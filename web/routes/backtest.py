@@ -338,42 +338,96 @@ def execute_backtest(req: BacktestRunRequest):
 
 
 # ---------------------------------------------------------------------------
-# NEW: Run ALL strategies and return top results ranked by profitability
+# NEW: Run ALL strategies and return top results ranked by profitability + AI Insight
 # ---------------------------------------------------------------------------
 MIN_TRADES_FOR_RANK = 10  # minimum total_trades for a strategy to be ranked
 
 
+class RunAllStrategiesRequest(BaseModel):
+    symbol: str = "BTCUSDT"
+    market: str = "spot"
+    timeframe: str = "1d"
+    data_segment: str = "full"
+    initial_capital: float = 5000.0
+    risk_per_trade_pct: float = 1.0
+
+
 @router.post("/run-all")
 def run_all_strategies(
-    symbol: str = Query("BTCUSDT", example="BTCUSDT"),
-    market: str = Query("spot", example="spot"),
-    timeframe: str = Query("1d", example="1d"),
-    data_segment: str = Query("full", example="full"),  # train, holdout, full
-    initial_capital: float = Query(default=5000.0, ge=100.0),
-    risk_per_trade_pct: float = Query(default=1.0, ge=0.1, le=10.0),
+    req: Optional[RunAllStrategiesRequest] = None,
+    symbol: Optional[str] = None,
+    market: Optional[str] = None,
+    timeframe: Optional[str] = None,
+    data_segment: Optional[str] = None,
+    initial_capital: Optional[float] = None,
+    risk_per_trade_pct: Optional[float] = None,
 ):
-    """Run ALL available strategies and return them ranked by profitability.
-
-    Ranking order (primary to secondary):
-    1. expectancy_r — average R-multiple per trade (most important per PRD)
-    2. profit_factor — gross winning R / gross losing R
-    3. total_trades — number of trades (must be >= MIN_TRADES_FOR_RANK)
-
-    Strategies that don't meet the minimum trade filter are excluded from
-    the ranked ``top3`` list but appear in ``allResults`` with a note.
-
-    Returns:
-        top3: top 3 strategies ranked by composite score
-        allResults: all strategies that ran (ranked if they meet the trade filter,
-                    otherwise listed with a warning note)
+    """Run ALL available strategies, rank them strictly by profitability,
+    and generate institutional AI Insights and Telegram deployment parameters.
     """
     from backtest.params import BASE_PARAMS
     from backtest.metrics import compute_metrics
     from backtest.equity import simulate_equity_curve
+    from backtest.holdout import compute_holdout_cutoff, split_by_cutoff
+    from ai.insight_engine import generate_ai_insight
+
+    # Resolve parameters safely from body, query params, or defaults
+    symbol = (req.symbol if req else None) or symbol or "BTCUSDT"
+    market = (req.market if req else None) or market or "spot"
+    timeframe = (req.timeframe if req else None) or timeframe or "1d"
+    data_segment = (req.data_segment if req else None) or data_segment or "full"
+    initial_capital = float(req.initial_capital if req else (initial_capital if initial_capital is not None else 5000.0))
+    risk_per_trade_pct = float(req.risk_per_trade_pct if req else (risk_per_trade_pct if risk_per_trade_pct is not None else 1.0))
+
+    # 1. Fetch base OHLCV + features once (without funding) and with funding
+    base_df = fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, include_funding=False)
+    if len(base_df) < 50:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient candles for {symbol} {market} {timeframe} (found {len(base_df)}, need >= 50). Please run backfill first."
+        )
+
+    funding_df = None  # lazy loaded only if needed
+
+    # Segment slicing
+    data_segment = data_segment.lower()
+    if data_segment in ("train", "holdout"):
+        cutoff = compute_holdout_cutoff(base_df, HOLDOUT_FRACTION)
+        train_df, holdout_df = split_by_cutoff(base_df, cutoff)
+        segment_df = train_df if data_segment == "train" else holdout_df
+    else:
+        segment_df = base_df
+        data_segment = "full"
+        cutoff = None
+
+    if len(segment_df) < 30:
+        raise HTTPException(status_code=400, detail=f"Segment {data_segment} has only {len(segment_df)} candles; cannot simulate.")
+
+    # Higher timeframe for trend_alignment
+    htf_segment = None
+    if timeframe != HTF_TIMEFRAME:
+        htf_full = fetch_ohlcv_with_features_df(symbol, market, HTF_TIMEFRAME, closed_only=True)
+        if len(htf_full) > 0:
+            if data_segment in ("train", "holdout") and cutoff is not None:
+                htf_tr, htf_ho = split_by_cutoff(htf_full, cutoff)
+                htf_segment = htf_tr if data_segment == "train" else htf_ho
+            else:
+                htf_segment = htf_full
+
+    # Pair dataframe for pairs_ratio
+    pair_segment = None
+    if symbol != PAIRS_BASE_SYMBOL:
+        pair_full = fetch_ohlcv_with_features_df(PAIRS_BASE_SYMBOL, market, timeframe, closed_only=True)
+        if len(pair_full) > 0:
+            if data_segment in ("train", "holdout") and cutoff is not None:
+                p_tr, p_ho = split_by_cutoff(pair_full, cutoff)
+                pair_segment = p_tr if data_segment == "train" else p_ho
+            else:
+                pair_segment = pair_full
 
     results = []
 
-    for strategy_name in STRATEGIES.keys():
+    for strategy_name, strategy_fn in STRATEGIES.items():
         try:
             run_params = dict(BASE_PARAMS)
             run_params.update({
@@ -385,61 +439,57 @@ def run_all_strategies(
                 "risk_per_trade_pct": risk_per_trade_pct,
             })
 
-            # Determine if this strategy needs funding data
-            include_funding = strategy_name in FUNDING_STRATEGIES
+            # Pass HTF / Pair if required
+            if strategy_name in TREND_ALIGNMENT_STRATEGIES and htf_segment is not None:
+                run_params["htf_df"] = htf_segment
 
-            # Fetch OHLCV + features
-            df = fetch_ohlcv_with_features_df(
-                symbol, market, timeframe, closed_only=True,
-                include_funding=include_funding,
-            )
-            if len(df) < 50:
-                results.append({
-                    "strategy": strategy_name,
-                    "displayName": STRATEGY_METADATA.get(strategy_name, {}).get(
-                        "displayName", strategy_name
-                    ),
-                    "category": STRATEGY_METADATA.get(strategy_name, {}).get("category", "Other"),
-                    "error": "insufficient_candles",
-                    "totalCandles": 0,
-                })
-                continue
+            if strategy_name in PAIRS_STRATEGIES and pair_segment is not None:
+                run_params["pair_df"] = pair_segment
+                run_params["pair_symbol"] = PAIRS_BASE_SYMBOL
 
-            # Run the strategy
-            strategy_fn = STRATEGIES[strategy_name]
-            trades = strategy_fn(df, run_params)
+            # Determine input dataframe (standard vs funding)
+            if strategy_name in FUNDING_STRATEGIES:
+                if funding_df is None:
+                    funding_full = fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, include_funding=True)
+                    if data_segment in ("train", "holdout") and cutoff is not None:
+                        f_tr, f_ho = split_by_cutoff(funding_full, cutoff)
+                        funding_df = f_tr if data_segment == "train" else f_ho
+                    else:
+                        funding_df = funding_full
+                strat_input_df = funding_df
+            else:
+                strat_input_df = segment_df
+
+            trades = strategy_fn(strat_input_df, run_params)
             metrics = compute_metrics(trades)
             equity_res = simulate_equity_curve(trades, initial_capital, risk_per_trade_pct)
 
             results.append({
                 "strategy": strategy_name,
-                "displayName": STRATEGY_METADATA.get(strategy_name, {}).get(
-                    "displayName", strategy_name
-                ),
+                "displayName": STRATEGY_METADATA.get(strategy_name, {}).get("displayName", strategy_name),
                 "category": STRATEGY_METADATA.get(strategy_name, {}).get("category", "Other"),
                 "metrics": metrics,
                 "equity": equity_res,
-                "totalCandles": len(df),
+                "totalCandles": len(strat_input_df),
                 "error": None,
             })
-
         except Exception as e:
-            logger.error(f"Failed to run {strategy_name}: {e}", exc_info=True)
+            logger.warning(f"Strategy {strategy_name} simulation error: {e}")
             results.append({
                 "strategy": strategy_name,
-                "displayName": STRATEGY_METADATA.get(strategy_name, {}).get(
-                    "displayName", strategy_name
-                ),
+                "displayName": STRATEGY_METADATA.get(strategy_name, {}).get("displayName", strategy_name),
                 "category": STRATEGY_METADATA.get(strategy_name, {}).get("category", "Other"),
                 "error": str(e),
-                "totalCandles": 0,
+                "totalCandles": len(segment_df),
+                "metrics": {"total_trades": 0, "expectancy_r": None, "profit_factor": None, "win_rate_pct": None, "max_drawdown_r": None},
+                "equity": None,
             })
 
     # ------------------------------------------------------------------
-    # Rank results: filter by minimum trades, then composite score
+    # Ranking Logic: Strict Profitability & Statistical Edge
     # ------------------------------------------------------------------
-    ranked = []
     all_with_info = []
+    eligible_for_top = []
 
     for r in results:
         if r.get("error"):
@@ -447,56 +497,85 @@ def run_all_strategies(
                 "strategy": r["strategy"],
                 "displayName": r["displayName"],
                 "category": r["category"],
-                "rankScore": None,
-                "rankNote": f"Failed: {r['error']}",
-                "metrics": {"total_trades": 0, "expectancy_r": None, "profit_factor": None, "win_rate_pct": None},
+                "rankScore": 0.0,
+                "isProfitable": False,
+                "rankNote": f"Error: {r['error']}",
+                "metrics": r["metrics"],
                 "equity": None,
                 "totalCandles": r.get("totalCandles", 0),
             })
             continue
 
-        total_trades = r["metrics"]["total_trades"]
+        metrics = r["metrics"]
+        total_trades = metrics.get("total_trades", 0)
+        ev = metrics.get("expectancy_r")
+        pf = metrics.get("profit_factor")
+        wr = metrics.get("win_rate_pct") or 0.0
+        max_dd = abs(metrics.get("max_drawdown_r") or 0.0)
+
+        # Handle nulls
+        ev_val = float(ev) if ev is not None else -999.0
+        pf_val = float(pf) if pf is not None else 0.0
+
+        # Profitability check: Must have positive expectancy and profit factor >= 1.0
+        is_profitable = ev_val > 0.0 and pf_val >= 1.0
+
         if total_trades < MIN_TRADES_FOR_RANK:
-            all_with_info.append({
-                "strategy": r["strategy"],
-                "displayName": r["displayName"],
-                "category": r["category"],
-                "rankScore": None,
-                "rankNote": f"Only {total_trades} trades (minimum {MIN_TRADES_FOR_RANK} required for ranking)",
-                "metrics": r["metrics"],
-                "equity": r["equity"],
-                "totalCandles": r.get("totalCandles", 0),
-            })
-            continue
+            note = f"⚠️ Only {total_trades} trades (minimum {MIN_TRADES_FOR_RANK} required for ranking)"
+            rank_score = 0.0
+        elif not is_profitable:
+            note = f"❌ Unprofitable (Exp: {ev_val:+.2f}R, PF: {pf_val:.2f})"
+            rank_score = 0.0
+        else:
+            note = None
+            # Composite rank score for profitable strategies
+            ev_norm = min(max(ev_val, 0.0) / 1.0, 1.0)
+            pf_norm = min(max(pf_val - 1.0, 0.0) / 2.0, 1.0)
+            wr_norm = min(wr / 100.0, 1.0)
+            tc_norm = min(total_trades / 50.0, 1.0)
+            dd_penalty = max(0.0, (max_dd - 3.0) * 0.04)
 
-        # Composite rank score: expectancy_R (50%) + profit_factor (30%) + win_rate (15%) + trade count (5%)
-        ev = r["metrics"].get("expectancy_r") or 0
-        pf = r["metrics"].get("profit_factor") or 1
-        wr = r["metrics"].get("win_rate_pct") or 0
-        tc = total_trades
+            rank_score = round(max(0.01, (ev_norm * 0.45) + (pf_norm * 0.30) + (wr_norm * 0.15) + (tc_norm * 0.10) - dd_penalty), 4)
 
-        ev_norm = min(abs(ev) / 1.0, 1.0)    # assume ~1R typical range
-        pf_norm = min(pf / 3.0, 1.0)         # assume ~3.0 typical PF
-        wr_norm = min(wr / 100.0, 1.0)
-        tc_norm = min(tc / 100, 1.0) if tc > 0 else 0
-
-        rank_score = (ev_norm * 0.5) + (pf_norm * 0.3) + (wr_norm * 0.15) + (tc_norm * 0.05)
-
-        ranked.append({
+        entry = {
             "strategy": r["strategy"],
             "displayName": r["displayName"],
             "category": r["category"],
-            "rankScore": round(rank_score, 4),
-            "rankNote": None,
-            "metrics": r["metrics"],
+            "rankScore": rank_score,
+            "isProfitable": is_profitable,
+            "rankNote": note,
+            "metrics": metrics,
             "equity": r["equity"],
             "totalCandles": r.get("totalCandles", 0),
-        })
+        }
 
-    # Sort: rankScore desc, then total_trades desc
-    ranked.sort(key=lambda x: (x["rankScore"], x.get("metrics", {}).get("total_trades", 0) or 0), reverse=True)
+        all_with_info.append(entry)
+        if is_profitable and total_trades >= MIN_TRADES_FOR_RANK:
+            eligible_for_top.append(entry)
 
-    top3 = ranked[:3] if ranked else []
+    # Sort eligible top strategies by rankScore desc, then expectancy desc
+    eligible_for_top.sort(
+        key=lambda x: (x["rankScore"], float(x["metrics"].get("expectancy_r") or 0.0), x["metrics"].get("total_trades", 0)),
+        reverse=True
+    )
+
+    # Sort allResults: profitable first by rankScore, then unprofitable
+    all_with_info.sort(
+        key=lambda x: (1 if x["isProfitable"] else 0, x["rankScore"], float(x["metrics"].get("expectancy_r") or -999)),
+        reverse=True
+    )
+
+    top3 = eligible_for_top[:3]
+
+    # Generate Institutional AI Insight & Recommendations
+    ai_insight = generate_ai_insight(
+        symbol=symbol,
+        market=market,
+        timeframe=timeframe,
+        top_strategies=top3,
+        all_results=all_with_info,
+        df=segment_df
+    )
 
     return {
         "symbol": symbol,
@@ -506,10 +585,51 @@ def run_all_strategies(
         "initialCapital": initial_capital,
         "riskPerTradePct": risk_per_trade_pct,
         "minTradesForRank": MIN_TRADES_FOR_RANK,
-        "count": len(ranked),
+        "totalEvaluated": len(results),
+        "profitableCount": len(eligible_for_top),
         "top3": top3,
-        "allResults": ranked,  # all strategies, ranked or with notes
+        "allResults": all_with_info,
+        "aiInsight": ai_insight,
     }
+
+
+@router.post("/ai-insight")
+def get_standalone_ai_insight(
+    symbol: str = Query("BTCUSDT"),
+    market: str = Query("spot"),
+    timeframe: str = Query("1d"),
+    strategy: str = Query("confluence_ensemble_v1"),
+):
+    """Provides deep AI quantitative diagnosis for a specific strategy."""
+    from ai.insight_engine import generate_ai_insight
+
+    df = fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True)
+    if len(df) < 50:
+        raise HTTPException(status_code=400, detail="Insufficient candles for AI insight")
+
+    # Run quick simulation
+    strategy_fn = STRATEGIES.get(strategy)
+    if not strategy_fn:
+        raise HTTPException(status_code=400, detail="Unknown strategy")
+
+    from backtest.params import BASE_PARAMS
+    from backtest.metrics import compute_metrics
+
+    params = dict(BASE_PARAMS, symbol=symbol, market=market, timeframe=timeframe)
+    trades = strategy_fn(df, params)
+    metrics = compute_metrics(trades)
+
+    top_dummy = [{
+        "strategy": strategy,
+        "displayName": STRATEGY_METADATA.get(strategy, {}).get("displayName", strategy),
+        "category": STRATEGY_METADATA.get(strategy, {}).get("category", "Quantitative"),
+        "metrics": metrics,
+        "rankScore": 0.5 if (metrics.get("expectancy_r") or 0) > 0 else 0.0,
+    }]
+
+    insight = generate_ai_insight(symbol, market, timeframe, top_dummy, top_dummy, df=df)
+    return {"symbol": symbol, "strategy": strategy, "metrics": metrics, "insight": insight}
+
 
 
 @router.get("/history")

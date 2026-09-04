@@ -17,6 +17,7 @@ from web.routes.master_data import router as master_data_router
 from web.routes.backtest import router as backtest_router
 from web.routes.settings import router as settings_router
 from web.routes.custom_strategy import router as custom_strat_router
+from web.routes.telegram_routes import router as telegram_router
 
 app = FastAPI(
     title="Crypto Signal Bot — Quantitative Trading Platform",
@@ -45,6 +46,7 @@ app.include_router(master_data_router)
 app.include_router(backtest_router)
 app.include_router(settings_router)
 app.include_router(custom_strat_router)
+app.include_router(telegram_router)
 
 # Mount Static Files
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")

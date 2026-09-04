@@ -252,6 +252,23 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
         conn.commit()
         cur.close()
         logger.info(f"Closed paper position #{pos['id']} ({pos['symbol']} {direction}) via {exit_reason}: {r_mult:+.2f}R")
+
+        # Telegram Notification (Phase C)
+        try:
+            from notifications.telegram_notifier import send_trade_close_alert
+            send_trade_close_alert(
+                symbol=pos["symbol"],
+                strategy_name=pos["strategy_name"],
+                direction=direction,
+                entry_price=entry_price,
+                exit_price=exit_price,
+                exit_reason=exit_reason,
+                net_return_pct=net_ret * 100,
+                r_multiple=r_mult,
+                holding_bars=pos.get("holding_bars", 0)
+            )
+        except Exception as tel_err:
+            logger.warning(f"Telegram trade close alert failed: {tel_err}")
     finally:
         conn.close()
 
@@ -442,6 +459,24 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                         cur.close()
                         eval_results["new_positions_opened"] += 1
                         logger.info(f"Opened new paper position for {symbol} ({direction}) via {strategy_name}")
+
+                        # Telegram Notification (Phase C)
+                        try:
+                            from notifications.telegram_notifier import send_signal_alert
+                            send_signal_alert(
+                                symbol=symbol,
+                                market=market,
+                                timeframe=timeframe,
+                                strategy_name=strategy_name,
+                                direction=direction,
+                                entry_price=raw_entry,
+                                stop_loss=stop_loss,
+                                take_profit=take_profit,
+                                initial_risk=initial_risk,
+                                atr=atr
+                            )
+                        except Exception as tel_err:
+                            logger.warning(f"Telegram entry signal alert failed: {tel_err}")
                     finally:
                         conn.close()
 

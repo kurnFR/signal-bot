@@ -1373,22 +1373,396 @@ const App = {
         document.getElementById("settings-bin-futures").innerText = bin.futuresApi;
     },
 
-    showToast(message, type = "info") {
-        const toast = document.createElement("div");
-        toast.className = `fixed bottom-5 right-5 z-50 px-4 py-3 rounded-lg shadow-xl border text-xs font-semibold flex items-center gap-2.5 transition-all duration-300 transform translate-y-2 opacity-0 ${type === "success" ? "bg-emerald-950 text-emerald-300 border-emerald-800" : "bg-slate-900 text-sky-300 border-slate-750"}`;
-        toast.innerHTML = `<span class="w-2 h-2 rounded-full ${type === "success" ? "bg-emerald-400" : "bg-sky-400"}"></span> ${message}`;
-        document.body.appendChild(toast);
+    // ==========================================
+    // BATTLE ROYALE & TOP 3 & AI INSIGHT
+    // ==========================================
+    async runBattleRoyale() {
+        const symbol = document.getElementById("bt-symbol-select").value;
+        const market = document.getElementById("bt-market-select").value;
+        const timeframe = document.getElementById("bt-timeframe-select").value;
+        const segment = document.getElementById("bt-segment-select").value;
+        const capital = parseFloat(document.getElementById("bt-capital-input").value) || 5000;
+        const riskPct = parseFloat(document.getElementById("bt-risk-input").value) || 1.0;
 
-        setTimeout(() => {
-            toast.classList.remove("translate-y-2", "opacity-0");
-        }, 10);
+        const btn = document.getElementById("btn-run-battle-royale");
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Evaluating 24 models...`;
 
-        setTimeout(() => {
-            toast.classList.add("translate-y-2", "opacity-0");
-            setTimeout(() => toast.remove(), 300);
-        }, 4000);
-    }
-};
+        try {
+            const res = await fetch(`${API_BASE}/api/backtest/run-all`, {
+                method: "POST",
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify({
+                    symbol, market, timeframe,
+                    data_segment: segment,
+                    initial_capital: capital,
+                    risk_per_trade_pct: riskPct
+                })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || "Battle Royale execution failed");
+            }
+
+            const data = await res.json();
+            this.lastBattleRoyaleData = data;
+            this.renderBattleRoyaleResults(data);
+            this.showToast(`Battle Royale Complete! ${data.top3.length} profitable models discovered.`, "success");
+        } catch (e) {
+            alert("Battle Royale Error: " + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    },
+
+    renderBattleRoyaleResults(data) {
+        const container = document.getElementById("battle-royale-container");
+        if (!container) return;
+        container.classList.remove("hidden");
+
+        const badgeEl = document.getElementById("br-summary-badge");
+        if (badgeEl) {
+            badgeEl.innerText = `${data.profitableCount} / ${data.totalEvaluated} Profitable Models | ${data.symbol} (${data.timeframe.toUpperCase()})`;
+        }
+
+        // Render Top 3 Cards
+        const topCardsContainer = document.getElementById("br-top3-cards");
+        if (topCardsContainer) {
+            topCardsContainer.innerHTML = "";
+            const ranks = [
+                { title: "1st Place Winner", badge: "🥇 Rank #1", border: "border-amber-500/60 bg-gradient-to-b from-amber-950/30 to-slate-900", accent: "text-amber-400" },
+                { title: "2nd Place Runner-Up", badge: "🥈 Rank #2", border: "border-slate-400/50 bg-gradient-to-b from-slate-800/40 to-slate-900", accent: "text-slate-200" },
+                { title: "3rd Place Contender", badge: "🥉 Rank #3", border: "border-orange-600/50 bg-gradient-to-b from-orange-950/25 to-slate-900", accent: "text-orange-400" },
+            ];
+
+            if (!data.top3 || data.top3.length === 0) {
+                topCardsContainer.innerHTML = `
+                    <div class="col-span-3 p-8 text-center bg-slate-900/60 border border-slate-800 rounded-xl">
+                        <i data-lucide="alert-triangle" class="w-8 h-8 text-amber-400 mx-auto mb-2"></i>
+                        <h4 class="text-sm font-bold text-slate-200">No Models Met Minimum Profitability Criteria</h4>
+                        <p class="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+                            None of the 24 strategy models yielded net positive expectancy (R > 0) with at least 10 trades on ${data.symbol} (${data.timeframe}). Try a higher timeframe (4h, 1d) or backfill more data.
+                        </p>
+                    </div>
+                `;
+            } else {
+                data.top3.forEach((strat, idx) => {
+                    const cfg = ranks[idx] || ranks[2];
+                    const m = strat.metrics || {};
+                    const isExpPos = (m.expectancy_r || 0) > 0;
+
+                    const card = document.createElement("div");
+                    card.className = `p-5 rounded-xl border ${cfg.border} flex flex-col justify-between space-y-4 shadow-xl relative`;
+                    card.innerHTML = `
+                        <div class="flex items-center justify-between">
+                            <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-800/90 ${cfg.accent} border border-slate-700">
+                                ${cfg.badge}
+                            </span>
+                            <span class="text-[11px] font-mono text-slate-400">Score: <b class="text-slate-100">${strat.rankScore}</b></span>
+                        </div>
+
+                        <div>
+                            <h4 class="text-sm font-bold text-slate-100 leading-snug">${strat.displayName || strat.strategy}</h4>
+                            <span class="text-[11px] text-slate-400 uppercase tracking-wider">${strat.category || 'Quantitative'}</span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2 text-xs bg-slate-950/50 p-3 rounded-lg border border-slate-800/60 font-mono">
+                            <div>
+                                <span class="text-[10px] text-slate-500 uppercase">Expectancy</span>
+                                <div class="font-bold ${isExpPos ? 'text-emerald-400' : 'text-rose-400'}">${m.expectancy_r > 0 ? '+' : ''}${m.expectancy_r}R</div>
+                            </div>
+                            <div>
+                                <span class="text-[10px] text-slate-500 uppercase">Profit Factor</span>
+                                <div class="font-bold text-slate-100">${m.profit_factor}</div>
+                            </div>
+                            <div>
+                                <span class="text-[10px] text-slate-500 uppercase">Win Rate</span>
+                                <div class="font-bold text-slate-100">${m.win_rate_pct}%</div>
+                            </div>
+                            <div>
+                                <span class="text-[10px] text-slate-500 uppercase">Total Trades</span>
+                                <div class="font-bold text-slate-100">${m.total_trades}</div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-2 pt-1">
+                            <button onclick="App.openDeployModal('${strat.strategy}', '${strat.displayName}', ${idx + 1}, ${strat.rankScore})" class="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold text-xs shadow-md shadow-emerald-500/20 flex items-center justify-center gap-1.5 transition-all">
+                                <i data-lucide="zap" class="w-3.5 h-3.5"></i> Deploy to Paper & Telegram
+                            </button>
+                            <button onclick="App.inspectStrategyInBacktest('${strat.strategy}')" class="w-full py-1.5 px-3 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 font-semibold text-xs flex items-center justify-center gap-1.5 border border-slate-700 transition-colors">
+                                <i data-lucide="line-chart" class="w-3.5 h-3.5"></i> View Candlestick Chart
+                            </button>
+                        </div>
+                    `;
+                    topCardsContainer.appendChild(card);
+                });
+            }
+        }
+
+        // Render AI Quantitative Insight Box
+        const aiBox = document.getElementById("br-ai-insight-box");
+        const ai = data.aiInsight;
+        if (aiBox && ai) {
+            const isStrong = ai.verdict === "STRONG_DEPLOY";
+            const badgeBg = isStrong ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" : "bg-amber-500/20 text-amber-300 border-amber-500/40";
+
+            aiBox.innerHTML = `
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center text-white shadow-lg shadow-sky-500/25">
+                            <i data-lucide="brain-circuit" class="w-5 h-5"></i>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h3 class="text-sm font-bold text-slate-100">AI Quantitative Strategy Diagnosis</h3>
+                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${badgeBg}">
+                                    ${ai.verdictLabel}
+                                </span>
+                            </div>
+                            <p class="text-xs text-slate-400 mt-0.5">Automated algorithmic analysis and regime compatibility engine</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs text-slate-400 flex items-center gap-1.5">
+                            <i data-lucide="send" class="w-3.5 h-3.5 text-sky-400"></i> Telegram Dispatch: 
+                            <b class="text-emerald-400">@SignBTBot (1487656060)</b>
+                        </span>
+                    </div>
+                </div>
+
+                <div class="p-4 rounded-xl bg-slate-850/80 border border-slate-800 text-xs text-slate-200 leading-relaxed font-medium">
+                    ${ai.headline}
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <!-- Column 1: Market Regime -->
+                    <div class="p-4 rounded-xl bg-slate-850 border border-slate-800 space-y-2">
+                        <span class="text-[11px] font-bold uppercase tracking-wider text-sky-400 flex items-center gap-1.5">
+                            <i data-lucide="compass" class="w-3.5 h-3.5"></i> Market Regime
+                        </span>
+                        <div class="text-xs font-bold text-slate-100">${ai.regime?.state || 'Neutral'}</div>
+                        <div class="text-[11px] text-slate-400">${ai.regime?.volatility || 'Normal Volatility'}</div>
+                        <p class="text-[11px] text-slate-500 pt-1 leading-normal">${ai.regime?.fitNote || ''}</p>
+                    </div>
+
+                    <!-- Column 2: Statistical Reliability -->
+                    <div class="p-4 rounded-xl bg-slate-850 border border-slate-800 space-y-2">
+                        <span class="text-[11px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                            <i data-lucide="shield-check" class="w-3.5 h-3.5"></i> Statistical Confidence
+                        </span>
+                        <div class="text-xs font-bold text-slate-100">${ai.topStrategy?.sampleConfidence || 'Moderate'}</div>
+                        <p class="text-[11px] text-slate-400 pt-1 leading-normal">${ai.topStrategy?.sampleNote || ''}</p>
+                    </div>
+
+                    <!-- Column 3: Sizing & Risk -->
+                    <div class="p-4 rounded-xl bg-slate-850 border border-slate-800 space-y-2">
+                        <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                            <i data-lucide="percent" class="w-3.5 h-3.5"></i> Risk Sizing Prescription
+                        </span>
+                        <div class="text-xs font-bold text-slate-100 font-mono">Recommended: ${ai.riskProfile?.recommendedRiskPct || 1.0}% / trade</div>
+                        <div class="text-[11px] text-slate-400 font-mono">Half-Kelly Max: ${ai.riskProfile?.halfKellyPct || 1.0}%</div>
+                        <p class="text-[11px] text-slate-500 pt-1 leading-normal">
+                            Risk of 4 Consecutive Losses: <b class="text-slate-300 font-mono">${ai.riskProfile?.prob4Losses || 0}%</b>
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Prescriptions List -->
+                <div class="space-y-2 pt-1">
+                    <h5 class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <i data-lucide="check-circle-2" class="w-3.5 h-3.5 text-emerald-400"></i> AI Actionable Prescriptions
+                    </h5>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        ${(ai.prescriptions || []).map(p => `
+                            <div class="p-3 rounded-lg bg-slate-850/60 border border-slate-800/80 text-xs text-slate-300 flex items-start gap-2">
+                                <span class="text-emerald-400 font-bold mt-0.5">➔</span>
+                                <div>${p}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Render All Evaluated Table
+        const allTbody = document.getElementById("br-all-table-body");
+        if (allTbody && data.allResults) {
+            allTbody.innerHTML = "";
+            data.allResults.forEach((r, idx) => {
+                const m = r.metrics || {};
+                const isProf = r.isProfitable;
+                const isTop3 = idx < (data.top3 || []).length && isProf;
+
+                const tr = document.createElement("tr");
+                tr.className = isTop3 ? "bg-amber-500/5 hover:bg-amber-500/10" : "hover:bg-slate-800/40";
+                tr.innerHTML = `
+                    <td class="font-mono font-bold ${isTop3 ? 'text-amber-400' : 'text-slate-400'}">
+                        ${isTop3 ? `🥇 #${idx + 1}` : `#${idx + 1}`}
+                    </td>
+                    <td>
+                        <div class="font-bold text-slate-200 text-xs">${r.displayName || r.strategy}</div>
+                        <div class="text-[10px] text-slate-500 font-mono">${r.strategy}</div>
+                    </td>
+                    <td class="text-xs text-slate-400">${r.category || 'Other'}</td>
+                    <td class="font-mono text-xs text-slate-200">${m.total_trades || 0}</td>
+                    <td class="font-mono text-xs text-slate-200">${m.win_rate_pct != null ? `${m.win_rate_pct}%` : '-'}</td>
+                    <td class="font-mono text-xs font-bold ${ (m.expectancy_r || 0) > 0 ? 'text-emerald-400' : 'text-rose-400' }">
+                        ${m.expectancy_r != null ? `${m.expectancy_r > 0 ? '+' : ''}${m.expectancy_r}R` : '-'}
+                    </td>
+                    <td class="font-mono text-xs text-slate-200">${m.profit_factor != null ? m.profit_factor : '-'}</td>
+                    <td class="font-mono text-xs text-rose-400">${m.max_drawdown_r != null ? `${m.max_drawdown_r}R` : '-'}</td>
+                    <td class="font-mono text-xs text-slate-300 font-bold">${r.rankScore > 0 ? r.rankScore : '-'}</td>
+                    <td class="text-xs">
+                        ${isProf 
+                            ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">PROFITABLE</span>` 
+                            : `<span class="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">${r.rankNote || 'Unprofitable'}</span>`}
+                    </td>
+                    <td class="text-right">
+                        <button onclick="App.openDeployModal('${r.strategy}', '${r.displayName}', ${idx + 1}, ${r.rankScore})" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-emerald-600 hover:text-white text-slate-300 font-semibold text-[11px] border border-slate-700 transition-colors">
+                            Deploy
+                        </button>
+                    </td>
+                `;
+                allTbody.appendChild(tr);
+            });
+        }
+
+        if (window.lucide) window.lucide.createIcons();
+        container.scrollIntoView({ behavior: "smooth" });
+    },
+
+    inspectStrategyInBacktest(stratName) {
+        const stratSelect = document.getElementById("bt-strategy-select");
+        if (stratSelect) {
+            stratSelect.value = stratName;
+            this.onStrategyChanged();
+            this.runBacktest();
+        }
+    },
+
+    // ==========================================
+    // DEPLOY STRATEGY TO PAPER & TELEGRAM MODAL
+    // ==========================================
+    openDeployModal(stratName, dispName, rank = null, score = null) {
+        this.currentDeployTarget = {
+            strategy: stratName,
+            displayName: dispName || stratName,
+            rank: rank,
+            score: score
+        };
+
+        const modal = document.getElementById("deploy-modal");
+        if (!modal) return;
+
+        const sym = document.getElementById("bt-symbol-select")?.value || "BTCUSDT";
+        const tf = document.getElementById("bt-timeframe-select")?.value || "1d";
+        const mkt = document.getElementById("bt-market-select")?.value || "spot";
+
+        document.getElementById("deploy-modal-strat-name").innerText = dispName || stratName;
+        document.getElementById("deploy-modal-pair").innerText = `${sym} (${mkt.toUpperCase()} / ${tf})`;
+        document.getElementById("deploy-modal-rank").innerText = rank ? `Rank #${rank} (Score: ${score || '-'})` : "Custom Model";
+
+        modal.classList.remove("hidden");
+        modal.classList.add("flex");
+        if (window.lucide) window.lucide.createIcons();
+    },
+
+    closeDeployModal() {
+        const modal = document.getElementById("deploy-modal");
+        if (modal) {
+            modal.classList.add("hidden");
+            modal.classList.remove("flex");
+        }
+    },
+
+    async confirmDeploy() {
+        if (!this.currentDeployTarget) return;
+
+        const sym = document.getElementById("bt-symbol-select")?.value || "BTCUSDT";
+        const mkt = document.getElementById("bt-market-select")?.value || "spot";
+        const tf = document.getElementById("bt-timeframe-select")?.value || "1d";
+        const capital = parseFloat(document.getElementById("deploy-modal-capital").value) || 5000;
+        const riskPct = parseFloat(document.getElementById("deploy-modal-risk").value) || 1.0;
+        const sendTg = document.getElementById("deploy-modal-telegram").checked;
+
+        const btn = document.getElementById("btn-confirm-deploy");
+        const origText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Deploying...`;
+
+        try {
+            const res = await fetch(`${API_BASE}/api/paper/deploy`, {
+                method: "POST",
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify({
+                    symbol: sym,
+                    market: mkt,
+                    timeframe: tf,
+                    strategy_name: this.currentDeployTarget.strategy,
+                    allocated_capital: capital,
+                    risk_per_trade_pct: riskPct,
+                    send_telegram: sendTg,
+                    rank: this.currentDeployTarget.rank,
+                    rank_score: this.currentDeployTarget.score
+                })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || "Deployment failed");
+            }
+
+            const data = await res.json();
+            this.closeDeployModal();
+            this.showToast(data.message || "Strategy deployed to Live Paper Trading!", "success");
+
+            // Refresh paper trading data
+            await this.fetchPaperData();
+
+            // Ask user if they want to switch to the Paper tab
+            if (confirm("🚀 Strategy successfully deployed to Live Paper Trading!\nTelegram alert dispatched to @SignBTBot.\n\nWould you like to switch to the Paper Trading tab now?")) {
+                this.switchTab("paper");
+            }
+        } catch (e) {
+            alert("Deployment error: " + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+        }
+    },
+
+    async sendTelegramTestPing() {
+        const btn = document.getElementById("btn-tg-test");
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<div class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>`;
+        }
+
+        try {
+            const res = await fetch(`${API_BASE}/api/telegram/test`, {
+                method: "POST",
+                headers: this.getAuthHeaders()
+            });
+            const data = await res.json();
+            if (data.success) {
+                this.showToast(`Ping delivered to @${data.bot?.username || 'bot'} (Chat ID: ${data.chat_id})!`, "success");
+            } else {
+                alert(`Telegram Ping Error: ${data.error || 'Failed to dispatch'}`);
+            }
+        } catch (e) {
+            alert("Telegram Test Error: " + e.message);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = `<i data-lucide="send" class="w-3 h-3"></i> Ping Bot`;
+                if (window.lucide) window.lucide.createIcons();
+            }
+        }
+    },
+
 
 window.App = App;
 document.addEventListener("DOMContentLoaded", () => App.init());
