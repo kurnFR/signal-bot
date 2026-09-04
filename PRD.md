@@ -2,7 +2,7 @@
 
 **Status:** In progress — data pipeline, feature engine, and backtesting
 framework are complete and heavily used. **Two strategies have now
-passed holdout validation** (see [Current Status](#current-status)) —
+passed holdout validation** (see [Current Status](#current-status)) — i wan
 `confluence_ensemble_v1` (ETH spot 1d) and `pairs_ratio_v1` (BNB futures
 1d, the stronger of the two). This is treated as a reasonable point to
 shift focus from "find a strategy" to Phase B (paper trading) rather than
