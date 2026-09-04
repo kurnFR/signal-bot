@@ -1,16 +1,27 @@
 # Crypto Signal Bot
 
-Progress: Step 1 (data pipeline) ✅ — Step 2 (indicators) ✅ — Step 3 (backtester, multi-strategy) ✅ — Step 4 (walk-forward validation) — see below.
+Progress: Step 1 (data pipeline) ✅ — Step 2 (indicators) ✅ — Step 3 (backtester, multi-strategy) ✅ — Step 4 (walk-forward) ✅ — Web Dashboard & Paper Trading (Phase B) ✅
 
-**Flagged for later (after Step 7):** a web UI where you can pick any
-symbol/timeframe, run backtests across a library of pro/institutional-style
-strategies, then take the best-performing one live (signals or full auto-
-trading). Not built yet — but design choices along the way (strategies as
-pluggable modules in a registry, the backtester callable as a function not
-just a CLI, params always in `config.py` rather than hardcoded) are made
-with that in mind so it isn't a rewrite later.
+## 🚀 Web Trading Dashboard & Paper Trading Platform
 
-## What this step builds
+A full-featured institutional quantitative trading web interface is included:
+- **Crypto Search & Coverage Matrix**: Live Binance asset discovery and local database coverage tracking.
+- **On-Demand Backfill & Feature Engineering**: Trigger historical klines backfill and feature calculation with one click.
+- **Backtest Studio**: Candlestick charts, buy/sell entry markers, stop-loss/take-profit lines, dynamic hyperparameter configuration, compounding dollar equity curves, and trade ledgers.
+- **Phase B Paper Trading Engine**: Real-time position tracking, automated trailing stops, SL/TP execution, and closed trade ledger.
+- **Security & Authentication**: User authentication (PBKDF2-HMAC-SHA256, 200,000 rounds), role-based access control (`admin` / `trader`), user creation, password resets, and 100% SQL injection hardening.
+
+### Running the Web Platform
+```bash
+# 1. Apply database migration (users & paper trading tables)
+mysql -u your_user -p crypto_signals < db/migrate_add_users_and_paper.sql
+
+# 2. Launch web server
+python3 run_web.py --port 8050
+```
+Open **`http://localhost:8050`** in your browser. Default login: `admin` / `admin123`.
+
+---
 
 - MySQL schema: `ohlcv`, `funding_rate`, `open_interest`, `liquidations`, `collector_heartbeat`
 - Historical backfill (default 2 years) for 10 symbols x 6 timeframes x 2 markets

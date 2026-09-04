@@ -1,0 +1,26 @@
+[
+  {
+    "name": "rsi_dip_buyer_v1",
+    "displayName": "RSI Dip Buyer",
+    "description": "Buys when RSI drops below 35, shorts when RSI rises above 65",
+    "longConditions": [
+      {
+        "indicator": "rsi",
+        "operator": "<",
+        "value": 35.0
+      }
+    ],
+    "shortConditions": [
+      {
+        "indicator": "rsi",
+        "operator": ">",
+        "value": 65.0
+      }
+    ],
+    "slAtrMult": 1.5,
+    "riskRewardRatio": 2.5,
+    "useTrailingStop": false,
+    "trailActivationR": 1.0,
+    "trailDistanceAtrMult": 1.5
+  }
+]
