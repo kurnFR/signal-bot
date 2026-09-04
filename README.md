@@ -1,15 +1,18 @@
 # Crypto Signal Bot
 
-Progress: Step 1 (data pipeline) ✅ — Step 2 (indicators) ✅ — Step 3 (backtester, multi-strategy) ✅ — Step 4 (walk-forward) ✅ — Web Dashboard & Paper Trading (Phase B) ✅
+Progress: Step 1 (data pipeline) ✅ — Step 2 (indicators) ✅ — Step 3 (backtester) ✅ — Step 4 (walk-forward) ✅ — Web Dashboard & Paper Trading (Phase B) ✅ — AI Insights & Telegram Alerts (Phase C) ✅
 
-## 🚀 Web Trading Dashboard & Paper Trading Platform
+## 🚀 Web Trading Dashboard, Paper Trading & Telegram Alerts
 
 A full-featured institutional quantitative trading web interface is included:
+- **Strategy Battle Royale & Ranking**: Run all 24 quantitative strategy variants with one click. Strict profitability scoring ensures only models with positive expectancy ($R > 0$) and Profit Factor $\ge 1.0$ compete for the Top 3 podium.
+- **AI Quantitative Strategy Insight**: Automated market regime detection (trend vs range), sample size statistical confidence analysis, risk profiling (Half-Kelly sizing, consecutive loss probabilities), and actionable trade prescriptions.
+- **1-Click Deployment to Paper Trading**: Select any winning strategy from the podium or ledger to activate in the Phase B shadow execution engine with custom capital allocation and risk per trade.
+- **Phase C Telegram Signal Broadcaster**: Integrated with Telegram Bot API (`@SignBTBot`) to deliver real-time formatted signals (🟢 LONG / 🔴 SHORT), stop loss, take profit, trailing stop updates, and closed trade summaries.
 - **Crypto Search & Coverage Matrix**: Live Binance asset discovery and local database coverage tracking.
 - **On-Demand Backfill & Feature Engineering**: Trigger historical klines backfill and feature calculation with one click.
-- **Backtest Studio**: Candlestick charts, buy/sell entry markers, stop-loss/take-profit lines, dynamic hyperparameter configuration, compounding dollar equity curves, and trade ledgers.
-- **Phase B Paper Trading Engine**: Real-time position tracking, automated trailing stops, SL/TP execution, and closed trade ledger.
-- **Security & Authentication**: User authentication (PBKDF2-HMAC-SHA256, 200,000 rounds), role-based access control (`admin` / `trader`), user creation, password resets, and 100% SQL injection hardening.
+- **Backtest Studio**: High-performance candlestick charts, buy/sell entry markers, stop-loss/take-profit lines, dynamic hyperparameter configuration, and compounding dollar equity curves.
+- **Security & Authentication**: PBKDF2-HMAC-SHA256 password hashing (200,000 rounds), role-based access control (`admin` / `trader`), user management, and 100% SQL injection hardening.
 
 ### Running the Web Platform
 ```bash
