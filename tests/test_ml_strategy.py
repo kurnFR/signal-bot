@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 
+import numpy as np
 import pandas as pd
 
 from ml.artifacts import ModelArtifact
@@ -34,6 +35,26 @@ class TestMLStrategy(unittest.TestCase):
         filt = MLSignalFilter(lambda df, p: [], "logistic_regression")
         with self.assertRaises(ValueError):
             filt.fit(pd.DataFrame({"x": [1, 2]}), [1, 1])
+
+    def test_inference_applies_training_preprocessor(self):
+        from sklearn.impute import SimpleImputer
+        from sklearn.preprocessing import StandardScaler
+
+        filt = MLSignalFilter(lambda df, p: [], "logistic_regression")
+        train = pd.DataFrame({"x": [0.0, 1.0, 10.0, 11.0]})
+        y = [0, 0, 1, 1]
+        imputer = SimpleImputer(strategy="median")
+        scaler = StandardScaler()
+        x_train = scaler.fit_transform(imputer.fit_transform(train))
+        filt.model.fit(x_train, y)
+        filt.model._signal_bot_preprocessor = (imputer, scaler)
+        filt.feature_columns = ("x",)
+
+        inference = pd.DataFrame({"x": [0.5, 10.5]})
+        actual = filt.predict_probability(inference)
+        expected_x = scaler.transform(imputer.transform(inference[["x"]]))
+        expected = filt.model.predict_proba(expected_x)[:, 1]
+        np.testing.assert_allclose(actual, expected)
 
     def _paper_artifact(self):
         return ModelArtifact(
