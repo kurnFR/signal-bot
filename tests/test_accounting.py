@@ -1,6 +1,10 @@
 import unittest
 
-from backtest.accounting import calculate_position_size, calculate_trade_accounting
+from backtest.accounting import (
+    calculate_funding_cost,
+    calculate_position_size,
+    calculate_trade_accounting,
+)
 
 
 class TestAccounting(unittest.TestCase):
@@ -33,6 +37,17 @@ class TestAccounting(unittest.TestCase):
         received = calculate_trade_accounting("LONG", 1.0, 100.0, 100.0, 0.0, funding_cost=-2.0)
         self.assertEqual(paid["net_pnl"], -2.0)
         self.assertEqual(received["net_pnl"], 2.0)
+
+    def test_funding_event_accrual(self):
+        cost = calculate_funding_cost(
+            10.0,
+            [(100.0, 0.001), (105.0, 0.001)],
+        )
+        self.assertAlmostEqual(cost, 2.05)
+
+    def test_invalid_position_size_is_rejected(self):
+        with self.assertRaises(ValueError):
+            calculate_position_size(5000, 1.0, 100.0, 100.0)
 
 
 if __name__ == "__main__":
