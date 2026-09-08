@@ -60,7 +60,7 @@ def build_signal_dataset(
         raise ValueError(f"Missing dataset columns: {', '.join(missing)}")
 
     if not trades:
-        columns = ["open_time", *BASE_POINT_IN_TIME_COLUMNS, *feature_columns,
+        columns = ["trade_index", "open_time", *BASE_POINT_IN_TIME_COLUMNS, *feature_columns,
                    "signal_direction", "target", "outcome_r"]
         columns.extend(_numeric_parameter_features(params or {}).keys())
         return pd.DataFrame(columns=list(dict.fromkeys(columns)))
@@ -69,7 +69,7 @@ def build_signal_dataset(
     rows = []
     parameter_features = _numeric_parameter_features(params or {})
 
-    for trade in trades:
+    for trade_index, trade in enumerate(trades):
         if "signal_open_time" not in trade or "direction" not in trade:
             raise ValueError("each trade must contain signal_open_time and direction")
         signal_time = int(trade["signal_open_time"])
@@ -81,6 +81,7 @@ def build_signal_dataset(
 
         row = indexed.loc[signal_time]
         values = {col: row[col] for col in ["open_time", *BASE_POINT_IN_TIME_COLUMNS, *feature_columns]}
+        values["trade_index"] = trade_index
         values["signal_direction"] = 1 if trade["direction"] == "LONG" else -1 if trade["direction"] == "SHORT" else 0
 
         outcome_r = trade.get("r_multiple")
