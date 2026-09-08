@@ -43,13 +43,7 @@ class MLSignalFilter:
         expected_features: list[str] | tuple[str, ...],
         paper: bool = False,
     ) -> "MLSignalFilter":
-        """Load a persisted model without refitting it.
-
-        ``paper=True`` is a hard deployment boundary: only entries explicitly
-        promoted to ``paper`` and marked eligible may be loaded. Research
-        models remain usable for research/backtest; retired models are never
-        loadable.
-        """
+        """Load a persisted model without refitting it."""
         entry = registry.get(model_id)
         if entry.status == "retired":
             raise ValueError(f"retired ML model cannot be loaded: {model_id}")
@@ -89,13 +83,24 @@ class MLSignalFilter:
         self.model.fit(X, y)
         return self
 
+    def _transform_features(self, X: pd.DataFrame):
+        """Apply the exact preprocessing fitted by the training pipeline."""
+        if self.feature_columns is None:
+            raise RuntimeError("ML filter has not been fitted or loaded")
+        values = X.loc[:, self.feature_columns]
+        preprocessor = getattr(self.model, "_signal_bot_preprocessor", None)
+        if preprocessor is None:
+            return values
+        imputer, scaler = preprocessor
+        return scaler.transform(imputer.transform(values))
+
     def predict_probability(self, X: pd.DataFrame):
         if self.feature_columns is None:
             raise RuntimeError("ML filter has not been fitted or loaded")
         missing = [c for c in self.feature_columns if c not in X.columns]
         if missing:
             raise ValueError(f"missing ML features: {', '.join(missing)}")
-        return self.model.predict_proba(X[list(self.feature_columns)])[:, 1]
+        return self.model.predict_proba(self._transform_features(X))[:, 1]
 
     def allow(self, X: pd.DataFrame):
         return self.predict_probability(X) >= self.threshold
