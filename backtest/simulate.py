@@ -5,7 +5,14 @@ from backtest.accounting import apply_entry_slippage, calculate_trade_accounting
 
 
 def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, stop_target) -> list:
-    """Simulate closed-candle signals with next-bar-open execution."""
+    """Simulate closed-candle signals with next-bar-open execution.
+
+    When ``params['_ml_signal_filter']`` is present, the ML model is applied
+    only after the base strategy has generated a direction. The model sees
+    the signal candle only, and the normal simulator remains responsible for
+    entry, exit, slippage, fees, and accounting. The runtime-only filter is
+    never persisted as part of the strategy parameters.
+    """
     trades = []
     n = len(df)
     i = 1
@@ -15,6 +22,10 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
     use_trailing = params.get("USE_TRAILING_STOP", False)
     trail_activation_r = params.get("TRAIL_ACTIVATION_R", 1.0)
     trail_distance_atr_mult = params.get("TRAIL_DISTANCE_ATR_MULT", 1.5)
+    ml_filter = params.get("_ml_signal_filter")
+
+    if ml_filter is not None and not hasattr(ml_filter, "predict_probability"):
+        raise TypeError("_ml_signal_filter must expose predict_probability()")
 
     while i < n - 1:
         row = df.iloc[i]
@@ -23,6 +34,20 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
         if direction is None:
             i += 1
             continue
+
+        ml_probability = None
+        if ml_filter is not None:
+            signal_frame = pd.DataFrame([row.to_dict()], index=[row.name])
+            probabilities = ml_filter.predict_probability(signal_frame)
+            if len(probabilities) != 1:
+                raise ValueError("ML signal filter must return exactly one probability per signal")
+            ml_probability = float(probabilities[0])
+            threshold = float(ml_filter.threshold)
+            if not 0.0 < threshold < 1.0:
+                raise ValueError("ML signal filter threshold must be between 0 and 1")
+            if ml_probability < threshold:
+                i += 1
+                continue
 
         entry_idx = i + 1
         entry_bar = df.iloc[entry_idx]
@@ -96,7 +121,7 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
             exit_slippage_pct=slip,
             stop_price=float(stop_loss),
         )
-        trades.append({
+        trade = {
             "direction": direction,
             "signal_open_time": int(row["open_time"]),
             "entry_time": int(entry_bar["open_time"]),
@@ -113,7 +138,10 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
             "net_return_pct": float(accounting["return_pct_on_entry_notional"]),
             "r_multiple": float(accounting["r_multiple"]) if accounting["r_multiple"] is not None else None,
             "holding_bars": exit_idx - entry_idx,
-        })
+        }
+        if ml_probability is not None:
+            trade["ml_probability"] = ml_probability
+        trades.append(trade)
         i = exit_idx + 1
 
     return trades
