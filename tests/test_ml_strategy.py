@@ -5,7 +5,7 @@ import pandas as pd
 
 from ml.artifacts import ModelArtifact
 from ml.model_store import ModelStore
-from ml.registry import ModelRegistry
+from ml.registry import ModelRegistry, RegistryEntry
 from ml.strategy import MLSignalFilter
 from ml.strategy_config import validate_ml_config
 
@@ -67,7 +67,7 @@ class TestMLStrategy(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             artifact = self._paper_artifact()
             store = self._trained_store(d, artifact)
-            registry = ModelRegistry([__import__("ml.registry", fromlist=["RegistryEntry"]).RegistryEntry(artifact)])
+            registry = ModelRegistry([RegistryEntry(artifact)])
             with self.assertRaises(ValueError):
                 MLSignalFilter.from_registry(
                     model_id=artifact.model_id,
