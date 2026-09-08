@@ -58,7 +58,7 @@ class TestMLTrainer(unittest.TestCase):
                 test,
                 config,
                 min_validation_trades=2,
-                threshold_candidates=[0.5, 0.6, 0.7],
+                threshold_candidates=[0.4, 0.45, 0.5, 0.6, 0.7],
             )
         except RuntimeError as exc:
             self.skipTest(str(exc))
