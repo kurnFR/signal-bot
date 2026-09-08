@@ -10,11 +10,14 @@ from typing import Any, Callable, Mapping
 
 import pandas as pd
 
+from ml.artifacts import ModelArtifact
 from ml.models import create_model
+from ml.model_store import ModelStore
+from ml.registry import ModelRegistry
 
 
 class MLSignalFilter:
-    """Fit an ML classifier and use it to filter base strategy signals."""
+    """Use a trained ML classifier to filter base strategy signals."""
 
     def __init__(self, base_strategy: Callable, model_type: str, model_params: Mapping[str, Any] | None = None,
                  threshold: float = 0.5):
@@ -26,6 +29,54 @@ class MLSignalFilter:
         self.threshold = threshold
         self.model = create_model(model_type, self.model_params)
         self.feature_columns: tuple[str, ...] | None = None
+        self.model_id: str | None = None
+        self.artifact: ModelArtifact | None = None
+
+    @classmethod
+    def from_registry(
+        cls,
+        *,
+        model_id: str,
+        registry: ModelRegistry,
+        store: ModelStore,
+        base_strategy: Callable,
+        expected_features: list[str] | tuple[str, ...],
+        paper: bool = False,
+    ) -> "MLSignalFilter":
+        """Load a persisted model without refitting it.
+
+        ``paper=True`` is a hard deployment boundary: only entries explicitly
+        promoted to ``paper`` and marked eligible may be loaded. Research
+        models remain usable for research/backtest; retired models are never
+        loadable.
+        """
+        entry = registry.get(model_id)
+        if entry.status == "retired":
+            raise ValueError(f"retired ML model cannot be loaded: {model_id}")
+        if paper and entry.status != "paper":
+            raise ValueError(f"ML model is not promoted for paper trading: {model_id}")
+        if paper and not entry.artifact.eligible_for_paper:
+            raise ValueError(f"ML model is not paper eligible: {model_id}")
+
+        artifact = entry.artifact
+        expected = tuple(expected_features)
+        if not expected:
+            raise ValueError("expected_features must not be empty")
+        if tuple(artifact.feature_columns) != expected:
+            raise ValueError("ML artifact feature schema does not match requested features")
+
+        loaded_model = store.load(artifact, expected)
+        filt = cls(
+            base_strategy=base_strategy,
+            model_type=artifact.model_type,
+            model_params=artifact.model_params,
+            threshold=artifact.threshold,
+        )
+        filt.model = loaded_model
+        filt.feature_columns = tuple(artifact.feature_columns)
+        filt.model_id = artifact.model_id
+        filt.artifact = artifact
+        return filt
 
     def fit(self, X: pd.DataFrame, y) -> "MLSignalFilter":
         if X.empty:
@@ -40,7 +91,7 @@ class MLSignalFilter:
 
     def predict_probability(self, X: pd.DataFrame):
         if self.feature_columns is None:
-            raise RuntimeError("ML filter has not been fitted")
+            raise RuntimeError("ML filter has not been fitted or loaded")
         missing = [c for c in self.feature_columns if c not in X.columns]
         if missing:
             raise ValueError(f"missing ML features: {', '.join(missing)}")
