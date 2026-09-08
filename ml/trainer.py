@@ -51,6 +51,8 @@ def _validate_frame(df: pd.DataFrame, feature_columns: Iterable[str], *, name: s
         raise ValueError(f"{name}.target contains missing values")
     if df["outcome_r"].isna().any():
         raise ValueError(f"{name}.outcome_r contains missing values")
+    if df["target"].nunique() < 2:
+        raise ValueError(f"{name}.target must contain both classes")
 
 
 def _prepare_features(train: pd.DataFrame, validation: pd.DataFrame, test: pd.DataFrame,
@@ -101,9 +103,13 @@ def select_validation_threshold(
     if min_trades < 1:
         raise ValueError("min_trades must be >= 1")
     probabilities = pd.Series(probabilities, index=validation.index, dtype=float)
+    if len(probabilities) != len(validation):
+        raise ValueError("probabilities must have the same length as validation")
     best: ThresholdResult | None = None
 
     for threshold in candidates or _threshold_candidates():
+        if not 0.0 < threshold < 1.0:
+            raise ValueError("threshold candidates must be between 0 and 1")
         mask = probabilities >= threshold
         selected = validation.loc[mask]
         count = len(selected)
@@ -150,9 +156,14 @@ def train_experiment(
     for frame, name in ((train, "train"), (validation, "validation"), (test, "test")):
         _validate_frame(frame, features, name=name)
 
-    # Fail closed if chronological boundaries overlap.
-    if set(train.index) & set(validation.index) or set(train.index) & set(test.index) or set(validation.index) & set(test.index):
-        raise ValueError("train/validation/test rows must be disjoint")
+    # The splitter resets DataFrame indexes, so row-index overlap is not a
+    # valid leakage test. When available, open_time is the canonical identity.
+    if all("open_time" in frame.columns for frame in (train, validation, test)):
+        train_times = set(train["open_time"])
+        validation_times = set(validation["open_time"])
+        test_times = set(test["open_time"])
+        if train_times & validation_times or train_times & test_times or validation_times & test_times:
+            raise ValueError("train/validation/test open_time rows must be disjoint")
 
     x_train, x_validation, x_test, imputer, scaler = _prepare_features(train, validation, test, features)
     model = create_model(config.model_type, {**config.model_params, "random_state": config.seed})
@@ -162,6 +173,8 @@ def train_experiment(
     validation_prob = model.predict_proba(x_validation)[:, 1]
     test_prob = model.predict_proba(x_test)[:, 1]
 
+    # This is the only selection step. TEST probabilities are calculated only
+    # after threshold/model selection and are never fed back into a decision.
     threshold = select_validation_threshold(
         validation,
         validation_prob,
@@ -174,9 +187,8 @@ def train_experiment(
     test_metrics = classification_metrics(test["target"], test_prob, threshold.threshold)
     test_trading = _trading_metrics(test, test_prob, threshold.threshold)
 
-    # Attach fitted preprocessing without changing the ExperimentConfig. The
-    # returned model is intentionally the fitted classifier; callers that
-    # persist it must persist the imputer/scaler alongside it.
+    # Persist fitted preprocessing with the model object for later artifact
+    # serialization. It is fitted from TRAIN only and never changes config.
     model._signal_bot_preprocessor = (imputer, scaler)
     return TrainingResult(
         experiment=config,
