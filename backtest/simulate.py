@@ -7,6 +7,11 @@ from backtest.accounting import apply_entry_slippage, calculate_trade_accounting
 def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, stop_target) -> list:
     """Simulate closed-candle signals with next-bar-open execution.
 
+    Optional runtime-only ``_simulation_start_open_time`` starts the simulation
+    at a chronological boundary while retaining the full dataframe for
+    indicator warm-up. This is used by ML OOS evaluation so TEST execution
+    cannot be affected by trades opened during TRAIN/VALIDATION.
+
     When ``params['_ml_signal_filter']`` is present, the ML model is applied
     only after the base strategy has generated a direction. The model sees
     the signal candle only, and the normal simulator remains responsible for
@@ -23,9 +28,17 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
     trail_activation_r = params.get("TRAIL_ACTIVATION_R", 1.0)
     trail_distance_atr_mult = params.get("TRAIL_DISTANCE_ATR_MULT", 1.5)
     ml_filter = params.get("_ml_signal_filter")
+    simulation_start = params.get("_simulation_start_open_time")
 
     if ml_filter is not None and not hasattr(ml_filter, "predict_probability"):
         raise TypeError("_ml_signal_filter must expose predict_probability()")
+
+    # Keep all historical rows available for strategy-specific indicator
+    # warm-up, but do not open a trade before the requested evaluation window.
+    if simulation_start is not None:
+        simulation_start = int(simulation_start)
+        while i < n - 1 and int(df.iloc[i]["open_time"]) < simulation_start:
+            i += 1
 
     while i < n - 1:
         row = df.iloc[i]
