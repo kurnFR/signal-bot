@@ -2,10 +2,10 @@
 
 All rates are decimal fractions (0.001 = 0.1%). Prices are quote-currency
 units. The module intentionally contains no database or strategy logic so it
-can be reused by the paper engine without importing the backtest simulator.
+can be reused by the paper engine.
 """
 from dataclasses import dataclass
-from typing import Optional
+from typing import Iterable, Optional
 
 
 @dataclass(frozen=True)
@@ -64,6 +64,28 @@ def apply_exit_slippage(price: float, direction: str, slippage_pct: float) -> fl
     raise ValueError("direction must be LONG or SHORT")
 
 
+def calculate_funding_cost(
+    quantity: float,
+    funding_events: Iterable[tuple[float, float]],
+) -> float:
+    """Calculate absolute funding cost from (mark_price, funding_rate) events.
+
+    Positive funding rates are a cost for LONG positions and a receipt for
+    SHORT positions. Negative rates reverse the direction. This helper returns
+    the cost from the perspective of a LONG position; callers invert the sign
+    for SHORT positions.
+    """
+    if quantity <= 0:
+        raise ValueError("quantity must be positive")
+
+    total = 0.0
+    for mark_price, funding_rate in funding_events:
+        if mark_price <= 0:
+            raise ValueError("funding mark price must be positive")
+        total += mark_price * quantity * funding_rate
+    return total
+
+
 def calculate_trade_accounting(
     direction: str,
     quantity: float,
@@ -88,9 +110,6 @@ def calculate_trade_accounting(
         exit_slippage_pct = entry_slippage_pct
     if exit_slippage_pct < 0:
         raise ValueError("exit slippage cannot be negative")
-    if funding_cost < 0:
-        # Negative funding is valid: the trader receives funding.
-        pass
 
     entry_exec = apply_entry_slippage(entry_price, direction, entry_slippage_pct)
     exit_exec = apply_exit_slippage(exit_price, direction, exit_slippage_pct)
