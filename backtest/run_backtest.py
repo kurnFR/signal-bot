@@ -36,7 +36,12 @@ logger = logging.getLogger("run_backtest")
 # are added to a COPY of this before calling a strategy, never stored.
 
 
-def run_one(symbol, market, timeframe, strategy_name, strategy_fn, data_segment="train"):
+def run_one(symbol, market, timeframe, strategy_name, strategy_fn, data_segment="train", ml_filter=None):
+    """Run one strategy, optionally filtered by a trained ML model.
+
+    The ML filter is runtime-only and is injected into a copy of BASE_PARAMS;
+    it is never persisted as part of the base strategy configuration.
+    """
     df = fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True,
                                        include_funding=strategy_name in FUNDING_STRATEGIES)
     if len(df) < 100:
@@ -53,6 +58,8 @@ def run_one(symbol, market, timeframe, strategy_name, strategy_fn, data_segment=
         return
 
     call_params = dict(BASE_PARAMS, symbol=symbol, market=market, timeframe=timeframe)
+    if ml_filter is not None:
+        call_params["_ml_signal_filter"] = ml_filter
 
     # trend_alignment_v1 needs a higher-timeframe series, split at the SAME
     # absolute cutoff as the working timeframe -- never let the HTF series
