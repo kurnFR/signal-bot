@@ -1,13 +1,22 @@
 # Signal Bot — Next Improvement Project
 
-**Created:** 2026-09-08
-**Source of truth:** `PROJECT_STATUS_AUDIT.md`
-**Scope:** Trading Trust & Risk Infrastructure
-**Status:** PLANNING — no application code changes in this phase
+**Created:** 2026-09-08  
+**Source of truth:** `PROJECT_STATUS_AUDIT.md`  
+**Scope:** Trading Trust & Risk Infrastructure  
+**Status:** IMPLEMENTATION — P0.1 through P0.5 are being closed incrementally
 
 ## Objective
 
 Make backtest, paper-trading, AI, and operational APIs trustworthy and internally consistent before adding live exchange execution or more trading strategies.
+
+## Current implementation checkpoint
+
+- **P0.1 API authorization/RBAC:** implemented; runtime authorization matrix still needs verification.
+- **P0.2 canonical accounting:** implemented in `backtest/accounting.py` and used by backtest/paper close accounting.
+- **P0.3 paper sizing/accounting:** engine integration implemented; DB migration and runtime verification remain.
+- **P0.4 futures funding:** canonical funding calculation and paper-engine event lookup implemented; runtime data verification remains.
+- **P0.5 execution parity:** contract/tests/documentation exist; the paper state-machine integration is still pending.
+- **P0.6/P0.7/P0.8:** partially covered by the P0.2/P0.3 changes, but final regression gates remain open.
 
 ## Non-negotiable gates
 
@@ -23,6 +32,8 @@ Live exchange execution MUST remain disabled until all P0 items are implemented,
 - Admin: users, configuration, sensitive operational controls.
 - Add authorization regression tests for every operational endpoint.
 
+**Implementation status:** centralized API middleware and role helpers are implemented. Runtime 401/403/200 verification remains.
+
 ### P0.2 Shared trading accounting model
 Create one canonical accounting module used by both backtest and paper trading for:
 - quantity/notional calculation;
@@ -35,7 +46,7 @@ Create one canonical accounting module used by both backtest and paper trading f
 - R-multiple;
 - equity updates.
 
-Backtest and paper must not maintain separate formulas for the same financial concepts.
+**Implementation status:** canonical accounting primitives are implemented. Paper close accounting now consumes the same module.
 
 ### P0.3 Real paper position sizing
 For each position calculate and persist:
@@ -51,10 +62,14 @@ For each position calculate and persist:
 
 Reject invalid zero/negative risk or stop distances.
 
+**Implementation status:** implemented in `paper/engine.py`; requires the P0 paper migration plus runtime verification.
+
 ### P0.4 Futures funding accounting
 For every futures position, accrue actual funding payments for funding intervals crossed by the position.
 
 Store funding separately from trading fees and slippage. Include funding in net P&L and equity.
+
+**Implementation status:** implemented against the repository's `funding_rate` table. Runtime verification against stored funding events remains.
 
 ### P0.5 Paper/backtest execution parity
 Define and enforce the lifecycle:
@@ -63,11 +78,17 @@ Define and enforce the lifecycle:
 
 Do not use historical future candles to make a real-time paper decision. If intrabar SL/TP cannot be known at the configured timeframe, use a documented lower-timeframe execution policy or conservative bar policy.
 
+**Implementation status:** parity contract and accounting tests are implemented. The explicit pending-entry state machine is the next coding step.
+
 ### P0.6 Correct paper R/P&L
 Paper R must be derived from the same canonical net-return/accounting definition as backtest. Fees, slippage and funding must be included consistently.
 
+**Implementation status:** realized paper R/net P&L now use canonical accounting. Final synthetic parity tests remain.
+
 ### P0.7 Idempotent paper execution
 Prevent duplicate OPEN positions for the same configuration using both application logic and database-level uniqueness/locking. Concurrent `/sync` calls must be safe.
+
+**Implementation status:** DB uniqueness plus application duplicate handling and compare-and-set close logic are implemented. Concurrency verification remains.
 
 ### P0.8 Accounting regression suite
 Add automated tests covering:
@@ -81,6 +102,8 @@ Add automated tests covering:
 - same-bar SL/TP policy;
 - paper/backtest parity;
 - duplicate sync protection.
+
+**Implementation status:** canonical accounting and parity regression coverage exists; DB-backed paper lifecycle tests are still required.
 
 ## P1 — Validation, Risk, and Security Hardening
 
