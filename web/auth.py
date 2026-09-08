@@ -2,8 +2,9 @@
 Authentication & Cryptographic Security Module.
 - PBKDF2-HMAC-SHA256 with 200,000 iterations & 16-byte random salt.
 - Constant-time verification against timing attacks.
-- 100% Parameterized queries to strictly prevent SQL injection.
+- Parameterized SQL queries to prevent SQL injection.
 - Token-based session management.
+- Central request authentication helper for API authorization middleware.
 """
 import os
 import time
@@ -14,14 +15,13 @@ import hashlib
 import secrets
 import logging
 from typing import Optional, Dict, Any
-from fastapi import Request, HTTPException, Security, Depends
+from fastapi import Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from db.db import get_pool
 
 logger = logging.getLogger("web.auth")
 
-# Security key initialization
 SECRET_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".app_secret")
 if os.path.exists(SECRET_FILE):
     with open(SECRET_FILE, "r") as f:
@@ -31,13 +31,10 @@ else:
     with open(SECRET_FILE, "w") as f:
         f.write(SECRET_KEY)
 
-TOKEN_EXPIRY_SECONDS = 86400  # 24 hours
+TOKEN_EXPIRY_SECONDS = 86400
 security_bearer = HTTPBearer(auto_error=False)
 
 
-# ============================================================================
-# Password Hashing & Verification (PBKDF2-HMAC-SHA256)
-# ============================================================================
 def hash_password(password: str) -> str:
     """Creates a hardened, salted PBKDF2-HMAC-SHA256 password hash."""
     if not password or len(password) < 6:
@@ -65,18 +62,16 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 
-# ============================================================================
-# Stateless Signed Session Token (HMAC-SHA256)
-# ============================================================================
 def create_access_token(user_id: int, username: str, role: str) -> str:
+    now = int(time.time())
     payload = {
         "sub": user_id,
         "username": username,
         "role": role,
-        "exp": int(time.time()) + TOKEN_EXPIRY_SECONDS,
-        "iat": int(time.time()),
+        "exp": now + TOKEN_EXPIRY_SECONDS,
+        "iat": now,
     }
-    payload_bytes = json.dumps(payload, separators=(',', ':')).encode("utf-8")
+    payload_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     payload_b64 = base64.urlsafe_b64encode(payload_bytes).decode("utf-8").rstrip("=")
     signature = hmac.new(SECRET_KEY.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256).digest()
     sig_b64 = base64.urlsafe_b64encode(signature).decode("utf-8").rstrip("=")
@@ -88,10 +83,9 @@ def verify_access_token(token: str) -> Optional[Dict[str, Any]]:
         return None
     try:
         payload_b64, sig_b64 = token.split(".", 1)
-        # Pad base64
         pad_payload = payload_b64 + "=" * (-len(payload_b64) % 4)
         pad_sig = sig_b64 + "=" * (-len(sig_b64) % 4)
-        
+
         expected_sig = hmac.new(SECRET_KEY.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256).digest()
         actual_sig = base64.urlsafe_b64decode(pad_sig.encode("utf-8"))
         if not hmac.compare_digest(expected_sig, actual_sig):
@@ -100,27 +94,25 @@ def verify_access_token(token: str) -> Optional[Dict[str, Any]]:
         payload_bytes = base64.urlsafe_b64decode(pad_payload.encode("utf-8"))
         payload = json.loads(payload_bytes.decode("utf-8"))
         if payload.get("exp", 0) < time.time():
-            return None  # Token expired
+            return None
         return payload
     except Exception:
         return None
 
 
-# ============================================================================
-# FastAPI Dependencies & Security Hardening
-# ============================================================================
-def get_current_user(
-    request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer)
-) -> Dict[str, Any]:
-    token = None
-    # 1. Try Authorization header
-    if credentials:
-        token = credentials.credentials
-    # 2. Try cookie
-    if not token and "auth_token" in request.cookies:
-        token = request.cookies.get("auth_token")
+def _token_from_request(request: Request) -> Optional[str]:
+    """Extract bearer token first, then the legacy auth cookie."""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header[7:].strip()
+        if token:
+            return token
+    return request.cookies.get("auth_token")
 
+
+def authenticate_request(request: Request) -> Dict[str, Any]:
+    """Authenticate an HTTP request and return the current active DB user."""
+    token = _token_from_request(request)
     if not token:
         raise HTTPException(status_code=401, detail="Authentication credentials missing")
 
@@ -128,35 +120,68 @@ def get_current_user(
     if not payload:
         raise HTTPException(status_code=401, detail="Session expired or invalid token")
 
-    # Verify user is still active in DB (strict SQL parameterized query)
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid session subject")
+
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        # Hardened SQL Injection protection: %s tuple parameter only
         cur.execute(
             "SELECT id, username, email, role, is_active FROM users WHERE id = %s AND is_active = 1",
-            (payload["sub"],)
+            (user_id,)
         )
         user = cur.fetchone()
         cur.close()
-        if not user:
-            raise HTTPException(status_code=401, detail="User account disabled or deleted")
-        return user
     finally:
         conn.close()
 
+    if not user:
+        raise HTTPException(status_code=401, detail="User account disabled or deleted")
+
+    return user
+
+
+def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer)
+) -> Dict[str, Any]:
+    """FastAPI dependency. Uses the supplied bearer credentials or request cookie."""
+    if credentials:
+        token = credentials.credentials
+        request.state.auth_token = token
+    return authenticate_request(request)
+
+
+def require_role(*allowed_roles: str):
+    """Create a FastAPI dependency requiring one of the supplied roles."""
+    def _require_role(current_user: Dict[str, Any] = Depends(get_current_user)):
+        if current_user.get("role") not in allowed_roles:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Required role: {', '.join(allowed_roles)}"
+            )
+        return current_user
+    return _require_role
+
 
 def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)):
+    return _require_admin(current_user)
+
+
+def _require_admin(current_user: Dict[str, Any]):
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin privileges required")
     return current_user
 
 
-# ============================================================================
-# Default Admin Seeding
-# ============================================================================
 def seed_default_admin():
-    """Initializes admin/admin123 if users table is empty."""
+    """Initializes admin/admin123 if users table is empty.
+
+    NOTE: This legacy bootstrap remains temporarily for compatibility. It is
+    explicitly tracked as a P0/P1 security item in NEXT_IMPROVEMENT_PROJECT.md
+    and must be replaced by a secure one-time bootstrap before external use.
+    """
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
@@ -165,7 +190,6 @@ def seed_default_admin():
         if count == 0:
             default_pwd = "admin123"
             pwd_hash = hash_password(default_pwd)
-            # 100% Parameterized query: no SQL injection possible
             cur.execute(
                 """
                 INSERT INTO users (username, email, password_hash, role, is_active)
@@ -174,13 +198,7 @@ def seed_default_admin():
                 ("admin", "admin@crypto-signal-bot.local", pwd_hash, "admin", 1)
             )
             conn.commit()
-            logger.info("Initialized default admin credentials: admin / admin123")
-            print("\n" + "=" * 60)
-            print(" [SECURITY] Default admin account created:")
-            print("   Username: admin")
-            print("   Password: admin123")
-            print("   Please change this password after initial login!")
-            print("=" * 60 + "\n")
+            logger.warning("Initialized legacy default admin account; rotate bootstrap credentials immediately.")
         cur.close()
     finally:
         conn.close()
