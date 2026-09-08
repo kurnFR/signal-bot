@@ -1,7 +1,11 @@
+import tempfile
 import unittest
 
 import pandas as pd
 
+from ml.artifacts import ModelArtifact
+from ml.model_store import ModelStore
+from ml.registry import ModelRegistry
 from ml.strategy import MLSignalFilter
 from ml.strategy_config import validate_ml_config
 
@@ -30,6 +34,101 @@ class TestMLStrategy(unittest.TestCase):
         filt = MLSignalFilter(lambda df, p: [], "logistic_regression")
         with self.assertRaises(ValueError):
             filt.fit(pd.DataFrame({"x": [1, 2]}), [1, 1])
+
+    def _paper_artifact(self):
+        return ModelArtifact(
+            model_id="deployment-test-v1",
+            experiment_id="exp-deployment-1",
+            model_type="logistic_regression",
+            base_strategy="trend_ema",
+            feature_columns=("x",),
+            strategy_params={},
+            model_params={},
+            threshold=.6,
+            train_metrics={},
+            validation_metrics={},
+            test_metrics={
+                "trade_count": 50,
+                "profit_factor": 1.2,
+                "max_drawdown_pct": 10.0,
+                "net_pnl": 100.0,
+            },
+            eligible_for_paper=True,
+        )
+
+    def _trained_store(self, root, artifact):
+        source = MLSignalFilter(lambda df, p: [], artifact.model_type, threshold=artifact.threshold)
+        source.fit(pd.DataFrame({"x": [0.0, 1.0, 2.0, 3.0]}), [0, 0, 1, 1])
+        store = ModelStore(root)
+        store.save(artifact, source.model)
+        return store
+
+    def test_registry_loader_blocks_research_model_for_paper(self):
+        with tempfile.TemporaryDirectory() as d:
+            artifact = self._paper_artifact()
+            store = self._trained_store(d, artifact)
+            registry = ModelRegistry([__import__("ml.registry", fromlist=["RegistryEntry"]).RegistryEntry(artifact)])
+            with self.assertRaises(ValueError):
+                MLSignalFilter.from_registry(
+                    model_id=artifact.model_id,
+                    registry=registry,
+                    store=store,
+                    base_strategy=lambda df, p: [],
+                    expected_features=["x"],
+                    paper=True,
+                )
+
+    def test_registry_loader_loads_promoted_model_without_refit(self):
+        with tempfile.TemporaryDirectory() as d:
+            artifact = self._paper_artifact()
+            store = self._trained_store(d, artifact)
+            registry = ModelRegistry()
+            registry.add(artifact)
+            registry.promote_to_paper(artifact.model_id)
+            loaded = MLSignalFilter.from_registry(
+                model_id=artifact.model_id,
+                registry=registry,
+                store=store,
+                base_strategy=lambda df, p: [],
+                expected_features=["x"],
+                paper=True,
+            )
+            self.assertEqual(loaded.model_id, artifact.model_id)
+            self.assertEqual(loaded.feature_columns, ("x",))
+            self.assertEqual(loaded.threshold, artifact.threshold)
+            probabilities = loaded.predict_probability(pd.DataFrame({"x": [0.5, 2.5]}))
+            self.assertEqual(len(probabilities), 2)
+
+    def test_registry_loader_rejects_retired_model(self):
+        with tempfile.TemporaryDirectory() as d:
+            artifact = self._paper_artifact()
+            store = self._trained_store(d, artifact)
+            registry = ModelRegistry()
+            registry.add(artifact)
+            registry.retire(artifact.model_id)
+            with self.assertRaises(ValueError):
+                MLSignalFilter.from_registry(
+                    model_id=artifact.model_id,
+                    registry=registry,
+                    store=store,
+                    base_strategy=lambda df, p: [],
+                    expected_features=["x"],
+                )
+
+    def test_registry_loader_rejects_feature_schema_mismatch(self):
+        with tempfile.TemporaryDirectory() as d:
+            artifact = self._paper_artifact()
+            store = self._trained_store(d, artifact)
+            registry = ModelRegistry()
+            registry.add(artifact)
+            with self.assertRaises(ValueError):
+                MLSignalFilter.from_registry(
+                    model_id=artifact.model_id,
+                    registry=registry,
+                    store=store,
+                    base_strategy=lambda df, p: [],
+                    expected_features=["x", "missing"],
+                )
 
 
 if __name__ == "__main__":
