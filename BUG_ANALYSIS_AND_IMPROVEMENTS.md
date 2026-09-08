@@ -1,157 +1,219 @@
 # Bug Analysis & Improvements Review
-## Crypto Signal Bot — Signal-Bot Project
+## Crypto Signal Bot — Current Synchronized Status
 
-**Status**: Local project pulled from GitHub (`3e6b0ef` — Web Dashboard, Auth & Paper Trading added), with new `POST /api/backtest/run-all` endpoint implemented and tested.
+**Last audited:** 2026-09-08  
+**Audited HEAD:** `803f45712f3955dc2fafb218f1ed03410e4fac84`  
+**Authoritative audit:** [`PROJECT_STATUS_AUDIT.md`](PROJECT_STATUS_AUDIT.md)
 
----
-
-## Project Phase Notice
-This project has progressed beyond the Step 1/Step 2 validation phase. The following scripts are **not used** in the current final project:
-- `validate_step1.py` — formerly confirmed OHLCV coverage, collector heartbeats, and supplementary table recency
-- `validate_step2.py` — formerly checked indicator row counts, NaN percentages, and value ranges
-These scripts have been superseded by the web dashboard's built-in coverage matrices and the Phase B paper trading engine. They are retained in the repository for historical reference only.
+> This document is now a synchronized backlog. Historical implementation notes remain useful, but the current source code is the authority. Do not treat older P0/P1 labels below as proof that a feature is still missing.
 
 ---
 
-## ✅ New Feature: `POST /api/backtest/run-all` Endpoint
+## 1. Already Implemented
 
-### Implementation Status
-Successfully implemented and tested. The endpoint runs all available strategies and returns them ranked by profitability.
+### `/api/backtest/run-all`
 
-### Test Results
-- **16 strategies** were executed against BTCUSDT/spot/1d
-- **Top 3 ranked**:
-  1. `inverse_double_pattern_v1` — rankScore: 0.3741, expectancy_R: +0.3119, PF: 1.48, 20 trades
-  2. `fibonacci_retracement_v1` — rankScore: 0.3451, expectancy_R: -0.5206, PF: 0.42, 38 trades
-  3. `inverse_confluence_ensemble_v1` — rankScore: 0.2808, expectancy_R: +0.1626, PF: 1.24, 45 trades
-- **Minimum trade filter**: `MIN_TRADES_FOR_RANK = 10` enforced — strategies with fewer than 10 trades appear in `allResults` with a note but are not ranked
-- **All 16 strategies** returned results; some had "insufficient_candles" or other errors handled gracefully
+**Status: ✅ IMPLEMENTED**
 
-### Endpoint Details
-- **URL**: `POST /api/backtest/run-all`
-- **Query params**: `symbol`, `market`, `timeframe`, `data_segment`, `initial_capital`, `risk_per_trade_pct`
-- **Response**: `{top3, allResults, minTradesForRank, count, symbol, market, timeframe, dataSegment, initialCapital, riskPerTradePct}`
-- **Ranking**: composite score = expectancy_R(50%) + profit_factor(30%) + win_rate(15%) + trade_count(5%)
-- **Minimum trade filter**: 10 trades required for ranking
+The endpoint is active in `web/routes/backtest.py` and evaluates the registered strategy set, returns `top3`, `allResults`, profitability eligibility, ranking score, and AI insight.
 
-### Recommendation
-This endpoint is **P0 priority** — it's the core feature enabling users to run all strategies and get top 3 results. The implementation is complete and functional.
+The repository currently registers **12 built-in strategies + 12 inverse variants = 24 built-in strategy variants**.
+
+The old test note saying "16 strategies" is historical and must not be used as the current count.
+
+### Strategy Battle Royale UI
+
+**Status: ✅ IMPLEMENTED**
+
+The current repository includes the Top-3 Battle Royale/podium UI and deployment flow. The old website recommendation that this UI still needed to be created is stale.
+
+### AI Insight Engine
+
+**Status: ⚠️ IMPLEMENTED, NEEDS CORRECTION**
+
+`ai/insight_engine.py` exists and generates regime, sample-size, risk and deployment guidance. However, its statistical confidence labels, Kelly calculation, and regime indicator inputs need correction before being described as institutional-grade.
+
+### Paper Trading
+
+**Status: ⚠️ IMPLEMENTED, NEEDS HARDENING**
+
+Paper trading exists, but its accounting and execution lifecycle are not yet trustworthy enough for professional financial simulation.
 
 ---
 
-## 1. Consistency of BASE_PARAMS Across All Strategies
+## 2. Confirmed Critical Issues From Source Audit
 
-### Issue
-While `backtest/params.py` consolidates `BASE_PARAMS` from `config.py`, not all strategy `run()` functions pull from the `params` dict consistently:
-- Some strategies use `params.get("KEY")` with fallbacks
-- Others hard-code their own defaults
-- The `run-all` endpoint works because it passes `BASE_PARAMS` merged with runtime params, but single-strategy runs via the web UI may use different defaults
+### P0 — Paper position sizing is not actually applied
 
-### Recommendation
-Ensure every strategy's `run(df, params)` function **always** pulls from the `params` dict with proper fallbacks. In `backtest/strategies/trend_ema.py`, verify:
-```python
-def run(df: pd.DataFrame, params: dict) -> list:
-    df = df.copy()
-    df["ema_fast"] = df["close"].ewm(span=params.get("TREND_EMA_FAST", 20), adjust=False).mean()
-    df["ema_slow"] = df["close"].ewm(span=params.get("TREND_EMA_SLOW", 50), adjust=False).mean()
-    return simulate(df, params, _long_condition, _short_condition, _stop_target)
+`paper_configs` stores `allocated_capital` and `risk_per_trade_pct`, but `paper_positions` has no quantity/notional/risk-dollar fields and the opening logic does not size the position from those settings.
+
+**Required:** build a deterministic position-sizing/accounting layer.
+
+### P0 — Futures funding is not charged
+
+Funding data is collected and can be used as a signal, but funding payments are not included in trade settlement/P&L.
+
+**Required:** accrue funding across the actual funding intervals crossed by each futures position.
+
+### P0 — Paper R/P&L is inconsistent with backtest
+
+Backtest R is based on net return after modeled costs, while paper close logic calculates `r_multiple` from raw return. Therefore paper R excludes the same costs that paper percentage return includes.
+
+**Required:** use one shared accounting calculation for both engines.
+
+### P0 — Paper execution lifecycle is not equivalent to real forward execution
+
+The paper engine discovers a signal after a candle has closed and derives the entry from the next historical candle, but it cannot know the next candle's intrabar SL/TP outcome at that time. The current implementation therefore does not faithfully reproduce the live-forward lifecycle.
+
+**Required:** explicit `SIGNAL -> PENDING ENTRY -> EXECUTED -> ACTIVE -> EXITED` state machine.
+
+### P0 — Operational API authorization is incomplete
+
+Authentication exists, but the current operational route modules do not consistently enforce it. The audit identified unprotected operational surfaces including paper trading, master-data jobs, settings diagnostics, Telegram diagnostics, custom strategy creation, and backtest operations.
+
+**Required:** apply `get_current_user` / `require_admin` or appropriate trader/viewer dependencies to every non-public endpoint.
+
+---
+
+## 3. Confirmed High-Priority Issues
+
+### P1 — Duplicate paper positions can race
+
+The paper engine performs read/check followed by insert without database-level protection against concurrent evaluators.
+
+**Required:** transaction/idempotency protection and a database uniqueness rule for one OPEN position per configuration.
+
+### P1 — Full-history re-simulation during paper polling
+
+New entries are detected by running the entire strategy simulation history for each active config.
+
+**Required:** incremental last-N/stateful evaluation path.
+
+### P1 — Holdout "one-time" rule is procedural only
+
+`run_holdout_check.py` requires `--confirm`, but the application does not technically prevent repeated holdout checks.
+
+**Required:** immutable validation records / explicit contamination state if the holdout is reused.
+
+### P1 — Segment boundary state can differ from continuous execution
+
+EMA/rolling strategy calculations can restart when only the holdout/fold dataframe is passed. This is not future leakage, but it can produce boundary artifacts versus continuous live state.
+
+**Required:** preserve state or provide pre-period warmup while scoring only the requested evaluation window.
+
+### P1 — Ranking is heuristic, not statistical proof
+
+The current Battle Royale ranking correctly rejects non-positive expectancy and low-trade results, but it does not account for multiple-testing bias, uncertainty, parameter-search breadth, strategy correlation, or futures funding costs.
+
+**Required:** eligibility gates + uncertainty metrics + multiple-testing-aware evidence score.
+
+### P1 — AI confidence/Kelly/regime logic needs correction
+
+The current AI engine calls 45+ trades "High" confidence, assumes a fixed 2R payoff for Kelly, clamps half-Kelly to a positive minimum, and expects `ema_20`, `ema_50`, and optional `adx` even though the shared feature engine does not currently produce those fields.
+
+**Required:** correct the math and use indicators from a shared, auditable source.
+
+### P1 — Security hardening
+
+Confirmed gaps include default `admin/admin123`, no login rate limiting, stateless non-revocable tokens, broad CORS, and system diagnostics exposing database connection metadata.
+
+### P1 — Telegram delivery reliability
+
+Telegram failures are logged but not durably queued/retried or reconciled.
+
+---
+
+## 4. Lower-Priority / Structural Improvements
+
+- Portfolio-level exposure and margin accounting.
+- Max daily loss / max drawdown / max concurrent-position circuit breakers.
+- Volatility/liquidity-aware slippage.
+- Durable audit log for strategy deployment and configuration changes.
+- Durable job queue instead of in-memory daemon threads.
+- Custom strategy database persistence/versioning and ownership.
+- Frontend HTML escaping for dynamic/custom strategy content.
+- Remove tracked `__pycache__` artifacts.
+- Automated lookahead, paper/backtest parity, and accounting regression tests.
+- Clarify that `walk_forward.py` is currently a fixed-parameter temporal stability test, not walk-forward optimization.
+
+---
+
+## 5. Parameter Handling Decision
+
+The previous recommendation to mass-rewrite strategies to `params.get("KEY", default)` is **rejected**.
+
+`backtest/params.py` already provides a centralized `BASE_PARAMS` source, and strict parameter access is preferable for required parameters.
+
+### New standard
+
+```text
+BASE_PARAMS
+    ↓
+validate required keys/types/ranges
+    ↓
+strategy execution
 ```
-Do the same for all other strategies. This ensures the `run-all` endpoint produces comparable results across strategies.
 
-### Action
-Update all 11 strategy modules in `backtest/strategies/` to use `params.get("KEY", default)` pattern consistently.
+A missing required parameter should fail explicitly rather than silently falling back to an unrelated default.
 
 ---
 
-## 2. Confidence / Sample Size Notes on Ranked Cards
+## 6. Next Improvement Project
 
-### Recommendation
-Append a "Confidence" note to each ranked strategy card in the UI:
-- `if total_trades < 50: "⚠️ Few trades — results may not be statistically significant"`
-- `if data_segment == "holdout": "✓ Holdout-validated (no overfit)"`
-- `if data_segment == "train": "📓 Train-only — run holdout check to verify"`
-- `if strategy in FUNDING_STRATEGIES and funding not available: "⚠️ Funding data unavailable — results may vary"`
+### P0 — Trust the numbers
 
-Display this in the card footer or as a tooltip when user hovers over the rank score.
+1. Shared trade accounting model.
+2. Real paper position sizing.
+3. Dollar P&L/equity ledger.
+4. Correct net R after costs.
+5. Futures funding settlement.
+6. Correct paper pending-entry state machine.
+7. Backtest/paper parity tests.
 
-### Action
-Update the dashboard "Strategy Battle Royale" tab UI (recommendation from `WEBSITE_IMPROVEMENT_RECOMMENDATIONS.md`) to include these notes.
+### P0 — Close security exposure
 
----
+8. Protect all operational APIs with RBAC.
+9. Remove default credential exposure.
+10. Restrict CORS.
+11. Protect system/Telegram diagnostics.
 
-## 3. Strategy Ranking Logic Refinements
+### P1 — Safer strategy selection
 
-### Current Logic
-```python
-rank_score = (ev_norm * 0.5) + (pf_norm * 0.3) + (wr_norm * 0.15) + (tc_norm * 0.05)
-```
-Where:
-- `ev_norm = min(abs(ev) / 1.0, 1.0)` — assumes ~1R typical range
-- `pf_norm = min(pf / 3.0, 1.0)` — assumes ~3.0 typical PF
-- `wr_norm = min(wr / 100.0, 1.0)`
-- `tc_norm = min(tc / 100, 1.0)` — trade count normalization
+12. Parameter contract validation.
+13. Better ranking eligibility/evidence score.
+14. Multiple-testing-aware statistics.
+15. True rolling OOS validation.
+16. Correct boundary warmup/state handling.
 
-### Recommendation
-Consider making the weights configurable via `config.py` or the web UI, so users can prioritize different metrics:
-- Risk-averse users: higher weight on `win_rate_pct` and `profit_factor`
-- Return-focused users: higher weight on `expectancy_r`
-- Experienced users: disable trade count filter or lower its weight
+### P1 — Risk controls
 
-### Action
-Add `RANK_WEIGHT_EV`, `RANK_WIGHT_PF`, `RANK_WEIGHT_QR`, `RANK_WEIGHT_TC` to `config.py` with defaults matching the current 0.5/0.3/0.15/0.05 split, and reference them in the `run-all` endpoint.
+17. Circuit breakers.
+18. Duplicate/idempotency controls.
+19. Portfolio exposure/margin limits.
+20. Immutable audit trail.
 
----
+### P1 — Correct AI decision support
 
-## 4. Minimum Trade Count Filter
+21. Shared regime indicators.
+22. Evidence-based confidence.
+23. Correct Kelly/risk recommendation.
+24. Deployment recommendation tied to OOS evidence.
 
-### Current Status
-`MIN_TRADES_FOR_RANK = 10` is enforced in the `run-all` endpoint. Strategies with fewer than 10 trades appear in `allResults` with a note but are excluded from `top3`.
+### P2 — Reliability and scale
 
-### Recommendation
-- Keep the filter at 10 for the default ranking
-- Add a UI control: "Minimum trades to consider: [10__20__50__100]"
-- Strategies with < 10 trades should still appear in `allResults` with their metrics and a "not enough data for ranking" note
+25. Telegram retry/queue/reconciliation.
+26. Incremental signal evaluation.
+27. Durable job management.
+28. CI/regression/security test suite.
 
-### Action
-Add a sidebar control in the dashboard to adjust `MIN_TRADES_FOR_RANK` dynamically.
+### P3 — Live execution
 
----
-
-## 5. Strategy Battle Royale Dashboard Tab (UI)
-
-### Current State
-The backend `run-all` endpoint is functional. The frontend UI needs to be updated to:
-1. Add a new tab "Strategy Rank" / "Battle Royale" in the left panel
-2. Show "Run All Strategies" button
-3. Display top 3 cards with: strategy name, expectancy_R, profit_factor, total_trades, final equity, rank score
-4. Show full results table (collapsible)
-5. Add parameter override before running
-6. Add confidence/sample size notes
-
-### Recommendation
-Priority: P1. The backend is done; the frontend UI integration completes the feature.
-
-### Action
-Update `web/static/js/app.js` to:
-- Add `currentTab = "battleroyale"` or similar
-- Add `fetchStrategies()` call on init (already done, but ensure strategies list populates the new tab)
-- Add `runAllStrategies()` function that calls `/api/backtest/run-all`
-- Display top 3 cards and full results table
-- Add parameter override modal (fee, slippage, trailing stop)
+Not started and should remain disabled until the P0/P1 trustworthiness requirements pass.
 
 ---
 
-## 5. Updated Summary of Priority Actions
+## 7. Source of Truth
 
-| Priority | Issue | Status | Action |
-|----------|-------|--------|--------|
-| **P0** | `POST /api/backtest/run-all` endpoint | ✅ **Complete** | Feature works; 16 strategies tested, top 3 ranked |
-| **P1** | Consistent BASE_PARAMS across all strategies | ⚠️ **Needed** | Ensure all `run(df, params)` use `params.get("KEY", default)` |
-| **P1** | Confidence/sample size notes on ranked cards | ⚠️ **Needed** | Add to dashboard UI |
-| **P1** | Strategy Battle Royale dashboard tab UI | ⚠️ **Needed** | Update `web/static/js/app.js` |
-| **P2** | Make rank scores weights configurable | 📝 **Optional** | Add `RANK_WEIGHT_*` to `config.py` |
-| **P2** | Adjustable MIN_TRADES_FOR_RANK via UI | 📝 **Optional** | Add sidebar control |
-| **P3** | Update `BUG_ANALYSIS_AND_IMPROVEMENTS.md` | ✅ **Done** | Documented new findings |
+For the complete audit, implementation matrix, readiness criteria, and KEEP / CHANGE / REWRITE / ADD / REMOVE decisions, see **`PROJECT_STATUS_AUDIT.md`**.
 
----
-*This document reflects the project's current state: run-all endpoint implemented and tested. No code changes beyond the endpoint have been applied yet (P1-P3 items are recommendations for future work). The existing `/api/backtest/run` single-strategy endpoint remains functional.*
+**Current project verdict: strong development foundation, but NOT live-trading-ready.**
