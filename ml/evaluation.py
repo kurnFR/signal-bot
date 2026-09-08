@@ -16,10 +16,7 @@ from backtest.metrics import compute_metrics
 def _trading_summary(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     metrics = compute_metrics(list(trades))
     net_pnl = float(sum(float(t.get("net_pnl", 0.0)) for t in trades))
-    return {
-        **metrics,
-        "net_pnl": round(net_pnl, 8),
-    }
+    return {**metrics, "net_pnl": round(net_pnl, 8)}
 
 
 def evaluate_filtered_trades(
@@ -30,9 +27,10 @@ def evaluate_filtered_trades(
 ) -> dict[str, Any]:
     """Compare baseline trades with the ML-selected subset.
 
-    ``signal_dataset`` must retain the canonical trade identity in
-    ``trade_index``. Probabilities must be aligned to that dataset. This
-    function deliberately does not use TEST results to change the threshold.
+    ``signal_dataset`` must retain canonical ``trade_index`` values. The
+    probabilities must be aligned to that dataset. Threshold selection must
+    happen upstream on VALIDATION only; this function is an evaluator and does
+    not optimize any parameter.
     """
     if not 0.0 < threshold < 1.0:
         raise ValueError("threshold must be between 0 and 1")
@@ -43,15 +41,13 @@ def evaluate_filtered_trades(
     if len(probabilities) != len(signal_dataset):
         raise ValueError("probabilities must have the same length as signal_dataset")
 
-    base = list(trades)
-    by_index = {int(t.get("_trade_index", i)): t for i, t in enumerate(base)}
-    selected_ids = set(
+    selected_ids = {
         int(row["trade_index"])
         for _, row in signal_dataset.loc[probabilities >= threshold].iterrows()
-    )
-    filtered = [t for i, t in enumerate(base) if i in selected_ids or int(t.get("_trade_index", i)) in selected_ids]
+    }
+    filtered = [trade for trade_index, trade in enumerate(trades) if trade_index in selected_ids]
 
-    baseline = _trading_summary(base)
+    baseline = _trading_summary(trades)
     ml_summary = _trading_summary(filtered)
     return {
         "threshold": threshold,
@@ -70,9 +66,11 @@ def evaluate_filtered_trades(
                 and isinstance(baseline["profit_factor"], (int, float))
                 else None
             ),
-            "max_drawdown_r": round(ml_summary["max_drawdown_r"] - baseline["max_drawdown_r"], 8)
-            if ml_summary["max_drawdown_r"] is not None and baseline["max_drawdown_r"] is not None
-            else None,
+            "max_drawdown_r": (
+                round(ml_summary["max_drawdown_r"] - baseline["max_drawdown_r"], 8)
+                if ml_summary["max_drawdown_r"] is not None and baseline["max_drawdown_r"] is not None
+                else None
+            ),
             "trades": ml_summary["total_trades"] - baseline["total_trades"],
         },
     }
