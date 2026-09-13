@@ -135,6 +135,12 @@ def run_execution_aware_tournament(
     test_end = int(split.test["open_time"].max())
     params_base = dict(BASE_PARAMS if base_params is None else base_params)
 
+    baseline_validation_params = dict(params_base)
+    baseline_validation_params["_simulation_start_open_time"] = validation_start
+    baseline_validation_params["_simulation_end_open_time"] = validation_end
+    baseline_validation_trades = strategy_fn(market_df, baseline_validation_params)
+    baseline_validation_metrics = _trade_metrics(baseline_validation_trades)
+
     validation_scores: list[CandidateScore] = []
     details: list[Mapping[str, Any]] = []
     fitted_by_index: dict[int, dict[str, Any]] = {}
@@ -220,6 +226,12 @@ def run_execution_aware_tournament(
     winner_threshold = float(winner_detail["selected_threshold"])
 
     # LOCK POINT: only the locked winner is allowed to touch TEST, exactly once.
+    test_baseline_params = dict(params_base)
+    test_baseline_params["_simulation_start_open_time"] = test_start
+    test_baseline_params["_simulation_end_open_time"] = test_end
+    baseline_test_trades = strategy_fn(market_df, test_baseline_params)
+    baseline_test_metrics = _trade_metrics(baseline_test_trades)
+
     test_filter = _locked_filter(winner_fit, winner_threshold)
     test_params = dict(params_base)
     test_params["_ml_signal_filter"] = test_filter
@@ -228,12 +240,18 @@ def run_execution_aware_tournament(
     test_trades = strategy_fn(market_df, test_params)
     test_metrics = _trade_metrics(test_trades)
 
+    baseline_metrics = {
+        "validation": baseline_validation_metrics,
+        "test": baseline_test_metrics,
+        "test_market_rows": int(len(split.test)),
+    }
     validation_metrics = {
         **dict(winner_detail["selected_metrics"]),
         "candidate_count": len(candidate_list),
         "eligible_candidate_count": len(validation_scores),
         "threshold_selection": "execution_aware_validation",
         "probability_diagnostics": dict(winner_detail["probability_diagnostics"]),
+        "target_type": "binary_positive_r",
     }
     experiment = ExperimentResult(
         experiment_id=experiment_id,
@@ -241,7 +259,7 @@ def run_execution_aware_tournament(
         timeframe=timeframe,
         base_strategy=base_strategy,
         model_type=winner.model_type,
-        baseline_metrics={"test_market_rows": int(len(split.test))},
+        baseline_metrics=baseline_metrics,
         ml_validation_metrics=validation_metrics,
         ml_test_metrics=test_metrics,
         threshold=winner_threshold,
