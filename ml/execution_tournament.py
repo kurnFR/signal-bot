@@ -122,9 +122,6 @@ def run_execution_aware_tournament(
         raise ValueError("train_fraction and validation_fraction must be between 0 and 1")
     if train_fraction + validation_fraction >= 1.0:
         raise ValueError("train_fraction + validation_fraction must be < 1")
-    threshold_values = tuple(float(t) for t in (threshold_candidates or (0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90)))
-    if not threshold_values or any(not 0.0 < t < 1.0 for t in threshold_values):
-        raise ValueError("threshold candidates must be strictly between 0 and 1")
 
     split = split_by_fractions(dataset, train_fraction=train_fraction, validation_fraction=validation_fraction)
     validation_start = int(split.validation["open_time"].min())
@@ -149,8 +146,14 @@ def run_execution_aware_tournament(
         best_score: CandidateScore | None = None
         best_threshold: float | None = None
         best_trades: list[dict] | None = None
+        thresholds = tuple(candidate.threshold_candidates) or tuple(threshold_candidates or ())
+        if not thresholds:
+            raise ValueError("candidate has no threshold candidates")
 
-        for threshold in threshold_values:
+        for threshold in thresholds:
+            threshold = float(threshold)
+            if not 0.0 < threshold < 1.0:
+                raise ValueError("threshold candidates must be strictly between 0 and 1")
             filt = _locked_filter(fitted, threshold)
             params = dict(params_base)
             params["_ml_signal_filter"] = filt
