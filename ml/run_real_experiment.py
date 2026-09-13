@@ -43,7 +43,9 @@ DEFAULT_MARKET = "spot"
 DEFAULT_TIMEFRAME = "1h"
 DEFAULT_STRATEGY = "trend_ema_v1"
 DEFAULT_MODEL = "logistic_regression"
-DEFAULT_THRESHOLDS = (0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90)
+# Diagnostic-first sweep: determine whether probability ranking has useful
+# separation below the old 0.50 floor. The simulator still decides economics.
+DEFAULT_THRESHOLDS = (0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50)
 DEFAULT_OUTPUT_DIR = "ml_results"
 
 
@@ -92,7 +94,8 @@ def _result_payload(result: Any, *, dataset_rows: int, market_rows: int) -> dict
                 "candidate_index": item["candidate_index"],
                 "candidate": _candidate_to_dict(item["candidate"]),
                 "selected_threshold": item["selected_threshold"],
-                "selected_metrics": dict(item["selected_metrics"]),
+                "selected_metrics": dict(item["selected_metrics"]) if item["selected_metrics"] is not None else None,
+                "probability_diagnostics": dict(item["probability_diagnostics"]),
                 "threshold_results": [dict(row) for row in item["threshold_results"]],
             }
             for item in result.validation_by_candidate
