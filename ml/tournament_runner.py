@@ -1,15 +1,8 @@
-"""Leakage-safe execution engine for ML candidate tournaments.
+"""Execute a deterministic ML candidate tournament without TEST leakage.
 
-The engine deliberately separates candidate selection from OOS evaluation:
-1. split the prepared dataset chronologically;
-2. train every candidate on TRAIN only;
-3. select each candidate's threshold on VALIDATION only;
-4. rank candidates using VALIDATION-only trading outcomes;
-5. lock exactly one winner;
-6. evaluate the locked winner on TEST exactly once.
-
-No candidate receives TEST metrics before the winner is locked, and no paper/live
-promotion is performed here.
+Candidate selection is performed entirely with TRAIN and VALIDATION. TEST is
+not passed to candidate fitting, preprocessing, threshold selection, or
+ranking. Only the locked winner is evaluated on TEST once.
 """
 from __future__ import annotations
 
@@ -19,12 +12,10 @@ from typing import Any, Iterable
 import pandas as pd
 
 from ml.experiment import ExperimentConfig
-from ml.metrics import classification_metrics
-from ml.models import create_model
 from ml.result import ExperimentResult
 from ml.split import split_by_fractions
 from ml.tournament import Candidate, CandidateScore, rank_candidates
-from ml.trainer import select_validation_threshold
+from ml.trainer import evaluate_locked_model, fit_experiment
 
 
 @dataclass(frozen=True)
@@ -37,75 +28,58 @@ class TournamentResult:
     model: Any
 
 
-def _prepare_features(train: pd.DataFrame, validation: pd.DataFrame, test: pd.DataFrame,
-                      feature_columns: tuple[str, ...]):
-    try:
-        from sklearn.impute import SimpleImputer
-        from sklearn.preprocessing import StandardScaler
-    except ImportError as exc:
-        raise RuntimeError("scikit-learn is required for ML tournament execution") from exc
-
-    imputer = SimpleImputer(strategy="median")
-    x_train = imputer.fit_transform(train.loc[:, feature_columns])
-    x_validation = imputer.transform(validation.loc[:, feature_columns])
-    x_test = imputer.transform(test.loc[:, feature_columns])
-
-    scaler = StandardScaler()
-    x_train = scaler.fit_transform(x_train)
-    x_validation = scaler.transform(x_validation)
-    x_test = scaler.transform(x_test)
-    return x_train, x_validation, x_test, imputer, scaler
+def _validation_score(validation: pd.DataFrame, fitted: dict[str, Any]) -> CandidateScore:
+    trading = fitted["validation_trading"]
+    return CandidateScore(
+        candidate=fitted["candidate"],
+        validation_net_pnl_r=float(trading["total_outcome_r"]),
+        validation_profit_factor=_profit_factor(validation, fitted),
+        validation_max_drawdown_r=_max_drawdown(validation, fitted),
+        validation_trade_count=int(trading["selected_trades"]),
+    )
 
 
-def _validate_candidate_frames(train: pd.DataFrame, validation: pd.DataFrame,
-                               test: pd.DataFrame, features: tuple[str, ...]) -> None:
-    required = set(features) | {"target", "outcome_r", "open_time"}
-    for frame, name in ((train, "train"), (validation, "validation"), (test, "test")):
-        missing = sorted(required - set(frame.columns))
-        if missing:
-            raise ValueError(f"{name} is missing required columns: {', '.join(missing)}")
-        if frame.empty:
-            raise ValueError(f"{name} must not be empty")
-        if frame["target"].nunique() < 2:
-            raise ValueError(f"{name}.target must contain both classes")
+def _selected_outcomes(validation: pd.DataFrame, fitted: dict[str, Any]) -> pd.Series:
+    model = fitted["model"]
+    imputer, scaler = model._signal_bot_preprocessor
+    features = fitted["feature_columns"]
+    x_validation = scaler.transform(imputer.transform(validation.loc[:, features]))
+    probabilities = model.predict_proba(x_validation)[:, 1]
+    return validation.loc[probabilities >= fitted["threshold"].threshold, "outcome_r"].astype(float)
 
 
-def _selected_stats(frame: pd.DataFrame, probabilities, threshold: float) -> tuple[float, float, int]:
-    probabilities = pd.Series(probabilities, index=frame.index, dtype=float)
-    selected = frame.loc[probabilities >= threshold]
-    outcomes = selected["outcome_r"].astype(float)
-    if outcomes.empty:
-        return 0.0, 0.0, 0
+def _profit_factor(validation: pd.DataFrame, fitted: dict[str, Any]) -> float:
+    outcomes = _selected_outcomes(validation, fitted)
     gains = float(outcomes[outcomes > 0].sum())
     losses = float(-outcomes[outcomes < 0].sum())
-    profit_factor = gains / losses if losses > 0 else (float("inf") if gains > 0 else 0.0)
-    cumulative = outcomes.cumsum()
-    drawdown = float((cumulative.cummax() - cumulative).max()) if len(cumulative) else 0.0
-    return float(profit_factor), drawdown, len(selected)
+    return gains / losses if losses > 0 else (float("inf") if gains > 0 else 0.0)
 
 
-def _metrics(frame: pd.DataFrame, probabilities, threshold: float) -> dict[str, Any]:
-    probabilities = pd.Series(probabilities, index=frame.index, dtype=float)
-    selected = frame.loc[probabilities >= threshold]
+def _max_drawdown(validation: pd.DataFrame, fitted: dict[str, Any]) -> float:
+    outcomes = _selected_outcomes(validation, fitted)
+    if outcomes.empty:
+        return 0.0
+    equity = outcomes.cumsum()
+    return float((equity.cummax() - equity).max())
+
+
+def _test_metrics(test: pd.DataFrame, probabilities, threshold: float) -> dict[str, Any]:
+    probabilities = pd.Series(probabilities, index=test.index, dtype=float)
+    selected = test.loc[probabilities >= threshold]
     outcomes = selected["outcome_r"].astype(float)
     total_r = float(outcomes.sum()) if len(outcomes) else 0.0
-    wins = int((outcomes > 0).sum())
-    losses = int((outcomes < 0).sum())
-    gross_profit = float(outcomes[outcomes > 0].sum())
-    gross_loss = float(-outcomes[outcomes < 0].sum())
+    gains = float(outcomes[outcomes > 0].sum())
+    losses = float(-outcomes[outcomes < 0].sum())
+    equity = outcomes.cumsum()
     return {
-        "candidate_signals": int(len(frame)),
+        "candidate_signals": int(len(test)),
         "selected_trades": int(len(selected)),
-        "selection_rate_pct": round(len(selected) / len(frame) * 100.0, 4) if len(frame) else None,
+        "selection_rate_pct": round(len(selected) / len(test) * 100.0, 4) if len(test) else None,
         "total_outcome_r": round(total_r, 8),
         "expectancy_r": round(total_r / len(selected), 8) if len(selected) else None,
-        "win_rate_pct": round(wins / len(selected) * 100.0, 4) if len(selected) else None,
-        "profit_factor": round(gross_profit / gross_loss, 8) if gross_loss > 0 else (float("inf") if gross_profit > 0 else 0.0),
-        "max_drawdown_r": round(float((outcomes.cumsum().cummax() - outcomes.cumsum()).max()), 8) if len(outcomes) else 0.0,
-        "gross_profit_r": round(gross_profit, 8),
-        "gross_loss_r": round(gross_loss, 8),
-        "wins": wins,
-        "losses": losses,
+        "win_rate_pct": round(float((outcomes > 0).mean() * 100.0), 4) if len(selected) else None,
+        "profit_factor": round(gains / losses, 8) if losses > 0 else (float("inf") if gains > 0 else 0.0),
+        "max_drawdown_r": round(float((equity.cummax() - equity).max()), 8) if len(outcomes) else 0.0,
         "threshold": threshold,
     }
 
@@ -124,7 +98,7 @@ def run_tournament(
     max_candidates: int = 50,
     seed: int = 42,
 ) -> TournamentResult:
-    """Run a candidate tournament and test only the locked winner."""
+    """Run TRAIN/VALIDATION tournament and test the locked winner exactly once."""
     candidate_list = list(candidates)
     if not candidate_list:
         raise ValueError("candidate grid is empty")
@@ -137,81 +111,68 @@ def run_tournament(
     if "open_time" not in dataset.columns:
         raise ValueError("dataset must contain open_time")
 
-    split = split_by_fractions(dataset, train_fraction=train_fraction,
-                                validation_fraction=validation_fraction)
+    split = split_by_fractions(
+        dataset,
+        train_fraction=train_fraction,
+        validation_fraction=validation_fraction,
+    )
     validation_scores: list[CandidateScore] = []
-    fitted: dict[Candidate, tuple[Any, Any, Any]] = {}
+    fitted: list[dict[str, Any]] = []
 
-    # Candidate loop has no TEST access. Each model and preprocessor is fitted
-    # exclusively on TRAIN, and threshold selection uses VALIDATION outcomes.
-    for candidate in candidate_list:
-        features = tuple(candidate.feature_columns)
-        _validate_candidate_frames(split.train, split.validation, split.test, features)
-        x_train, x_validation, _x_test, imputer, scaler = _prepare_features(
-            split.train, split.validation, split.test, features
+    # TEST is intentionally absent from this loop.
+    for index, candidate in enumerate(candidate_list):
+        config = ExperimentConfig(
+            experiment_id=f"{experiment_id}-c{index:03d}",
+            symbol=symbol,
+            timeframe=timeframe,
+            base_strategy=base_strategy,
+            model_type=candidate.model_type,
+            feature_columns=candidate.feature_columns,
+            model_params=dict(candidate.model_params),
+            probability_threshold=0.60,
+            train_fraction=train_fraction,
+            validation_fraction=validation_fraction,
+            test_fraction=1.0 - train_fraction - validation_fraction,
+            seed=seed,
         )
-        model = create_model(candidate.model_type, {**candidate.model_params, "random_state": seed})
-        model.fit(x_train, split.train["target"].astype(int))
-        validation_prob = model.predict_proba(x_validation)[:, 1]
-        threshold = select_validation_threshold(
+        locked_candidate = fit_experiment(
+            split.train,
             split.validation,
-            validation_prob,
-            min_trades=min_validation_trades,
-            candidates=candidate.threshold_candidates,
+            config,
+            min_validation_trades=min_validation_trades,
+            threshold_candidates=candidate.threshold_candidates,
         )
-        profit_factor, drawdown, trade_count = _selected_stats(
-            split.validation, validation_prob, threshold.threshold
-        )
-        validation_scores.append(CandidateScore(
-            candidate=candidate,
-            validation_net_pnl_r=threshold.total_outcome_r,
-            validation_profit_factor=profit_factor,
-            validation_max_drawdown_r=drawdown,
-            validation_trade_count=trade_count,
-        ))
-        model._signal_bot_preprocessor = (imputer, scaler)
-        fitted[candidate] = (model, validation_prob, threshold)
+        locked_candidate = {**locked_candidate, "candidate": candidate}
+        fitted.append(locked_candidate)
+        validation_scores.append(_validation_score(split.validation, locked_candidate))
 
     ranked = rank_candidates(validation_scores)
     winner = ranked[0].candidate
-    winner_model, _winner_validation_prob, winner_threshold = fitted[winner]
+    winner_index = candidate_list.index(winner)
+    winner_fit = fitted[winner_index]
 
-    # LOCK POINT: from here onward exactly one candidate is evaluated on TEST.
-    features = tuple(winner.feature_columns)
-    x_test = winner_model._signal_bot_preprocessor[0].transform(split.test.loc[:, features])
-    x_test = winner_model._signal_bot_preprocessor[1].transform(x_test)
-    test_prob = winner_model.predict_proba(x_test)[:, 1]
-
-    config = ExperimentConfig(
+    # LOCK POINT. TEST is first accessed here, by exactly one winner.
+    test_classification, test_trading = evaluate_locked_model(split.test, winner_fit)
+    test_metrics = {**dict(test_classification), "trading": dict(test_trading)}
+    validation_metrics = {
+        **dict(winner_fit["validation_metrics"]),
+        "trading": dict(winner_fit["validation_trading"]),
+        "candidate_count": len(candidate_list),
+    }
+    baseline_metrics = {
+        "total_trades": int(len(split.test)),
+        "total_outcome_r": round(float(split.test["outcome_r"].sum()), 8),
+    }
+    result = ExperimentResult(
         experiment_id=experiment_id,
         symbol=symbol,
         timeframe=timeframe,
         base_strategy=base_strategy,
         model_type=winner.model_type,
-        feature_columns=features,
-        strategy_params={},
-        model_params=dict(winner.model_params),
-        probability_threshold=winner_threshold.threshold,
-        train_fraction=train_fraction,
-        validation_fraction=validation_fraction,
-        test_fraction=1.0 - train_fraction - validation_fraction,
-        seed=seed,
-    )
-    baseline_metrics = {
-        "total_trades": int(len(split.test)),
-        "total_outcome_r": round(float(split.test["outcome_r"].sum()), 8),
-    }
-    test_metrics = _metrics(split.test, test_prob, winner_threshold.threshold)
-    result = ExperimentResult(
-        experiment_id=config.experiment_id,
-        symbol=config.symbol,
-        timeframe=config.timeframe,
-        base_strategy=config.base_strategy,
-        model_type=config.model_type,
         baseline_metrics=baseline_metrics,
-        ml_validation_metrics=_metrics(split.validation, fitted[winner][1], winner_threshold.threshold),
+        ml_validation_metrics=validation_metrics,
         ml_test_metrics=test_metrics,
-        threshold=winner_threshold.threshold,
+        threshold=float(winner_fit["threshold"].threshold),
         status="research",
     )
-    return TournamentResult(result, winner, tuple(ranked), winner_model)
+    return TournamentResult(result, winner, tuple(ranked), winner_fit["model"])
