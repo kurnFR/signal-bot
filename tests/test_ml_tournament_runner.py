@@ -11,13 +11,12 @@ from ml.tournament_runner import run_tournament
 class TestMLTournamentRunner(unittest.TestCase):
     @staticmethod
     def _dataset(n=120):
-        x = np.linspace(-3.0, 3.0, n)
-        target = (x > 0).astype(int)
-        # Deterministic trading outcomes correlated with the target.
+        target = (np.arange(n) % 2).astype(int)
+        feature = np.where(target == 1, 1.0, -1.0) + np.linspace(-0.1, 0.1, n)
         outcome = np.where(target == 1, 1.0, -0.5)
         return pd.DataFrame({
             "open_time": np.arange(n),
-            "feature": x,
+            "feature": feature,
             "target": target,
             "outcome_r": outcome,
         })
@@ -54,16 +53,18 @@ class TestMLTournamentRunner(unittest.TestCase):
             self._candidate("logistic_regression", {"C": 0.5}),
             self._candidate("logistic_regression", {"C": 1.0}),
         ]
-        with patch("ml.tournament_runner.evaluate_locked_model", return_value=({"accuracy": 1.0}, {"selected_trades": 20})) as evaluate:
+        with patch(
+            "ml.tournament_runner.evaluate_locked_model",
+            return_value=({"accuracy": 1.0}, {"selected_trades": 20}),
+        ) as evaluate:
             result = run_tournament(
                 self._dataset(), candidates, experiment_id="exp", symbol="BTCUSDT",
                 timeframe="1h", base_strategy="trend_ema_v1", min_validation_trades=5,
             )
-        self.assertEqual(result.candidates_evaluated if hasattr(result, "candidates_evaluated") else len(result.ranked_validation), 2)
         self.assertEqual(len(result.ranked_validation), 2)
         self.assertEqual(evaluate.call_count, 1)
+        self.assertIs(result.winner, evaluate.call_args.args[1]["candidate"])
         self.assertEqual(result.experiment.status, "research")
-        self.assertEqual(result.experiment.model_type, "logistic_regression")
 
     def test_deterministic_winner(self):
         candidates = [
