@@ -6,14 +6,14 @@ import pandas as pd
 from ml.dataset import build_signal_dataset
 from ml.evaluation import evaluate_filtered_trades
 from ml.experiment import ExperimentConfig
-from ml.split import chronological_split
+from ml.split import split_by_fractions
 
 
 class TestMLEndToEndContracts(unittest.TestCase):
     def test_chronological_split_has_no_overlap(self):
         n = 100
         frame = pd.DataFrame({"open_time": np.arange(n), "x": np.arange(n, dtype=float), "target": [i % 2 for i in range(n)]})
-        split = chronological_split(frame, train_fraction=.6, validation_fraction=.2)
+        split = split_by_fractions(frame, train_fraction=.6, validation_fraction=.2)
         self.assertLess(split.train["open_time"].max(), split.validation["open_time"].min())
         self.assertLess(split.validation["open_time"].max(), split.test["open_time"].min())
 
