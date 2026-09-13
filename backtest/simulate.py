@@ -1,22 +1,15 @@
 """Generic trade simulation engine shared by all strategies."""
 import pandas as pd
 
-from backtest.accounting import apply_entry_slippage, calculate_trade_accounting
+from backtest.accounting import calculate_trade_accounting
 
 
 def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, stop_target) -> list:
     """Simulate closed-candle signals with next-bar-open execution.
 
-    Optional runtime-only ``_simulation_start_open_time`` starts the simulation
-    at a chronological boundary while retaining the full dataframe for
-    indicator warm-up. This is used by ML OOS evaluation so TEST execution
-    cannot be affected by trades opened during TRAIN/VALIDATION.
-
-    When ``params['_ml_signal_filter']`` is present, the ML model is applied
-    only after the base strategy has generated a direction. The model sees
-    the signal candle only, and the normal simulator remains responsible for
-    entry, exit, slippage, fees, and accounting. The runtime-only filter is
-    never persisted as part of the strategy parameters.
+    ``_simulation_start_open_time`` and ``_simulation_end_open_time`` are
+    runtime-only chronological bounds. Historical rows remain available for
+    indicator warm-up, but no signal/entry/exit is allowed outside the window.
     """
     trades = []
     n = len(df)
@@ -29,19 +22,23 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
     trail_distance_atr_mult = params.get("TRAIL_DISTANCE_ATR_MULT", 1.5)
     ml_filter = params.get("_ml_signal_filter")
     simulation_start = params.get("_simulation_start_open_time")
+    simulation_end = params.get("_simulation_end_open_time")
 
     if ml_filter is not None and not hasattr(ml_filter, "predict_probability"):
         raise TypeError("_ml_signal_filter must expose predict_probability()")
 
-    # Keep all historical rows available for strategy-specific indicator
-    # warm-up, but do not open a trade before the requested evaluation window.
     if simulation_start is not None:
         simulation_start = int(simulation_start)
         while i < n - 1 and int(df.iloc[i]["open_time"]) < simulation_start:
             i += 1
+    if simulation_end is not None:
+        simulation_end = int(simulation_end)
 
     while i < n - 1:
         row = df.iloc[i]
+        row_time = int(row["open_time"])
+        if simulation_end is not None and row_time > simulation_end:
+            break
         prev_row = df.iloc[i - 1]
         direction = "LONG" if long_condition(row, prev_row, params) else ("SHORT" if short_condition(row, prev_row, params) else None)
         if direction is None:
@@ -63,7 +60,12 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
                 continue
 
         entry_idx = i + 1
+        if entry_idx >= n:
+            break
         entry_bar = df.iloc[entry_idx]
+        entry_time = int(entry_bar["open_time"])
+        if simulation_end is not None and entry_time > simulation_end:
+            break
         raw_entry_price = float(entry_bar["open"])
         atr_at_signal = row["atr"]
         if pd.isna(atr_at_signal) or atr_at_signal <= 0:
@@ -78,7 +80,14 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
         favorable_extreme = raw_entry_price
 
         j = entry_idx
-        while j < n:
+        last_allowed_idx = n - 1
+        if simulation_end is not None:
+            while last_allowed_idx >= entry_idx and int(df.iloc[last_allowed_idx]["open_time"]) > simulation_end:
+                last_allowed_idx -= 1
+        if last_allowed_idx < entry_idx:
+            break
+
+        while j <= last_allowed_idx:
             bar = df.iloc[j]
             if use_trailing and initial_risk_price > 0:
                 if direction == "LONG" and bar["low"] <= current_stop:
@@ -121,7 +130,7 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
             j += 1
 
         if exit_price is None:
-            exit_idx = n - 1
+            exit_idx = last_allowed_idx
             exit_price, exit_reason = float(df.iloc[exit_idx]["close"]), "END_OF_DATA"
 
         accounting = calculate_trade_accounting(
