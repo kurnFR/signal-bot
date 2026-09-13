@@ -18,6 +18,7 @@ class ExperimentConfig:
     strategy_params: dict[str, Any] = field(default_factory=dict)
     model_params: dict[str, Any] = field(default_factory=dict)
     probability_threshold: float = 0.5
+    target_type: str = "binary_positive_r"
     train_fraction: float = 0.6
     validation_fraction: float = 0.2
     test_fraction: float = 0.2
@@ -36,6 +37,8 @@ class ExperimentConfig:
             raise ValueError("probability_threshold must be between 0 and 1")
         if not self.feature_columns:
             raise ValueError("feature_columns must not be empty")
+        if self.target_type != "binary_positive_r":
+            raise ValueError(f"unsupported target_type: {self.target_type}")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
