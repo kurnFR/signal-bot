@@ -50,13 +50,11 @@ def _validate_frame(df: pd.DataFrame, feature_columns: Iterable[str], *, name: s
 
 def _prepare_features(train: pd.DataFrame, validation: pd.DataFrame, test: pd.DataFrame,
                       feature_columns: tuple[str, ...]):
-    """Fit numeric imputation/scaling on TRAIN only and transform all splits."""
     try:
         from sklearn.impute import SimpleImputer
         from sklearn.preprocessing import StandardScaler
     except ImportError as exc:
         raise RuntimeError("scikit-learn is required for ML training") from exc
-
     imputer = SimpleImputer(strategy="median")
     x_train = imputer.fit_transform(train.loc[:, feature_columns])
     x_validation = imputer.transform(validation.loc[:, feature_columns])
@@ -70,13 +68,11 @@ def _prepare_features(train: pd.DataFrame, validation: pd.DataFrame, test: pd.Da
 
 def _prepare_train_validation(train: pd.DataFrame, validation: pd.DataFrame,
                               feature_columns: tuple[str, ...]):
-    """Fit preprocessing on TRAIN and transform TRAIN/VALIDATION only."""
     try:
         from sklearn.impute import SimpleImputer
         from sklearn.preprocessing import StandardScaler
     except ImportError as exc:
         raise RuntimeError("scikit-learn is required for ML training") from exc
-
     imputer = SimpleImputer(strategy="median")
     x_train = imputer.fit_transform(train.loc[:, feature_columns])
     x_validation = imputer.transform(validation.loc[:, feature_columns])
@@ -112,8 +108,7 @@ def select_validation_threshold(
     for threshold in candidates or _threshold_candidates():
         if not 0.0 < threshold < 1.0:
             raise ValueError("threshold candidates must be between 0 and 1")
-        mask = probabilities >= threshold
-        selected = validation.loc[mask]
+        selected = validation.loc[probabilities >= threshold]
         count = len(selected)
         if count < min_trades:
             continue
@@ -157,6 +152,38 @@ def _validate_split_identity(train: pd.DataFrame, validation: pd.DataFrame, test
             raise ValueError("train/validation/test open_time rows must be disjoint")
 
 
+def fit_candidate_model(
+    train: pd.DataFrame,
+    validation: pd.DataFrame,
+    config: ExperimentConfig,
+):
+    """Fit one candidate on TRAIN and return VALIDATION probabilities.
+
+    No validation outcome is used here. This primitive exists so execution-aware
+    tournaments can choose thresholds from actual simulator results rather than
+    from pre-completed baseline trade outcomes.
+    """
+    features = tuple(config.feature_columns)
+    _validate_frame(train, features, name="train")
+    _validate_frame(validation, features, name="validation")
+    if set(train.get("open_time", [])) & set(validation.get("open_time", [])):
+        raise ValueError("train/validation open_time rows must be disjoint")
+    x_train, x_validation, imputer, scaler = _prepare_train_validation(train, validation, features)
+    model = create_model(config.model_type, {**config.model_params, "random_state": config.seed})
+    model.fit(x_train, train["target"].astype(int))
+    model._signal_bot_preprocessor = (imputer, scaler)
+    train_prob = model.predict_proba(x_train)[:, 1]
+    validation_prob = model.predict_proba(x_validation)[:, 1]
+    return {
+        "experiment": config,
+        "model": model,
+        "feature_columns": features,
+        "train_probabilities": train_prob,
+        "validation_probabilities": validation_prob,
+        "train_metrics": classification_metrics(train["target"], train_prob, config.probability_threshold),
+    }
+
+
 def fit_experiment(
     train: pd.DataFrame,
     validation: pd.DataFrame,
@@ -165,46 +192,21 @@ def fit_experiment(
     min_validation_trades: int = 10,
     threshold_candidates: Iterable[float] | None = None,
 ):
-    """Fit a candidate using TRAIN and lock its threshold using VALIDATION.
-
-    This function intentionally has no TEST argument or access. It is the
-    primitive used by candidate tournaments so OOS data cannot influence
-    candidate ranking or model selection.
-    """
-    features = tuple(config.feature_columns)
-    _validate_frame(train, features, name="train")
-    _validate_frame(validation, features, name="validation")
-    if "open_time" in train.columns and "open_time" in validation.columns:
-        if set(train["open_time"]) & set(validation["open_time"]):
-            raise ValueError("train/validation open_time rows must be disjoint")
-
-    x_train, x_validation, imputer, scaler = _prepare_train_validation(train, validation, features)
-    model = create_model(config.model_type, {**config.model_params, "random_state": config.seed})
-    model.fit(x_train, train["target"].astype(int))
-    validation_prob = model.predict_proba(x_validation)[:, 1]
+    """Fit a candidate using TRAIN and lock its threshold using VALIDATION."""
+    fitted = fit_candidate_model(train, validation, config)
+    validation_prob = fitted["validation_probabilities"]
     threshold = select_validation_threshold(
-        validation,
-        validation_prob,
-        min_trades=min_validation_trades,
-        candidates=threshold_candidates,
+        validation, validation_prob, min_trades=min_validation_trades, candidates=threshold_candidates
     )
-    train_prob = model.predict_proba(x_train)[:, 1]
-    model._signal_bot_preprocessor = (imputer, scaler)
     return {
-        "experiment": config,
-        "model": model,
-        "feature_columns": features,
+        **fitted,
         "threshold": threshold,
-        "train_metrics": classification_metrics(train["target"], train_prob, threshold.threshold),
         "validation_metrics": classification_metrics(validation["target"], validation_prob, threshold.threshold),
         "validation_trading": _trading_metrics(validation, validation_prob, threshold.threshold),
     }
 
 
-def evaluate_locked_model(
-    test: pd.DataFrame,
-    fitted,
-) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+def evaluate_locked_model(test: pd.DataFrame, fitted) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
     """Evaluate a previously locked model exactly once on TEST/OOS."""
     features = tuple(fitted["feature_columns"])
     _validate_frame(test, features, name="test")
@@ -233,21 +235,10 @@ def train_experiment(
 ) -> TrainingResult:
     """Backward-compatible full experiment: fit/lock, then one OOS TEST."""
     _validate_split_identity(train, validation, test)
-    fitted = fit_experiment(
-        train,
-        validation,
-        config,
-        min_validation_trades=min_validation_trades,
-        threshold_candidates=threshold_candidates,
-    )
+    fitted = fit_experiment(train, validation, config, min_validation_trades=min_validation_trades,
+                            threshold_candidates=threshold_candidates)
     test_metrics, test_trading = evaluate_locked_model(test, fitted)
-    return TrainingResult(
-        experiment=config,
-        model=fitted["model"],
-        feature_columns=fitted["feature_columns"],
-        threshold=fitted["threshold"],
-        train_metrics=fitted["train_metrics"],
-        validation_metrics=fitted["validation_metrics"],
-        test_metrics=test_metrics,
-        test_trading=test_trading,
-    )
+    return TrainingResult(experiment=config, model=fitted["model"], feature_columns=fitted["feature_columns"],
+                          threshold=fitted["threshold"], train_metrics=fitted["train_metrics"],
+                          validation_metrics=fitted["validation_metrics"], test_metrics=test_metrics,
+                          test_trading=test_trading)
