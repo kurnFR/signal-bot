@@ -19,7 +19,7 @@ from ml.result import ExperimentResult
 from ml.split import split_by_fractions
 from ml.strategy import MLSignalFilter
 from ml.tournament import Candidate, CandidateScore, rank_candidates
-from ml.trainer import evaluate_locked_model, fit_candidate_model
+from ml.trainer import fit_candidate_model
 
 
 @dataclass(frozen=True)
@@ -72,19 +72,14 @@ def _candidate_config(experiment_id: str, symbol: str, timeframe: str, base_stra
     )
 
 
-def _score_validation(
-    trades: list[dict],
-    candidate: Candidate,
-    threshold: float,
-    *,
-    min_validation_trades: int,
-) -> CandidateScore:
+def _score_validation(trades: list[dict], candidate: Candidate, threshold: float, *,
+                      min_validation_trades: int) -> CandidateScore:
     metrics = _trade_metrics(trades)
     count = int(metrics["total_trades"])
     if count < min_validation_trades:
         raise ValueError(
-            f"candidate {candidate.model_type} threshold={threshold} produced "
-            f"{count} validation trades; minimum is {min_validation_trades}"
+            f"candidate {candidate.model_type} threshold={threshold} produced {count} validation trades; "
+            f"minimum is {min_validation_trades}"
         )
     return CandidateScore(
         candidate=candidate,
@@ -111,15 +106,9 @@ def run_execution_aware_tournament(
     min_validation_trades: int = 10,
     max_candidates: int = 50,
     seed: int = 42,
-    threshold_candidates: Iterable[float] = (0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90),
+    threshold_candidates: Iterable[float] | None = None,
 ) -> ExecutionTournamentResult:
-    """Select one candidate using real VALIDATION simulator results.
-
-    ``strategy_fn`` must be an existing registered strategy whose normal
-    implementation calls ``backtest.simulate.simulate``. Runtime-only
-    simulation bounds prevent validation trades from entering or exiting in
-    TEST. No TEST rows are touched until the winner is ranked and locked.
-    """
+    """Select one candidate using real VALIDATION simulator results."""
     candidate_list = list(candidates)
     if not candidate_list:
         raise ValueError("candidate grid is empty")
@@ -133,54 +122,52 @@ def run_execution_aware_tournament(
         raise ValueError("train_fraction and validation_fraction must be between 0 and 1")
     if train_fraction + validation_fraction >= 1.0:
         raise ValueError("train_fraction + validation_fraction must be < 1")
+    threshold_values = tuple(float(t) for t in (threshold_candidates or (0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90)))
+    if not threshold_values or any(not 0.0 < t < 1.0 for t in threshold_values):
+        raise ValueError("threshold candidates must be strictly between 0 and 1")
 
-    split = split_by_fractions(
-        dataset,
-        train_fraction=train_fraction,
-        validation_fraction=validation_fraction,
-    )
+    split = split_by_fractions(dataset, train_fraction=train_fraction, validation_fraction=validation_fraction)
     validation_start = int(split.validation["open_time"].min())
     validation_end = int(split.validation["open_time"].max())
     test_start = int(split.test["open_time"].min())
+    test_end = int(split.test["open_time"].max())
     params_base = dict(BASE_PARAMS if base_params is None else base_params)
 
     validation_scores: list[CandidateScore] = []
     details: list[Mapping[str, Any]] = []
-    fitted_by_candidate: dict[Candidate, dict[str, Any]] = {}
+    fitted_by_index: dict[int, dict[str, Any]] = {}
 
-    # TRAIN-only fit. Every threshold is evaluated through the real simulator
-    # on VALIDATION; completed baseline trade outcomes are never used to pick it.
+    # TEST is deliberately absent from this entire candidate/threshold loop.
     for index, candidate in enumerate(candidate_list):
         config = _candidate_config(
             f"{experiment_id}-c{index:03d}", symbol, timeframe, base_strategy,
             candidate, train_fraction, validation_fraction, seed,
         )
         fitted = fit_candidate_model(split.train, split.validation, config)
-        fitted_by_candidate[candidate] = fitted
+        fitted_by_index[index] = fitted
         threshold_results = []
         best_score: CandidateScore | None = None
         best_threshold: float | None = None
         best_trades: list[dict] | None = None
 
-        for threshold in threshold_candidates:
-            filt = _locked_filter(fitted, float(threshold))
+        for threshold in threshold_values:
+            filt = _locked_filter(fitted, threshold)
             params = dict(params_base)
             params["_ml_signal_filter"] = filt
             params["_simulation_start_open_time"] = validation_start
             params["_simulation_end_open_time"] = validation_end
             trades = strategy_fn(market_df, params)
-            score = _score_validation(
-                trades, candidate, float(threshold), min_validation_trades=min_validation_trades
-            )
-            threshold_results.append({"threshold": float(threshold), "metrics": _trade_metrics(trades)})
-            if best_score is None or (score.rank_key() < best_score.rank_key()):
+            score = _score_validation(trades, candidate, threshold, min_validation_trades=min_validation_trades)
+            threshold_results.append({"threshold": threshold, "metrics": _trade_metrics(trades)})
+            if best_score is None or score.rank_key > best_score.rank_key:
                 best_score = score
-                best_threshold = float(threshold)
+                best_threshold = threshold
                 best_trades = trades
 
         assert best_score is not None and best_threshold is not None and best_trades is not None
         validation_scores.append(best_score)
         details.append({
+            "candidate_index": index,
             "candidate": candidate,
             "selected_threshold": best_threshold,
             "selected_metrics": _trade_metrics(best_trades),
@@ -190,15 +177,16 @@ def run_execution_aware_tournament(
     ranked = rank_candidates(validation_scores)
     winner = ranked[0].candidate
     winner_detail = next(item for item in details if item["candidate"] == winner)
-    winner_fit = fitted_by_candidate[winner]
+    winner_index = int(winner_detail["candidate_index"])
+    winner_fit = fitted_by_index[winner_index]
     winner_threshold = float(winner_detail["selected_threshold"])
 
-    # LOCK POINT: only now is TEST allowed to execute. One real simulator run.
+    # LOCK POINT: only the locked winner is allowed to touch TEST, exactly once.
     test_filter = _locked_filter(winner_fit, winner_threshold)
     test_params = dict(params_base)
     test_params["_ml_signal_filter"] = test_filter
     test_params["_simulation_start_open_time"] = test_start
-    test_params["_simulation_end_open_time"] = int(split.test["open_time"].max())
+    test_params["_simulation_end_open_time"] = test_end
     test_trades = strategy_fn(market_df, test_params)
     test_metrics = _trade_metrics(test_trades)
 
@@ -207,14 +195,13 @@ def run_execution_aware_tournament(
         "candidate_count": len(candidate_list),
         "threshold_selection": "execution_aware_validation",
     }
-    baseline_metrics = {"test_market_rows": int(len(split.test))}
     experiment = ExperimentResult(
         experiment_id=experiment_id,
         symbol=symbol,
         timeframe=timeframe,
         base_strategy=base_strategy,
         model_type=winner.model_type,
-        baseline_metrics=baseline_metrics,
+        baseline_metrics={"test_market_rows": int(len(split.test))},
         ml_validation_metrics=validation_metrics,
         ml_test_metrics=test_metrics,
         threshold=winner_threshold,
