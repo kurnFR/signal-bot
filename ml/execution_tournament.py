@@ -15,6 +15,7 @@ import pandas as pd
 from backtest.metrics import compute_metrics
 from backtest.params import BASE_PARAMS
 from ml.experiment import ExperimentConfig
+from ml.metrics import probability_diagnostics
 from ml.result import ExperimentResult
 from ml.split import split_by_fractions
 from ml.strategy import MLSignalFilter
@@ -73,14 +74,11 @@ def _candidate_config(experiment_id: str, symbol: str, timeframe: str, base_stra
 
 
 def _score_validation(trades: list[dict], candidate: Candidate, threshold: float, *,
-                      min_validation_trades: int) -> CandidateScore:
+                      min_validation_trades: int) -> CandidateScore | None:
     metrics = _trade_metrics(trades)
     count = int(metrics["total_trades"])
     if count < min_validation_trades:
-        raise ValueError(
-            f"candidate {candidate.model_type} threshold={threshold} produced {count} validation trades; "
-            f"minimum is {min_validation_trades}"
-        )
+        return None
     return CandidateScore(
         candidate=candidate,
         validation_net_pnl_r=float(metrics["total_outcome_r"]),
@@ -108,7 +106,12 @@ def run_execution_aware_tournament(
     seed: int = 42,
     threshold_candidates: Iterable[float] | None = None,
 ) -> ExecutionTournamentResult:
-    """Select one candidate using real VALIDATION simulator results."""
+    """Select one candidate using real VALIDATION simulator results.
+
+    Thresholds that do not produce enough validation trades are recorded as
+    unusable rather than aborting the whole candidate tournament. TEST remains
+    untouched until a candidate and threshold have been selected.
+    """
     candidate_list = list(candidates)
     if not candidate_list:
         raise ValueError("candidate grid is empty")
@@ -122,6 +125,8 @@ def run_execution_aware_tournament(
         raise ValueError("train_fraction and validation_fraction must be between 0 and 1")
     if train_fraction + validation_fraction >= 1.0:
         raise ValueError("train_fraction + validation_fraction must be < 1")
+    if min_validation_trades < 1:
+        raise ValueError("min_validation_trades must be >= 1")
 
     split = split_by_fractions(dataset, train_fraction=train_fraction, validation_fraction=validation_fraction)
     validation_start = int(split.validation["open_time"].min())
@@ -150,6 +155,13 @@ def run_execution_aware_tournament(
         if not thresholds:
             raise ValueError("candidate has no threshold candidates")
 
+        validation_probabilities = fitted["validation_probabilities"]
+        probability_info = probability_diagnostics(
+            split.validation["target"],
+            validation_probabilities,
+            thresholds=thresholds,
+        )
+
         for threshold in thresholds:
             threshold = float(threshold)
             if not 0.0 < threshold < 1.0:
@@ -160,22 +172,45 @@ def run_execution_aware_tournament(
             params["_simulation_start_open_time"] = validation_start
             params["_simulation_end_open_time"] = validation_end
             trades = strategy_fn(market_df, params)
-            score = _score_validation(trades, candidate, threshold, min_validation_trades=min_validation_trades)
-            threshold_results.append({"threshold": threshold, "metrics": _trade_metrics(trades)})
-            if best_score is None or score.rank_key > best_score.rank_key:
+            metrics = _trade_metrics(trades)
+            score = _score_validation(
+                trades, candidate, threshold, min_validation_trades=min_validation_trades
+            )
+            threshold_results.append({
+                "threshold": threshold,
+                "usable": score is not None,
+                "metrics": metrics,
+            })
+            if score is not None and (best_score is None or score.rank_key > best_score.rank_key):
                 best_score = score
                 best_threshold = threshold
                 best_trades = trades
 
-        assert best_score is not None and best_threshold is not None and best_trades is not None
+        if best_score is None or best_threshold is None or best_trades is None:
+            details.append({
+                "candidate_index": index,
+                "candidate": candidate,
+                "selected_threshold": None,
+                "selected_metrics": None,
+                "probability_diagnostics": probability_info,
+                "threshold_results": tuple(threshold_results),
+            })
+            continue
+
         validation_scores.append(best_score)
         details.append({
             "candidate_index": index,
             "candidate": candidate,
             "selected_threshold": best_threshold,
             "selected_metrics": _trade_metrics(best_trades),
+            "probability_diagnostics": probability_info,
             "threshold_results": tuple(threshold_results),
         })
+
+    if not validation_scores:
+        raise ValueError(
+            f"no candidate/threshold produced at least {min_validation_trades} validation trades"
+        )
 
     ranked = rank_candidates(validation_scores)
     winner = ranked[0].candidate
@@ -196,7 +231,9 @@ def run_execution_aware_tournament(
     validation_metrics = {
         **dict(winner_detail["selected_metrics"]),
         "candidate_count": len(candidate_list),
+        "eligible_candidate_count": len(validation_scores),
         "threshold_selection": "execution_aware_validation",
+        "probability_diagnostics": dict(winner_detail["probability_diagnostics"]),
     }
     experiment = ExperimentResult(
         experiment_id=experiment_id,
