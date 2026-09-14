@@ -7,7 +7,7 @@ from typing import Any
 import json
 
 
-TARGET_TYPES = ("binary_positive_r", "r_above_half", "r_above_one")
+TARGET_TYPES = ("binary_positive_r", "binary_r_above_half", "binary_r_above_one")
 
 
 @dataclass(frozen=True)
