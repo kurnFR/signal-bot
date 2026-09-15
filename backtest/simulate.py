@@ -24,15 +24,22 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
     simulation_start = params.get("_simulation_start_open_time")
     simulation_end = params.get("_simulation_end_open_time")
 
+    import numpy as np
+
     if ml_filter is not None and not hasattr(ml_filter, "predict_probability"):
         raise TypeError("_ml_signal_filter must expose predict_probability()")
 
+    open_times = df["open_time"].values
     if simulation_start is not None:
         simulation_start = int(simulation_start)
-        while i < n - 1 and int(df.iloc[i]["open_time"]) < simulation_start:
-            i += 1
+        start_idx = int(np.searchsorted(open_times, simulation_start, side="left"))
+        i = max(1, start_idx)
+
+    max_allowed_idx = n - 1
     if simulation_end is not None:
         simulation_end = int(simulation_end)
+        end_idx = int(np.searchsorted(open_times, simulation_end, side="right")) - 1
+        max_allowed_idx = min(n - 1, max(-1, end_idx))
 
     while i < n - 1:
         row = df.iloc[i]
@@ -80,10 +87,7 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
         favorable_extreme = raw_entry_price
 
         j = entry_idx
-        last_allowed_idx = n - 1
-        if simulation_end is not None:
-            while last_allowed_idx >= entry_idx and int(df.iloc[last_allowed_idx]["open_time"]) > simulation_end:
-                last_allowed_idx -= 1
+        last_allowed_idx = max_allowed_idx
         if last_allowed_idx < entry_idx:
             break
 

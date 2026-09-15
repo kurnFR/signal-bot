@@ -28,10 +28,15 @@ def test_execution_tournament_selects_threshold_from_simulator_and_tests_once():
         start = params["_simulation_start_open_time"]
         end = params["_simulation_end_open_time"]
         calls.append((start, end))
-        filt = params["_ml_signal_filter"]
+        filt = params.get("_ml_signal_filter")
         rows = df[(df.open_time >= start) & (df.open_time <= end)]
-        probabilities = filt.predict_probability(rows[["x"]])
         trades = []
+        if filt is None:
+            for row in rows.itertuples():
+                r = (1.0 if row.x > 0 else -1.0) - 0.10
+                trades.append({"r_multiple": r, "net_pnl": r, "fees": 0.10})
+            return trades
+        probabilities = filt.predict_probability(rows[["x"]])
         for row, probability in zip(rows.itertuples(), probabilities):
             if probability < filt.threshold:
                 continue
@@ -51,12 +56,12 @@ def test_execution_tournament_selects_threshold_from_simulator_and_tests_once():
         min_validation_trades=2,
     )
 
-    # Two validation thresholds plus exactly one locked TEST execution.
-    assert len(calls) == 3
+    # 1 baseline validation + 2 validation thresholds + 1 baseline test + 1 locked TEST execution.
+    assert len(calls) == 5
     validation_end = int(dataset.iloc[39]["open_time"])
     test_start = int(dataset.iloc[40]["open_time"])
-    assert all(end <= validation_end for _, end in calls[:2])
-    assert calls[2][0] == test_start
+    assert all(end <= validation_end for _, end in calls[:3])
+    assert all(start == test_start for start, _ in calls[3:])
     assert result.experiment.status == "research"
     assert result.experiment.threshold in (0.50, 0.55)
     assert result.validation_by_candidate[0]["selected_metrics"]["net_pnl"] == result.validation_by_candidate[0]["selected_metrics"]["total_outcome_r"]
@@ -77,6 +82,7 @@ def test_execution_tournament_rejects_candidate_with_too_few_validation_trades()
             base_strategy="trend_ema_v1", min_validation_trades=1,
         )
     except ValueError as exc:
-        assert "minimum is 1" in str(exc)
+        assert "at least 1 validation trades" in str(exc)
     else:
         raise AssertionError("expected minimum validation trade gate")
+

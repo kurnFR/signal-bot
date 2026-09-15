@@ -19,6 +19,12 @@ import pandas as pd
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from backtest.params import BASE_PARAMS
 from backtest.strategies import STRATEGIES
 from db.db import fetch_ohlcv_with_features_df
@@ -79,7 +85,8 @@ def _result_payload(result: Any, *, dataset_rows: int, market_rows: int) -> dict
 def run_real_experiment(*, symbol: str = DEFAULT_SYMBOL, market: str = DEFAULT_MARKET,
                         timeframe: str = DEFAULT_TIMEFRAME, strategy_name: str = DEFAULT_STRATEGY,
                         model_type: str = DEFAULT_MODEL, target_type: str = DEFAULT_TARGET,
-                        output_dir: str = DEFAULT_OUTPUT_DIR, seed: int = 42) -> Path:
+                        output_dir: str = DEFAULT_OUTPUT_DIR, min_validation_trades: int = 10,
+                        seed: int = 42) -> Path:
     if strategy_name not in STRATEGIES:
         raise ValueError(f"Unknown strategy {strategy_name!r}. Available: {', '.join(sorted(STRATEGIES))}")
     if target_type not in TARGET_TYPES:
@@ -106,7 +113,7 @@ def run_real_experiment(*, symbol: str = DEFAULT_SYMBOL, market: str = DEFAULT_M
     result = run_execution_aware_tournament(
         market_df, dataset, candidates, strategy_fn=strategy_fn, base_params=params,
         experiment_id=experiment_id, symbol=symbol, timeframe=timeframe, base_strategy=strategy_name,
-        train_fraction=0.60, validation_fraction=0.20, min_validation_trades=10,
+        train_fraction=0.60, validation_fraction=0.20, min_validation_trades=min_validation_trades,
         max_candidates=1, seed=seed, threshold_candidates=DEFAULT_THRESHOLDS, target_type=target_type)
 
     payload = _result_payload(result, dataset_rows=len(dataset), market_rows=len(market_df))
@@ -127,6 +134,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", dest="model_type", default=DEFAULT_MODEL)
     parser.add_argument("--target", dest="target_type", choices=TARGET_TYPES, default=DEFAULT_TARGET)
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--min-validation-trades", type=int, default=10,
+                        help="Minimum validation trades required for candidate evaluation (default: 10)")
     parser.add_argument("--seed", type=int, default=42)
     return parser
 
@@ -137,7 +146,8 @@ def main() -> int:
     try:
         result_path = run_real_experiment(symbol=args.symbol, market=args.market, timeframe=args.timeframe,
                                           strategy_name=args.strategy_name, model_type=args.model_type,
-                                          target_type=args.target_type, output_dir=args.output_dir, seed=args.seed)
+                                          target_type=args.target_type, output_dir=args.output_dir,
+                                          min_validation_trades=args.min_validation_trades, seed=args.seed)
     except Exception as exc:
         logger.error("ML research experiment failed: %s", exc)
         return 1
