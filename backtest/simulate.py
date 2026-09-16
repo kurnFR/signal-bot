@@ -76,6 +76,12 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
         raw_entry_price = float(entry_bar["open"])
         atr_at_signal = row["atr"]
         if pd.isna(atr_at_signal) or atr_at_signal <= 0:
+            if use_trailing:
+                import logging
+                logging.getLogger("backtest.simulate").warning(
+                    "Signal at bar index %d (open_time=%s) has NaN or non-positive ATR (%s); skipping to avoid invalid stop/trailing calculation",
+                    i, row_time, atr_at_signal
+                )
             i += 1
             continue
 

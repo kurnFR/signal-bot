@@ -95,9 +95,135 @@ def verify_access_token(token: str) -> Optional[Dict[str, Any]]:
         payload = json.loads(payload_bytes.decode("utf-8"))
         if payload.get("exp", 0) < time.time():
             return None
+        if is_token_revoked(token):
+            return None
         return payload
     except Exception:
         return None
+
+
+# ============================================================================
+# Token Revocation / Blacklisting (Server-side Session Revocation)
+# ============================================================================
+_revoked_tokens_cache = set()
+
+
+def revoke_token(token: str) -> None:
+    """Revokes an active token and blacklists it across the server."""
+    if not token:
+        return
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    _revoked_tokens_cache.add(token_hash)
+    payload = verify_access_token(token)
+    exp = payload.get("exp", int(time.time()) + TOKEN_EXPIRY_SECONDS) if payload else int(time.time()) + TOKEN_EXPIRY_SECONDS
+    exp_dt = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(exp))
+
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO revoked_tokens (token_hash, expires_at)
+            VALUES (%s, %s)
+            ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at)
+            """,
+            (token_hash, exp_dt),
+        )
+        conn.commit()
+        cur.close()
+        logger.info("Token %s... revoked and blacklisted", token_hash[:8])
+    except Exception as exc:
+        logger.error("Failed to persist revoked token: %s", exc)
+    finally:
+        conn.close()
+
+
+def is_token_revoked(token: str) -> bool:
+    """Check if token was revoked via database lookup and in-memory cache."""
+    if not token:
+        return True
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    if token_hash in _revoked_tokens_cache:
+        return True
+
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT token_hash FROM revoked_tokens WHERE token_hash = %s AND expires_at > UTC_TIMESTAMP()",
+            (token_hash,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        if row:
+            _revoked_tokens_cache.add(token_hash)
+            return True
+        return False
+    except Exception as exc:
+        logger.error("Error checking token revocation: %s", exc)
+        return False
+    finally:
+        conn.close()
+
+
+# ============================================================================
+# Login Rate Limiting & Lockout
+# ============================================================================
+_login_attempts: Dict[str, list[float]] = {}
+RATE_LIMIT_MAX_ATTEMPTS = 5
+RATE_LIMIT_WINDOW_SECONDS = 300  # 5 minutes
+
+
+def check_login_rate_limit(key: str) -> bool:
+    """Returns True if within rate limit, False if locked out."""
+    now = time.time()
+    attempts = [t for t in _login_attempts.get(key, []) if now - t < RATE_LIMIT_WINDOW_SECONDS]
+    _login_attempts[key] = attempts
+    return len(attempts) < RATE_LIMIT_MAX_ATTEMPTS
+
+
+def record_failed_login(key: str) -> int:
+    """Records a failed login attempt and returns the current count within the window."""
+    now = time.time()
+    attempts = [t for t in _login_attempts.get(key, []) if now - t < RATE_LIMIT_WINDOW_SECONDS]
+    attempts.append(now)
+    _login_attempts[key] = attempts
+    return len(attempts)
+
+
+def reset_login_attempts(key: str) -> None:
+    _login_attempts.pop(key, None)
+
+
+# ============================================================================
+# Audit Logging (Immutable System Action History)
+# ============================================================================
+def log_audit(
+    action: str,
+    username: str,
+    user_id: Optional[int] = None,
+    details: Optional[Dict[str, Any]] = None,
+    ip_address: Optional[str] = None,
+) -> None:
+    """Records an administrative, security, or trading action in audit_logs."""
+    try:
+        conn = get_pool().get_connection()
+        try:
+            cur = conn.cursor()
+            details_json = json.dumps(details) if details else None
+            cur.execute(
+                """
+                INSERT INTO audit_logs (user_id, username, action, details, ip_address)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (user_id, username, action, details_json, ip_address),
+            )
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.error("Failed to write audit log (%s by %s): %s", action, username, exc)
 
 
 def _token_from_request(request: Request) -> Optional[str]:
@@ -128,7 +254,7 @@ def authenticate_request(request: Request) -> Dict[str, Any]:
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            "SELECT id, username, email, role, is_active FROM users WHERE id = %s AND is_active = 1",
+            "SELECT id, username, email, role, is_active, must_change_password FROM users WHERE id = %s AND is_active = 1",
             (user_id,)
         )
         user = cur.fetchone()
@@ -176,11 +302,10 @@ def _require_admin(current_user: Dict[str, Any]):
 
 
 def seed_default_admin():
-    """Initializes admin/admin123 if users table is empty.
+    """Initializes admin account if users table is empty.
 
-    NOTE: This legacy bootstrap remains temporarily for compatibility. It is
-    explicitly tracked as a P0/P1 security item in NEXT_IMPROVEMENT_PROJECT.md
-    and must be replaced by a secure one-time bootstrap before external use.
+    Prioritizes ADMIN_DEFAULT_PASSWORD env var; if omitted, generates a cryptographically
+    secure one-time password and enforces must_change_password flag upon first login.
     """
     conn = get_pool().get_connection()
     try:
@@ -188,17 +313,33 @@ def seed_default_admin():
         cur.execute("SELECT COUNT(*) as count FROM users")
         count = cur.fetchone()["count"]
         if count == 0:
-            default_pwd = "admin123"
+            env_pwd = os.getenv("ADMIN_DEFAULT_PASSWORD", "").strip()
+            if env_pwd:
+                default_pwd = env_pwd
+                must_change = 0
+            else:
+                default_pwd = secrets.token_urlsafe(12)
+                must_change = 1
+
             pwd_hash = hash_password(default_pwd)
             cur.execute(
                 """
-                INSERT INTO users (username, email, password_hash, role, is_active)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO users (username, email, password_hash, role, is_active, must_change_password)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                ("admin", "admin@crypto-signal-bot.local", pwd_hash, "admin", 1)
+                ("admin", "admin@crypto-signal-bot.local", pwd_hash, "admin", 1, must_change)
             )
             conn.commit()
-            logger.warning("Initialized legacy default admin account; rotate bootstrap credentials immediately.")
+
+            # Store credentials securely in local file
+            cred_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".initial_admin_credential")
+            with open(cred_file, "w") as f:
+                f.write(f"username: admin\npassword: {default_pwd}\nmust_change_password: {must_change}\ncreated_at: {time.time()}\n")
+            try:
+                os.chmod(cred_file, 0o600)
+            except Exception:
+                pass
+            logger.info("Admin user bootstrap complete. Initial credentials recorded in %s", cred_file)
         cur.close()
     finally:
         conn.close()

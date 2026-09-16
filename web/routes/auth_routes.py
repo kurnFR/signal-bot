@@ -11,8 +11,11 @@ from pydantic import BaseModel, Field
 from db.db import get_pool
 from web.auth import (
     hash_password, verify_password, create_access_token,
-    get_current_user, require_admin
+    get_current_user, require_admin, revoke_token,
+    check_login_rate_limit, record_failed_login, reset_login_attempts,
+    log_audit, _token_from_request
 )
+from fastapi import Request
 
 router = APIRouter(prefix="/api", tags=["authentication-and-users"])
 logger = logging.getLogger("web.auth_routes")
@@ -53,10 +56,19 @@ class UpdateUserRequest(BaseModel):
 # Authentication Endpoints
 # ============================================================================
 @router.post("/auth/login")
-def login(req: LoginRequest):
+def login(req: LoginRequest, request: Request):
     username = req.username.strip()
     if not username or not req.password:
         raise HTTPException(status_code=400, detail="Username and password are required")
+
+    client_ip = request.client.host if request.client else "unknown"
+    rate_key = f"{client_ip}:{username}"
+    if not check_login_rate_limit(rate_key):
+        log_audit("LOGIN_RATE_LIMITED", username, None, {"ip": client_ip}, client_ip)
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed login attempts. Account temporarily locked. Please try again in 5 minutes."
+        )
 
     conn = get_pool().get_connection()
     try:
@@ -64,7 +76,7 @@ def login(req: LoginRequest):
         # 100% Parameterized query: immune to SQL injection
         cur.execute(
             """
-            SELECT id, username, email, password_hash, role, is_active 
+            SELECT id, username, email, password_hash, role, is_active, must_change_password 
             FROM users 
             WHERE username = %s
             """,
@@ -74,12 +86,18 @@ def login(req: LoginRequest):
         cur.close()
 
         if not user or not user["is_active"]:
+            failed_count = record_failed_login(rate_key)
+            log_audit("LOGIN_FAILED", username, None, {"attempt": failed_count, "reason": "user_not_found_or_inactive"}, client_ip)
             raise HTTPException(status_code=401, detail="Invalid username or password")
 
         if not verify_password(req.password, user["password_hash"]):
+            failed_count = record_failed_login(rate_key)
+            log_audit("LOGIN_FAILED", username, user["id"], {"attempt": failed_count, "reason": "bad_password"}, client_ip)
             raise HTTPException(status_code=401, detail="Invalid username or password")
 
+        reset_login_attempts(rate_key)
         token = create_access_token(user["id"], user["username"], user["role"])
+        log_audit("LOGIN_SUCCESS", user["username"], user["id"], {"role": user["role"]}, client_ip)
 
         return {
             "token": token,
@@ -88,10 +106,21 @@ def login(req: LoginRequest):
                 "username": user["username"],
                 "email": user["email"],
                 "role": user["role"],
+                "must_change_password": bool(user.get("must_change_password", 0)),
             }
         }
     finally:
         conn.close()
+
+
+@router.post("/auth/logout")
+def logout(request: Request, current_user: dict = Depends(get_current_user)):
+    token = _token_from_request(request)
+    if token:
+        revoke_token(token)
+    client_ip = request.client.host if request.client else "unknown"
+    log_audit("LOGOUT", current_user["username"], current_user["id"], None, client_ip)
+    return {"status": "success", "message": "Successfully logged out"}
 
 
 @router.get("/auth/me")
@@ -101,11 +130,12 @@ def get_current_user_profile(current_user: dict = Depends(get_current_user)):
         "username": current_user["username"],
         "email": current_user["email"],
         "role": current_user["role"],
+        "must_change_password": bool(current_user.get("must_change_password", 0)),
     }
 
 
 @router.post("/auth/change-password")
-def change_password(req: ChangePasswordRequest, current_user: dict = Depends(get_current_user)):
+def change_password(req: ChangePasswordRequest, request: Request, current_user: dict = Depends(get_current_user)):
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
@@ -117,12 +147,43 @@ def change_password(req: ChangePasswordRequest, current_user: dict = Depends(get
 
         new_hash = hash_password(req.new_password)
         cur.execute(
-            "UPDATE users SET password_hash = %s, updated_at = NOW() WHERE id = %s",
+            "UPDATE users SET password_hash = %s, must_change_password = 0, updated_at = NOW() WHERE id = %s",
             (new_hash, current_user["id"])
         )
         conn.commit()
         cur.close()
+        client_ip = request.client.host if request.client else "unknown"
+        log_audit("PASSWORD_CHANGED", current_user["username"], current_user["id"], None, client_ip)
         return {"status": "success", "message": "Password changed successfully"}
+    finally:
+        conn.close()
+
+
+@router.get("/auth/audit-logs")
+def get_audit_logs(limit: int = 50, current_user: dict = Depends(require_admin)):
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT id, user_id, username, action, details, ip_address, created_at
+            FROM audit_logs
+            ORDER BY created_at DESC
+            LIMIT %s
+            """,
+            (max(1, min(100, limit)),)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        for r in rows:
+            r["created_at"] = str(r["created_at"])
+            if isinstance(r.get("details"), str):
+                try:
+                    import json
+                    r["details"] = json.loads(r["details"])
+                except Exception:
+                    pass
+        return {"items": rows}
     finally:
         conn.close()
 
@@ -189,6 +250,8 @@ def create_user(req: CreateUserRequest, admin: dict = Depends(require_admin)):
         new_id = cur.lastrowid
         cur.close()
 
+        log_audit("USER_CREATED", admin["username"], admin["id"], {"created_user": clean_username, "role": clean_role})
+
         return {
             "status": "success",
             "user": {
@@ -215,11 +278,13 @@ def reset_user_password(user_id: int, req: ResetPasswordRequest, admin: dict = D
 
         new_hash = hash_password(req.new_password)
         cur.execute(
-            "UPDATE users SET password_hash = %s, updated_at = NOW() WHERE id = %s",
+            "UPDATE users SET password_hash = %s, must_change_password = 1, updated_at = NOW() WHERE id = %s",
             (new_hash, user_id)
         )
         conn.commit()
         cur.close()
+
+        log_audit("USER_PASSWORD_RESET", admin["username"], admin["id"], {"target_user": target["username"], "target_id": user_id})
 
         return {
             "status": "success",
@@ -257,11 +322,11 @@ def update_user(user_id: int, req: UpdateUserRequest, admin: dict = Depends(requ
         if updates:
             updates.append("updated_at = NOW()")
             params.append(user_id)
-            sql = f"UPDATE users SET {', '.join(updates)} WHERE id = %s"
-            cur.execute(sql, tuple(params))
+            cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = %s", tuple(params))
             conn.commit()
 
         cur.close()
+        log_audit("USER_UPDATED", admin["username"], admin["id"], {"target_user": target["username"], "role": req.role, "is_active": req.is_active})
         return {"status": "success", "message": f"User '{target['username']}' updated"}
     finally:
         conn.close()

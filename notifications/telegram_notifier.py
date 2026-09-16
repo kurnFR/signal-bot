@@ -28,8 +28,8 @@ def get_telegram_config() -> Dict[str, Any]:
     }
 
 
-def send_telegram_message(text: str, parse_mode: str = "HTML") -> Dict[str, Any]:
-    """Sends a raw formatted message to the configured Telegram chat."""
+def send_telegram_message(text: str, parse_mode: str = "HTML", max_retries: int = 3) -> Dict[str, Any]:
+    """Sends a raw formatted message to the configured Telegram chat with retry logic and exponential backoff."""
     cfg = get_telegram_config()
     if not cfg["is_configured"]:
         logger.warning("Telegram not configured (missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID)")
@@ -43,18 +43,27 @@ def send_telegram_message(text: str, parse_mode: str = "HTML") -> Dict[str, Any]
         "disable_web_page_preview": True,
     }
 
-    try:
-        res = requests.post(url, json=payload, timeout=8)
-        data = res.json()
-        if res.status_code == 200 and data.get("ok"):
-            logger.info("Telegram message dispatched successfully")
-            return {"success": True, "message_id": data.get("result", {}).get("message_id")}
-        else:
-            logger.error(f"Telegram API error: {data}")
-            return {"success": False, "error": data.get("description", "Unknown API error")}
-    except Exception as e:
-        logger.error(f"Failed to send Telegram message: {e}")
-        return {"success": False, "error": str(e)}
+    last_error = "Unknown error"
+    import time
+    for attempt in range(1, max_retries + 1):
+        try:
+            res = requests.post(url, json=payload, timeout=8)
+            data = res.json()
+            if res.status_code == 200 and data.get("ok"):
+                logger.info("Telegram message dispatched successfully (attempt %d/%d)", attempt, max_retries)
+                return {"success": True, "message_id": data.get("result", {}).get("message_id")}
+            else:
+                last_error = data.get("description", f"HTTP {res.status_code}")
+                logger.warning("Telegram API response attempt %d/%d: %s", attempt, max_retries, last_error)
+        except Exception as e:
+            last_error = str(e)
+            logger.warning("Telegram send attempt %d/%d failed: %s", attempt, max_retries, e)
+
+        if attempt < max_retries:
+            time.sleep(1.0 * attempt)
+
+    logger.error("All %d Telegram delivery attempts failed. Last error: %s", max_retries, last_error)
+    return {"success": False, "error": last_error}
 
 
 def test_telegram_connection() -> Dict[str, Any]:
@@ -105,9 +114,12 @@ def send_signal_alert(
     stop_loss: float,
     take_profit: float,
     initial_risk: float = 0.0,
-    atr: Optional[float] = None
+    atr: Optional[float] = None,
+    ml_probability: Optional[float] = None,
+    ml_threshold: Optional[float] = None,
+    ml_model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Formats and dispatches an official trade entry signal alert."""
+    """Formats and dispatches an official trade entry signal alert with optional ML gating metadata."""
     dir_emoji = "🟢" if direction.upper() == "LONG" else "🔴"
     side_action = "BUY / LONG" if direction.upper() == "LONG" else "SELL / SHORT"
     
@@ -134,6 +146,13 @@ def send_signal_alert(
     )
     if atr:
         msg += f"📈 <b>ATR Volatility:</b> <code>${atr:,.4f}</code>\n"
+
+    if ml_probability is not None:
+        pass_badge = "✅ PASSED" if (ml_threshold is None or ml_probability >= ml_threshold) else "⚠️ GATED"
+        thresh_info = f" (Threshold: {ml_threshold * 100:.1f}%)" if ml_threshold is not None else ""
+        msg += f"🤖 <b>AI/ML Confidence:</b> <code>{ml_probability * 100:.1f}%</code>{thresh_info} {pass_badge}\n"
+        if ml_model_id:
+            msg += f"🧬 <b>Filter Model:</b> <code>{ml_model_id}</code>\n"
 
     msg += (
         f"━━━━━━━━━━━━━━━━━━━━━\n"

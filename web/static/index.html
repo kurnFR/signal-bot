@@ -107,6 +107,13 @@
                         <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-emerald-950 text-emerald-300 border border-emerald-800">PHASE B</span>
                     </div>
                 </button>
+                <button data-tab="ml-studio" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-purple-400 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="brain-circuit" class="w-4 h-4 text-purple-400"></i>
+                    <div class="flex items-center justify-between w-full">
+                        <span>ML Forecast Studio</span>
+                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-purple-950 text-purple-300 border border-purple-800">AI</span>
+                    </div>
+                </button>
                 <button data-tab="strategies" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="layers" class="w-4 h-4"></i>
                     <span>Strategy Library</span>
@@ -686,6 +693,117 @@
             </section>
 
             <!-- ============================================== -->
+            <!-- 4B. MACHINE LEARNING FORECAST & TOURNAMENT STUDIO -->
+            <!-- ============================================== -->
+            <section id="view-ml-studio" class="view-section hidden space-y-6">
+                <!-- Header Banner -->
+                <div class="p-6 rounded-2xl bg-gradient-to-r from-purple-950/40 via-slate-900 to-indigo-950/40 border border-purple-800/40 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="px-2 py-0.5 text-[10px] font-extrabold uppercase rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">ML Execution Tournament</span>
+                            <span class="text-xs text-slate-400 font-mono">No-Lookahead • Chronological Splits</span>
+                        </div>
+                        <h2 class="text-lg font-black text-slate-100 tracking-tight">Machine Learning Strategy & Forecast Studio</h2>
+                        <p class="text-xs text-slate-400 mt-1 max-w-2xl">Train multi-model tournaments across Logistic Regression, Random Forest, and Gradient Boosting. Automatically test probability thresholds, verify ROC-AUC, and gate live paper trading signals.</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button onclick="App.openRunMLModal()" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-purple-500/25 flex items-center gap-2 transition-all">
+                            <i data-lucide="sparkles" class="w-4 h-4"></i>
+                            <span>Launch ML Tournament</span>
+                        </button>
+                        <button onclick="App.fetchMLData()" class="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 transition-colors" title="Refresh ML Data">
+                            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Metrics & Risk Circuit Breaker Row -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <div class="flex items-center justify-between text-xs text-slate-400">
+                            <span>Completed Experiments</span>
+                            <i data-lucide="database" class="w-4 h-4 text-purple-400"></i>
+                        </div>
+                        <div id="ml-stat-experiments" class="text-2xl font-black text-slate-100 font-mono mt-1">0</div>
+                        <div class="text-[11px] text-slate-500 mt-0.5">Tournaments saved in ml_results/</div>
+                    </div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <div class="flex items-center justify-between text-xs text-slate-400">
+                            <span>Trained Model Artifacts</span>
+                            <i data-lucide="cpu" class="w-4 h-4 text-indigo-400"></i>
+                        </div>
+                        <div id="ml-stat-models" class="text-2xl font-black text-indigo-400 font-mono mt-1">0</div>
+                        <div class="text-[11px] text-slate-500 mt-0.5">Ready for paper trading gate</div>
+                    </div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <div class="flex items-center justify-between text-xs text-slate-400">
+                            <span>Candidate Architectures</span>
+                            <i data-lucide="layers" class="w-4 h-4 text-emerald-400"></i>
+                        </div>
+                        <div class="text-xs font-bold text-slate-200 mt-2 space-y-0.5">
+                            <div><span class="text-emerald-400">●</span> Logistic Regression</div>
+                            <div><span class="text-sky-400">●</span> Random Forest</div>
+                            <div><span class="text-amber-400">●</span> Gradient Boosting</div>
+                        </div>
+                    </div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                        <div>
+                            <div class="flex items-center justify-between text-xs text-slate-400">
+                                <span>Risk Circuit Breakers</span>
+                                <i data-lucide="shield-alert" class="w-4 h-4 text-amber-400"></i>
+                            </div>
+                            <div id="ml-breaker-badge" class="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
+                                <span class="w-2 h-2 rounded-full bg-emerald-400"></span> NOMINAL
+                            </div>
+                            <div id="ml-breaker-details" class="text-[11px] text-slate-400 mt-1">Max daily loss: $500 • Max pos: 5</div>
+                        </div>
+                        <div class="flex items-center gap-2 mt-2 pt-2 border-t border-slate-800/80">
+                            <button onclick="App.tripCircuitBreaker()" class="flex-1 px-2 py-1 text-[11px] font-bold rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800 transition-colors">
+                                Emergency Stop
+                            </button>
+                            <button onclick="App.resetCircuitBreaker()" class="flex-1 px-2 py-1 text-[11px] font-bold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors">
+                                Reset
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Experiments & Tournaments Table -->
+                <div class="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                                <i data-lucide="trophy" class="w-4 h-4 text-amber-400"></i>
+                                ML Tournament Leaderboard & OOS Verification
+                            </h3>
+                            <p class="text-xs text-slate-400 mt-0.5">Execution-aware validation results: compares un-filtered baseline vs ML-filtered performance on locked test data</p>
+                        </div>
+                    </div>
+
+                    <div class="overflow-x-auto rounded-xl border border-slate-800">
+                        <table class="w-full text-left custom-table">
+                            <thead>
+                                <tr>
+                                    <th>Experiment / Asset</th>
+                                    <th>Base Strategy</th>
+                                    <th>Winning Model</th>
+                                    <th>Threshold</th>
+                                    <th>ROC-AUC</th>
+                                    <th>Baseline Test R</th>
+                                    <th>ML Filter Test R</th>
+                                    <th>Win Rate</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ml-experiments-table-body">
+                                <tr><td colspan="9" class="text-center py-8 text-slate-500 text-xs">Loading ML experiments...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================== -->
             <!-- 5. STRATEGY LIBRARY & BUILDER VIEW -->
             <!-- ============================================== -->
             <section id="view-strategies" class="view-section hidden space-y-8">
@@ -1063,6 +1181,186 @@
             </div>
         </div>
     </div>
+
+    <!-- LAUNCH ML TOURNAMENT MODAL -->
+    <div id="modal-run-ml" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm hidden items-center justify-center p-4">
+        <div class="bg-slate-900 border border-purple-700/50 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold">
+                        <i data-lucide="brain-circuit" class="w-4 h-4"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-100">Launch ML Strategy Tournament</h3>
+                        <p class="text-xs text-slate-400">Execution-aware multi-model validation tournament</p>
+                    </div>
+                </div>
+                <button onclick="App.closeRunMLModal()" class="text-slate-400 hover:text-white">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <div class="space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 mb-1">Symbol</label>
+                        <input type="text" id="ml-run-symbol" value="BTCUSDT" class="w-full text-xs font-mono font-bold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700 uppercase">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 mb-1">Market</label>
+                        <select id="ml-run-market" class="w-full text-xs font-semibold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
+                            <option value="spot">Spot</option>
+                            <option value="futures">Futures</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 mb-1">Timeframe</label>
+                        <select id="ml-run-timeframe" class="w-full text-xs font-mono font-bold text-amber-400 bg-slate-800 rounded-lg p-2.5 border border-slate-700">
+                            <option value="1h">1h</option>
+                            <option value="4h">4h</option>
+                            <option value="1d">1d</option>
+                            <option value="15m">15m</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 mb-1">Base Strategy</label>
+                        <select id="ml-run-strategy" class="w-full text-xs font-semibold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
+                            <option value="trend_ema_v1">trend_ema_v1</option>
+                            <option value="confluence_ensemble_v1">confluence_ensemble_v1</option>
+                            <option value="macd_histogram_momentum_v1">macd_histogram_momentum_v1</option>
+                            <option value="bollinger_mean_reversion_v1">bollinger_mean_reversion_v1</option>
+                            <option value="supertrend_v1">supertrend_v1</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">Candidate Model Grid</label>
+                    <select id="ml-run-model" class="w-full text-xs font-semibold bg-slate-800 text-purple-300 rounded-lg p-2.5 border border-slate-700">
+                        <option value="all">⚡ All Models Tournament (LR + Random Forest + Gradient Boosting)</option>
+                        <option value="logistic_regression">Logistic Regression (Linear Regularization Grid)</option>
+                        <option value="random_forest">Random Forest (Bagging Tree Ensemble)</option>
+                        <option value="hist_gradient_boosting">Hist Gradient Boosting (Boosting Ensemble)</option>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 mb-1">Target Definition</label>
+                        <select id="ml-run-target" class="w-full text-xs font-semibold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
+                            <option value="binary_positive_r">binary_positive_r (Trade R &gt; 0)</option>
+                            <option value="binary_r_above_half">binary_r_above_half (Trade R &gt; 0.5)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 mb-1">Min Validation Trades</label>
+                        <input type="number" id="ml-run-min-trades" value="5" min="1" max="50" class="w-full text-xs font-mono font-bold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                <button onclick="App.closeRunMLModal()" class="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300">
+                    Cancel
+                </button>
+                <button id="btn-submit-ml-run" onclick="App.submitMLRun()" class="px-5 py-2 text-xs font-bold rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-lg shadow-purple-500/25 flex items-center gap-1.5 transition-all">
+                    <i data-lucide="play" class="w-3.5 h-3.5"></i> Run Tournament
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- DEPLOY ML FILTER TO PAPER MODAL -->
+    <div id="modal-deploy-ml" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm hidden items-center justify-center p-4">
+        <div class="bg-slate-900 border border-purple-700/50 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold">
+                        <i data-lucide="shield-check" class="w-4 h-4"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-100">Deploy ML Filter to Paper Trading</h3>
+                        <p class="text-xs text-slate-400">Gated live execution with AI confidence filtering</p>
+                    </div>
+                </div>
+                <button onclick="App.closeDeployMLModal()" class="text-slate-400 hover:text-white">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <input type="hidden" id="deploy-ml-model-id" value="">
+            <div class="p-4 rounded-xl bg-slate-850 border border-slate-800 space-y-2 text-xs">
+                <div class="flex justify-between text-slate-300">
+                    <span class="text-slate-400">ML Model ID:</span>
+                    <span id="deploy-ml-label-id" class="font-bold text-purple-400 font-mono text-[11px]"></span>
+                </div>
+                <div class="flex justify-between text-slate-300">
+                    <span class="text-slate-400">Model Architecture:</span>
+                    <span id="deploy-ml-label-model" class="font-bold text-slate-100"></span>
+                </div>
+                <div class="flex justify-between text-slate-300">
+                    <span class="text-slate-400">Probability Threshold:</span>
+                    <span id="deploy-ml-label-threshold" class="font-bold text-emerald-400 font-mono"></span>
+                </div>
+            </div>
+
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">Allocated Virtual Capital ($)</label>
+                    <input type="number" id="deploy-ml-capital" value="5000" min="100" step="500" class="w-full text-xs font-mono font-bold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">Risk per Trade (%)</label>
+                    <input type="number" id="deploy-ml-risk" value="1.0" min="0.1" max="5.0" step="0.25" class="w-full text-xs font-mono font-bold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
+                </div>
+                <div class="p-3 rounded-lg bg-purple-950/40 border border-purple-800/40 flex items-start gap-2.5">
+                    <input type="checkbox" id="deploy-ml-telegram" checked class="w-4 h-4 accent-purple-500 rounded bg-slate-800 border-slate-700 mt-0.5">
+                    <label for="deploy-ml-telegram" class="text-xs text-slate-200">
+                        <span class="font-bold text-purple-400">Broadcast Filtered Alerts to Telegram</span><br>
+                        <span class="text-[11px] text-slate-400">Include AI confidence score &amp; threshold gate outcome on each alert.</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-3 pt-2">
+                <button onclick="App.closeDeployMLModal()" class="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300">
+                    Cancel
+                </button>
+                <button id="btn-confirm-deploy-ml" onclick="App.confirmDeployML()" class="px-5 py-2 text-xs font-bold rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-lg shadow-purple-500/25 flex items-center gap-1.5 transition-all">
+                    <i data-lucide="check" class="w-4 h-4"></i> Deploy AI Model to Paper
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- INSPECT ML EXPERIMENT MODAL -->
+    <div id="modal-inspect-ml" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm hidden items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div>
+                    <h3 id="inspect-ml-title" class="text-sm font-bold text-slate-100 font-mono">Experiment Details</h3>
+                    <p class="text-xs text-slate-400">Full tournament breakdown, validation metrics &amp; test diagnostics</p>
+                </div>
+                <button onclick="App.closeInspectMLModal()" class="text-slate-400 hover:text-white">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <div id="inspect-ml-content" class="space-y-4 text-xs">
+                <!-- Populated dynamically via JS -->
+            </div>
+
+            <div class="flex items-center justify-end pt-3 border-t border-slate-800">
+                <button onclick="App.closeInspectMLModal()" class="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
 
     <!-- Application Script -->
     <script src="/static/js/app.js"></script>

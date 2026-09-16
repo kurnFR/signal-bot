@@ -22,6 +22,7 @@ class PaperConfigRequest(BaseModel):
     is_active: bool = Field(True)
     allocated_capital: float = Field(5000.0)
     risk_per_trade_pct: float = Field(1.0)
+    ml_model_id: Optional[str] = Field(None, example="real-btcusdt-spot-1h-trend_ema_v1-logistic_regression-binary_positive_r")
 
 
 @router.get("/positions")
@@ -57,7 +58,8 @@ def update_config(req: PaperConfigRequest):
         req.strategy_name.strip(),
         req.is_active,
         req.allocated_capital,
-        req.risk_per_trade_pct
+        req.risk_per_trade_pct,
+        req.ml_model_id.strip() if req.ml_model_id else None,
     )
     return res
 
@@ -87,6 +89,7 @@ class DeployStrategyRequest(BaseModel):
     send_telegram: bool = Field(True)
     rank: Optional[int] = None
     rank_score: Optional[float] = None
+    ml_model_id: Optional[str] = None
 
 
 @router.post("/deploy")
@@ -99,7 +102,8 @@ def deploy_strategy(req: DeployStrategyRequest):
         req.strategy_name.strip(),
         is_active=True,
         allocated_capital=req.allocated_capital,
-        risk_per_trade_pct=req.risk_per_trade_pct
+        risk_per_trade_pct=req.risk_per_trade_pct,
+        ml_model_id=req.ml_model_id.strip() if req.ml_model_id else None,
     )
 
     # 2. Telegram deployment alert
@@ -134,4 +138,28 @@ def deploy_strategy(req: DeployStrategyRequest):
         "telegramAlert": telegram_res,
         "syncResult": eval_res
     }
+
+
+# ============================================================================
+# Circuit Breaker & Risk Safety Endpoints
+# ============================================================================
+@router.get("/circuit-breakers")
+def get_circuit_breakers():
+    from paper.circuit_breaker import get_circuit_breaker_status
+    return get_circuit_breaker_status()
+
+
+@router.post("/circuit-breakers/emergency-stop")
+def trip_circuit_breaker(reason: str = "Manual emergency stop via Web Dashboard"):
+    from paper.circuit_breaker import trip_emergency_stop, get_circuit_breaker_status
+    trip_emergency_stop(reason)
+    return {"status": "success", "message": reason, "breaker": get_circuit_breaker_status()}
+
+
+@router.post("/circuit-breakers/reset")
+def reset_circuit_breaker():
+    from paper.circuit_breaker import reset_emergency_stop, get_circuit_breaker_status
+    reset_emergency_stop()
+    return {"status": "success", "message": "Circuit breaker reset", "breaker": get_circuit_breaker_status()}
+
 

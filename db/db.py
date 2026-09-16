@@ -291,7 +291,7 @@ def upsert_features(rows, batch_size=2000):
         conn.close()
 
 
-def fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, include_funding=False):
+def fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, include_funding=False, limit=None):
     """
     Returns ohlcv joined with features for one symbol/market/timeframe,
     sorted ascending by open_time -- the exact dataset the backtester (and
@@ -300,6 +300,9 @@ def fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, in
     closed_only=True excludes any still-forming candle (is_closed=0) --
     always True for backtesting historical data; the live engine will want
     this too, since a still-forming candle's indicators aren't final yet.
+
+    limit: if specified, fetches only the most recent `limit` closed candles,
+    enabling high-performance incremental signal evaluation for live paper trading.
 
     include_funding=True adds a 'funding_rate' column, sourced from the
     funding_rate table (a futures-market concept, but usable as a
@@ -313,23 +316,46 @@ def fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, in
     """
     import pandas as pd
 
-    sql = """
-        SELECT o.open_time, o.open, o.high, o.low, o.close, o.volume, o.is_closed,
-               f.rsi, f.macd, f.macd_signal, f.macd_hist, f.atr, f.atr_pct,
-               f.volume_sma, f.volume_ratio, f.support, f.resistance,
-               f.swing_high, f.swing_low, f.fib_0, f.fib_236, f.fib_382,
-               f.fib_5, f.fib_618, f.fib_786, f.fib_1
-        FROM ohlcv o
-        JOIN features f
-          ON f.symbol = o.symbol AND f.market = o.market AND f.timeframe = o.timeframe
-         AND f.open_time = o.open_time
-        WHERE o.symbol=%(symbol)s AND o.market=%(market)s AND o.timeframe=%(timeframe)s
-        ORDER BY o.open_time ASC
-    """
+    params = {"symbol": symbol, "market": market, "timeframe": timeframe}
+    if limit is not None and int(limit) > 0:
+        params["limit"] = int(limit)
+        closed_clause = "AND is_closed = 1" if closed_only else ""
+        sql = f"""
+            SELECT o.open_time, o.open, o.high, o.low, o.close, o.volume, o.is_closed,
+                   f.rsi, f.macd, f.macd_signal, f.macd_hist, f.atr, f.atr_pct,
+                   f.volume_sma, f.volume_ratio, f.support, f.resistance,
+                   f.swing_high, f.swing_low, f.fib_0, f.fib_236, f.fib_382,
+                   f.fib_5, f.fib_618, f.fib_786, f.fib_1
+            FROM (
+                SELECT open_time, open, high, low, close, volume, is_closed, symbol, market, timeframe
+                FROM ohlcv
+                WHERE symbol=%(symbol)s AND market=%(market)s AND timeframe=%(timeframe)s {closed_clause}
+                ORDER BY open_time DESC
+                LIMIT %(limit)s
+            ) o
+            JOIN features f
+              ON f.symbol = o.symbol AND f.market = o.market AND f.timeframe = o.timeframe
+             AND f.open_time = o.open_time
+            ORDER BY o.open_time ASC
+        """
+    else:
+        sql = """
+            SELECT o.open_time, o.open, o.high, o.low, o.close, o.volume, o.is_closed,
+                   f.rsi, f.macd, f.macd_signal, f.macd_hist, f.atr, f.atr_pct,
+                   f.volume_sma, f.volume_ratio, f.support, f.resistance,
+                   f.swing_high, f.swing_low, f.fib_0, f.fib_236, f.fib_382,
+                   f.fib_5, f.fib_618, f.fib_786, f.fib_1
+            FROM ohlcv o
+            JOIN features f
+              ON f.symbol = o.symbol AND f.market = o.market AND f.timeframe = o.timeframe
+             AND f.open_time = o.open_time
+            WHERE o.symbol=%(symbol)s AND o.market=%(market)s AND o.timeframe=%(timeframe)s
+            ORDER BY o.open_time ASC
+        """
     engine = get_sqlalchemy_engine()
-    df = pd.read_sql(sql, engine, params={"symbol": symbol, "market": market, "timeframe": timeframe})
+    df = pd.read_sql(sql, engine, params=params)
 
-    if closed_only:
+    if closed_only and (limit is None or int(limit) <= 0):
         df = df[df["is_closed"] == 1].reset_index(drop=True)
 
     numeric_cols = [c for c in df.columns if c not in ("open_time", "is_closed")]

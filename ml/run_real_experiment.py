@@ -107,14 +107,20 @@ def run_real_experiment(*, symbol: str = DEFAULT_SYMBOL, market: str = DEFAULT_M
     if dataset.empty:
         raise RuntimeError("ML dataset is empty")
 
-    candidates = build_candidates(model_grid=[(model_type, {})], feature_sets=[SHARED_FEATURE_COLUMNS],
+    if model_type in {"all", "tournament"}:
+        from ml.tournament import get_expanded_model_grid
+        grid = get_expanded_model_grid()
+    else:
+        grid = [(model_type, {})]
+
+    candidates = build_candidates(model_grid=grid, feature_sets=[SHARED_FEATURE_COLUMNS],
                                   thresholds=DEFAULT_THRESHOLDS)
     experiment_id = f"real-{symbol.lower()}-{market.lower()}-{timeframe}-{strategy_name}-{model_type}-{target_type}"
     result = run_execution_aware_tournament(
         market_df, dataset, candidates, strategy_fn=strategy_fn, base_params=params,
         experiment_id=experiment_id, symbol=symbol, timeframe=timeframe, base_strategy=strategy_name,
         train_fraction=0.60, validation_fraction=0.20, min_validation_trades=min_validation_trades,
-        max_candidates=1, seed=seed, threshold_candidates=DEFAULT_THRESHOLDS, target_type=target_type)
+        max_candidates=max(50, len(candidates)), seed=seed, threshold_candidates=DEFAULT_THRESHOLDS, target_type=target_type)
 
     payload = _result_payload(result, dataset_rows=len(dataset), market_rows=len(market_df))
     destination = Path(output_dir)
@@ -122,6 +128,39 @@ def run_real_experiment(*, symbol: str = DEFAULT_SYMBOL, market: str = DEFAULT_M
     result_path = destination / f"{experiment_id}.json"
     result_path.write_text(json.dumps(payload, indent=2, default=_json_default) + "\n", encoding="utf-8")
     logger.info("Research result saved to %s", result_path)
+
+    # Persist model artifact for paper trading integration
+    try:
+        from ml.artifacts import ModelArtifact
+        from ml.model_store import ModelStore
+        models_dir = Path("ml_models")
+        models_dir.mkdir(parents=True, exist_ok=True)
+        is_eligible = bool(result.experiment.ml_test_metrics.get("total_outcome_r", 0) > 0)
+        artifact = ModelArtifact(
+            model_id=experiment_id,
+            experiment_id=experiment_id,
+            model_type=result.winner.model_type,
+            base_strategy=strategy_name,
+            feature_columns=result.winner.feature_columns,
+            strategy_params=params,
+            model_params=result.winner.model_params,
+            threshold=result.experiment.threshold,
+            train_metrics={},
+            validation_metrics=dict(result.experiment.ml_validation_metrics),
+            test_metrics=dict(result.experiment.ml_test_metrics),
+            eligible_for_paper=is_eligible,
+        )
+        store = ModelStore(models_dir)
+        try:
+            store.save(artifact, result.model)
+            logger.info("Persisted model artifact %s for paper trading", experiment_id)
+        except FileExistsError:
+            import joblib
+            joblib.dump(result.model, models_dir / f"{experiment_id}.joblib")
+            artifact.save_manifest(models_dir)
+    except Exception as exc:
+        logger.warning("Could not persist model artifact: %s", exc)
+
     return result_path
 
 
@@ -131,7 +170,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--market", default=DEFAULT_MARKET)
     parser.add_argument("--timeframe", default=DEFAULT_TIMEFRAME)
     parser.add_argument("--strategy", dest="strategy_name", default=DEFAULT_STRATEGY)
-    parser.add_argument("--model", dest="model_type", default=DEFAULT_MODEL)
+    parser.add_argument("--model", dest="model_type", default=DEFAULT_MODEL,
+                        help="Model type: logistic_regression, random_forest, hist_gradient_boosting, or all/tournament")
     parser.add_argument("--target", dest="target_type", choices=TARGET_TYPES, default=DEFAULT_TARGET)
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--min-validation-trades", type=int, default=10,

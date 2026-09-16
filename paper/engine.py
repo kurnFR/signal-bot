@@ -13,7 +13,7 @@ as live execution.
 """
 import time
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from db.db import get_pool, fetch_ohlcv_with_features_df
 from backtest.strategies import (
@@ -70,7 +70,7 @@ def get_paper_configs() -> List[Dict[str, Any]]:
         cur.execute(
             """
             SELECT id, symbol, market, timeframe, strategy_name, is_active,
-                   allocated_capital, risk_per_trade_pct, created_at
+                   allocated_capital, risk_per_trade_pct, ml_model_id, created_at
             FROM paper_configs
             ORDER BY is_active DESC, symbol ASC
             """
@@ -81,6 +81,7 @@ def get_paper_configs() -> List[Dict[str, Any]]:
             r["is_active"] = bool(r["is_active"])
             r["allocated_capital"] = float(r["allocated_capital"])
             r["risk_per_trade_pct"] = float(r["risk_per_trade_pct"])
+            r["ml_model_id"] = r.get("ml_model_id")
             r["created_at"] = str(r["created_at"])
         return rows
     finally:
@@ -95,6 +96,7 @@ def set_paper_config(
     is_active: bool,
     allocated_capital: float = 5000.0,
     risk_per_trade_pct: float = 1.0,
+    ml_model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     if allocated_capital <= 0:
         raise ValueError("allocated_capital must be positive")
@@ -108,12 +110,13 @@ def set_paper_config(
             """
             INSERT INTO paper_configs
                 (symbol, market, timeframe, strategy_name, is_active,
-                 allocated_capital, risk_per_trade_pct)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                 allocated_capital, risk_per_trade_pct, ml_model_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 is_active = VALUES(is_active),
                 allocated_capital = VALUES(allocated_capital),
-                risk_per_trade_pct = VALUES(risk_per_trade_pct)
+                risk_per_trade_pct = VALUES(risk_per_trade_pct),
+                ml_model_id = VALUES(ml_model_id)
             """,
             (
                 symbol,
@@ -123,11 +126,18 @@ def set_paper_config(
                 1 if is_active else 0,
                 allocated_capital,
                 risk_per_trade_pct,
+                ml_model_id,
             ),
         )
         conn.commit()
         cur.close()
-        return {"status": "success", "symbol": symbol, "strategy": strategy_name, "is_active": is_active}
+        return {
+            "status": "success",
+            "symbol": symbol,
+            "strategy": strategy_name,
+            "is_active": is_active,
+            "ml_model_id": ml_model_id,
+        }
     finally:
         conn.close()
 
@@ -324,10 +334,10 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
                 stop_loss, take_profit, allocated_capital, risk_per_trade_pct,
                 risk_amount, stop_distance, quantity, notional_value,
                 gross_pnl, entry_fee, exit_fee, funding_pnl, net_pnl,
-                net_return_pct, r_multiple, holding_bars
+                net_return_pct, r_multiple, holding_bars, ml_model_id, ml_probability
             ) VALUES (
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                %s,%s,%s,%s,%s,%s,%s,%s
+                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s
             )
             """,
             (
@@ -337,7 +347,7 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
                 accounting["risk_amount"], pos["stop_distance"], quantity, pos["notional_value"],
                 accounting["gross_pnl"], pos["entry_fee"], accounting["fees"] - float(pos["entry_fee"]),
                 -funding_cost, accounting["net_pnl"], accounting["return_pct_on_entry_notional"],
-                accounting["r_multiple"], pos["holding_bars"],
+                accounting["r_multiple"], pos["holding_bars"], pos.get("ml_model_id"), pos.get("ml_probability"),
             ),
         )
         conn.commit()
@@ -381,7 +391,14 @@ def manual_close_position(position_id: int) -> Dict[str, Any]:
     }
 
 
-def _insert_position(cfg: Dict[str, Any], trade: Dict[str, Any], current_close: float, candle_open_time: int) -> bool:
+def _insert_position(
+    cfg: Dict[str, Any],
+    trade: Dict[str, Any],
+    current_close: float,
+    candle_open_time: int,
+    ml_model_id: Optional[str] = None,
+    ml_probability: Optional[float] = None,
+) -> bool:
     direction = trade["direction"]
     raw_entry = float(trade["entry_price"])
     stop_loss = float(trade["stop_loss"])
@@ -407,10 +424,11 @@ def _insert_position(cfg: Dict[str, Any], trade: Dict[str, Any], current_close: 
                 atr_at_signal, initial_risk, unrealized_pnl_pct, unrealized_r,
                 holding_bars, max_hold_bars, last_update_time, status,
                 allocated_capital, risk_per_trade_pct, risk_amount, stop_distance,
-                quantity, notional_value, entry_fee, exit_fee, funding_pnl
+                quantity, notional_value, entry_fee, exit_fee, funding_pnl,
+                ml_model_id, ml_probability
             ) VALUES (
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0,1.0,1.5,%s,%s,0.0,0.0,
-                0,200,%s,'OPEN',%s,%s,%s,%s,%s,%s,%s,0.0,0.0
+                0,200,%s,'OPEN',%s,%s,%s,%s,%s,%s,%s,0.0,0.0,%s,%s
             )
             """,
             (
@@ -418,7 +436,7 @@ def _insert_position(cfg: Dict[str, Any], trade: Dict[str, Any], current_close: 
                 int(candle_open_time), raw_entry, current_close, stop_loss, take_profit, stop_loss,
                 atr, size.stop_distance, size.risk_amount, cfg["allocated_capital"],
                 cfg["risk_per_trade_pct"], size.risk_amount, size.stop_distance,
-                size.quantity, size.notional, entry_fee,
+                size.quantity, size.notional, entry_fee, ml_model_id, ml_probability,
             ),
         )
         conn.commit()
@@ -450,7 +468,8 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
         if strategy_name not in STRATEGIES:
             continue
         include_funding = strategy_name in FUNDING_STRATEGIES
-        df = fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, include_funding=include_funding)
+        # Incremental evaluation: fetch latest 300 bars for O(1) live polling speed
+        df = fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, include_funding=include_funding, limit=300)
         if len(df) < 50:
             continue
 
@@ -468,7 +487,21 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
             trailing_active = bool(pos["trailing_active"])
             trail_act_r = float(pos["trail_activation_r"])
             trail_dist_mult = float(pos["trail_distance_atr_mult"])
-            atr = float(latest_bar.get("atr", 0) or 0)
+
+            # Robust ATR validation: do not silently swallow NaN
+            import pandas as pd
+            raw_atr = latest_bar.get("atr")
+            if pd.isna(raw_atr) or float(raw_atr or 0.0) <= 0:
+                atr = 0.0
+                if unrealized_r >= trail_act_r:
+                    logger.warning(
+                        "Paper position #%s: trailing stop threshold reached (unrealized_r=%.2f >= %.2f) "
+                        "but ATR is invalid/NaN (%s); cannot trail stop on this bar",
+                        pos["id"], unrealized_r, trail_act_r, raw_atr
+                    )
+            else:
+                atr = float(raw_atr)
+
             holding_bars = int(pos["holding_bars"]) + 1
 
             if direction == "LONG":
@@ -525,22 +558,71 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                 finally:
                     conn.close()
         else:
+            # Check risk circuit breakers before discovering / opening new trades
+            from paper.circuit_breaker import check_circuit_breakers
+            allowed, breaker_msg = check_circuit_breakers()
+            if not allowed:
+                logger.info("Skipping signal evaluation for %s: %s", symbol, breaker_msg)
+                continue
+
             run_params = dict(BASE_PARAMS, symbol=symbol, market=market, timeframe=timeframe)
             if strategy_name in TREND_ALIGNMENT_STRATEGIES and timeframe != HTF_TIMEFRAME:
-                run_params["htf_df"] = fetch_ohlcv_with_features_df(symbol, market, HTF_TIMEFRAME, closed_only=True)
+                run_params["htf_df"] = fetch_ohlcv_with_features_df(symbol, market, HTF_TIMEFRAME, closed_only=True, limit=300)
             if strategy_name in PAIRS_STRATEGIES and symbol != PAIRS_BASE_SYMBOL:
-                run_params["pair_df"] = fetch_ohlcv_with_features_df(PAIRS_BASE_SYMBOL, market, timeframe, closed_only=True)
+                run_params["pair_df"] = fetch_ohlcv_with_features_df(PAIRS_BASE_SYMBOL, market, timeframe, closed_only=True, limit=300)
                 run_params["pair_symbol"] = PAIRS_BASE_SYMBOL
 
             sim_trades = STRATEGIES[strategy_name](df, run_params)
             if sim_trades:
                 latest_trade = sim_trades[-1]
                 # Current behavior is intentionally limited to trades whose
-                # entry is represented by the latest closed candle. A later P0.5
-                # change will introduce SIGNAL -> PENDING_ENTRY -> ACTIVE so a
-                # signal is never retroactively filled after its bar opened.
+                # entry is represented by the latest closed candle.
                 if latest_trade.get("entry_time") == candle_open_time:
-                    if _insert_position(cfg, latest_trade, current_close, candle_open_time):
+                    # ML Signal Filtering Gate (if model attached to this paper config)
+                    ml_model_id = cfg.get("ml_model_id")
+                    ml_probability = None
+                    ml_threshold = None
+
+                    if ml_model_id:
+                        try:
+                            import json
+                            from pathlib import Path
+                            import joblib
+                            from ml.artifacts import ModelArtifact
+                            from ml.strategy import MLSignalFilter
+
+                            manifest_path = Path("ml_models") / f"{ml_model_id}.json"
+                            model_path = Path("ml_models") / f"{ml_model_id}.joblib"
+                            if manifest_path.exists() and model_path.exists():
+                                with open(manifest_path, "r", encoding="utf-8") as mf:
+                                    manifest = json.load(mf)
+                                artifact = ModelArtifact(**manifest)
+                                model = joblib.load(model_path)
+                                ml_filter = MLSignalFilter(artifact=artifact, model=model, threshold=artifact.threshold)
+
+                                # Evaluate features on current candle
+                                feature_row = pd.DataFrame([latest_bar.to_dict()])
+                                probs = ml_filter.predict_probability(feature_row)
+                                ml_probability = float(probs[0])
+                                ml_threshold = float(ml_filter.threshold)
+
+                                if ml_probability < ml_threshold:
+                                    logger.info(
+                                        "Paper trading signal %s (%s) REJECTED by ML model %s: prob=%.4f < threshold=%.4f",
+                                        symbol, latest_trade["direction"], ml_model_id, ml_probability, ml_threshold
+                                    )
+                                    continue
+                                logger.info(
+                                    "Paper trading signal %s (%s) ACCEPTED by ML model %s: prob=%.4f >= threshold=%.4f",
+                                    symbol, latest_trade["direction"], ml_model_id, ml_probability, ml_threshold
+                                )
+                            else:
+                                logger.warning("ML model files for %s not found in ml_models/; executing without ML filter", ml_model_id)
+                        except Exception as ml_err:
+                            logger.error("Error evaluating ML signal filter %s: %s; executing without filter", ml_model_id, ml_err)
+
+                    if _insert_position(cfg, latest_trade, current_close, candle_open_time,
+                                        ml_model_id=ml_model_id, ml_probability=ml_probability):
                         result["new_positions_opened"] += 1
                         logger.info("Opened paper position for %s (%s) via %s", symbol, latest_trade["direction"], strategy_name)
                         try:
@@ -553,6 +635,9 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                                 take_profit=float(latest_trade["take_profit"]),
                                 initial_risk=abs(float(latest_trade["entry_price"]) - float(latest_trade["stop_loss"])),
                                 atr=float(latest_bar.get("atr", 0) or 0),
+                                ml_probability=ml_probability,
+                                ml_threshold=ml_threshold,
+                                ml_model_id=ml_model_id,
                             )
                         except Exception as tel_err:
                             logger.warning("Telegram entry signal alert failed: %s", tel_err)

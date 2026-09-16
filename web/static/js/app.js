@@ -553,6 +553,10 @@ const App = {
             if (titleEl) titleEl.innerText = "Phase B: Live Paper Trading";
             if (descEl) descEl.innerText = "Simulate forward order execution against real market data without risk";
             this.fetchPaperData();
+        } else if (tabId === "ml-studio") {
+            if (titleEl) titleEl.innerText = "Machine Learning Forecast & Tournament Studio";
+            if (descEl) descEl.innerText = "Multi-model tournament validation, probability calibration, and AI signal gating";
+            this.fetchMLData();
         } else if (tabId === "strategies") {
             if (titleEl) titleEl.innerText = "Strategy Library & Rule Builder";
             if (descEl) descEl.innerText = "Explore strategy methodologies, benchmark performance, and create custom strategies";
@@ -1763,6 +1767,358 @@ const App = {
         }
     },
 
+    // ========================================================================
+    // ML STUDIO & CIRCUIT BREAKER METHODS
+    // ========================================================================
+    async fetchMLData() {
+        try {
+            // 1. Fetch circuit breakers
+            const cbRes = await fetch(`${API_BASE}/api/paper/circuit-breakers`, {
+                headers: this.getAuthHeaders()
+            });
+            if (cbRes.ok) {
+                const cb = await cbRes.json();
+                const badge = document.getElementById("ml-breaker-badge");
+                const details = document.getElementById("ml-breaker-details");
+                if (badge) {
+                    if (cb.status === "NORMAL") {
+                        badge.className = "mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-950 text-emerald-400 border border-emerald-800";
+                        badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400"></span> NOMINAL`;
+                    } else {
+                        badge.className = "mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-rose-950 text-rose-400 border border-rose-800";
+                        badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-400 animate-pulse"></span> TRIPPED`;
+                    }
+                }
+                if (details) {
+                    details.innerText = `Active: ${cb.active_positions}/${cb.max_concurrent_positions} • Daily PnL: $${cb.today_realized_pnl_usd.toFixed(2)}`;
+                }
+            }
+
+            // 2. Fetch models count
+            const modelsRes = await fetch(`${API_BASE}/api/ml/models`, {
+                headers: this.getAuthHeaders()
+            });
+            if (modelsRes.ok) {
+                const md = await modelsRes.json();
+                const modelsStat = document.getElementById("ml-stat-models");
+                if (modelsStat) modelsStat.innerText = md.models ? md.models.length : 0;
+            }
+
+            // 3. Fetch experiments list
+            const expRes = await fetch(`${API_BASE}/api/ml/experiments`, {
+                headers: this.getAuthHeaders()
+            });
+            if (expRes.ok) {
+                const expData = await expRes.json();
+                const experiments = expData.experiments || [];
+                const statExp = document.getElementById("ml-stat-experiments");
+                if (statExp) statExp.innerText = experiments.length;
+
+                const tbody = document.getElementById("ml-experiments-table-body");
+                if (tbody) {
+                    if (experiments.length === 0) {
+                        tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-500 text-xs">No ML tournaments found. Launch a new tournament using the button above.</td></tr>`;
+                    } else {
+                        tbody.innerHTML = experiments.map(exp => {
+                            const rocColor = exp.roc_auc !== null ? (exp.roc_auc >= 0.55 ? "text-emerald-400 font-bold" : (exp.roc_auc >= 0.5 ? "text-sky-400" : "text-amber-400")) : "text-slate-500";
+                            const rocText = exp.roc_auc !== null ? exp.roc_auc.toFixed(3) : "N/A";
+                            const rColor = exp.ml_test_r >= 0 ? "text-emerald-400 font-bold" : "text-rose-400 font-bold";
+                            const baseColor = exp.baseline_test_r >= 0 ? "text-slate-300" : "text-slate-400";
+
+                            return `
+                                <tr class="border-b border-slate-800/60 hover:bg-slate-800/30 transition-colors">
+                                    <td class="py-3 px-3">
+                                        <div class="font-mono text-xs font-bold text-slate-200">${exp.symbol} <span class="text-[10px] text-sky-400 uppercase font-sans">(${exp.market})</span></div>
+                                        <div class="text-[10px] text-slate-400 font-mono">${exp.timeframe} • ${exp.experiment_id.split("-").slice(-2).join("-")}</div>
+                                    </td>
+                                    <td class="py-3 px-3 font-mono text-xs text-sky-300">${exp.strategy}</td>
+                                    <td class="py-3 px-3">
+                                        <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-purple-950/70 text-purple-300 border border-purple-800/50">
+                                            ${exp.winner_model}
+                                        </span>
+                                    </td>
+                                    <td class="py-3 px-3 font-mono text-xs font-bold text-amber-400">${(exp.threshold * 100).toFixed(0)}%</td>
+                                    <td class="py-3 px-3 font-mono text-xs ${rocColor}">${rocText}</td>
+                                    <td class="py-3 px-3 font-mono text-xs ${baseColor}">${exp.baseline_test_r >= 0 ? "+" : ""}${exp.baseline_test_r.toFixed(2)}R</td>
+                                    <td class="py-3 px-3 font-mono text-xs ${rColor}">${exp.ml_test_r >= 0 ? "+" : ""}${exp.ml_test_r.toFixed(2)}R</td>
+                                    <td class="py-3 px-3 font-mono text-xs text-slate-300">${exp.ml_test_win_rate ? exp.ml_test_win_rate.toFixed(1) + "%" : "N/A"} <span class="text-[10px] text-slate-500">(${exp.ml_test_trades}t)</span></td>
+                                    <td class="py-3 px-3">
+                                        <div class="flex items-center gap-2">
+                                            <button onclick="App.inspectMLExperiment('${exp.experiment_id}')" class="px-2.5 py-1 rounded text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors">
+                                                Inspect
+                                            </button>
+                                            <button onclick="App.openDeployMLModal('${exp.experiment_id}', '${exp.winner_model}', ${exp.threshold})" class="px-2.5 py-1 rounded text-[11px] font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-sm transition-all flex items-center gap-1">
+                                                <i data-lucide="zap" class="w-3 h-3"></i> Deploy
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join("");
+                        if (window.lucide) window.lucide.createIcons();
+                    }
+                }
+            }
+        } catch (e) {
+            console.error("fetchMLData error:", e);
+        }
+    },
+
+    async tripCircuitBreaker() {
+        if (!confirm("⚠️ Are you sure you want to trigger the EMERGENCY STOP circuit breaker?\n\nThis will immediately halt all new paper position openings across all strategies.")) {
+            return;
+        }
+        try {
+            const res = await fetch(`${API_BASE}/api/paper/circuit-breakers/emergency-stop`, {
+                method: "POST",
+                headers: this.getAuthHeaders()
+            });
+            const data = await res.json();
+            this.showToast("Emergency kill switch activated!", "warning");
+            await this.fetchMLData();
+        } catch (e) {
+            alert("Error tripping circuit breaker: " + e.message);
+        }
+    },
+
+    async resetCircuitBreaker() {
+        try {
+            const res = await fetch(`${API_BASE}/api/paper/circuit-breakers/reset`, {
+                method: "POST",
+                headers: this.getAuthHeaders()
+            });
+            const data = await res.json();
+            this.showToast("Circuit breaker reset: new trade entries re-enabled", "success");
+            await this.fetchMLData();
+        } catch (e) {
+            alert("Error resetting circuit breaker: " + e.message);
+        }
+    },
+
+    openRunMLModal() {
+        const modal = document.getElementById("modal-run-ml");
+        if (modal) {
+            modal.classList.remove("hidden");
+            modal.classList.add("flex");
+        }
+    },
+
+    closeRunMLModal() {
+        const modal = document.getElementById("modal-run-ml");
+        if (modal) {
+            modal.classList.add("hidden");
+            modal.classList.remove("flex");
+        }
+    },
+
+    async submitMLRun() {
+        const btn = document.getElementById("btn-submit-ml-run");
+        const origHtml = btn ? btn.innerHTML : "";
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<div class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Training Tournament...`;
+        }
+
+        const symbol = document.getElementById("ml-run-symbol").value.trim().toUpperCase();
+        const market = document.getElementById("ml-run-market").value;
+        const timeframe = document.getElementById("ml-run-timeframe").value;
+        const strategy_name = document.getElementById("ml-run-strategy").value;
+        const model_type = document.getElementById("ml-run-model").value;
+        const target_type = document.getElementById("ml-run-target").value;
+        const min_validation_trades = parseInt(document.getElementById("ml-run-min-trades").value) || 5;
+
+        try {
+            const res = await fetch(`${API_BASE}/api/ml/run-experiment`, {
+                method: "POST",
+                headers: {
+                    ...this.getAuthHeaders(),
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    symbol, market, timeframe, strategy_name,
+                    model_type, target_type, min_validation_trades
+                })
+            });
+            const data = await res.json();
+            if (res.ok && data.status === "success") {
+                this.closeRunMLModal();
+                this.showToast(`Tournament completed! Winner: ${data.result?.winner?.model_type || 'Selected'}`, "success");
+                await this.fetchMLData();
+            } else {
+                alert(`ML Run Failed: ${data.detail || JSON.stringify(data)}`);
+            }
+        } catch (e) {
+            alert(`ML Run Network Error: ${e.message}`);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = origHtml;
+                if (window.lucide) window.lucide.createIcons();
+            }
+        }
+    },
+
+    openDeployMLModal(modelId, modelType, threshold) {
+        document.getElementById("deploy-ml-model-id").value = modelId;
+        document.getElementById("deploy-ml-label-id").innerText = modelId;
+        document.getElementById("deploy-ml-label-model").innerText = modelType;
+        document.getElementById("deploy-ml-label-threshold").innerText = `${(threshold * 100).toFixed(1)}%`;
+
+        const modal = document.getElementById("modal-deploy-ml");
+        if (modal) {
+            modal.classList.remove("hidden");
+            modal.classList.add("flex");
+        }
+    },
+
+    closeDeployMLModal() {
+        const modal = document.getElementById("modal-deploy-ml");
+        if (modal) {
+            modal.classList.add("hidden");
+            modal.classList.remove("flex");
+        }
+    },
+
+    async confirmDeployML() {
+        const btn = document.getElementById("btn-confirm-deploy-ml");
+        const origText = btn ? btn.innerHTML : "";
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<div class="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Deploying...`;
+        }
+
+        const model_id = document.getElementById("deploy-ml-model-id").value;
+        const allocated_capital = parseFloat(document.getElementById("deploy-ml-capital").value) || 5000.0;
+        const risk_per_trade_pct = parseFloat(document.getElementById("deploy-ml-risk").value) || 1.0;
+        const send_telegram = document.getElementById("deploy-ml-telegram").checked;
+
+        try {
+            const res = await fetch(`${API_BASE}/api/ml/deploy-to-paper`, {
+                method: "POST",
+                headers: {
+                    ...this.getAuthHeaders(),
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    model_id, allocated_capital, risk_per_trade_pct, send_telegram
+                })
+            });
+            const data = await res.json();
+            if (res.ok && data.status === "success") {
+                this.closeDeployMLModal();
+                this.showToast(data.message, "success");
+                await this.fetchPaperData();
+                if (confirm("🚀 ML Model successfully deployed to Live Paper Trading!\nSignals will now be gated with AI confidence.\n\nSwitch to the Paper Trading tab to view active configs?")) {
+                    this.switchTab("paper");
+                }
+            } else {
+                alert(`Deploy Failed: ${data.detail || JSON.stringify(data)}`);
+            }
+        } catch (e) {
+            alert(`Deploy Error: ${e.message}`);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = origText;
+            }
+        }
+    },
+
+    async inspectMLExperiment(experimentId) {
+        try {
+            const res = await fetch(`${API_BASE}/api/ml/experiments/${experimentId}`, {
+                headers: this.getAuthHeaders()
+            });
+            if (!res.ok) {
+                alert("Could not load experiment details.");
+                return;
+            }
+            const data = await res.json();
+            const exp = data.experiment || {};
+            const winner = data.winner || {};
+            const baseTest = exp.baseline_test_metrics || {};
+            const mlTest = exp.ml_test_metrics || {};
+            const diag = exp.probability_diagnostics || {};
+
+            document.getElementById("inspect-ml-title").innerText = data.experiment_id;
+            const container = document.getElementById("inspect-ml-content");
+            container.innerHTML = `
+                <div class="grid grid-cols-2 gap-3 p-3 rounded-lg bg-slate-800/80 border border-slate-700">
+                    <div><span class="text-slate-400">Winner Model:</span> <b class="text-purple-400">${winner.model_type || 'N/A'}</b></div>
+                    <div><span class="text-slate-400">Selected Threshold:</span> <b class="text-amber-400 font-mono">${(exp.threshold * 100).toFixed(1)}%</b></div>
+                    <div><span class="text-slate-400">ROC-AUC:</span> <b class="text-sky-400 font-mono">${diag.roc_auc !== null && diag.roc_auc !== undefined ? diag.roc_auc.toFixed(4) : 'N/A'}</b></div>
+                    <div><span class="text-slate-400">Brier Score:</span> <b class="text-slate-200 font-mono">${diag.brier_score !== null && diag.brier_score !== undefined ? diag.brier_score.toFixed(4) : 'N/A'}</b></div>
+                    <div><span class="text-slate-400">Dataset Rows:</span> <b class="text-slate-200 font-mono">${data.dataset_rows || 0}</b></div>
+                    <div><span class="text-slate-400">Evaluation Mode:</span> <b class="text-emerald-400">No-Lookahead Chronological</b></div>
+                </div>
+
+                <div class="p-3 rounded-lg bg-slate-850 border border-slate-800 space-y-2">
+                    <h4 class="font-bold text-slate-200 text-xs">Locked OOS Test Performance (Baseline vs ML Filter)</h4>
+                    <table class="w-full text-left custom-table text-xs">
+                        <thead>
+                            <tr>
+                                <th>Metric</th>
+                                <th>Rule-Based Baseline</th>
+                                <th>ML Filter (${(exp.threshold * 100).toFixed(0)}% Gate)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Net Outcome R</td>
+                                <td class="font-mono">${baseTest.total_outcome_r !== undefined ? baseTest.total_outcome_r.toFixed(2) + "R" : "0.00R"}</td>
+                                <td class="font-mono font-bold ${mlTest.total_outcome_r >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${mlTest.total_outcome_r !== undefined ? (mlTest.total_outcome_r >= 0 ? "+" : "") + mlTest.total_outcome_r.toFixed(2) + "R" : "0.00R"}</td>
+                            </tr>
+                            <tr>
+                                <td>Win Rate</td>
+                                <td class="font-mono">${baseTest.win_rate_pct !== undefined ? baseTest.win_rate_pct.toFixed(1) + "%" : "N/A"}</td>
+                                <td class="font-mono font-bold text-sky-400">${mlTest.win_rate_pct !== undefined ? mlTest.win_rate_pct.toFixed(1) + "%" : "N/A"}</td>
+                            </tr>
+                            <tr>
+                                <td>Profit Factor</td>
+                                <td class="font-mono">${baseTest.profit_factor !== undefined ? baseTest.profit_factor.toFixed(2) : "N/A"}</td>
+                                <td class="font-mono font-bold text-amber-400">${mlTest.profit_factor !== undefined ? mlTest.profit_factor.toFixed(2) : "N/A"}</td>
+                            </tr>
+                            <tr>
+                                <td>Trade Count</td>
+                                <td class="font-mono">${baseTest.trade_count || 0}</td>
+                                <td class="font-mono">${mlTest.trade_count || 0}</td>
+                            </tr>
+                            <tr>
+                                <td>Max Drawdown R</td>
+                                <td class="font-mono text-rose-400">-${baseTest.max_drawdown_r !== undefined ? baseTest.max_drawdown_r.toFixed(2) + "R" : "0.00R"}</td>
+                                <td class="font-mono text-rose-400">-${mlTest.max_drawdown_r !== undefined ? mlTest.max_drawdown_r.toFixed(2) + "R" : "0.00R"}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="p-3 rounded-lg bg-slate-850 border border-slate-800 space-y-1.5">
+                    <h4 class="font-bold text-slate-200 text-xs">Features Used</h4>
+                    <div class="flex flex-wrap gap-1.5">
+                        ${(winner.feature_columns || []).map(f => `<span class="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-300 border border-slate-700">${f}</span>`).join("")}
+                    </div>
+                </div>
+            `;
+
+            const modal = document.getElementById("modal-inspect-ml");
+            if (modal) {
+                modal.classList.remove("hidden");
+                modal.classList.add("flex");
+            }
+        } catch (e) {
+            alert("Error inspecting experiment: " + e.message);
+        }
+    },
+
+    closeInspectMLModal() {
+        const modal = document.getElementById("modal-inspect-ml");
+        if (modal) {
+            modal.classList.add("hidden");
+            modal.classList.remove("flex");
+        }
+    },
+};
 
 window.App = App;
 document.addEventListener("DOMContentLoaded", () => App.init());
+

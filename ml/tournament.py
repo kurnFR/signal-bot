@@ -59,3 +59,17 @@ def build_candidates(
     if not result:
         raise ValueError("candidate grid is empty")
     return result
+
+
+def get_expanded_model_grid() -> list[tuple[str, dict[str, Any]]]:
+    """Expanded candidate model grid spanning multiple model families (linear, bagging, boosting)."""
+    return [
+        ("logistic_regression", {"C": 0.1}),
+        ("logistic_regression", {"C": 1.0}),
+        ("logistic_regression", {"C": 10.0}),
+        ("random_forest", {"n_estimators": 50, "max_depth": 3, "min_samples_leaf": 5}),
+        ("random_forest", {"n_estimators": 100, "max_depth": 5, "min_samples_leaf": 5}),
+        ("hist_gradient_boosting", {"learning_rate": 0.05, "max_iter": 50, "max_depth": 3}),
+        ("hist_gradient_boosting", {"learning_rate": 0.10, "max_iter": 100, "max_depth": 4}),
+    ]
+

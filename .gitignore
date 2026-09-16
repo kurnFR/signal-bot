@@ -7,3 +7,5 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 ml_results/
+ml_models/
+.initial_admin_credential
