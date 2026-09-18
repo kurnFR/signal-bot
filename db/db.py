@@ -498,6 +498,26 @@ def upsert_news_events(rows):
         conn.close()
 
 
+def get_active_paper_symbols():
+    """(symbol, market, timeframe) tuples for currently active paper_configs.
+    Deliberately implemented as a direct query here rather than importing
+    paper.engine.get_paper_configs() -- that module still has the
+    import-time DB side effect flagged in PROFESSIONAL_TRADER_REVIEW.md
+    §2.6 (unresolved), so importing it from a lightweight poller like
+    ai/news_strategy_engine.py would make this feature depend on that bug
+    staying harmless. Revisit once §2.6 is fixed."""
+    sql = "SELECT DISTINCT symbol, market, timeframe FROM paper_configs WHERE is_active = 1"
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql)
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+    finally:
+        conn.close()
+
+
 def get_unprocessed_news_events(limit=100):
     """
     Rows not yet evaluated by the Phase 2 AI reasoning layer
@@ -519,5 +539,54 @@ def get_unprocessed_news_events(limit=100):
         rows = cur.fetchall()
         cur.close()
         return rows
+    finally:
+        conn.close()
+
+
+def mark_news_events_processed(event_ids):
+    """Mark news_events rows as evaluated so they aren't re-sent to the AI
+    layer on the next poll, regardless of whether they crossed the
+    confidence threshold."""
+    if not event_ids:
+        return
+    sql = "UPDATE news_events SET processed_at = NOW() WHERE id IN (%s)" % (
+        ",".join(["%s"] * len(event_ids))
+    )
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, tuple(event_ids))
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+
+def insert_news_ai_signal(signal):
+    """
+    signal: dict with keys news_event_id, symbol, bias, confidence, reasoning,
+    invalidation_condition, time_horizon, trade_timing. paper_position_id is
+    intentionally not accepted here -- Phase 2 is log-only; Phase 3 will add
+    a separate update call once positions are actually opened from this.
+    """
+    sql = """
+        INSERT INTO news_ai_signals (
+            news_event_id, symbol, bias, confidence, reasoning,
+            invalidation_condition, time_horizon, trade_timing
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+    """
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, (
+            signal["news_event_id"], signal["symbol"], signal["bias"],
+            signal["confidence"], signal.get("reasoning"),
+            signal.get("invalidation_condition"), signal.get("time_horizon"),
+            signal.get("trade_timing"),
+        ))
+        conn.commit()
+        new_id = cur.lastrowid
+        cur.close()
+        return new_id
     finally:
         conn.close()

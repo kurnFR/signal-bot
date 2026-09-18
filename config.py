@@ -76,6 +76,30 @@ NEWS_RELEVANCE_KEYWORDS = [
 ]
 
 # ---------------------------------------------------------------------------
+# News AI Overlay strategy -- Phase 2 (AI reasoning layer). Log-only: this
+# evaluates news/calendar events and stores a bias+confidence recommendation
+# in news_ai_signals, but does NOT open positions or send Telegram alerts
+# yet (that's Phase 3, gated on this phase's signal quality first -- see
+# NEWS_AI_STRATEGY_PLAN.md). Like the Phase 1 collectors, this is additive:
+# if ANTHROPIC_API_KEY is unset, ai/news_strategy_engine.py logs a warning
+# and exits cleanly.
+# ---------------------------------------------------------------------------
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
+# Model string per Anthropic's current lineup -- override via env if your
+# account uses a different alias/version.
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+
+NEWS_AI_POLL_INTERVAL_SECONDS = int(os.getenv("NEWS_AI_POLL_INTERVAL_SECONDS", 300))
+# Only signals at/above this confidence get stored as "high probability" --
+# below this, the event is still marked processed (so it isn't re-evaluated
+# every cycle) but no news_ai_signals row is written.
+NEWS_AI_MIN_CONFIDENCE = int(os.getenv("NEWS_AI_MIN_CONFIDENCE", 75))
+# Cap on unprocessed events sent to the model per (symbol) per poll cycle --
+# keeps prompt size and API cost bounded regardless of news volume.
+NEWS_AI_MAX_EVENTS_PER_SYMBOL = int(os.getenv("NEWS_AI_MAX_EVENTS_PER_SYMBOL", 15))
+
+# ---------------------------------------------------------------------------
 # Binance REST endpoints
 # ---------------------------------------------------------------------------
 SPOT_KLINE_URL = "https://api.binance.com/api/v3/klines"

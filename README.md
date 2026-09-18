@@ -1025,26 +1025,34 @@ if `trend_alignment_v1` looks more stable than what came before — and only
 run the holdout check once we're confident enough to treat it as close to
 final.
 
-## News AI Overlay Strategy — Phase 1 (data plumbing)
+## News AI Overlay Strategy — Phase 1 & 2 (data plumbing + AI reasoning, log-only)
 
-See `NEWS_AI_STRATEGY_PLAN.md` for the full design and phased rollout. This
-phase only collects and stores raw news/economic-calendar data — no AI
-reasoning or position opening happens yet (that's Phase 2/3).
+See `NEWS_AI_STRATEGY_PLAN.md` for the full design and phased rollout. These
+phases collect news/calendar data and produce AI bias/confidence
+recommendations — **no positions are opened and no Telegram alerts are sent
+yet** (that's Phase 3).
 
 ```bash
-# 1. run the migration (adds news_events + reserved news_ai_signals tables)
+# 1. run the migration (adds news_events + news_ai_signals tables)
 mysql -u crypto_bot -p crypto_signals < db/migrate_news_events.sql
 
-# 2. add CRYPTOPANIC_API_KEY and FINNHUB_API_KEY to .env (see .env.example
-#    for where to get free-tier keys for each)
+# 2. add CRYPTOPANIC_API_KEY, FINNHUB_API_KEY and ANTHROPIC_API_KEY to .env
+#    (see .env.example for where to get free-tier keys for each)
 
-# 3. run the two pollers (each exits cleanly with a warning if its key is unset)
+# 3. run the two Phase 1 collectors (each exits cleanly with a warning if its key is unset)
 python3 -m collectors.news_poller
 python3 -m collectors.econ_calendar_poller
+
+# 4. run the Phase 2 AI reasoning layer -- scores unprocessed news/calendar
+#    events for whichever symbols are currently is_active=1 in paper_configs
+python3 -m ai.news_strategy_engine --once   # single pass, good for a first test
+python3 -m ai.news_strategy_engine          # continuous poll loop
 ```
 
-Both are long-running pollers (like `oi_poller.py`), not one-shot backfills —
-run them under the same process manager/supervisor you use for the other
-collectors. Check `collector_heartbeat` for `news_poller` /
-`econ_calendar_poller` rows to confirm they're running.
+All three are long-running pollers when run without `--once` (like
+`oi_poller.py`) — run them under the same process manager/supervisor you use
+for the other collectors. Check `collector_heartbeat` for `news_poller` /
+`econ_calendar_poller` / `news_strategy_engine` rows to confirm they're
+running, and query `news_ai_signals` to see what the AI layer has flagged so
+far.
 

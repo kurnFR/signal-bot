@@ -1,14 +1,20 @@
 # News + Economic Calendar AI Overlay Strategy — Design Plan
 
-> **Status:** Phase 1 (data plumbing) implemented — `db/migrate_news_events.sql`,
-> `collectors/news_poller.py` (CryptoPanic), `collectors/econ_calendar_poller.py`
-> (Finnhub economic calendar), and the corresponding `config.py`/`.env.example`
-> entries and `db/db.py` upsert helpers are in place and unit-tested (parsing/
-> filtering logic verified offline; live API/DB behavior still needs a real
-> run with real keys). Phase 2 (AI reasoning layer) and Phase 3 (wiring to
-> the paper engine + Telegram) are not started. Decisions locked in for this
-> build: **Claude (Anthropic API)** for reasoning, **CryptoPanic** for crypto
-> news, **Finnhub** for the economic calendar (substituted for the
+> **Status:** Phase 1 (data plumbing) and Phase 2 (AI reasoning layer, log-only)
+> are implemented. Phase 1: `db/migrate_news_events.sql`, `collectors/news_poller.py`
+> (CryptoPanic), `collectors/econ_calendar_poller.py` (Finnhub economic calendar).
+> Phase 2: `ai/news_strategy_engine.py` — calls Claude, scores news/calendar
+> events per currently-active paper symbol, stores high-confidence
+> bias/reasoning in `news_ai_signals`. **Does not open positions or send
+> Telegram alerts yet** — that's Phase 3, deliberately gated on watching this
+> phase's signal quality first. All new modules unit-tested offline (parsing/
+> filtering/prompt-building logic verified with stubbed DB and mocked model
+> output); live API/DB behavior against real keys not yet verified — no
+> Anthropic/CryptoPanic/Finnhub key is available in the build sandbox. Run
+> each module once with real keys and eyeball the output before trusting it.
+> Decisions locked in for this build: **Claude (Anthropic API, model
+> `claude-sonnet-5`)** for reasoning, **CryptoPanic** for crypto news,
+> **Finnhub** for the economic calendar (substituted for the
 > originally-suggested TradingEconomics, whose free tier only returns sample
 > data — Finnhub has a genuinely usable free-tier economic calendar).
 
@@ -116,10 +122,15 @@ CREATE TABLE news_ai_signals (
 ```
 
 ## 6. Phased implementation
-1. **Data plumbing:** `news_events` table + the two collectors, no AI yet — just get clean, deduped news/calendar data flowing. ✅ **Done** — see status note at top.
-2. **AI reasoning layer, log-only:** call the model, store `news_ai_signals`, but don't open positions yet — build confidence the signal quality is real before it touches capital (even paper capital). ⬜ Not started.
-3. **Wire to paper engine + Telegram:** once signal quality looks reasonable over a couple weeks of shadow logging, enable actual position opening with the guardrails from §4. ⬜ Not started.
+1. **Data plumbing:** `news_events` table + the two collectors, no AI yet — just get clean, deduped news/calendar data flowing. ✅ **Done**.
+2. **AI reasoning layer, log-only:** call the model, store `news_ai_signals`, but don't open positions yet — build confidence the signal quality is real before it touches capital (even paper capital). ✅ **Done** — `ai/news_strategy_engine.py`. Confidence threshold (`NEWS_AI_MIN_CONFIDENCE`, default 75) and per-symbol event cap (`NEWS_AI_MAX_EVENTS_PER_SYMBOL`, default 15) are both tunable via `.env`. Scoped automatically to whichever symbols are currently `is_active=1` in `paper_configs` — i.e. whatever the Battle Royale promoted, no manual symbol config needed.
+3. **Wire to paper engine + Telegram:** once signal quality looks reasonable over a couple weeks of shadow logging, enable actual position opening with the guardrails from §4. ⬜ Not started — this is the next phase.
 4. **Feedback loop:** track win rate / expectancy of `news_ai_overlay` trades the same way technical strategies are tracked, so it earns its place next to them rather than being trusted by default. ⬜ Not started.
+
+### What to check before moving to Phase 3
+- Run `collectors/news_poller.py`, `collectors/econ_calendar_poller.py`, and `ai/news_strategy_engine.py --once` with real keys and confirm rows land correctly in `news_events` / `news_ai_signals`.
+- Spot-check a handful of `news_ai_signals.reasoning` values against the source headline — is the model's confidence calibrated (not confidently wrong), and does the `trade_timing` field correctly default to `wait_for_reaction` for not-yet-released calendar events?
+- Let it run log-only for a while and look at the *distribution* of confidence scores — if everything is clustering at 80+, the threshold or prompt likely needs tightening before Phase 3 lets any of this touch a paper position.
 
 ## 7. Decisions needed from you before implementation
 - News/economic-calendar data provider (cost, API key) — see §3.1 for recommendations.
