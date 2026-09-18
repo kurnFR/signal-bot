@@ -1024,3 +1024,27 @@ Run the new comparison (now 4 strategies), share it, and we'll figure out
 if `trend_alignment_v1` looks more stable than what came before — and only
 run the holdout check once we're confident enough to treat it as close to
 final.
+
+## News AI Overlay Strategy — Phase 1 (data plumbing)
+
+See `NEWS_AI_STRATEGY_PLAN.md` for the full design and phased rollout. This
+phase only collects and stores raw news/economic-calendar data — no AI
+reasoning or position opening happens yet (that's Phase 2/3).
+
+```bash
+# 1. run the migration (adds news_events + reserved news_ai_signals tables)
+mysql -u crypto_bot -p crypto_signals < db/migrate_news_events.sql
+
+# 2. add CRYPTOPANIC_API_KEY and FINNHUB_API_KEY to .env (see .env.example
+#    for where to get free-tier keys for each)
+
+# 3. run the two pollers (each exits cleanly with a warning if its key is unset)
+python3 -m collectors.news_poller
+python3 -m collectors.econ_calendar_poller
+```
+
+Both are long-running pollers (like `oi_poller.py`), not one-shot backfills —
+run them under the same process manager/supervisor you use for the other
+collectors. Check `collector_heartbeat` for `news_poller` /
+`econ_calendar_poller` rows to confirm they're running.
+

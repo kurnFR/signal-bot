@@ -449,3 +449,75 @@ def insert_backtest_trades(run_id, trades, batch_size=2000):
         cur.close()
     finally:
         conn.close()
+
+
+def upsert_news_events(rows):
+    """
+    rows: list of dicts with keys matching news_events columns:
+        source, category, external_id, headline, url, symbols, country,
+        impact, published_at, scheduled_at, actual_value, forecast_value,
+        previous_value, raw_payload (already-serialized JSON string or None)
+    Idempotent on (source, external_id) -- safe to re-poll the same window
+    repeatedly (e.g. a calendar event's actual_value gets updated after
+    release without creating a duplicate row).
+    """
+    if not rows:
+        return
+    sql = """
+        INSERT INTO news_events (
+            source, category, external_id, headline, url, symbols, country,
+            impact, published_at, scheduled_at, actual_value, forecast_value,
+            previous_value, raw_payload
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON DUPLICATE KEY UPDATE
+            headline=VALUES(headline),
+            url=VALUES(url),
+            symbols=VALUES(symbols),
+            impact=VALUES(impact),
+            actual_value=VALUES(actual_value),
+            forecast_value=VALUES(forecast_value),
+            previous_value=VALUES(previous_value),
+            raw_payload=VALUES(raw_payload)
+    """
+    values = [
+        (
+            r["source"], r["category"], r["external_id"], r["headline"], r.get("url"),
+            r.get("symbols"), r.get("country"), r.get("impact"), r.get("published_at"),
+            r.get("scheduled_at"), r.get("actual_value"), r.get("forecast_value"),
+            r.get("previous_value"), r.get("raw_payload"),
+        )
+        for r in rows
+    ]
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.executemany(sql, values)
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+
+def get_unprocessed_news_events(limit=100):
+    """
+    Rows not yet evaluated by the Phase 2 AI reasoning layer
+    (processed_at IS NULL), newest first.
+    """
+    sql = """
+        SELECT id, source, category, external_id, headline, url, symbols, country,
+               impact, published_at, scheduled_at, actual_value, forecast_value,
+               previous_value, raw_payload, fetched_at
+        FROM news_events
+        WHERE processed_at IS NULL
+        ORDER BY COALESCE(published_at, scheduled_at, fetched_at) DESC
+        LIMIT %s
+    """
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(sql, (limit,))
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+    finally:
+        conn.close()

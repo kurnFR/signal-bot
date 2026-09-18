@@ -45,6 +45,37 @@ ENABLE_FUTURES = os.getenv("ENABLE_FUTURES", "false").lower() == "true"
 MARKETS = ["spot", "futures"] if ENABLE_FUTURES else ["spot"]
 
 # ---------------------------------------------------------------------------
+# News + economic calendar (Phase 1 of the News AI Overlay strategy --
+# data plumbing only; see NEWS_AI_STRATEGY_PLAN.md for the full design).
+# Both keys are optional at this stage: if unset, the corresponding poller
+# logs a warning and exits cleanly rather than crashing the rest of the app,
+# since this feature is additive and shouldn't block existing collectors.
+# ---------------------------------------------------------------------------
+CRYPTOPANIC_API_KEY = os.getenv("CRYPTOPANIC_API_KEY", "")
+CRYPTOPANIC_API_URL = "https://cryptopanic.com/api/v1/posts/"
+
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
+FINNHUB_ECON_CALENDAR_URL = "https://finnhub.io/api/v1/calendar/economic"
+
+NEWS_POLL_INTERVAL_SECONDS = int(os.getenv("NEWS_POLL_INTERVAL_SECONDS", 120))
+ECON_CALENDAR_POLL_INTERVAL_SECONDS = int(os.getenv("ECON_CALENDAR_POLL_INTERVAL_SECONDS", 3600))
+
+# Only macro events at/above this Finnhub "impact" level are stored --
+# low-impact calendar noise (minor regional data releases) isn't worth
+# feeding to the AI reasoning step in Phase 2.
+ECON_CALENDAR_MIN_IMPACT = os.getenv("ECON_CALENDAR_MIN_IMPACT", "medium")  # low | medium | high
+
+# Crypto-relevant keyword filter applied to CryptoPanic results before
+# they're stored -- CryptoPanic's own currency filter already scopes results
+# to the configured SYMBOLS, this is a secondary relevance guard for the
+# AI reasoning step in Phase 2 (kept here, not in the AI module, so the
+# same keyword list can be reused/tuned without touching model-call code).
+NEWS_RELEVANCE_KEYWORDS = [
+    "sec", "etf", "regulat", "fomc", "rate cut", "rate hike", "cpi", "inflation",
+    "hack", "exploit", "liquidat", "halving", "listing", "delisting", "outflow", "inflow",
+]
+
+# ---------------------------------------------------------------------------
 # Binance REST endpoints
 # ---------------------------------------------------------------------------
 SPOT_KLINE_URL = "https://api.binance.com/api/v3/klines"
