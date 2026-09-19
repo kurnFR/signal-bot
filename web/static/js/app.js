@@ -63,6 +63,60 @@ const App = {
     },
 
     // ----------------------------------------------------
+    // TOAST NOTIFICATIONS
+    // ----------------------------------------------------
+    showToast(message, type = "info") {
+        let container = document.getElementById("toast-container");
+        if (!container) {
+            container = document.createElement("div");
+            container.id = "toast-container";
+            container.style.cssText = [
+                "position:fixed", "top:1rem", "right:1rem", "z-index:9999",
+                "display:flex", "flex-direction:column", "gap:0.5rem",
+                "max-width:22rem", "pointer-events:none",
+            ].join(";");
+            document.body.appendChild(container);
+        }
+
+        const palette = {
+            success: { border: "#10b981", icon: "check-circle", iconColor: "#34d399" },
+            error: { border: "#ef4444", icon: "alert-circle", iconColor: "#f87171" },
+            warning: { border: "#f59e0b", icon: "alert-triangle", iconColor: "#fbbf24" },
+            info: { border: "#3b82f6", icon: "info", iconColor: "#60a5fa" },
+        };
+        const style = palette[type] || palette.info;
+
+        const toast = document.createElement("div");
+        toast.style.cssText = [
+            "pointer-events:auto", "background:#111827", `border-left:3px solid ${style.border}`,
+            "border-top:1px solid #1f293d", "border-right:1px solid #1f293d", "border-bottom:1px solid #1f293d",
+            "border-radius:0.5rem", "padding:0.75rem 1rem", "display:flex", "align-items:flex-start", "gap:0.6rem",
+            "box-shadow:0 10px 25px -5px rgba(0,0,0,0.4)", "font-size:0.8rem", "color:#e2e8f0",
+            "opacity:0", "transform:translateX(1rem)", "transition:opacity 0.2s ease, transform 0.2s ease",
+        ].join(";");
+        toast.innerHTML = `
+            <i data-lucide="${style.icon}" style="width:16px;height:16px;flex-shrink:0;margin-top:1px;color:${style.iconColor}"></i>
+            <span style="flex:1;line-height:1.35;word-break:break-word;">${message}</span>
+            <button style="background:none;border:none;color:#64748b;cursor:pointer;line-height:1;font-size:0.9rem;padding:0 0 0 0.25rem;" aria-label="Dismiss">&times;</button>
+        `;
+        container.appendChild(toast);
+        if (window.lucide) window.lucide.createIcons();
+
+        requestAnimationFrame(() => {
+            toast.style.opacity = "1";
+            toast.style.transform = "translateX(0)";
+        });
+
+        const remove = () => {
+            toast.style.opacity = "0";
+            toast.style.transform = "translateX(1rem)";
+            setTimeout(() => toast.remove(), 200);
+        };
+        toast.querySelector("button").addEventListener("click", remove);
+        setTimeout(remove, 4500);
+    },
+
+    // ----------------------------------------------------
     // AUTHENTICATION & SESSIONS
     // ----------------------------------------------------
     async checkAuth() {
@@ -918,6 +972,20 @@ const App = {
     // ----------------------------------------------------
     // BACKTEST STUDIO
     // ----------------------------------------------------
+    renderBacktestStudio() {
+        // Called every time the Backtest Studio tab is opened (see
+        // switchTab()). Refreshes both dropdowns from the latest fetched
+        // data -- coverage/strategies may have changed (e.g. a new backfill)
+        // since app init or the last visit to this tab. Was previously
+        // called but never defined, throwing on every visit to this tab
+        // (same bug class as the missing showToast() above).
+        this.updateSymbolSelectors();
+        this.updateStrategySelectors();
+        if (this.strategiesList.length > 0) {
+            this.onStrategyChanged();
+        }
+    },
+
     updateSymbolSelectors() {
         const symbolSelect = document.getElementById("bt-symbol-select");
         if (!symbolSelect) return;
