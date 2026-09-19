@@ -512,7 +512,20 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
             trail_act_r = float(pos["trail_activation_r"])
             trail_dist_mult = float(pos["trail_distance_atr_mult"])
 
-            # Robust ATR validation: do not silently swallow NaN
+            holding_bars = int(pos["holding_bars"]) + 1
+
+            if direction == "LONG":
+                unrealized_pct = (current_close - entry_price) / entry_price
+                unrealized_r = (current_close - entry_price) / initial_risk if initial_risk > 0 else 0.0
+            else:
+                unrealized_pct = (entry_price - current_close) / entry_price
+                unrealized_r = (entry_price - current_close) / initial_risk if initial_risk > 0 else 0.0
+
+            # Robust ATR validation: do not silently swallow NaN. Must run
+            # AFTER unrealized_r is computed above -- it's referenced in the
+            # warning log below (this ordering bug previously caused a
+            # NameError -> uncaught 500 on every /api/paper/sync call that
+            # touched a position with invalid/NaN ATR on its latest bar).
             import pandas as pd
             raw_atr = latest_bar.get("atr")
             if pd.isna(raw_atr) or float(raw_atr or 0.0) <= 0:
@@ -525,15 +538,6 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                     )
             else:
                 atr = float(raw_atr)
-
-            holding_bars = int(pos["holding_bars"]) + 1
-
-            if direction == "LONG":
-                unrealized_pct = (current_close - entry_price) / entry_price
-                unrealized_r = (current_close - entry_price) / initial_risk if initial_risk > 0 else 0.0
-            else:
-                unrealized_pct = (entry_price - current_close) / entry_price
-                unrealized_r = (entry_price - current_close) / initial_risk if initial_risk > 0 else 0.0
 
             exit_reason = None
             exit_price = None

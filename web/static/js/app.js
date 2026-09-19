@@ -549,12 +549,25 @@ const App = {
                 method: "POST",
                 headers: this.getAuthHeaders()
             });
+            if (!res.ok) {
+                // Surface the real backend error instead of letting a
+                // non-JSON error body (e.g. a plain-text 500) blow up on
+                // res.json() with a confusing "Unexpected token" message.
+                let detail = `HTTP ${res.status}`;
+                try {
+                    const errBody = await res.json();
+                    detail = errBody.detail || JSON.stringify(errBody);
+                } catch (_) {
+                    detail = await res.text();
+                }
+                throw new Error(detail);
+            }
             const data = await res.json();
             const r = data.results || {};
             this.showToast(`Market sync evaluated ${r.evaluated_configs} active strategies: ${r.new_positions_opened} new entries, ${r.positions_closed} exits.`, "success");
             await this.fetchPaperData();
         } catch (e) {
-            alert("Sync error: " + e);
+            this.showToast(`Sync error: ${e.message || e}`, "error");
         } finally {
             if (btn) btn.innerHTML = `<i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Evaluate Market Tick`;
             if (window.lucide) window.lucide.createIcons();

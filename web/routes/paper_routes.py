@@ -1,6 +1,7 @@
 """
 API Router for Phase B: Live Paper Trading.
 """
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -75,8 +76,18 @@ def close_position(position_id: int):
 
 @router.post("/sync")
 def sync_market_tick():
-    eval_res = sync_and_evaluate_paper_trading()
-    return {"status": "success", "results": eval_res}
+    try:
+        eval_res = sync_and_evaluate_paper_trading()
+        return {"status": "success", "results": eval_res}
+    except Exception as e:
+        # Without this, an unhandled exception here falls through to
+        # Starlette's default 500 handler, which returns a *plain-text*
+        # body ("Internal Server Error") rather than JSON -- the frontend's
+        # res.json() call then throws its own confusing
+        # "Unexpected token... is not valid JSON" error, masking whatever
+        # the real backend bug was. Return JSON with the real detail instead.
+        logging.getLogger("web.paper_routes").exception("sync_market_tick failed")
+        raise HTTPException(status_code=500, detail=f"Sync failed: {e}")
 
 
 class DeployStrategyRequest(BaseModel):
