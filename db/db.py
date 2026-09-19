@@ -715,3 +715,120 @@ def ensure_overlay_paper_config(symbol, market, timeframe, strategy_name, alloca
         cur.close()
     finally:
         conn.close()
+
+
+# ----------------------------------------------------------------------------
+# News AI Overlay -- visibility panel read helpers (web/routes/news_routes.py)
+# ----------------------------------------------------------------------------
+
+def get_recent_news_signals(limit=50):
+    """news_ai_signals joined with the news_event that triggered them, newest
+    first -- everything the AI has evaluated highly enough to store, with
+    enough context to judge whether it was a reasonable call."""
+    limit = max(1, min(int(limit), 200))
+    sql = """
+        SELECT
+            s.id, s.symbol, s.market, s.timeframe, s.bias, s.confidence,
+            s.reasoning, s.invalidation_condition, s.time_horizon, s.trade_timing,
+            s.acted_on, s.paper_position_id, s.skip_reason, s.created_at,
+            e.headline, e.url, e.source, e.category, e.country, e.impact,
+            e.scheduled_at, e.actual_value, e.forecast_value, e.previous_value
+        FROM news_ai_signals s
+        LEFT JOIN news_events e ON e.id = s.news_event_id
+        ORDER BY s.created_at DESC
+        LIMIT %s
+    """
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(sql, (limit,))
+        rows = cur.fetchall()
+        cur.close()
+        for r in rows:
+            r["confidence"] = int(r["confidence"]) if r["confidence"] is not None else None
+            r["acted_on"] = bool(r["acted_on"])
+            for dt_key in ("created_at", "scheduled_at"):
+                if r.get(dt_key) is not None:
+                    r[dt_key] = str(r[dt_key])
+        return rows
+    finally:
+        conn.close()
+
+
+def get_recent_news_events(limit=30):
+    """Raw news_events feed, newest first -- what's actually been collected,
+    independent of whether the AI layer judged it worth a signal. Gives a
+    visibility panel a way to show "AI is running and seeing data" even
+    during a quiet stretch with no high-confidence signals."""
+    limit = max(1, min(int(limit), 200))
+    sql = """
+        SELECT id, source, category, headline, url, symbols, country, impact,
+               published_at, scheduled_at, actual_value, forecast_value,
+               previous_value, processed_at, fetched_at
+        FROM news_events
+        ORDER BY COALESCE(published_at, scheduled_at, fetched_at) DESC
+        LIMIT %s
+    """
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(sql, (limit,))
+        rows = cur.fetchall()
+        cur.close()
+        for r in rows:
+            for dt_key in ("published_at", "scheduled_at", "processed_at", "fetched_at"):
+                if r.get(dt_key) is not None:
+                    r[dt_key] = str(r[dt_key])
+        return rows
+    finally:
+        conn.close()
+
+
+def get_news_overlay_stats():
+    """Summary KPIs for the News AI Overlay visibility panel: how much has
+    been collected/evaluated, how often the AI actually acts, and whether
+    the four pollers are alive (collector_heartbeat)."""
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+
+        cur.execute("SELECT COUNT(*) AS n FROM news_events")
+        total_events = cur.fetchone()["n"]
+
+        cur.execute("SELECT COUNT(*) AS n FROM news_events WHERE processed_at IS NOT NULL")
+        processed_events = cur.fetchone()["n"]
+
+        cur.execute("SELECT COUNT(*) AS n, AVG(confidence) AS avg_conf FROM news_ai_signals")
+        sig_row = cur.fetchone()
+        total_signals = sig_row["n"]
+        avg_confidence = round(float(sig_row["avg_conf"]), 1) if sig_row["avg_conf"] is not None else None
+
+        cur.execute("SELECT COUNT(*) AS n FROM news_ai_signals WHERE paper_position_id IS NOT NULL")
+        trades_opened = cur.fetchone()["n"]
+
+        cur.execute("SELECT COUNT(*) AS n FROM news_ai_signals WHERE acted_on = FALSE")
+        pending_signals = cur.fetchone()["n"]
+
+        cur.execute(
+            """
+            SELECT collector_name, status, detail, last_beat_time
+            FROM collector_heartbeat
+            WHERE collector_name IN ('news_poller', 'econ_calendar_poller', 'news_strategy_engine', 'news_execution')
+            """
+        )
+        heartbeats = cur.fetchall()
+        for h in heartbeats:
+            h["last_beat_time"] = str(h["last_beat_time"])
+        cur.close()
+
+        return {
+            "total_events_collected": total_events,
+            "events_evaluated_by_ai": processed_events,
+            "high_confidence_signals": total_signals,
+            "avg_confidence": avg_confidence,
+            "trades_opened": trades_opened,
+            "pending_signals": pending_signals,
+            "heartbeats": heartbeats,
+        }
+    finally:
+        conn.close()

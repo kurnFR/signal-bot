@@ -118,6 +118,13 @@
                     <i data-lucide="layers" class="w-4 h-4"></i>
                     <span>Strategy Library</span>
                 </button>
+                <button data-tab="news-ai" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-amber-400 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="newspaper" class="w-4 h-4 text-amber-400"></i>
+                    <div class="flex items-center justify-between w-full">
+                        <span>News AI Signals</span>
+                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-amber-950 text-amber-300 border border-amber-800">NEW</span>
+                    </div>
+                </button>
                 <button data-tab="settings" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="settings" class="w-4 h-4"></i>
                     <span>Settings & Users</span>
@@ -869,6 +876,104 @@
             </section>
 
             <!-- ============================================== -->
+            <!-- 5b. NEWS AI SIGNALS VIEW -->
+            <!-- ============================================== -->
+            <section id="view-news-ai" class="view-section hidden space-y-6">
+                <!-- Scorecard Banner -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4">
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Events Collected</span>
+                        <div id="news-kpi-events" class="text-3xl font-black font-mono text-slate-100 mt-2">0</div>
+                        <span class="text-[11px] text-slate-500">News + economic calendar</span>
+                    </div>
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Evaluated by AI</span>
+                        <div id="news-kpi-processed" class="text-3xl font-black font-mono text-sky-400 mt-2">0</div>
+                        <span class="text-[11px] text-slate-500">Scored by Claude</span>
+                    </div>
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">High-Confidence Signals</span>
+                        <div id="news-kpi-signals" class="text-3xl font-black font-mono text-amber-400 mt-2">0</div>
+                        <span class="text-[11px] text-slate-500">Avg confidence: <span id="news-kpi-avgconf">--</span></span>
+                    </div>
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Trades Opened</span>
+                        <div id="news-kpi-trades" class="text-3xl font-black font-mono text-emerald-400 mt-2">0</div>
+                        <span class="text-[11px] text-slate-500">Real paper positions</span>
+                    </div>
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Pending Review</span>
+                        <div id="news-kpi-pending" class="text-3xl font-black font-mono text-slate-100 mt-2">0</div>
+                        <span class="text-[11px] text-slate-500">Awaiting execution pass</span>
+                    </div>
+                </div>
+
+                <!-- Pipeline Health -->
+                <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                            <i data-lucide="activity" class="w-4 h-4 text-amber-400"></i>
+                            Pipeline Health
+                        </h3>
+                        <button onclick="App.fetchNewsData()" class="px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
+                            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
+                        </button>
+                    </div>
+                    <p class="text-xs text-slate-400 -mt-1.5">
+                        These four processes run independently of this web server -- see README.md. If a process shows
+                        "Not running", it either isn't started or has no API key configured.
+                    </p>
+                    <div id="news-heartbeats-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <!-- Rendered by JS -->
+                    </div>
+                </div>
+
+                <!-- Signals Table -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                            <i data-lucide="brain-circuit" class="w-4 h-4 text-amber-400"></i>
+                            AI Signal Ledger
+                        </h3>
+                        <p class="text-xs text-slate-400 mt-0.5">Every news/calendar event the AI judged confident enough to store, and what happened to it</p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left custom-table">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Symbol</th>
+                                    <th>Bias</th>
+                                    <th>Confidence</th>
+                                    <th>Trigger</th>
+                                    <th>Reasoning</th>
+                                    <th>Horizon</th>
+                                    <th>Outcome</th>
+                                </tr>
+                            </thead>
+                            <tbody id="news-signals-table-body">
+                                <tr><td colspan="8" class="text-center py-6 text-slate-500 text-xs">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Raw News Feed -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                            <i data-lucide="rss" class="w-4 h-4 text-sky-400"></i>
+                            Recent News & Calendar Feed
+                        </h3>
+                        <p class="text-xs text-slate-400 mt-0.5">Raw collected events, independent of whether the AI judged them worth a signal</p>
+                    </div>
+                    <div id="news-events-feed" class="space-y-2 max-h-[480px] overflow-y-auto pr-1">
+                        <!-- Rendered by JS -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================== -->
             <!-- 6. SETTINGS & USER MANAGEMENT VIEW -->
             <!-- ============================================== -->
             <section id="view-settings" class="view-section hidden space-y-8">
@@ -1368,7 +1473,7 @@
          browsers can keep serving a stale cached copy indefinitely since
          this file has no explicit Cache-Control header. See the
          "still seeing the old bug after a fix was pushed" class of report. -->
-    <script src="/static/js/app.js?v=20260919-2"></script>
+    <script src="/static/js/app.js?v=20260919-3"></script>
     <script>
         if (window.lucide) window.lucide.createIcons();
     </script>

@@ -117,6 +117,192 @@ const App = {
     },
 
     // ----------------------------------------------------
+    // NEWS AI OVERLAY SIGNALS
+    // ----------------------------------------------------
+    _escapeHtml(str) {
+        if (str === null || str === undefined) return "";
+        const div = document.createElement("div");
+        div.textContent = String(str);
+        return div.innerHTML;
+    },
+
+    async fetchNewsData() {
+        const grid = document.getElementById("news-heartbeats-grid");
+        const tbody = document.getElementById("news-signals-table-body");
+        const feed = document.getElementById("news-events-feed");
+        try {
+            const [statsRes, signalsRes, eventsRes] = await Promise.all([
+                fetch(`${API_BASE}/api/news/stats`, { headers: this.getAuthHeaders() }),
+                fetch(`${API_BASE}/api/news/signals?limit=50`, { headers: this.getAuthHeaders() }),
+                fetch(`${API_BASE}/api/news/events?limit=30`, { headers: this.getAuthHeaders() }),
+            ]);
+            if (!statsRes.ok || !signalsRes.ok || !eventsRes.ok) {
+                const failed = [statsRes, signalsRes, eventsRes].find(r => !r.ok);
+                let detail = `HTTP ${failed.status}`;
+                try { detail = (await failed.json()).detail || detail; } catch (_) {}
+                throw new Error(detail);
+            }
+            const stats = await statsRes.json();
+            const { signals } = await signalsRes.json();
+            const { events } = await eventsRes.json();
+
+            this._renderNewsKpis(stats);
+            this._renderNewsHeartbeats(stats.heartbeats || []);
+            this._renderNewsSignalsTable(signals);
+            this._renderNewsFeed(events);
+        } catch (e) {
+            this.showToast(`Failed to load News AI data: ${e.message || e}`, "error");
+            if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-rose-400 text-xs">Failed to load -- ${this._escapeHtml(e.message || e)}</td></tr>`;
+            if (feed) feed.innerHTML = "";
+            if (grid) grid.innerHTML = "";
+        } finally {
+            if (window.lucide) window.lucide.createIcons();
+        }
+    },
+
+    _renderNewsKpis(stats) {
+        const set = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
+        set("news-kpi-events", stats.total_events_collected ?? 0);
+        set("news-kpi-processed", stats.events_evaluated_by_ai ?? 0);
+        set("news-kpi-signals", stats.high_confidence_signals ?? 0);
+        set("news-kpi-avgconf", stats.avg_confidence != null ? `${stats.avg_confidence}%` : "--");
+        set("news-kpi-trades", stats.trades_opened ?? 0);
+        set("news-kpi-pending", stats.pending_signals ?? 0);
+    },
+
+    _renderNewsHeartbeats(heartbeats) {
+        const grid = document.getElementById("news-heartbeats-grid");
+        if (!grid) return;
+        const expected = [
+            { name: "news_poller", label: "News Collector (CryptoPanic)" },
+            { name: "econ_calendar_poller", label: "Economic Calendar (Finnhub)" },
+            { name: "news_strategy_engine", label: "AI Reasoning (Claude)" },
+            { name: "news_execution", label: "Execution & Telegram" },
+        ];
+        const byName = Object.fromEntries(heartbeats.map(h => [h.collector_name, h]));
+        const STALE_MS = 20 * 60 * 1000; // no beat in 20 min -> treat as not running
+
+        grid.innerHTML = expected.map(exp => {
+            const hb = byName[exp.name];
+            let dotColor = "bg-slate-600", label = "Not running", sub = "No heartbeat recorded yet";
+            if (hb) {
+                const age = Date.now() - new Date(hb.last_beat_time + "Z").getTime();
+                if (hb.status === "error") {
+                    dotColor = "bg-rose-400 animate-pulse"; label = "Error";
+                    sub = this._escapeHtml(hb.detail || "See process logs");
+                } else if (age > STALE_MS) {
+                    dotColor = "bg-slate-600"; label = "Not running";
+                    sub = `Last seen ${this._timeAgo(hb.last_beat_time)}`;
+                } else {
+                    dotColor = "bg-emerald-400"; label = "Running";
+                    sub = this._escapeHtml(hb.detail || `Last beat ${this._timeAgo(hb.last_beat_time)}`);
+                }
+            }
+            return `
+                <div class="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full ${dotColor} flex-shrink-0"></span>
+                        <span class="text-xs font-semibold text-slate-200">${exp.label}</span>
+                    </div>
+                    <div class="text-[11px] text-slate-500 mt-1 pl-4">${label} &middot; ${sub}</div>
+                </div>`;
+        }).join("");
+    },
+
+    _timeAgo(isoString) {
+        const diffMs = Date.now() - new Date(isoString + "Z").getTime();
+        const mins = Math.floor(diffMs / 60000);
+        if (mins < 1) return "just now";
+        if (mins < 60) return `${mins}m ago`;
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return `${hrs}h ago`;
+        return `${Math.floor(hrs / 24)}d ago`;
+    },
+
+    _renderNewsSignalsTable(signals) {
+        const tbody = document.getElementById("news-signals-table-body");
+        if (!tbody) return;
+        if (!signals || signals.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-slate-500 text-xs">No signals yet -- the AI hasn't seen anything worth a high-confidence call. Check Pipeline Health above to confirm the collectors are running.</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = signals.map(s => {
+            const biasColor = s.bias === "long" ? "text-emerald-400 bg-emerald-950 border-emerald-800"
+                : s.bias === "short" ? "text-rose-400 bg-rose-950 border-rose-800"
+                : "text-slate-400 bg-slate-800 border-slate-700";
+            let outcome;
+            if (s.paper_position_id) {
+                outcome = `<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-950 text-emerald-300 border border-emerald-800">OPENED #${s.paper_position_id}</span>`;
+            } else if (s.acted_on) {
+                outcome = `<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-slate-800 text-slate-400 border border-slate-700" title="${this._escapeHtml(s.skip_reason || '')}">SKIPPED</span>
+                    <div class="text-[10px] text-slate-500 mt-0.5">${this._escapeHtml(s.skip_reason || '')}</div>`;
+            } else {
+                outcome = `<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-950 text-amber-300 border border-amber-800">PENDING</span>`;
+            }
+            const confColor = s.confidence >= 85 ? "text-emerald-400" : s.confidence >= 75 ? "text-amber-400" : "text-slate-300";
+            return `
+                <tr>
+                    <td class="whitespace-nowrap text-slate-400">${this._formatDateTime(s.created_at)}</td>
+                    <td class="font-semibold text-slate-100">${this._escapeHtml(s.symbol)}<div class="text-[10px] text-slate-500">${this._escapeHtml(s.market)}/${this._escapeHtml(s.timeframe)}</div></td>
+                    <td><span class="px-2 py-0.5 text-[10px] font-bold rounded border ${biasColor}">${this._escapeHtml((s.bias || "").toUpperCase())}</span></td>
+                    <td class="font-mono font-bold ${confColor}">${s.confidence}%</td>
+                    <td class="max-w-[220px] text-slate-300">${s.url ? `<a href="${this._escapeHtml(s.url)}" target="_blank" rel="noopener" class="hover:text-sky-400 underline decoration-dotted">${this._escapeHtml(s.headline || "(no linked event)")}</a>` : this._escapeHtml(s.headline || "(no linked event)")}</td>
+                    <td class="max-w-[260px] text-slate-400">${this._escapeHtml(s.reasoning || "--")}</td>
+                    <td class="text-slate-400">${this._escapeHtml(s.time_horizon || "--")}</td>
+                    <td>${outcome}</td>
+                </tr>`;
+        }).join("");
+    },
+
+    _renderNewsFeed(events) {
+        const feed = document.getElementById("news-events-feed");
+        if (!feed) return;
+        if (!events || events.length === 0) {
+            feed.innerHTML = `<div class="text-center py-8 text-slate-500 text-xs">No news collected yet.</div>`;
+            return;
+        }
+        feed.innerHTML = events.map(e => {
+            const isCalendar = e.category === "macro_calendar";
+            const icon = isCalendar ? "calendar-clock" : "newspaper";
+            const badgeColor = isCalendar ? "text-purple-300 bg-purple-950 border-purple-800" : "text-sky-300 bg-sky-950 border-sky-800";
+            const badgeText = isCalendar ? (e.impact || "macro").toUpperCase() : (e.source || "news").toUpperCase();
+            const when = e.published_at || e.scheduled_at || e.fetched_at;
+            let metaLine = "";
+            if (isCalendar) {
+                metaLine = `Forecast: ${this._escapeHtml(e.forecast_value ?? "--")} &middot; Actual: ${this._escapeHtml(e.actual_value ?? "pending")} &middot; Previous: ${this._escapeHtml(e.previous_value ?? "--")}`;
+            } else if (e.symbols) {
+                metaLine = `Tagged: ${this._escapeHtml(e.symbols)}`;
+            }
+            const headline = e.url
+                ? `<a href="${this._escapeHtml(e.url)}" target="_blank" rel="noopener" class="hover:text-sky-400">${this._escapeHtml(e.headline)}</a>`
+                : this._escapeHtml(e.headline);
+            return `
+                <div class="flex items-start gap-3 p-2.5 rounded-lg hover:bg-slate-800/40 transition-all">
+                    <i data-lucide="${icon}" class="w-3.5 h-3.5 text-slate-500 flex-shrink-0 mt-0.5"></i>
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2">
+                            <span class="px-1.5 py-0.2 text-[9px] font-bold rounded border ${badgeColor}">${badgeText}</span>
+                            <span class="text-[11px] text-slate-500">${this._formatDateTime(when)}</span>
+                            ${!e.processed_at ? `<span class="text-[9px] text-amber-500">not yet evaluated</span>` : ""}
+                        </div>
+                        <div class="text-xs text-slate-200 mt-0.5">${headline}</div>
+                        ${metaLine ? `<div class="text-[10px] text-slate-500 mt-0.5">${metaLine}</div>` : ""}
+                    </div>
+                </div>`;
+        }).join("");
+    },
+
+    _formatDateTime(isoString) {
+        if (!isoString) return "--";
+        try {
+            const d = new Date(isoString.includes("Z") || isoString.includes("+") ? isoString : isoString + "Z");
+            return d.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+        } catch (_) {
+            return isoString;
+        }
+    },
+
+    // ----------------------------------------------------
     // AUTHENTICATION & SESSIONS
     // ----------------------------------------------------
     async checkAuth() {
@@ -628,6 +814,10 @@ const App = {
             if (titleEl) titleEl.innerText = "Strategy Library & Rule Builder";
             if (descEl) descEl.innerText = "Explore strategy methodologies, benchmark performance, and create custom strategies";
             this.renderStrategyLibrary();
+        } else if (tabId === "news-ai") {
+            if (titleEl) titleEl.innerText = "News AI Overlay Signals";
+            if (descEl) descEl.innerText = "What the AI has read, how confident it was, and what it did about it";
+            this.fetchNewsData();
         } else if (tabId === "settings") {
             if (titleEl) titleEl.innerText = "System Settings & User Administration";
             if (descEl) descEl.innerText = "User accounts, password resets, MariaDB connection, and execution parameters";
