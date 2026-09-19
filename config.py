@@ -80,17 +80,28 @@ NEWS_RELEVANCE_KEYWORDS = [
 # evaluates news/calendar events and stores a bias+confidence recommendation
 # in news_ai_signals, but does NOT open positions or send Telegram alerts
 # yet (that's Phase 3, gated on this phase's signal quality first -- see
-# NEWS_AI_STRATEGY_PLAN.md). Like the Phase 1 collectors, this is additive:
-# if ANTHROPIC_API_KEY is unset, ai/news_strategy_engine.py logs a warning
-# and exits cleanly.
+# NEWS_AI_STRATEGY_PLAN.md).
+# Supports multiple providers: 9router (local gateway), openrouter, or anthropic.
 # ---------------------------------------------------------------------------
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "9router").lower()  # 9router | openrouter | anthropic
+
+# 9Router configuration (local AI gateway)
+NINEROUTER_API_KEY = os.getenv("NINEROUTER_API_KEY", "")
+NINEROUTER_BASE_URL = os.getenv("NINEROUTER_BASE_URL", "http://localhost:20128/v1")
+NINEROUTER_MODEL = os.getenv("NINEROUTER_MODEL", "cf/@cf/qwen/qwen2.5-coder-32b-instruct")
+
+# OpenRouter configuration
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash-0731:free")
+
+# Anthropic direct API configuration
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-# Model string per Anthropic's current lineup -- override via env if your
-# account uses a different alias/version.
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 
 NEWS_AI_POLL_INTERVAL_SECONDS = int(os.getenv("NEWS_AI_POLL_INTERVAL_SECONDS", 300))
+
 # Only signals at/above this confidence get stored as "high probability" --
 # below this, the event is still marked processed (so it isn't re-evaluated
 # every cycle) but no news_ai_signals row is written.

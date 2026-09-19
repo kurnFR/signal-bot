@@ -17,6 +17,8 @@ import os
 import time
 import json
 from datetime import datetime, timezone
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
 
 import requests
 
@@ -120,23 +122,90 @@ def rows_from_response(raw_items):
     return rows
 
 
+_FREE_RSS_FEEDS = [
+    "https://cointelegraph.com/rss",
+    "https://www.coindesk.com/arc/outboundfeeds/rss/",
+]
+
+
+def fetch_free_rss_news(currencies):
+    rows = []
+    for feed_url in _FREE_RSS_FEEDS:
+        try:
+            resp = SESSION.get(feed_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+            if not resp.ok:
+                continue
+            root = ET.fromstring(resp.content)
+            for item in root.findall("./channel/item"):
+                title_el = item.find("title")
+                link_el = item.find("link")
+                pub_date_el = item.find("pubDate")
+                guid_el = item.find("guid")
+
+                title = title_el.text.strip() if title_el is not None and title_el.text else ""
+                link = link_el.text.strip() if link_el is not None and link_el.text else ""
+                ext_id = (guid_el.text.strip() if guid_el is not None and guid_el.text else link)[:100]
+
+                if not title or not _is_relevant(title):
+                    continue
+
+                published_at = None
+                if pub_date_el is not None and pub_date_el.text:
+                    try:
+                        published_at = parsedate_to_datetime(pub_date_el.text).astimezone(timezone.utc)
+                    except Exception:
+                        pass
+
+                title_upper = title.upper()
+                tagged = [c for c in currencies if c in title_upper]
+                tagged_symbols = ",".join(tagged) if tagged else None
+
+                rows.append({
+                    "source": "rss_news",
+                    "category": "crypto_news",
+                    "external_id": ext_id,
+                    "headline": title,
+                    "url": link or None,
+                    "symbols": tagged_symbols,
+                    "country": None,
+                    "impact": None,
+                    "published_at": published_at,
+                    "scheduled_at": None,
+                    "actual_value": None,
+                    "forecast_value": None,
+                    "previous_value": None,
+                    "raw_payload": json.dumps({"title": title, "url": link, "source": feed_url}),
+                })
+        except Exception as e:
+            logger.warning(f"Error reading free RSS feed {feed_url}: {e}")
+    return rows
+
+
 def poll_once():
     currencies = sorted({_base_currency(s) for s in SYMBOLS})
-    raw_items = fetch_news(currencies)
-    rows = rows_from_response(raw_items)
+    if CRYPTOPANIC_API_KEY:
+        raw_items = fetch_news(currencies)
+        rows = rows_from_response(raw_items)
+        detail_msg = f"{len(rows)}/{len(raw_items)} stories stored via CryptoPanic"
+    else:
+        rows = fetch_free_rss_news(currencies)
+        detail_msg = f"{len(rows)} stories stored via Free RSS (CoinTelegraph/CoinDesk)"
+
     if rows:
         upsert_news_events(rows)
-    heartbeat("news_poller", detail=f"{len(rows)} stories stored ({len(raw_items)} fetched)")
-    logger.info(f"Stored {len(rows)}/{len(raw_items)} news items for {currencies}")
+    heartbeat("news_poller", detail=detail_msg)
+    logger.info(f"{detail_msg} for {currencies}")
 
 
 def run():
     if not CRYPTOPANIC_API_KEY:
-        logger.warning(
-            "CRYPTOPANIC_API_KEY not set -- news_poller will not run. "
-            "See .env.example. Exiting cleanly (this feature is additive)."
+        logger.info(
+            "CRYPTOPANIC_API_KEY not set -- operating in FREE mode using live RSS feeds "
+            "(CoinTelegraph, CoinDesk). Free & no API key required."
         )
-        return
+    else:
+        logger.info("Starting news_poller using CryptoPanic API.")
+
     while True:
         start = time.time()
         try:
@@ -150,3 +219,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+

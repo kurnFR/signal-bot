@@ -29,6 +29,9 @@ import requests
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
+    LLM_PROVIDER,
+    NINEROUTER_API_KEY, NINEROUTER_BASE_URL, NINEROUTER_MODEL,
+    OPENROUTER_API_KEY, OPENROUTER_BASE_URL, OPENROUTER_MODEL,
     ANTHROPIC_API_KEY, ANTHROPIC_API_URL, ANTHROPIC_MODEL,
     NEWS_AI_POLL_INTERVAL_SECONDS, NEWS_AI_MIN_CONFIDENCE, NEWS_AI_MAX_EVENTS_PER_SYMBOL,
 )
@@ -173,6 +176,75 @@ def call_claude(user_prompt, retries=3):
     return None
 
 
+def call_openai_compatible(url, api_key, model, user_prompt, retries=3, provider_name="LLM"):
+    headers = {
+        "Content-Type": "application/json",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    body = {
+        "model": model,
+        "max_tokens": 600,
+        "temperature": 0.2,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt}
+        ],
+    }
+    for attempt in range(retries):
+        try:
+            resp = SESSION.post(url, headers=headers, json=body, timeout=35)
+            if resp.status_code == 429:
+                wait = int(resp.headers.get("retry-after", 20))
+                logger.warning(f"{provider_name} rate limited, sleeping {wait}s")
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            raw_text = resp.text.strip()
+            if "data: [DONE]" in raw_text:
+                raw_text = raw_text.split("data: [DONE]")[0].strip()
+            data = json.loads(raw_text)
+            choice = data.get("choices", [{}])[0]
+            msg = choice.get("message", {})
+            text = msg.get("content") or msg.get("reasoning") or ""
+            if isinstance(text, (dict, list)):
+                return json.dumps(text)
+            if not isinstance(text, str):
+                text = str(text)
+            return text.strip()
+        except Exception as e:
+            logger.warning(f"{provider_name} API attempt {attempt + 1} failed: {e}")
+            time.sleep(2 ** attempt)
+    logger.error(f"{provider_name} API call failed after retries")
+    return None
+
+
+
+def call_llm(user_prompt, retries=3):
+    if LLM_PROVIDER == "9router":
+        return call_openai_compatible(
+            url=f"{NINEROUTER_BASE_URL.rstrip('/')}/chat/completions",
+            api_key=NINEROUTER_API_KEY,
+            model=NINEROUTER_MODEL,
+            user_prompt=user_prompt,
+            retries=retries,
+            provider_name="9Router",
+        )
+    elif LLM_PROVIDER == "openrouter":
+        return call_openai_compatible(
+            url=f"{OPENROUTER_BASE_URL.rstrip('/')}/chat/completions",
+            api_key=OPENROUTER_API_KEY,
+            model=OPENROUTER_MODEL,
+            user_prompt=user_prompt,
+            retries=retries,
+            provider_name="OpenRouter",
+        )
+    else:
+        return call_claude(user_prompt, retries=retries)
+
+
+
 def parse_model_output(text):
     """Strict-ish JSON parse with a couple of defensive fallbacks for the
     model wrapping output in a fenced code block despite instructions not
@@ -220,9 +292,10 @@ def evaluate_symbol(symbol, market, timeframe, events):
     events = events[:NEWS_AI_MAX_EVENTS_PER_SYMBOL]
     market_ctx = _market_context(symbol, market, timeframe)
     prompt = build_user_prompt(symbol, market, timeframe, market_ctx, events)
-    raw = call_claude(prompt)
+    raw = call_llm(prompt)
     parsed = parse_model_output(raw)
     event_ids = [e["id"] for e in events]
+
 
     if parsed is None:
         logger.info(f"{symbol}: no usable AI output this cycle ({len(events)} events sent)")
@@ -295,13 +368,33 @@ def poll_once():
 
 
 def run(once=False):
-    if not ANTHROPIC_API_KEY:
-        logger.warning(
-            "ANTHROPIC_API_KEY not set -- news_strategy_engine will not run. "
-            "See .env.example. Exiting cleanly (this feature is additive)."
-        )
-        return
+    if LLM_PROVIDER == "9router":
+        if not NINEROUTER_API_KEY and not NINEROUTER_BASE_URL:
+            logger.warning(
+                "LLM_PROVIDER=9router but NINEROUTER_BASE_URL or NINEROUTER_API_KEY is unset. "
+                "See .env. Exiting cleanly."
+            )
+            return
+        logger.info(f"Using 9Router gateway at {NINEROUTER_BASE_URL} with model '{NINEROUTER_MODEL}'")
+    elif LLM_PROVIDER == "openrouter":
+        if not OPENROUTER_API_KEY:
+            logger.warning(
+                "LLM_PROVIDER=openrouter but OPENROUTER_API_KEY is not set. "
+                "See .env. Exiting cleanly."
+            )
+            return
+        logger.info(f"Using OpenRouter with model '{OPENROUTER_MODEL}'")
+    else:
+        if not ANTHROPIC_API_KEY:
+            logger.warning(
+                "LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set -- news_strategy_engine will not run. "
+                "See .env.example. Exiting cleanly (this feature is additive)."
+            )
+            return
+        logger.info(f"Using Anthropic API with model '{ANTHROPIC_MODEL}'")
+
     while True:
+
         start = time.time()
         try:
             poll_once()

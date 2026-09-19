@@ -107,27 +107,80 @@ def rows_from_response(raw_items):
     return rows
 
 
+_FREE_FOREXFACTORY_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+
+
+def fetch_free_forexfactory_calendar():
+    try:
+        resp = SESSION.get(_FREE_FOREXFACTORY_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        if not resp.ok:
+            logger.warning(f"ForexFactory calendar request failed: HTTP {resp.status_code}")
+            return []
+        items = resp.json()
+        rows = []
+        for ev in items:
+            country = ev.get("country", "")
+            impact = (ev.get("impact") or "").lower()
+            if not _meets_min_impact(impact):
+                continue
+            title = ev.get("title", "")
+            date_str = ev.get("date", "")
+            dt = None
+            if date_str:
+                try:
+                    dt = datetime.fromisoformat(date_str).astimezone(timezone.utc)
+                except Exception:
+                    pass
+            ext_id = f"ff:{country}:{title}:{date_str}"[:100]
+            rows.append({
+                "source": "forexfactory",
+                "category": "macro_calendar",
+                "external_id": ext_id,
+                "headline": f"{country} {title}",
+                "url": None,
+                "symbols": None,
+                "country": country,
+                "impact": impact,
+                "published_at": None,
+                "scheduled_at": dt,
+                "actual_value": None,
+                "forecast_value": ev.get("forecast") or None,
+                "previous_value": ev.get("previous") or None,
+                "raw_payload": json.dumps(ev),
+            })
+        return rows
+    except Exception as e:
+        logger.warning(f"Failed to fetch ForexFactory calendar: {e}")
+        return []
+
+
 def poll_once():
-    today = datetime.now(timezone.utc).date()
-    # Fetch a window covering the recent past (so actual_value updates for
-    # already-scheduled events get picked up) through 2 weeks ahead.
-    start_date = (today - timedelta(days=2)).isoformat()
-    end_date = (today + timedelta(days=14)).isoformat()
-    raw_items = fetch_calendar(start_date, end_date)
-    rows = rows_from_response(raw_items)
+    if FINNHUB_API_KEY:
+        today = datetime.now(timezone.utc).date()
+        start_date = (today - timedelta(days=2)).isoformat()
+        end_date = (today + timedelta(days=14)).isoformat()
+        raw_items = fetch_calendar(start_date, end_date)
+        rows = rows_from_response(raw_items)
+        detail_msg = f"{len(rows)}/{len(raw_items)} events stored via Finnhub ({start_date}..{end_date})"
+    else:
+        rows = fetch_free_forexfactory_calendar()
+        detail_msg = f"{len(rows)} events stored via Free ForexFactory calendar"
+
     if rows:
         upsert_news_events(rows)
-    heartbeat("econ_calendar_poller", detail=f"{len(rows)} events stored ({len(raw_items)} fetched)")
-    logger.info(f"Stored {len(rows)}/{len(raw_items)} calendar events for {start_date}..{end_date}")
+    heartbeat("econ_calendar_poller", detail=detail_msg)
+    logger.info(detail_msg)
 
 
 def run():
     if not FINNHUB_API_KEY:
-        logger.warning(
-            "FINNHUB_API_KEY not set -- econ_calendar_poller will not run. "
-            "See .env.example. Exiting cleanly (this feature is additive)."
+        logger.info(
+            "FINNHUB_API_KEY not set -- operating in FREE mode using live ForexFactory calendar feed. "
+            "To use Finnhub, set FINNHUB_API_KEY in .env."
         )
-        return
+    else:
+        logger.info("Starting econ_calendar_poller using Finnhub API.")
+
     while True:
         start = time.time()
         try:
@@ -141,3 +194,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+
