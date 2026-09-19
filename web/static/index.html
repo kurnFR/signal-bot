@@ -1363,7 +1363,12 @@
 
 
     <!-- Application Script -->
-    <script src="/static/js/app.js"></script>
+    <!-- Cache-busting version query string: bump this (or switch to a
+         build-hash) on every deploy that changes app.js, otherwise
+         browsers can keep serving a stale cached copy indefinitely since
+         this file has no explicit Cache-Control header. See the
+         "still seeing the old bug after a fix was pushed" class of report. -->
+    <script src="/static/js/app.js?v=20260919-2"></script>
     <script>
         if (window.lucide) window.lucide.createIcons();
     </script>
