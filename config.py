@@ -100,6 +100,22 @@ NEWS_AI_MIN_CONFIDENCE = int(os.getenv("NEWS_AI_MIN_CONFIDENCE", 75))
 NEWS_AI_MAX_EVENTS_PER_SYMBOL = int(os.getenv("NEWS_AI_MAX_EVENTS_PER_SYMBOL", 15))
 
 # ---------------------------------------------------------------------------
+# News AI Overlay strategy -- Phase 3 (execution: opens real paper positions
+# + sends Telegram alerts from high-confidence signals stored in Phase 2).
+# ---------------------------------------------------------------------------
+NEWS_AI_EXECUTION_POLL_INTERVAL_SECONDS = int(os.getenv("NEWS_AI_EXECUTION_POLL_INTERVAL_SECONDS", 60))
+# Hard cap on how many news-driven positions can be opened per UTC day,
+# regardless of how many high-confidence signals fire -- news can cluster
+# false signals around a single narrative (NEWS_AI_STRATEGY_PLAN.md §4).
+NEWS_AI_MAX_TRADES_PER_DAY = int(os.getenv("NEWS_AI_MAX_TRADES_PER_DAY", 3))
+# ATR multiplier for the initial stop, applied in the signal's direction.
+NEWS_AI_STOP_ATR_MULT = float(os.getenv("NEWS_AI_STOP_ATR_MULT", 1.5))
+# R-multiple target by the model's reported time_horizon; falls back to
+# "intraday" for anything the model didn't return a recognized horizon for.
+NEWS_AI_TP_R_MULTIPLE = {"scalp": 1.5, "intraday": 2.0, "swing": 3.0}
+NEWS_AI_DEFAULT_TP_R_MULTIPLE = 2.0
+
+# ---------------------------------------------------------------------------
 # Binance REST endpoints
 # ---------------------------------------------------------------------------
 SPOT_KLINE_URL = "https://api.binance.com/api/v3/klines"

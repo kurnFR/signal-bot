@@ -1025,34 +1025,46 @@ if `trend_alignment_v1` looks more stable than what came before — and only
 run the holdout check once we're confident enough to treat it as close to
 final.
 
-## News AI Overlay Strategy — Phase 1 & 2 (data plumbing + AI reasoning, log-only)
+## News AI Overlay Strategy — Phase 1, 2 & 3 (data → AI reasoning → execution)
 
-See `NEWS_AI_STRATEGY_PLAN.md` for the full design and phased rollout. These
-phases collect news/calendar data and produce AI bias/confidence
-recommendations — **no positions are opened and no Telegram alerts are sent
-yet** (that's Phase 3).
+See `NEWS_AI_STRATEGY_PLAN.md` for the full design and phased rollout.
+**Phase 3 opens real paper positions and sends Telegram alerts** from
+high-confidence AI signals — this is no longer log-only. Still paper trading
+only; no live broker execution exists in this codebase.
 
 ```bash
-# 1. run the migration (adds news_events + news_ai_signals tables)
+# 1. run the migrations, in order
 mysql -u crypto_bot -p crypto_signals < db/migrate_news_events.sql
+mysql -u crypto_bot -p crypto_signals < db/migrate_news_execution.sql
 
 # 2. add CRYPTOPANIC_API_KEY, FINNHUB_API_KEY and ANTHROPIC_API_KEY to .env
 #    (see .env.example for where to get free-tier keys for each)
 
-# 3. run the two Phase 1 collectors (each exits cleanly with a warning if its key is unset)
+# 3. Phase 1 -- collect news + calendar data
 python3 -m collectors.news_poller
 python3 -m collectors.econ_calendar_poller
 
-# 4. run the Phase 2 AI reasoning layer -- scores unprocessed news/calendar
-#    events for whichever symbols are currently is_active=1 in paper_configs
+# 4. Phase 2 -- AI reasoning (scores events, stores high-confidence signals)
 python3 -m ai.news_strategy_engine --once   # single pass, good for a first test
 python3 -m ai.news_strategy_engine          # continuous poll loop
+
+# 5. Phase 3 -- execution (opens paper positions + sends Telegram alerts)
+python3 -m ai.news_execution --once
+python3 -m ai.news_execution
 ```
 
-All three are long-running pollers when run without `--once` (like
+All of these are long-running pollers when run without `--once` (like
 `oi_poller.py`) — run them under the same process manager/supervisor you use
 for the other collectors. Check `collector_heartbeat` for `news_poller` /
-`econ_calendar_poller` / `news_strategy_engine` rows to confirm they're
-running, and query `news_ai_signals` to see what the AI layer has flagged so
-far.
+`econ_calendar_poller` / `news_strategy_engine` / `news_execution` rows to
+confirm they're running. `news_ai_overlay` positions land in the same
+`paper_positions` / `paper_trades` tables as every other strategy, so the
+existing dashboard should show them alongside technical-strategy positions.
+
+**Before trusting Phase 3 with anything:** start with a low
+`NEWS_AI_MAX_TRADES_PER_DAY` (default 3) and watch `news_ai_signals` /
+`paper_positions` for a while. The confluence guardrail blocks a news-driven
+entry on any symbol where the active technical strategy already has an open
+position, and the shared circuit breaker (`paper/circuit_breaker.py`) still
+applies — but it's still new code path making real (paper) trade decisions.
 

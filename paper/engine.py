@@ -29,6 +29,16 @@ from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT, PAIRS_BASE_SYMBOL
 
 logger = logging.getLogger("paper.engine")
 
+# Strategies whose entries are opened by their own dedicated module rather
+# than the STRATEGIES-driven signal loop below -- deliberately excluded from
+# STRATEGIES (and from backtest/strategies/__init__.py's registry) because
+# they aren't backtestable against historical bars the normal way. A
+# paper_configs row with one of these strategy_names still gets exit
+# management (SL/TP/trailing/circuit-breakers) from the loop in
+# sync_and_evaluate_paper_trading() -- it just never auto-opens a position
+# from price action alone. See NEWS_AI_STRATEGY_PLAN.md §4/§6.
+OVERLAY_STRATEGIES = {"news_ai_overlay"}
+
 
 def seed_validated_paper_configs():
     """Initialize validated paper configs when the table is empty.
@@ -398,7 +408,12 @@ def _insert_position(
     candle_open_time: int,
     ml_model_id: Optional[str] = None,
     ml_probability: Optional[float] = None,
-) -> bool:
+) -> Optional[int]:
+    """Returns the new paper_positions row id on success, or None if the
+    insert was skipped as a duplicate (the unique open-position key already
+    covers this symbol/market/timeframe/strategy). Callers that only care
+    whether a position was opened (not the id) can still use this in a
+    boolean context -- 0 is never a valid auto-increment id."""
     direction = trade["direction"]
     raw_entry = float(trade["entry_price"])
     stop_loss = float(trade["stop_loss"])
@@ -440,18 +455,26 @@ def _insert_position(
             ),
         )
         conn.commit()
+        new_id = cur.lastrowid
         cur.close()
-        return True
+        return new_id
     except Exception as exc:
         conn.rollback()
         # The P0 migration adds a unique active-position key. A duplicate is
         # expected when concurrent schedulers observe the same signal.
         if "uq_paper_open_position" in str(exc) or "Duplicate entry" in str(exc):
             logger.info("Ignored duplicate paper position for %s/%s", cfg["symbol"], cfg["strategy_name"])
-            return False
+            return None
         raise
     finally:
         conn.close()
+
+
+# Public alias -- ai/news_execution.py (and any other overlay-strategy
+# module) inserts positions through this rather than the underscore-prefixed
+# name, since it's a legitimate cross-module entry point, not an internal
+# detail of this file.
+insert_paper_position = _insert_position
 
 
 def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
@@ -465,7 +488,8 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
     for cfg in active_cfgs:
         symbol, market, timeframe, strategy_name = cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"]
         key = (symbol, market, timeframe, strategy_name)
-        if strategy_name not in STRATEGIES:
+        is_overlay_strategy = strategy_name in OVERLAY_STRATEGIES
+        if strategy_name not in STRATEGIES and not is_overlay_strategy:
             continue
         include_funding = strategy_name in FUNDING_STRATEGIES
         # Incremental evaluation: fetch latest 300 bars for O(1) live polling speed
@@ -558,6 +582,15 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                 finally:
                     conn.close()
         else:
+            if is_overlay_strategy:
+                # Overlay strategies (e.g. news_ai_overlay) don't generate
+                # entries from price action here -- their entries are
+                # inserted directly by their own module (ai/news_execution.py
+                # for news_ai_overlay), using insert_paper_position(). This
+                # branch's only job for them is the exit-management above,
+                # which already ran. Deliberately NOT in STRATEGIES / not
+                # backtestable the normal way -- see NEWS_AI_STRATEGY_PLAN.md §4.
+                continue
             # Check risk circuit breakers before discovering / opening new trades
             from paper.circuit_breaker import check_circuit_breakers
             allowed, breaker_msg = check_circuit_breakers()

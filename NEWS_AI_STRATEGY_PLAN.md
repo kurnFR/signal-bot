@@ -1,19 +1,22 @@
 # News + Economic Calendar AI Overlay Strategy — Design Plan
 
-> **Status:** Phase 1 (data plumbing) and Phase 2 (AI reasoning layer, log-only)
-> are implemented. Phase 1: `db/migrate_news_events.sql`, `collectors/news_poller.py`
-> (CryptoPanic), `collectors/econ_calendar_poller.py` (Finnhub economic calendar).
-> Phase 2: `ai/news_strategy_engine.py` — calls Claude, scores news/calendar
-> events per currently-active paper symbol, stores high-confidence
-> bias/reasoning in `news_ai_signals`. **Does not open positions or send
-> Telegram alerts yet** — that's Phase 3, deliberately gated on watching this
-> phase's signal quality first. All new modules unit-tested offline (parsing/
-> filtering/prompt-building logic verified with stubbed DB and mocked model
-> output); live API/DB behavior against real keys not yet verified — no
-> Anthropic/CryptoPanic/Finnhub key is available in the build sandbox. Run
-> each module once with real keys and eyeball the output before trusting it.
-> Decisions locked in for this build: **Claude (Anthropic API, model
-> `claude-sonnet-5`)** for reasoning, **CryptoPanic** for crypto news,
+> **Status:** Phases 1–3 are implemented. Phase 1: `db/migrate_news_events.sql`,
+> `collectors/news_poller.py` (CryptoPanic), `collectors/econ_calendar_poller.py`
+> (Finnhub economic calendar). Phase 2: `ai/news_strategy_engine.py` — calls
+> Claude, scores news/calendar events per currently-active paper symbol,
+> stores high-confidence bias/reasoning in `news_ai_signals`. **Phase 3
+> (NEW): `ai/news_execution.py`** — turns those high-confidence signals into
+> real paper positions (entry/SL/TP via ATR + R-multiple, same accounting
+> path every strategy uses) and sends Telegram alerts, with the confluence/
+> daily-cap/circuit-breaker/pre-release guardrails from §4 all implemented
+> and enforced. All new modules unit-tested offline (20+ scenarios across
+> parsing, filtering, prompt-building, trade math, and every guardrail, with
+> DB/API dependencies stubbed); live API/DB behavior against real keys not
+> yet verified — no Anthropic/CryptoPanic/Finnhub key is available in the
+> build sandbox. Run each module once with real keys and eyeball the output
+> before trusting it, and see §8 for two upstream bugs that were fixed along
+> the way. Decisions locked in for this build: **Claude (Anthropic API,
+> model `claude-sonnet-5`)** for reasoning, **CryptoPanic** for crypto news,
 > **Finnhub** for the economic calendar (substituted for the
 > originally-suggested TradingEconomics, whose free tier only returns sample
 > data — Finnhub has a genuinely usable free-tier economic calendar).
@@ -124,16 +127,47 @@ CREATE TABLE news_ai_signals (
 ## 6. Phased implementation
 1. **Data plumbing:** `news_events` table + the two collectors, no AI yet — just get clean, deduped news/calendar data flowing. ✅ **Done**.
 2. **AI reasoning layer, log-only:** call the model, store `news_ai_signals`, but don't open positions yet — build confidence the signal quality is real before it touches capital (even paper capital). ✅ **Done** — `ai/news_strategy_engine.py`. Confidence threshold (`NEWS_AI_MIN_CONFIDENCE`, default 75) and per-symbol event cap (`NEWS_AI_MAX_EVENTS_PER_SYMBOL`, default 15) are both tunable via `.env`. Scoped automatically to whichever symbols are currently `is_active=1` in `paper_configs` — i.e. whatever the Battle Royale promoted, no manual symbol config needed.
-3. **Wire to paper engine + Telegram:** once signal quality looks reasonable over a couple weeks of shadow logging, enable actual position opening with the guardrails from §4. ⬜ Not started — this is the next phase.
-4. **Feedback loop:** track win rate / expectancy of `news_ai_overlay` trades the same way technical strategies are tracked, so it earns its place next to them rather than being trusted by default. ⬜ Not started.
+3. **Wire to paper engine + Telegram:** once signal quality looks reasonable over a couple weeks of shadow logging, enable actual position opening with the guardrails from §4. ✅ **Done** — `ai/news_execution.py`. All four guardrails from §4 are implemented: confluence block (no stacking on a symbol the technical strategy already holds), `NEWS_AI_MAX_TRADES_PER_DAY` daily cap (default 3), the account-wide circuit breaker (`paper/circuit_breaker.py` — max concurrent positions / max daily loss / emergency stop, shared with the technical strategies), and pre-release-gap avoidance (a `wait_for_reaction` signal tied to a not-yet-released scheduled macro event is retried next cycle rather than traded blind). Entry = latest close, stop = `NEWS_AI_STOP_ATR_MULT` × ATR (default 1.5), target = R-multiple by the model's reported `time_horizon` (`NEWS_AI_TP_R_MULTIPLE`: scalp 1.5R, intraday 2R, swing 3R) — same accounting path (`backtest/accounting.py`) as every technical strategy, via a public `insert_paper_position()` entry point in `paper/engine.py`.
+4. **Feedback loop:** track win rate / expectancy of `news_ai_overlay` trades the same way technical strategies are tracked, so it earns its place next to them rather than being trusted by default. ⬜ Not started — this is genuinely the next step. `news_ai_overlay` positions already flow through the same `paper_positions`/`paper_trades` tables as everything else, so this is a reporting/dashboard task, not a new data-collection one.
 
-### What to check before moving to Phase 3
-- Run `collectors/news_poller.py`, `collectors/econ_calendar_poller.py`, and `ai/news_strategy_engine.py --once` with real keys and confirm rows land correctly in `news_events` / `news_ai_signals`.
-- Spot-check a handful of `news_ai_signals.reasoning` values against the source headline — is the model's confidence calibrated (not confidently wrong), and does the `trade_timing` field correctly default to `wait_for_reaction` for not-yet-released calendar events?
-- Let it run log-only for a while and look at the *distribution* of confidence scores — if everything is clustering at 80+, the threshold or prompt likely needs tightening before Phase 3 lets any of this touch a paper position.
+### What was checked before/while building Phase 3
+- Ran the same offline-unit-test discipline as Phases 1–2: 20+ scenarios covering the pending-on-release retry path, confluence blocking, the daily cap, ATR-based stop/target math for both directions and all three time horizons, the happy-path open+alert flow, and the market-data-unavailable fallback — all with DB/paper-engine/Telegram dependencies stubbed out (no live DB/API in the build sandbox).
+- Still outstanding before trusting this with anything beyond a first look: run all three modules with real keys, confirm `news_ai_signals` and `paper_positions` rows look sane end-to-end, and specifically watch the confidence-score distribution and how often the daily cap actually gets hit.
 
 ## 7. Decisions needed from you before implementation
-- News/economic-calendar data provider (cost, API key) — see §3.1 for recommendations.
-- Confirm Claude (Anthropic API) as the reasoning model, or a different provider.
-- Confidence threshold and daily trade cap to start with (defaults above are a starting point, not fixed).
-- Whether a news-driven signal should be blocked entirely when the technical strategy already has an open position on that symbol, or allowed to scale it (§4).
+- ~~News/economic-calendar data provider (cost, API key) — see §3.1 for recommendations.~~ ✅ Decided (§3.1): CryptoPanic + Finnhub.
+- ~~Confirm Claude (Anthropic API) as the reasoning model, or a different provider.~~ ✅ Decided: Claude (`claude-sonnet-5`).
+- ~~Confidence threshold and daily trade cap to start with (defaults above are a starting point, not fixed).~~ ✅ Implemented as defaults (`NEWS_AI_MIN_CONFIDENCE=75`, `NEWS_AI_MAX_TRADES_PER_DAY=3`) — still yours to tune once you've watched it run for a while.
+- ~~Whether a news-driven signal should be blocked entirely when the technical strategy already has an open position on that symbol, or allowed to scale it (§4).~~ ✅ Decided: blocked entirely (no scaling) — implemented in `ai/news_execution.py::_has_open_technical_position()`.
+
+## 8. Fixes made to existing code along the way
+
+Two pre-existing issues in `paper/engine.py` would have made Phase 3 fragile or
+wrong if left as-is, so they were fixed rather than worked around:
+
+- **Overlay-strategy entries no longer risk being auto-generated by the
+  technical signal loop.** `sync_and_evaluate_paper_trading()` previously
+  gated *both* entry generation and exit management on `strategy_name in
+  STRATEGIES`. A `news_ai_overlay` config would have been silently skipped
+  entirely — meaning Phase 3's positions would open correctly but then never
+  get their SL/TP/trailing-stop managed by the existing exit machinery. Fixed
+  by introducing `OVERLAY_STRATEGIES` (currently `{"news_ai_overlay"}`):
+  overlay strategies still get exit management, but are explicitly excluded
+  from `STRATEGIES` (and therefore from backtesting/the Battle Royale
+  ranking, which is correct — see §4, this can't be backtested honestly) and
+  from ever having an entry auto-generated from price action.
+- **`_insert_position()` now returns the new row's id, not just `True`.**
+  Needed so `news_ai_signals.paper_position_id` can actually be linked to the
+  position it opened, for auditability. Backward compatible — existing
+  callers only checked truthiness, and `0` is never a valid auto-increment
+  id. Exposed as a public `insert_paper_position` alias so Phase 3 doesn't
+  need to import a leading-underscore "private" function across modules.
+
+One earlier-flagged issue was deliberately *not* touched: `PROFESSIONAL_TRADER_REVIEW.md`
+§2.6 (module-level DB side effects at import time) turned out to already be
+fixed independently — confirmed by scanning `paper/engine.py` for any
+top-level function calls (there are none). `ai/news_execution.py` still
+avoids importing `paper.engine.get_paper_configs()` for symbol lookups
+(uses a direct `get_active_paper_symbols()` query in `db/db.py` instead, per
+the Phase 2 commit) simply because that's a cleaner, more minimal dependency
+— not because the import-time bug is still live.

@@ -564,29 +564,154 @@ def mark_news_events_processed(event_ids):
 
 def insert_news_ai_signal(signal):
     """
-    signal: dict with keys news_event_id, symbol, bias, confidence, reasoning,
-    invalidation_condition, time_horizon, trade_timing. paper_position_id is
-    intentionally not accepted here -- Phase 2 is log-only; Phase 3 will add
-    a separate update call once positions are actually opened from this.
+    signal: dict with keys news_event_id, symbol, market, timeframe, bias,
+    confidence, reasoning, invalidation_condition, time_horizon, trade_timing.
+    acted_on defaults to FALSE / paper_position_id NULL -- Phase 3
+    (ai/news_execution.py) updates those via mark_news_signal_acted() once
+    it's made a final decision (opened a position or deliberately skipped).
     """
     sql = """
         INSERT INTO news_ai_signals (
-            news_event_id, symbol, bias, confidence, reasoning,
+            news_event_id, symbol, market, timeframe, bias, confidence, reasoning,
             invalidation_condition, time_horizon, trade_timing
-        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     """
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
         cur.execute(sql, (
-            signal["news_event_id"], signal["symbol"], signal["bias"],
-            signal["confidence"], signal.get("reasoning"),
-            signal.get("invalidation_condition"), signal.get("time_horizon"),
-            signal.get("trade_timing"),
+            signal["news_event_id"], signal["symbol"], signal.get("market"),
+            signal.get("timeframe"), signal["bias"], signal["confidence"],
+            signal.get("reasoning"), signal.get("invalidation_condition"),
+            signal.get("time_horizon"), signal.get("trade_timing"),
         ))
         conn.commit()
         new_id = cur.lastrowid
         cur.close()
         return new_id
+    finally:
+        conn.close()
+
+
+def get_unacted_news_signals(limit=20):
+    """High-probability signals (already confidence-thresholded at write
+    time by ai/news_strategy_engine.py) that Phase 3 hasn't made a final
+    decision on yet. Oldest first -- process in the order they were raised."""
+    sql = """
+        SELECT id, news_event_id, symbol, market, timeframe, bias, confidence,
+               reasoning, invalidation_condition, time_horizon, trade_timing, created_at
+        FROM news_ai_signals
+        WHERE acted_on = FALSE
+        ORDER BY created_at ASC
+        LIMIT %s
+    """
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(sql, (limit,))
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+    finally:
+        conn.close()
+
+
+def get_news_event(event_id):
+    sql = """
+        SELECT id, source, category, external_id, headline, url, symbols, country,
+               impact, published_at, scheduled_at, actual_value, forecast_value, previous_value
+        FROM news_events WHERE id = %s
+    """
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(sql, (event_id,))
+        row = cur.fetchone()
+        cur.close()
+        return row
+    finally:
+        conn.close()
+
+
+def mark_news_signal_acted(signal_id, paper_position_id=None, skip_reason=None):
+    sql = """
+        UPDATE news_ai_signals
+        SET acted_on = TRUE, paper_position_id = %s, skip_reason = %s
+        WHERE id = %s
+    """
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, (paper_position_id, skip_reason, signal_id))
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+
+def count_news_trades_opened_today(strategy_name="news_ai_overlay"):
+    """UTC-day count of positions opened by the given overlay strategy --
+    used to enforce a daily trade cap (news headlines can cluster around a
+    single narrative; this bounds how much of that a single day can act on)."""
+    sql = """
+        SELECT COUNT(*) AS n FROM paper_positions
+        WHERE strategy_name = %s
+          AND entry_time >= UNIX_TIMESTAMP(UTC_DATE()) * 1000
+    """
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(sql, (strategy_name,))
+        row = cur.fetchone()
+        cur.close()
+        return int(row["n"]) if row else 0
+    finally:
+        conn.close()
+
+
+def get_technical_paper_config(symbol, market, timeframe, exclude_strategy="news_ai_overlay"):
+    """The active *technical* (backtestable) strategy config for this
+    symbol/market/timeframe, if any -- i.e. the Battle Royale winner. Used
+    by Phase 3 both for the confluence guardrail (is there already an open
+    technical position here?) and to mirror its capital allocation when
+    auto-creating a paper_configs row for the news overlay strategy."""
+    sql = """
+        SELECT id, symbol, market, timeframe, strategy_name, is_active,
+               allocated_capital, risk_per_trade_pct
+        FROM paper_configs
+        WHERE symbol = %s AND market = %s AND timeframe = %s
+          AND strategy_name != %s AND is_active = 1
+        LIMIT 1
+    """
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(sql, (symbol, market, timeframe, exclude_strategy))
+        row = cur.fetchone()
+        cur.close()
+        return row
+    finally:
+        conn.close()
+
+
+def ensure_overlay_paper_config(symbol, market, timeframe, strategy_name, allocated_capital, risk_per_trade_pct):
+    """Idempotently creates (or leaves untouched) a paper_configs row for an
+    overlay strategy like news_ai_overlay, so it has somewhere to read
+    allocated_capital/risk_per_trade_pct from -- the same accounting contract
+    every other strategy uses (see backtest/accounting.py). is_active=1 so
+    the existing exit-management loop in sync_and_evaluate_paper_trading()
+    picks it up automatically."""
+    sql = """
+        INSERT INTO paper_configs (symbol, market, timeframe, strategy_name, is_active,
+                                     allocated_capital, risk_per_trade_pct)
+        VALUES (%s,%s,%s,%s,1,%s,%s)
+        ON DUPLICATE KEY UPDATE id = id
+    """
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, (symbol, market, timeframe, strategy_name, allocated_capital, risk_per_trade_pct))
+        conn.commit()
+        cur.close()
     finally:
         conn.close()

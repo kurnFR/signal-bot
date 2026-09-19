@@ -236,6 +236,8 @@ def evaluate_symbol(symbol, market, timeframe, events):
         insert_news_ai_signal({
             "news_event_id": primary_event["id"],
             "symbol": symbol,
+            "market": market,
+            "timeframe": timeframe,
             "bias": parsed["bias"],
             "confidence": parsed["confidence"],
             "reasoning": parsed.get("reasoning"),

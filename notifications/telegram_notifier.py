@@ -161,6 +161,60 @@ def send_signal_alert(
     return send_telegram_message(msg)
 
 
+def send_news_signal_alert(
+    symbol: str,
+    market: str,
+    timeframe: str,
+    direction: str,
+    entry_price: float,
+    stop_loss: float,
+    take_profit: float,
+    confidence: int,
+    reasoning: Optional[str] = None,
+    invalidation_condition: Optional[str] = None,
+    trigger_headline: Optional[str] = None,
+    time_horizon: Optional[str] = None,
+) -> Dict[str, Any]:
+    """News AI Overlay strategy (Phase 3) entry alert -- same chat/bot as
+    send_signal_alert(), deliberately distinct visual template (📰 header,
+    'Paper trade' footer) so it's never mistaken for a technical-strategy
+    signal. See NEWS_AI_STRATEGY_PLAN.md §3.4."""
+    dir_emoji = "🟢" if direction.upper() == "LONG" else "🔴"
+    risk = abs(entry_price - stop_loss)
+    reward = abs(take_profit - entry_price)
+    rr_ratio = round(reward / risk, 2) if risk > 0 else 0.0
+    risk_pct = round((risk / entry_price) * 100, 2) if entry_price > 0 else 0.0
+    now_wib = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M WIB")
+
+    msg = (
+        f"📰 {dir_emoji} <b>NEWS-DRIVEN SIGNAL: {symbol} ({direction.upper()})</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 <b>Market:</b> {market.upper()} | <b>TF:</b> {timeframe}\n"
+    )
+    if trigger_headline:
+        msg += f"🗞 <b>Trigger:</b> {trigger_headline}\n"
+    msg += (
+        f"🤖 <b>AI Confidence:</b> <code>{confidence}%</code>"
+        + (f" | <b>Horizon:</b> {time_horizon}" if time_horizon else "")
+        + "\n"
+        f"⏱ <b>Signal Time:</b> {now_wib}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💵 <b>Entry:</b> <code>${entry_price:,.4f}</code>\n"
+        f"🛑 <b>Stop Loss:</b> <code>${stop_loss:,.4f}</code> (-{risk_pct}%)\n"
+        f"🎯 <b>Take Profit:</b> <code>${take_profit:,.4f}</code>\n"
+        f"⚖️ <b>Risk : Reward:</b> <code>1 : {rr_ratio}</code>\n"
+    )
+    if reasoning:
+        msg += f"💭 <b>Reasoning:</b> {reasoning}\n"
+    if invalidation_condition:
+        msg += f"❌ <b>Invalidation:</b> {invalidation_condition}\n"
+    msg += (
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚠️ <i>Paper trade only -- News AI Overlay (Phase 3). No live execution.</i>"
+    )
+    return send_telegram_message(msg)
+
+
 def send_trade_close_alert(
     symbol: str,
     strategy_name: str,
