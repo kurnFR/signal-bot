@@ -837,7 +837,7 @@ def get_news_overlay_stats():
             SELECT r_multiple
             FROM paper_trades
             WHERE strategy_name = 'news_ai_overlay'
-            ORDER BY COALESCE(exit_time, closed_at, created_at), id
+            ORDER BY exit_time, id
             """
         )
         peak = 0.0
