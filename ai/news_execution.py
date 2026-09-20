@@ -72,7 +72,24 @@ def _pending_on_release(signal, event):
         return False
     if event.get("category") != "macro_calendar":
         return False
-    return not event.get("actual_value")
+    # Some free calendar feeds never populate actual_value. Once the scheduled
+    # time has passed, the event is no longer a pre-release signal even if the
+    # provider has not supplied the actual figure yet.
+    if event.get("actual_value"):
+        return False
+    scheduled_at = event.get("scheduled_at")
+    if not scheduled_at:
+        return False
+    try:
+        from datetime import datetime, timezone
+        if isinstance(scheduled_at, str):
+            scheduled_at = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+        if scheduled_at.tzinfo is None:
+            scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+        return scheduled_at > datetime.now(timezone.utc)
+    except (TypeError, ValueError):
+        # Fail closed when a provider gives an unusable timestamp.
+        return True
 
 
 def _has_open_technical_position(symbol, market, timeframe):
