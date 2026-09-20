@@ -908,6 +908,27 @@
                     </div>
                 </div>
 
+                <!-- News AI Performance Feedback -->
+                <div class="p-5 rounded-xl bg-slate-900/90 border border-amber-900/40 space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                                <i data-lucide="chart-no-axes-combined" class="w-4 h-4 text-amber-400"></i>
+                                News AI Performance Feedback
+                            </h3>
+                            <p class="text-xs text-slate-400 mt-0.5">Realized paper results from closed <code class="text-amber-300">news_ai_overlay</code> trades. AI confidence is a score, not a calibrated probability.</p>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                        <div class="p-3 rounded-lg bg-slate-950/60 border border-slate-800"><div class="text-[10px] text-slate-500 uppercase">Closed Trades</div><div id="news-perf-closed" class="text-xl font-black font-mono mt-1">0</div></div>
+                        <div class="p-3 rounded-lg bg-slate-950/60 border border-slate-800"><div class="text-[10px] text-slate-500 uppercase">Win Rate</div><div id="news-perf-winrate" class="text-xl font-black font-mono mt-1">--</div></div>
+                        <div class="p-3 rounded-lg bg-slate-950/60 border border-slate-800"><div class="text-[10px] text-slate-500 uppercase">Expectancy</div><div id="news-perf-expectancy" class="text-xl font-black font-mono mt-1">--</div></div>
+                        <div class="p-3 rounded-lg bg-slate-950/60 border border-slate-800"><div class="text-[10px] text-slate-500 uppercase">Profit Factor</div><div id="news-perf-pf" class="text-xl font-black font-mono mt-1">--</div></div>
+                        <div class="p-3 rounded-lg bg-slate-950/60 border border-slate-800"><div class="text-[10px] text-slate-500 uppercase">Total R</div><div id="news-perf-r" class="text-xl font-black font-mono mt-1">0.00R</div></div>
+                        <div class="p-3 rounded-lg bg-slate-950/60 border border-slate-800"><div class="text-[10px] text-slate-500 uppercase">Max DD</div><div id="news-perf-dd" class="text-xl font-black font-mono mt-1">0.00R</div></div>
+                    </div>
+                </div>
+
                 <!-- Pipeline Health -->
                 <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-3">
                     <div class="flex items-center justify-between">
