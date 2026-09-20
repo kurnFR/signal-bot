@@ -168,6 +168,14 @@ const App = {
         set("news-kpi-avgconf", stats.avg_confidence != null ? `${stats.avg_confidence}%` : "--");
         set("news-kpi-trades", stats.trades_opened ?? 0);
         set("news-kpi-pending", stats.pending_signals ?? 0);
+
+        const perf = stats.performance || {};
+        set("news-perf-closed", perf.closed_trades ?? 0);
+        set("news-perf-winrate", perf.win_rate != null ? `${perf.win_rate}%` : "--");
+        set("news-perf-expectancy", perf.expectancy_r != null ? `${Number(perf.expectancy_r).toFixed(3)}R` : "--");
+        set("news-perf-pf", perf.profit_factor != null ? Number(perf.profit_factor).toFixed(3) : "--");
+        set("news-perf-r", `${Number(perf.total_r || 0).toFixed(2)}R`);
+        set("news-perf-dd", `${Number(perf.max_drawdown_r || 0).toFixed(2)}R`);
     },
 
     _renderNewsHeartbeats(heartbeats) {
