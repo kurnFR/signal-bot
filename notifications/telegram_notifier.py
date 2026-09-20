@@ -6,6 +6,7 @@ to Telegram using Bot API.
 import os
 import logging
 import requests
+from html import escape
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 from dotenv import load_dotenv
@@ -135,7 +136,7 @@ def send_signal_alert(
         f"{dir_emoji} <b>NEW TRADING SIGNAL: {symbol} ({direction.upper()})</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎯 <b>Action:</b> <code>{side_action}</code>\n"
-        f"📊 <b>Market:</b> {market.upper()} | <b>TF:</b> {timeframe}\n"
+        f"📊 <b>Market:</b> {safe_market} | <b>TF:</b> {safe_timeframe}\n"
         f"🧠 <b>Strategy:</b> <code>{strategy_name}</code>\n"
         f"⏱ <b>Signal Time:</b> {now_wib}\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -186,16 +187,24 @@ def send_news_signal_alert(
     risk_pct = round((risk / entry_price) * 100, 2) if entry_price > 0 else 0.0
     now_wib = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M WIB")
 
+    safe_symbol = escape(str(symbol))
+    safe_market = escape(str(market).upper())
+    safe_timeframe = escape(str(timeframe))
+    safe_headline = escape(str(trigger_headline)) if trigger_headline else None
+    safe_reasoning = escape(str(reasoning)) if reasoning else None
+    safe_invalidation = escape(str(invalidation_condition)) if invalidation_condition else None
+    safe_horizon = escape(str(time_horizon)) if time_horizon else None
+
     msg = (
-        f"📰 {dir_emoji} <b>NEWS-DRIVEN SIGNAL: {symbol} ({direction.upper()})</b>\n"
+        f"📰 {dir_emoji} <b>NEWS-DRIVEN SIGNAL: {safe_symbol} ({direction.upper()})</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"📊 <b>Market:</b> {market.upper()} | <b>TF:</b> {timeframe}\n"
     )
     if trigger_headline:
-        msg += f"🗞 <b>Trigger:</b> {trigger_headline}\n"
+        msg += f"🗞 <b>Trigger:</b> {safe_headline}\n"
     msg += (
         f"🤖 <b>AI Confidence:</b> <code>{confidence}%</code>"
-        + (f" | <b>Horizon:</b> {time_horizon}" if time_horizon else "")
+        + (f" | <b>Horizon:</b> {safe_horizon}" if safe_horizon else "")
         + "\n"
         f"⏱ <b>Signal Time:</b> {now_wib}\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -205,9 +214,9 @@ def send_news_signal_alert(
         f"⚖️ <b>Risk : Reward:</b> <code>1 : {rr_ratio}</code>\n"
     )
     if reasoning:
-        msg += f"💭 <b>Reasoning:</b> {reasoning}\n"
+        msg += f"💭 <b>Reasoning:</b> {safe_reasoning}\n"
     if invalidation_condition:
-        msg += f"❌ <b>Invalidation:</b> {invalidation_condition}\n"
+        msg += f"❌ <b>Invalidation:</b> {safe_invalidation}\n"
     msg += (
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"⚠️ <i>Paper trade only -- News AI Overlay (Phase 3). No live execution.</i>"
