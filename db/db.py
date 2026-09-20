@@ -594,14 +594,17 @@ def insert_news_ai_signal(signal):
 
 
 def get_unacted_news_signals(limit=20):
-    """High-probability signals (already confidence-thresholded at write
-    time by ai/news_strategy_engine.py) that Phase 3 hasn't made a final
-    decision on yet. Oldest first -- process in the order they were raised."""
+    """Return signals that are not finalized and are not currently claimed.
+
+    A stale processing claim (>10 minutes) is eligible again so a crashed
+    execution worker cannot strand a signal forever.
+    """
     sql = """
         SELECT id, news_event_id, symbol, market, timeframe, bias, confidence,
                reasoning, invalidation_condition, time_horizon, trade_timing, created_at
         FROM news_ai_signals
         WHERE acted_on = FALSE
+          AND (processing_at IS NULL OR processing_at < UTC_TIMESTAMP() - INTERVAL 10 MINUTE)
         ORDER BY created_at ASC
         LIMIT %s
     """
@@ -612,6 +615,45 @@ def get_unacted_news_signals(limit=20):
         rows = cur.fetchall()
         cur.close()
         return rows
+    finally:
+        conn.close()
+
+
+def claim_news_signal(signal_id):
+    """Atomically claim one signal for execution.
+
+    Returns True for exactly one concurrent worker; stale claims are
+    recoverable after 10 minutes.
+    """
+    sql = """
+        UPDATE news_ai_signals
+        SET processing_at = UTC_TIMESTAMP()
+        WHERE id = %s
+          AND acted_on = FALSE
+          AND (processing_at IS NULL OR processing_at < UTC_TIMESTAMP() - INTERVAL 10 MINUTE)
+    """
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, (signal_id,))
+        conn.commit()
+        claimed = cur.rowcount == 1
+        cur.close()
+        return claimed
+    finally:
+        conn.close()
+
+
+def release_news_signal_claim(signal_id):
+    """Release a claim without finalizing the signal (used for future
+    scheduled macro releases that must be retried on the next cycle)."""
+    sql = "UPDATE news_ai_signals SET processing_at = NULL WHERE id = %s AND acted_on = FALSE"
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, (signal_id,))
+        conn.commit()
+        cur.close()
     finally:
         conn.close()
 
@@ -636,8 +678,8 @@ def get_news_event(event_id):
 def mark_news_signal_acted(signal_id, paper_position_id=None, skip_reason=None):
     sql = """
         UPDATE news_ai_signals
-        SET acted_on = TRUE, paper_position_id = %s, skip_reason = %s
-        WHERE id = %s
+        SET acted_on = TRUE, processing_at = NULL, paper_position_id = %s, skip_reason = %s
+        WHERE id = %s AND acted_on = FALSE
     """
     conn = get_pool().get_connection()
     try:
