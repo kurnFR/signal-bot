@@ -785,16 +785,15 @@ def get_recent_news_events(limit=30):
 
 
 def get_news_overlay_stats():
-    """Summary KPIs for the News AI Overlay visibility panel: how much has
-    been collected/evaluated, how often the AI actually acts, and whether
-    the four pollers are alive (collector_heartbeat)."""
+    """Return dashboard KPIs for collection, AI decisions, execution and realized
+    paper performance. Performance is intentionally based on CLOSED
+    news_ai_overlay trades only; open positions are reported separately."""
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
 
         cur.execute("SELECT COUNT(*) AS n FROM news_events")
         total_events = cur.fetchone()["n"]
-
         cur.execute("SELECT COUNT(*) AS n FROM news_events WHERE processed_at IS NOT NULL")
         processed_events = cur.fetchone()["n"]
 
@@ -805,15 +804,58 @@ def get_news_overlay_stats():
 
         cur.execute("SELECT COUNT(*) AS n FROM news_ai_signals WHERE paper_position_id IS NOT NULL")
         trades_opened = cur.fetchone()["n"]
-
         cur.execute("SELECT COUNT(*) AS n FROM news_ai_signals WHERE acted_on = FALSE")
         pending_signals = cur.fetchone()["n"]
+
+        # Realized performance comes from the canonical paper_trades ledger.
+        cur.execute(
+            """
+            SELECT
+                COUNT(*) AS closed_trades,
+                COALESCE(SUM(net_pnl), 0) AS net_pnl,
+                COALESCE(SUM(CASE WHEN r_multiple > 0 THEN 1 ELSE 0 END), 0) AS wins,
+                COALESCE(SUM(CASE WHEN r_multiple < 0 THEN 1 ELSE 0 END), 0) AS losses,
+                COALESCE(SUM(CASE WHEN r_multiple > 0 THEN r_multiple ELSE 0 END), 0) AS gross_win_r,
+                COALESCE(-SUM(CASE WHEN r_multiple < 0 THEN r_multiple ELSE 0 END), 0) AS gross_loss_r,
+                COALESCE(SUM(r_multiple), 0) AS total_r
+            FROM paper_trades
+            WHERE strategy_name = 'news_ai_overlay'
+            """
+        )
+        perf = cur.fetchone()
+        closed_trades = int(perf["closed_trades"] or 0)
+        total_r = float(perf["total_r"] or 0)
+        gross_win_r = float(perf["gross_win_r"] or 0)
+        gross_loss_r = float(perf["gross_loss_r"] or 0)
+        profit_factor = round(gross_win_r / gross_loss_r, 3) if gross_loss_r > 0 else None
+        expectancy_r = round(total_r / closed_trades, 3) if closed_trades else None
+        win_rate = round((int(perf["wins"] or 0) / closed_trades) * 100, 1) if closed_trades else None
+
+        # Max drawdown is calculated over realized cumulative R in close-time order.
+        cur.execute(
+            """
+            SELECT r_multiple
+            FROM paper_trades
+            WHERE strategy_name = 'news_ai_overlay'
+            ORDER BY COALESCE(exit_time, closed_at, created_at), id
+            """
+        )
+        peak = 0.0
+        equity = 0.0
+        max_dd_r = 0.0
+        for row in cur.fetchall():
+            equity += float(row["r_multiple"] or 0)
+            peak = max(peak, equity)
+            max_dd_r = max(max_dd_r, peak - equity)
 
         cur.execute(
             """
             SELECT collector_name, status, detail, last_beat_time
             FROM collector_heartbeat
-            WHERE collector_name IN ('news_poller', 'econ_calendar_poller', 'news_strategy_engine', 'news_execution')
+            WHERE collector_name IN (
+                'news_poller', 'econ_calendar_poller',
+                'news_strategy_engine', 'news_execution'
+            )
             """
         )
         heartbeats = cur.fetchall()
@@ -828,6 +870,17 @@ def get_news_overlay_stats():
             "avg_confidence": avg_confidence,
             "trades_opened": trades_opened,
             "pending_signals": pending_signals,
+            "performance": {
+                "closed_trades": closed_trades,
+                "wins": int(perf["wins"] or 0),
+                "losses": int(perf["losses"] or 0),
+                "win_rate": win_rate,
+                "expectancy_r": expectancy_r,
+                "profit_factor": profit_factor,
+                "total_r": round(total_r, 3),
+                "net_pnl": round(float(perf["net_pnl"] or 0), 2),
+                "max_drawdown_r": round(max_dd_r, 3),
+            },
             "heartbeats": heartbeats,
         }
     finally:
