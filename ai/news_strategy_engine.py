@@ -7,9 +7,10 @@ currently promoted to active paper trading (paper_configs.is_active), and asks
 Claude for a structured bias/confidence read. High-confidence signals are
 stored in `news_ai_signals`.
 
-IMPORTANT -- this phase is log-only by design (see NEWS_AI_STRATEGY_PLAN.md):
-it does NOT open paper positions and does NOT send Telegram alerts. That's
-Phase 3, deliberately gated on watching this phase's signal quality first.
+This module is the AI reasoning stage of the production News AI Overlay
+pipeline. It stores qualifying signals for the Phase 3 execution worker;
+it does not open paper positions or send Telegram alerts itself. Execution
+and risk guardrails are handled by ai/news_execution.py.
 Like the Phase 1 collectors, this is additive: if ANTHROPIC_API_KEY is unset,
 this exits cleanly with a warning rather than breaking anything else.
 
