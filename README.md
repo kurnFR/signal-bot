@@ -22,7 +22,34 @@ mysql -u your_user -p crypto_signals < db/migrate_add_users_and_paper.sql
 # 2. Launch web server
 python3 run_web.py --port 8050
 ```
-Open **`http://localhost:8050`** in your browser. Default login: `admin` / `admin123`.
+Open **`http://localhost:8050`** in your browser.
+
+### Authentication and API verification
+
+The web API is intentionally protected. Only `POST /api/auth/login` is public; News AI endpoints such as `/api/news/stats`, `/api/news/signals`, and `/api/news/events` require a bearer token.
+
+The bootstrap admin account is created only when the `users` table is empty:
+- `ADMIN_DEFAULT_PASSWORD` is used when configured.
+- Otherwise a random one-time password is written to `.initial_admin_credential` with mode `0600`, and `must_change_password` is enabled.
+
+Do **not** assume `admin/admin123`; that is no longer the runtime default.
+
+For shell verification:
+```bash
+TOKEN=$(curl -sS -X POST http://127.0.0.1:8050/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"YOUR_PASSWORD"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+
+curl -sS http://127.0.0.1:8050/api/auth/me \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+
+curl -sS http://127.0.0.1:8050/api/news/stats \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+
+curl -sS 'http://127.0.0.1:8050/api/news/signals?limit=10' \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+```
 
 ---
 
