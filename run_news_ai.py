@@ -26,12 +26,20 @@ logger = logging.getLogger("run_news_ai")
 
 
 def start_worker(name, target_fn):
+    """Run a worker and automatically restart it after an unexpected crash.
+
+    Individual pollers already report their own errors, but a top-level
+    exception must not silently remove a component from the News AI pipeline.
+    """
     def wrapper():
-        logger.info(f"Worker '{name}' started.")
-        try:
-            target_fn()
-        except Exception as e:
-            logger.error(f"Worker '{name}' crashed: {e}", exc_info=True)
+        while True:
+            logger.info(f"Worker '{name}' started.")
+            try:
+                target_fn()
+                logger.warning(f"Worker '{name}' exited unexpectedly; restarting in 5s")
+            except Exception as e:
+                logger.error(f"Worker '{name}' crashed: {e}", exc_info=True)
+            time.sleep(5)
 
     t = threading.Thread(target=wrapper, name=name, daemon=True)
     t.start()
@@ -55,10 +63,13 @@ def main():
     try:
         while True:
             time.sleep(1)
-            # Monitor worker thread health
+            # Worker wrappers stay alive and restart the underlying
+            # poller after an unexpected exception. This is intentionally
+            # lightweight; the dashboard heartbeat remains the source of
+            # truth for component freshness.
             for t in threads:
                 if not t.is_alive():
-                    logger.warning(f"Worker {t.name} is no longer alive.")
+                    logger.error(f"Worker supervisor thread {t.name} died")
     except KeyboardInterrupt:
         logger.info("Stopping News AI Overlay Engine...")
 
