@@ -50,7 +50,7 @@ from config import (
 from db.db import (
     get_unacted_news_signals, get_news_event, mark_news_signal_acted,
     count_news_trades_opened_today, get_technical_paper_config, ensure_overlay_paper_config,
-    fetch_ohlcv_with_features_df, heartbeat,
+    fetch_ohlcv_with_features_df, heartbeat, claim_news_signal, release_news_signal_claim,
 )
 from paper.engine import get_active_positions, insert_paper_position, OVERLAY_STRATEGIES
 from paper.circuit_breaker import check_circuit_breakers
@@ -141,9 +141,16 @@ def _compute_trade(symbol, market, timeframe, bias, time_horizon):
 
 
 def process_signal(signal):
-    """Returns True if a position was opened, False otherwise. Always
-    leaves the signal either acted-on (with a position or a skip_reason)
-    or, for a not-yet-released scheduled event, untouched for retry."""
+    """Process one signal with an atomic DB claim.
+
+    Multiple execution workers may poll at the same time; only the worker
+    that successfully claims the signal is allowed to make the final
+    disposition. A claim is released only for the deliberate pending-macro
+    retry path.
+    """
+    if not claim_news_signal(signal["id"]):
+        return False
+
     symbol, market, timeframe = signal["symbol"], signal.get("market"), signal.get("timeframe")
     if not market or not timeframe:
         # Signals written before the Phase 3 migration added these columns.
@@ -153,6 +160,7 @@ def process_signal(signal):
     event = get_news_event(signal["news_event_id"]) if signal.get("news_event_id") else None
     if _pending_on_release(signal, event):
         logger.info(f"{symbol}: signal #{signal['id']} waiting on scheduled release, retrying later")
+        release_news_signal_claim(signal["id"])
         return False  # deliberately not marked acted -- retry next cycle
 
     if _has_open_technical_position(symbol, market, timeframe):
