@@ -121,6 +121,11 @@ def send_signal_alert(
     ml_model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Formats and dispatches an official trade entry signal alert with optional ML gating metadata."""
+    safe_symbol = escape(str(symbol))
+    safe_market = escape(str(market).upper())
+    safe_timeframe = escape(str(timeframe))
+    safe_strategy = escape(str(strategy_name))
+    safe_direction = escape(str(direction).upper())
     dir_emoji = "🟢" if direction.upper() == "LONG" else "🔴"
     side_action = "BUY / LONG" if direction.upper() == "LONG" else "SELL / SHORT"
     
@@ -133,11 +138,11 @@ def send_signal_alert(
     now_wib = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M WIB")
 
     msg = (
-        f"{dir_emoji} <b>NEW TRADING SIGNAL: {symbol} ({direction.upper()})</b>\n"
+        f"{dir_emoji} <b>NEW TRADING SIGNAL: {safe_symbol} ({safe_direction})</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎯 <b>Action:</b> <code>{side_action}</code>\n"
         f"📊 <b>Market:</b> {safe_market} | <b>TF:</b> {safe_timeframe}\n"
-        f"🧠 <b>Strategy:</b> <code>{strategy_name}</code>\n"
+        f"🧠 <b>Strategy:</b> <code>{safe_strategy}</code>\n"
         f"⏱ <b>Signal Time:</b> {now_wib}\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"💵 <b>Entry Price:</b> <code>${entry_price:,.4f}</code>\n"
