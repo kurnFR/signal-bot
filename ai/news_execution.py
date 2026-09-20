@@ -240,8 +240,9 @@ def poll_once():
             if process_signal(signal):
                 opened += 1
         except Exception as e:
-            logger.error(f"process_signal failed for signal #{signal['id']}: {e}")
-            mark_news_signal_acted(signal["id"], skip_reason=f"error:{e}"[:100])
+            # Transient DB/API failures must not permanently discard a signal.
+            # The atomic claim will expire after 10 minutes, allowing retry.
+            logger.error(f"process_signal failed for signal #{signal['id']}: {e}", exc_info=True)
     heartbeat("news_execution", detail=f"{len(signals)} signals processed, {opened} positions opened")
     logger.info(f"Cycle complete: {len(signals)} signals processed, {opened} positions opened")
 
