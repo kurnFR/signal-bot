@@ -198,7 +198,7 @@ def send_news_signal_alert(
     msg = (
         f"📰 {dir_emoji} <b>NEWS-DRIVEN SIGNAL: {safe_symbol} ({direction.upper()})</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 <b>Market:</b> {market.upper()} | <b>TF:</b> {timeframe}\n"
+        f"📊 <b>Market:</b> {safe_market} | <b>TF:</b> {safe_timeframe}\n"
     )
     if trigger_headline:
         msg += f"🗞 <b>Trigger:</b> {safe_headline}\n"
