@@ -79,9 +79,6 @@ CONFIG = {
     "log_file": os.getenv("LOG_FILE", "smart_money_detector_v2.log"),
 }
 
-if not CONFIG["telegram_bot_token"] or not CONFIG["telegram_chat_id"]:
-    raise ValueError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set in .env")
-
 # =========================
 # LOGGING
 # =========================
@@ -95,6 +92,10 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("SmartMoneyDetector")
+
+if not CONFIG["telegram_bot_token"] or not CONFIG["telegram_chat_id"]:
+    logger.warning("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set in .env for Telegram alerts")
+
 
 # =========================
 # DATA CLASSES
@@ -343,7 +344,10 @@ class SmartMoneyTelegram:
         self.session.mount("https://", HTTPAdapter(max_retries=retry))
 
     def send_alert(self, signal: SmartMoneySignal):
+        if not self.token or not self.chat_id:
+            return
         with self.lock:
+
             if time.time() - self.last_send < 0.7:
                 time.sleep(0.7)
 

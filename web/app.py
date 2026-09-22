@@ -1,9 +1,13 @@
 import os
 import sys
+import logging
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+
+logger = logging.getLogger("web.app")
+
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
@@ -105,6 +109,12 @@ async def api_security_boundary(request: Request, call_next):
 @app.on_event("startup")
 def on_startup():
     seed_default_admin()
+    try:
+        from Screen.screening import ensure_signal_table
+        ensure_signal_table()
+    except Exception as e:
+        logger.warning(f"Could not initialize smart_money_signals table on startup: {e}")
+
 
 app.include_router(auth_router)
 app.include_router(paper_router)

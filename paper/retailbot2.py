@@ -134,13 +134,14 @@ class BotConfig:
     min_trade_interval_hours: int = 2
 
     # Infrastructure
-    db_host: str = field(default_factory=lambda: os.getenv('DB_HOST', '192.168.1.30'))
-    db_port: int = 3306
-    db_name: str = "Binance"
-    db_user: str = field(default_factory=lambda: os.getenv('DB_USER', 'cms'))
-    db_password: str = field(default_factory=lambda: os.getenv('DB_PASS', 'DB_PASS'))
-    telegram_token: str = field(default_factory=lambda: os.getenv('TELEGRAM_TOKEN'))
-    telegram_chat_id: str = field(default_factory=lambda: os.getenv('TELEGRAM_CHAT_ID'))
+    db_host: str = field(default_factory=lambda: os.getenv('RETAILBOT2_DB_HOST', os.getenv('DB_HOST', os.getenv('MYSQL_HOST', '192.168.1.30'))))
+    db_port: int = int(os.getenv('RETAILBOT2_DB_PORT', os.getenv('DB_PORT', os.getenv('MYSQL_PORT', '3306'))))
+    db_name: str = os.getenv('RETAILBOT2_DB_NAME', os.getenv('DB_NAME', 'Binance'))
+    db_user: str = field(default_factory=lambda: os.getenv('RETAILBOT2_DB_USER', os.getenv('DB_USER', os.getenv('MYSQL_USER', 'cms'))))
+    db_password: str = field(default_factory=lambda: os.getenv('RETAILBOT2_DB_PASSWORD', os.getenv('DB_PASS', os.getenv('MYSQL_PASSWORD', '***REDACTED-ROTATED-DB-PASSWORD***'))))
+    telegram_token: str = field(default_factory=lambda: os.getenv('TELEGRAM_TOKEN', os.getenv('TELEGRAM_BOT_TOKEN', '')))
+    telegram_chat_id: str = field(default_factory=lambda: os.getenv('TELEGRAM_CHAT_ID', ''))
+
 
     exit_check_interval: int = 5
     api_retries: int = 3
@@ -1871,16 +1872,16 @@ def main():
         max_trades_per_symbol=1,
         min_trade_interval_hours=2,
         # ── Infrastructure ──
-        db_host = os.getenv('DB_HOST', '192.168.1.30'),
-        db_user = os.getenv('DB_USER', 'xxx'),
-        db_password = os.getenv('DB_PASS', 'xxxxx'),
-        db_name = os.getenv('DB_NAME', 'Binance'),
+        db_host=os.getenv('RETAILBOT2_DB_HOST', os.getenv('DB_HOST', os.getenv('MYSQL_HOST', '192.168.1.30'))),
+        db_user=os.getenv('RETAILBOT2_DB_USER', os.getenv('DB_USER', os.getenv('MYSQL_USER', 'cms'))),
+        db_password=os.getenv('RETAILBOT2_DB_PASSWORD', os.getenv('DB_PASS', os.getenv('MYSQL_PASSWORD', '***REDACTED-ROTATED-DB-PASSWORD***'))),
+        db_name=os.getenv('RETAILBOT2_DB_NAME', os.getenv('DB_NAME', 'Binance')),
 
         # ── Telegram ──
-        telegram_token = os.getenv('TELEGRAM_TOKEN', 'YOUR_BOT_TOKEN_HERE'),
-        telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID', 'YOUR_CHAT_ID_HERE'),
-
+        telegram_token=os.getenv('TELEGRAM_TOKEN', os.getenv('TELEGRAM_BOT_TOKEN', '')),
+        telegram_chat_id=os.getenv('TELEGRAM_CHAT_ID', ''),
     )
+
 
     bot = RetailDeathTrapBot(config)
     bot.run()

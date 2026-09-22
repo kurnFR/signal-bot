@@ -83,9 +83,6 @@ CONFIG = {
     "log_file": os.getenv("LOG_FILE", "smart_money_detector.log"),
 }
 
-if not CONFIG["telegram_bot_token"] or not CONFIG["telegram_chat_id"]:
-    raise ValueError("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID via environment variables")
-
 # =========================
 # LOGGING SETUP
 # =========================
@@ -99,6 +96,10 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("SmartMoneyDetector")
+
+if not CONFIG["telegram_bot_token"] or not CONFIG["telegram_chat_id"]:
+    logger.warning("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set -- Telegram alerts disabled (signals will be saved to database)")
+
 
 # =========================
 # DATA CLASSES
@@ -338,7 +339,10 @@ class SmartMoneyTelegram:
     
     def send_early_alert(self, signal: SmartMoneySignal) -> bool:
         """Send early warning alert with smart money context"""
+        if not self.token or not self.chat_id:
+            return False
         with self._lock:
+
             # Rate limit
             elapsed = time.time() - self._last_send
             if elapsed < 0.8:  # Slightly faster for early signals
