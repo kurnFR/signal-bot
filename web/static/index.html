@@ -125,6 +125,13 @@
                         <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-amber-950 text-amber-300 border border-amber-800">NEW</span>
                     </div>
                 </button>
+                <button data-tab="research" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-purple-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="flask-conical" class="w-4 h-4 text-purple-400"></i>
+                    <div class="flex items-center justify-between w-full">
+                        <span>Research Bots</span>
+                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-purple-950 text-purple-300 border border-purple-800">NEW</span>
+                    </div>
+                </button>
                 <button data-tab="settings" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="settings" class="w-4 h-4"></i>
                     <span>Settings & Users</span>
@@ -995,6 +1002,116 @@
             </section>
 
             <!-- ============================================== -->
+            <!-- 5c. RESEARCH BOTS VIEW (retailbot2 + volume screener) -->
+            <!-- ============================================== -->
+            <section id="view-research" class="view-section hidden space-y-6">
+                <!-- ===== Retail Death Trap Bot v2 ===== -->
+                <div class="flex items-center gap-2">
+                    <i data-lucide="skull" class="w-4 h-4 text-purple-400"></i>
+                    <h2 class="text-sm font-bold text-slate-100">Retail Death Trap Bot v2</h2>
+                    <span class="text-[10px] text-slate-500">7-strategy shadow/inverse confluence bot &middot; separate database</span>
+                    <button onclick="App.fetchResearchData()" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Shadow (real signal)</span>
+                        <div id="rb2-kpi-shadow-pnl" class="text-2xl font-black font-mono mt-2">$0.00</div>
+                        <span class="text-[11px] text-slate-500"><span id="rb2-kpi-shadow-open">0</span> open &middot; <span id="rb2-kpi-shadow-wr">--</span> win rate</span>
+                    </div>
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Inverse (faded signal)</span>
+                        <div id="rb2-kpi-inverse-pnl" class="text-2xl font-black font-mono mt-2">$0.00</div>
+                        <span class="text-[11px] text-slate-500"><span id="rb2-kpi-inverse-open">0</span> open &middot; <span id="rb2-kpi-inverse-wr">--</span> win rate</span>
+                    </div>
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Shadow Closed Trades</span>
+                        <div id="rb2-kpi-shadow-closed" class="text-2xl font-black font-mono text-slate-100 mt-2">0</div>
+                        <span class="text-[11px] text-slate-500">All-time</span>
+                    </div>
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Inverse Closed Trades</span>
+                        <div id="rb2-kpi-inverse-closed" class="text-2xl font-black font-mono text-slate-100 mt-2">0</div>
+                        <span class="text-[11px] text-slate-500">All-time</span>
+                    </div>
+                </div>
+
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <h3 class="text-sm font-bold text-slate-100">Open Positions</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left custom-table">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th><th>Side</th><th>Mode</th><th>Entry</th>
+                                    <th>Stop</th><th>Target</th><th>Strategy</th><th>Confluence</th><th>Opened</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rb2-positions-table-body">
+                                <tr><td colspan="9" class="text-center py-6 text-slate-500 text-xs">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <h3 class="text-sm font-bold text-slate-100">Strategy Performance (7 strategies &times; shadow/inverse)</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left custom-table">
+                            <thead>
+                                <tr>
+                                    <th>Strategy</th><th>Mode</th><th>Trades</th><th>Wins</th><th>Losses</th><th>Win Rate</th><th>Net P&amp;L</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rb2-strategy-table-body">
+                                <tr><td colspan="7" class="text-center py-6 text-slate-500 text-xs">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- ===== Smart Money Volume Screener ===== -->
+                <div class="flex items-center gap-2 pt-2">
+                    <i data-lucide="zap" class="w-4 h-4 text-purple-400"></i>
+                    <h2 class="text-sm font-bold text-slate-100">Smart Money Volume Screener</h2>
+                    <span class="text-[10px] text-slate-500">RVOL / divergence / velocity volume-spike detector &middot; Telegram-only alerts, now logged</span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Signals (24h)</span>
+                        <div id="screener-kpi-24h" class="text-3xl font-black font-mono text-purple-400 mt-2">0</div>
+                    </div>
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Signals (all-time)</span>
+                        <div id="screener-kpi-total" class="text-3xl font-black font-mono text-slate-100 mt-2">0</div>
+                    </div>
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">24h Breakdown</span>
+                        <div id="screener-kpi-breakdown" class="text-xs text-slate-300 mt-2 space-y-0.5">--</div>
+                    </div>
+                </div>
+
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <h3 class="text-sm font-bold text-slate-100">Recent Signals</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left custom-table">
+                            <thead>
+                                <tr>
+                                    <th>Time</th><th>Symbol</th><th>Type</th><th>RVOL</th>
+                                    <th>Price</th><th>Price Chg</th><th>Velocity</th><th>Alerted</th>
+                                </tr>
+                            </thead>
+                            <tbody id="screener-signals-table-body">
+                                <tr><td colspan="8" class="text-center py-6 text-slate-500 text-xs">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================== -->
             <!-- 6. SETTINGS & USER MANAGEMENT VIEW -->
             <!-- ============================================== -->
             <section id="view-settings" class="view-section hidden space-y-8">
@@ -1494,7 +1611,7 @@
          browsers can keep serving a stale cached copy indefinitely since
          this file has no explicit Cache-Control header. See the
          "still seeing the old bug after a fix was pushed" class of report. -->
-    <script src="/static/js/app.js?v=20260920-2"></script>
+    <script src="/static/js/app.js?v=20260922-1"></script>
     <script>
         if (window.lucide) window.lucide.createIcons();
     </script>

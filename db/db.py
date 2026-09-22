@@ -6,14 +6,33 @@ backfill or restarting a WS collector is always safe (idempotent).
 import mysql.connector
 from mysql.connector import pooling
 import logging
+from decimal import Decimal
 
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import MYSQL_CONFIG
+from config import MYSQL_CONFIG, RETAILBOT2_DB_CONFIG
 
 logger = logging.getLogger("db")
 
 _pool = None
+_retailbot2_pool = None
+
+
+def get_retailbot2_pool():
+    """Separate pool for paper/retailbot2.py's own database (see
+    RETAILBOT2_DB_CONFIG in config.py) -- read-only usage from the web
+    dashboard's visibility panel. Lazily initialized so importing db.db
+    doesn't require this second database to be reachable if retailbot2
+    isn't running / configured."""
+    global _retailbot2_pool
+    if _retailbot2_pool is None:
+        _retailbot2_pool = pooling.MySQLConnectionPool(
+            pool_name="retailbot2_pool",
+            pool_size=3,
+            init_command="SET time_zone = '+00:00'",
+            **RETAILBOT2_DB_CONFIG,
+        )
+    return _retailbot2_pool
 
 
 def get_pool():
@@ -925,5 +944,162 @@ def get_news_overlay_stats():
             },
             "heartbeats": heartbeats,
         }
+    finally:
+        conn.close()
+
+
+# ----------------------------------------------------------------------------
+# retailbot2 -- read helpers for the web dashboard visibility panel.
+# Reads from RETAILBOT2_DB_CONFIG's database (default "Binance"), separate
+# from the main crypto_signals pool used everywhere else in this file.
+# ----------------------------------------------------------------------------
+
+def get_retailbot2_open_trades(limit=100):
+    conn = get_retailbot2_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT id, symbol, side, mode, entry_price, stop_price, target_price,
+                   atr, rr, units, strategy, strategies_json, confluence_score,
+                   reason, entry_time
+            FROM rdt_trades WHERE status='OPEN'
+            ORDER BY entry_time DESC LIMIT %s
+        """, (limit,))
+        rows = cur.fetchall()
+        cur.close()
+        for r in rows:
+            for k, v in r.items():
+                if isinstance(v, Decimal):
+                    r[k] = float(v)
+            r["entry_time"] = str(r["entry_time"]) if r.get("entry_time") else None
+        return rows
+    finally:
+        conn.close()
+
+
+def get_retailbot2_recent_trades(limit=50):
+    conn = get_retailbot2_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT id, symbol, side, mode, entry_price, stop_price, target_price,
+                   units, strategy, confluence_score, status, exit_price,
+                   exit_reason, net_pnl, pnl_percent, entry_time, exit_time
+            FROM rdt_trades WHERE status='CLOSED'
+            ORDER BY exit_time DESC LIMIT %s
+        """, (limit,))
+        rows = cur.fetchall()
+        cur.close()
+        for r in rows:
+            for k, v in r.items():
+                if isinstance(v, Decimal):
+                    r[k] = float(v)
+            for dt_key in ("entry_time", "exit_time"):
+                if r.get(dt_key) is not None:
+                    r[dt_key] = str(r[dt_key])
+        return rows
+    finally:
+        conn.close()
+
+
+def get_retailbot2_stats():
+    """Per-strategy/mode win-rate stats plus overall equity summary
+    (initial_capital isn't stored in this DB -- the dashboard adds it from
+    its own config if needed; realized_pnl sums are enough on their own to
+    show relative performance)."""
+    conn = get_retailbot2_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM rdt_strategy_stats ORDER BY mode, strategy")
+        stats_rows = cur.fetchall()
+        for r in stats_rows:
+            if isinstance(r.get("total_pnl"), Decimal):
+                r["total_pnl"] = float(r["total_pnl"])
+            r["last_updated"] = str(r["last_updated"]) if r.get("last_updated") else None
+
+        cur.execute("""
+            SELECT mode, COUNT(*) AS open_count FROM rdt_trades
+            WHERE status='OPEN' GROUP BY mode
+        """)
+        open_counts = {r["mode"]: r["open_count"] for r in cur.fetchall()}
+
+        cur.execute("""
+            SELECT mode, COALESCE(SUM(net_pnl), 0) AS realized_pnl,
+                   COUNT(*) AS closed_count,
+                   SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END) AS wins
+            FROM rdt_trades WHERE status='CLOSED' GROUP BY mode
+        """)
+        pnl_rows = cur.fetchall()
+        by_mode = {}
+        for r in pnl_rows:
+            closed = r["closed_count"] or 0
+            wins = r["wins"] or 0
+            by_mode[r["mode"]] = {
+                "realized_pnl": float(r["realized_pnl"]),
+                "closed_count": closed,
+                "wins": wins,
+                "win_rate": round(wins / closed * 100, 1) if closed > 0 else None,
+                "open_count": open_counts.get(r["mode"], 0),
+            }
+        for mode in ("shadow", "inverse"):
+            by_mode.setdefault(mode, {
+                "realized_pnl": 0.0, "closed_count": 0, "wins": 0,
+                "win_rate": None, "open_count": open_counts.get(mode, 0),
+            })
+        cur.close()
+        return {"by_strategy": stats_rows, "by_mode": by_mode}
+    finally:
+        conn.close()
+
+
+# ----------------------------------------------------------------------------
+# Screen/screening.py (smart-money volume screener) -- read helpers.
+# Uses the main crypto_signals pool since this table lives there.
+# ----------------------------------------------------------------------------
+
+def get_recent_smart_money_signals(limit=50):
+    limit = max(1, min(int(limit), 200))
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT id, symbol, signal_type, rvol, volume, quote_volume, price,
+                   price_change_pct, volume_velocity, candle_time,
+                   telegram_sent, detected_at
+            FROM smart_money_signals
+            ORDER BY detected_at DESC LIMIT %s
+        """, (limit,))
+        rows = cur.fetchall()
+        cur.close()
+        for r in rows:
+            for k in ("rvol", "volume", "quote_volume", "price", "price_change_pct", "volume_velocity"):
+                if isinstance(r.get(k), Decimal):
+                    r[k] = float(r[k])
+            r["telegram_sent"] = bool(r["telegram_sent"])
+            r["detected_at"] = str(r["detected_at"])
+        return rows
+    finally:
+        conn.close()
+
+
+def get_smart_money_stats():
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT COUNT(*) AS n FROM smart_money_signals")
+        total = cur.fetchone()["n"]
+        cur.execute("""
+            SELECT COUNT(*) AS n FROM smart_money_signals
+            WHERE detected_at >= NOW() - INTERVAL 24 HOUR
+        """)
+        last_24h = cur.fetchone()["n"]
+        cur.execute("""
+            SELECT signal_type, COUNT(*) AS n FROM smart_money_signals
+            WHERE detected_at >= NOW() - INTERVAL 24 HOUR
+            GROUP BY signal_type
+        """)
+        by_type = {r["signal_type"]: r["n"] for r in cur.fetchall()}
+        cur.close()
+        return {"total_signals": total, "signals_last_24h": last_24h, "by_type_last_24h": by_type}
     finally:
         conn.close()

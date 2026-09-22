@@ -18,6 +18,7 @@ import signal
 import logging
 import threading
 import heapq
+import sys
 from datetime import datetime, timezone
 from collections import defaultdict, deque
 from typing import Optional, Dict, List, Tuple, Deque
@@ -30,6 +31,12 @@ from urllib3.util.retry import Retry
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Reuse the main app's shared MySQL connection pool (crypto_signals DB)
+# rather than standing up a separate database, so signals this screener
+# fires can be read by the web dashboard directly. See db/db.py.
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from db.db import get_pool
 
 
 # =========================
@@ -56,6 +63,7 @@ CONFIG = {
     
     # === Alert Control ===
     "max_alerts_per_hour": int(os.getenv("MAX_ALERTS_PER_HOUR", "5")),  # Prevent spam
+    "max_alerts_per_symbol_per_hour": int(os.getenv("MAX_ALERTS_PER_SYMBOL_PER_HOUR", "2")),  # Stop one volatile symbol from burning the whole global budget
     "alert_cooldown_sec": int(os.getenv("ALERT_COOLDOWN_SEC", "120")),  # 2 min per pair
     "daily_reset_utc_hour": int(os.getenv("DAILY_RESET_UTC_HOUR", "0")),
     
@@ -265,19 +273,34 @@ class SmartMoneyState:
         )
     
     def _can_alert(self, symbol: str) -> bool:
-        """Check cooldown and hourly rate limit"""
+        """Check cooldown and rate limits (both global and per-symbol).
+
+        [FIX] hourly_alert_count[symbol] was being incremented on every
+        alert but never actually checked -- only the "global" counter was
+        enforced, so max_alerts_per_hour was effectively a *global* cap
+        across every monitored symbol combined. On a volatile day, a
+        handful of alerts on one or two symbols could silently exhaust the
+        entire hour's budget and suppress every other symbol's legitimate
+        signal. Both caps now apply: the global one still bounds total
+        alert volume, and the new per-symbol one stops any single symbol
+        from consuming that whole budget by itself.
+        """
         now = time.time()
-        
+
         with self.lock:
             # Per-symbol cooldown
             last = self.last_alert_time.get(symbol, 0)
             if now - last < CONFIG["alert_cooldown_sec"]:
                 return False
-            
+
             # Hourly global limit
             if self.hourly_alert_count["global"] >= CONFIG["max_alerts_per_hour"]:
                 return False
-            
+
+            # Hourly per-symbol limit
+            if self.hourly_alert_count[symbol] >= CONFIG["max_alerts_per_symbol_per_hour"]:
+                return False
+
             # Update counters
             self.last_alert_time[symbol] = now
             self.hourly_alert_count["global"] += 1
@@ -381,6 +404,72 @@ class SmartMoneyTelegram:
 telegram = SmartMoneyTelegram(CONFIG["telegram_bot_token"], CONFIG["telegram_chat_id"])
 
 # =========================
+# PERSISTENCE (shared crypto_signals DB -- read by the web dashboard)
+# =========================
+def ensure_signal_table():
+    """Create smart_money_signals if it doesn't exist. Previously this
+    screener had NO database persistence at all -- it only fired Telegram
+    alerts, so there was nothing for a dashboard to read. Called once at
+    startup; safe to call repeatedly (CREATE TABLE IF NOT EXISTS)."""
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS smart_money_signals (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                symbol VARCHAR(20) NOT NULL,
+                signal_type VARCHAR(30) NOT NULL,
+                rvol DECIMAL(12,4) NOT NULL,
+                volume DECIMAL(30,8) NOT NULL,
+                quote_volume DECIMAL(20,2) NOT NULL,
+                price DECIMAL(20,8) NOT NULL,
+                price_change_pct DECIMAL(10,4) NOT NULL,
+                volume_velocity DECIMAL(12,4) NOT NULL,
+                candle_time VARCHAR(20) NOT NULL,
+                telegram_sent BOOLEAN NOT NULL DEFAULT FALSE,
+                detected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_smsig_symbol_time (symbol, detected_at),
+                INDEX idx_smsig_type_time (signal_type, detected_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """)
+        conn.commit()
+        cur.close()
+        logger.info("✅ smart_money_signals table ready")
+    except Exception as e:
+        logger.error(f"❌ ensure_signal_table failed: {e}")
+    finally:
+        conn.close()
+
+
+def save_signal_to_db(signal: SmartMoneySignal, telegram_sent: bool):
+    """Persist a fired signal so the web dashboard can display it. Never
+    raises -- a DB hiccup here must not stop the screener from continuing
+    to detect and alert on signals, which is its primary job."""
+    try:
+        conn = get_pool().get_connection()
+    except Exception as e:
+        logger.error(f"❌ save_signal_to_db: could not get connection: {e}")
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO smart_money_signals
+                (symbol, signal_type, rvol, volume, quote_volume, price,
+                 price_change_pct, volume_velocity, candle_time, telegram_sent)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            signal.symbol, signal.signal_type, signal.rvol, signal.volume,
+            signal.quote_volume, signal.price, signal.price_change_pct,
+            signal.volume_velocity, signal.candle_time, telegram_sent,
+        ))
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        logger.error(f"❌ save_signal_to_db failed for {signal.symbol}: {e}")
+    finally:
+        conn.close()
+
+# =========================
 # BINANCE API WITH LIQUIDITY FILTERING
 # =========================
 def get_liquid_symbols() -> List[str]:
@@ -467,7 +556,8 @@ def process_kline_message(raw_msg: str):
         )
         
         if signal and state.register_signal(signal):
-            telegram.send_early_alert(signal)
+            sent = telegram.send_early_alert(signal)
+            save_signal_to_db(signal, telegram_sent=sent)
             logger.info(f"🎯 EARLY SIGNAL: {signal.symbol} | {signal.signal_type} | RVOL: {signal.rvol:.2f}x | ${signal.price:.4f}")
                 
     except json.JSONDecodeError as e:
@@ -543,7 +633,9 @@ def main():
     logger.info("🚀 Smart Money Volume Detector starting (EARLY WARNING MODE)...")
     logger.info(f"Config: RVOL≥{CONFIG['rvol_multiplier']}x | Divergence: ≤{CONFIG['divergence_max_price_change']}% price move | "
                 f"Velocity: ≥{CONFIG['velocity_threshold']}x | Max {CONFIG['max_alerts_per_hour']} alerts/hour")
-    
+
+    ensure_signal_table()
+
     symbols = get_liquid_symbols()
     if not symbols:
         logger.error("❌ No liquid symbols found - exiting")

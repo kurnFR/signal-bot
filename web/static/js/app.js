@@ -311,6 +311,154 @@ const App = {
     },
 
     // ----------------------------------------------------
+    // RESEARCH BOTS: retailbot2 + smart-money screener
+    // ----------------------------------------------------
+    async fetchResearchData() {
+        try {
+            const [posRes, statsRes, screenerSigRes, screenerStatsRes] = await Promise.all([
+                fetch(`${API_BASE}/api/research/retailbot2/positions?limit=100`, { headers: this.getAuthHeaders() }),
+                fetch(`${API_BASE}/api/research/retailbot2/stats`, { headers: this.getAuthHeaders() }),
+                fetch(`${API_BASE}/api/research/screener/signals?limit=50`, { headers: this.getAuthHeaders() }),
+                fetch(`${API_BASE}/api/research/screener/stats`, { headers: this.getAuthHeaders() }),
+            ]);
+            const results = [posRes, statsRes, screenerSigRes, screenerStatsRes];
+            const failed = results.find(r => !r.ok);
+            if (failed) {
+                let detail = `HTTP ${failed.status}`;
+                try { detail = (await failed.json()).detail || detail; } catch (_) {}
+                throw new Error(detail);
+            }
+            const { positions } = await posRes.json();
+            const rb2Stats = await statsRes.json();
+            const { signals } = await screenerSigRes.json();
+            const screenerStats = await screenerStatsRes.json();
+
+            this._renderRb2Kpis(rb2Stats);
+            this._renderRb2Positions(positions);
+            this._renderRb2StrategyTable(rb2Stats.by_strategy || []);
+            this._renderScreenerKpis(screenerStats);
+            this._renderScreenerSignals(signals);
+        } catch (e) {
+            this.showToast(`Failed to load Research Bots data: ${e.message || e}`, "error");
+        } finally {
+            if (window.lucide) window.lucide.createIcons();
+        }
+    },
+
+    _renderRb2Kpis(stats) {
+        const byMode = stats.by_mode || {};
+        const shadow = byMode.shadow || {};
+        const inverse = byMode.inverse || {};
+        const set = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
+        const pnlClass = (v) => v > 0 ? "text-emerald-400" : v < 0 ? "text-rose-400" : "text-slate-100";
+        const pnlEl = (id, v) => { const el = document.getElementById(id); if (el) { el.innerText = `${v >= 0 ? "+" : ""}$${v.toFixed(2)}`; el.className = el.className.replace(/text-(emerald|rose|slate)-\d+/, "") + " " + pnlClass(v); } };
+
+        pnlEl("rb2-kpi-shadow-pnl", shadow.realized_pnl || 0);
+        pnlEl("rb2-kpi-inverse-pnl", inverse.realized_pnl || 0);
+        set("rb2-kpi-shadow-open", shadow.open_count ?? 0);
+        set("rb2-kpi-inverse-open", inverse.open_count ?? 0);
+        set("rb2-kpi-shadow-wr", shadow.win_rate != null ? `${shadow.win_rate}%` : "--");
+        set("rb2-kpi-inverse-wr", inverse.win_rate != null ? `${inverse.win_rate}%` : "--");
+        set("rb2-kpi-shadow-closed", shadow.closed_count ?? 0);
+        set("rb2-kpi-inverse-closed", inverse.closed_count ?? 0);
+    },
+
+    _renderRb2Positions(positions) {
+        const tbody = document.getElementById("rb2-positions-table-body");
+        if (!tbody) return;
+        if (!positions || positions.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-500 text-xs">No open positions. Confirm paper/retailbot2.py is running.</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = positions.map(p => {
+            const sideColor = p.side === "LONG" ? "text-emerald-400 bg-emerald-950 border-emerald-800" : "text-rose-400 bg-rose-950 border-rose-800";
+            const modeColor = p.mode === "inverse" ? "text-purple-300 bg-purple-950 border-purple-800" : "text-sky-300 bg-sky-950 border-sky-800";
+            return `
+                <tr>
+                    <td class="font-semibold text-slate-100">${this._escapeHtml(p.symbol)}</td>
+                    <td><span class="px-2 py-0.5 text-[10px] font-bold rounded border ${sideColor}">${this._escapeHtml(p.side)}</span></td>
+                    <td><span class="px-2 py-0.5 text-[10px] font-bold rounded border ${modeColor}">${this._escapeHtml(p.mode)}</span></td>
+                    <td class="font-mono text-slate-300">$${Number(p.entry_price).toFixed(4)}</td>
+                    <td class="font-mono text-rose-400">$${Number(p.stop_price).toFixed(4)}</td>
+                    <td class="font-mono text-emerald-400">$${Number(p.target_price).toFixed(4)}</td>
+                    <td class="text-slate-400">${this._escapeHtml(p.strategy)}</td>
+                    <td class="text-slate-400">${p.confluence_score ?? 1}/7</td>
+                    <td class="whitespace-nowrap text-slate-500">${this._formatDateTime(p.entry_time)}</td>
+                </tr>`;
+        }).join("");
+    },
+
+    _renderRb2StrategyTable(rows) {
+        const tbody = document.getElementById("rb2-strategy-table-body");
+        if (!tbody) return;
+        if (!rows || rows.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-500 text-xs">No closed trades yet.</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = rows.map(r => {
+            const total = r.total_trades || 0;
+            const wr = total > 0 ? ((r.wins || 0) / total * 100).toFixed(1) : "--";
+            const pnl = Number(r.total_pnl || 0);
+            const pnlColor = pnl > 0 ? "text-emerald-400" : pnl < 0 ? "text-rose-400" : "text-slate-300";
+            const modeColor = r.mode === "inverse" ? "text-purple-300 bg-purple-950 border-purple-800" : "text-sky-300 bg-sky-950 border-sky-800";
+            return `
+                <tr>
+                    <td class="font-semibold text-slate-100">${this._escapeHtml(r.strategy)}</td>
+                    <td><span class="px-2 py-0.5 text-[10px] font-bold rounded border ${modeColor}">${this._escapeHtml(r.mode)}</span></td>
+                    <td class="text-slate-300">${total}</td>
+                    <td class="text-emerald-400">${r.wins || 0}</td>
+                    <td class="text-rose-400">${r.losses || 0}</td>
+                    <td class="text-slate-300">${wr}${wr !== "--" ? "%" : ""}</td>
+                    <td class="font-mono ${pnlColor}">${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}</td>
+                </tr>`;
+        }).join("");
+    },
+
+    _renderScreenerKpis(stats) {
+        const set = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
+        set("screener-kpi-24h", stats.signals_last_24h ?? 0);
+        set("screener-kpi-total", stats.total_signals ?? 0);
+        const breakdownEl = document.getElementById("screener-kpi-breakdown");
+        if (breakdownEl) {
+            const byType = stats.by_type_last_24h || {};
+            const entries = Object.entries(byType);
+            breakdownEl.innerHTML = entries.length
+                ? entries.map(([type, n]) => `<div>${this._escapeHtml(type)}: <span class="font-mono text-slate-100">${n}</span></div>`).join("")
+                : `<span class="text-slate-500">No signals in 24h</span>`;
+        }
+    },
+
+    _renderScreenerSignals(signals) {
+        const tbody = document.getElementById("screener-signals-table-body");
+        if (!tbody) return;
+        if (!signals || signals.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-slate-500 text-xs">No signals yet. Confirm Screen/screening.py is running.</td></tr>`;
+            return;
+        }
+        const typeColors = {
+            RVOL_SPIKE: "text-amber-300 bg-amber-950 border-amber-800",
+            DIVERGENCE_ACCUMULATION: "text-emerald-300 bg-emerald-950 border-emerald-800",
+            DIVERGENCE_DISTRIBUTION: "text-rose-300 bg-rose-950 border-rose-800",
+            VELOCITY_SURGE: "text-sky-300 bg-sky-950 border-sky-800",
+        };
+        tbody.innerHTML = signals.map(s => {
+            const color = typeColors[s.signal_type] || "text-slate-300 bg-slate-800 border-slate-700";
+            const changeColor = s.price_change_pct > 0 ? "text-emerald-400" : s.price_change_pct < 0 ? "text-rose-400" : "text-slate-400";
+            return `
+                <tr>
+                    <td class="whitespace-nowrap text-slate-500">${this._formatDateTime(s.detected_at)}</td>
+                    <td class="font-semibold text-slate-100">${this._escapeHtml(s.symbol)}</td>
+                    <td><span class="px-2 py-0.5 text-[10px] font-bold rounded border ${color}">${this._escapeHtml(s.signal_type)}</span></td>
+                    <td class="font-mono text-slate-300">${Number(s.rvol).toFixed(2)}x</td>
+                    <td class="font-mono text-slate-300">$${Number(s.price).toFixed(4)}</td>
+                    <td class="font-mono ${changeColor}">${s.price_change_pct >= 0 ? "+" : ""}${Number(s.price_change_pct).toFixed(3)}%</td>
+                    <td class="font-mono text-slate-300">${Number(s.volume_velocity).toFixed(2)}x</td>
+                    <td>${s.telegram_sent ? `<i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400"></i>` : `<i data-lucide="x" class="w-3.5 h-3.5 text-slate-600"></i>`}</td>
+                </tr>`;
+        }).join("");
+    },
+
+    // ----------------------------------------------------
     // AUTHENTICATION & SESSIONS
     // ----------------------------------------------------
     async checkAuth() {
@@ -826,6 +974,10 @@ const App = {
             if (titleEl) titleEl.innerText = "News AI Overlay Signals";
             if (descEl) descEl.innerText = "What the AI has read, how confident it was, and what it did about it";
             this.fetchNewsData();
+        } else if (tabId === "research") {
+            if (titleEl) titleEl.innerText = "Research Bots";
+            if (descEl) descEl.innerText = "Retail Death Trap Bot v2 (shadow/inverse confluence) and the Smart Money Volume Screener";
+            this.fetchResearchData();
         } else if (tabId === "settings") {
             if (titleEl) titleEl.innerText = "System Settings & User Administration";
             if (descEl) descEl.innerText = "User accounts, password resets, MariaDB connection, and execution parameters";

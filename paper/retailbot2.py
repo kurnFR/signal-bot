@@ -1298,6 +1298,56 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    def get_realized_pnl_by_mode(self) -> Dict[str, float]:
+        """Sum of net_pnl for CLOSED trades, grouped by mode. Used to
+        rebuild equity_shadow/equity_inverse on restart -- without this,
+        _load_state() resets both back to initial_capital on every
+        restart, silently discarding all realized gains/losses."""
+        conn = self.get_conn()
+        if not conn:
+            return {}
+        try:
+            c = conn.cursor(dictionary=True)
+            c.execute("""
+                SELECT mode, COALESCE(SUM(net_pnl), 0) AS total_pnl
+                FROM rdt_trades WHERE status='CLOSED' GROUP BY mode
+            """)
+            rows = c.fetchall()
+            c.close()
+            return {r['mode']: float(r['total_pnl']) for r in rows}
+        except Exception as e:
+            self.logger.error(f"❌ get_realized_pnl_by_mode: {e}")
+            return {}
+        finally:
+            conn.close()
+
+    def get_last_trade_times(self) -> Dict[str, Dict[str, datetime]]:
+        """Most recent entry_time per (symbol, mode) across ALL trades
+        (open + closed). Used to rebuild the per-symbol cooldown on
+        restart -- without this, _load_state() resets every symbol's
+        cooldown to datetime.min, so a restart can immediately bypass
+        min_trade_interval_hours and re-enter a symbol with no cooldown."""
+        conn = self.get_conn()
+        if not conn:
+            return {}
+        try:
+            c = conn.cursor(dictionary=True)
+            c.execute("""
+                SELECT symbol, mode, MAX(entry_time) AS last_entry
+                FROM rdt_trades GROUP BY symbol, mode
+            """)
+            rows = c.fetchall()
+            c.close()
+            result: Dict[str, Dict[str, datetime]] = {}
+            for r in rows:
+                result.setdefault(r['symbol'], {})[r['mode']] = r['last_entry']
+            return result
+        except Exception as e:
+            self.logger.error(f"❌ get_last_trade_times: {e}")
+            return {}
+        finally:
+            conn.close()
+
 
 # ═══════════════════════════════════════════════════════════════════
 # DATA FETCHER
@@ -1443,6 +1493,34 @@ class RetailDeathTrapBot:
                 f"📂 Loaded #{t['id']} {t['symbol']} "
                 f"{t['side']} [{record['mode']}]"
             )
+
+        # Rebuild equity from realized P&L -- without this, a restart
+        # silently resets both equities back to initial_capital, discarding
+        # every closed trade's gain/loss (see get_realized_pnl_by_mode()).
+        realized = self.db.get_realized_pnl_by_mode()
+        if realized:
+            self.equity_shadow = self.config.initial_capital + realized.get('shadow', 0.0)
+            self.equity_inverse = self.config.initial_capital + realized.get('inverse', 0.0)
+            self.logger.info(
+                f"💰 Restored equity from DB: shadow=${self.equity_shadow:,.2f} "
+                f"inverse=${self.equity_inverse:,.2f}"
+            )
+
+        # Rebuild per-symbol cooldown -- without this, a restart resets
+        # last_trade_time to datetime.min for every symbol, bypassing
+        # min_trade_interval_hours immediately after restart (see
+        # get_last_trade_times()).
+        last_times = self.db.get_last_trade_times()
+        restored = 0
+        for symbol, by_mode in last_times.items():
+            if symbol not in self.last_trade_time:
+                continue
+            for mode, last_entry in by_mode.items():
+                if last_entry is not None:
+                    self.last_trade_time[symbol][mode] = last_entry
+                    restored += 1
+        if restored:
+            self.logger.info(f"⏱️  Restored cooldown state for {restored} symbol/mode pairs")
 
     def _startup_msg(self):
         msg = (

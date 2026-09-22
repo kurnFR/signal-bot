@@ -349,3 +349,19 @@ MYSQL_CONFIG = {
     "password": os.getenv("MYSQL_PASSWORD", ""),
     "database": os.getenv("MYSQL_DATABASE", "crypto_signals"),
 }
+
+# paper/retailbot2.py runs as its own standalone process with its own
+# database (its BotConfig reads DB_HOST/DB_USER/DB_PASS/DB_NAME, default
+# database name "Binance"). This gives the web dashboard read access to
+# that same database for the visibility panel, reusing retailbot2.py's own
+# env var names so credentials aren't duplicated under a second set of
+# names -- override RETAILBOT2_DB_* individually only if the dashboard
+# needs different (e.g. more restricted, read-only) credentials than the
+# bot process itself uses.
+RETAILBOT2_DB_CONFIG = {
+    "host": os.getenv("RETAILBOT2_DB_HOST", os.getenv("DB_HOST", "192.168.1.30")),
+    "port": int(os.getenv("RETAILBOT2_DB_PORT", 3306)),
+    "user": os.getenv("RETAILBOT2_DB_USER", os.getenv("DB_USER", MYSQL_CONFIG["user"])),
+    "password": os.getenv("RETAILBOT2_DB_PASSWORD", os.getenv("DB_PASS", MYSQL_CONFIG["password"])),
+    "database": os.getenv("RETAILBOT2_DB_NAME", os.getenv("DB_NAME", "Binance")),
+}
