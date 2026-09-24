@@ -1015,6 +1015,44 @@
                     </button>
                 </div>
 
+                <!-- Bot Control: retailbot2 -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="rb2-ctl-enabled" class="sr-only peer">
+                                <div class="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:bg-emerald-600 transition-all"></div>
+                                <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-all peer-checked:translate-x-5"></span>
+                            </label>
+                            <span class="text-xs font-semibold text-slate-200">Trading Enabled</span>
+                            <span id="rb2-ctl-status-note" class="text-[10px] text-slate-500">Existing open positions are always managed regardless of this toggle</span>
+                        </div>
+                        <span id="rb2-ctl-updated" class="text-[10px] text-slate-600"></span>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                        <label class="text-[11px] text-slate-400">ATR Stop Multiplier<input type="number" step="0.1" id="rb2-ctl-atr_sl_multiplier" class="cfg-input" placeholder="1.5"></label>
+                        <label class="text-[11px] text-slate-400">Risk:Reward Ratio<input type="number" step="0.1" id="rb2-ctl-rr_ratio" class="cfg-input" placeholder="2.0"></label>
+                        <label class="text-[11px] text-slate-400">Risk Per Trade (frac, e.g. 0.01=1%)<input type="number" step="0.001" id="rb2-ctl-risk_per_trade" class="cfg-input" placeholder="0.01"></label>
+                        <label class="text-[11px] text-slate-400">Max Open Trades / Mode<input type="number" step="1" id="rb2-ctl-max_open_trades_per_mode" class="cfg-input" placeholder="8"></label>
+                        <label class="text-[11px] text-slate-400">Max Trades / Symbol<input type="number" step="1" id="rb2-ctl-max_trades_per_symbol" class="cfg-input" placeholder="1"></label>
+                        <label class="text-[11px] text-slate-400">Cooldown (hours)<input type="number" step="0.5" id="rb2-ctl-min_trade_interval_hours" class="cfg-input" placeholder="2"></label>
+                        <label class="text-[11px] text-slate-400">RSI Oversold<input type="number" step="1" id="rb2-ctl-rsi_oversold" class="cfg-input" placeholder="35"></label>
+                        <label class="text-[11px] text-slate-400">RSI Overbought<input type="number" step="1" id="rb2-ctl-rsi_overbought" class="cfg-input" placeholder="65"></label>
+                        <label class="text-[11px] text-slate-400">RSI Zone Width<input type="number" step="1" id="rb2-ctl-rsi_zone_width" class="cfg-input" placeholder="5"></label>
+                        <label class="text-[11px] text-slate-400">S/R Touch Threshold<input type="number" step="0.0001" id="rb2-ctl-sr_touch_threshold" class="cfg-input" placeholder="0.0015"></label>
+                        <label class="text-[11px] text-slate-400">S/R Min Touches<input type="number" step="1" id="rb2-ctl-sr_min_touches" class="cfg-input" placeholder="2"></label>
+                        <label class="text-[11px] text-slate-400">Bollinger Std Dev<input type="number" step="0.1" id="rb2-ctl-bb_std" class="cfg-input" placeholder="2.0"></label>
+                        <label class="text-[11px] text-slate-400">BB Proximity %<input type="number" step="0.001" id="rb2-ctl-bb_proximity_pct" class="cfg-input" placeholder="0.003"></label>
+                        <label class="text-[11px] text-slate-400">Pattern Tolerance<input type="number" step="0.001" id="rb2-ctl-pattern_tolerance" class="cfg-input" placeholder="0.002"></label>
+                        <label class="text-[11px] text-slate-400">Pattern Min Bars Apart<input type="number" step="1" id="rb2-ctl-pattern_min_bars_apart" class="cfg-input" placeholder="10"></label>
+                        <label class="text-[11px] text-slate-400">Spike Fade ATR Mult<input type="number" step="0.1" id="rb2-ctl-spike_atr_multiplier" class="cfg-input" placeholder="2.5"></label>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button onclick="App.saveBotControl('retailbot2')" class="px-4 py-2 text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white rounded-lg transition-all">Save Changes</button>
+                        <span class="text-[10px] text-slate-500">Takes effect within ~30s on the running process -- no restart needed</span>
+                    </div>
+                </div>
+
                 <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                     <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
                         <span class="text-xs text-slate-400 uppercase font-semibold">Shadow (real signal)</span>
@@ -1076,6 +1114,40 @@
                     <i data-lucide="zap" class="w-4 h-4 text-purple-400"></i>
                     <h2 class="text-sm font-bold text-slate-100">Smart Money Volume Screener</h2>
                     <span class="text-[10px] text-slate-500">RVOL / divergence / velocity volume-spike detector &middot; Telegram-only alerts, now logged</span>
+                </div>
+
+                <!-- Bot Control: screener -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="screener-ctl-enabled" class="sr-only peer">
+                                <div class="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:bg-emerald-600 transition-all"></div>
+                                <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-all peer-checked:translate-x-5"></span>
+                            </label>
+                            <span class="text-xs font-semibold text-slate-200">Alerts Enabled</span>
+                            <span class="text-[10px] text-slate-500">Detection keeps running either way -- this only suppresses Telegram sends when off</span>
+                        </div>
+                        <span id="screener-ctl-updated" class="text-[10px] text-slate-600"></span>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                        <label class="text-[11px] text-slate-400">RVOL Multiplier<input type="number" step="0.1" id="screener-ctl-rvol_multiplier" class="cfg-input" placeholder="7.0"></label>
+                        <label class="text-[11px] text-slate-400">Divergence Max Price Chg %<input type="number" step="0.1" id="screener-ctl-divergence_max_price_change" class="cfg-input" placeholder="1.0"></label>
+                        <label class="text-[11px] text-slate-400">Velocity Threshold<input type="number" step="0.1" id="screener-ctl-velocity_threshold" class="cfg-input" placeholder="3.0"></label>
+                        <label class="text-[11px] text-slate-400">Max Alerts / Hour (global)<input type="number" step="1" id="screener-ctl-max_alerts_per_hour" class="cfg-input" placeholder="5"></label>
+                        <label class="text-[11px] text-slate-400">Max Alerts / Symbol / Hour<input type="number" step="1" id="screener-ctl-max_alerts_per_symbol_per_hour" class="cfg-input" placeholder="2"></label>
+                        <label class="text-[11px] text-slate-400">Alert Cooldown (sec)<input type="number" step="10" id="screener-ctl-alert_cooldown_sec" class="cfg-input" placeholder="120"></label>
+                        <label class="text-[11px] text-slate-400 flex items-center gap-2 mt-3">
+                            <input type="checkbox" id="screener-ctl-enable_divergence_detection" class="w-3.5 h-3.5"> Divergence Detection
+                        </label>
+                        <label class="text-[11px] text-slate-400 flex items-center gap-2 mt-3">
+                            <input type="checkbox" id="screener-ctl-enable_velocity_detection" class="w-3.5 h-3.5"> Velocity Detection
+                        </label>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button onclick="App.saveBotControl('screener')" class="px-4 py-2 text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white rounded-lg transition-all">Save Changes</button>
+                        <span class="text-[10px] text-slate-500">Takes effect within ~60s on the running process -- no restart needed</span>
+                    </div>
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1611,7 +1683,7 @@
          browsers can keep serving a stale cached copy indefinitely since
          this file has no explicit Cache-Control header. See the
          "still seeing the old bug after a fix was pushed" class of report. -->
-    <script src="/static/js/app.js?v=20260922-1"></script>
+    <script src="/static/js/app.js?v=20260924-1"></script>
     <script>
         if (window.lucide) window.lucide.createIcons();
     </script>

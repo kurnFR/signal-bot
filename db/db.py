@@ -6,6 +6,7 @@ backfill or restarting a WS collector is always safe (idempotent).
 import mysql.connector
 from mysql.connector import pooling
 import logging
+import json
 from decimal import Decimal
 
 import sys, os
@@ -1101,5 +1102,107 @@ def get_smart_money_stats():
         by_type = {r["signal_type"]: r["n"] for r in cur.fetchall()}
         cur.close()
         return {"total_signals": total, "signals_last_24h": last_24h, "by_type_last_24h": by_type}
+    finally:
+        conn.close()
+
+
+# ----------------------------------------------------------------------------
+# Bot control -- read/write for the "enable + tunable params" toggle panels.
+# retailbot2's bot_control lives in ITS OWN database (RETAILBOT2_DB_CONFIG);
+# the screener's screener_control lives in the shared crypto_signals DB.
+# Both tables are self-created by their respective process on startup
+# (paper/retailbot2.py's DatabaseManager._create_tables(),
+# Screen/screening.py's ensure_signal_table()) -- these helpers assume the
+# table already exists, which it will once that process has run at least
+# once. If it hasn't, these raise, and the route layer turns that into a
+# clear "control table not ready yet -- has retailbot2/screening been
+# started at least once?" error rather than a silent empty response.
+# ----------------------------------------------------------------------------
+
+# Explicit safe-list mirrored from paper/retailbot2.py's own
+# _tunable_fields -- kept here too so a malformed/forged request can be
+# rejected at the API layer before it ever reaches the bot process, not
+# just relying on the bot's own filter as the only line of defense.
+RETAILBOT2_TUNABLE_FIELDS = {
+    "rsi_oversold", "rsi_overbought", "rsi_zone_width",
+    "sr_touch_threshold", "sr_min_touches",
+    "bb_std", "bb_proximity_pct",
+    "pattern_tolerance", "pattern_min_bars_apart",
+    "spike_atr_multiplier",
+    "atr_sl_multiplier", "rr_ratio", "risk_per_trade",
+    "max_open_trades_per_mode", "max_trades_per_symbol",
+    "min_trade_interval_hours",
+}
+
+SCREENER_TUNABLE_FIELDS = {
+    "rvol_multiplier", "divergence_max_price_change", "velocity_threshold",
+    "enable_divergence_detection", "enable_velocity_detection",
+    "max_alerts_per_hour", "max_alerts_per_symbol_per_hour", "alert_cooldown_sec",
+}
+
+
+def get_retailbot2_control():
+    conn = get_retailbot2_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT enabled, overrides_json, updated_at FROM bot_control WHERE id=1")
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            return {"enabled": True, "overrides": {}, "updated_at": None}
+        return {
+            "enabled": bool(row["enabled"]),
+            "overrides": json.loads(row["overrides_json"]) if row["overrides_json"] else {},
+            "updated_at": str(row["updated_at"]) if row.get("updated_at") else None,
+        }
+    finally:
+        conn.close()
+
+
+def set_retailbot2_control(enabled, overrides):
+    """overrides is the FULL replacement dict (read-modify-write from the
+    dashboard form), pre-filtered by the caller against
+    RETAILBOT2_TUNABLE_FIELDS -- see web/routes/research_routes.py."""
+    conn = get_retailbot2_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE bot_control SET enabled=%s, overrides_json=%s WHERE id=1",
+            (enabled, json.dumps(overrides)),
+        )
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+
+def get_screener_control():
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT enabled, overrides_json, updated_at FROM screener_control WHERE id=1")
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            return {"enabled": True, "overrides": {}, "updated_at": None}
+        return {
+            "enabled": bool(row["enabled"]),
+            "overrides": json.loads(row["overrides_json"]) if row["overrides_json"] else {},
+            "updated_at": str(row["updated_at"]) if row.get("updated_at") else None,
+        }
+    finally:
+        conn.close()
+
+
+def set_screener_control(enabled, overrides):
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE screener_control SET enabled=%s, overrides_json=%s WHERE id=1",
+            (enabled, json.dumps(overrides)),
+        )
+        conn.commit()
+        cur.close()
     finally:
         conn.close()

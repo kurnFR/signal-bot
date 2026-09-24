@@ -43,6 +43,9 @@ from db.db import get_pool
 # PROFESSIONAL CONFIGURATION
 # =========================
 CONFIG = {
+    # === Web dashboard control (screener_control table) ===
+    "enabled": True,  # reload_control() overwrites this from the DB every ~60s
+
     # === Early Detection Settings ===
     "timeframe": os.getenv("TIMEFRAME", "1m"),  # 1m for fastest detection
     "rvol_multiplier": float(os.getenv("RVOL_MULTIPLIER", "7.0")),  # Lower threshold for early signals
@@ -405,16 +408,41 @@ class SmartMoneyTelegram:
                 logger.error(f"❌ Telegram error: {e}")
                 return False
 
+    def send(self, text: str) -> bool:
+        """Generic HTML message send, for control-plane notices (enable/
+        disable, config overrides) that aren't tied to a specific
+        SmartMoneySignal. Shares the same session/retry/rate-limit as
+        send_early_alert()."""
+        if not self.token or not self.chat_id:
+            return False
+        with self._lock:
+            elapsed = time.time() - self._last_send
+            if elapsed < 0.8:
+                time.sleep(0.8 - elapsed)
+            try:
+                payload = {
+                    "chat_id": self.chat_id, "text": text,
+                    "parse_mode": "HTML", "disable_web_page_preview": True,
+                }
+                resp = self.session.post(self.url, json=payload, timeout=8)
+                resp.raise_for_status()
+                self._last_send = time.time()
+                return True
+            except Exception as e:
+                logger.error(f"❌ Telegram error: {e}")
+                return False
+
 telegram = SmartMoneyTelegram(CONFIG["telegram_bot_token"], CONFIG["telegram_chat_id"])
 
 # =========================
 # PERSISTENCE (shared crypto_signals DB -- read by the web dashboard)
 # =========================
 def ensure_signal_table():
-    """Create smart_money_signals if it doesn't exist. Previously this
-    screener had NO database persistence at all -- it only fired Telegram
-    alerts, so there was nothing for a dashboard to read. Called once at
-    startup; safe to call repeatedly (CREATE TABLE IF NOT EXISTS)."""
+    """Create smart_money_signals and screener_control if they don't exist.
+    Previously this screener had NO database persistence at all -- it only
+    fired Telegram alerts, so there was nothing for a dashboard to read.
+    Called once at startup; safe to call repeatedly (CREATE TABLE IF NOT
+    EXISTS)."""
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
@@ -436,13 +464,88 @@ def ensure_signal_table():
                 INDEX idx_smsig_type_time (signal_type, detected_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS screener_control (
+                id INT PRIMARY KEY DEFAULT 1,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                overrides_json TEXT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    ON UPDATE CURRENT_TIMESTAMP,
+                CONSTRAINT chk_screener_control_singleton CHECK (id = 1)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """)
+        cur.execute("INSERT IGNORE INTO screener_control (id, enabled, overrides_json) VALUES (1, TRUE, NULL)")
         conn.commit()
         cur.close()
-        logger.info("✅ smart_money_signals table ready")
+        logger.info("✅ smart_money_signals / screener_control tables ready")
     except Exception as e:
         logger.error(f"❌ ensure_signal_table failed: {e}")
     finally:
         conn.close()
+
+
+# Keys safe to change on a running process without corrupting state.
+# ema_length/velocity_window/timeframe/symbols_filter etc. are NOT here --
+# changing those live would invalidate the already-accumulated EMA/volume
+# history rather than just changing behavior going forward.
+_TUNABLE_CONFIG_KEYS = {
+    "rvol_multiplier", "divergence_max_price_change", "velocity_threshold",
+    "enable_divergence_detection", "enable_velocity_detection",
+    "max_alerts_per_hour", "max_alerts_per_symbol_per_hour", "alert_cooldown_sec",
+}
+
+
+def reload_control():
+    """Poll screener_control and apply enabled flag + safe CONFIG overrides.
+    CONFIG is mutated in place (not reassigned), so every place in this
+    file that reads CONFIG["..."] picks up the new value immediately --
+    no extra plumbing needed. Called once per main-loop tick (~60s)."""
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT enabled, overrides_json FROM screener_control WHERE id=1")
+        row = cur.fetchone()
+        cur.close()
+    except Exception as e:
+        logger.error(f"❌ reload_control: {e}")
+        return
+    finally:
+        conn.close()
+
+    if not row:
+        return
+
+    was_enabled = CONFIG.get("enabled", True)
+    CONFIG["enabled"] = bool(row["enabled"])
+    if was_enabled != CONFIG["enabled"]:
+        state_str = "ENABLED" if CONFIG["enabled"] else "PAUSED (still detecting, alerts suppressed)"
+        logger.info(f"🎛️  Screener {state_str} via dashboard control")
+        telegram.send(f"🎛️ <b>Smart Money Screener {state_str}</b> (via web dashboard)")
+
+    overrides = json.loads(row["overrides_json"]) if row["overrides_json"] else {}
+    applied = []
+    for key, value in overrides.items():
+        if key not in _TUNABLE_CONFIG_KEYS:
+            logger.warning(f"⚠️  Ignoring non-tunable/unknown screener_control override key: {key}")
+            continue
+        current = CONFIG.get(key)
+        try:
+            if isinstance(current, bool):
+                new_value = bool(value)
+            elif isinstance(current, int) and not isinstance(current, bool):
+                new_value = int(value)
+            elif isinstance(current, float):
+                new_value = float(value)
+            else:
+                new_value = value
+        except (TypeError, ValueError):
+            logger.warning(f"⚠️  Could not coerce override {key}={value!r}, skipping")
+            continue
+        if current != new_value:
+            CONFIG[key] = new_value
+            applied.append(f"{key}={new_value}")
+    if applied:
+        logger.info(f"🎛️  Applied config overrides: {', '.join(applied)}")
 
 
 def save_signal_to_db(signal: SmartMoneySignal, telegram_sent: bool):
@@ -560,9 +663,13 @@ def process_kline_message(raw_msg: str):
         )
         
         if signal and state.register_signal(signal):
-            sent = telegram.send_early_alert(signal)
+            screener_enabled = CONFIG.get("enabled", True)
+            sent = telegram.send_early_alert(signal) if screener_enabled else False
             save_signal_to_db(signal, telegram_sent=sent)
-            logger.info(f"🎯 EARLY SIGNAL: {signal.symbol} | {signal.signal_type} | RVOL: {signal.rvol:.2f}x | ${signal.price:.4f}")
+            if screener_enabled:
+                logger.info(f"🎯 EARLY SIGNAL: {signal.symbol} | {signal.signal_type} | RVOL: {signal.rvol:.2f}x | ${signal.price:.4f}")
+            else:
+                logger.info(f"🔇 Signal detected but suppressed (dashboard paused): {signal.symbol} | {signal.signal_type} -- logged to DB, no Telegram")
                 
     except json.JSONDecodeError as e:
         logger.warning(f"JSON parse error: {e}")
@@ -639,6 +746,7 @@ def main():
                 f"Velocity: ≥{CONFIG['velocity_threshold']}x | Max {CONFIG['max_alerts_per_hour']} alerts/hour")
 
     ensure_signal_table()
+    reload_control()
 
     symbols = get_liquid_symbols()
     if not symbols:
@@ -667,6 +775,7 @@ def main():
     try:
         while not state.shutdown_flag:
             time.sleep(60)
+            reload_control()
     except KeyboardInterrupt:
         pass
     finally:

@@ -343,6 +343,88 @@ const App = {
         } finally {
             if (window.lucide) window.lucide.createIcons();
         }
+        // Separate try/catch: a bot that's never been started yet (control
+        // table doesn't exist) shouldn't take down the rest of the panel
+        // above, which can still show positions/stats/signals fine.
+        this._fetchBotControl("retailbot2");
+        this._fetchBotControl("screener");
+    },
+
+    async _fetchBotControl(botName) {
+        try {
+            const res = await fetch(`${API_BASE}/api/research/${botName}/control`, { headers: this.getAuthHeaders() });
+            if (!res.ok) {
+                let detail = `HTTP ${res.status}`;
+                try { detail = (await res.json()).detail || detail; } catch (_) {}
+                throw new Error(detail);
+            }
+            const control = await res.json();
+            const prefix = botName === "retailbot2" ? "rb2-ctl-" : "screener-ctl-";
+            const enabledEl = document.getElementById(`${prefix}enabled`);
+            if (enabledEl) enabledEl.checked = !!control.enabled;
+            for (const [key, value] of Object.entries(control.overrides || {})) {
+                const el = document.getElementById(`${prefix}${key}`);
+                if (!el) continue;
+                if (el.type === "checkbox") el.checked = !!value;
+                else el.value = value;
+            }
+            const updatedEl = document.getElementById(`${prefix}updated`);
+            if (updatedEl && control.updated_at) {
+                updatedEl.innerText = `Last changed: ${this._formatDateTime(control.updated_at)}`;
+            }
+        } catch (e) {
+            // Quiet by design -- this fires automatically on every panel
+            // load, and "bot never started yet" is an expected state, not
+            // an error worth interrupting the user with a toast for. The
+            // control card's inputs just stay at their placeholder defaults.
+            console.warn(`${botName} control not available yet:`, e.message || e);
+        }
+    },
+
+    async saveBotControl(botName) {
+        const prefix = botName === "retailbot2" ? "rb2-ctl-" : "screener-ctl-";
+        const fields = botName === "retailbot2"
+            ? ["atr_sl_multiplier", "rr_ratio", "risk_per_trade", "max_open_trades_per_mode",
+               "max_trades_per_symbol", "min_trade_interval_hours", "rsi_oversold", "rsi_overbought",
+               "rsi_zone_width", "sr_touch_threshold", "sr_min_touches", "bb_std", "bb_proximity_pct",
+               "pattern_tolerance", "pattern_min_bars_apart", "spike_atr_multiplier"]
+            : ["rvol_multiplier", "divergence_max_price_change", "velocity_threshold",
+               "max_alerts_per_hour", "max_alerts_per_symbol_per_hour", "alert_cooldown_sec",
+               "enable_divergence_detection", "enable_velocity_detection"];
+
+        const enabledEl = document.getElementById(`${prefix}enabled`);
+        const overrides = {};
+        for (const key of fields) {
+            const el = document.getElementById(`${prefix}${key}`);
+            if (!el) continue;
+            if (el.type === "checkbox") {
+                overrides[key] = el.checked;
+            } else if (el.value !== "") {
+                const num = Number(el.value);
+                if (!Number.isNaN(num)) overrides[key] = num;
+            }
+            // A blank field is intentionally left out of the payload rather
+            // than sent as 0/null -- the bot only applies keys present in
+            // the overrides dict, so blank = "don't change this one" here,
+            // not "reset to zero".
+        }
+
+        try {
+            const res = await fetch(`${API_BASE}/api/research/${botName}/control`, {
+                method: "POST",
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify({ enabled: enabledEl ? enabledEl.checked : true, overrides }),
+            });
+            if (!res.ok) {
+                let detail = `HTTP ${res.status}`;
+                try { detail = (await res.json()).detail || detail; } catch (_) {}
+                throw new Error(detail);
+            }
+            const data = await res.json();
+            this.showToast(`${botName === "retailbot2" ? "Retail Bot" : "Screener"} settings saved. ${data.note || ""}`, "success");
+        } catch (e) {
+            this.showToast(`Failed to save ${botName} settings: ${e.message || e}`, "error");
+        }
     },
 
     _renderRb2Kpis(stats) {
@@ -801,9 +883,10 @@ const App = {
                             ${c.is_active ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">ACTIVE LIVE</span>` : `<span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-500">PAUSED</span>`}
                         </div>
                         <div class="text-xs font-mono text-sky-400 mt-1">${c.strategy_name}</div>
+                        <div class="text-[10px] text-slate-500 mt-0.5">$${Number(c.allocated_capital).toLocaleString()} capital &middot; ${c.risk_per_trade_pct}% risk/trade</div>
                     </div>
                     <div>
-                        <button onclick="App.togglePaperStrategy('${c.symbol}', '${c.market}', '${c.timeframe}', '${c.strategy_name}', ${!c.is_active})" 
+                        <button onclick="App.togglePaperStrategy('${c.symbol}', '${c.market}', '${c.timeframe}', '${c.strategy_name}', ${!c.is_active}, ${c.allocated_capital}, ${c.risk_per_trade_pct})" 
                             class="px-3 py-1.5 rounded text-xs font-semibold ${c.is_active ? "bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30" : "bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30"}">
                             ${c.is_active ? "Pause" : "Activate"}
                         </button>
@@ -847,7 +930,7 @@ const App = {
         }
     },
 
-    async togglePaperStrategy(symbol, market, timeframe, strategy, newActive) {
+    async togglePaperStrategy(symbol, market, timeframe, strategy, newActive, allocatedCapital, riskPerTradePct) {
         try {
             const res = await fetch(`${API_BASE}/api/paper/configs`, {
                 method: "POST",
@@ -855,7 +938,15 @@ const App = {
                 body: JSON.stringify({
                     symbol, market, timeframe,
                     strategy_name: strategy,
-                    is_active: newActive
+                    is_active: newActive,
+                    // Must send the existing capital/risk% back -- the
+                    // backend's ON DUPLICATE KEY UPDATE always applies
+                    // whatever is in this request, and Pydantic's request
+                    // model defaults (5000.0 / 1.0) would otherwise silently
+                    // overwrite a deployment's real configured values on
+                    // every single pause/activate click.
+                    allocated_capital: allocatedCapital,
+                    risk_per_trade_pct: riskPerTradePct,
                 })
             });
             if (res.ok) {

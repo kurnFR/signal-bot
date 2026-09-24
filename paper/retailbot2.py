@@ -1131,10 +1131,78 @@ class DatabaseManager:
                     UNIQUE KEY uk_strat_mode (strategy, mode)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS bot_control (
+                    id INT PRIMARY KEY DEFAULT 1,
+                    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    overrides_json TEXT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        ON UPDATE CURRENT_TIMESTAMP,
+                    CONSTRAINT chk_bot_control_singleton CHECK (id = 1)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            c.execute("""
+                INSERT IGNORE INTO bot_control (id, enabled, overrides_json)
+                VALUES (1, TRUE, NULL)
+            """)
             conn.commit()
             c.close()
         except Exception as e:
             self.logger.error(f"❌ Table create error: {e}")
+        finally:
+            conn.close()
+
+    def get_bot_control(self) -> Dict:
+        """Web-dashboard-controlled enable flag + BotConfig field overrides.
+        Polled periodically by the run loop (see RetailDeathTrapBot._reload_control)
+        rather than only read once at startup, so changes made from the
+        dashboard take effect on a running process without a restart."""
+        conn = self.get_conn()
+        if not conn:
+            return {'enabled': True, 'overrides': {}}
+        try:
+            c = conn.cursor(dictionary=True)
+            c.execute("SELECT enabled, overrides_json FROM bot_control WHERE id=1")
+            row = c.fetchone()
+            c.close()
+            if not row:
+                return {'enabled': True, 'overrides': {}}
+            overrides = json.loads(row['overrides_json']) if row['overrides_json'] else {}
+            return {'enabled': bool(row['enabled']), 'overrides': overrides}
+        except Exception as e:
+            self.logger.error(f"❌ get_bot_control: {e}")
+            return {'enabled': True, 'overrides': {}}
+        finally:
+            conn.close()
+
+    def set_bot_control(self, enabled: Optional[bool] = None, overrides: Optional[Dict] = None):
+        """Partial update -- pass only what changed. `overrides` REPLACES the
+        whole overrides dict (the web route is expected to read-modify-write,
+        not send a partial patch), matching how the dashboard form works:
+        it always submits the full current parameter set."""
+        conn = self.get_conn()
+        if not conn:
+            return False
+        try:
+            c = conn.cursor()
+            if enabled is not None and overrides is not None:
+                c.execute(
+                    "UPDATE bot_control SET enabled=%s, overrides_json=%s WHERE id=1",
+                    (enabled, json.dumps(overrides))
+                )
+            elif enabled is not None:
+                c.execute("UPDATE bot_control SET enabled=%s WHERE id=1", (enabled,))
+            elif overrides is not None:
+                c.execute(
+                    "UPDATE bot_control SET overrides_json=%s WHERE id=1",
+                    (json.dumps(overrides),)
+                )
+            conn.commit()
+            c.close()
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ set_bot_control: {e}")
+            return False
         finally:
             conn.close()
 
@@ -1471,6 +1539,77 @@ class RetailDeathTrapBot:
 
         self._load_state()
         self._startup_msg()
+
+        # Bot control: trading_enabled gates new-signal scanning only --
+        # check_exits() always runs regardless, so pausing never abandons
+        # an open position. Reloaded periodically from the DB (see
+        # _reload_control()), not just read once at startup, so a toggle
+        # from the web dashboard takes effect on this running process
+        # without needing a restart.
+        self.trading_enabled = True
+        self._control_reload_interval = 30  # seconds
+        self._last_control_reload = 0.0
+        # Explicit safe-list, NOT "every dataclass field" -- BotConfig also
+        # holds db_password/telegram_token/db_host etc., which must never
+        # be settable via a web API override regardless of what a request
+        # sends. Deliberately excludes ema/lookback "shape" params that
+        # would corrupt already-accumulated indicator state if changed on
+        # a running process (symbols, primary_timeframe, *_period/*_lookback
+        # lengths) -- those still require a restart, same as before this
+        # feature existed.
+        self._tunable_fields = {
+            "rsi_oversold", "rsi_overbought", "rsi_zone_width",
+            "sr_touch_threshold", "sr_min_touches",
+            "bb_std", "bb_proximity_pct",
+            "pattern_tolerance", "pattern_min_bars_apart",
+            "spike_atr_multiplier",
+            "atr_sl_multiplier", "rr_ratio", "risk_per_trade",
+            "max_open_trades_per_mode", "max_trades_per_symbol",
+            "min_trade_interval_hours",
+        }
+        self._reload_control(force=True)
+
+    def _reload_control(self, force: bool = False):
+        now = time.time()
+        if not force and (now - self._last_control_reload) < self._control_reload_interval:
+            return
+        self._last_control_reload = now
+
+        control = self.db.get_bot_control()
+        was_enabled = getattr(self, "trading_enabled", True)
+        self.trading_enabled = control['enabled']
+        if was_enabled != self.trading_enabled:
+            state_str = "ENABLED" if self.trading_enabled else "PAUSED (existing positions still managed)"
+            self.logger.info(f"🎛️  Trading {state_str} via dashboard control")
+            self.tg.send(f"🎛️ <b>Trading {state_str}</b> (via web dashboard)")
+
+        applied = []
+        for key, value in (control.get('overrides') or {}).items():
+            if key not in self._tunable_fields:
+                self.logger.warning(f"⚠️  Ignoring unknown bot_control override key: {key}")
+                continue
+            current = getattr(self.config, key, None)
+            # Coerce to the existing field's type so a value submitted as a
+            # JSON string/number from the web form lands as the right
+            # Python type (int/float/bool) rather than silently breaking
+            # downstream numeric comparisons in the strategy engine.
+            try:
+                if isinstance(current, bool):
+                    new_value = bool(value)
+                elif isinstance(current, int) and not isinstance(current, bool):
+                    new_value = int(value)
+                elif isinstance(current, float):
+                    new_value = float(value)
+                else:
+                    new_value = value
+            except (TypeError, ValueError):
+                self.logger.warning(f"⚠️  Could not coerce override {key}={value!r} to match existing type, skipping")
+                continue
+            if current != new_value:
+                setattr(self.config, key, new_value)
+                applied.append(f"{key}={new_value}")
+        if applied:
+            self.logger.info(f"🎛️  Applied config overrides: {', '.join(applied)}")
 
     def _load_state(self):
         rows = self.db.load_open_trades()
@@ -1809,8 +1948,10 @@ class RetailDeathTrapBot:
             try:
                 loop_count += 1
 
+                self._reload_control()
                 self.check_exits()
-                self.scan()
+                if self.trading_enabled:
+                    self.scan()
 
                 # Heartbeat every 60s
                 hb_loops = self.config.heartbeat_interval // self.config.exit_check_interval
