@@ -20,6 +20,8 @@ class TestResearchRoutes(unittest.TestCase):
             "/api/research/retailbot2/stats",
             "/api/research/screener/signals",
             "/api/research/screener/stats",
+            "/api/research/retailbot2/control",
+            "/api/research/screener/control",
         ]
         for ep in endpoints:
             res = self.client.get(ep)
@@ -63,6 +65,54 @@ class TestResearchRoutes(unittest.TestCase):
         self.assertIn("total_signals", data)
         self.assertIn("signals_last_24h", data)
         self.assertIn("by_type_last_24h", data)
+
+    def test_retailbot2_control_get_and_set(self):
+        # GET
+        res = self.client.get("/api/research/retailbot2/control", headers=self.headers)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertIn("enabled", data)
+        self.assertIn("tunable_fields", data)
+
+        # POST valid override
+        post_res = self.client.post(
+            "/api/research/retailbot2/control",
+            headers=self.headers,
+            json={"enabled": True, "overrides": {"rr_ratio": 2.5}}
+        )
+        self.assertEqual(post_res.status_code, 200)
+
+        # POST invalid override (credentials/unknown key should be rejected with 400)
+        bad_res = self.client.post(
+            "/api/research/retailbot2/control",
+            headers=self.headers,
+            json={"enabled": True, "overrides": {"db_password": 123.0}}
+        )
+        self.assertEqual(bad_res.status_code, 400)
+
+    def test_screener_control_get_and_set(self):
+        # GET
+        res = self.client.get("/api/research/screener/control", headers=self.headers)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertIn("enabled", data)
+        self.assertIn("tunable_fields", data)
+
+        # POST valid override
+        post_res = self.client.post(
+            "/api/research/screener/control",
+            headers=self.headers,
+            json={"enabled": True, "overrides": {"rvol_multiplier": 8.0}}
+        )
+        self.assertEqual(post_res.status_code, 200)
+
+        # POST invalid override (unknown key should be rejected with 400)
+        bad_res = self.client.post(
+            "/api/research/screener/control",
+            headers=self.headers,
+            json={"enabled": True, "overrides": {"non_existent_setting": 123}}
+        )
+        self.assertEqual(bad_res.status_code, 400)
 
     @patch("web.routes.research_routes.get_retailbot2_stats")
     def test_retailbot2_stats_error_handling(self, mock_stats):

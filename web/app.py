@@ -114,6 +114,12 @@ def on_startup():
         ensure_signal_table()
     except Exception as e:
         logger.warning(f"Could not initialize smart_money_signals table on startup: {e}")
+    try:
+        from paper.retailbot2 import DatabaseManager, BotConfig
+        cfg = BotConfig()
+        DatabaseManager(cfg, logger)
+    except Exception as e:
+        logger.warning(f"Could not initialize retailbot2 tables on startup: {e}")
 
 
 app.include_router(auth_router)
