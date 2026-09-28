@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .app_secret
 *.log
 logs/
