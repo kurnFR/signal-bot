@@ -13,6 +13,7 @@ Professional Logic:
 
 import os
 import json
+from html import escape
 import time
 import signal
 import logging
@@ -361,10 +362,10 @@ class SmartMoneyTelegram:
             
             # Smart money interpretation
             if "ACCUMULATION" in signal.signal_type:
-                interpretation = "🟢 Institutions accumulating (buying quietly)"
+                interpretation = "🟢 Possible accumulation (high volume, limited price movement)"
                 action_hint = "Watch for upside breakout"
             elif "DISTRIBUTION" in signal.signal_type:
-                interpretation = "🔴 Institutions distributing (selling quietly)"
+                interpretation = "🔴 Possible distribution (high volume, limited price movement)"
                 action_hint = "Watch for downside breakdown"
             elif signal.price_change_pct > 0.5:
                 interpretation = "🟢 Strong buying pressure"
@@ -379,13 +380,13 @@ class SmartMoneyTelegram:
             message = (
                 f"{signal_emoji} <b>SMART MONEY EARLY SIGNAL</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"Pair: <b>{signal.symbol}</b>\n"
-                f"Signal: <code>{signal.signal_type}</code>\n"
+                f"Pair: <b>{escape(str(signal.symbol))}</b>\n"
+                f"Signal: <code>{escape(str(signal.signal_type))}</code>\n"
                 f"RVOL: <b>{signal.rvol:.2f}x</b> (vs {CONFIG['ema_length']}-EMA)\n"
                 f"Velocity: <b>{signal.volume_velocity:.2f}x</b> acceleration\n"
                 f"Price: <code>${signal.price:.6f}</code> ({signal.price_change_pct:+.3f}%)\n"
                 f"Volume: <code>{signal.volume:,.0f}</code> | Quote: <code>${signal.quote_volume:,.0f}</code>\n"
-                f"Time: <code>{signal.candle_time}</code> UTC\n"
+                f"Time: <code>{escape(str(signal.candle_time))}</code> UTC\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"<b>Interpretation:</b> {interpretation}\n"
                 f"<i>Action: {action_hint}</i>\n"
