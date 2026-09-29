@@ -44,7 +44,8 @@
             if (av.value > bv.value) return 1 * direction;
             return 0;
         }
-        return String(av.value).localeCompare(String(bv.value)) * direction;
+        // Keep mixed-type columns deterministic; empty values are already last.
+        return String(av.value).localeCompare(String(bv.value), undefined, { numeric: true, sensitivity: "base" }) * direction;
     }
 
     function setSortIndicator(th, direction) {
