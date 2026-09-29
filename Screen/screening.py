@@ -594,10 +594,41 @@ def save_signal_to_db(signal: SmartMoneySignal, telegram_sent: bool):
         conn.close()
 
 # =========================
-# BINANCE API WITH LIQUIDITY FILTERING
+# BINANCE API + MARKET-CAP FILTERING
 # =========================
+def get_market_caps() -> Dict[str, float]:
+    if CONFIG["min_market_cap_usd"] <= 0:
+        return {}
+    caps: Dict[str, float] = {}
+    try:
+        for page in range(1, max(1, CONFIG.get("market_cap_pages", 5)) + 1):
+            resp = requests.get(
+                "https://api.coingecko.com/api/v3/coins/markets",
+                params={"vs_currency": "usd", "order": "market_cap_desc",
+                        "per_page": 250, "page": page, "sparkline": "false"},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            rows = resp.json()
+            if not rows:
+                break
+            for row in rows:
+                ticker = str(row.get("symbol", "")).upper()
+                cap = float(row.get("market_cap") or 0)
+                if ticker and cap > caps.get(ticker, 0):
+                    caps[ticker] = cap
+            if len(rows) < 250:
+                break
+            time.sleep(0.2)
+        logger.info("Loaded market-cap metadata for %d tickers", len(caps))
+    except Exception as e:
+        logger.warning("Market-cap metadata unavailable; unknown assets will be excluded: %s", e)
+    return caps
+
+
 def get_liquid_symbols() -> List[str]:
     """Fetch symbols with professional liquidity filtering"""
+    market_caps = get_market_caps()
     url = "https://api.binance.com/api/v3/exchangeInfo"
     try:
         resp = requests.get(url, timeout=15)
@@ -623,8 +654,13 @@ def get_liquid_symbols() -> List[str]:
                 continue
             ticker = tickers.get(sym, {})
             quote_vol = float(ticker.get("quoteVolume", 0))
-            if quote_vol >= CONFIG["min_quote_volume_24h"]:
-                symbols.append(sym)
+            if quote_vol < CONFIG["min_quote_volume_24h"]:
+                continue
+            if CONFIG["min_market_cap_usd"] > 0:
+                base = sym[:-len(CONFIG["symbols_filter"])] if CONFIG["symbols_filter"] else sym
+                if market_caps.get(base.upper(), 0) < CONFIG["min_market_cap_usd"]:
+                    continue
+            symbols.append(sym)
         
         logger.info(f"✅ Filtered {len(symbols)} liquid pairs (min ${CONFIG['min_quote_volume_24h']:,.0f} 24h vol)")
         return symbols
