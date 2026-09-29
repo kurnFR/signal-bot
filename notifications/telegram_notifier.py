@@ -257,14 +257,19 @@ def send_trade_close_alert(
         )
     )
     result_emoji = "🟢" if is_win else "🔴"
-    now_wib = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M WIB")
+    now_wib = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M WIB")
+
+    safe_symbol = escape(str(symbol))
+    safe_strategy = escape(str(strategy_name))
+    safe_direction = escape(str(direction))
+    safe_exit_reason = escape(str(exit_reason))
 
     msg = (
-        f"{result_emoji} {outcome_emoji}: <b>{symbol}</b>\n"
+        f"{result_emoji} {outcome_emoji}: <b>{safe_symbol}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🧠 <b>Strategy:</b> <code>{strategy_name}</code> ({direction})\n"
+        f"🧠 <b>Strategy:</b> <code>{safe_strategy}</code> ({safe_direction})\n"
         f"💵 <b>Entry:</b> ${entry_price:,.4f} ➔ <b>Exit:</b> ${exit_price:,.4f}\n"
-        f"📌 <b>Reason:</b> <code>{exit_reason}</code>\n"
+        f"📌 <b>Reason:</b> <code>{safe_exit_reason}</code>\n"
         f"⏳ <b>Holding Time:</b> {holding_bars} bars\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"💰 <b>Net Return:</b> <code>{net_return_pct:+.2f}%</code>\n"
@@ -286,15 +291,20 @@ def send_deployment_alert(
 ) -> Dict[str, Any]:
     """Notifies when a top-performing strategy is deployed to live paper trading."""
     rank_badge = f"🥇 Rank #{rank}" if rank == 1 else (f"🥈 Rank #{rank}" if rank == 2 else (f"🥉 Rank #{rank}" if rank == 3 else "⚡ Strategy"))
-    now_wib = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M WIB")
+    now_wib = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M WIB")
+
+    safe_symbol = escape(str(symbol))
+    safe_market = escape(str(market).upper())
+    safe_timeframe = escape(str(timeframe))
+    safe_strategy = escape(str(strategy_name))
 
     msg = (
         f"🚀 <b>NEW STRATEGY DEPLOYED TO PAPER TRADING!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🏆 <b>Status:</b> {rank_badge} (Score: {rank_score if rank_score is not None else 'N/A'})\n"
-        f"🪙 <b>Pair:</b> <code>{symbol}</code> ({market.upper()})\n"
-        f"⏱ <b>Timeframe:</b> <code>{timeframe}</code>\n"
-        f"🧠 <b>Strategy:</b> <code>{strategy_name}</code>\n"
+        f"🪙 <b>Pair:</b> <code>{safe_symbol}</code> ({safe_market})\n"
+        f"⏱ <b>Timeframe:</b> <code>{safe_timeframe}</code>\n"
+        f"🧠 <b>Strategy:</b> <code>{safe_strategy}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"💼 <b>Allocated Capital:</b> <code>${allocated_capital:,.2f}</code>\n"
         f"🛡️ <b>Risk per Trade:</b> <code>{risk_per_trade_pct:.1f}%</code>\n"
