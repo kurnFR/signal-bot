@@ -630,13 +630,27 @@ const App = {
         }
     },
 
-    handleLogout() {
-        this.authToken = null;
-        this.currentUser = null;
-        localStorage.removeItem("token");
-        this.updateUserUI();
-        this.showLoginModal();
-        this.showToast("Logged out successfully.", "info");
+    async handleLogout() {
+        // Revoke the server-side session before clearing the local token.
+        // Even if the request fails, always clear the browser session locally.
+        const token = this.authToken;
+        try {
+            if (token) {
+                await fetch(API_BASE + "/api/auth/logout", {
+                    method: "POST",
+                    headers: { "Authorization": "Bearer " + token },
+                });
+            }
+        } catch (e) {
+            console.warn("Server logout failed; clearing local session anyway:", e);
+        } finally {
+            this.authToken = null;
+            this.currentUser = null;
+            localStorage.removeItem("token");
+            this.updateUserUI();
+            this.showLoginModal();
+            this.showToast("Logged out successfully.", "info");
+        }
     },
 
     updateUserUI() {
