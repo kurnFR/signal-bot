@@ -1138,6 +1138,8 @@ SCREENER_TUNABLE_FIELDS = {
     "rvol_multiplier", "divergence_max_price_change", "velocity_threshold",
     "enable_divergence_detection", "enable_velocity_detection",
     "max_alerts_per_hour", "max_alerts_per_symbol_per_hour", "alert_cooldown_sec",
+    "require_confluence", "min_signal_rvol", "min_signal_velocity",
+    "min_quote_volume_24h", "min_market_cap_usd",
 }
 
 
