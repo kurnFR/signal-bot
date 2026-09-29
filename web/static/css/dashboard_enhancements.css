@@ -1,0 +1,76 @@
+/* Dashboard table UX */
+.dashboard-table-scroll {
+    position: relative;
+    max-height: 520px;
+    overflow-x: auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+}
+
+.dashboard-table-scroll > table {
+    min-width: max-content;
+}
+
+.dashboard-sticky-head,
+.dashboard-sticky-head tr,
+.dashboard-sticky-head th {
+    position: sticky;
+    top: 0;
+    z-index: 15;
+}
+
+.dashboard-sticky-head th {
+    background: #0f172a;
+    box-shadow: 0 1px 0 #1f293d;
+}
+
+.table-sortable-header {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    transition: color 120ms ease, background-color 120ms ease;
+}
+
+.table-sortable-header:hover,
+.table-sortable-header:focus-visible {
+    color: #e2e8f0;
+    background-color: #172033;
+    outline: none;
+}
+
+.table-sort-indicator {
+    display: inline-block;
+    min-width: 0.8rem;
+    color: #38bdf8;
+    font-weight: 800;
+}
+
+.dashboard-horizontal-scroll {
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    display: none;
+    width: 100%;
+    height: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin-top: 2px;
+    border-radius: 999px;
+    background: #0b0f17;
+    scrollbar-width: thin;
+}
+
+.dashboard-horizontal-scroll::-webkit-scrollbar {
+    height: 8px;
+}
+
+.dashboard-horizontal-spacer {
+    height: 1px;
+}
+
+@media (max-width: 768px) {
+    .dashboard-table-scroll {
+        max-height: 440px;
+    }
+}
