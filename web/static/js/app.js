@@ -96,7 +96,7 @@ const App = {
         ].join(";");
         toast.innerHTML = `
             <i data-lucide="${style.icon}" style="width:16px;height:16px;flex-shrink:0;margin-top:1px;color:${style.iconColor}"></i>
-            <span style="flex:1;line-height:1.35;word-break:break-word;">${message}</span>
+            <span style="flex:1;line-height:1.35;word-break:break-word;">${this._escapeHtml(message)}</span>
             <button style="background:none;border:none;color:#64748b;cursor:pointer;line-height:1;font-size:0.9rem;padding:0 0 0 0.25rem;" aria-label="Dismiss">&times;</button>
         `;
         container.appendChild(toast);
