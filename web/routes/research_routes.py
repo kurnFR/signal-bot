@@ -18,6 +18,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Dict, Optional
+import math
 
 from db.db import (
     get_retailbot2_open_trades, get_retailbot2_recent_trades, get_retailbot2_stats,
@@ -46,11 +47,36 @@ def _filter_overrides(overrides: Dict, allowed: set, bot_label: str) -> Dict:
             status_code=400,
             detail=f"Not a tunable {bot_label} parameter: {', '.join(rejected)}. Allowed: {sorted(allowed)}",
         )
+    invalid_values = [
+        k for k, value in overrides.items()
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value))
+    ]
+    if invalid_values:
+        raise HTTPException(status_code=400, detail=f"Override values must be finite numbers: {', '.join(invalid_values)}")
+
+    bounds = {
+        "rsi_oversold": (1, 49), "rsi_overbought": (51, 99), "rsi_zone_width": (0, 20),
+        "sr_touch_threshold": (0.00001, 0.1), "sr_min_touches": (1, 20),
+        "bb_std": (0.1, 10), "bb_proximity_pct": (0, 0.1),
+        "pattern_tolerance": (0.00001, 0.1), "pattern_min_bars_apart": (1, 500),
+        "spike_atr_multiplier": (0.1, 20), "atr_sl_multiplier": (0.1, 20),
+        "rr_ratio": (0.1, 20), "risk_per_trade": (0.0001, 0.1),
+        "max_open_trades_per_mode": (1, 100), "max_trades_per_symbol": (1, 10),
+        "min_trade_interval_hours": (0, 168), "rvol_multiplier": (1, 100),
+        "divergence_max_price_change": (0, 20), "velocity_threshold": (0.1, 100),
+        "max_alerts_per_hour": (1, 1000), "max_alerts_per_symbol_per_hour": (1, 100),
+        "alert_cooldown_sec": (0, 86400),
+    }
+    for key, value in overrides.items():
+        if key in bounds:
+            lo, hi = bounds[key]
+            if not lo <= float(value) <= hi:
+                raise HTTPException(status_code=400, detail=f"{key} must be between {lo} and {hi}")
     return overrides
 
 
 @router.get("/retailbot2/positions")
-def retailbot2_positions(limit: int = 100):
+def retailbot2_positions(limit: int = Field(100, ge=1, le=200)):
     try:
         return {"positions": get_retailbot2_open_trades(limit=limit)}
     except Exception as e:
@@ -59,7 +85,7 @@ def retailbot2_positions(limit: int = 100):
 
 
 @router.get("/retailbot2/trades")
-def retailbot2_trades(limit: int = 50):
+def retailbot2_trades(limit: int = Field(50, ge=1, le=200)):
     try:
         return {"trades": get_retailbot2_recent_trades(limit=limit)}
     except Exception as e:
@@ -77,7 +103,7 @@ def retailbot2_stats():
 
 
 @router.get("/screener/signals")
-def screener_signals(limit: int = 50):
+def screener_signals(limit: int = Field(50, ge=1, le=200)):
     try:
         return {"signals": get_recent_smart_money_signals(limit=limit)}
     except Exception as e:
