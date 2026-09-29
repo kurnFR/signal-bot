@@ -5,6 +5,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import Optional
+import math
 
 from paper.engine import (
     get_active_positions, get_paper_trades, get_paper_configs,
@@ -21,8 +22,8 @@ class PaperConfigRequest(BaseModel):
     timeframe: str = Field("1d", example="1d")
     strategy_name: str = Field(..., example="confluence_ensemble_v1")
     is_active: bool = Field(True)
-    allocated_capital: float = Field(5000.0)
-    risk_per_trade_pct: float = Field(1.0)
+    allocated_capital: float = Field(5000.0, ge=100.0)
+    risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
     ml_model_id: Optional[str] = Field(None, example="real-btcusdt-spot-1h-trend_ema_v1-logistic_regression-binary_positive_r")
 
 
@@ -33,7 +34,7 @@ def list_positions():
 
 
 @router.get("/trades")
-def list_trades(limit: int = 50):
+def list_trades(limit: int = Field(50, ge=1, le=200)):
     trades = get_paper_trades(limit)
     return {"trades": trades}
 
@@ -52,6 +53,10 @@ def list_configs():
 
 @router.post("/configs")
 def update_config(req: PaperConfigRequest):
+    if not math.isfinite(req.allocated_capital) or not math.isfinite(req.risk_per_trade_pct):
+        raise HTTPException(status_code=400, detail="allocated_capital and risk_per_trade_pct must be finite")
+    if not req.symbol.strip() or not req.strategy_name.strip():
+        raise HTTPException(status_code=400, detail="symbol and strategy_name must not be blank")
     res = set_paper_config(
         req.symbol.strip().upper(),
         req.market.strip().lower(),
@@ -66,7 +71,7 @@ def update_config(req: PaperConfigRequest):
 
 
 @router.post("/positions/{position_id}/close")
-def close_position(position_id: int):
+def close_position(position_id: int = Field(..., gt=0)):
     try:
         res = manual_close_position(position_id)
         return res
@@ -105,6 +110,12 @@ class DeployStrategyRequest(BaseModel):
 
 @router.post("/deploy")
 def deploy_strategy(req: DeployStrategyRequest):
+    if not math.isfinite(req.allocated_capital) or not math.isfinite(req.risk_per_trade_pct):
+        raise HTTPException(status_code=400, detail="allocated_capital and risk_per_trade_pct must be finite")
+    if req.rank_score is not None and not math.isfinite(req.rank_score):
+        raise HTTPException(status_code=400, detail="rank_score must be finite")
+    if not req.symbol.strip() or not req.strategy_name.strip():
+        raise HTTPException(status_code=400, detail="symbol and strategy_name must not be blank")
     # 1. Update/Add paper config
     res = set_paper_config(
         req.symbol.strip().upper(),
@@ -142,8 +153,9 @@ def deploy_strategy(req: DeployStrategyRequest):
     except Exception as eval_err:
         eval_res = {"error": str(eval_err)}
 
+    deployment_status = "success" if "error" not in eval_res else "partial"
     return {
-        "status": "success",
+        "status": deployment_status,
         "message": f"Strategy '{req.strategy_name}' deployed to Live Paper Trading on {req.symbol} ({req.timeframe}).",
         "config": res,
         "telegramAlert": telegram_res,
