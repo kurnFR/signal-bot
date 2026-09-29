@@ -66,6 +66,9 @@ def _filter_overrides(overrides: Dict, allowed: set, bot_label: str) -> Dict:
         "divergence_max_price_change": (0, 20), "velocity_threshold": (0.1, 100),
         "max_alerts_per_hour": (1, 1000), "max_alerts_per_symbol_per_hour": (1, 100),
         "alert_cooldown_sec": (0, 86400),
+        "min_signal_rvol": (1, 100), "min_signal_velocity": (1, 100),
+        "min_quote_volume_24h": (0, 1e12), "min_market_cap_usd": (0, 1e12),
+        "min_quality_score": (0, 100),
     }
     for key, value in overrides.items():
         if key in bounds:
