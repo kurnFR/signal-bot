@@ -39,6 +39,7 @@ import traceback
 import random
 import json
 import os
+from html import escape
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -388,7 +389,7 @@ class TelegramAlert:
         # Build strategy list safely
         strat_lines = []
         for s in strategies:
-            strat_lines.append(f"  ├ {s}")
+            strat_lines.append(f"  ├ {escape(str(s))}")
         strat_text = "\n".join(strat_lines) if strat_lines else "  ├ N/A"
 
         # Truncate reason to avoid Telegram 4096 char limit
@@ -397,8 +398,8 @@ class TelegramAlert:
         msg = (
             f"{side_emoji} <b>{mode_tag} #{trade_id}</b>\n"
             f"\n"
-            f"<b>Symbol:</b> {signal['symbol']}\n"
-            f"<b>Time:</b> {signal.get('candle_close_time', 'N/A')}\n"
+            f"<b>Symbol:</b> {escape(str(signal['symbol']))}\n"
+            f"<b>Time:</b> {escape(str(signal.get('candle_close_time', 'N/A')))}\n"
             f"\n"
             f"<b>📊 PLAN:</b>\n"
             f"  ├ Entry:  <code>${signal['entry']:.6f}</code>\n"
@@ -413,7 +414,7 @@ class TelegramAlert:
             f"<b>🎯 Strategies ({confluence}/7):</b>\n"
             f"{strat_text}\n"
             f"\n"
-            f"<b>Reason:</b> <i>{reason}</i>"
+            f"<b>Reason:</b> <i>{escape(reason)}</i>"
         )
         return self.send(msg)
 
@@ -430,10 +431,10 @@ class TelegramAlert:
         msg = (
             f"{emoji} <b>EXIT [{mode}] #{trade.get('id', '?')}</b>\n"
             f"\n"
-            f"<b>Symbol:</b> {trade.get('symbol')} "
-            f"<b>Side:</b> {trade.get('side')}\n"
-            f"<b>Strategy:</b> {trade.get('strategy', '?')}\n"
-            f"<b>Reason:</b> {reason.replace('_', ' ')}\n"
+            f"<b>Symbol:</b> {escape(str(trade.get('symbol', '?')))} "
+            f"<b>Side:</b> {escape(str(trade.get('side', '?')))}\n"
+            f"<b>Strategy:</b> {escape(str(trade.get('strategy', '?')))}\n"
+            f"<b>Reason:</b> {escape(str(reason).replace('_', ' '))}\n"
             f"\n"
             f"{color} <b>P&L:</b> ${pnl:+.2f} ({pnl_pct:+.2f}%)\n"
             f"{color} <b>Exit:</b> <code>${exit_price:.6f}</code>\n"
@@ -1692,10 +1693,11 @@ class RetailDeathTrapBot:
         if len(active) >= self.config.max_open_trades_per_mode:
             return False, f"Max {mode} trades ({self.config.max_open_trades_per_mode}) reached"
 
-        # Per-symbol cap (across both modes for same symbol)
-        sym_count = sum(
-            1 for t in active.values() if t['symbol'] == symbol
-        )
+        # Per-symbol cap applies across both modes. Mode capacity remains
+        # separate, but a symbol must not consume one slot in each mode.
+        other_active = self.active_shadow if mode == 'inverse' else self.active_inverse
+        sym_count = sum(1 for t in active.values() if t['symbol'] == symbol)
+        sym_count += sum(1 for t in other_active.values() if t['symbol'] == symbol)
         if sym_count >= self.config.max_trades_per_symbol:
             return False, f"{symbol} already has {mode} trade open"
 
