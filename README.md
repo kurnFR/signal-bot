@@ -15,18 +15,36 @@ A full-featured institutional quantitative trading web interface is included:
 - **Security & Authentication**: PBKDF2-HMAC-SHA256 password hashing (200,000 rounds), role-based access control (`admin` / `trader`), user management, and 100% SQL injection hardening.
 
 ### Running the Web Platform
+
+**Single command (recommended):** starts the web server plus every
+background process it depends on (collectors, paper trading engine, News
+AI Overlay, retailbot2, the volume screener), and restarts any of them if
+they crash.
 ```bash
 # 1. Apply database migration (users & paper trading tables)
 mysql -u your_user -p crypto_signals < db/migrate_add_users_and_paper.sql
 
-# 2. Launch web server
-python3 run_web.py --port 8050
+# 2. Start everything
+python3 run_all.py
+# or a subset, e.g. skip the two research bots if you're not using them yet:
+python3 run_all.py --skip retailbot2 --skip screener
+```
+Ctrl+C stops everything cleanly (no orphaned processes). See `python3
+run_all.py --help` for `--skip`/`--only`.
 
-# 3. Launch the paper trading engine (REQUIRED for live paper trading --
-#    without this running, deployed strategies sit idle and nothing gets
-#    evaluated automatically; "Evaluate Market Tick" only checks once per
-#    click)
-python3 run_paper_engine.py
+**Running pieces individually** (what `run_all.py` does under the hood,
+useful for debugging one component or running under your own process
+supervisor like systemd instead):
+```bash
+python3 run_web.py --port 8050        # dashboard
+python3 run_collectors.py             # OHLCV/funding/OI/liquidations
+python3 run_paper_engine.py           # REQUIRED for live paper trading --
+                                       # without this, deployed strategies
+                                       # sit idle; "Evaluate Market Tick"
+                                       # only checks once per click
+python3 run_news_ai.py                # News AI Overlay (needs its API keys)
+python3 paper/retailbot2.py           # retailbot2 (needs its own DB config)
+python3 Screen/screening.py           # volume screener
 ```
 Open **`http://localhost:8050`** in your browser.
 
