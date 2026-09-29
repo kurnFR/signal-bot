@@ -565,6 +565,7 @@ def reload_control():
 
     overrides = json.loads(row["overrides_json"]) if row["overrides_json"] else {}
     applied = []
+    universe_changed = False
     for key, value in overrides.items():
         if key not in _TUNABLE_CONFIG_KEYS:
             logger.warning(f"⚠️  Ignoring non-tunable/unknown screener_control override key: {key}")
@@ -585,8 +586,11 @@ def reload_control():
         if current != new_value:
             CONFIG[key] = new_value
             applied.append(f"{key}={new_value}")
+            if key in {"min_quote_volume_24h", "min_market_cap_usd"}:
+                universe_changed = True
     if applied:
-        logger.info(f"🎛️  Applied config overrides: {', '.join(applied)}")
+        logger.info("🎛️ Applied config overrides: %s", ", ".join(applied))
+    return universe_changed
 
 
 def save_signal_to_db(signal: SmartMoneySignal, telegram_sent: bool):
@@ -774,12 +778,12 @@ def on_open(ws):
 # =========================
 # WEBSOCKET MANAGER
 # =========================
-def start_websocket(streams: List[str], thread_id: int):
+def start_websocket(streams: List[str], thread_id: int, stop_event: threading.Event):
     """Start WebSocket with exponential backoff reconnect"""
     base_url = "wss://stream.binance.com:9443/stream?streams="
     reconnect_delay = CONFIG["reconnect_delay_base"]
     
-    while not state.shutdown_flag:
+    while not state.shutdown_flag and not stop_event.is_set():
         try:
             url = base_url + "/".join(streams)
             logger.info(f"[Thread-{thread_id}] Connecting to {len(streams)} streams")
@@ -800,11 +804,12 @@ def start_websocket(streams: List[str], thread_id: int):
         except Exception as e:
             logger.error(f"[Thread-{thread_id}] WebSocket exception: {e}")
         
-        if state.shutdown_flag:
+        if state.shutdown_flag or stop_event.is_set():
             break
-            
+
         logger.info(f"[Thread-{thread_id}] Reconnecting in {reconnect_delay}s...")
-        time.sleep(reconnect_delay)
+        if stop_event.wait(reconnect_delay):
+            break
         reconnect_delay = min(reconnect_delay * 1.5, CONFIG["reconnect_delay_max"])
 
 # =========================
@@ -822,48 +827,81 @@ signal.signal(signal.SIGTERM, signal_handler)
 # =========================
 def main():
     logger.info("🚀 Smart Money Volume Detector starting (EARLY WARNING MODE)...")
-    logger.info(f"Config: RVOL≥{CONFIG['rvol_multiplier']}x | Divergence: ≤{CONFIG['divergence_max_price_change']}% price move | "
-                f"Velocity: ≥{CONFIG['velocity_threshold']}x | Max {CONFIG['max_alerts_per_hour']} alerts/hour")
+    logger.info(
+        f"Config: RVOL≥{CONFIG['rvol_multiplier']}x | "
+        f"Divergence: ≤{CONFIG['divergence_max_price_change']}% | "
+        f"Velocity: ≥{CONFIG['velocity_threshold']}x | "
+        f"Quality≥{CONFIG.get('min_quality_score', 0):.0f} | "
+        f"Max {CONFIG['max_alerts_per_hour']} alerts/hour"
+    )
 
     ensure_signal_table()
     reload_control()
 
-    symbols = get_liquid_symbols()
-    if not symbols:
-        logger.error("❌ No liquid symbols found - exiting")
-        return
-    
-    chunk_size = CONFIG["max_streams_per_conn"]
     threads = []
-    
-    logger.info(f"📡 Monitoring {len(symbols)} symbols for EARLY smart money signals")
-    
-    for i, start_idx in enumerate(range(0, len(symbols), chunk_size)):
-        chunk = symbols[start_idx:start_idx + chunk_size]
-        streams = [build_stream_name(s, CONFIG["timeframe"]) for s in chunk]
-        
-        t = threading.Thread(
-            target=start_websocket,
-            args=(streams, i),
-            daemon=True,
-            name=f"SmartMoney-WS-{i}"
-        )
-        t.start()
-        threads.append(t)
-        time.sleep(0.2)  # Minimal stagger for fastest startup
-    
+    ws_stop_event = threading.Event()
+    last_universe_refresh = 0.0
+
+    def start_connections(symbols):
+        nonlocal threads, ws_stop_event
+        ws_stop_event = threading.Event()
+        chunk_size = CONFIG["max_streams_per_conn"]
+        threads = []
+        logger.info(f"📡 Monitoring {len(symbols)} symbols for EARLY smart money signals")
+        for i, start_idx in enumerate(range(0, len(symbols), chunk_size)):
+            chunk = symbols[start_idx:start_idx + chunk_size]
+            streams = [build_stream_name(s, CONFIG["timeframe"]) for s in chunk]
+            t = threading.Thread(
+                target=start_websocket,
+                args=(streams, i, ws_stop_event),
+                daemon=True,
+                name=f"SmartMoney-WS-{i}",
+            )
+            t.start()
+            threads.append(t)
+            time.sleep(0.2)
+
+    def stop_connections():
+        nonlocal threads
+        ws_stop_event.set()
+        for t in threads:
+            t.join(timeout=5)
+        threads = []
+
     try:
+        symbols = get_liquid_symbols()
+        if not symbols:
+            logger.error("❌ No liquid symbols found - retrying universe discovery in the control loop")
+        else:
+            start_connections(symbols)
+            last_universe_refresh = time.time()
+
         while not state.shutdown_flag:
             time.sleep(60)
-            reload_control()
+            universe_changed = reload_control()
+            refresh_minutes = max(1, int(CONFIG.get("market_cap_refresh_minutes", 30)))
+            refresh_due = time.time() - last_universe_refresh >= refresh_minutes * 60
+
+            if universe_changed or refresh_due:
+                reason = "config change" if universe_changed else "scheduled market-cap/liquidity refresh"
+                logger.info(f"🔄 Rebuilding screener universe ({reason})")
+                stop_connections()
+                symbols = get_liquid_symbols()
+                if symbols:
+                    start_connections(symbols)
+                    last_universe_refresh = time.time()
+                else:
+                    logger.error("❌ Universe refresh returned no eligible symbols; keeping screener disconnected until next refresh")
+                    last_universe_refresh = time.time()
+
     except KeyboardInterrupt:
         pass
     finally:
         logger.info("🔄 Shutting down...")
         state.shutdown_flag = True
-        for t in threads:
-            t.join(timeout=5)
+        stop_connections()
         logger.info("✅ Shutdown complete")
+
 
 if __name__ == "__main__":
     main()
