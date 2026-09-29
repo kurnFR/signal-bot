@@ -58,7 +58,12 @@ def send_telegram_message(text: str, parse_mode: str = "HTML", max_retries: int 
             else:
                 last_error = data.get("description", f"HTTP {res.status_code}")
                 logger.warning("Telegram API response attempt %d/%d: %s", attempt, max_retries, last_error)
-        except Exception as e:
+                # Retry rate limits and server-side failures; permanent client
+                # errors (invalid token/chat ID, malformed request, etc.) will
+                # not succeed by repeating the same request.
+                if res.status_code < 500 and res.status_code != 429:
+                    break
+        except (requests.RequestException, ValueError) as e:
             last_error = str(e)
             logger.warning("Telegram send attempt %d/%d failed: %s", attempt, max_retries, e)
 
