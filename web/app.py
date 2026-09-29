@@ -50,6 +50,11 @@ ADMIN_OR_TRADER_PREFIXES = (
     "/api/master-data/build-features",
     "/api/custom-strategy",
 )
+RESEARCH_CONTROL_PREFIXES = (
+    "/api/research/retailbot2/control",
+    "/api/research/screener/control",
+)
+
 TRADER_OR_ADMIN_PREFIXES = (
     "/api/paper/configs",
     "/api/paper/positions",
@@ -73,6 +78,10 @@ def _role_allowed(method: str, path: str, role: str) -> bool:
     if _is_prefix(path, ADMIN_OR_TRADER_PREFIXES):
         return role in ("admin", "trader")
     if _is_prefix(path, TRADER_OR_ADMIN_PREFIXES):
+        if method.upper() == "GET":
+            return True
+        return role in ("admin", "trader")
+    if _is_prefix(path, RESEARCH_CONTROL_PREFIXES):
         if method.upper() == "GET":
             return True
         return role in ("admin", "trader")
