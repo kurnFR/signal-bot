@@ -630,7 +630,10 @@ def save_signal_to_db(signal: SmartMoneySignal, telegram_sent: bool):
 def get_market_caps() -> Dict[str, float]:
     if CONFIG["min_market_cap_usd"] <= 0:
         return {}
-    caps: Dict[str, float] = {}
+    # CoinGecko exposes ticker symbols, not Binance asset IDs. A ticker can
+    # represent multiple unrelated assets, so never select the largest match:
+    # an ambiguous ticker is unsafe for a market-cap gate and is excluded.
+    ticker_caps: Dict[str, set] = defaultdict(set)
     try:
         for page in range(1, max(1, CONFIG.get("market_cap_pages", 5)) + 1):
             resp = requests.get(
@@ -646,14 +649,26 @@ def get_market_caps() -> Dict[str, float]:
             for row in rows:
                 ticker = str(row.get("symbol", "")).upper()
                 cap = float(row.get("market_cap") or 0)
-                if ticker and cap > caps.get(ticker, 0):
-                    caps[ticker] = cap
+                if ticker and cap > 0:
+                    ticker_caps[ticker].add(cap)
             if len(rows) < 250:
                 break
             time.sleep(0.2)
-        logger.info("Loaded market-cap metadata for %d tickers", len(caps))
+
+        caps = {
+            ticker: next(iter(values))
+            for ticker, values in ticker_caps.items()
+            if len(values) == 1
+        }
+        ambiguous = len(ticker_caps) - len(caps)
+        logger.info(
+            "Loaded market-cap metadata for %d unambiguous tickers; "
+            "excluded %d ambiguous tickers",
+            len(caps), ambiguous,
+        )
     except Exception as e:
         logger.warning("Market-cap metadata unavailable; unknown assets will be excluded: %s", e)
+        return {}
     return caps
 
 
