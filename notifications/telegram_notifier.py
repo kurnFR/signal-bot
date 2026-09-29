@@ -8,7 +8,7 @@ import logging
 import requests
 from html import escape
 from typing import Dict, Any, Optional
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
@@ -192,7 +192,7 @@ def send_news_signal_alert(
     reward = abs(take_profit - entry_price)
     rr_ratio = round(reward / risk, 2) if risk > 0 else 0.0
     risk_pct = round((risk / entry_price) * 100, 2) if entry_price > 0 else 0.0
-    now_wib = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M WIB")
+    now_wib = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M WIB")
 
     safe_symbol = escape(str(symbol))
     safe_market = escape(str(market).upper())
