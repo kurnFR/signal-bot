@@ -3,7 +3,7 @@ import sys
 import logging
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 logger = logging.getLogger("web.app")
@@ -142,9 +142,20 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.get("/")
 def serve_index():
     index_path = os.path.join(STATIC_DIR, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return {"message": "Crypto Signal Bot API is running."}
+    if not os.path.exists(index_path):
+        return {"message": "Crypto Signal Bot API is running."}
+
+    # Inject the dashboard enhancement bundle without rewriting the large static
+    # index.html. This keeps the trading/dashboard markup untouched.
+    with open(index_path, "r", encoding="utf-8") as handle:
+        html = handle.read()
+    enhancement = (
+        '<link rel="stylesheet" href="/static/css/dashboard_enhancements.css">\n'
+        '<script src="/static/js/dashboard_enhancements.js"></script>\n'
+    )
+    if "dashboard_enhancements.js" not in html:
+        html = html.replace("</body>", enhancement + "</body>", 1)
+    return HTMLResponse(content=html)
 
 
 if __name__ == "__main__":
