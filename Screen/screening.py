@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""
-Smart Money Volume Detector - Early Warning System
-Detects institutional accumulation/distribution BEFORE price breakout.
-Uses pure RVOL + volume divergence + velocity analysis for earliest signals.
-
-Professional Logic:
-✅ Volume precedes price - alert on smart money entry, not confirmation
-✅ High volume + low volatility = accumulation (bullish) or distribution (bearish)
-✅ Quote volume (USDT) tracks real capital flow, not token count
-✅ Velocity detection catches momentum shifts before candles close
-"""
+"""Smart Money Volume Detector - Early Warning System."""
 
 import os
 import json
@@ -32,34 +22,19 @@ from urllib3.util.retry import Retry
 from dotenv import load_dotenv
 
 load_dotenv()
-
-# Reuse the main app's shared MySQL connection pool (crypto_signals DB)
-# rather than standing up a separate database, so signals this screener
-# fires can be read by the web dashboard directly. See db/db.py.
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db.db import get_pool
 
-
-# =========================
-# PROFESSIONAL CONFIGURATION
-# =========================
 CONFIG = {
-    # === Web dashboard control (screener_control table) ===
-    "enabled": True,  # reload_control() overwrites this from the DB every ~60s
-
-    # === Early Detection Settings ===
-    "timeframe": os.getenv("TIMEFRAME", "1m"),  # 1m for fastest detection
-    "rvol_multiplier": float(os.getenv("RVOL_MULTIPLIER", "7.0")),  # Lower threshold for early signals
-    "ema_length": int(os.getenv("EMA_LENGTH", "7200")),  # Shorter EMA = more responsive
-    "velocity_window": int(os.getenv("VELOCITY_WINDOW", "100")),  # Candles to measure volume acceleration
-    
-    # === Smart Money Signal Types ===
-    "enable_divergence_detection": os.getenv("ENABLE_DIVERGENCE", "true").lower() == "true",  # High vol + low price move
-    "divergence_max_price_change": float(os.getenv("DIVERGENCE_MAX_PRICE_CHANGE", "0.3")),  # <0.3% move = accumulation signal
-    "enable_velocity_detection": os.getenv("ENABLE_VELOCITY", "true").lower() == "true",  # Volume acceleration
-    "velocity_threshold": float(os.getenv("VELOCITY_THRESHOLD", "5")),  # 1.5x volume increase vs prior candle
-    
-    # === Liquidity Filters ===
+    "enabled": True,
+    "timeframe": os.getenv("TIMEFRAME", "1m"),
+    "rvol_multiplier": float(os.getenv("RVOL_MULTIPLIER", "7.0")),
+    "ema_length": int(os.getenv("EMA_LENGTH", "7200")),
+    "velocity_window": int(os.getenv("VELOCITY_WINDOW", "100")),
+    "enable_divergence_detection": os.getenv("ENABLE_DIVERGENCE", "true").lower() == "true",
+    "divergence_max_price_change": float(os.getenv("DIVERGENCE_MAX_PRICE_CHANGE", "0.3")),
+    "enable_velocity_detection": os.getenv("ENABLE_VELOCITY", "true").lower() == "true",
+    "velocity_threshold": float(os.getenv("VELOCITY_THRESHOLD", "5")),
     "symbols_filter": os.getenv("SYMBOLS_FILTER", "USDT"),
     "min_quote_volume_24h": float(os.getenv("MIN_QUOTE_VOLUME_24H", "1000000")),
     "min_market_cap_usd": float(os.getenv("MIN_MARKET_CAP_USD", "50000000")),
@@ -67,60 +42,40 @@ CONFIG = {
     "market_cap_refresh_minutes": int(os.getenv("MARKET_CAP_REFRESH_MINUTES", "30")),
     "exclude_leveraged": os.getenv("EXCLUDE_LEVERAGED", "true").lower() == "true",
     "exclude_stablecoins": os.getenv("EXCLUDE_STABLECOINS", "true").lower() == "true",
-    
-    # === Alert Control ===
-    "max_alerts_per_hour": int(os.getenv("MAX_ALERTS_PER_HOUR", "5")),  # Prevent spam
-    "max_alerts_per_symbol_per_hour": int(os.getenv("MAX_ALERTS_PER_SYMBOL_PER_HOUR", "2")),  # Stop one volatile symbol from burning the whole global budget
+    "max_alerts_per_hour": int(os.getenv("MAX_ALERTS_PER_HOUR", "5")),
+    "max_alerts_per_symbol_per_hour": int(os.getenv("MAX_ALERTS_PER_SYMBOL_PER_HOUR", "2")),
     "alert_cooldown_sec": int(os.getenv("ALERT_COOLDOWN_SEC", "900")),
     "require_confluence": os.getenv("REQUIRE_CONFLUENCE", "true").lower() == "true",
     "min_signal_rvol": float(os.getenv("MIN_SIGNAL_RVOL", "5.0")),
     "min_signal_velocity": float(os.getenv("MIN_SIGNAL_VELOCITY", "3.0")),
     "min_quality_score": float(os.getenv("MIN_QUALITY_SCORE", "70")),
+    "alert_selection_window_sec": float(os.getenv("ALERT_SELECTION_WINDOW_SEC", "3")),
     "daily_reset_utc_hour": int(os.getenv("DAILY_RESET_UTC_HOUR", "0")),
-    
-    # === Telegram ===
     "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN"),
     "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID"),
-    
-    # === WebSocket ===
     "ws_ping_interval": 20,
     "ws_ping_timeout": 10,
     "max_streams_per_conn": int(os.getenv("MAX_STREAMS_PER_CONN", "100")),
     "reconnect_delay_base": 5,
     "reconnect_delay_max": 60,
-    
-    # === Logging ===
     "log_level": os.getenv("LOG_LEVEL", "INFO"),
     "log_file": os.getenv("LOG_FILE", "smart_money_detector.log"),
 }
 
-# =========================
-# LOGGING SETUP
-# =========================
 logging.basicConfig(
     level=getattr(logging, CONFIG["log_level"].upper()),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.FileHandler(CONFIG["log_file"], encoding="utf-8"),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler(CONFIG["log_file"], encoding="utf-8"), logging.StreamHandler()],
 )
 logger = logging.getLogger("SmartMoneyDetector")
 
-if not CONFIG["telegram_bot_token"] or not CONFIG["telegram_chat_id"]:
-    logger.warning("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set -- Telegram alerts disabled (signals will be saved to database)")
 
-
-# =========================
-# DATA CLASSES
-# =========================
 @dataclass(order=True)
 class SmartMoneySignal:
-    """Heap-ordered signal for prioritization"""
-    priority_score: float  # Negative for max-heap
+    priority_score: float
     symbol: str = field(compare=False)
-    signal_type: str = field(compare=False)  # "RVOL_SPIKE", "DIVERGENCE", "VELOCITY"
+    signal_type: str = field(compare=False)
     rvol: float = field(compare=False)
     volume: float = field(compare=False)
     quote_volume: float = field(compare=False)
@@ -130,19 +85,11 @@ class SmartMoneySignal:
     timestamp: float = field(compare=False)
     candle_time: str = field(compare=False)
     quality_score: float = field(compare=False)
-    
-    @property
-    def priority(self) -> float:
-        return -self.priority_score
 
-# =========================
-# THREAD-SAFE STATE WITH EARLY DETECTION
-# =========================
+
 class SmartMoneyState:
-    """State management with volume divergence & velocity detection"""
-    
     def __init__(self, ema_length: int, rvol_threshold: float, max_alerts_per_hour: int):
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.ema_volume: Dict[str, float] = {}
         self.ema_quote_volume: Dict[str, float] = {}
         self.ema_initialized: Dict[str, int] = defaultdict(int)
@@ -150,129 +97,89 @@ class SmartMoneyState:
         self.seen_signal_candles: Dict[Tuple[str, str], str] = {}
         self.hourly_alert_count: Dict[str, int] = defaultdict(int)
         self.last_hour_reset = None
-        
-        # Volume history for velocity calculation
-        self.volume_history: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=CONFIG["velocity_window"]+1))
-        self.quote_volume_history: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=CONFIG["velocity_window"]+1))
-        
-        # Signal tracking
+        self.volume_history: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=CONFIG["velocity_window"] + 1))
+        self.quote_volume_history: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=CONFIG["velocity_window"] + 1))
         self.alpha = 2 / (ema_length + 1)
         self.rvol_threshold = rvol_threshold
         self.warmup_candles = max(10, ema_length // 3)
         self.max_alerts_per_hour = max_alerts_per_hour
-        
         self.shutdown_flag = False
+        self.pending_signals: List[SmartMoneySignal] = []
+        self.pending_keys: set = set()
         self._check_hourly_reset()
-    
+
     def _check_hourly_reset(self):
-        """Reset hourly alert counters"""
         now = datetime.now(timezone.utc)
         hour_key = now.strftime("%Y-%m-%d %H")
-        
-        if self.last_hour_reset != hour_key:
-            with self.lock:
+        with self.lock:
+            if self.last_hour_reset != hour_key:
                 self.hourly_alert_count.clear()
                 self.last_hour_reset = hour_key
-                logger.info(f"🔄 Hourly reset: cleared alert counters for {hour_key}")
-    
-    def update_ema(self, symbol: str, volume: float, quote_volume: float) -> Tuple[bool, float, float]:
-        """Update EMA for volume tracking"""
+                logger.info("🔄 Hourly reset: cleared alert counters for %s", hour_key)
+
+    def update_ema(self, symbol, volume, quote_volume):
         with self.lock:
             if symbol not in self.ema_volume:
                 self.ema_volume[symbol] = volume
                 self.ema_quote_volume[symbol] = quote_volume
                 self.ema_initialized[symbol] = 1
                 return False, volume, quote_volume
-            
             if self.ema_initialized[symbol] < self.warmup_candles:
-                self.ema_volume[symbol] = (self.alpha * volume) + ((1 - self.alpha) * self.ema_volume[symbol])
-                self.ema_quote_volume[symbol] = (self.alpha * quote_volume) + ((1 - self.alpha) * self.ema_quote_volume[symbol])
+                self.ema_volume[symbol] = self.alpha * volume + (1 - self.alpha) * self.ema_volume[symbol]
+                self.ema_quote_volume[symbol] = self.alpha * quote_volume + (1 - self.alpha) * self.ema_quote_volume[symbol]
                 self.ema_initialized[symbol] += 1
                 return False, self.ema_volume[symbol], self.ema_quote_volume[symbol]
-            
             old_ema_vol = self.ema_volume[symbol]
             old_ema_quote = self.ema_quote_volume[symbol]
-            
-            self.ema_volume[symbol] = (self.alpha * volume) + ((1 - self.alpha) * old_ema_vol)
-            self.ema_quote_volume[symbol] = (self.alpha * quote_volume) + ((1 - self.alpha) * old_ema_quote)
-            
+            self.ema_volume[symbol] = self.alpha * volume + (1 - self.alpha) * old_ema_vol
+            self.ema_quote_volume[symbol] = self.alpha * quote_volume + (1 - self.alpha) * old_ema_quote
             return True, self.ema_volume[symbol], self.ema_quote_volume[symbol]
-    
-    def update_volume_history(self, symbol: str, volume: float, quote_volume: float):
-        """Track recent volume for velocity calculation"""
+
+    def update_volume_history(self, symbol, volume, quote_volume):
         with self.lock:
             self.volume_history[symbol].append(volume)
             self.quote_volume_history[symbol].append(quote_volume)
-    
-    def calculate_velocity(self, symbol: str, current_quote_vol: float) -> float:
-        """Calculate volume velocity: current vs recent average"""
+
+    def calculate_velocity(self, symbol, current_quote_vol):
         with self.lock:
             history = self.quote_volume_history[symbol]
             if len(history) < 2:
                 return 1.0
-            # Compare current to average of prior N candles
             prior_avg = sum(list(history)[:-1]) / (len(history) - 1)
             return current_quote_vol / prior_avg if prior_avg > 0 else 1.0
-    
-    def detect_smart_money_signal(self, symbol: str, volume: float, quote_volume: float,
-                                 price: float, open_price: float, high: float, low: float,
-                                 close_time: str) -> Optional[SmartMoneySignal]:
-        """
-        Detect early smart money signals:
-        1. Pure RVOL spike (any direction)
-        2. Volume divergence: high volume + low price move = accumulation/distribution
-        3. Volume velocity: sudden acceleration
-        """
+
+    def detect_smart_money_signal(self, symbol, volume, quote_volume, price, open_price, high, low, close_time):
         self._check_hourly_reset()
-        
         is_ready, ema_vol, ema_quote = self.update_ema(symbol, volume, quote_volume)
         if not is_ready:
             return None
-        
-        # Update volume history for velocity
         self.update_volume_history(symbol, volume, quote_volume)
-        
-        # Calculate metrics
         rvol = quote_volume / ema_quote if ema_quote > 0 else 0
         price_change_pct = (price - open_price) / open_price * 100 if open_price > 0 else 0
         price_range_pct = (high - low) / open_price * 100 if open_price > 0 else 0
         velocity = self.calculate_velocity(symbol, quote_volume)
-        
+
         signal_type = None
-        priority_score = 0.0
-        
-        # === SIGNAL 1: Pure RVOL Spike (earliest detection) ===
+        base_priority = 0.0
         if rvol >= CONFIG["rvol_multiplier"]:
             signal_type = "RVOL_SPIKE"
-            # Priority: higher RVOL = higher priority
-            priority_score = rvol * 10
-        
-        # === SIGNAL 2: Volume Divergence (smart money accumulation) ===
-        elif (CONFIG["enable_divergence_detection"] and 
-              rvol >= CONFIG["rvol_multiplier"] * 0.8 and  # Slightly lower threshold
-              price_range_pct <= CONFIG["divergence_max_price_change"]):
-            # High volume but price NOT moving = institutions accumulating quietly
+            base_priority = rvol * 10
+        elif (CONFIG["enable_divergence_detection"] and rvol >= CONFIG["rvol_multiplier"] * 0.8
+              and price_range_pct <= CONFIG["divergence_max_price_change"]):
             signal_type = "DIVERGENCE_ACCUMULATION" if price_change_pct >= 0 else "DIVERGENCE_DISTRIBUTION"
-            # Priority: high volume + tight range = stronger signal
-            priority_score = rvol * 15  # Weight divergence higher
-            
-        # === SIGNAL 3: Volume Velocity Acceleration ===
-        elif (CONFIG["enable_velocity_detection"] and 
-              velocity >= CONFIG["velocity_threshold"] and
-              rvol >= CONFIG["rvol_multiplier"] * 0.7):
+            base_priority = rvol * 15
+        elif (CONFIG["enable_velocity_detection"] and velocity >= CONFIG["velocity_threshold"]
+              and rvol >= CONFIG["rvol_multiplier"] * 0.7):
             signal_type = "VELOCITY_SURGE"
-            # Priority: faster acceleration = higher priority
-            priority_score = velocity * 8
-        
-        # No signal detected
+            base_priority = velocity * 8
         if not signal_type:
             return None
-        
+
         rvol_score = min(rvol / max(CONFIG["min_signal_rvol"], 1.0), 2.0) * 25.0
         velocity_score = min(velocity / max(CONFIG["min_signal_velocity"], 1.0), 2.0) * 20.0
         tightness_score = 0.0
         if CONFIG["enable_divergence_detection"]:
-            tightness_score = max(0.0, 1.0 - (price_range_pct / max(CONFIG["divergence_max_price_change"], 0.0001))) * 20.0
+            tightness_score = max(0.0, 1.0 - price_range_pct / max(CONFIG["divergence_max_price_change"], 0.0001)) * 20.0
         movement_score = min(abs(price_change_pct), 1.0) * 10.0
         quality_score = min(100.0, rvol_score + velocity_score + tightness_score + movement_score)
         if quality_score < CONFIG.get("min_quality_score", 0):
@@ -281,25 +188,20 @@ class SmartMoneyState:
         if CONFIG.get("require_confluence", True):
             conditions = int(rvol >= CONFIG["min_signal_rvol"])
             conditions += int(velocity >= CONFIG["min_signal_velocity"])
-            conditions += int(
-                price_range_pct <= CONFIG["divergence_max_price_change"]
-                and rvol >= CONFIG["rvol_multiplier"] * 0.8
-            )
+            conditions += int(price_range_pct <= CONFIG["divergence_max_price_change"] and rvol >= CONFIG["rvol_multiplier"] * 0.8)
             if conditions < 2:
                 return None
 
-        # Cooldown & rate limit check
         signal_key = (symbol, signal_type)
         with self.lock:
             if self.seen_signal_candles.get(signal_key) == close_time:
                 return None
             self.seen_signal_candles[signal_key] = close_time
 
-        if not self._can_alert(symbol):
-            return None
-        
+        # Higher quality always wins. Base priority is only a deterministic tie-breaker.
+        ranking = quality_score * 1000.0 + base_priority
         return SmartMoneySignal(
-            priority_score=-priority_score,  # Negative for max-heap
+            priority_score=-ranking,
             symbol=symbol,
             signal_type=signal_type,
             rvol=rvol,
@@ -310,146 +212,110 @@ class SmartMoneyState:
             volume_velocity=velocity,
             timestamp=time.time(),
             candle_time=close_time,
-            quality_score=quality_score
+            quality_score=quality_score,
         )
-    
-    def _can_alert(self, symbol: str) -> bool:
-        """Check cooldown and rate limits (both global and per-symbol).
 
-        [FIX] hourly_alert_count[symbol] was being incremented on every
-        alert but never actually checked -- only the "global" counter was
-        enforced, so max_alerts_per_hour was effectively a *global* cap
-        across every monitored symbol combined. On a volatile day, a
-        handful of alerts on one or two symbols could silently exhaust the
-        entire hour's budget and suppress every other symbol's legitimate
-        signal. Both caps now apply: the global one still bounds total
-        alert volume, and the new per-symbol one stops any single symbol
-        from consuming that whole budget by itself.
-        """
-        now = time.time()
-
+    def register_signal(self, signal: SmartMoneySignal) -> bool:
+        """Queue a candidate. Alert budget is intentionally NOT consumed here."""
+        key = (signal.symbol, signal.signal_type, signal.candle_time)
         with self.lock:
-            # Per-symbol cooldown
-            last = self.last_alert_time.get(symbol, 0)
-            if now - last < CONFIG["alert_cooldown_sec"]:
+            if key in self.pending_keys:
                 return False
+            self.pending_keys.add(key)
+            heapq.heappush(self.pending_signals, signal)
+            return True
 
-            # Hourly global limit
+    def _can_alert(self, symbol: str) -> bool:
+        now = time.time()
+        with self.lock:
+            self._check_hourly_reset()
+            if now - self.last_alert_time.get(symbol, 0) < CONFIG["alert_cooldown_sec"]:
+                return False
             if self.hourly_alert_count["global"] >= CONFIG["max_alerts_per_hour"]:
                 return False
-
-            # Hourly per-symbol limit
             if self.hourly_alert_count[symbol] >= CONFIG["max_alerts_per_symbol_per_hour"]:
                 return False
-
-            # Update counters
             self.last_alert_time[symbol] = now
             self.hourly_alert_count["global"] += 1
             self.hourly_alert_count[symbol] += 1
             return True
-    
-    def register_signal(self, signal: SmartMoneySignal) -> bool:
-        """Register signal and return True if should alert"""
-        # For early detection: alert immediately on valid signal (no TOP-N delay)
-        # But still track for potential duplicate suppression
-        return True  # Always alert on valid early signal
 
-state = SmartMoneyState(
-    ema_length=CONFIG["ema_length"],
-    rvol_threshold=CONFIG["rvol_multiplier"],
-    max_alerts_per_hour=CONFIG["max_alerts_per_hour"]
-)
+    def pop_best_eligible(self) -> Optional[SmartMoneySignal]:
+        """Select the best currently eligible candidate, then consume one alert slot."""
+        with self.lock:
+            self._check_hourly_reset()
+            deferred = []
+            selected = None
+            while self.pending_signals:
+                candidate = heapq.heappop(self.pending_signals)
+                key = (candidate.symbol, candidate.signal_type, candidate.candle_time)
+                self.pending_keys.discard(key)
+                if not CONFIG.get("enabled", True):
+                    deferred.append(candidate)
+                    continue
+                if self._can_alert(candidate.symbol):
+                    selected = candidate
+                    break
+            for candidate in deferred:
+                key = (candidate.symbol, candidate.signal_type, candidate.candle_time)
+                if key not in self.pending_keys:
+                    self.pending_keys.add(key)
+                    heapq.heappush(self.pending_signals, candidate)
+            return selected
 
-# =========================
-# TELEGRAM WITH SMART MONEY FORMATTING
-# =========================
+
+state = SmartMoneyState(CONFIG["ema_length"], CONFIG["rvol_multiplier"], CONFIG["max_alerts_per_hour"])
+
 class SmartMoneyTelegram:
-    """Telegram sender with early-signal optimized formatting"""
-    
-    def __init__(self, token: str, chat_id: str):
+    def __init__(self, token, chat_id):
         self.token = token
         self.chat_id = chat_id
-        self.url = f"https://api.telegram.org/bot{token}/sendMessage"
+        self.url = f"https://api.telegram.org/bot{token}/sendMessage" if token else ""
         self._last_send = 0
         self._lock = threading.Lock()
-        
         self.session = requests.Session()
         retry = Retry(total=3, backoff_factor=0.3, status_forcelist=[429, 500, 502, 503, 504])
         self.session.mount("https://", HTTPAdapter(max_retries=retry))
-    
-    def send_early_alert(self, signal: SmartMoneySignal) -> bool:
-        """Send early warning alert with smart money context"""
+
+    def send_early_alert(self, signal):
         if not self.token or not self.chat_id:
             return False
         with self._lock:
-
-            # Rate limit
             elapsed = time.time() - self._last_send
-            if elapsed < 0.8:  # Slightly faster for early signals
+            if elapsed < 0.8:
                 time.sleep(0.8 - elapsed)
-            
-            # Signal-specific emoji and messaging
-            signal_emoji = {
-                "RVOL_SPIKE": "⚡",
-                "DIVERGENCE_ACCUMULATION": "🤫",
-                "DIVERGENCE_DISTRIBUTION": "🚨",
-                "VELOCITY_SURGE": "🚀"
-            }.get(signal.signal_type, "🔍")
-            
-            # Smart money interpretation
+            signal_emoji = {"RVOL_SPIKE": "⚡", "DIVERGENCE_ACCUMULATION": "🤫", "DIVERGENCE_DISTRIBUTION": "🚨", "VELOCITY_SURGE": "🚀"}.get(signal.signal_type, "🔍")
             if "ACCUMULATION" in signal.signal_type:
-                interpretation = "🟢 Possible accumulation (high volume, limited price movement)"
-                action_hint = "Watch for upside breakout"
+                interpretation, action_hint = "🟢 Possible accumulation (high volume, limited price movement)", "Watch for upside breakout"
             elif "DISTRIBUTION" in signal.signal_type:
-                interpretation = "🔴 Possible distribution (high volume, limited price movement)"
-                action_hint = "Watch for downside breakdown"
+                interpretation, action_hint = "🔴 Possible distribution (high volume, limited price movement)", "Watch for downside breakdown"
             elif signal.price_change_pct > 0.5:
-                interpretation = "🟢 Strong buying pressure"
-                action_hint = "Momentum building"
+                interpretation, action_hint = "🟢 Strong buying pressure", "Momentum building"
             elif signal.price_change_pct < -0.5:
-                interpretation = "🔴 Strong selling pressure"
-                action_hint = "Momentum breaking down"
+                interpretation, action_hint = "🔴 Strong selling pressure", "Momentum breaking down"
             else:
-                interpretation = "🟡 Unusual volume - watch direction"
-                action_hint = "Wait for price confirmation"
-            
+                interpretation, action_hint = "🟡 Unusual volume - watch direction", "Wait for price confirmation"
             message = (
-                f"{signal_emoji} <b>SMART MONEY EARLY SIGNAL</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"Pair: <b>{escape(str(signal.symbol))}</b>\n"
-                f"Signal: <code>{escape(str(signal.signal_type))}</code>\n"
-                f"RVOL: <b>{signal.rvol:.2f}x</b> (vs {CONFIG['ema_length']}-EMA)\n"
-                f"Velocity: <b>{signal.volume_velocity:.2f}x</b> acceleration\n"
-                f"Price: <code>${signal.price:.6f}</code> ({signal.price_change_pct:+.3f}%)\n"
+                f"{signal_emoji} <b>SMART MONEY EARLY SIGNAL</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"Pair: <b>{escape(str(signal.symbol))}</b>\nSignal: <code>{escape(str(signal.signal_type))}</code>\n"
+                f"Quality: <b>{signal.quality_score:.0f}/100</b>\nRVOL: <b>{signal.rvol:.2f}x</b> (vs {CONFIG['ema_length']}-EMA)\n"
+                f"Velocity: <b>{signal.volume_velocity:.2f}x</b> acceleration\nPrice: <code>${signal.price:.6f}</code> ({signal.price_change_pct:+.3f}%)\n"
                 f"Volume: <code>{signal.volume:,.0f}</code> | Quote: <code>${signal.quote_volume:,.0f}</code>\n"
-                f"Time: <code>{escape(str(signal.candle_time))}</code> UTC\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"<b>Interpretation:</b> {interpretation}\n"
-                f"<i>Action: {action_hint}</i>\n"
+                f"Time: <code>{escape(str(signal.candle_time))}</code> UTC\n━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"<b>Interpretation:</b> {interpretation}\n<i>Action: {action_hint}</i>\n"
                 f"<i>⚠️ Early signal - confirm with your strategy before entry</i>"
             )
-            
             try:
-                payload = {
-                    "chat_id": self.chat_id,
-                    "text": message,
-                    "parse_mode": "HTML",
-                    "disable_web_page_preview": True
-                }
-                resp = self.session.post(self.url, json=payload, timeout=8)
+                resp = self.session.post(self.url, json={"chat_id": self.chat_id, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}, timeout=8)
                 resp.raise_for_status()
                 self._last_send = time.time()
-                logger.info(f"✅ Early alert: {signal.symbol} | {signal.signal_type} | RVOL {signal.rvol:.2f}x")
+                logger.info("✅ Early alert: %s | %s | Quality %.0f | RVOL %.2fx", signal.symbol, signal.signal_type, signal.quality_score, signal.rvol)
                 return True
             except Exception as e:
-                logger.error(f"❌ Telegram error: {e}")
+                logger.error("❌ Telegram error: %s", e)
                 return False
 
-    def send(self, text: str) -> bool:
-        """Generic HTML message send, for control-plane notices (enable/
-        disable, config overrides) that aren't tied to a specific
-        SmartMoneySignal. Shares the same session/retry/rate-limit as
-        send_early_alert()."""
+    def send(self, text):
         if not self.token or not self.chat_id:
             return False
         with self._lock:
@@ -457,466 +323,215 @@ class SmartMoneyTelegram:
             if elapsed < 0.8:
                 time.sleep(0.8 - elapsed)
             try:
-                payload = {
-                    "chat_id": self.chat_id, "text": text,
-                    "parse_mode": "HTML", "disable_web_page_preview": True,
-                }
-                resp = self.session.post(self.url, json=payload, timeout=8)
+                resp = self.session.post(self.url, json={"chat_id": self.chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}, timeout=8)
                 resp.raise_for_status()
                 self._last_send = time.time()
                 return True
             except Exception as e:
-                logger.error(f"❌ Telegram error: {e}")
+                logger.error("❌ Telegram error: %s", e)
                 return False
 
 telegram = SmartMoneyTelegram(CONFIG["telegram_bot_token"], CONFIG["telegram_chat_id"])
 
-# =========================
-# PERSISTENCE (shared crypto_signals DB -- read by the web dashboard)
-# =========================
+
 def ensure_signal_table():
-    """Create smart_money_signals and screener_control if they don't exist.
-    Previously this screener had NO database persistence at all -- it only
-    fired Telegram alerts, so there was nothing for a dashboard to read.
-    Called once at startup; safe to call repeatedly (CREATE TABLE IF NOT
-    EXISTS)."""
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS smart_money_signals (
-                id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                symbol VARCHAR(20) NOT NULL,
-                signal_type VARCHAR(30) NOT NULL,
-                rvol DECIMAL(12,4) NOT NULL,
-                volume DECIMAL(30,8) NOT NULL,
-                quote_volume DECIMAL(20,2) NOT NULL,
-                price DECIMAL(20,8) NOT NULL,
-                price_change_pct DECIMAL(10,4) NOT NULL,
-                volume_velocity DECIMAL(12,4) NOT NULL,
-                quality_score DECIMAL(6,2) NOT NULL DEFAULT 0,
-                candle_time VARCHAR(32) NOT NULL,
-                telegram_sent BOOLEAN NOT NULL DEFAULT FALSE,
-                detected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                INDEX idx_smsig_symbol_time (symbol, detected_at),
-                INDEX idx_smsig_type_time (signal_type, detected_at),
-                UNIQUE KEY uq_smsig_candle (symbol, signal_type, candle_time)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS screener_control (
-                id INT PRIMARY KEY DEFAULT 1,
-                enabled BOOLEAN NOT NULL DEFAULT TRUE,
-                overrides_json TEXT NULL,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    ON UPDATE CURRENT_TIMESTAMP,
-                CONSTRAINT chk_screener_control_singleton CHECK (id = 1)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-        """)
+        cur.execute("""CREATE TABLE IF NOT EXISTS smart_money_signals (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY, symbol VARCHAR(20) NOT NULL, signal_type VARCHAR(30) NOT NULL,
+            rvol DECIMAL(12,4) NOT NULL, volume DECIMAL(30,8) NOT NULL, quote_volume DECIMAL(20,2) NOT NULL,
+            price DECIMAL(20,8) NOT NULL, price_change_pct DECIMAL(10,4) NOT NULL, volume_velocity DECIMAL(12,4) NOT NULL,
+            quality_score DECIMAL(6,2) NOT NULL DEFAULT 0, candle_time VARCHAR(32) NOT NULL,
+            telegram_sent BOOLEAN NOT NULL DEFAULT FALSE, detected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_smsig_symbol_time (symbol, detected_at), INDEX idx_smsig_type_time (signal_type, detected_at),
+            UNIQUE KEY uq_smsig_candle (symbol, signal_type, candle_time)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+        cur.execute("""CREATE TABLE IF NOT EXISTS screener_control (
+            id INT PRIMARY KEY DEFAULT 1, enabled BOOLEAN NOT NULL DEFAULT TRUE, overrides_json TEXT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            CONSTRAINT chk_screener_control_singleton CHECK (id = 1)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
         cur.execute("INSERT IGNORE INTO screener_control (id, enabled, overrides_json) VALUES (1, TRUE, NULL)")
-        conn.commit()
-        cur.close()
-        logger.info("✅ smart_money_signals / screener_control tables ready")
+        conn.commit(); cur.close(); logger.info("✅ screener persistence tables ready")
     except Exception as e:
-        logger.error(f"❌ ensure_signal_table failed: {e}")
+        logger.error("❌ ensure_signal_table failed: %s", e)
     finally:
         conn.close()
 
-
-# Keys safe to change on a running process without corrupting state.
-# ema_length/velocity_window/timeframe/symbols_filter etc. are NOT here --
-# changing those live would invalidate the already-accumulated EMA/volume
-# history rather than just changing behavior going forward.
-_TUNABLE_CONFIG_KEYS = {
-    "rvol_multiplier", "divergence_max_price_change", "velocity_threshold",
-    "enable_divergence_detection", "enable_velocity_detection",
-    "max_alerts_per_hour", "max_alerts_per_symbol_per_hour", "alert_cooldown_sec",
-    "require_confluence", "min_signal_rvol", "min_signal_velocity",
-    "min_quote_volume_24h", "min_market_cap_usd", "min_quality_score",
-}
+_TUNABLE_CONFIG_KEYS = {"rvol_multiplier", "divergence_max_price_change", "velocity_threshold", "enable_divergence_detection", "enable_velocity_detection", "max_alerts_per_hour", "max_alerts_per_symbol_per_hour", "alert_cooldown_sec", "require_confluence", "min_signal_rvol", "min_signal_velocity", "min_quote_volume_24h", "min_market_cap_usd", "min_quality_score"}
 
 
 def reload_control():
-    """Poll screener_control and apply enabled flag + safe CONFIG overrides.
-    CONFIG is mutated in place (not reassigned), so every place in this
-    file that reads CONFIG["..."] picks up the new value immediately --
-    no extra plumbing needed. Called once per main-loop tick (~60s)."""
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute("SELECT enabled, overrides_json FROM screener_control WHERE id=1")
-        row = cur.fetchone()
-        cur.close()
+        row = cur.fetchone(); cur.close()
     except Exception as e:
-        logger.error(f"❌ reload_control: {e}")
-        return
+        logger.error("❌ reload_control: %s", e); return False
     finally:
         conn.close()
-
-    if not row:
-        return
-
-    was_enabled = CONFIG.get("enabled", True)
-    CONFIG["enabled"] = bool(row["enabled"])
+    if not row: return False
+    was_enabled = CONFIG.get("enabled", True); CONFIG["enabled"] = bool(row["enabled"])
     if was_enabled != CONFIG["enabled"]:
-        state_str = "ENABLED" if CONFIG["enabled"] else "PAUSED (still detecting, alerts suppressed)"
-        logger.info(f"🎛️  Screener {state_str} via dashboard control")
+        state_str = "ENABLED" if CONFIG["enabled"] else "PAUSED (alerts suppressed)"
+        logger.info("🎛️ Screener %s via dashboard control", state_str)
         telegram.send(f"🎛️ <b>Smart Money Screener {state_str}</b> (via web dashboard)")
-
-    overrides = json.loads(row["overrides_json"]) if row["overrides_json"] else {}
-    applied = []
-    universe_changed = False
-    for key, value in overrides.items():
-        if key not in _TUNABLE_CONFIG_KEYS:
-            logger.warning(f"⚠️  Ignoring non-tunable/unknown screener_control override key: {key}")
-            continue
-        current = CONFIG.get(key)
-        try:
-            if isinstance(current, bool):
-                new_value = bool(value)
-            elif isinstance(current, int) and not isinstance(current, bool):
-                new_value = int(value)
-            elif isinstance(current, float):
-                new_value = float(value)
-            else:
-                new_value = value
-        except (TypeError, ValueError):
-            logger.warning(f"⚠️  Could not coerce override {key}={value!r}, skipping")
-            continue
+    try:
+        overrides = json.loads(row["overrides_json"]) if row["overrides_json"] else {}
+    except (TypeError, ValueError):
+        logger.error("❌ Invalid screener overrides JSON; ignoring it")
+        overrides = {}
+    applied=[]; universe_changed=False
+    for key,value in overrides.items():
+        if key not in _TUNABLE_CONFIG_KEYS: continue
+        current=CONFIG.get(key)
+        try: new_value = bool(value) if isinstance(current,bool) else int(value) if isinstance(current,int) and not isinstance(current,bool) else float(value) if isinstance(current,float) else value
+        except (TypeError,ValueError): continue
         if current != new_value:
-            CONFIG[key] = new_value
-            applied.append(f"{key}={new_value}")
-            if key in {"min_quote_volume_24h", "min_market_cap_usd"}:
-                universe_changed = True
-    if applied:
-        logger.info("🎛️ Applied config overrides: %s", ", ".join(applied))
+            CONFIG[key]=new_value; applied.append(f"{key}={new_value}")
+            if key in {"min_quote_volume_24h","min_market_cap_usd"}: universe_changed=True
+    if applied: logger.info("🎛️ Applied config overrides: %s", ", ".join(applied))
     return universe_changed
 
 
-def save_signal_to_db(signal: SmartMoneySignal, telegram_sent: bool):
-    """Persist a fired signal so the web dashboard can display it. Never
-    raises -- a DB hiccup here must not stop the screener from continuing
-    to detect and alert on signals, which is its primary job."""
+def save_signal_to_db(signal, telegram_sent):
+    try: conn=get_pool().get_connection()
+    except Exception as e: logger.error("❌ save_signal_to_db connection: %s", e); return
     try:
-        conn = get_pool().get_connection()
-    except Exception as e:
-        logger.error(f"❌ save_signal_to_db: could not get connection: {e}")
-        return
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO smart_money_signals
-                (symbol, signal_type, rvol, volume, quote_volume, price,
-                 price_change_pct, volume_velocity, quality_score, candle_time, telegram_sent)
+        cur=conn.cursor(); cur.execute("""INSERT INTO smart_money_signals
+            (symbol,signal_type,rvol,volume,quote_volume,price,price_change_pct,volume_velocity,quality_score,candle_time,telegram_sent)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON DUPLICATE KEY UPDATE
-                quality_score=GREATEST(quality_score, VALUES(quality_score)),
-                telegram_sent=telegram_sent OR VALUES(telegram_sent)
-        """, (
-            signal.symbol, signal.signal_type, signal.rvol, signal.volume,
-            signal.quote_volume, signal.price, signal.price_change_pct,
-            signal.volume_velocity, signal.quality_score, signal.candle_time, telegram_sent,
-        ))
-        conn.commit()
-        cur.close()
-    except Exception as e:
-        logger.error(f"❌ save_signal_to_db failed for {signal.symbol}: {e}")
-    finally:
-        conn.close()
+            ON DUPLICATE KEY UPDATE quality_score=GREATEST(quality_score,VALUES(quality_score)), telegram_sent=telegram_sent OR VALUES(telegram_sent)""",
+            (signal.symbol,signal.signal_type,signal.rvol,signal.volume,signal.quote_volume,signal.price,signal.price_change_pct,signal.volume_velocity,signal.quality_score,signal.candle_time,telegram_sent))
+        conn.commit(); cur.close()
+    except Exception as e: logger.error("❌ save_signal_to_db failed for %s: %s", signal.symbol,e)
+    finally: conn.close()
 
-# =========================
-# BINANCE API + MARKET-CAP FILTERING
-# =========================
-def get_market_caps() -> Dict[str, float]:
-    if CONFIG["min_market_cap_usd"] <= 0:
-        return {}
-    # CoinGecko exposes ticker symbols, not Binance asset IDs. A ticker can
-    # represent multiple unrelated assets, so never select the largest match:
-    # an ambiguous ticker is unsafe for a market-cap gate and is excluded.
-    ticker_caps: Dict[str, set] = defaultdict(set)
+
+def get_market_caps():
+    if CONFIG["min_market_cap_usd"] <= 0: return {}
+    ticker_caps=defaultdict(set)
     try:
-        for page in range(1, max(1, CONFIG.get("market_cap_pages", 5)) + 1):
-            resp = requests.get(
-                "https://api.coingecko.com/api/v3/coins/markets",
-                params={"vs_currency": "usd", "order": "market_cap_desc",
-                        "per_page": 250, "page": page, "sparkline": "false"},
-                timeout=20,
-            )
-            resp.raise_for_status()
-            rows = resp.json()
-            if not rows:
-                break
+        for page in range(1,max(1,CONFIG.get("market_cap_pages",5))+1):
+            resp=requests.get("https://api.coingecko.com/api/v3/coins/markets",params={"vs_currency":"usd","order":"market_cap_desc","per_page":250,"page":page,"sparkline":"false"},timeout=20); resp.raise_for_status(); rows=resp.json()
+            if not rows: break
             for row in rows:
-                ticker = str(row.get("symbol", "")).upper()
-                cap = float(row.get("market_cap") or 0)
-                if ticker and cap > 0:
-                    ticker_caps[ticker].add(cap)
-            if len(rows) < 250:
-                break
+                ticker=str(row.get("symbol","")).upper(); cap=float(row.get("market_cap") or 0)
+                if ticker and cap>0: ticker_caps[ticker].add(cap)
+            if len(rows)<250: break
             time.sleep(0.2)
-
-        caps = {
-            ticker: next(iter(values))
-            for ticker, values in ticker_caps.items()
-            if len(values) == 1
-        }
-        ambiguous = len(ticker_caps) - len(caps)
-        logger.info(
-            "Loaded market-cap metadata for %d unambiguous tickers; "
-            "excluded %d ambiguous tickers",
-            len(caps), ambiguous,
-        )
-    except Exception as e:
-        logger.warning("Market-cap metadata unavailable; unknown assets will be excluded: %s", e)
-        return {}
-    return caps
+        caps={ticker:next(iter(values)) for ticker,values in ticker_caps.items() if len(values)==1}
+        logger.info("Loaded market-cap metadata for %d unambiguous tickers; excluded %d ambiguous tickers",len(caps),len(ticker_caps)-len(caps))
+        return caps
+    except Exception as e: logger.warning("Market-cap metadata unavailable; unknown assets will be excluded: %s",e); return {}
 
 
-def get_liquid_symbols() -> List[str]:
-    """Fetch symbols with professional liquidity filtering"""
-    market_caps = get_market_caps()
-    url = "https://api.binance.com/api/v3/exchangeInfo"
+def get_liquid_symbols():
+    market_caps=get_market_caps()
     try:
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-        
-        candidates = [
-            s for s in data["symbols"]
-            if s["quoteAsset"] == CONFIG["symbols_filter"]
-            and s["status"] == "TRADING"
-        ]
-        
-        # Fetch 24h tickers for volume filtering
-        ticker_url = "https://api.binance.com/api/v3/ticker/24hr"
-        tickers = {t["symbol"]: t for t in requests.get(ticker_url, timeout=15).json()}
-        
-        symbols = []
+        resp=requests.get("https://api.binance.com/api/v3/exchangeInfo",timeout=15); resp.raise_for_status(); data=resp.json()
+        candidates=[s for s in data["symbols"] if s["quoteAsset"]==CONFIG["symbols_filter"] and s["status"]=="TRADING"]
+        tickers={t["symbol"]:t for t in requests.get("https://api.binance.com/api/v3/ticker/24hr",timeout=15).json()}
+        symbols=[]
         for s in candidates:
-            sym = s["symbol"]
-            if CONFIG["exclude_leveraged"] and any(tok in sym for tok in ["UPUSDT", "DOWNUSDT", "BULL", "BEAR"]):
-                continue
-            if CONFIG["exclude_stablecoins"] and sym.replace(CONFIG["symbols_filter"], "") in ["USDC", "BUSD", "TUSD"]:
-                continue
-            ticker = tickers.get(sym, {})
-            quote_vol = float(ticker.get("quoteVolume", 0))
-            if quote_vol < CONFIG["min_quote_volume_24h"]:
-                continue
-            if CONFIG["min_market_cap_usd"] > 0:
-                base = sym[:-len(CONFIG["symbols_filter"])] if CONFIG["symbols_filter"] else sym
-                if market_caps.get(base.upper(), 0) < CONFIG["min_market_cap_usd"]:
-                    continue
+            sym=s["symbol"]
+            if CONFIG["exclude_leveraged"] and any(tok in sym for tok in ["UPUSDT","DOWNUSDT","BULL","BEAR"]): continue
+            if CONFIG["exclude_stablecoins"] and sym.replace(CONFIG["symbols_filter"],"") in ["USDC","BUSD","TUSD"]: continue
+            if float(tickers.get(sym,{}).get("quoteVolume",0))<CONFIG["min_quote_volume_24h"]: continue
+            if CONFIG["min_market_cap_usd"]>0:
+                base=sym[:-len(CONFIG["symbols_filter"])] if CONFIG["symbols_filter"] else sym
+                if market_caps.get(base.upper(),0)<CONFIG["min_market_cap_usd"]: continue
             symbols.append(sym)
-        
-        logger.info(f"✅ Filtered {len(symbols)} liquid pairs (min ${CONFIG['min_quote_volume_24h']:,.0f} 24h vol)")
+        logger.info("✅ Filtered %d liquid pairs (min $%,.0f 24h vol)",len(symbols),CONFIG["min_quote_volume_24h"])
         return symbols
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to fetch symbols: {e}")
-        return []
+    except Exception as e: logger.error("❌ Failed to fetch symbols: %s",e); return []
 
-def build_stream_name(symbol: str, timeframe: str) -> str:
-    return f"{symbol.lower()}@kline_{timeframe}"
 
-# =========================
-# EARLY DETECTION MESSAGE PROCESSING
-# =========================
-def process_kline_message(raw_msg: str):
-    """Process kline for early smart money signal detection"""
+def build_stream_name(symbol,timeframe): return f"{symbol.lower()}@kline_{timeframe}"
+
+
+def process_kline_message(raw_msg):
     try:
-        msg = json.loads(raw_msg)
-        event = msg["data"] if "data" in msg and "stream" in msg else msg
-        
-        if event.get("e") != "kline":
-            return
-        
-        kline = event.get("k", {})
-        symbol = event.get("s", "").upper()
-        
-        # Only process CLOSED candles for reliable signals
-        if not kline.get("x"):
-            return
-        
-        try:
-            volume = float(kline["v"])
-            quote_volume = float(kline["q"])  # USDT volume - key for smart money detection
-            open_price = float(kline["o"])
-            close_price = float(kline["c"])
-            high_price = float(kline["h"])
-            low_price = float(kline["l"])
-            close_time = datetime.fromtimestamp(kline["t"] / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        except (KeyError, ValueError) as e:
-            logger.warning(f"Invalid kline data for {symbol}: {e}")
-            return
-        
-        # Detect smart money signal
-        signal = state.detect_smart_money_signal(
-            symbol=symbol,
-            volume=volume,
-            quote_volume=quote_volume,
-            price=close_price,
-            open_price=open_price,
-            high=high_price,
-            low=low_price,
-            close_time=close_time
-        )
-        
-        if signal and state.register_signal(signal):
-            screener_enabled = CONFIG.get("enabled", True)
-            sent = telegram.send_early_alert(signal) if screener_enabled else False
-            save_signal_to_db(signal, telegram_sent=sent)
-            if screener_enabled:
-                logger.info(f"🎯 EARLY SIGNAL: {signal.symbol} | {signal.signal_type} | RVOL: {signal.rvol:.2f}x | ${signal.price:.4f}")
-            else:
-                logger.info(f"🔇 Signal detected but suppressed (dashboard paused): {signal.symbol} | {signal.signal_type} -- logged to DB, no Telegram")
-                
-    except json.JSONDecodeError as e:
-        logger.warning(f"JSON parse error: {e}")
-    except Exception as e:
-        logger.error(f"Error processing message: {e}", exc_info=True)
+        msg=json.loads(raw_msg); event=msg["data"] if "data" in msg and "stream" in msg else msg
+        if event.get("e")!="kline": return
+        kline=event.get("k",{}); symbol=event.get("s","").upper()
+        if not kline.get("x"): return
+        volume=float(kline["v"]); quote_volume=float(kline["q"]); open_price=float(kline["o"]); close_price=float(kline["c"]); high_price=float(kline["h"]); low_price=float(kline["l"])
+        close_time=datetime.fromtimestamp(kline["t"]/1000,tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        candidate=state.detect_smart_money_signal(symbol,volume,quote_volume,close_price,open_price,high_price,low_price,close_time)
+        if candidate and state.register_signal(candidate):
+            save_signal_to_db(candidate,telegram_sent=False)
+            logger.info("📥 Candidate queued: %s | %s | Quality %.0f | RVOL %.2fx",candidate.symbol,candidate.signal_type,candidate.quality_score,candidate.rvol)
+    except (json.JSONDecodeError,KeyError,ValueError,TypeError) as e: logger.warning("Invalid kline message: %s",e)
+    except Exception as e: logger.error("Error processing message: %s",e,exc_info=True)
 
-# =========================
-# WEBSOCKET HANDLERS
-# =========================
-def on_message(ws, message: str):
-    process_kline_message(message)
 
-def on_error(ws, error):
-    logger.error(f"WebSocket error: {error}")
+def dispatch_alerts():
+    """Continuously select highest-quality candidates before consuming alert budget."""
+    while not state.shutdown_flag:
+        candidate=state.pop_best_eligible()
+        if candidate is None:
+            time.sleep(0.5); continue
+        sent=telegram.send_early_alert(candidate) if CONFIG.get("enabled",True) else False
+        save_signal_to_db(candidate,telegram_sent=sent)
+        logger.info("🎯 Selected alert: %s | %s | Quality %.0f | RVOL %.2fx | pending=%d",candidate.symbol,candidate.signal_type,candidate.quality_score,candidate.rvol,len(state.pending_signals))
 
-def on_close(ws, close_status_code, close_msg):
-    logger.warning(f"WebSocket closed: code={close_status_code}, msg={close_msg}")
 
-def on_open(ws):
-    logger.info("✅ WebSocket connection established")
+def on_message(ws,message): process_kline_message(message)
+def on_error(ws,error): logger.error("WebSocket error: %s",error)
+def on_close(ws,close_status_code,close_msg): logger.warning("WebSocket closed: code=%s, msg=%s",close_status_code,close_msg)
+def on_open(ws): logger.info("✅ WebSocket connection established")
 
-# =========================
-# WEBSOCKET MANAGER
-# =========================
-def start_websocket(streams: List[str], thread_id: int, stop_event: threading.Event):
-    """Start WebSocket with exponential backoff reconnect"""
-    base_url = "wss://stream.binance.com:9443/stream?streams="
-    reconnect_delay = CONFIG["reconnect_delay_base"]
-    
+
+def start_websocket(streams,thread_id,stop_event):
+    base_url="wss://stream.binance.com:9443/stream?streams="; reconnect_delay=CONFIG["reconnect_delay_base"]
     while not state.shutdown_flag and not stop_event.is_set():
         try:
-            url = base_url + "/".join(streams)
-            logger.info(f"[Thread-{thread_id}] Connecting to {len(streams)} streams")
-            
-            ws = websocket.WebSocketApp(
-                url,
-                on_message=on_message,
-                on_error=on_error,
-                on_close=on_close,
-                on_open=on_open
-            )
-            
-            ws.run_forever(
-                ping_interval=CONFIG["ws_ping_interval"],
-                ping_timeout=CONFIG["ws_ping_timeout"]
-            )
-            
-        except Exception as e:
-            logger.error(f"[Thread-{thread_id}] WebSocket exception: {e}")
-        
-        if state.shutdown_flag or stop_event.is_set():
-            break
+            ws=websocket.WebSocketApp(base_url+"/".join(streams),on_message=on_message,on_error=on_error,on_close=on_close,on_open=on_open)
+            logger.info("[Thread-%s] Connecting to %d streams",thread_id,len(streams))
+            ws.run_forever(ping_interval=CONFIG["ws_ping_interval"],ping_timeout=CONFIG["ws_ping_timeout"])
+        except Exception as e: logger.error("[Thread-%s] WebSocket exception: %s",thread_id,e)
+        if state.shutdown_flag or stop_event.is_set(): break
+        logger.info("[Thread-%s] Reconnecting in %ss...",thread_id,reconnect_delay)
+        if stop_event.wait(reconnect_delay): break
+        reconnect_delay=min(reconnect_delay*1.5,CONFIG["reconnect_delay_max"])
 
-        logger.info(f"[Thread-{thread_id}] Reconnecting in {reconnect_delay}s...")
-        if stop_event.wait(reconnect_delay):
-            break
-        reconnect_delay = min(reconnect_delay * 1.5, CONFIG["reconnect_delay_max"])
 
-# =========================
-# GRACEFUL SHUTDOWN
-# =========================
-def signal_handler(signum, frame):
-    logger.info(f"🛑 Received signal {signum}, initiating graceful shutdown...")
-    state.shutdown_flag = True
+def signal_handler(signum,frame): logger.info("🛑 Received signal %s, initiating graceful shutdown...",signum); state.shutdown_flag=True
+signal.signal(signal.SIGINT,signal_handler); signal.signal(signal.SIGTERM,signal_handler)
 
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
 
-# =========================
-# MAIN
-# =========================
 def main():
-    logger.info("🚀 Smart Money Volume Detector starting (EARLY WARNING MODE)...")
-    logger.info(
-        f"Config: RVOL≥{CONFIG['rvol_multiplier']}x | "
-        f"Divergence: ≤{CONFIG['divergence_max_price_change']}% | "
-        f"Velocity: ≥{CONFIG['velocity_threshold']}x | "
-        f"Quality≥{CONFIG.get('min_quality_score', 0):.0f} | "
-        f"Max {CONFIG['max_alerts_per_hour']} alerts/hour"
-    )
-
-    ensure_signal_table()
-    reload_control()
-
-    threads = []
-    ws_stop_event = threading.Event()
-    last_universe_refresh = 0.0
-
+    logger.info("🚀 Smart Money Volume Detector starting (RANKED ALERT MODE)...")
+    logger.info("Config: RVOL≥%sx | Quality≥%.0f | Max %d alerts/hour | selection window %.1fs",CONFIG["rvol_multiplier"],CONFIG["min_quality_score"],CONFIG["max_alerts_per_hour"],CONFIG["alert_selection_window_sec"])
+    ensure_signal_table(); reload_control()
+    dispatcher=threading.Thread(target=dispatch_alerts,daemon=True,name="SmartMoney-Alert-Dispatcher"); dispatcher.start()
+    threads=[]; ws_stop_event=threading.Event(); last_universe_refresh=0.0
     def start_connections(symbols):
-        nonlocal threads, ws_stop_event
-        ws_stop_event = threading.Event()
-        chunk_size = CONFIG["max_streams_per_conn"]
-        threads = []
-        logger.info(f"📡 Monitoring {len(symbols)} symbols for EARLY smart money signals")
-        for i, start_idx in enumerate(range(0, len(symbols), chunk_size)):
-            chunk = symbols[start_idx:start_idx + chunk_size]
-            streams = [build_stream_name(s, CONFIG["timeframe"]) for s in chunk]
-            t = threading.Thread(
-                target=start_websocket,
-                args=(streams, i, ws_stop_event),
-                daemon=True,
-                name=f"SmartMoney-WS-{i}",
-            )
-            t.start()
-            threads.append(t)
-            time.sleep(0.2)
-
+        nonlocal threads,ws_stop_event
+        ws_stop_event=threading.Event(); threads=[]
+        for i,start_idx in enumerate(range(0,len(symbols),CONFIG["max_streams_per_conn"])):
+            chunk=symbols[start_idx:start_idx+CONFIG["max_streams_per_conn"]]; streams=[build_stream_name(s,CONFIG["timeframe"]) for s in chunk]
+            t=threading.Thread(target=start_websocket,args=(streams,i,ws_stop_event),daemon=True,name=f"SmartMoney-WS-{i}"); t.start(); threads.append(t); time.sleep(0.2)
+        logger.info("📡 Monitoring %d symbols",len(symbols))
     def stop_connections():
         nonlocal threads
         ws_stop_event.set()
-        for t in threads:
-            t.join(timeout=5)
-        threads = []
-
+        for t in threads: t.join(timeout=5)
+        threads=[]
     try:
-        symbols = get_liquid_symbols()
-        if not symbols:
-            logger.error("❌ No liquid symbols found - retrying universe discovery in the control loop")
-        else:
-            start_connections(symbols)
-            last_universe_refresh = time.time()
-
+        symbols=get_liquid_symbols()
+        if symbols: start_connections(symbols); last_universe_refresh=time.time()
         while not state.shutdown_flag:
-            time.sleep(60)
-            universe_changed = reload_control()
-            refresh_minutes = max(1, int(CONFIG.get("market_cap_refresh_minutes", 30)))
-            refresh_due = time.time() - last_universe_refresh >= refresh_minutes * 60
-
+            time.sleep(60); universe_changed=reload_control(); refresh_due=time.time()-last_universe_refresh>=max(1,int(CONFIG.get("market_cap_refresh_minutes",30)))*60
             if universe_changed or refresh_due:
-                reason = "config change" if universe_changed else "scheduled market-cap/liquidity refresh"
-                logger.info(f"🔄 Rebuilding screener universe ({reason})")
-                stop_connections()
-                symbols = get_liquid_symbols()
-                if symbols:
-                    start_connections(symbols)
-                    last_universe_refresh = time.time()
-                else:
-                    logger.error("❌ Universe refresh returned no eligible symbols; keeping screener disconnected until next refresh")
-                    last_universe_refresh = time.time()
-
-    except KeyboardInterrupt:
-        pass
+                stop_connections(); symbols=get_liquid_symbols()
+                if symbols: start_connections(symbols)
+                last_universe_refresh=time.time()
+    except KeyboardInterrupt: pass
     finally:
-        logger.info("🔄 Shutting down...")
-        state.shutdown_flag = True
-        stop_connections()
-        logger.info("✅ Shutdown complete")
+        state.shutdown_flag=True; stop_connections(); dispatcher.join(timeout=3); logger.info("✅ Shutdown complete")
 
-
-if __name__ == "__main__":
-    main()
+if __name__=="__main__": main()
