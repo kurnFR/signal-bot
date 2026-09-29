@@ -22,11 +22,7 @@
         const text = String(value || "").trim();
         if (!text) return { type: "empty", value: "" };
 
-        const numeric = text
-            .replace(/[$€£¥,]/g, "")
-            .replace(/%/g, "")
-            .replace(/R$/i, "")
-            .trim();
+        const numeric = text.replace(/[$€£¥,]/g, "").replace(/%/g, "").replace(/R$/i, "").trim();
         if (/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?$/i.test(numeric)) {
             return { type: "number", value: Number(numeric) };
         }
@@ -67,16 +63,18 @@
         if (!tbody) return;
         const rows = Array.from(tbody.rows);
         if (rows.length < 2) return;
-
+        rows.forEach((row, index) => {
+            if (row.dataset.originalIndex === undefined) row.dataset.originalIndex = String(index);
+        });
         rows.sort((ra, rb) => {
-            const result = compareValues(
-                rawCellValue(ra.cells[columnIndex]),
-                rawCellValue(rb.cells[columnIndex]),
-                direction
-            );
+            const result = compareValues(rawCellValue(ra.cells[columnIndex]), rawCellValue(rb.cells[columnIndex]), direction);
             return result || Number(ra.dataset.originalIndex || 0) - Number(rb.dataset.originalIndex || 0);
         });
         rows.forEach(row => tbody.appendChild(row));
+    }
+
+    function tbodyRows(table) {
+        return table.tBodies[0] ? Array.from(table.tBodies[0].rows) : [];
     }
 
     function makeTableSortable(table) {
@@ -111,10 +109,6 @@
         });
     }
 
-    function tbodyRows(table) {
-        return table.tBodies[0] ? Array.from(table.tBodies[0].rows) : [];
-    }
-
     function enhanceTable(table) {
         if (!table || table.dataset.dashboardEnhanced === "1") return;
         const parent = table.parentElement;
@@ -123,30 +117,25 @@
         table.dataset.dashboardEnhanced = "1";
         makeTableSortable(table);
 
-        // Keep the header visible while the table rows scroll vertically.
         const head = table.tHead;
         if (head) head.classList.add("dashboard-sticky-head");
 
-        // Give wide tables a controlled scroll viewport instead of pushing the
-        // page-level horizontal scrollbar to the bottom of the page.
-        let viewport = parent;
-        if (!viewport.classList.contains("dashboard-table-scroll")) {
-            viewport.classList.add("dashboard-table-scroll");
-        }
+        const viewport = parent;
+        viewport.classList.add("dashboard-table-scroll");
 
-        if (!viewport.querySelector(".dashboard-horizontal-scroll")) {
+        if (!viewport.querySelector(":scope > .dashboard-horizontal-scroll")) {
             const bar = document.createElement("div");
             bar.className = "dashboard-horizontal-scroll";
             bar.setAttribute("aria-label", "Horizontal table scroll");
             const spacer = document.createElement("div");
             spacer.className = "dashboard-horizontal-spacer";
             bar.appendChild(spacer);
-            viewport.parentElement.insertBefore(bar, viewport.nextSibling);
+            viewport.appendChild(bar);
 
             const syncWidth = () => {
                 spacer.style.width = `${table.scrollWidth}px`;
                 bar.style.display = table.scrollWidth > viewport.clientWidth ? "block" : "none";
-                bar.scrollLeft = viewport.scrollLeft;
+                if (Math.abs(bar.scrollLeft - viewport.scrollLeft) > 1) bar.scrollLeft = viewport.scrollLeft;
             };
             let syncing = false;
             bar.addEventListener("scroll", () => {
@@ -161,8 +150,10 @@
                 bar.scrollLeft = viewport.scrollLeft;
                 requestAnimationFrame(() => { syncing = false; });
             });
-            new ResizeObserver(syncWidth).observe(viewport);
-            new ResizeObserver(syncWidth).observe(table);
+            if (window.ResizeObserver) {
+                new ResizeObserver(syncWidth).observe(viewport);
+                new ResizeObserver(syncWidth).observe(table);
+            }
             syncWidth();
         }
     }
@@ -196,9 +187,7 @@
                     const detail = data.detail || data.error || `HTTP ${response.status}`;
                     throw new Error(detail);
                 }
-                if (!data.success) {
-                    throw new Error(data.error || "Telegram test failed");
-                }
+                if (!data.success) throw new Error(data.error || "Telegram test failed");
 
                 const bot = data.bot || {};
                 const target = data.chat_id ? ` → chat ${data.chat_id}` : "";
@@ -208,7 +197,7 @@
             } finally {
                 if (btn) {
                     btn.disabled = false;
-                    btn.innerHTML = original || `<i data-lucide="send" class="w-3 h-3"></i> Ping Bot>`;
+                    btn.innerHTML = original || `<i data-lucide="send" class="w-3 h-3"></i> Ping Bot`;
                     if (window.lucide) window.lucide.createIcons();
                 }
             }
@@ -218,13 +207,11 @@
     function init() {
         enhanceAllTables();
         installTelegramPing();
-
         const observer = new MutationObserver(() => {
             enhanceAllTables();
             installTelegramPing();
         });
         observer.observe(document.body, { childList: true, subtree: true });
-
         window.addEventListener("resize", enhanceAllTables);
     }
 
