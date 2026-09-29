@@ -62,7 +62,9 @@ CONFIG = {
     # === Liquidity Filters ===
     "symbols_filter": os.getenv("SYMBOLS_FILTER", "USDT"),
     "min_quote_volume_24h": float(os.getenv("MIN_QUOTE_VOLUME_24H", "1000000")),
-    "min_market_cap_usd": float(os.getenv("MIN_MARKET_CAP_USD", "50000000")),  # $100k min for serious pairs
+    "min_market_cap_usd": float(os.getenv("MIN_MARKET_CAP_USD", "50000000")),
+    "market_cap_pages": int(os.getenv("MARKET_CAP_PAGES", "5")),
+    "market_cap_refresh_minutes": int(os.getenv("MARKET_CAP_REFRESH_MINUTES", "30")),
     "exclude_leveraged": os.getenv("EXCLUDE_LEVERAGED", "true").lower() == "true",
     "exclude_stablecoins": os.getenv("EXCLUDE_STABLECOINS", "true").lower() == "true",
     
@@ -72,7 +74,8 @@ CONFIG = {
     "alert_cooldown_sec": int(os.getenv("ALERT_COOLDOWN_SEC", "900")),
     "require_confluence": os.getenv("REQUIRE_CONFLUENCE", "true").lower() == "true",
     "min_signal_rvol": float(os.getenv("MIN_SIGNAL_RVOL", "5.0")),
-    "min_signal_velocity": float(os.getenv("MIN_SIGNAL_VELOCITY", "3.0")),  # 2 min per pair
+    "min_signal_velocity": float(os.getenv("MIN_SIGNAL_VELOCITY", "3.0")),
+    "min_quality_score": float(os.getenv("MIN_QUALITY_SCORE", "70")),
     "daily_reset_utc_hour": int(os.getenv("DAILY_RESET_UTC_HOUR", "0")),
     
     # === Telegram ===
@@ -126,6 +129,7 @@ class SmartMoneySignal:
     volume_velocity: float = field(compare=False)
     timestamp: float = field(compare=False)
     candle_time: str = field(compare=False)
+    quality_score: float = field(compare=False)
     
     @property
     def priority(self) -> float:
@@ -143,6 +147,7 @@ class SmartMoneyState:
         self.ema_quote_volume: Dict[str, float] = {}
         self.ema_initialized: Dict[str, int] = defaultdict(int)
         self.last_alert_time: Dict[str, float] = {}
+        self.seen_signal_candles: Dict[Tuple[str, str], str] = {}
         self.hourly_alert_count: Dict[str, int] = defaultdict(int)
         self.last_hour_reset = None
         
@@ -263,6 +268,16 @@ class SmartMoneyState:
         if not signal_type:
             return None
         
+        rvol_score = min(rvol / max(CONFIG["min_signal_rvol"], 1.0), 2.0) * 25.0
+        velocity_score = min(velocity / max(CONFIG["min_signal_velocity"], 1.0), 2.0) * 20.0
+        tightness_score = 0.0
+        if CONFIG["enable_divergence_detection"]:
+            tightness_score = max(0.0, 1.0 - (price_range_pct / max(CONFIG["divergence_max_price_change"], 0.0001))) * 20.0
+        movement_score = min(abs(price_change_pct), 1.0) * 10.0
+        quality_score = min(100.0, rvol_score + velocity_score + tightness_score + movement_score)
+        if quality_score < CONFIG.get("min_quality_score", 0):
+            return None
+
         if CONFIG.get("require_confluence", True):
             conditions = int(rvol >= CONFIG["min_signal_rvol"])
             conditions += int(velocity >= CONFIG["min_signal_velocity"])
@@ -274,6 +289,12 @@ class SmartMoneyState:
                 return None
 
         # Cooldown & rate limit check
+        signal_key = (symbol, signal_type)
+        with self.lock:
+            if self.seen_signal_candles.get(signal_key) == close_time:
+                return None
+            self.seen_signal_candles[signal_key] = close_time
+
         if not self._can_alert(symbol):
             return None
         
@@ -288,7 +309,8 @@ class SmartMoneyState:
             price_change_pct=price_change_pct,
             volume_velocity=velocity,
             timestamp=time.time(),
-            candle_time=close_time
+            candle_time=close_time,
+            quality_score=quality_score
         )
     
     def _can_alert(self, symbol: str) -> bool:
@@ -472,11 +494,13 @@ def ensure_signal_table():
                 price DECIMAL(20,8) NOT NULL,
                 price_change_pct DECIMAL(10,4) NOT NULL,
                 volume_velocity DECIMAL(12,4) NOT NULL,
-                candle_time VARCHAR(20) NOT NULL,
+                quality_score DECIMAL(6,2) NOT NULL DEFAULT 0,
+                candle_time VARCHAR(32) NOT NULL,
                 telegram_sent BOOLEAN NOT NULL DEFAULT FALSE,
                 detected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 INDEX idx_smsig_symbol_time (symbol, detected_at),
-                INDEX idx_smsig_type_time (signal_type, detected_at)
+                INDEX idx_smsig_type_time (signal_type, detected_at),
+                UNIQUE KEY uq_smsig_candle (symbol, signal_type, candle_time)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """)
         cur.execute("""
@@ -508,7 +532,7 @@ _TUNABLE_CONFIG_KEYS = {
     "enable_divergence_detection", "enable_velocity_detection",
     "max_alerts_per_hour", "max_alerts_per_symbol_per_hour", "alert_cooldown_sec",
     "require_confluence", "min_signal_rvol", "min_signal_velocity",
-    "min_quote_volume_24h", "min_market_cap_usd",
+    "min_quote_volume_24h", "min_market_cap_usd", "min_quality_score",
 }
 
 
@@ -579,12 +603,15 @@ def save_signal_to_db(signal: SmartMoneySignal, telegram_sent: bool):
         cur.execute("""
             INSERT INTO smart_money_signals
                 (symbol, signal_type, rvol, volume, quote_volume, price,
-                 price_change_pct, volume_velocity, candle_time, telegram_sent)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                 price_change_pct, volume_velocity, quality_score, candle_time, telegram_sent)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON DUPLICATE KEY UPDATE
+                quality_score=GREATEST(quality_score, VALUES(quality_score)),
+                telegram_sent=telegram_sent OR VALUES(telegram_sent)
         """, (
             signal.symbol, signal.signal_type, signal.rvol, signal.volume,
             signal.quote_volume, signal.price, signal.price_change_pct,
-            signal.volume_velocity, signal.candle_time, telegram_sent,
+            signal.volume_velocity, signal.quality_score, signal.candle_time, telegram_sent,
         ))
         conn.commit()
         cur.close()
@@ -698,7 +725,7 @@ def process_kline_message(raw_msg: str):
             close_price = float(kline["c"])
             high_price = float(kline["h"])
             low_price = float(kline["l"])
-            close_time = datetime.fromtimestamp(kline["t"] / 1000, tz=timezone.utc).strftime("%H:%M:%S")
+            close_time = datetime.fromtimestamp(kline["t"] / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         except (KeyError, ValueError) as e:
             logger.warning(f"Invalid kline data for {symbol}: {e}")
             return
