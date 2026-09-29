@@ -21,6 +21,12 @@ mysql -u your_user -p crypto_signals < db/migrate_add_users_and_paper.sql
 
 # 2. Launch web server
 python3 run_web.py --port 8050
+
+# 3. Launch the paper trading engine (REQUIRED for live paper trading --
+#    without this running, deployed strategies sit idle and nothing gets
+#    evaluated automatically; "Evaluate Market Tick" only checks once per
+#    click)
+python3 run_paper_engine.py
 ```
 Open **`http://localhost:8050`** in your browser.
 

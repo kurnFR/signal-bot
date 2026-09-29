@@ -427,6 +427,17 @@ def _insert_position(
     entry_fee = raw_entry * size.quantity * BACKTEST_FEE_PCT
     atr = float(trade.get("atr_at_signal", 0.0) or 0.0)
 
+    # last_update_time = open_time of the last candle whose data has been
+    # applied to this position (holding_bars, SL/TP, trailing). At insert
+    # NO candle has been applied yet -- the entry bar's own high/low still
+    # has to be checked, matching backtest/simulate.py which starts its
+    # exit scan AT the entry bar (j = entry_idx). So store "just before the
+    # entry candle", not the entry candle itself. (This slot previously
+    # received size.risk_amount by a positional misalignment in the values
+    # tuple -- a dollar amount in a timestamp column. Harmless while nothing
+    # read the column; the per-candle guard below now depends on it.)
+    last_applied_candle = int(candle_open_time) - 1
+
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
@@ -449,7 +460,7 @@ def _insert_position(
             (
                 cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"], direction,
                 int(candle_open_time), raw_entry, current_close, stop_loss, take_profit, stop_loss,
-                atr, size.stop_distance, size.risk_amount, cfg["allocated_capital"],
+                atr, size.stop_distance, last_applied_candle, cfg["allocated_capital"],
                 cfg["risk_per_trade_pct"], size.risk_amount, size.stop_distance,
                 size.quantity, size.notional, entry_fee, ml_model_id, ml_probability,
             ),
@@ -475,6 +486,46 @@ def _insert_position(
 # name, since it's a legitimate cross-module entry point, not an internal
 # detail of this file.
 insert_paper_position = _insert_position
+
+
+# Candles where the ML gate already rejected this config's signal. The
+# rejection is deterministic for a given closed candle (same features ->
+# same probability), so under a continuous polling loop there's no point
+# reloading the joblib model and re-scoring it every cycle -- and it
+# would log a fresh "REJECTED" line every minute for the whole candle.
+# In-process only (resets on restart, which just means one re-score).
+_ML_REJECTED_CANDLE: Dict[tuple, int] = {}
+
+
+def _signal_already_traded(cfg: Dict[str, Any], entry_candle: int) -> bool:
+    """True if a trade for this exact config already entered on this candle.
+
+    A signal is only actionable while its entry bar is the latest closed
+    candle -- for a whole hour on 1h, a whole day on 1d -- and this function
+    now runs every ~60s. Without this check, a position that opens and is
+    stopped out on the same candle (the entry bar's own range is evaluated,
+    as in the backtest) would be re-opened by the very next cycle, because
+    the strategy still reports that same signal on the latest bar: open ->
+    stop -> re-open, repeatedly, for the whole candle. Open positions are
+    covered by the unique open-position index; this covers CLOSED ones.
+    """
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT 1 FROM paper_trades
+            WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
+              AND entry_time=%s
+            LIMIT 1
+            """,
+            (cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"], int(entry_candle)),
+        )
+        found = cur.fetchone() is not None
+        cur.close()
+        return found
+    finally:
+        conn.close()
 
 
 def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
@@ -503,6 +554,18 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
 
         if key in open_pos_map:
             pos = open_pos_map[key]
+
+            # Per-candle idempotency. This function is now driven by a
+            # continuous loop (run_paper_engine.py, ~60s), not just manual
+            # button clicks -- so the same latest closed candle is seen many
+            # times. Everything below (holding_bars += 1, SL/TP/trailing
+            # against this bar's range) must be applied once per candle, or
+            # a 1h strategy would count ~60 "bars" per hour and time-stop
+            # ~60x too early. last_update_time is the open_time of the last
+            # candle already applied to this position (see _insert_position).
+            if int(pos.get("last_update_time") or 0) >= candle_open_time:
+                continue
+
             direction = pos["direction"]
             entry_price = float(pos["entry_price"])
             initial_risk = float(pos["initial_risk"])
@@ -595,6 +658,13 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                 # which already ran. Deliberately NOT in STRATEGIES / not
                 # backtestable the normal way -- see NEWS_AI_STRATEGY_PLAN.md §4.
                 continue
+            # Cheap guards first (no strategy run needed): this candle's
+            # signal was already traded, or already rejected by the ML gate.
+            if _ML_REJECTED_CANDLE.get(key) == candle_open_time:
+                continue
+            if _signal_already_traded(cfg, candle_open_time):
+                continue
+
             # Check risk circuit breakers before discovering / opening new trades
             from paper.circuit_breaker import check_circuit_breakers
             allowed, breaker_msg = check_circuit_breakers()
@@ -644,6 +714,7 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                                 ml_threshold = float(ml_filter.threshold)
 
                                 if ml_probability < ml_threshold:
+                                    _ML_REJECTED_CANDLE[key] = candle_open_time
                                     logger.info(
                                         "Paper trading signal %s (%s) REJECTED by ML model %s: prob=%.4f < threshold=%.4f",
                                         symbol, latest_trade["direction"], ml_model_id, ml_probability, ml_threshold

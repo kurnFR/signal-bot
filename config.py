@@ -115,6 +115,15 @@ NEWS_AI_MAX_EVENTS_PER_SYMBOL = int(os.getenv("NEWS_AI_MAX_EVENTS_PER_SYMBOL", 1
 # + sends Telegram alerts from high-confidence signals stored in Phase 2).
 # ---------------------------------------------------------------------------
 NEWS_AI_EXECUTION_POLL_INTERVAL_SECONDS = int(os.getenv("NEWS_AI_EXECUTION_POLL_INTERVAL_SECONDS", 60))
+
+# ---------------------------------------------------------------------------
+# Paper trading engine poll interval. sync_and_evaluate_paper_trading()
+# previously only ran when a human clicked "Evaluate Market Tick" (or on
+# deploy / after an ML run) -- there was no continuous driver at all, so
+# "Live Paper Trading" never actually evaluated positions/signals on its
+# own. See run_paper_engine.py.
+# ---------------------------------------------------------------------------
+PAPER_ENGINE_POLL_INTERVAL_SECONDS = int(os.getenv("PAPER_ENGINE_POLL_INTERVAL_SECONDS", 60))
 # Hard cap on how many news-driven positions can be opened per UTC day,
 # regardless of how many high-confidence signals fire -- news can cluster
 # false signals around a single narrative (NEWS_AI_STRATEGY_PLAN.md §4).
