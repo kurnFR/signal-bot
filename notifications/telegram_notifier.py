@@ -9,6 +9,7 @@ import requests
 from html import escape
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -20,8 +21,9 @@ TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/{method}"
 
 def get_telegram_config() -> Dict[str, Any]:
     """Retrieves current telegram credentials from environment."""
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    # Prefer canonical names, but remain compatible with the legacy retailbot name.
+    token = (os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN") or "").strip()
+    chat_id = (os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_TARGET_CHAT_ID") or "").strip()
     return {
         "token": token,
         "chat_id": chat_id,
@@ -85,7 +87,7 @@ def test_telegram_connection() -> Dict[str, Any]:
 
     # If chat_id is present, send a ping message
     if cfg["chat_id"]:
-        now_wib = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S WIB (UTC+7)")
+        now_wib = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S WIB (UTC+7)")
         test_msg = (
             "🔔 <b>Crypto Signal Bot — Telegram Test</b>\n\n"
             "✅ <b>Connection Status:</b> ACTIVE & VERIFIED\n"
@@ -135,7 +137,7 @@ def send_signal_alert(
     rr_ratio = round(reward / risk, 2) if risk > 0 else 2.0
     risk_pct = round((risk / entry_price) * 100, 2) if entry_price > 0 else 0.0
 
-    now_wib = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M WIB")
+    now_wib = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M WIB")
 
     msg = (
         f"{dir_emoji} <b>NEW TRADING SIGNAL: {safe_symbol} ({safe_direction})</b>\n"
