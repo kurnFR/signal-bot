@@ -1065,7 +1065,7 @@ def get_recent_smart_money_signals(limit=50):
         cur = conn.cursor(dictionary=True)
         cur.execute("""
             SELECT id, symbol, signal_type, rvol, volume, quote_volume, price,
-                   price_change_pct, volume_velocity, candle_time,
+                   price_change_pct, volume_velocity, quality_score, candle_time,
                    telegram_sent, detected_at
             FROM smart_money_signals
             ORDER BY detected_at DESC LIMIT %s
@@ -1073,7 +1073,7 @@ def get_recent_smart_money_signals(limit=50):
         rows = cur.fetchall()
         cur.close()
         for r in rows:
-            for k in ("rvol", "volume", "quote_volume", "price", "price_change_pct", "volume_velocity"):
+            for k in ("rvol", "volume", "quote_volume", "price", "price_change_pct", "volume_velocity", "quality_score"):
                 if isinstance(r.get(k), Decimal):
                     r[k] = float(r[k])
             r["telegram_sent"] = bool(r["telegram_sent"])
