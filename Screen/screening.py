@@ -61,14 +61,18 @@ CONFIG = {
     
     # === Liquidity Filters ===
     "symbols_filter": os.getenv("SYMBOLS_FILTER", "USDT"),
-    "min_quote_volume_24h": float(os.getenv("MIN_QUOTE_VOLUME_24H", "100000")),  # $100k min for serious pairs
+    "min_quote_volume_24h": float(os.getenv("MIN_QUOTE_VOLUME_24H", "1000000")),
+    "min_market_cap_usd": float(os.getenv("MIN_MARKET_CAP_USD", "50000000")),  # $100k min for serious pairs
     "exclude_leveraged": os.getenv("EXCLUDE_LEVERAGED", "true").lower() == "true",
     "exclude_stablecoins": os.getenv("EXCLUDE_STABLECOINS", "true").lower() == "true",
     
     # === Alert Control ===
     "max_alerts_per_hour": int(os.getenv("MAX_ALERTS_PER_HOUR", "5")),  # Prevent spam
     "max_alerts_per_symbol_per_hour": int(os.getenv("MAX_ALERTS_PER_SYMBOL_PER_HOUR", "2")),  # Stop one volatile symbol from burning the whole global budget
-    "alert_cooldown_sec": int(os.getenv("ALERT_COOLDOWN_SEC", "120")),  # 2 min per pair
+    "alert_cooldown_sec": int(os.getenv("ALERT_COOLDOWN_SEC", "900")),
+    "require_confluence": os.getenv("REQUIRE_CONFLUENCE", "true").lower() == "true",
+    "min_signal_rvol": float(os.getenv("MIN_SIGNAL_RVOL", "5.0")),
+    "min_signal_velocity": float(os.getenv("MIN_SIGNAL_VELOCITY", "3.0")),  # 2 min per pair
     "daily_reset_utc_hour": int(os.getenv("DAILY_RESET_UTC_HOUR", "0")),
     
     # === Telegram ===
@@ -259,6 +263,16 @@ class SmartMoneyState:
         if not signal_type:
             return None
         
+        if CONFIG.get("require_confluence", True):
+            conditions = int(rvol >= CONFIG["min_signal_rvol"])
+            conditions += int(velocity >= CONFIG["min_signal_velocity"])
+            conditions += int(
+                price_range_pct <= CONFIG["divergence_max_price_change"]
+                and rvol >= CONFIG["rvol_multiplier"] * 0.8
+            )
+            if conditions < 2:
+                return None
+
         # Cooldown & rate limit check
         if not self._can_alert(symbol):
             return None
@@ -493,6 +507,8 @@ _TUNABLE_CONFIG_KEYS = {
     "rvol_multiplier", "divergence_max_price_change", "velocity_threshold",
     "enable_divergence_detection", "enable_velocity_detection",
     "max_alerts_per_hour", "max_alerts_per_symbol_per_hour", "alert_cooldown_sec",
+    "require_confluence", "min_signal_rvol", "min_signal_velocity",
+    "min_quote_volume_24h", "min_market_cap_usd",
 }
 
 
