@@ -65,7 +65,6 @@ CONFIG = {
 logging.basicConfig(level=getattr(logging, CONFIG["log_level"].upper()), format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S", handlers=[logging.FileHandler(CONFIG["log_file"], encoding="utf-8"), logging.StreamHandler()])
 logger = logging.getLogger("SmartMoneyDetector")
 
-
 @dataclass(order=True)
 class SmartMoneySignal:
     priority_score: float
@@ -80,7 +79,6 @@ class SmartMoneySignal:
     timestamp: float = field(compare=False)
     candle_time: str = field(compare=False)
     quality_score: float = field(compare=False)
-
 
 class SmartMoneyState:
     def __init__(self, ema_length: int, rvol_threshold: float, max_alerts_per_hour: int):
@@ -188,7 +186,6 @@ class SmartMoneyState:
             return True
 
     def release_alert_slot(self, symbol):
-        """Return a reserved alert slot when Telegram delivery fails."""
         with self.lock:
             self.hourly_alert_count["global"] = max(0, self.hourly_alert_count["global"] - 1)
             self.hourly_alert_count[symbol] = max(0, self.hourly_alert_count[symbol] - 1)
@@ -201,6 +198,7 @@ class SmartMoneyState:
                 candidate=heapq.heappop(self.pending_signals); key=(candidate.symbol,candidate.signal_type,candidate.candle_time); self.pending_keys.discard(key)
                 if not CONFIG.get("enabled",True): deferred.append(candidate); continue
                 if self._can_alert(candidate.symbol): selected=candidate; break
+                deferred.append(candidate)
             for candidate in deferred:
                 key=(candidate.symbol,candidate.signal_type,candidate.candle_time)
                 if key not in self.pending_keys: self.pending_keys.add(key); heapq.heappush(self.pending_signals,candidate)
@@ -328,14 +326,11 @@ def process_kline_message(raw_msg):
     except Exception as e: logger.error("Error processing message: %s",e,exc_info=True)
 
 def dispatch_alerts():
-    """Collect candidates for the configured window, then select the best one."""
     while not state.shutdown_flag:
         if not state.pending_signals:
             time.sleep(0.25); continue
-        window=max(0.0,CONFIG.get("alert_selection_window_sec",3.0))
-        deadline=time.monotonic()+window
-        while not state.shutdown_flag and time.monotonic()<deadline:
-            time.sleep(min(0.1,max(0.0,deadline-time.monotonic())))
+        window=max(0.0,CONFIG.get("alert_selection_window_sec",3.0)); deadline=time.monotonic()+window
+        while not state.shutdown_flag and time.monotonic()<deadline: time.sleep(min(0.1,max(0.0,deadline-time.monotonic())))
         candidate=state.pop_best_eligible()
         if candidate is None: continue
         sent=telegram.send_early_alert(candidate) if CONFIG.get("enabled",True) else False
@@ -382,13 +377,13 @@ def main():
         if symbols: start_connections(symbols); last_universe_refresh=time.time()
         else: logger.error("❌ No liquid symbols found - retrying universe discovery in control loop")
         while not state.shutdown_flag:
-            time.sleep(60); universe_changed=reload_control(); refresh_minutes=max(1,int(CONFIG.get("market_cap_refresh_minutes",30))); refresh_due=time.time()-last_universe_refresh>=refresh_minutes*60
+            time.sleep(60); universe_changed=reload_control(); refresh_due=time.time()-last_universe_refresh>=max(1,int(CONFIG.get("market_cap_refresh_minutes",30)))*60
             if universe_changed or refresh_due:
                 reason="config change" if universe_changed else "scheduled market-cap/liquidity refresh"; logger.info("🔄 Rebuilding screener universe (%s)",reason); stop_connections(); symbols=get_liquid_symbols()
                 if symbols: start_connections(symbols); last_universe_refresh=time.time()
-                else: logger.error("❌ Universe refresh returned no eligible symbols; retrying next refresh"); last_universe_refresh=time.time()
+                else: logger.error("❌ Universe refresh returned no eligible symbols; keeping screener disconnected until next refresh"); last_universe_refresh=time.time()
     except KeyboardInterrupt: pass
     finally:
-        logger.info("🔄 Shutting down..."); state.shutdown_flag=True; stop_connections(); dispatch_thread.join(timeout=5); logger.info("✅ Shutdown complete")
+        logger.info("🔄 Shutting down..."); state.shutdown_flag=True; ws_stop_event.set(); stop_connections(); dispatch_thread.join(timeout=5); logger.info("✅ Shutdown complete")
 
-if __name__=="__main__": main()
+if __name__ == "__main__": main()
