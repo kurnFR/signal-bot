@@ -137,8 +137,8 @@ class BotConfig:
     # Infrastructure
     db_host: str = field(default_factory=lambda: os.getenv('RETAILBOT2_DB_HOST', os.getenv('DB_HOST', os.getenv('MYSQL_HOST', '192.168.1.30'))))
     db_port: int = int(os.getenv('RETAILBOT2_DB_PORT', os.getenv('DB_PORT', os.getenv('MYSQL_PORT', '3306'))))
-    db_name: str = os.getenv('RETAILBOT2_DB_NAME', os.getenv('DB_NAME', 'Binance'))
-    db_user: str = field(default_factory=lambda: os.getenv('RETAILBOT2_DB_USER', os.getenv('DB_USER', os.getenv('MYSQL_USER', 'cms'))))
+    db_name: str = os.getenv('RETAILBOT2_DB_NAME', os.getenv('DB_NAME', 'Bin'))
+    db_user: str = field(default_factory=lambda: os.getenv('RETAILBOT2_DB_USER', os.getenv('DB_USER', os.getenv('MYSQL_USER', ''))))
     db_password: str = field(default_factory=lambda: os.getenv('RETAILBOT2_DB_PASSWORD', os.getenv('DB_PASS', os.getenv('MYSQL_PASSWORD', ''))))
     telegram_token: str = field(default_factory=lambda: os.getenv('TELEGRAM_TOKEN', os.getenv('TELEGRAM_BOT_TOKEN', '')))
     telegram_chat_id: str = field(default_factory=lambda: os.getenv('TELEGRAM_CHAT_ID', ''))
