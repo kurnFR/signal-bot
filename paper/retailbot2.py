@@ -1252,9 +1252,15 @@ class DatabaseManager:
 
     def close_trade(self, trade_id: int, exit_price: float,
                     reason: str, pnl: float, pnl_pct: float):
+        """Close a trade in its own transaction.
+
+        Kept for compatibility with existing callers. New trade-closing code
+        should use close_trade_and_update_stats() so the trade row and strategy
+        statistics commit atomically.
+        """
         conn = self.get_conn()
         if not conn:
-            return
+            return False
         try:
             c = conn.cursor()
             c.execute("""
@@ -1264,9 +1270,74 @@ class DatabaseManager:
             """, (exit_price, reason, pnl, pnl_pct, datetime.utcnow(), trade_id))
             conn.commit()
             c.close()
+            return True
         except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             self.logger.error(f"❌ close_trade: {e}")
+            return False
         finally:
+            conn.close()
+
+    def close_trade_and_update_stats(
+            self, trade_id: int, exit_price: float, reason: str,
+            pnl: float, pnl_pct: float, strategy: str, mode: str) -> bool:
+        """Atomically close a trade and update its strategy statistics.
+
+        Both writes use the same DB connection and transaction. No caller
+        state must be mutated until this method returns True. If either write
+        fails, the transaction is rolled back and the trade remains OPEN.
+        """
+        conn = self.get_conn()
+        if not conn:
+            return False
+
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE rdt_trades SET status='CLOSED',
+                exit_price=%s, exit_reason=%s, net_pnl=%s,
+                pnl_percent=%s, exit_time=%s WHERE id=%s
+            """, (exit_price, reason, pnl, pnl_pct, datetime.utcnow(), trade_id))
+
+            if cursor.rowcount != 1:
+                raise RuntimeError(
+                    f"trade close affected {cursor.rowcount} rows for id={trade_id}"
+                )
+
+            cursor.execute("""
+                INSERT INTO rdt_strategy_stats
+                    (strategy, mode, total_trades, wins, losses, total_pnl)
+                VALUES (%s, %s, 1, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    total_trades = total_trades + 1,
+                    wins = wins + %s,
+                    losses = losses + %s,
+                    total_pnl = total_pnl + %s
+            """, (
+                strategy, mode,
+                1 if pnl > 0 else 0, 0 if pnl > 0 else 1, pnl,
+                1 if pnl > 0 else 0, 0 if pnl > 0 else 1, pnl,
+            ))
+
+            conn.commit()
+            return True
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            self.logger.error(f"❌ close_trade_and_update_stats: {e}")
+            return False
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
             conn.close()
 
     def update_stats(self, strategy: str, mode: str,
@@ -1785,14 +1856,24 @@ class RetailDeathTrapBot:
         base_value = trade['entry'] * units
         pnl_pct = (pnl / base_value * 100) if base_value > 0 else 0.0
 
-        # Update equity
+        # Persistence is the commit boundary. Do not mutate in-memory
+        # equity or remove the active trade until both DB writes commit.
+        persisted = self.db.close_trade_and_update_stats(
+            tid, exit_price, reason, pnl, pnl_pct,
+            trade['strategy'], mode
+        )
+        if not persisted:
+            self.logger.error(
+                f"❌ [{mode.upper()}] #{tid} close persistence failed; "
+                "keeping active trade and equity unchanged"
+            )
+            return
+
+        # Update equity only after the atomic DB transaction commits.
         if mode == 'inverse':
             self.equity_inverse += pnl
         else:
             self.equity_shadow += pnl
-
-        self.db.close_trade(tid, exit_price, reason, pnl, pnl_pct)
-        self.db.update_stats(trade['strategy'], mode, pnl > 0, pnl)
 
         del active[tid]
 
