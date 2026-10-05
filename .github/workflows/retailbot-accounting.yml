@@ -1,0 +1,36 @@
+name: RetailBot accounting regression
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  paper-accounting:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run Paper + RetailBot accounting tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python -m pytest -q             tests/test_accounting.py             tests/test_paper_backtest_parity.py             tests/test_paper_engine_candle_guards.py             tests/test_retailbot_accounting.py
+
+      - name: Run Screener tests
+        env:
+          SCREENER_ENABLED: "false"
+          TELEGRAM_BOT_TOKEN: ""
+          TELEGRAM_CHAT_ID: ""
+        run: python -m pytest -q tests/test_screener.py
