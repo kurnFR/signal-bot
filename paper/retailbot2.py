@@ -1301,8 +1301,9 @@ class DatabaseManager:
             cursor.execute("""
                 UPDATE rdt_trades SET status='CLOSED',
                 exit_price=%s, exit_reason=%s, net_pnl=%s,
-                pnl_percent=%s, exit_time=%s WHERE id=%s
-            """, (exit_price, reason, pnl, pnl_pct, datetime.utcnow(), trade_id))
+                pnl_percent=%s, exit_time=%s
+                WHERE id=%s AND mode=%s AND status='OPEN'
+            """, (exit_price, reason, pnl, pnl_pct, datetime.utcnow(), trade_id, mode))
 
             if cursor.rowcount != 1:
                 raise RuntimeError(
