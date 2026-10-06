@@ -7,7 +7,7 @@ import mysql.connector
 from mysql.connector import pooling
 import logging
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import sys, os
@@ -1181,7 +1181,29 @@ def set_retailbot2_control(enabled, overrides):
 
 def update_screener_heartbeat(*, pid=None, timeframe=None, symbols_monitored=None, last_signal_at=None, last_universe_refresh_at=None):
     """Persist lightweight process telemetry so the dashboard can distinguish
-    a healthy-but-quiet screener from a process that is not running."""
+    a healthy-but-quiet screener from a process that is not running.
+
+    Screener candle timestamps arrive as ISO-8601 strings (for example,
+    2026-10-06T22:37:00Z), while MariaDB DATETIME expects a datetime
+    value. Normalize ISO strings to UTC-naive datetimes before binding them.
+    """
+    def _normalize_datetime(value):
+        if value is None or isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if parsed.tzinfo is not None:
+                    parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+                return parsed
+            except ValueError:
+                logger.warning("Invalid screener heartbeat datetime: %r", value)
+                return None
+        return value
+
+    last_signal_at = _normalize_datetime(last_signal_at)
+    last_universe_refresh_at = _normalize_datetime(last_universe_refresh_at)
+
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
