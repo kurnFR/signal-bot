@@ -1179,7 +1179,7 @@ def set_retailbot2_control(enabled, overrides):
         conn.close()
 
 
-def update_screener_heartbeat(*, pid=None, symbols_monitored=None, last_signal_at=None, last_universe_refresh_at=None):
+def update_screener_heartbeat(*, pid=None, timeframe=None, symbols_monitored=None, last_signal_at=None, last_universe_refresh_at=None):
     """Persist lightweight process telemetry so the dashboard can distinguish
     a healthy-but-quiet screener from a process that is not running."""
     conn = get_pool().get_connection()
@@ -1188,16 +1188,17 @@ def update_screener_heartbeat(*, pid=None, symbols_monitored=None, last_signal_a
         cur.execute(
             """
             INSERT INTO screener_heartbeat
-                (id, pid, last_beat_at, symbols_monitored, last_signal_at, last_universe_refresh_at)
-            VALUES (1, %s, UTC_TIMESTAMP(), %s, %s, %s)
+                (id, pid, last_beat_at, timeframe, symbols_monitored, last_signal_at, last_universe_refresh_at)
+            VALUES (1, %s, UTC_TIMESTAMP(), %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 pid=VALUES(pid),
                 last_beat_at=UTC_TIMESTAMP(),
+                timeframe=COALESCE(VALUES(timeframe), timeframe),
                 symbols_monitored=COALESCE(VALUES(symbols_monitored), symbols_monitored),
                 last_signal_at=COALESCE(VALUES(last_signal_at), last_signal_at),
                 last_universe_refresh_at=COALESCE(VALUES(last_universe_refresh_at), last_universe_refresh_at)
             """,
-            (pid, symbols_monitored, last_signal_at, last_universe_refresh_at),
+            (pid, timeframe, symbols_monitored, last_signal_at, last_universe_refresh_at),
         )
         conn.commit()
         cur.close()
@@ -1212,7 +1213,7 @@ def get_screener_status():
         try:
             cur.execute(
                 """
-                SELECT pid, last_beat_at, symbols_monitored, last_signal_at,
+                SELECT pid, last_beat_at, timeframe, symbols_monitored, last_signal_at,
                        last_universe_refresh_at
                 FROM screener_heartbeat
                 WHERE id=1
@@ -1225,6 +1226,7 @@ def get_screener_status():
                 return {
                     "running": False,
                     "database_ok": True,
+                    "timeframe": None,
                     "symbols_monitored": 0,
                     "last_beat_at": None,
                     "last_signal_at": None,
@@ -1236,6 +1238,7 @@ def get_screener_status():
             return {
                 "running": False,
                 "database_ok": True,
+                "timeframe": None,
                 "symbols_monitored": 0,
                 "last_beat_at": None,
                 "last_signal_at": None,
@@ -1250,6 +1253,7 @@ def get_screener_status():
             "running": running,
             "database_ok": True,
             "pid": row.get("pid"),
+            "timeframe": row.get("timeframe"),
             "symbols_monitored": int(row.get("symbols_monitored") or 0),
             "last_beat_at": row.get("last_beat_at"),
             "last_signal_at": row.get("last_signal_at"),
