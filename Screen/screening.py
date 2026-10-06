@@ -251,6 +251,10 @@ class SmartMoneyTelegram:
             except Exception as e: logger.error("❌ Telegram error: %s",e); return False
 
 telegram=SmartMoneyTelegram(CONFIG["telegram_bot_token"],CONFIG["telegram_chat_id"])
+if CONFIG["telegram_bot_token"] and CONFIG["telegram_chat_id"]:
+    logger.info("📨 Telegram alert transport configured")
+else:
+    logger.warning("⚠️ Telegram alerts are NOT configured: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing")
 
 
 def ensure_signal_table():
