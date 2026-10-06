@@ -41,6 +41,7 @@ const App = {
             if (this.authToken) {
                 this.fetchSystemStatus();
                 if (this.currentTab === "paper") this.fetchPaperData();
+                if (this.currentTab === "market-screener") this.fetchScreenerData();
             }
         }, 15000);
     },
@@ -315,14 +316,11 @@ const App = {
     // ----------------------------------------------------
     async fetchResearchData() {
         try {
-            const [posRes, statsRes, screenerSigRes, screenerStatsRes] = await Promise.all([
-                fetch(`${API_BASE}/api/research/retailbot2/positions?limit=100`, { headers: this.getAuthHeaders() }),
-                fetch(`${API_BASE}/api/research/retailbot2/stats`, { headers: this.getAuthHeaders() }),
-                fetch(`${API_BASE}/api/research/screener/signals?limit=50`, { headers: this.getAuthHeaders() }),
-                fetch(`${API_BASE}/api/research/screener/stats`, { headers: this.getAuthHeaders() }),
+            const [posRes, statsRes] = await Promise.all([
+                fetch(`@@DL@{API_BASE}/api/research/retailbot2/positions?limit=100`, { headers: this.getAuthHeaders() }),
+                fetch(`@@DL@{API_BASE}/api/research/retailbot2/stats`, { headers: this.getAuthHeaders() }),
             ]);
-            const results = [posRes, statsRes, screenerSigRes, screenerStatsRes];
-            const failed = results.find(r => !r.ok);
+            const results = [posRes, statsRes];
             if (failed) {
                 let detail = `HTTP ${failed.status}`;
                 try { detail = (await failed.json()).detail || detail; } catch (_) {}
@@ -330,14 +328,10 @@ const App = {
             }
             const { positions } = await posRes.json();
             const rb2Stats = await statsRes.json();
-            const { signals } = await screenerSigRes.json();
-            const screenerStats = await screenerStatsRes.json();
 
             this._renderRb2Kpis(rb2Stats);
             this._renderRb2Positions(positions);
             this._renderRb2StrategyTable(rb2Stats.by_strategy || []);
-            this._renderScreenerKpis(screenerStats);
-            this._renderScreenerSignals(signals);
         } catch (e) {
             this.showToast(`Failed to load Research Bots data: ${e.message || e}`, "error");
         } finally {
@@ -348,6 +342,34 @@ const App = {
         // above, which can still show positions/stats/signals fine.
         this._fetchBotControl("retailbot2");
         this._fetchBotControl("screener");
+    },
+
+    async fetchScreenerData() {
+        try {
+            const [statusRes, sigRes, statsRes] = await Promise.all([
+                `@@DL@{API_BASE}/api/research/screener/status`, { headers: this.getAuthHeaders() }),
+                `@@DL@{API_BASE}/api/research/screener/signals?limit=100`, { headers: this.getAuthHeaders() }),
+                `@@DL@{API_BASE}/api/research/screener/stats`, { headers: this.getAuthHeaders() }),
+            ]);
+            const results = [statusRes, sigRes, statsRes];
+            const failed = results.find(r => !r.ok);
+            if (failed) {
+                let detail = `HTTP @@DL@{failed.status}`;
+                try { detail = (await failed.json()).detail || detail; } catch (_) {}
+                throw new Error(detail);
+            }
+            const status = await statusRes.json();
+            const { signals } = await sigRes.json();
+            const stats = await statsRes.json();
+            this._renderScreenerStatus(status);
+            this._renderScreenerKpis(stats);
+            this._renderScreenerSignals(signals);
+            this._fetchBotControl("screener");
+        } catch (e) {
+            this.showToast(`Failed to load Market Screener: @@DL@{e.message || e}`, "error");
+        } finally {
+            if (window.lucide) window.lucide.createIcons();
+        }
     },
 
     async _fetchBotControl(botName) {
@@ -390,7 +412,9 @@ const App = {
                "pattern_tolerance", "pattern_min_bars_apart", "spike_atr_multiplier"]
             : ["rvol_multiplier", "divergence_max_price_change", "velocity_threshold",
                "max_alerts_per_hour", "max_alerts_per_symbol_per_hour", "alert_cooldown_sec",
-               "enable_divergence_detection", "enable_velocity_detection"];
+               "enable_divergence_detection", "enable_velocity_detection",
+               "require_confluence", "min_signal_rvol", "min_signal_velocity",
+               "min_quote_volume_24h", "min_market_cap_usd", "min_quality_score"];
 
         const enabledEl = document.getElementById(`${prefix}enabled`);
         const overrides = {};
@@ -496,16 +520,38 @@ const App = {
         }).join("");
     },
 
+    _renderScreenerStatus(status) {
+        const set = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
+        const running = !!status.running;
+        const enabled = !!status.enabled;
+        const statusEl = document.getElementById("screener-v2-status");
+        if (statusEl) {
+            statusEl.innerText = running ? "RUNNING" : "OFFLINE";
+            statusEl.className = `text-lg font-black mt-1 @@DL@{running ? "text-emerald-400" : "text-rose-400"}`;
+        }
+        set("screener-v2-status-detail", running ? `PID @@DL@{status.pid || "--"} · heartbeat @@DL@{this._formatDateTime(status.last_beat_at)}` : (status.last_beat_at ? `Last heartbeat @@DL@{this._formatDateTime(status.last_beat_at)}` : "No heartbeat recorded"));
+        set("screener-v2-enabled", enabled ? "ENABLED" : "PAUSED");
+        const enabledEl = document.getElementById("screener-v2-enabled");
+        if (enabledEl) enabledEl.className = `text-lg font-black mt-1 @@DL@{enabled ? "text-emerald-400" : "text-amber-400"}`;
+        set("screener-v2-symbols", Number(status.symbols_monitored || 0).toLocaleString());
+        set("screener-v2-last-signal", this._formatDateTime(status.last_signal_at));
+        set("screener-v2-last-refresh", this._formatDateTime(status.last_universe_refresh));
+        set("screener-kpi-db", status.database_ok ? "OK" : "ERROR");
+        const db = document.getElementById("screener-kpi-db");
+        if (db) db.className = `text-lg font-black mt-2 @@DL@{status.database_ok ? "text-emerald-400" : "text-rose-400"}`;
+    },
+
     _renderScreenerKpis(stats) {
         const set = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
         set("screener-kpi-24h", stats.signals_last_24h ?? 0);
         set("screener-kpi-total", stats.total_signals ?? 0);
+        set("screener-signal-count", `@@DL@{stats.signals_last_24h ?? 0} signals in the last 24h`);
         const breakdownEl = document.getElementById("screener-kpi-breakdown");
         if (breakdownEl) {
             const byType = stats.by_type_last_24h || {};
             const entries = Object.entries(byType);
             breakdownEl.innerHTML = entries.length
-                ? entries.map(([type, n]) => `<div>${this._escapeHtml(type)}: <span class="font-mono text-slate-100">${n}</span></div>`).join("")
+                ? entries.map(([type, n]) => `<div>@@DL@{this._escapeHtml(type)}: <span class="font-mono text-slate-100">@@DL@{n}</span></div>`).join("")
                 : `<span class="text-slate-500">No signals in 24h</span>`;
         }
     },
@@ -514,7 +560,7 @@ const App = {
         const tbody = document.getElementById("screener-signals-table-body");
         if (!tbody) return;
         if (!signals || signals.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-slate-500 text-xs">No signals yet. Confirm Screen/screening.py is running.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="10" class="text-center py-8 text-slate-500 text-xs">No qualifying signals. The screener may be healthy and simply quiet.</td></tr>`;
             return;
         }
         const typeColors = {
@@ -526,18 +572,22 @@ const App = {
         tbody.innerHTML = signals.map(s => {
             const color = typeColors[s.signal_type] || "text-slate-300 bg-slate-800 border-slate-700";
             const changeColor = s.price_change_pct > 0 ? "text-emerald-400" : s.price_change_pct < 0 ? "text-rose-400" : "text-slate-400";
+            const quality = Number(s.quality_score || 0);
             return `
                 <tr>
-                    <td class="whitespace-nowrap text-slate-500">${this._formatDateTime(s.detected_at)}</td>
-                    <td class="font-semibold text-slate-100">${this._escapeHtml(s.symbol)}</td>
-                    <td><span class="px-2 py-0.5 text-[10px] font-bold rounded border ${color}">${this._escapeHtml(s.signal_type)}</span></td>
-                    <td class="font-mono text-slate-300">${Number(s.rvol).toFixed(2)}x</td>
-                    <td class="font-mono text-slate-300">$${Number(s.price).toFixed(4)}</td>
-                    <td class="font-mono ${changeColor}">${s.price_change_pct >= 0 ? "+" : ""}${Number(s.price_change_pct).toFixed(3)}%</td>
-                    <td class="font-mono text-slate-300">${Number(s.volume_velocity).toFixed(2)}x</td>
-                    <td>${s.telegram_sent ? `<i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400"></i>` : `<i data-lucide="x" class="w-3.5 h-3.5 text-slate-600"></i>`}</td>
+                    <td class="whitespace-nowrap text-slate-500" data-sort-value="@@DL@{this._escapeHtml(s.detected_at || "")}`">@@DL@{this._formatDateTime(s.detected_at)}</td>
+                    <td class="font-semibold text-slate-100">@@DL@{this._escapeHtml(s.symbol)}</td>
+                    <td><span class="px-2 py-0.5 text-[10px] font-bold rounded border @@DL@{color}`">@@DL@{this._escapeHtml(s.signal_type)}</span></td>
+                    <td class="font-mono text-slate-300" data-sort-value="@@DL@{Number(s.rvol || 0)}">@@DL@{Number(s.rvol || 0).toFixed(2)}x</td>
+                    <td class="font-mono text-slate-300" data-sort-value="@@DL@{Number(s.volume_velocity || 0)}">@@DL@{Number(s.volume_velocity || 0).toFixed(2)}x</td>
+                    <td class="font-mono font-bold @@DL@{quality >= 70 ? "text-emerald-400" : quality >= 50 ? "text-amber-400" : "text-slate-400"}`" data-sort-value="@@DL@{quality}`">@@DL@{quality.toFixed(0)}</td>
+                    <td class="font-mono text-slate-300" data-sort-value="@@DL@{Number(s.price || 0)}">$@@DL@{Number(s.price || 0).toFixed(4)}</td>
+                    <td class="font-mono @@DL@{changeColor}`" data-sort-value="@@DL@{Number(s.price_change_pct || 0)}">@@DL@{s.price_change_pct >= 0 ? "+" : ""}@@DL@{Number(s.price_change_pct || 0).toFixed(3)}%</td>
+                    <td class="font-mono text-slate-300" data-sort-value="@@DL@{Number(s.quote_volume || 0)}">$@@DL@{Number(s.quote_volume || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+                    <td>@@DL@{s.telegram_sent ? `<i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400"></i>` : `<i data-lucide="x" class="w-3.5 h-3.5 text-slate-600"></i>`}</td>
                 </tr>`;
         }).join("");
+        if (window.lucide) window.lucide.createIcons();
     },
 
     // ----------------------------------------------------
@@ -1081,8 +1131,12 @@ const App = {
             this.fetchNewsData();
         } else if (tabId === "research") {
             if (titleEl) titleEl.innerText = "Research Bots";
-            if (descEl) descEl.innerText = "Retail Death Trap Bot v2 (shadow/inverse confluence) and the Smart Money Volume Screener";
+            if (descEl) descEl.innerText = "Retail Death Trap Bot v2 (shadow/inverse confluence)";
             this.fetchResearchData();
+        } else if (tabId === "market-screener") {
+            if (titleEl) titleEl.innerText = "Market Screener V2";
+            if (descEl) descEl.innerText = "Smart-money volume detection, universe health, signal quality, and live alert controls";
+            this.fetchScreenerData();
         } else if (tabId === "settings") {
             if (titleEl) titleEl.innerText = "System Settings & User Administration";
             if (descEl) descEl.innerText = "User accounts, password resets, MariaDB connection, and execution parameters";
