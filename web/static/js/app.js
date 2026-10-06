@@ -576,14 +576,14 @@ const App = {
             const quality = Number(s.quality_score || 0);
             return `
                 <tr>
-                    <td class="whitespace-nowrap text-slate-500" data-sort-value="${this._escapeHtml(s.detected_at || "")}`">${this._formatDateTime(s.detected_at)}</td>
+                    <td class="whitespace-nowrap text-slate-500" data-sort-value="${this._escapeHtml(s.detected_at || "")}">${this._formatDateTime(s.detected_at)}</td>
                     <td class="font-semibold text-slate-100">${this._escapeHtml(s.symbol)}</td>
-                    <td><span class="px-2 py-0.5 text-[10px] font-bold rounded border ${color}`">${this._escapeHtml(s.signal_type)}</span></td>
+                    <td><span class="px-2 py-0.5 text-[10px] font-bold rounded border ${color}">${this._escapeHtml(s.signal_type)}</span></td>
                     <td class="font-mono text-slate-300" data-sort-value="${Number(s.rvol || 0)}">${Number(s.rvol || 0).toFixed(2)}x</td>
                     <td class="font-mono text-slate-300" data-sort-value="${Number(s.volume_velocity || 0)}">${Number(s.volume_velocity || 0).toFixed(2)}x</td>
-                    <td class="font-mono font-bold ${quality >= 70 ? "text-emerald-400" : quality >= 50 ? "text-amber-400" : "text-slate-400"}`" data-sort-value="${quality}`">${quality.toFixed(0)}</td>
+                    <td class="font-mono font-bold ${quality >= 70 ? "text-emerald-400" : quality >= 50 ? "text-amber-400" : "text-slate-400"}" data-sort-value="${quality}">${quality.toFixed(0)}</td>
                     <td class="font-mono text-slate-300" data-sort-value="${Number(s.price || 0)}">$${Number(s.price || 0).toFixed(4)}</td>
-                    <td class="font-mono ${changeColor}`" data-sort-value="${Number(s.price_change_pct || 0)}">${s.price_change_pct >= 0 ? "+" : ""}${Number(s.price_change_pct || 0).toFixed(3)}%</td>
+                    <td class="font-mono ${changeColor}" data-sort-value="${Number(s.price_change_pct || 0)}">${s.price_change_pct >= 0 ? "+" : ""}${Number(s.price_change_pct || 0).toFixed(3)}%</td>
                     <td class="font-mono text-slate-300" data-sort-value="${Number(s.quote_volume || 0)}">$${Number(s.quote_volume || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
                     <td>${s.telegram_sent ? `<i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400"></i>` : `<i data-lucide="x" class="w-3.5 h-3.5 text-slate-600"></i>`}</td>
                 </tr>`;
