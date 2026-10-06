@@ -62,6 +62,11 @@ CONFIG = {
     "log_file": os.getenv("LOG_FILE", "smart_money_detector.log"),
 }
 
+# Immutable baseline loaded from environment at process startup. Dashboard overrides
+# are intentionally reapplied from this baseline on every control-loop tick so that
+# removing an override really restores the configured environment default.
+DEFAULT_CONFIG = CONFIG.copy()
+
 logging.basicConfig(level=getattr(logging, CONFIG["log_level"].upper()), format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S", handlers=[logging.FileHandler(CONFIG["log_file"], encoding="utf-8"), logging.StreamHandler()])
 
 # Immutable baseline loaded from environment at process startup. Dashboard overrides
