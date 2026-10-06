@@ -17,14 +17,14 @@ supervisor) -- these toggles only pause/resume what it does once it's up.
 import logging
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 import math
 
 from db.db import (
     get_retailbot2_open_trades, get_retailbot2_recent_trades, get_retailbot2_stats,
     get_recent_smart_money_signals, get_smart_money_stats,
     get_retailbot2_control, set_retailbot2_control, RETAILBOT2_TUNABLE_FIELDS,
-    get_screener_control, set_screener_control, SCREENER_TUNABLE_FIELDS,
+    get_screener_control, set_screener_control, get_screener_status, SCREENER_TUNABLE_FIELDS,
 )
 
 router = APIRouter(prefix="/api/research", tags=["research-bots"])
@@ -33,7 +33,7 @@ logger = logging.getLogger("web.research_routes")
 
 class BotControlRequest(BaseModel):
     enabled: bool
-    overrides: Dict[str, float] = Field(default_factory=dict)
+    overrides: Dict[str, Union[float, bool]] = Field(default_factory=dict)
 
 
 def _filter_overrides(overrides: Dict, allowed: set, bot_label: str) -> Dict:
@@ -146,6 +146,20 @@ def retailbot2_control_set(req: BotControlRequest):
     except Exception as e:
         logger.exception("retailbot2_control_set failed")
         raise HTTPException(status_code=500, detail=f"Failed to update retailbot2 control: {e}")
+
+
+@router.get("/screener/status")
+def screener_status():
+    try:
+        control = get_screener_control()
+        status = get_screener_status()
+        status["enabled"] = bool(control.get("enabled", True))
+        status["timeframe"] = "1m"
+        status["last_signal_at"] = status.get("last_signal_at")
+        return status
+    except Exception as e:
+        logger.exception("screener_status failed")
+        raise HTTPException(status_code=500, detail=f"Failed to load screener status: {e}")
 
 
 @router.get("/screener/control")
