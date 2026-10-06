@@ -48,12 +48,20 @@ def _filter_overrides(overrides: Dict, allowed: set, bot_label: str) -> Dict:
             status_code=400,
             detail=f"Not a tunable {bot_label} parameter: {', '.join(rejected)}. Allowed: {sorted(allowed)}",
         )
-    invalid_values = [
-        k for k, value in overrides.items()
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value))
-    ]
+    boolean_fields = {
+        "enable_divergence_detection",
+        "enable_velocity_detection",
+        "require_confluence",
+    }
+    invalid_values = []
+    for key, value in overrides.items():
+        if key in boolean_fields:
+            if not isinstance(value, bool):
+                invalid_values.append(key)
+        elif isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            invalid_values.append(key)
     if invalid_values:
-        raise HTTPException(status_code=400, detail=f"Override values must be finite numbers: {', '.join(invalid_values)}")
+        raise HTTPException(status_code=400, detail=f"Override values must be valid booleans or finite numbers: {', '.join(invalid_values)}")
 
     bounds = {
         "rsi_oversold": (1, 49), "rsi_overbought": (51, 99), "rsi_zone_width": (0, 20),
