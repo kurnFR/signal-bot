@@ -384,6 +384,24 @@ const App = {
             const prefix = botName === "retailbot2" ? "rb2-ctl-" : "screener-ctl-";
             const enabledEl = document.getElementById(`${prefix}enabled`);
             if (enabledEl) enabledEl.checked = !!control.enabled;
+
+            // Boolean screener settings have real process defaults. Reflect those
+            // defaults in the UI when there is no persisted override; otherwise a
+            // normal "Save Changes" could accidentally turn them off.
+            if (botName === "screener") {
+                const screenerBooleanDefaults = {
+                    enable_divergence_detection: true,
+                    enable_velocity_detection: true,
+                    require_confluence: true,
+                };
+                for (const [key, defaultValue] of Object.entries(screenerBooleanDefaults)) {
+                    const el = document.getElementById(`screener-ctl-${key}`);
+                    if (el && !Object.prototype.hasOwnProperty.call(control.overrides || {}, key)) {
+                        el.checked = defaultValue;
+                    }
+                }
+            }
+
             for (const [key, value] of Object.entries(control.overrides || {})) {
                 const el = document.getElementById(`${prefix}${key}`);
                 if (!el) continue;
