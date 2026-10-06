@@ -7,7 +7,7 @@ import mysql.connector
 from mysql.connector import pooling
 import logging
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 
 import sys, os
@@ -1242,7 +1242,7 @@ def get_screener_status():
                 "last_universe_refresh": None,
             }
         last_beat_at = row.get("last_beat_at")
-        running = bool(last_beat_at and (datetime.now(timezone.utc) - last_beat_at).total_seconds() <= 150)
+        running = bool(last_beat_at and (datetime.utcnow() - last_beat_at).total_seconds() <= 150)
         for key in ("last_beat_at", "last_signal_at", "last_universe_refresh_at"):
             if row.get(key) is not None:
                 row[key] = str(row[key])
