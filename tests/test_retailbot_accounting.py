@@ -9,10 +9,12 @@ class FakeCursor:
         self.fail_on_execute = fail_on_execute
         self.rowcount = rowcount
         self.calls = 0
+        self.execute_calls = []
         self.closed = False
 
     def execute(self, sql, params=None):
         self.calls += 1
+        self.execute_calls.append((sql, params))
         if self.fail_on_execute == self.calls:
             raise RuntimeError(f"execute failure {self.calls}")
 
@@ -100,6 +102,23 @@ class TestRetailBotAtomicClose(unittest.TestCase):
         self.assertEqual(conn.commits, 0)
         self.assertEqual(conn.rollbacks, 1)
         self.assertEqual(conn.cursor_obj.calls, 2)
+
+    def test_close_requires_open_trade_and_matching_mode(self):
+        conn = FakeConnection(rowcount=0)
+        db = make_db(conn)
+
+        ok = db.close_trade_and_update_stats(
+            7, 110.0, "TAKE_PROFIT", 100.0, 10.0, "RSI_CTR", "inverse"
+        )
+
+        self.assertFalse(ok)
+        self.assertEqual(conn.commits, 0)
+        self.assertEqual(conn.rollbacks, 1)
+        self.assertEqual(conn.cursor_obj.calls, 1)
+        sql, params = conn.cursor_obj.execute_calls[0]
+        self.assertIn("status='OPEN'", sql)
+        self.assertIn("mode=%s", sql)
+        self.assertEqual(params[-2:], (7, "inverse"))
 
     def test_close_rejects_missing_trade_row_without_commit(self):
         conn = FakeConnection(rowcount=0)
