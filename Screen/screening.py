@@ -309,7 +309,7 @@ def get_liquid_symbols():
                 base=sym[:-len(CONFIG["symbols_filter"])] if CONFIG["symbols_filter"] else sym
                 if market_caps.get(base.upper(),0)<CONFIG["min_market_cap_usd"]: continue
             symbols.append(sym)
-        logger.info("✅ Filtered %d liquid pairs (min $%,.0f 24h vol)",len(symbols),CONFIG["min_quote_volume_24h"]); return symbols
+        logger.info("✅ Filtered %d liquid pairs (min $%.0f 24h vol)", len(symbols), CONFIG["min_quote_volume_24h"]); return symbols
     except Exception as e: logger.error("❌ Failed to fetch symbols: %s",e); return []
 
 def build_stream_name(symbol,timeframe): return f"{symbol.lower()}@kline_{timeframe}"
