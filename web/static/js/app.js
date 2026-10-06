@@ -321,6 +321,7 @@ const App = {
                 fetch(`${API_BASE}/api/research/retailbot2/stats`, { headers: this.getAuthHeaders() }),
             ]);
             const results = [posRes, statsRes];
+            const failed = results.find(r => !r.ok);
             if (failed) {
                 let detail = `HTTP ${failed.status}`;
                 try { detail = (await failed.json()).detail || detail; } catch (_) {}
@@ -341,15 +342,14 @@ const App = {
         // table doesn't exist) shouldn't take down the rest of the panel
         // above, which can still show positions/stats/signals fine.
         this._fetchBotControl("retailbot2");
-        this._fetchBotControl("screener");
     },
 
     async fetchScreenerData() {
         try {
             const [statusRes, sigRes, statsRes] = await Promise.all([
-                `${API_BASE}/api/research/screener/status`, { headers: this.getAuthHeaders() }),
-                `${API_BASE}/api/research/screener/signals?limit=100`, { headers: this.getAuthHeaders() }),
-                `${API_BASE}/api/research/screener/stats`, { headers: this.getAuthHeaders() }),
+                fetch(`${API_BASE}/api/research/screener/status`, { headers: this.getAuthHeaders() }),
+                fetch(`${API_BASE}/api/research/screener/signals?limit=100`, { headers: this.getAuthHeaders() }),
+                fetch(`${API_BASE}/api/research/screener/stats`, { headers: this.getAuthHeaders() }),
             ]);
             const results = [statusRes, sigRes, statsRes];
             const failed = results.find(r => !r.ok);
