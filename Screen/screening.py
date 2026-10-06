@@ -405,7 +405,7 @@ def main():
                 if symbols:
                     start_connections(symbols); last_universe_refresh=time.time()
                     try:
-                        update_screener_heartbeat(pid=os.getpid(), symbols_monitored=len(symbols), last_universe_refresh_at=datetime.fromtimestamp(last_universe_refresh))
+                        update_screener_heartbeat(pid=os.getpid(), symbols_monitored=len(symbols), last_universe_refresh_at=datetime.utcfromtimestamp(last_universe_refresh))
                     except Exception as e:
                         logger.warning("⚠️ screener universe heartbeat update failed: %s", e)
                 else: logger.error("❌ Universe refresh returned no eligible symbols; keeping screener disconnected until next refresh"); last_universe_refresh=time.time()
