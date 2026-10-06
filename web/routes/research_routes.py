@@ -168,7 +168,7 @@ def screener_status():
             control = {"enabled": True}
         status = get_screener_status()
         status["enabled"] = bool(control.get("enabled", True))
-        status["timeframe"] = os.getenv("TIMEFRAME", "1m")
+        status["timeframe"] = status.get("timeframe") or os.getenv("TIMEFRAME", "1m")
         status["last_signal_at"] = status.get("last_signal_at")
         return status
     except Exception as e:
