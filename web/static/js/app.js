@@ -534,6 +534,7 @@ const App = {
         const enabledEl = document.getElementById("screener-v2-enabled");
         if (enabledEl) enabledEl.className = `text-lg font-black mt-1 @@DL@{enabled ? "text-emerald-400" : "text-amber-400"}`;
         set("screener-v2-symbols", Number(status.symbols_monitored || 0).toLocaleString());
+        set("screener-v2-timeframe", status.timeframe || "--");
         set("screener-v2-last-signal", this._formatDateTime(status.last_signal_at));
         set("screener-v2-last-refresh", this._formatDateTime(status.last_universe_refresh));
         set("screener-kpi-db", status.database_ok ? "OK" : "ERROR");
