@@ -217,7 +217,9 @@ class SmartMoneyTelegram:
         self.token=token; self.chat_id=chat_id; self.url=f"https://api.telegram.org/bot{token}/sendMessage" if token else ""; self._last_send=0; self._lock=threading.Lock(); self.session=requests.Session()
         self.session.mount("https://",HTTPAdapter(max_retries=Retry(total=3,backoff_factor=0.3,status_forcelist=[429,500,502,503,504])))
     def send_early_alert(self, signal):
-        if not self.token or not self.chat_id: return False
+        if not self.token or not self.chat_id:
+            logger.error("❌ Telegram alert skipped: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing")
+            return False
         with self._lock:
             elapsed=time.time()-self._last_send
             if elapsed<0.8: time.sleep(0.8-elapsed)
@@ -230,9 +232,17 @@ class SmartMoneyTelegram:
             message=(f"{emoji} <b>SMART MONEY EARLY SIGNAL</b>\n━━━━━━━━━━━━━━━━━━━━━━\nPair: <b>{escape(str(signal.symbol))}</b>\nSignal: <code>{escape(str(signal.signal_type))}</code>\nQuality: <b>{signal.quality_score:.0f}/100</b>\nRVOL: <b>{signal.rvol:.2f}x</b> (vs {CONFIG['ema_length']}-EMA)\nVelocity: <b>{signal.volume_velocity:.2f}x</b> acceleration\nPrice: <code>${signal.price:.6f}</code> ({signal.price_change_pct:+.3f}%)\nVolume: <code>{signal.volume:,.0f}</code> | Quote: <code>${signal.quote_volume:,.0f}</code>\nTime: <code>{escape(str(signal.candle_time))}</code> UTC\n━━━━━━━━━━━━━━━━━━━━━━\n<b>Interpretation:</b> {interpretation}\n<i>Action: {action_hint}</i>\n<i>⚠️ Early signal - confirm with your strategy before entry</i>")
             try:
                 resp=self.session.post(self.url,json={"chat_id":self.chat_id,"text":message,"parse_mode":"HTML","disable_web_page_preview":True},timeout=8); resp.raise_for_status(); self._last_send=time.time(); logger.info("✅ Early alert: %s | %s | Quality %.0f | RVOL %.2fx",signal.symbol,signal.signal_type,signal.quality_score,signal.rvol); return True
-            except Exception as e: logger.error("❌ Telegram error: %s",e); return False
+            except requests.HTTPError as e:
+                body = getattr(e.response, "text", "")[:500] if getattr(e, "response", None) is not None else ""
+                logger.error("❌ Telegram API error: status=%s body=%s", getattr(e.response, "status_code", None), body)
+                return False
+            except Exception as e:
+                logger.error("❌ Telegram request error: %s", e)
+                return False
     def send(self,text):
-        if not self.token or not self.chat_id: return False
+        if not self.token or not self.chat_id:
+            logger.error("❌ Telegram message skipped: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing")
+            return False
         with self._lock:
             elapsed=time.time()-self._last_send
             if elapsed<0.8: time.sleep(0.8-elapsed)
