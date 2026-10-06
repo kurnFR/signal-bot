@@ -391,7 +391,7 @@ def main():
         while not state.shutdown_flag:
             time.sleep(60)
             try:
-                update_screener_heartbeat(pid=os.getpid(), symbols_monitored=len(symbols), last_universe_refresh_at=datetime.fromtimestamp(last_universe_refresh) if last_universe_refresh else None)
+                update_screener_heartbeat(pid=os.getpid(), symbols_monitored=len(symbols), last_universe_refresh_at=datetime.utcfromtimestamp(last_universe_refresh) if last_universe_refresh else None)
             except Exception as e:
                 logger.warning("⚠️ screener heartbeat update failed: %s", e)
             universe_changed=reload_control(); refresh_due=time.time()-last_universe_refresh>=max(1,int(CONFIG.get("market_cap_refresh_minutes",30)))*60
