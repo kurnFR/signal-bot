@@ -15,6 +15,7 @@ process itself is still your responsibility to keep running (tmux/systemd/
 supervisor) -- these toggles only pause/resume what it does once it's up.
 """
 import logging
+import os
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Dict, Optional, Union
@@ -154,7 +155,7 @@ def screener_status():
         control = get_screener_control()
         status = get_screener_status()
         status["enabled"] = bool(control.get("enabled", True))
-        status["timeframe"] = "1m"
+        status["timeframe"] = os.getenv("TIMEFRAME", "1m")
         status["last_signal_at"] = status.get("last_signal_at")
         return status
     except Exception as e:
