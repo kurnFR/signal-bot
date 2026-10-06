@@ -152,7 +152,12 @@ def retailbot2_control_set(req: BotControlRequest):
 @router.get("/screener/status")
 def screener_status():
     try:
-        control = get_screener_control()
+        try:
+            control = get_screener_control()
+        except Exception:
+            # The screener creates its control table on first startup; a missing
+            # table therefore means "not started yet", not a dashboard failure.
+            control = {"enabled": True}
         status = get_screener_status()
         status["enabled"] = bool(control.get("enabled", True))
         status["timeframe"] = os.getenv("TIMEFRAME", "1m")
