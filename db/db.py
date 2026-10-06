@@ -1189,10 +1189,10 @@ def update_screener_heartbeat(*, pid=None, symbols_monitored=None, last_signal_a
             """
             INSERT INTO screener_heartbeat
                 (id, pid, last_beat_at, symbols_monitored, last_signal_at, last_universe_refresh_at)
-            VALUES (1, %s, NOW(), %s, %s, %s)
+            VALUES (1, %s, UTC_TIMESTAMP(), %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 pid=VALUES(pid),
-                last_beat_at=NOW(),
+                last_beat_at=UTC_TIMESTAMP(),
                 symbols_monitored=COALESCE(VALUES(symbols_monitored), symbols_monitored),
                 last_signal_at=COALESCE(VALUES(last_signal_at), last_signal_at),
                 last_universe_refresh_at=COALESCE(VALUES(last_universe_refresh_at), last_universe_refresh_at)
