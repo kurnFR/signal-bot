@@ -1209,15 +1209,28 @@ def get_screener_status():
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute(
-            """
-            SELECT pid, last_beat_at, symbols_monitored, last_signal_at,
-                   last_universe_refresh_at
-            FROM screener_heartbeat
-            WHERE id=1
-            """
-        )
-        row = cur.fetchone()
+        try:
+            cur.execute(
+                """
+                SELECT pid, last_beat_at, symbols_monitored, last_signal_at,
+                       last_universe_refresh_at
+                FROM screener_heartbeat
+                WHERE id=1
+                """
+            )
+            row = cur.fetchone()
+        except mysql.connector.Error as exc:
+            cur.close()
+            if exc.errno == 1146:
+                return {
+                    "running": False,
+                    "database_ok": True,
+                    "symbols_monitored": 0,
+                    "last_beat_at": None,
+                    "last_signal_at": None,
+                    "last_universe_refresh": None,
+                }
+            raise
         cur.close()
         if not row:
             return {
