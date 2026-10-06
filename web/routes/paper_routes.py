@@ -17,14 +17,14 @@ router = APIRouter(prefix="/api/paper", tags=["paper-trading"])
 
 
 class PaperConfigRequest(BaseModel):
-    symbol: str = Field(..., example="ETHUSDT")
-    market: str = Field("spot", example="spot")
-    timeframe: str = Field("1d", example="1d")
-    strategy_name: str = Field(..., example="confluence_ensemble_v1")
+    symbol: str = Field(..., json_schema_extra={"example": "ETHUSDT"})
+    market: str = Field("spot", json_schema_extra={"example": "spot"})
+    timeframe: str = Field("1d", json_schema_extra={"example": "1d"})
+    strategy_name: str = Field(..., json_schema_extra={"example": "confluence_ensemble_v1"})
     is_active: bool = Field(True)
     allocated_capital: float = Field(5000.0, ge=100.0)
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
-    ml_model_id: Optional[str] = Field(None, example="real-btcusdt-spot-1h-trend_ema_v1-logistic_regression-binary_positive_r")
+    ml_model_id: Optional[str] = Field(None, json_schema_extra={"example": "real-btcusdt-spot-1h-trend_ema_v1-logistic_regression-binary_positive_r"})
 
 
 @router.get("/positions")
@@ -96,10 +96,10 @@ def sync_market_tick():
 
 
 class DeployStrategyRequest(BaseModel):
-    symbol: str = Field(..., example="BTCUSDT")
-    market: str = Field("spot", example="spot")
-    timeframe: str = Field("1d", example="1d")
-    strategy_name: str = Field(..., example="confluence_ensemble_v1")
+    symbol: str = Field(..., json_schema_extra={"example": "BTCUSDT"})
+    market: str = Field("spot", json_schema_extra={"example": "spot"})
+    timeframe: str = Field("1d", json_schema_extra={"example": "1d"})
+    strategy_name: str = Field(..., json_schema_extra={"example": "confluence_ensemble_v1"})
     allocated_capital: float = Field(5000.0, ge=100.0)
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
     send_telegram: bool = Field(True)
