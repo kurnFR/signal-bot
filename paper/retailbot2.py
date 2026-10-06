@@ -439,7 +439,7 @@ class TelegramAlert:
             f"{color} <b>P&L:</b> ${pnl:+.2f} ({pnl_pct:+.2f}%)\n"
             f"{color} <b>Exit:</b> <code>${exit_price:.6f}</code>\n"
             f"\n"
-            f"⏰ {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+            f"⏰ {datetime.now(datetime.UTC).replace(tzinfo=None).strftime('%Y-%m-%d %H:%M UTC')}"
         )
         return self.send(msg)
 
@@ -1238,7 +1238,7 @@ class DatabaseManager:
                 json.dumps(signal.get('strategies_triggered', [])),
                 signal.get('confluence_score', 1),
                 str(signal.get('reason', ''))[:500],
-                signal.get('candle_close_time', datetime.utcnow()),
+                signal.get('candle_close_time', datetime.now(datetime.UTC).replace(tzinfo=None)),
             ))
             tid = c.lastrowid
             conn.commit()
@@ -1267,7 +1267,7 @@ class DatabaseManager:
                 UPDATE rdt_trades SET status='CLOSED',
                 exit_price=%s, exit_reason=%s, net_pnl=%s,
                 pnl_percent=%s, exit_time=%s WHERE id=%s
-            """, (exit_price, reason, pnl, pnl_pct, datetime.utcnow(), trade_id))
+            """, (exit_price, reason, pnl, pnl_pct, datetime.now(datetime.UTC).replace(tzinfo=None), trade_id))
             conn.commit()
             c.close()
             return True
@@ -1302,7 +1302,7 @@ class DatabaseManager:
                 exit_price=%s, exit_reason=%s, net_pnl=%s,
                 pnl_percent=%s, exit_time=%s
                 WHERE id=%s AND mode=%s AND status='OPEN'
-            """, (exit_price, reason, pnl, pnl_pct, datetime.utcnow(), trade_id, mode))
+            """, (exit_price, reason, pnl, pnl_pct, datetime.now(datetime.UTC).replace(tzinfo=None), trade_id, mode))
 
             if cursor.rowcount != 1:
                 raise RuntimeError(
@@ -1775,7 +1775,7 @@ class RetailDeathTrapBot:
 
         # Cooldown
         last = self.last_trade_time.get(symbol, {}).get(mode, datetime.min)
-        elapsed = (datetime.utcnow() - last).total_seconds()
+        elapsed = (datetime.now(datetime.UTC).replace(tzinfo=None) - last).total_seconds()
         cooldown = self.config.min_trade_interval_hours * 3600
         if elapsed < cooldown:
             remaining = (cooldown - elapsed) / 60
@@ -1828,7 +1828,7 @@ class RetailDeathTrapBot:
         # Update cooldown
         if signal['symbol'] not in self.last_trade_time:
             self.last_trade_time[signal['symbol']] = {'shadow': datetime.min, 'inverse': datetime.min}
-        self.last_trade_time[signal['symbol']][mode] = datetime.utcnow()
+        self.last_trade_time[signal['symbol']][mode] = datetime.now(datetime.UTC).replace(tzinfo=None)
 
         risk_pct = self.config.risk_per_trade * 100
         self.tg.send_entry(signal, tid, units, risk_amt, risk_pct, mode)
