@@ -2,7 +2,7 @@
 API Router for Phase B: Live Paper Trading.
 """
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query, Path
 from pydantic import BaseModel, Field
 from typing import Optional
 import math
@@ -34,7 +34,7 @@ def list_positions():
 
 
 @router.get("/trades")
-def list_trades(limit: int = Field(50, ge=1, le=200)):
+def list_trades(limit: int = Query(50, ge=1, le=200)):
     trades = get_paper_trades(limit)
     return {"trades": trades}
 
@@ -71,7 +71,7 @@ def update_config(req: PaperConfigRequest):
 
 
 @router.post("/positions/{position_id}/close")
-def close_position(position_id: int = Field(..., gt=0)):
+def close_position(position_id: int = Path(..., gt=0)):
     try:
         res = manual_close_position(position_id)
         return res

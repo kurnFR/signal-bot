@@ -15,7 +15,7 @@ process itself is still your responsibility to keep running (tmux/systemd/
 supervisor) -- these toggles only pause/resume what it does once it's up.
 """
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Dict, Optional
 import math
@@ -79,7 +79,7 @@ def _filter_overrides(overrides: Dict, allowed: set, bot_label: str) -> Dict:
 
 
 @router.get("/retailbot2/positions")
-def retailbot2_positions(limit: int = Field(100, ge=1, le=200)):
+def retailbot2_positions(limit: int = Query(100, ge=1, le=200)):
     try:
         return {"positions": get_retailbot2_open_trades(limit=limit)}
     except Exception as e:
@@ -88,7 +88,7 @@ def retailbot2_positions(limit: int = Field(100, ge=1, le=200)):
 
 
 @router.get("/retailbot2/trades")
-def retailbot2_trades(limit: int = Field(50, ge=1, le=200)):
+def retailbot2_trades(limit: int = Query(50, ge=1, le=200)):
     try:
         return {"trades": get_retailbot2_recent_trades(limit=limit)}
     except Exception as e:
@@ -106,7 +106,7 @@ def retailbot2_stats():
 
 
 @router.get("/screener/signals")
-def screener_signals(limit: int = Field(50, ge=1, le=200)):
+def screener_signals(limit: int = Query(50, ge=1, le=200)):
     try:
         return {"signals": get_recent_smart_money_signals(limit=limit)}
     except Exception as e:
