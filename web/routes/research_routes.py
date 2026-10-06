@@ -18,7 +18,7 @@ import logging
 import os
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from typing import Dict, Optional, Union
+from typing import Any, Dict, Optional
 import math
 
 from db.db import (
@@ -34,7 +34,7 @@ logger = logging.getLogger("web.research_routes")
 
 class BotControlRequest(BaseModel):
     enabled: bool
-    overrides: Dict[str, Union[float, bool]] = Field(default_factory=dict)
+    overrides: Dict[str, Any] = Field(default_factory=dict)
 
 
 def _filter_overrides(overrides: Dict, allowed: set, bot_label: str) -> Dict:
