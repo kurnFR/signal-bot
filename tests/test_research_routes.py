@@ -123,6 +123,7 @@ class TestResearchRoutes(unittest.TestCase):
             "running": True,
             "database_ok": True,
             "pid": 1234,
+            "timeframe": "5m",
             "symbols_monitored": 247,
             "last_beat_at": "2026-10-06 03:30:00",
             "last_signal_at": "2026-10-06 03:29:00",
@@ -134,7 +135,7 @@ class TestResearchRoutes(unittest.TestCase):
         self.assertTrue(data["running"])
         self.assertTrue(data["enabled"])
         self.assertEqual(data["symbols_monitored"], 247)
-        self.assertIn("timeframe", data)
+        self.assertEqual(data["timeframe"], "5m")
 
     def test_screener_control_accepts_boolean_overrides(self):
         res = self.client.post(
