@@ -386,7 +386,12 @@ def main():
         threads=[]
     try:
         symbols=get_liquid_symbols()
-        if symbols: start_connections(symbols); last_universe_refresh=time.time()
+        if symbols:
+            start_connections(symbols); last_universe_refresh=time.time()
+            try:
+                update_screener_heartbeat(pid=os.getpid(), symbols_monitored=len(symbols), last_universe_refresh_at=datetime.utcfromtimestamp(last_universe_refresh))
+            except Exception as e:
+                logger.warning("⚠️ initial universe heartbeat update failed: %s", e)
         else: logger.error("❌ No liquid symbols found - retrying universe discovery in control loop")
         while not state.shutdown_flag:
             time.sleep(60)
