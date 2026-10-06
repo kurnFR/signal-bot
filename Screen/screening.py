@@ -63,6 +63,10 @@ CONFIG = {
 }
 
 logging.basicConfig(level=getattr(logging, CONFIG["log_level"].upper()), format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S", handlers=[logging.FileHandler(CONFIG["log_file"], encoding="utf-8"), logging.StreamHandler()])
+
+# Immutable baseline loaded from environment at process startup. Dashboard overrides
+# are intentionally reapplied from this baseline on every control-loop tick so that
+# removing an override really restores the configured environment default.
 logger = logging.getLogger("SmartMoneyDetector")
 
 @dataclass(order=True)
@@ -259,7 +263,14 @@ def reload_control():
     except Exception as e: logger.error("❌ reload_control: %s",e); return False
     finally: conn.close()
     if not row: return False
-    was_enabled=CONFIG.get("enabled",True); CONFIG["enabled"]=bool(row["enabled"])
+    was_enabled=CONFIG.get("enabled",True)
+    CONFIG["enabled"]=bool(row["enabled"])
+    # Reset all dashboard-tunable values to the process baseline first. The DB
+    # stores the complete current override set, so an omitted key means "use
+    # the environment default" rather than "keep the previous runtime value".
+    for key in _TUNABLE_CONFIG_KEYS:
+        if key in DEFAULT_CONFIG:
+            CONFIG[key]=DEFAULT_CONFIG[key]
     if was_enabled!=CONFIG["enabled"]:
         state_str="ENABLED" if CONFIG["enabled"] else "PAUSED (alerts suppressed)"; logger.info("🎛️ Screener %s via dashboard control",state_str); telegram.send(f"🎛️ <b>Smart Money Screener {state_str}</b> (via web dashboard)")
     try: overrides=json.loads(row["overrides_json"]) if row["overrides_json"] else {}
