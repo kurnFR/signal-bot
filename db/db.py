@@ -1228,11 +1228,13 @@ def get_screener_status():
                 "last_signal_at": None,
                 "last_universe_refresh": None,
             }
+        last_beat_at = row.get("last_beat_at")
+        running = bool(last_beat_at and (datetime.now() - last_beat_at).total_seconds() <= 150)
         for key in ("last_beat_at", "last_signal_at", "last_universe_refresh_at"):
             if row.get(key) is not None:
                 row[key] = str(row[key])
         return {
-            "running": bool(row["last_beat_at"] and (datetime.now() - row["last_beat_at"]).total_seconds() <= 150),
+            "running": running,
             "database_ok": True,
             "pid": row.get("pid"),
             "symbols_monitored": int(row.get("symbols_monitored") or 0),
