@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
@@ -26,7 +27,25 @@ from web.routes.ml_routes import router as ml_router
 from web.routes.news_routes import router as news_router
 from web.routes.research_routes import router as research_router
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    seed_default_admin()
+    try:
+        from Screen.screening import ensure_signal_table
+        ensure_signal_table()
+    except Exception as e:
+        logger.warning(f"Could not initialize smart_money_signals table on startup: {e}")
+    try:
+        from paper.retailbot2 import DatabaseManager, BotConfig
+        cfg = BotConfig()
+        DatabaseManager(cfg, logger)
+    except Exception as e:
+        logger.warning(f"Could not initialize retailbot2 tables on startup: {e}")
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Crypto Signal Bot — Quantitative Trading Platform",
     description="Institutional trading dashboard: Real-time search, historical backfill, strategy simulation, and Phase B paper trading.",
     version="2.0.0",
@@ -113,22 +132,6 @@ async def api_security_boundary(request: Request, call_next):
         return JSONResponse(status_code=401, content={"detail": "Authentication required"})
 
     return await call_next(request)
-
-
-@app.on_event("startup")
-def on_startup():
-    seed_default_admin()
-    try:
-        from Screen.screening import ensure_signal_table
-        ensure_signal_table()
-    except Exception as e:
-        logger.warning(f"Could not initialize smart_money_signals table on startup: {e}")
-    try:
-        from paper.retailbot2 import DatabaseManager, BotConfig
-        cfg = BotConfig()
-        DatabaseManager(cfg, logger)
-    except Exception as e:
-        logger.warning(f"Could not initialize retailbot2 tables on startup: {e}")
 
 
 app.include_router(auth_router)
