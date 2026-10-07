@@ -137,7 +137,7 @@ class BotConfig:
     # Infrastructure
     db_host: str = field(default_factory=lambda: os.getenv('RETAILBOT2_DB_HOST', os.getenv('DB_HOST', os.getenv('MYSQL_HOST', '192.168.1.30'))))
     db_port: int = int(os.getenv('RETAILBOT2_DB_PORT', os.getenv('DB_PORT', os.getenv('MYSQL_PORT', '3306'))))
-    db_name: str = os.getenv('RETAILBOT2_DB_NAME', os.getenv('DB_NAME', 'Binance'))
+    db_name: str = field(default_factory=lambda: os.getenv('RETAILBOT2_DB_NAME', 'crypto_signals'))
     db_user: str = field(default_factory=lambda: os.getenv('RETAILBOT2_DB_USER', os.getenv('DB_USER', os.getenv('MYSQL_USER', 'cms'))))
     db_password: str = field(default_factory=lambda: os.getenv('RETAILBOT2_DB_PASSWORD', os.getenv('DB_PASS', os.getenv('MYSQL_PASSWORD', ''))))
     telegram_token: str = field(default_factory=lambda: os.getenv('TELEGRAM_TOKEN', os.getenv('TELEGRAM_BOT_TOKEN', '')))
@@ -1414,21 +1414,40 @@ class DatabaseManager:
             conn.close()
 
     def get_stats(self) -> Dict:
+        """Build performance statistics from the closed trade ledger.
+
+        rdt_trades is the single source of truth. rdt_strategy_stats remains
+        a derived/cache table for compatibility, but reports must never read
+        it because historical incremental summaries can drift from the
+        authoritative trade ledger.
+        """
         conn = self.get_conn()
         if not conn:
             return {}
         try:
             c = conn.cursor(dictionary=True)
-            c.execute("SELECT * FROM rdt_strategy_stats ORDER BY strategy, mode")
+            c.execute("""
+                SELECT
+                    strategy,
+                    mode,
+                    COUNT(*) AS total_trades,
+                    SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                    SUM(CASE WHEN net_pnl <= 0 THEN 1 ELSE 0 END) AS losses,
+                    COALESCE(SUM(net_pnl), 0) AS total_pnl
+                FROM rdt_trades
+                WHERE status='CLOSED'
+                GROUP BY strategy, mode
+                ORDER BY strategy, mode
+            """)
             rows = c.fetchall()
             c.close()
             result = {}
             for r in rows:
                 key = f"{r['strategy']}_{r['mode']}"
                 result[key] = {
-                    'total': r['total_trades'],
-                    'wins': r['wins'],
-                    'losses': r['losses'],
+                    'total': int(r['total_trades']),
+                    'wins': int(r['wins']),
+                    'losses': int(r['losses']),
                     'net_pnl': float(r['total_pnl'])
                     if isinstance(r['total_pnl'], Decimal)
                     else float(r.get('total_pnl', 0)),
@@ -2100,7 +2119,7 @@ def main():
         db_host=os.getenv('RETAILBOT2_DB_HOST', os.getenv('DB_HOST', os.getenv('MYSQL_HOST', '192.168.1.30'))),
         db_user=os.getenv('RETAILBOT2_DB_USER', os.getenv('DB_USER', os.getenv('MYSQL_USER', 'cms'))),
         db_password=os.getenv('RETAILBOT2_DB_PASSWORD', os.getenv('DB_PASS', os.getenv('MYSQL_PASSWORD', ''))),
-        db_name=os.getenv('RETAILBOT2_DB_NAME', os.getenv('DB_NAME', 'Binance')),
+        db_name=os.getenv('RETAILBOT2_DB_NAME', 'crypto_signals'),
 
         # ── Telegram ──
         telegram_token=os.getenv('TELEGRAM_TOKEN', os.getenv('TELEGRAM_BOT_TOKEN', '')),
