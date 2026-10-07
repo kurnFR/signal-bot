@@ -1,6 +1,7 @@
 import os
 import unittest
 from decimal import Decimal
+from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from paper.retailbot2 import DatabaseManager, RetailDeathTrapBot
