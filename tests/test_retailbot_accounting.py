@@ -71,6 +71,69 @@ class TestRetailBotDatabaseConfig(unittest.TestCase):
 
 
 
+class StatsCursor:
+    def __init__(self, rows):
+        self.rows = rows
+        self.executed_sql = None
+        self.closed = False
+
+    def execute(self, sql, params=None):
+        self.executed_sql = sql
+
+    def fetchall(self):
+        return self.rows
+
+    def close(self):
+        self.closed = True
+
+
+class StatsConnection:
+    def __init__(self, rows):
+        self.cursor_obj = StatsCursor(rows)
+        self.closed = False
+
+    def cursor(self, dictionary=False):
+        self.dictionary = dictionary
+        return self.cursor_obj
+
+    def close(self):
+        self.closed = True
+
+
+class TestRetailBotLedgerStats(unittest.TestCase):
+    def test_get_stats_aggregates_closed_trade_ledger_not_summary_cache(self):
+        conn = StatsConnection([
+            {
+                "strategy": "RSI_CTR",
+                "mode": "shadow",
+                "total_trades": 3,
+                "wins": 2,
+                "losses": 1,
+                "total_pnl": Decimal("12.50"),
+            }
+        ])
+        db = make_db(conn)
+
+        stats = db.get_stats()
+
+        self.assertEqual(
+            stats,
+            {
+                "RSI_CTR_shadow": {
+                    "total": 3,
+                    "wins": 2,
+                    "losses": 1,
+                    "net_pnl": 12.5,
+                }
+            },
+        )
+        self.assertIn("FROM rdt_trades", conn.cursor_obj.executed_sql)
+        self.assertIn("WHERE status='CLOSED'", conn.cursor_obj.executed_sql)
+        self.assertNotIn("FROM rdt_strategy_stats", conn.cursor_obj.executed_sql)
+        self.assertTrue(conn.closed)
+        self.assertTrue(conn.cursor_obj.closed)
+
+
 class TestRetailBotAtomicClose(unittest.TestCase):
     def test_successful_close_commits_trade_and_stats_atomically(self):
         conn = FakeConnection()
