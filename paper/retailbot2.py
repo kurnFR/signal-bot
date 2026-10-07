@@ -1414,21 +1414,40 @@ class DatabaseManager:
             conn.close()
 
     def get_stats(self) -> Dict:
+        """Build performance statistics from the closed trade ledger.
+
+        rdt_trades is the single source of truth. rdt_strategy_stats remains
+        a derived/cache table for compatibility, but reports must never read
+        it because historical incremental summaries can drift from the
+        authoritative trade ledger.
+        """
         conn = self.get_conn()
         if not conn:
             return {}
         try:
             c = conn.cursor(dictionary=True)
-            c.execute("SELECT * FROM rdt_strategy_stats ORDER BY strategy, mode")
+            c.execute("""
+                SELECT
+                    strategy,
+                    mode,
+                    COUNT(*) AS total_trades,
+                    SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                    SUM(CASE WHEN net_pnl <= 0 THEN 1 ELSE 0 END) AS losses,
+                    COALESCE(SUM(net_pnl), 0) AS total_pnl
+                FROM rdt_trades
+                WHERE status='CLOSED'
+                GROUP BY strategy, mode
+                ORDER BY strategy, mode
+            """)
             rows = c.fetchall()
             c.close()
             result = {}
             for r in rows:
                 key = f"{r['strategy']}_{r['mode']}"
                 result[key] = {
-                    'total': r['total_trades'],
-                    'wins': r['wins'],
-                    'losses': r['losses'],
+                    'total': int(r['total_trades']),
+                    'wins': int(r['wins']),
+                    'losses': int(r['losses']),
                     'net_pnl': float(r['total_pnl'])
                     if isinstance(r['total_pnl'], Decimal)
                     else float(r.get('total_pnl', 0)),
