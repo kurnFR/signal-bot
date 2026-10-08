@@ -49,6 +49,13 @@ CONFIG = {
     "min_signal_rvol": float(os.getenv("MIN_SIGNAL_RVOL", "5.0")),
     "min_signal_velocity": float(os.getenv("MIN_SIGNAL_VELOCITY", "3.0")),
     "min_quality_score": float(os.getenv("MIN_QUALITY_SCORE", "70")),
+    "htf_timeframes": tuple(tf.strip() for tf in os.getenv("HTF_TIMEFRAMES", "5m,15m").split(",") if tf.strip()),
+    "htf_ema_fast": int(os.getenv("HTF_EMA_FAST", "9")),
+    "htf_ema_slow": int(os.getenv("HTF_EMA_SLOW", "21")),
+    "htf_min_bars": int(os.getenv("HTF_MIN_BARS", "25")),
+    "htf_timeout_sec": float(os.getenv("HTF_TIMEOUT_SEC", "3")),
+    "max_quality_without_htf": float(os.getenv("MAX_QUALITY_WITHOUT_HTF", "79")),
+    "use_taker_buy_confirmation": os.getenv("USE_TAKER_BUY_CONFIRMATION", "true").lower() == "true",
     "alert_selection_window_sec": float(os.getenv("ALERT_SELECTION_WINDOW_SEC", "3")),
     "daily_reset_utc_hour": int(os.getenv("DAILY_RESET_UTC_HOUR", "0")),
     "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN"),
@@ -85,6 +92,10 @@ class SmartMoneySignal:
     timestamp: float = field(compare=False)
     candle_time: str = field(compare=False)
     quality_score: float = field(compare=False)
+    direction: str = field(compare=False, default="NEUTRAL")
+    taker_buy_ratio: Optional[float] = field(compare=False, default=None)
+    htf_alignment: int = field(compare=False, default=0)
+    htf_context: str = field(compare=False, default="UNAVAILABLE")
 
 class SmartMoneyState:
     def __init__(self, ema_length: int, rvol_threshold: float, max_alerts_per_hour: int):
