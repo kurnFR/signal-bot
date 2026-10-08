@@ -153,6 +153,108 @@ class SmartMoneyState:
             prior_avg = sum(list(history)[:-1]) / (len(history) - 1)
             return current_quote_vol / prior_avg if prior_avg > 0 else 1.0
 
+    @staticmethod
+    def _ema(values: List[float], span: int) -> float:
+        if not values:
+            return 0.0
+        alpha = 2.0 / (span + 1.0)
+        ema = values[0]
+        for value in values[1:]:
+            ema = alpha * value + (1.0 - alpha) * ema
+        return ema
+
+    @staticmethod
+    def _direction(price_change_pct: float) -> str:
+        if price_change_pct >= 0.10:
+            return "BULLISH"
+        if price_change_pct <= -0.10:
+            return "BEARISH"
+        return "NEUTRAL"
+
+    def _fetch_htf_context(self, symbol: str, signal_open_ms: int, direction: str) -> Tuple[int, str]:
+        """Use only HTF candles that were already closed at the 1m signal."""
+        trends = []
+        for timeframe in CONFIG.get("htf_timeframes", ("5m", "15m")):
+            if timeframe not in {"5m", "15m"}:
+                continue
+            try:
+                response = requests.get(
+                    "https://api.binance.com/api/v3/klines",
+                    params={
+                        "symbol": symbol,
+                        "interval": timeframe,
+                        "limit": max(CONFIG["htf_min_bars"], CONFIG["htf_ema_slow"] + 4),
+                        "endTime": signal_open_ms - 1,
+                    },
+                    timeout=CONFIG["htf_timeout_sec"],
+                )
+                response.raise_for_status()
+                rows = response.json()
+                closes = [float(row[4]) for row in rows if len(row) >= 5]
+                if len(closes) < CONFIG["htf_ema_slow"]:
+                    continue
+                close = closes[-1]
+                fast = self._ema(closes, CONFIG["htf_ema_fast"])
+                slow = self._ema(closes, CONFIG["htf_ema_slow"])
+                trend = (
+                    "BULLISH" if close > fast > slow
+                    else "BEARISH" if close < fast < slow
+                    else "NEUTRAL"
+                )
+                trends.append(f"{timeframe}:{trend}")
+            except Exception as exc:
+                logger.debug("HTF context unavailable for %s/%s: %s", symbol, timeframe, exc)
+
+        if not trends:
+            return 0, "UNAVAILABLE"
+
+        alignment = sum(
+            1 if item.endswith(direction) else -1
+            if direction != "NEUTRAL" and (
+                item.endswith("BULLISH") or item.endswith("BEARISH")
+            ) else 0
+            for item in trends
+        )
+        return alignment, ",".join(trends)
+
+    @staticmethod
+    def _score_structure(price_change_pct: float, open_price: float, high: float, low: float, price: float) -> float:
+        price_range = max(high - low, 0.0)
+        if price_range <= 0 or open_price <= 0:
+            return 0.0
+        body_ratio = min(abs(price - open_price) / price_range, 1.0)
+        close_location = (price - low) / price_range
+        direction = SmartMoneyState._direction(price_change_pct)
+        directional_close = (
+            close_location if direction == "BULLISH"
+            else 1.0 - close_location if direction == "BEARISH"
+            else 0.5
+        )
+        return min(15.0, body_ratio * 7.5 + directional_close * 7.5)
+
+    @staticmethod
+    def _score_orderflow(direction: str, taker_buy_ratio: Optional[float]) -> float:
+        if taker_buy_ratio is None:
+            return 0.0
+        ratio = min(max(taker_buy_ratio, 0.0), 1.0)
+        aligned = ratio if direction == "BULLISH" else (
+            1.0 - ratio if direction == "BEARISH"
+            else abs(ratio - 0.5) + 0.5
+        )
+        return min(15.0, max(0.0, (aligned - 0.5) / 0.20) * 15.0)
+
+    @staticmethod
+    def _score_htf(alignment: int, context: str, direction: str) -> float:
+        if context == "UNAVAILABLE":
+            return 0.0
+        if direction == "NEUTRAL":
+            return 5.0 if alignment == 0 else 0.0
+        if alignment >= 2:
+            return 20.0
+        if alignment == 1:
+            return 10.0
+        return 0.0
+
     def detect_smart_money_signal(self, symbol, volume, quote_volume, price, open_price, high, low, close_time):
         self._check_hourly_reset()
         is_ready, ema_vol, ema_quote = self.update_ema(symbol, volume, quote_volume)
