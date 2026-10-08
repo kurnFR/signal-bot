@@ -116,6 +116,7 @@ class SmartMoneyState:
         self.shutdown_flag = False
         self.pending_signals: List[SmartMoneySignal] = []
         self.pending_keys: set = set()
+        self.htf_cache: Dict[Tuple[str, str, int], Tuple[int, str]] = {}
         self._check_hourly_reset()
 
     def _check_hourly_reset(self):
