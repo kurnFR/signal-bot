@@ -178,6 +178,13 @@ class SmartMoneyState:
         for timeframe in CONFIG.get("htf_timeframes", ("5m", "15m")):
             if timeframe not in {"5m", "15m"}:
                 continue
+            interval_ms = 5 * 60_000 if timeframe == "5m" else 15 * 60_000
+            cache_key = (symbol, timeframe, signal_open_ms // interval_ms)
+            with self.lock:
+                cached = self.htf_cache.get(cache_key)
+            if cached is not None:
+                trends.append(cached[1])
+                continue
             try:
                 response = requests.get(
                     "https://api.binance.com/api/v3/klines",
@@ -202,7 +209,10 @@ class SmartMoneyState:
                     else "BEARISH" if close < fast < slow
                     else "NEUTRAL"
                 )
-                trends.append(f"{timeframe}:{trend}")
+                context = f"{timeframe}:{trend}"
+                with self.lock:
+                    self.htf_cache[cache_key] = (1 if trend == direction else -1 if direction != "NEUTRAL" and trend != "NEUTRAL" else 0, context)
+                trends.append(context)
             except Exception as exc:
                 logger.debug("HTF context unavailable for %s/%s: %s", symbol, timeframe, exc)
 
