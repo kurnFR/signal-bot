@@ -515,8 +515,8 @@ def process_kline_message(raw_msg):
         if event.get("e")!="kline": return
         kline=event.get("k",{}); symbol=event.get("s","").upper()
         if not kline.get("x"): return
-        volume=float(kline["v"]); quote_volume=float(kline["q"]); open_price=float(kline["o"]); close_price=float(kline["c"]); high_price=float(kline["h"]); low_price=float(kline["l"]); close_time=datetime.fromtimestamp(kline["t"]/1000,tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        candidate=state.detect_smart_money_signal(symbol,volume,quote_volume,close_price,open_price,high_price,low_price,close_time)
+        volume=float(kline["v"]); quote_volume=float(kline["q"]); open_price=float(kline["o"]); close_price=float(kline["c"]); high_price=float(kline["h"]); low_price=float(kline["l"]); taker_buy_quote=float(kline.get("Q", 0.0)) if kline.get("Q") is not None else None; close_time=datetime.fromtimestamp(kline["t"]/1000,tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        candidate=state.detect_smart_money_signal(symbol,volume,quote_volume,close_price,open_price,high_price,low_price,close_time,taker_buy_quote=taker_buy_quote)
         if candidate and state.register_signal(candidate): save_signal_to_db(candidate,telegram_sent=False); logger.info("📥 Candidate queued: %s | %s | Quality %.0f | RVOL %.2fx",candidate.symbol,candidate.signal_type,candidate.quality_score,candidate.rvol)
     except (json.JSONDecodeError,KeyError,ValueError,TypeError) as e: logger.warning("Invalid kline message: %s",e)
     except Exception as e: logger.error("Error processing message: %s",e,exc_info=True)
