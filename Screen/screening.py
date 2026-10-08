@@ -255,15 +255,25 @@ class SmartMoneyState:
             return 10.0
         return 0.0
 
-    def detect_smart_money_signal(self, symbol, volume, quote_volume, price, open_price, high, low, close_time):
+    def detect_smart_money_signal(self, symbol, volume, quote_volume, price, open_price, high, low, close_time, taker_buy_quote=None):
         self._check_hourly_reset()
-        is_ready, ema_vol, ema_quote = self.update_ema(symbol, volume, quote_volume)
+        # Compare the closed candle against the PREVIOUS EMA; including the
+        # spike itself in the denominator dilutes the anomaly.
+        with self.lock:
+            old_ema_quote = self.ema_quote_volume.get(symbol, 0.0)
+        is_ready, _, _ = self.update_ema(symbol, volume, quote_volume)
         if not is_ready: return None
         self.update_volume_history(symbol, volume, quote_volume)
-        rvol = quote_volume / ema_quote if ema_quote > 0 else 0
+        rvol = quote_volume / old_ema_quote if old_ema_quote > 0 else 0
         price_change_pct = (price - open_price) / open_price * 100 if open_price > 0 else 0
         price_range_pct = (high - low) / open_price * 100 if open_price > 0 else 0
         velocity = self.calculate_velocity(symbol, quote_volume)
+        direction = self._direction(price_change_pct)
+        taker_buy_ratio = (
+            min(max(float(taker_buy_quote) / quote_volume, 0.0), 1.0)
+            if taker_buy_quote is not None and quote_volume > 0
+            else None
+        )
         signal_type = None; base_priority = 0.0
         if rvol >= CONFIG["rvol_multiplier"]:
             signal_type = "RVOL_SPIKE"; base_priority = rvol * 10
@@ -272,21 +282,59 @@ class SmartMoneyState:
         elif CONFIG["enable_velocity_detection"] and velocity >= CONFIG["velocity_threshold"] and rvol >= CONFIG["rvol_multiplier"] * 0.7:
             signal_type = "VELOCITY_SURGE"; base_priority = velocity * 8
         if not signal_type: return None
+        # Quality is evidence-weighted, not simply "how extreme is volume".
+        # A pure 1m anomaly cannot earn 100/100 without HTF evidence.
         rvol_score = min(rvol / max(CONFIG["min_signal_rvol"], 1.0), 2.0) * 25.0
-        velocity_score = min(velocity / max(CONFIG["min_signal_velocity"], 1.0), 2.0) * 20.0
-        tightness_score = max(0.0, 1.0 - price_range_pct / max(CONFIG["divergence_max_price_change"], 0.0001)) * 20.0 if CONFIG["enable_divergence_detection"] else 0.0
-        movement_score = min(abs(price_change_pct), 1.0) * 10.0
-        quality_score = min(100.0, rvol_score + velocity_score + tightness_score + movement_score)
+        velocity_score = min(velocity / max(CONFIG["min_signal_velocity"], 1.0), 2.0) * 15.0
+        structure_score = self._score_structure(price_change_pct, open_price, high, low, price)
+        orderflow_score = (
+            self._score_orderflow(direction, taker_buy_ratio)
+            if CONFIG.get("use_taker_buy_confirmation", True) else 0.0
+        )
+        try:
+            signal_open_ms = int(datetime.strptime(
+                close_time, "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=timezone.utc).timestamp() * 1000)
+            htf_alignment, htf_context = self._fetch_htf_context(
+                symbol, signal_open_ms, direction
+            )
+        except (TypeError, ValueError):
+            htf_alignment, htf_context = 0, "UNAVAILABLE"
+        htf_score = self._score_htf(htf_alignment, htf_context, direction)
+        quality_score = min(
+            100.0,
+            rvol_score + velocity_score + structure_score + orderflow_score + htf_score,
+        )
+        if htf_context == "UNAVAILABLE":
+            quality_score = min(quality_score, CONFIG.get("max_quality_without_htf", 79.0))
         if quality_score < CONFIG.get("min_quality_score", 0): return None
         if CONFIG.get("require_confluence", True):
-            conditions = int(rvol >= CONFIG["min_signal_rvol"]) + int(velocity >= CONFIG["min_signal_velocity"]) + int(price_range_pct <= CONFIG["divergence_max_price_change"] and rvol >= CONFIG["rvol_multiplier"] * 0.8)
+            conditions = (
+                int(rvol >= CONFIG["min_signal_rvol"])
+                + int(velocity >= CONFIG["min_signal_velocity"])
+                + int(
+                    price_range_pct <= CONFIG["divergence_max_price_change"]
+                    and rvol >= CONFIG["rvol_multiplier"] * 0.8
+                )
+                + int(taker_buy_ratio is not None)
+            )
             if conditions < 2: return None
+            # 80+ is reserved for signals with real HTF evidence.
+            if quality_score >= 80.0 and htf_context == "UNAVAILABLE":
+                return None
         signal_key = (symbol, signal_type)
         with self.lock:
             if self.seen_signal_candles.get(signal_key) == close_time: return None
             self.seen_signal_candles[signal_key] = close_time
         ranking = quality_score * 1000.0 + base_priority
-        return SmartMoneySignal(-ranking, symbol, signal_type, rvol, volume, quote_volume, price, price_change_pct, velocity, time.time(), close_time, quality_score)
+        return SmartMoneySignal(
+            -ranking, symbol, signal_type, rvol, volume, quote_volume, price,
+            price_change_pct, velocity, time.time(), close_time, quality_score,
+            direction=direction,
+            taker_buy_ratio=taker_buy_ratio,
+            htf_alignment=htf_alignment,
+            htf_context=htf_context,
+        )
 
     def register_signal(self, signal):
         key = (signal.symbol, signal.signal_type, signal.candle_time)
