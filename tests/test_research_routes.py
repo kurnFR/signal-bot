@@ -18,6 +18,7 @@ class TestResearchRoutes(unittest.TestCase):
             "/api/research/retailbot2/positions",
             "/api/research/retailbot2/trades",
             "/api/research/retailbot2/stats",
+            "/api/research/screener/status",
             "/api/research/screener/signals",
             "/api/research/screener/stats",
             "/api/research/retailbot2/control",
@@ -113,6 +114,43 @@ class TestResearchRoutes(unittest.TestCase):
             json={"enabled": True, "overrides": {"non_existent_setting": 123}}
         )
         self.assertEqual(bad_res.status_code, 400)
+
+    @patch("web.routes.research_routes.get_screener_control")
+    @patch("web.routes.research_routes.get_screener_status")
+    def test_screener_status_endpoint(self, mock_status, mock_control):
+        mock_control.return_value = {"enabled": True, "overrides": {}, "updated_at": None}
+        mock_status.return_value = {
+            "running": True,
+            "database_ok": True,
+            "pid": 1234,
+            "timeframe": "5m",
+            "symbols_monitored": 247,
+            "last_beat_at": "2026-10-06 03:30:00",
+            "last_signal_at": "2026-10-06 03:29:00",
+            "last_universe_refresh": "2026-10-06 03:00:00",
+        }
+        res = self.client.get("/api/research/screener/status", headers=self.headers)
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data["running"])
+        self.assertTrue(data["enabled"])
+        self.assertEqual(data["symbols_monitored"], 247)
+        self.assertEqual(data["timeframe"], "5m")
+
+    def test_screener_control_accepts_boolean_overrides(self):
+        res = self.client.post(
+            "/api/research/screener/control",
+            headers=self.headers,
+            json={
+                "enabled": True,
+                "overrides": {
+                    "enable_velocity_detection": True,
+                    "require_confluence": False,
+                    "min_quality_score": 70,
+                },
+            },
+        )
+        self.assertEqual(res.status_code, 200)
 
     @patch("web.routes.research_routes.get_retailbot2_stats")
     def test_retailbot2_stats_error_handling(self, mock_stats):

@@ -15,16 +15,17 @@ process itself is still your responsibility to keep running (tmux/systemd/
 supervisor) -- these toggles only pause/resume what it does once it's up.
 """
 import logging
+import os
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 import math
 
 from db.db import (
     get_retailbot2_open_trades, get_retailbot2_recent_trades, get_retailbot2_stats,
     get_recent_smart_money_signals, get_smart_money_stats,
     get_retailbot2_control, set_retailbot2_control, RETAILBOT2_TUNABLE_FIELDS,
-    get_screener_control, set_screener_control, SCREENER_TUNABLE_FIELDS,
+    get_screener_control, set_screener_control, get_screener_status, SCREENER_TUNABLE_FIELDS,
 )
 
 router = APIRouter(prefix="/api/research", tags=["research-bots"])
@@ -33,7 +34,7 @@ logger = logging.getLogger("web.research_routes")
 
 class BotControlRequest(BaseModel):
     enabled: bool
-    overrides: Dict[str, float] = Field(default_factory=dict)
+    overrides: Dict[str, Any] = Field(default_factory=dict)
 
 
 def _filter_overrides(overrides: Dict, allowed: set, bot_label: str) -> Dict:
@@ -47,12 +48,20 @@ def _filter_overrides(overrides: Dict, allowed: set, bot_label: str) -> Dict:
             status_code=400,
             detail=f"Not a tunable {bot_label} parameter: {', '.join(rejected)}. Allowed: {sorted(allowed)}",
         )
-    invalid_values = [
-        k for k, value in overrides.items()
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value))
-    ]
+    boolean_fields = {
+        "enable_divergence_detection",
+        "enable_velocity_detection",
+        "require_confluence",
+    }
+    invalid_values = []
+    for key, value in overrides.items():
+        if key in boolean_fields:
+            if not isinstance(value, bool):
+                invalid_values.append(key)
+        elif isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            invalid_values.append(key)
     if invalid_values:
-        raise HTTPException(status_code=400, detail=f"Override values must be finite numbers: {', '.join(invalid_values)}")
+        raise HTTPException(status_code=400, detail=f"Override values must be valid booleans or finite numbers: {', '.join(invalid_values)}")
 
     bounds = {
         "rsi_oversold": (1, 49), "rsi_overbought": (51, 99), "rsi_zone_width": (0, 20),
@@ -146,6 +155,25 @@ def retailbot2_control_set(req: BotControlRequest):
     except Exception as e:
         logger.exception("retailbot2_control_set failed")
         raise HTTPException(status_code=500, detail=f"Failed to update retailbot2 control: {e}")
+
+
+@router.get("/screener/status")
+def screener_status():
+    try:
+        try:
+            control = get_screener_control()
+        except Exception:
+            # The screener creates its control table on first startup; a missing
+            # table therefore means "not started yet", not a dashboard failure.
+            control = {"enabled": True}
+        status = get_screener_status()
+        status["enabled"] = bool(control.get("enabled", True))
+        status["timeframe"] = status.get("timeframe") or os.getenv("TIMEFRAME", "1m")
+        status["last_signal_at"] = status.get("last_signal_at")
+        return status
+    except Exception as e:
+        logger.exception("screener_status failed")
+        raise HTTPException(status_code=500, detail=f"Failed to load screener status: {e}")
 
 
 @router.get("/screener/control")

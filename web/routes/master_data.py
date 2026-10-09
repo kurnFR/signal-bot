@@ -21,17 +21,17 @@ JOBS_LOCK = threading.Lock()
 
 
 class BackfillRequest(BaseModel):
-    symbol: str = Field(..., example="BTCUSDT")
-    market: str = Field("spot", example="spot")  # spot or futures
-    timeframe: str = Field("1h", example="1h")   # 1m, 5m, 15m, 1h, 4h, 1d
-    years: float = Field(1.0, ge=0.01, le=10.0, example=1.0)
-    auto_compute_features: bool = Field(True, example=True)
+    symbol: str = Field(..., json_schema_extra={"example": "BTCUSDT"})
+    market: str = Field("spot", json_schema_extra={"example": "spot"})  # spot or futures
+    timeframe: str = Field("1h", json_schema_extra={"example": "1h"})   # 1m, 5m, 15m, 1h, 4h, 1d
+    years: float = Field(1.0, ge=0.01, le=10.0, json_schema_extra={"example": 1.0})
+    auto_compute_features: bool = Field(True, json_schema_extra={"example": True})
 
 
 class FeatureBuildRequest(BaseModel):
-    symbol: str = Field(..., example="BTCUSDT")
-    market: str = Field("spot", example="spot")
-    timeframe: str = Field("1h", example="1h")
+    symbol: str = Field(..., json_schema_extra={"example": "BTCUSDT"})
+    market: str = Field("spot", json_schema_extra={"example": "spot"})
+    timeframe: str = Field("1h", json_schema_extra={"example": "1h"})
 
 
 def _run_backfill_job(job_id: str, symbol: str, market: str, timeframe: str, years: float, auto_compute_features: bool):

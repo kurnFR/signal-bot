@@ -7,6 +7,7 @@ import mysql.connector
 from mysql.connector import pooling
 import logging
 import json
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import sys, os
@@ -1139,7 +1140,7 @@ SCREENER_TUNABLE_FIELDS = {
     "enable_divergence_detection", "enable_velocity_detection",
     "max_alerts_per_hour", "max_alerts_per_symbol_per_hour", "alert_cooldown_sec",
     "require_confluence", "min_signal_rvol", "min_signal_velocity",
-    "min_quote_volume_24h", "min_market_cap_usd",
+    "min_quote_volume_24h", "min_market_cap_usd", "min_quality_score",
 }
 
 
@@ -1174,6 +1175,112 @@ def set_retailbot2_control(enabled, overrides):
         )
         conn.commit()
         cur.close()
+    finally:
+        conn.close()
+
+
+def update_screener_heartbeat(*, pid=None, timeframe=None, symbols_monitored=None, last_signal_at=None, last_universe_refresh_at=None):
+    """Persist lightweight process telemetry so the dashboard can distinguish
+    a healthy-but-quiet screener from a process that is not running.
+
+    Screener candle timestamps arrive as ISO-8601 strings (for example,
+    2026-10-06T22:37:00Z), while MariaDB DATETIME expects a datetime
+    value. Normalize ISO strings to UTC-naive datetimes before binding them.
+    """
+    def _normalize_datetime(value):
+        if value is None or isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if parsed.tzinfo is not None:
+                    parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+                return parsed
+            except ValueError:
+                logger.warning("Invalid screener heartbeat datetime: %r", value)
+                return None
+        return value
+
+    last_signal_at = _normalize_datetime(last_signal_at)
+    last_universe_refresh_at = _normalize_datetime(last_universe_refresh_at)
+
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO screener_heartbeat
+                (id, pid, last_beat_at, timeframe, symbols_monitored, last_signal_at, last_universe_refresh_at)
+            VALUES (1, %s, UTC_TIMESTAMP(), %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                pid=VALUES(pid),
+                last_beat_at=UTC_TIMESTAMP(),
+                timeframe=COALESCE(VALUES(timeframe), timeframe),
+                symbols_monitored=COALESCE(VALUES(symbols_monitored), symbols_monitored),
+                last_signal_at=COALESCE(VALUES(last_signal_at), last_signal_at),
+                last_universe_refresh_at=COALESCE(VALUES(last_universe_refresh_at), last_universe_refresh_at)
+            """,
+            (pid, timeframe, symbols_monitored, last_signal_at, last_universe_refresh_at),
+        )
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+
+def get_screener_status():
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT pid, last_beat_at, timeframe, symbols_monitored, last_signal_at,
+                       last_universe_refresh_at
+                FROM screener_heartbeat
+                WHERE id=1
+                """
+            )
+            row = cur.fetchone()
+        except mysql.connector.Error as exc:
+            cur.close()
+            if exc.errno == 1146:
+                return {
+                    "running": False,
+                    "database_ok": True,
+                    "timeframe": None,
+                    "symbols_monitored": 0,
+                    "last_beat_at": None,
+                    "last_signal_at": None,
+                    "last_universe_refresh": None,
+                }
+            raise
+        cur.close()
+        if not row:
+            return {
+                "running": False,
+                "database_ok": True,
+                "timeframe": None,
+                "symbols_monitored": 0,
+                "last_beat_at": None,
+                "last_signal_at": None,
+                "last_universe_refresh": None,
+            }
+        last_beat_at = row.get("last_beat_at")
+        running = bool(last_beat_at and (datetime.utcnow() - last_beat_at).total_seconds() <= 150)
+        for key in ("last_beat_at", "last_signal_at", "last_universe_refresh_at"):
+            if row.get(key) is not None:
+                row[key] = str(row[key])
+        return {
+            "running": running,
+            "database_ok": True,
+            "pid": row.get("pid"),
+            "timeframe": row.get("timeframe"),
+            "symbols_monitored": int(row.get("symbols_monitored") or 0),
+            "last_beat_at": row.get("last_beat_at"),
+            "last_signal_at": row.get("last_signal_at"),
+            "last_universe_refresh": row.get("last_universe_refresh_at"),
+        }
     finally:
         conn.close()
 

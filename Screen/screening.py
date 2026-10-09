@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from db.db import get_pool
+from db.db import get_pool, update_screener_heartbeat
 
 CONFIG = {
     "enabled": True,
@@ -49,6 +49,13 @@ CONFIG = {
     "min_signal_rvol": float(os.getenv("MIN_SIGNAL_RVOL", "5.0")),
     "min_signal_velocity": float(os.getenv("MIN_SIGNAL_VELOCITY", "3.0")),
     "min_quality_score": float(os.getenv("MIN_QUALITY_SCORE", "70")),
+    "htf_timeframes": tuple(tf.strip() for tf in os.getenv("HTF_TIMEFRAMES", "5m,15m").split(",") if tf.strip()),
+    "htf_ema_fast": int(os.getenv("HTF_EMA_FAST", "9")),
+    "htf_ema_slow": int(os.getenv("HTF_EMA_SLOW", "21")),
+    "htf_min_bars": int(os.getenv("HTF_MIN_BARS", "25")),
+    "htf_timeout_sec": float(os.getenv("HTF_TIMEOUT_SEC", "3")),
+    "max_quality_without_htf": float(os.getenv("MAX_QUALITY_WITHOUT_HTF", "79")),
+    "use_taker_buy_confirmation": os.getenv("USE_TAKER_BUY_CONFIRMATION", "true").lower() == "true",
     "alert_selection_window_sec": float(os.getenv("ALERT_SELECTION_WINDOW_SEC", "3")),
     "daily_reset_utc_hour": int(os.getenv("DAILY_RESET_UTC_HOUR", "0")),
     "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN"),
@@ -62,7 +69,13 @@ CONFIG = {
     "log_file": os.getenv("LOG_FILE", "smart_money_detector.log"),
 }
 
+# Immutable baseline loaded from environment at process startup. Dashboard overrides
+# are intentionally reapplied from this baseline on every control-loop tick so that
+# removing an override really restores the configured environment default.
+DEFAULT_CONFIG = CONFIG.copy()
+
 logging.basicConfig(level=getattr(logging, CONFIG["log_level"].upper()), format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S", handlers=[logging.FileHandler(CONFIG["log_file"], encoding="utf-8"), logging.StreamHandler()])
+
 logger = logging.getLogger("SmartMoneyDetector")
 
 @dataclass(order=True)
@@ -79,6 +92,10 @@ class SmartMoneySignal:
     timestamp: float = field(compare=False)
     candle_time: str = field(compare=False)
     quality_score: float = field(compare=False)
+    direction: str = field(compare=False, default="NEUTRAL")
+    taker_buy_ratio: Optional[float] = field(compare=False, default=None)
+    htf_alignment: int = field(compare=False, default=0)
+    htf_context: str = field(compare=False, default="UNAVAILABLE")
 
 class SmartMoneyState:
     def __init__(self, ema_length: int, rvol_threshold: float, max_alerts_per_hour: int):
@@ -99,6 +116,7 @@ class SmartMoneyState:
         self.shutdown_flag = False
         self.pending_signals: List[SmartMoneySignal] = []
         self.pending_keys: set = set()
+        self.htf_cache: Dict[Tuple[str, str, int], Tuple[int, str]] = {}
         self._check_hourly_reset()
 
     def _check_hourly_reset(self):
@@ -136,15 +154,137 @@ class SmartMoneyState:
             prior_avg = sum(list(history)[:-1]) / (len(history) - 1)
             return current_quote_vol / prior_avg if prior_avg > 0 else 1.0
 
-    def detect_smart_money_signal(self, symbol, volume, quote_volume, price, open_price, high, low, close_time):
+    @staticmethod
+    def _ema(values: List[float], span: int) -> float:
+        if not values:
+            return 0.0
+        alpha = 2.0 / (span + 1.0)
+        ema = values[0]
+        for value in values[1:]:
+            ema = alpha * value + (1.0 - alpha) * ema
+        return ema
+
+    @staticmethod
+    def _direction(price_change_pct: float) -> str:
+        if price_change_pct >= 0.10:
+            return "BULLISH"
+        if price_change_pct <= -0.10:
+            return "BEARISH"
+        return "NEUTRAL"
+
+    def _fetch_htf_context(self, symbol: str, signal_open_ms: int, direction: str) -> Tuple[int, str]:
+        """Use only HTF candles that were already closed at the 1m signal."""
+        trends = []
+        for timeframe in CONFIG.get("htf_timeframes", ("5m", "15m")):
+            if timeframe not in {"5m", "15m"}:
+                continue
+            interval_ms = 5 * 60_000 if timeframe == "5m" else 15 * 60_000
+            cache_key = (symbol, timeframe, signal_open_ms // interval_ms)
+            with self.lock:
+                cached = self.htf_cache.get(cache_key)
+            if cached is not None:
+                trends.append(cached[1])
+                continue
+            try:
+                response = requests.get(
+                    "https://api.binance.com/api/v3/klines",
+                    params={
+                        "symbol": symbol,
+                        "interval": timeframe,
+                        "limit": max(CONFIG["htf_min_bars"], CONFIG["htf_ema_slow"] + 4),
+                        "endTime": signal_open_ms - 1,
+                    },
+                    timeout=CONFIG["htf_timeout_sec"],
+                )
+                response.raise_for_status()
+                rows = response.json()
+                closes = [float(row[4]) for row in rows if len(row) >= 5]
+                if len(closes) < CONFIG["htf_ema_slow"]:
+                    continue
+                close = closes[-1]
+                fast = self._ema(closes, CONFIG["htf_ema_fast"])
+                slow = self._ema(closes, CONFIG["htf_ema_slow"])
+                trend = (
+                    "BULLISH" if close > fast > slow
+                    else "BEARISH" if close < fast < slow
+                    else "NEUTRAL"
+                )
+                context = f"{timeframe}:{trend}"
+                with self.lock:
+                    self.htf_cache[cache_key] = (1 if trend == direction else -1 if direction != "NEUTRAL" and trend != "NEUTRAL" else 0, context)
+                trends.append(context)
+            except Exception as exc:
+                logger.debug("HTF context unavailable for %s/%s: %s", symbol, timeframe, exc)
+
+        if not trends:
+            return 0, "UNAVAILABLE"
+
+        alignment = sum(
+            1 if item.endswith(direction) else -1
+            if direction != "NEUTRAL" and (
+                item.endswith("BULLISH") or item.endswith("BEARISH")
+            ) else 0
+            for item in trends
+        )
+        return alignment, ",".join(trends)
+
+    @staticmethod
+    def _score_structure(price_change_pct: float, open_price: float, high: float, low: float, price: float) -> float:
+        price_range = max(high - low, 0.0)
+        if price_range <= 0 or open_price <= 0:
+            return 0.0
+        body_ratio = min(abs(price - open_price) / price_range, 1.0)
+        close_location = (price - low) / price_range
+        direction = SmartMoneyState._direction(price_change_pct)
+        directional_close = (
+            close_location if direction == "BULLISH"
+            else 1.0 - close_location if direction == "BEARISH"
+            else 0.5
+        )
+        return min(15.0, body_ratio * 7.5 + directional_close * 7.5)
+
+    @staticmethod
+    def _score_orderflow(direction: str, taker_buy_ratio: Optional[float]) -> float:
+        if taker_buy_ratio is None:
+            return 0.0
+        ratio = min(max(taker_buy_ratio, 0.0), 1.0)
+        aligned = ratio if direction == "BULLISH" else (
+            1.0 - ratio if direction == "BEARISH"
+            else abs(ratio - 0.5) + 0.5
+        )
+        return min(15.0, max(0.0, (aligned - 0.5) / 0.20) * 15.0)
+
+    @staticmethod
+    def _score_htf(alignment: int, context: str, direction: str) -> float:
+        if context == "UNAVAILABLE":
+            return 0.0
+        if direction == "NEUTRAL":
+            return 5.0 if alignment == 0 else 0.0
+        if alignment >= 2:
+            return 20.0
+        if alignment == 1:
+            return 10.0
+        return 0.0
+
+    def detect_smart_money_signal(self, symbol, volume, quote_volume, price, open_price, high, low, close_time, taker_buy_quote=None):
         self._check_hourly_reset()
-        is_ready, ema_vol, ema_quote = self.update_ema(symbol, volume, quote_volume)
+        # Compare the closed candle against the PREVIOUS EMA; including the
+        # spike itself in the denominator dilutes the anomaly.
+        with self.lock:
+            old_ema_quote = self.ema_quote_volume.get(symbol, 0.0)
+        is_ready, _, _ = self.update_ema(symbol, volume, quote_volume)
         if not is_ready: return None
         self.update_volume_history(symbol, volume, quote_volume)
-        rvol = quote_volume / ema_quote if ema_quote > 0 else 0
+        rvol = quote_volume / old_ema_quote if old_ema_quote > 0 else 0
         price_change_pct = (price - open_price) / open_price * 100 if open_price > 0 else 0
         price_range_pct = (high - low) / open_price * 100 if open_price > 0 else 0
         velocity = self.calculate_velocity(symbol, quote_volume)
+        direction = self._direction(price_change_pct)
+        taker_buy_ratio = (
+            min(max(float(taker_buy_quote) / quote_volume, 0.0), 1.0)
+            if taker_buy_quote is not None and quote_volume > 0
+            else None
+        )
         signal_type = None; base_priority = 0.0
         if rvol >= CONFIG["rvol_multiplier"]:
             signal_type = "RVOL_SPIKE"; base_priority = rvol * 10
@@ -153,21 +293,59 @@ class SmartMoneyState:
         elif CONFIG["enable_velocity_detection"] and velocity >= CONFIG["velocity_threshold"] and rvol >= CONFIG["rvol_multiplier"] * 0.7:
             signal_type = "VELOCITY_SURGE"; base_priority = velocity * 8
         if not signal_type: return None
+        # Quality is evidence-weighted, not simply "how extreme is volume".
+        # A pure 1m anomaly cannot earn 100/100 without HTF evidence.
         rvol_score = min(rvol / max(CONFIG["min_signal_rvol"], 1.0), 2.0) * 25.0
-        velocity_score = min(velocity / max(CONFIG["min_signal_velocity"], 1.0), 2.0) * 20.0
-        tightness_score = max(0.0, 1.0 - price_range_pct / max(CONFIG["divergence_max_price_change"], 0.0001)) * 20.0 if CONFIG["enable_divergence_detection"] else 0.0
-        movement_score = min(abs(price_change_pct), 1.0) * 10.0
-        quality_score = min(100.0, rvol_score + velocity_score + tightness_score + movement_score)
+        velocity_score = min(velocity / max(CONFIG["min_signal_velocity"], 1.0), 2.0) * 15.0
+        structure_score = self._score_structure(price_change_pct, open_price, high, low, price)
+        orderflow_score = (
+            self._score_orderflow(direction, taker_buy_ratio)
+            if CONFIG.get("use_taker_buy_confirmation", True) else 0.0
+        )
+        try:
+            signal_open_ms = int(datetime.strptime(
+                close_time, "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=timezone.utc).timestamp() * 1000)
+            htf_alignment, htf_context = self._fetch_htf_context(
+                symbol, signal_open_ms, direction
+            )
+        except (TypeError, ValueError):
+            htf_alignment, htf_context = 0, "UNAVAILABLE"
+        htf_score = self._score_htf(htf_alignment, htf_context, direction)
+        quality_score = min(
+            100.0,
+            rvol_score + velocity_score + structure_score + orderflow_score + htf_score,
+        )
+        if htf_context == "UNAVAILABLE":
+            quality_score = min(quality_score, CONFIG.get("max_quality_without_htf", 79.0))
         if quality_score < CONFIG.get("min_quality_score", 0): return None
         if CONFIG.get("require_confluence", True):
-            conditions = int(rvol >= CONFIG["min_signal_rvol"]) + int(velocity >= CONFIG["min_signal_velocity"]) + int(price_range_pct <= CONFIG["divergence_max_price_change"] and rvol >= CONFIG["rvol_multiplier"] * 0.8)
+            conditions = (
+                int(rvol >= CONFIG["min_signal_rvol"])
+                + int(velocity >= CONFIG["min_signal_velocity"])
+                + int(
+                    price_range_pct <= CONFIG["divergence_max_price_change"]
+                    and rvol >= CONFIG["rvol_multiplier"] * 0.8
+                )
+                + int(taker_buy_ratio is not None)
+            )
             if conditions < 2: return None
+            # 80+ is reserved for signals with real HTF evidence.
+            if quality_score >= 80.0 and htf_context == "UNAVAILABLE":
+                return None
         signal_key = (symbol, signal_type)
         with self.lock:
             if self.seen_signal_candles.get(signal_key) == close_time: return None
             self.seen_signal_candles[signal_key] = close_time
         ranking = quality_score * 1000.0 + base_priority
-        return SmartMoneySignal(-ranking, symbol, signal_type, rvol, volume, quote_volume, price, price_change_pct, velocity, time.time(), close_time, quality_score)
+        return SmartMoneySignal(
+            -ranking, symbol, signal_type, rvol, volume, quote_volume, price,
+            price_change_pct, velocity, time.time(), close_time, quality_score,
+            direction=direction,
+            taker_buy_ratio=taker_buy_ratio,
+            htf_alignment=htf_alignment,
+            htf_context=htf_context,
+        )
 
     def register_signal(self, signal):
         key = (signal.symbol, signal.signal_type, signal.candle_time)
@@ -211,7 +389,9 @@ class SmartMoneyTelegram:
         self.token=token; self.chat_id=chat_id; self.url=f"https://api.telegram.org/bot{token}/sendMessage" if token else ""; self._last_send=0; self._lock=threading.Lock(); self.session=requests.Session()
         self.session.mount("https://",HTTPAdapter(max_retries=Retry(total=3,backoff_factor=0.3,status_forcelist=[429,500,502,503,504])))
     def send_early_alert(self, signal):
-        if not self.token or not self.chat_id: return False
+        if not self.token or not self.chat_id:
+            logger.error("❌ Telegram alert skipped: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing")
+            return False
         with self._lock:
             elapsed=time.time()-self._last_send
             if elapsed<0.8: time.sleep(0.8-elapsed)
@@ -221,12 +401,21 @@ class SmartMoneyTelegram:
             elif signal.price_change_pct>0.5: interpretation,action_hint="🟢 Strong buying pressure","Momentum building"
             elif signal.price_change_pct<-0.5: interpretation,action_hint="🔴 Strong selling pressure","Momentum breaking down"
             else: interpretation,action_hint="🟡 Unusual volume - watch direction","Wait for price confirmation"
-            message=(f"{emoji} <b>SMART MONEY EARLY SIGNAL</b>\n━━━━━━━━━━━━━━━━━━━━━━\nPair: <b>{escape(str(signal.symbol))}</b>\nSignal: <code>{escape(str(signal.signal_type))}</code>\nQuality: <b>{signal.quality_score:.0f}/100</b>\nRVOL: <b>{signal.rvol:.2f}x</b> (vs {CONFIG['ema_length']}-EMA)\nVelocity: <b>{signal.volume_velocity:.2f}x</b> acceleration\nPrice: <code>${signal.price:.6f}</code> ({signal.price_change_pct:+.3f}%)\nVolume: <code>{signal.volume:,.0f}</code> | Quote: <code>${signal.quote_volume:,.0f}</code>\nTime: <code>{escape(str(signal.candle_time))}</code> UTC\n━━━━━━━━━━━━━━━━━━━━━━\n<b>Interpretation:</b> {interpretation}\n<i>Action: {action_hint}</i>\n<i>⚠️ Early signal - confirm with your strategy before entry</i>")
+            orderflow = f"{signal.taker_buy_ratio:.1%}" if signal.taker_buy_ratio is not None else "n/a"
+            message=(f"{emoji} <b>SMART MONEY EARLY SIGNAL</b>\n━━━━━━━━━━━━━━━━━━━━━━\nPair: <b>{escape(str(signal.symbol))}</b>\nSignal: <code>{escape(str(signal.signal_type))}</code>\nQuality: <b>{signal.quality_score:.0f}/100</b>\nBias: <b>{signal.direction}</b>\nRVOL: <b>{signal.rvol:.2f}x</b> (vs {CONFIG['ema_length']}-EMA)\nVelocity: <b>{signal.volume_velocity:.2f}x</b> acceleration\nTaker Buy: <b>{orderflow}</b>\nHTF: <b>{escape(signal.htf_context)}</b>\nPrice: <code>${signal.price:.6f}</code> ({signal.price_change_pct:+.3f}%)\nVolume: <code>{signal.volume:,.0f}</code> | Quote: <code>${signal.quote_volume:,.0f}</code>\nTime: <code>{escape(str(signal.candle_time))}</code> UTC\n━━━━━━━━━━━━━━━━━━━━━━\n<b>Interpretation:</b> {interpretation}\n<i>Action: {action_hint}</i>\n<i>⚠️ Early signal - confirm with your strategy before entry</i>")
             try:
                 resp=self.session.post(self.url,json={"chat_id":self.chat_id,"text":message,"parse_mode":"HTML","disable_web_page_preview":True},timeout=8); resp.raise_for_status(); self._last_send=time.time(); logger.info("✅ Early alert: %s | %s | Quality %.0f | RVOL %.2fx",signal.symbol,signal.signal_type,signal.quality_score,signal.rvol); return True
-            except Exception as e: logger.error("❌ Telegram error: %s",e); return False
+            except requests.HTTPError as e:
+                body = getattr(e.response, "text", "")[:500] if getattr(e, "response", None) is not None else ""
+                logger.error("❌ Telegram API error: status=%s body=%s", getattr(e.response, "status_code", None), body)
+                return False
+            except Exception as e:
+                logger.error("❌ Telegram request error: %s", e)
+                return False
     def send(self,text):
-        if not self.token or not self.chat_id: return False
+        if not self.token or not self.chat_id:
+            logger.error("❌ Telegram message skipped: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing")
+            return False
         with self._lock:
             elapsed=time.time()-self._last_send
             if elapsed<0.8: time.sleep(0.8-elapsed)
@@ -235,6 +424,10 @@ class SmartMoneyTelegram:
             except Exception as e: logger.error("❌ Telegram error: %s",e); return False
 
 telegram=SmartMoneyTelegram(CONFIG["telegram_bot_token"],CONFIG["telegram_chat_id"])
+if CONFIG["telegram_bot_token"] and CONFIG["telegram_chat_id"]:
+    logger.info("📨 Telegram alert transport configured")
+else:
+    logger.warning("⚠️ Telegram alerts are NOT configured: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing")
 
 
 def ensure_signal_table():
@@ -242,7 +435,14 @@ def ensure_signal_table():
     try:
         cur=conn.cursor(); cur.execute("""CREATE TABLE IF NOT EXISTS smart_money_signals (id BIGINT AUTO_INCREMENT PRIMARY KEY, symbol VARCHAR(20) NOT NULL, signal_type VARCHAR(30) NOT NULL, rvol DECIMAL(12,4) NOT NULL, volume DECIMAL(30,8) NOT NULL, quote_volume DECIMAL(20,2) NOT NULL, price DECIMAL(20,8) NOT NULL, price_change_pct DECIMAL(10,4) NOT NULL, volume_velocity DECIMAL(12,4) NOT NULL, quality_score DECIMAL(6,2) NOT NULL DEFAULT 0, candle_time VARCHAR(32) NOT NULL, telegram_sent BOOLEAN NOT NULL DEFAULT FALSE, detected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_smsig_symbol_time (symbol, detected_at), INDEX idx_smsig_type_time (signal_type, detected_at), UNIQUE KEY uq_smsig_candle (symbol, signal_type, candle_time)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
         cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS quality_score DECIMAL(6,2) NOT NULL DEFAULT 0")
+        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS direction VARCHAR(10) NOT NULL DEFAULT 'NEUTRAL'")
+        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS taker_buy_ratio DECIMAL(8,6) NULL")
+        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS htf_alignment TINYINT NOT NULL DEFAULT 0")
+        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS htf_context VARCHAR(64) NOT NULL DEFAULT 'UNAVAILABLE'")
         cur.execute("""CREATE TABLE IF NOT EXISTS screener_control (id INT PRIMARY KEY DEFAULT 1, enabled BOOLEAN NOT NULL DEFAULT TRUE, overrides_json TEXT NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, CONSTRAINT chk_screener_control_singleton CHECK (id = 1)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+        cur.execute("""CREATE TABLE IF NOT EXISTS screener_heartbeat (id INT PRIMARY KEY DEFAULT 1, pid INT NULL, last_beat_at DATETIME NULL, timeframe VARCHAR(20) NULL, symbols_monitored INT NOT NULL DEFAULT 0, last_signal_at DATETIME NULL, last_universe_refresh_at DATETIME NULL, CONSTRAINT chk_screener_heartbeat_singleton CHECK (id = 1)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+        cur.execute("ALTER TABLE screener_heartbeat ADD COLUMN IF NOT EXISTS timeframe VARCHAR(20) NULL")
+        cur.execute("INSERT IGNORE INTO screener_heartbeat (id) VALUES (1)")
         cur.execute("INSERT IGNORE INTO screener_control (id,enabled,overrides_json) VALUES (1,TRUE,NULL)"); conn.commit(); cur.close(); logger.info("✅ screener persistence tables ready")
     except Exception as e: logger.error("❌ ensure_signal_table failed: %s",e)
     finally: conn.close()
@@ -256,7 +456,14 @@ def reload_control():
     except Exception as e: logger.error("❌ reload_control: %s",e); return False
     finally: conn.close()
     if not row: return False
-    was_enabled=CONFIG.get("enabled",True); CONFIG["enabled"]=bool(row["enabled"])
+    was_enabled=CONFIG.get("enabled",True)
+    CONFIG["enabled"]=bool(row["enabled"])
+    # Reset all dashboard-tunable values to the process baseline first. The DB
+    # stores the complete current override set, so an omitted key means "use
+    # the environment default" rather than "keep the previous runtime value".
+    for key in _TUNABLE_CONFIG_KEYS:
+        if key in DEFAULT_CONFIG:
+            CONFIG[key]=DEFAULT_CONFIG[key]
     if was_enabled!=CONFIG["enabled"]:
         state_str="ENABLED" if CONFIG["enabled"] else "PAUSED (alerts suppressed)"; logger.info("🎛️ Screener %s via dashboard control",state_str); telegram.send(f"🎛️ <b>Smart Money Screener {state_str}</b> (via web dashboard)")
     try: overrides=json.loads(row["overrides_json"]) if row["overrides_json"] else {}
@@ -274,10 +481,16 @@ def reload_control():
     return universe_changed
 
 def save_signal_to_db(signal,telegram_sent):
+    try:
+        update_screener_heartbeat(last_signal_at=signal.candle_time)
+    except Exception as e:
+        logger.warning("⚠️ screener heartbeat signal update failed: %s", e)
     try: conn=get_pool().get_connection()
     except Exception as e: logger.error("❌ save_signal_to_db connection: %s",e); return
+    cur = None
     try:
-        cur=conn.cursor(); cur.execute("""INSERT INTO smart_money_signals (symbol,signal_type,rvol,volume,quote_volume,price,price_change_pct,volume_velocity,quality_score,candle_time,telegram_sent) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE quality_score=GREATEST(quality_score,VALUES(quality_score)),telegram_sent=telegram_sent OR VALUES(telegram_sent)""",(signal.symbol,signal.signal_type,signal.rvol,signal.volume,signal.quote_volume,signal.price,signal.price_change_pct,signal.volume_velocity,signal.quality_score,signal.candle_time,telegram_sent)); conn.commit(); cur.close()
+        cur = conn.cursor()
+        cur.execute("""INSERT INTO smart_money_signals (symbol,signal_type,rvol,volume,quote_volume,price,price_change_pct,volume_velocity,quality_score,direction,taker_buy_ratio,htf_alignment,htf_context,candle_time,telegram_sent) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE quality_score=VALUES(quality_score),direction=VALUES(direction),taker_buy_ratio=VALUES(taker_buy_ratio),htf_alignment=VALUES(htf_alignment),htf_context=VALUES(htf_context),telegram_sent=telegram_sent OR VALUES(telegram_sent)""",(signal.symbol,signal.signal_type,signal.rvol,signal.volume,signal.quote_volume,signal.price,signal.price_change_pct,signal.volume_velocity,signal.quality_score,signal.direction,signal.taker_buy_ratio,signal.htf_alignment,signal.htf_context,signal.candle_time,telegram_sent)); conn.commit(); cur.close()
     except Exception as e: logger.error("❌ save_signal_to_db failed for %s: %s",signal.symbol,e)
     finally: conn.close()
 
@@ -320,8 +533,8 @@ def process_kline_message(raw_msg):
         if event.get("e")!="kline": return
         kline=event.get("k",{}); symbol=event.get("s","").upper()
         if not kline.get("x"): return
-        volume=float(kline["v"]); quote_volume=float(kline["q"]); open_price=float(kline["o"]); close_price=float(kline["c"]); high_price=float(kline["h"]); low_price=float(kline["l"]); close_time=datetime.fromtimestamp(kline["t"]/1000,tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        candidate=state.detect_smart_money_signal(symbol,volume,quote_volume,close_price,open_price,high_price,low_price,close_time)
+        volume=float(kline["v"]); quote_volume=float(kline["q"]); open_price=float(kline["o"]); close_price=float(kline["c"]); high_price=float(kline["h"]); low_price=float(kline["l"]); taker_buy_quote=float(kline.get("Q", 0.0)) if kline.get("Q") is not None else None; close_time=datetime.fromtimestamp(kline["t"]/1000,tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        candidate=state.detect_smart_money_signal(symbol,volume,quote_volume,close_price,open_price,high_price,low_price,close_time,taker_buy_quote=taker_buy_quote)
         if candidate and state.register_signal(candidate): save_signal_to_db(candidate,telegram_sent=False); logger.info("📥 Candidate queued: %s | %s | Quality %.0f | RVOL %.2fx",candidate.symbol,candidate.signal_type,candidate.quality_score,candidate.rvol)
     except (json.JSONDecodeError,KeyError,ValueError,TypeError) as e: logger.warning("Invalid kline message: %s",e)
     except Exception as e: logger.error("Error processing message: %s",e,exc_info=True)
@@ -361,7 +574,12 @@ signal.signal(signal.SIGINT,signal_handler); signal.signal(signal.SIGTERM,signal
 def main():
     logger.info("🚀 Smart Money Volume Detector starting (EARLY WARNING MODE)...")
     logger.info(f"Config: RVOL≥{CONFIG['rvol_multiplier']}x | Divergence: ≤{CONFIG['divergence_max_price_change']}% | Velocity: ≥{CONFIG['velocity_threshold']}x | Quality≥{CONFIG.get('min_quality_score',0):.0f} | Selection window={CONFIG.get('alert_selection_window_sec',3):.1f}s | Max {CONFIG['max_alerts_per_hour']} alerts/hour")
-    ensure_signal_table(); reload_control(); dispatch_thread=threading.Thread(target=dispatch_alerts,daemon=True,name="SmartMoney-Dispatcher"); dispatch_thread.start(); threads=[]; ws_stop_event=threading.Event(); last_universe_refresh=0.0
+    ensure_signal_table(); reload_control()
+    try:
+        update_screener_heartbeat(pid=os.getpid(), timeframe=CONFIG.get("timeframe", "1m"), symbols_monitored=0)
+    except Exception as e:
+        logger.warning("⚠️ initial screener heartbeat failed: %s", e)
+    dispatch_thread=threading.Thread(target=dispatch_alerts,daemon=True,name="SmartMoney-Dispatcher"); dispatch_thread.start(); threads=[]; ws_stop_event=threading.Event(); last_universe_refresh=0.0
     def start_connections(symbols):
         nonlocal threads,ws_stop_event
         ws_stop_event=threading.Event(); threads=[]; chunk_size=CONFIG["max_streams_per_conn"]
@@ -375,13 +593,28 @@ def main():
         threads=[]
     try:
         symbols=get_liquid_symbols()
-        if symbols: start_connections(symbols); last_universe_refresh=time.time()
+        if symbols:
+            start_connections(symbols); last_universe_refresh=time.time()
+            try:
+                update_screener_heartbeat(pid=os.getpid(), timeframe=CONFIG.get("timeframe", "1m"), symbols_monitored=len(symbols), last_universe_refresh_at=datetime.utcfromtimestamp(last_universe_refresh))
+            except Exception as e:
+                logger.warning("⚠️ initial universe heartbeat update failed: %s", e)
         else: logger.error("❌ No liquid symbols found - retrying universe discovery in control loop")
         while not state.shutdown_flag:
-            time.sleep(60); universe_changed=reload_control(); refresh_due=time.time()-last_universe_refresh>=max(1,int(CONFIG.get("market_cap_refresh_minutes",30)))*60
+            time.sleep(60)
+            try:
+                update_screener_heartbeat(pid=os.getpid(), timeframe=CONFIG.get("timeframe", "1m"), symbols_monitored=len(symbols), last_universe_refresh_at=datetime.utcfromtimestamp(last_universe_refresh) if last_universe_refresh else None)
+            except Exception as e:
+                logger.warning("⚠️ screener heartbeat update failed: %s", e)
+            universe_changed=reload_control(); refresh_due=time.time()-last_universe_refresh>=max(1,int(CONFIG.get("market_cap_refresh_minutes",30)))*60
             if universe_changed or refresh_due:
                 reason="config change" if universe_changed else "scheduled market-cap/liquidity refresh"; logger.info("🔄 Rebuilding screener universe (%s)",reason); stop_connections(); symbols=get_liquid_symbols()
-                if symbols: start_connections(symbols); last_universe_refresh=time.time()
+                if symbols:
+                    start_connections(symbols); last_universe_refresh=time.time()
+                    try:
+                        update_screener_heartbeat(pid=os.getpid(), symbols_monitored=len(symbols), last_universe_refresh_at=datetime.utcfromtimestamp(last_universe_refresh))
+                    except Exception as e:
+                        logger.warning("⚠️ screener universe heartbeat update failed: %s", e)
                 else: logger.error("❌ Universe refresh returned no eligible symbols; keeping screener disconnected until next refresh"); last_universe_refresh=time.time()
     except KeyboardInterrupt: pass
     finally:

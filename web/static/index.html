@@ -133,6 +133,13 @@
                         <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-purple-950 text-purple-300 border border-purple-800">NEW</span>
                     </div>
                 </button>
+                <button data-tab="market-screener" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-amber-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="scan-search" class="w-4 h-4 text-amber-400"></i>
+                    <div class="flex items-center justify-between w-full">
+                        <span>Market Screener</span>
+                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-amber-950 text-amber-300 border border-amber-800">V2</span>
+                    </div>
+                </button>
                 <button data-tab="settings" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="settings" class="w-4 h-4"></i>
                     <span>Settings & Users</span>
@@ -1110,74 +1117,139 @@
                     </div>
                 </div>
 
-                <!-- ===== Smart Money Volume Screener ===== -->
-                <div class="flex items-center gap-2 pt-2">
-                    <i data-lucide="zap" class="w-4 h-4 text-purple-400"></i>
-                    <h2 class="text-sm font-bold text-slate-100">Smart Money Volume Screener</h2>
-                    <span class="text-[10px] text-slate-500">RVOL / divergence / velocity volume-spike detector &middot; Telegram-only alerts, now logged</span>
+            </section>
+
+            <!-- ============================================== -->
+            <!-- 6. MARKET SCREENER V2 VIEW -->
+            <!-- ============================================== -->
+            <section id="view-market-screener" class="view-section hidden space-y-6">
+                <div class="flex items-center gap-3">
+                    <div>
+                        <h2 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                            <i data-lucide="scan-search" class="w-4 h-4 text-amber-400"></i>
+                            Market Screener
+                            <span class="px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 text-[9px] font-bold">V2</span>
+                        </h2>
+                        <p class="text-[11px] text-slate-500 mt-0.5">Smart-money volume detection across the liquid Binance USDT universe</p>
+                    </div>
+                    <button onclick="App.fetchScreenerData()" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
+                    </button>
                 </div>
 
-                <!-- Bot Control: screener -->
-                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                <!-- Runtime Status -->
+                <div class="grid grid-cols-2 md:grid-cols-6 gap-4">
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 uppercase font-semibold">Process</span>
+                        <div id="screener-v2-status" class="text-lg font-black text-slate-300 mt-1">--</div>
+                        <div id="screener-v2-status-detail" class="text-[10px] text-slate-500 mt-1">Waiting for heartbeat</div>
+                    </div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 uppercase font-semibold">Alerts</span>
+                        <div id="screener-v2-enabled" class="text-lg font-black text-slate-300 mt-1">--</div>
+                        <div class="text-[10px] text-slate-500 mt-1">Telegram gate</div>
+                    </div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 uppercase font-semibold">Symbols Monitored</span>
+                        <div id="screener-v2-symbols" class="text-lg font-black text-slate-100 font-mono mt-1">0</div>
+                        <div class="text-[10px] text-slate-500 mt-1">Current universe</div>
+                    </div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 uppercase font-semibold">Timeframe</span>
+                        <div id="screener-v2-timeframe" class="text-lg font-black text-sky-400 font-mono mt-1">--</div>
+                        <div class="text-[10px] text-slate-500 mt-1">Configured kline interval</div>
+                    </div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 uppercase font-semibold">Last Signal</span>
+                        <div id="screener-v2-last-signal" class="text-sm font-bold text-slate-200 mt-2">--</div>
+                        <div class="text-[10px] text-slate-500 mt-1">Candle time</div>
+                    </div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 uppercase font-semibold">Universe Refresh</span>
+                        <div id="screener-v2-last-refresh" class="text-sm font-bold text-slate-200 mt-2">--</div>
+                        <div class="text-[10px] text-slate-500 mt-1">Last successful rebuild</div>
+                    </div>
+                </div>
+
+                <!-- Configuration -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-5">
                     <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-3">
-                            <label class="relative inline-flex items-center cursor-pointer">
-                                <input type="checkbox" id="screener-ctl-enabled" class="sr-only peer">
-                                <div class="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:bg-emerald-600 transition-all"></div>
-                                <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-all peer-checked:translate-x-5"></span>
-                            </label>
-                            <span class="text-xs font-semibold text-slate-200">Alerts Enabled</span>
-                            <span class="text-[10px] text-slate-500">Detection keeps running either way -- this only suppresses Telegram sends when off</span>
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-100">Screener Configuration</h3>
+                            <p class="text-[10px] text-slate-500 mt-0.5">Changes are persisted and picked up by the running screener on its next control-loop tick.</p>
                         </div>
                         <span id="screener-ctl-updated" class="text-[10px] text-slate-600"></span>
                     </div>
+                    <div class="flex items-center gap-3">
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="screener-ctl-enabled" class="sr-only peer">
+                            <div class="w-10 h-5 bg-slate-700 rounded-full peer peer-checked:bg-emerald-600 transition-all"></div>
+                            <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-all peer-checked:translate-x-5"></span>
+                        </label>
+                        <span class="text-xs font-semibold text-slate-200">Alerting Enabled</span>
+                        <span class="text-[10px] text-slate-500">Detection continues while alerting is paused</span>
+                    </div>
                     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                        <label class="text-[11px] text-slate-400">Min 24h Quote Volume<input type="number" step="100000" id="screener-ctl-min_quote_volume_24h" class="cfg-input" placeholder="1000000"></label>
+                        <label class="text-[11px] text-slate-400">Min Market Cap (USD)<input type="number" step="1000000" id="screener-ctl-min_market_cap_usd" class="cfg-input" placeholder="50000000"></label>
                         <label class="text-[11px] text-slate-400">RVOL Multiplier<input type="number" step="0.1" id="screener-ctl-rvol_multiplier" class="cfg-input" placeholder="7.0"></label>
-                        <label class="text-[11px] text-slate-400">Divergence Max Price Chg %<input type="number" step="0.1" id="screener-ctl-divergence_max_price_change" class="cfg-input" placeholder="1.0"></label>
-                        <label class="text-[11px] text-slate-400">Velocity Threshold<input type="number" step="0.1" id="screener-ctl-velocity_threshold" class="cfg-input" placeholder="3.0"></label>
-                        <label class="text-[11px] text-slate-400">Max Alerts / Hour (global)<input type="number" step="1" id="screener-ctl-max_alerts_per_hour" class="cfg-input" placeholder="5"></label>
+                        <label class="text-[11px] text-slate-400">Min Signal RVOL<input type="number" step="0.1" id="screener-ctl-min_signal_rvol" class="cfg-input" placeholder="5.0"></label>
+                        <label class="text-[11px] text-slate-400">Velocity Threshold<input type="number" step="0.1" id="screener-ctl-velocity_threshold" class="cfg-input" placeholder="5.0"></label>
+                        <label class="text-[11px] text-slate-400">Min Signal Velocity<input type="number" step="0.1" id="screener-ctl-min_signal_velocity" class="cfg-input" placeholder="3.0"></label>
+                        <label class="text-[11px] text-slate-400">Divergence Max Price Chg %<input type="number" step="0.1" id="screener-ctl-divergence_max_price_change" class="cfg-input" placeholder="0.3"></label>
+                        <label class="text-[11px] text-slate-400">Min Quality Score<input type="number" step="1" id="screener-ctl-min_quality_score" class="cfg-input" placeholder="70"></label>
+                        <label class="text-[11px] text-slate-400">Max Alerts / Hour<input type="number" step="1" id="screener-ctl-max_alerts_per_hour" class="cfg-input" placeholder="5"></label>
                         <label class="text-[11px] text-slate-400">Max Alerts / Symbol / Hour<input type="number" step="1" id="screener-ctl-max_alerts_per_symbol_per_hour" class="cfg-input" placeholder="2"></label>
-                        <label class="text-[11px] text-slate-400">Alert Cooldown (sec)<input type="number" step="10" id="screener-ctl-alert_cooldown_sec" class="cfg-input" placeholder="120"></label>
-                        <label class="text-[11px] text-slate-400 flex items-center gap-2 mt-3">
-                            <input type="checkbox" id="screener-ctl-enable_divergence_detection" class="w-3.5 h-3.5"> Divergence Detection
-                        </label>
-                        <label class="text-[11px] text-slate-400 flex items-center gap-2 mt-3">
-                            <input type="checkbox" id="screener-ctl-enable_velocity_detection" class="w-3.5 h-3.5"> Velocity Detection
-                        </label>
+                        <label class="text-[11px] text-slate-400">Alert Cooldown (sec)<input type="number" step="10" id="screener-ctl-alert_cooldown_sec" class="cfg-input" placeholder="900"></label>
+                        <label class="text-[11px] text-slate-400 flex items-center gap-2 mt-3"><input type="checkbox" id="screener-ctl-enable_divergence_detection" class="w-3.5 h-3.5"> Divergence Detection</label>
+                        <label class="text-[11px] text-slate-400 flex items-center gap-2 mt-3"><input type="checkbox" id="screener-ctl-enable_velocity_detection" class="w-3.5 h-3.5"> Velocity Detection</label>
+                        <label class="text-[11px] text-slate-400 flex items-center gap-2 mt-3"><input type="checkbox" id="screener-ctl-require_confluence" class="w-3.5 h-3.5"> Require Confluence</label>
                     </div>
                     <div class="flex items-center gap-3">
-                        <button onclick="App.saveBotControl('screener')" class="px-4 py-2 text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white rounded-lg transition-all">Save Changes</button>
-                        <span class="text-[10px] text-slate-500">Takes effect within ~60s on the running process -- no restart needed</span>
+                        <button onclick="App.saveBotControl('screener')" class="px-4 py-2 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-all">Save Changes</button>
+                        <span class="text-[10px] text-slate-500">No process restart required.</span>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                <!-- Live Summary -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800">
                         <span class="text-xs text-slate-400 uppercase font-semibold">Signals (24h)</span>
-                        <div id="screener-kpi-24h" class="text-3xl font-black font-mono text-purple-400 mt-2">0</div>
+                        <div id="screener-kpi-24h" class="text-3xl font-black font-mono text-amber-400 mt-2">0</div>
                     </div>
-                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-                        <span class="text-xs text-slate-400 uppercase font-semibold">Signals (all-time)</span>
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Signals (All-time)</span>
                         <div id="screener-kpi-total" class="text-3xl font-black font-mono text-slate-100 mt-2">0</div>
                     </div>
-                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-                        <span class="text-xs text-slate-400 uppercase font-semibold">24h Breakdown</span>
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Signal Types (24h)</span>
                         <div id="screener-kpi-breakdown" class="text-xs text-slate-300 mt-2 space-y-0.5">--</div>
+                    </div>
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Database</span>
+                        <div id="screener-kpi-db" class="text-lg font-black text-slate-300 mt-2">--</div>
                     </div>
                 </div>
 
+                <!-- Recent Signals -->
                 <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
-                    <h3 class="text-sm font-bold text-slate-100">Recent Signals</h3>
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-100">Recent Signals</h3>
+                            <p class="text-[10px] text-slate-500">Latest persisted signals; click any column header to sort.</p>
+                        </div>
+                        <span id="screener-signal-count" class="text-[10px] text-slate-500">--</span>
+                    </div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left custom-table">
                             <thead>
                                 <tr>
-                                    <th>Time</th><th>Symbol</th><th>Type</th><th>RVOL</th>
-                                    <th>Price</th><th>Price Chg</th><th>Velocity</th><th>Alerted</th>
+                                    <th>Time</th><th>Symbol</th><th>Type</th><th>RVOL</th><th>Velocity</th>
+                                    <th>Quality</th><th>Price</th><th>Price Chg</th><th>Quote Volume</th><th>Alerted</th>
                                 </tr>
                             </thead>
                             <tbody id="screener-signals-table-body">
-                                <tr><td colspan="8" class="text-center py-6 text-slate-500 text-xs">Loading...</td></tr>
+                                <tr><td colspan="10" class="text-center py-8 text-slate-500 text-xs">Loading screener signals...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -1185,7 +1257,7 @@
             </section>
 
             <!-- ============================================== -->
-            <!-- 6. SETTINGS & USER MANAGEMENT VIEW -->
+            <!-- 7. SETTINGS & USER MANAGEMENT VIEW -->
             <!-- ============================================== -->
             <section id="view-settings" class="view-section hidden space-y-8">
                 <!-- User Administration Panel -->
@@ -1684,7 +1756,7 @@
          browsers can keep serving a stale cached copy indefinitely since
          this file has no explicit Cache-Control header. See the
          "still seeing the old bug after a fix was pushed" class of report. -->
-    <script src="/static/js/app.js?v=20260929-2"></script>
+    <script src="/static/js/app.js?v=20261006-3"></script>
     <script src="/static/js/dashboard_enhancements.js?v=20261006-1"></script>
     <script>
         if (window.lucide) window.lucide.createIcons();

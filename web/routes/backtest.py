@@ -176,11 +176,11 @@ SHARED_EXECUTION_PARAMS = [
 
 
 class BacktestRunRequest(BaseModel):
-    symbol: str = Field(..., example="BTCUSDT")
-    market: str = Field("spot", example="spot")
-    timeframe: str = Field("1d", example="1d")
-    strategy: str = Field("confluence_ensemble_v1", example="confluence_ensemble_v1")
-    data_segment: str = Field("full", example="full")  # train, holdout, full
+    symbol: str = Field(..., json_schema_extra={"example": "BTCUSDT"})
+    market: str = Field("spot", json_schema_extra={"example": "spot"})
+    timeframe: str = Field("1d", json_schema_extra={"example": "1d"})
+    strategy: str = Field("confluence_ensemble_v1", json_schema_extra={"example": "confluence_ensemble_v1"})
+    data_segment: str = Field("full", json_schema_extra={"example": "full"})  # train, holdout, full
     initial_capital: float = Field(5000.0, ge=100.0)
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
     save_to_db: bool = Field(True)

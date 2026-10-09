@@ -27,8 +27,8 @@ USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]{3,30}$")
 # Request / Response Schemas
 # ============================================================================
 class LoginRequest(BaseModel):
-    username: str = Field(..., example="admin")
-    password: str = Field(..., example="admin123")
+    username: str = Field(..., json_schema_extra={"example": "admin"})
+    password: str = Field(..., json_schema_extra={"example": "admin123"})
 
 
 class ChangePasswordRequest(BaseModel):
