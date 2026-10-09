@@ -495,6 +495,7 @@ def ensure_signal_table():
         cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS delivered_at DATETIME NULL")
         cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS last_delivery_error VARCHAR(500) NULL")
         cur.execute("UPDATE smart_money_signals SET delivery_status='SENT' WHERE telegram_sent=TRUE AND delivery_status='PENDING'")
+        cur.execute("UPDATE smart_money_signals SET delivered_at=detected_at WHERE telegram_sent=TRUE AND delivered_at IS NULL")
         cur.execute("""CREATE TABLE IF NOT EXISTS screener_control (id INT PRIMARY KEY DEFAULT 1, enabled BOOLEAN NOT NULL DEFAULT TRUE, overrides_json TEXT NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, CONSTRAINT chk_screener_control_singleton CHECK (id = 1)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
         cur.execute("""CREATE TABLE IF NOT EXISTS screener_heartbeat (id INT PRIMARY KEY DEFAULT 1, pid INT NULL, last_beat_at DATETIME NULL, timeframe VARCHAR(20) NULL, symbols_monitored INT NOT NULL DEFAULT 0, last_signal_at DATETIME NULL, last_universe_refresh_at DATETIME NULL, CONSTRAINT chk_screener_heartbeat_singleton CHECK (id = 1)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
         cur.execute("ALTER TABLE screener_heartbeat ADD COLUMN IF NOT EXISTS timeframe VARCHAR(20) NULL")
@@ -711,6 +712,42 @@ def release_signal_claim(signal):
             try: conn.close()
             except Exception: pass
 
+def persistent_alert_limit_allows(symbol):
+    """Enforce hourly and per-symbol limits across process restarts using delivery history."""
+    conn = None
+    cur = None
+    try:
+        conn = get_pool().get_connection()
+        cur = conn.cursor()
+        cur.execute("""SELECT COUNT(*), COALESCE(SUM(symbol=%s),0), MAX(CASE WHEN symbol=%s THEN delivered_at ELSE NULL END)
+                       FROM smart_money_signals
+                       WHERE delivery_status='SENT' AND delivered_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR)""", (symbol, symbol))
+        row = cur.fetchone() or (0, 0, None)
+        total_sent, symbol_sent, last_symbol_sent = int(row[0] or 0), int(row[1] or 0), row[2]
+        if total_sent >= int(CONFIG.get("max_alerts_per_hour", 5)):
+            return False
+        if symbol_sent >= int(CONFIG.get("max_alerts_per_symbol_per_hour", 2)):
+            return False
+        if last_symbol_sent is not None:
+            if isinstance(last_symbol_sent, str):
+                last_symbol_sent = datetime.fromisoformat(last_symbol_sent)
+            if last_symbol_sent.tzinfo is None:
+                last_symbol_sent = last_symbol_sent.replace(tzinfo=timezone.utc)
+            if time.time() - last_symbol_sent.timestamp() < int(CONFIG.get("alert_cooldown_sec", 900)):
+                return False
+        return True
+    except Exception as exc:
+        # Fail closed: do not bypass trading-alert rate limits when the DB is unavailable.
+        logger.error("Persistent alert rate-limit check failed; delivery paused: %s", exc)
+        return False
+    finally:
+        if cur:
+            try: cur.close()
+            except Exception: pass
+        if conn:
+            try: conn.close()
+            except Exception: pass
+
 def dispatch_alerts():
     """Deliver from MySQL so pending work survives process restarts."""
     while not state.shutdown_flag:
@@ -721,8 +758,9 @@ def dispatch_alerts():
         if candidate is None:
             time.sleep(max(0.25, CONFIG.get("delivery_poll_interval_sec", 1.0)))
             continue
-        if not state._can_alert(candidate.symbol):
+        if not persistent_alert_limit_allows(candidate.symbol) or not state._can_alert(candidate.symbol):
             release_signal_claim(candidate)
+            time.sleep(1.0)
             continue
         sent = telegram.send_early_alert(candidate)
         if sent:
