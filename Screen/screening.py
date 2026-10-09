@@ -487,7 +487,9 @@ def save_signal_to_db(signal,telegram_sent):
         logger.warning("⚠️ screener heartbeat signal update failed: %s", e)
     try: conn=get_pool().get_connection()
     except Exception as e: logger.error("❌ save_signal_to_db connection: %s",e); return
+    cur = None
     try:
+        cur = conn.cursor()
         cur.execute("""INSERT INTO smart_money_signals (symbol,signal_type,rvol,volume,quote_volume,price,price_change_pct,volume_velocity,quality_score,direction,taker_buy_ratio,htf_alignment,htf_context,candle_time,telegram_sent) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE quality_score=VALUES(quality_score),direction=VALUES(direction),taker_buy_ratio=VALUES(taker_buy_ratio),htf_alignment=VALUES(htf_alignment),htf_context=VALUES(htf_context),telegram_sent=telegram_sent OR VALUES(telegram_sent)""",(signal.symbol,signal.signal_type,signal.rvol,signal.volume,signal.quote_volume,signal.price,signal.price_change_pct,signal.volume_velocity,signal.quality_score,signal.direction,signal.taker_buy_ratio,signal.htf_alignment,signal.htf_context,signal.candle_time,telegram_sent)); conn.commit(); cur.close()
     except Exception as e: logger.error("❌ save_signal_to_db failed for %s: %s",signal.symbol,e)
     finally: conn.close()
