@@ -127,3 +127,50 @@ def test_websocket_taker_buy_quote_is_used_for_orderflow():
     assert signal is not None
     assert signal.taker_buy_ratio == 0.8
     assert signal.direction == "BULLISH"
+
+def test_database_upsert_replaces_score_with_matching_confirmation_context(monkeypatch):
+    reset_limits()
+    captured = {}
+
+    class FakeCursor:
+        def execute(self, query, params=None):
+            captured["query"] = query
+            captured["params"] = params
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def cursor(self, *args, **kwargs):
+            return FakeCursor()
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    class FakePool:
+        def get_connection(self):
+            return FakeConnection()
+
+    monkeypatch.setattr(module, "get_pool", lambda: FakePool())
+    monkeypatch.setattr(module, "update_screener_heartbeat", lambda **kwargs: None)
+
+    signal = make_signal("SPKUSDT", 79)
+    signal.direction = "BULLISH"
+    signal.taker_buy_ratio = 0.72
+    signal.htf_alignment = 0
+    signal.htf_context = "UNAVAILABLE"
+
+    module.save_signal_to_db(signal, telegram_sent=False)
+
+    query = captured["query"]
+    assert "quality_score=VALUES(quality_score)" in query
+    assert "quality_score=GREATEST(" not in query
+    params = captured["params"]
+    assert params[8] == 79
+    assert params[9] == "BULLISH"
+    assert params[10] == 0.72
+    assert params[12] == "UNAVAILABLE"
+
