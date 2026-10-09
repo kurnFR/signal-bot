@@ -217,3 +217,67 @@ def test_stale_candidate_is_removed_without_delivery():
     assert state.pop_best_eligible() is None
     assert state.pending_signals == []
     assert state.pending_keys == set()
+
+
+
+def test_persistent_rate_limit_blocks_when_hourly_cap_reached(monkeypatch):
+    reset_limits(max_per_hour=5)
+    class FakeCursor:
+        def execute(self, query, params=None):
+            self.query = query
+        def fetchone(self):
+            return (5, 0, None)
+        def close(self):
+            pass
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+        def close(self):
+            pass
+    class FakePool:
+        def get_connection(self):
+            return FakeConnection()
+    monkeypatch.setattr(module, "get_pool", lambda: FakePool())
+
+    assert not module.persistent_alert_limit_allows("BTCUSDT")
+
+
+def test_persistent_rate_limit_fails_closed_when_database_is_unavailable(monkeypatch):
+    reset_limits()
+    def unavailable_pool():
+        raise RuntimeError("database unavailable")
+    monkeypatch.setattr(module, "get_pool", unavailable_pool)
+
+    assert not module.persistent_alert_limit_allows("BTCUSDT")
+
+
+def test_delivery_failure_is_scheduled_for_bounded_retry(monkeypatch):
+    reset_limits()
+    captured = {"updates": []}
+    class FakeCursor:
+        def execute(self, query, params=None):
+            captured["updates"].append((query, params))
+        def fetchone(self):
+            return (2,)
+        def close(self):
+            pass
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+        def commit(self):
+            pass
+        def close(self):
+            pass
+    class FakePool:
+        def get_connection(self):
+            return FakeConnection()
+    monkeypatch.setattr(module, "get_pool", lambda: FakePool())
+    module.CONFIG["max_delivery_attempts"] = 5
+
+    module.complete_signal_delivery(make_signal("BTCUSDT", 90), False, "temporary Telegram error")
+
+    update_query, update_params = captured["updates"][-1]
+    assert "delivery_status=%s" in update_query
+    assert update_params[0] == "PENDING"
+    assert update_params[2] == 60
+    assert update_params[3] == "temporary Telegram error"
