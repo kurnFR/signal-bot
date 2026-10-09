@@ -57,6 +57,8 @@ CONFIG = {
     "max_quality_without_htf": float(os.getenv("MAX_QUALITY_WITHOUT_HTF", "79")),
     "use_taker_buy_confirmation": os.getenv("USE_TAKER_BUY_CONFIRMATION", "true").lower() == "true",
     "alert_selection_window_sec": float(os.getenv("ALERT_SELECTION_WINDOW_SEC", "3")),
+    "max_pending_signals": int(os.getenv("MAX_PENDING_SIGNALS", "200")),
+    "max_signal_age_sec": int(os.getenv("MAX_SIGNAL_AGE_SEC", "180")),
     "daily_reset_utc_hour": int(os.getenv("DAILY_RESET_UTC_HOUR", "0")),
     "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN"),
     "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID"),
@@ -348,10 +350,47 @@ class SmartMoneyState:
         )
 
     def register_signal(self, signal):
+        """Queue a candidate without allowing the in-memory queue to grow indefinitely.
+
+        The database write is handled by the caller even when this returns False.
+        When full, retain the highest-ranked candidates (priority_score is negative
+        ranking, so smaller values are better).
+        """
         key = (signal.symbol, signal.signal_type, signal.candle_time)
         with self.lock:
-            if key in self.pending_keys: return False
-            self.pending_keys.add(key); heapq.heappush(self.pending_signals, signal); return True
+            if key in self.pending_keys:
+                return False
+
+            max_pending = max(1, int(CONFIG.get("max_pending_signals", 200)))
+            if len(self.pending_signals) < max_pending:
+                self.pending_keys.add(key)
+                heapq.heappush(self.pending_signals, signal)
+                return True
+
+            worst_index = max(
+                range(len(self.pending_signals)),
+                key=lambda index: self.pending_signals[index].priority_score,
+            )
+            worst = self.pending_signals[worst_index]
+            if signal.priority_score >= worst.priority_score:
+                logger.warning(
+                    "Alert queue full (%d); candidate not queued: %s %s quality=%.1f",
+                    max_pending, signal.symbol, signal.signal_type, signal.quality_score,
+                )
+                return False
+
+            evicted_key = (worst.symbol, worst.signal_type, worst.candle_time)
+            self.pending_keys.discard(evicted_key)
+            self.pending_signals[worst_index] = signal
+            heapq.heapify(self.pending_signals)
+            self.pending_keys.add(key)
+            logger.warning(
+                "Alert queue full (%d); replaced lower-ranked %s %s (quality=%.1f) "
+                "with %s %s (quality=%.1f)",
+                max_pending, worst.symbol, worst.signal_type, worst.quality_score,
+                signal.symbol, signal.signal_type, signal.quality_score,
+            )
+            return True
 
     def _can_alert(self, symbol):
         now = time.time()
@@ -372,8 +411,16 @@ class SmartMoneyState:
     def pop_best_eligible(self):
         with self.lock:
             self._check_hourly_reset(); deferred=[]; selected=None
+            max_age = max(0, int(CONFIG.get("max_signal_age_sec", 180)))
+            now = time.time()
             while self.pending_signals:
                 candidate=heapq.heappop(self.pending_signals); key=(candidate.symbol,candidate.signal_type,candidate.candle_time); self.pending_keys.discard(key)
+                if max_age and now - candidate.timestamp > max_age:
+                    logger.info(
+                        "Discarding stale queued signal: %s %s age=%.0fs max_age=%ss",
+                        candidate.symbol, candidate.signal_type, now - candidate.timestamp, max_age,
+                    )
+                    continue
                 if not CONFIG.get("enabled",True): deferred.append(candidate); continue
                 if self._can_alert(candidate.symbol): selected=candidate; break
                 deferred.append(candidate)
@@ -535,7 +582,14 @@ def process_kline_message(raw_msg):
         if not kline.get("x"): return
         volume=float(kline["v"]); quote_volume=float(kline["q"]); open_price=float(kline["o"]); close_price=float(kline["c"]); high_price=float(kline["h"]); low_price=float(kline["l"]); taker_buy_quote=float(kline.get("Q", 0.0)) if kline.get("Q") is not None else None; close_time=datetime.fromtimestamp(kline["t"]/1000,tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         candidate=state.detect_smart_money_signal(symbol,volume,quote_volume,close_price,open_price,high_price,low_price,close_time,taker_buy_quote=taker_buy_quote)
-        if candidate and state.register_signal(candidate): save_signal_to_db(candidate,telegram_sent=False); logger.info("📥 Candidate queued: %s | %s | Quality %.0f | RVOL %.2fx",candidate.symbol,candidate.signal_type,candidate.quality_score,candidate.rvol)
+        if candidate:
+            queued = state.register_signal(candidate)
+            # Keep the full candidate history even if the bounded delivery queue is full.
+            save_signal_to_db(candidate, telegram_sent=False)
+            if queued:
+                logger.info("📥 Candidate queued: %s | %s | Quality %.0f | RVOL %.2fx | pending=%d", candidate.symbol, candidate.signal_type, candidate.quality_score, candidate.rvol, len(state.pending_signals))
+            else:
+                logger.info("🗃️ Candidate persisted but not queued: %s | %s | Quality %.0f", candidate.symbol, candidate.signal_type, candidate.quality_score)
     except (json.JSONDecodeError,KeyError,ValueError,TypeError) as e: logger.warning("Invalid kline message: %s",e)
     except Exception as e: logger.error("Error processing message: %s",e,exc_info=True)
 
