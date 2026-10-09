@@ -10,14 +10,18 @@ sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
 
-def make_signal(symbol, quality, candle="2026-09-30T00:00:00Z"):
-    return module.SmartMoneySignal(-quality * 1000, symbol, "RVOL_SPIKE", quality / 10, 1000, 100000, 100, 0.5, 5, 1.0, candle, quality)
+def make_signal(symbol, quality, candle="2026-09-30T00:00:00Z", timestamp=None):
+    if timestamp is None:
+        timestamp = module.time.time()
+    return module.SmartMoneySignal(-quality * 1000, symbol, "RVOL_SPIKE", quality / 10, 1000, 100000, 100, 0.5, 5, timestamp, candle, quality)
 
 
 def reset_limits(max_per_hour=5, max_per_symbol=5, cooldown=0):
     module.CONFIG["alert_cooldown_sec"] = cooldown
     module.CONFIG["max_alerts_per_hour"] = max_per_hour
     module.CONFIG["max_alerts_per_symbol_per_hour"] = max_per_symbol
+    module.CONFIG["max_pending_signals"] = 200
+    module.CONFIG["max_signal_age_sec"] = 180
 
 
 def test_pending_candidates_are_ranked_by_quality():
@@ -174,3 +178,42 @@ def test_database_upsert_replaces_score_with_matching_confirmation_context(monke
     assert params[10] == 0.72
     assert params[12] == "UNAVAILABLE"
 
+
+
+
+def test_pending_queue_is_bounded_and_keeps_higher_ranked_signals():
+    reset_limits()
+    module.CONFIG["max_pending_signals"] = 2
+    state = module.SmartMoneyState(10, 7, 5)
+
+    assert state.register_signal(make_signal("LOWUSDT", 70))
+    assert state.register_signal(make_signal("MIDUSDT", 80))
+    assert state.register_signal(make_signal("HIGHUSDT", 95))
+
+    assert len(state.pending_signals) == 2
+    assert {item.symbol for item in state.pending_signals} == {"MIDUSDT", "HIGHUSDT"}
+    assert ("LOWUSDT", "RVOL_SPIKE", "2026-09-30T00:00:00Z") not in state.pending_keys
+    assert len(state.pending_keys) == 2
+
+
+def test_full_queue_rejects_lower_ranked_candidate_without_growing():
+    reset_limits()
+    module.CONFIG["max_pending_signals"] = 1
+    state = module.SmartMoneyState(10, 7, 5)
+
+    assert state.register_signal(make_signal("HIGHUSDT", 95))
+    assert not state.register_signal(make_signal("LOWUSDT", 70))
+
+    assert len(state.pending_signals) == 1
+    assert state.pending_signals[0].symbol == "HIGHUSDT"
+
+
+def test_stale_candidate_is_removed_without_delivery():
+    reset_limits()
+    module.CONFIG["max_signal_age_sec"] = 60
+    state = module.SmartMoneyState(10, 7, 5)
+    assert state.register_signal(make_signal("OLDUSDT", 95, timestamp=module.time.time() - 120))
+
+    assert state.pop_best_eligible() is None
+    assert state.pending_signals == []
+    assert state.pending_keys == set()
