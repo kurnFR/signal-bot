@@ -351,25 +351,18 @@ VOL_BREAKOUT_MIN_MARGIN_PCT = 0.15
 VOL_BREAKOUT_EMA_PERIOD = 100
 VOL_BREAKOUT_RISK_REWARD_RATIO = 3
 
-# Shared MySQL credentials. RetailBot's DB_* names are canonical so the
-# screener, web auth, collectors, and RetailBot use the same .env values.
-# MYSQL_* remain supported as backwards-compatible aliases for deployments
-# that have not migrated their environment yet.
+# One connection configuration for every signal-bot component.
+# MYSQL_* matches the existing host .env. Legacy DB_* names remain fallback
+# aliases for connection details, but database selection is intentionally
+# centralized: every component uses MYSQL_DATABASE (default crypto_signals).
 MYSQL_CONFIG = {
-    "host": os.getenv("DB_HOST", os.getenv("MYSQL_HOST", "192.168.1.30")),
-    "port": int(os.getenv("DB_PORT", os.getenv("MYSQL_PORT", "3306"))),
-    "user": os.getenv("DB_USER", os.getenv("MYSQL_USER", "cms")),
-    "password": os.getenv("DB_PASS", os.getenv("MYSQL_PASSWORD", "")),
-    "database": os.getenv("DB_NAME", os.getenv("MYSQL_DATABASE", "crypto_signals")),
+    "host": os.getenv("MYSQL_HOST", os.getenv("DB_HOST", "192.168.1.30")),
+    "port": int(os.getenv("MYSQL_PORT", os.getenv("DB_PORT", "3306"))),
+    "user": os.getenv("MYSQL_USER", os.getenv("DB_USER", "cms")),
+    "password": os.getenv("MYSQL_PASSWORD", os.getenv("DB_PASS", "")),
+    "database": os.getenv("MYSQL_DATABASE", "crypto_signals"),
 }
 
-# RetailBot's visibility-panel connection can be overridden independently
-# (for example, with read-only credentials). Otherwise it reuses the same
-# DB_* credentials that RetailBot itself reads from .env.
-RETAILBOT2_DB_CONFIG = {
-    "host": os.getenv("RETAILBOT2_DB_HOST", os.getenv("DB_HOST", MYSQL_CONFIG["host"])),
-    "port": int(os.getenv("RETAILBOT2_DB_PORT", os.getenv("DB_PORT", MYSQL_CONFIG["port"]))),
-    "user": os.getenv("RETAILBOT2_DB_USER", os.getenv("DB_USER", MYSQL_CONFIG["user"])),
-    "password": os.getenv("RETAILBOT2_DB_PASSWORD", os.getenv("DB_PASS", MYSQL_CONFIG["password"])),
-    "database": os.getenv("RETAILBOT2_DB_NAME", os.getenv("DB_NAME", MYSQL_CONFIG["database"])),
-}
+# Dashboard reads the same database and endpoint as the rest of signal-bot.
+# Keep this alias for existing callers; do not allow a separate Binance DB.
+RETAILBOT2_DB_CONFIG = dict(MYSQL_CONFIG)
