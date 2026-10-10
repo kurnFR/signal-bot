@@ -281,3 +281,36 @@ def test_delivery_failure_is_scheduled_for_bounded_retry(monkeypatch):
     assert update_params[0] == "PENDING"
     assert update_params[2] == 60
     assert update_params[3] == "temporary Telegram error"
+
+def test_dispatcher_survives_telegram_exception_and_schedules_retry(monkeypatch):
+    reset_limits()
+    candidate = make_signal("BTCUSDT", 90)
+    completed = []
+    released = []
+
+    monkeypatch.setattr(module.state, "shutdown_flag", False)
+    monkeypatch.setattr(module, "persistent_alert_limit_allows", lambda symbol: True)
+    monkeypatch.setattr(module.state, "_can_alert", lambda symbol: True)
+    monkeypatch.setattr(module.state, "release_alert_slot", lambda symbol: released.append(symbol))
+    monkeypatch.setattr(module, "complete_signal_delivery", lambda signal, sent, error=None: completed.append((signal, sent, error)))
+
+    def claim_once():
+        # Return one candidate, then stop the loop after it has been processed.
+        module.state.shutdown_flag = True
+        return candidate
+
+    def raise_telegram_error(signal):
+        raise RuntimeError("simulated Telegram timeout")
+
+    monkeypatch.setattr(module, "claim_next_pending_signal", claim_once)
+    monkeypatch.setattr(module.telegram, "send_early_alert", raise_telegram_error)
+
+    module.dispatch_alerts()
+
+    assert released == ["BTCUSDT"]
+    assert len(completed) == 1
+    assert completed[0][0] is candidate
+    assert completed[0][1] is False
+    assert "RuntimeError" in completed[0][2]
+    assert "simulated Telegram timeout" in completed[0][2]
+
