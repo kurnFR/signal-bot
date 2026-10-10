@@ -762,7 +762,21 @@ def dispatch_alerts():
             release_signal_claim(candidate)
             time.sleep(1.0)
             continue
-        sent = telegram.send_early_alert(candidate)
+        try:
+            sent = telegram.send_early_alert(candidate)
+        except Exception as exc:
+            # Treat raised transport/client errors like a failed send so the
+            # dispatcher survives and the durable queue can retry this signal.
+            state.release_alert_slot(candidate.symbol)
+            complete_signal_delivery(
+                candidate, False, f"Telegram send raised {type(exc).__name__}: {exc}"
+            )
+            logger.exception(
+                "Telegram delivery raised an exception; retry state saved for %s %s",
+                candidate.symbol, candidate.signal_type,
+            )
+            continue
+
         if sent:
             complete_signal_delivery(candidate, True)
             logger.info("🎯 Durable alert delivered: %s | %s | Quality %.0f | RVOL %.2fx", candidate.symbol, candidate.signal_type, candidate.quality_score, candidate.rvol)
