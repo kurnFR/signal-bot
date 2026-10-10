@@ -135,11 +135,12 @@ class BotConfig:
     min_trade_interval_hours: int = 2
 
     # Infrastructure
-    db_host: str = field(default_factory=lambda: os.getenv('RETAILBOT2_DB_HOST', os.getenv('DB_HOST', os.getenv('MYSQL_HOST', '192.168.1.30'))))
-    db_port: int = int(os.getenv('RETAILBOT2_DB_PORT', os.getenv('DB_PORT', os.getenv('MYSQL_PORT', '3306'))))
-    db_name: str = field(default_factory=lambda: os.getenv('RETAILBOT2_DB_NAME', 'crypto_signals'))
-    db_user: str = field(default_factory=lambda: os.getenv('RETAILBOT2_DB_USER', os.getenv('DB_USER', os.getenv('MYSQL_USER', 'cms'))))
-    db_password: str = field(default_factory=lambda: os.getenv('RETAILBOT2_DB_PASSWORD', os.getenv('DB_PASS', os.getenv('MYSQL_PASSWORD', ''))))
+    # Use the shared signal-bot MySQL connection; no per-RetailBot DB override.
+    db_host: str = field(default_factory=lambda: os.getenv('MYSQL_HOST', os.getenv('DB_HOST', '192.168.1.30')))
+    db_port: int = int(os.getenv('MYSQL_PORT', os.getenv('DB_PORT', '3306')))
+    db_name: str = field(default_factory=lambda: os.getenv('MYSQL_DATABASE', 'crypto_signals'))
+    db_user: str = field(default_factory=lambda: os.getenv('MYSQL_USER', os.getenv('DB_USER', 'cms')))
+    db_password: str = field(default_factory=lambda: os.getenv('MYSQL_PASSWORD', os.getenv('DB_PASS', '')))
     telegram_token: str = field(default_factory=lambda: os.getenv('TELEGRAM_TOKEN', os.getenv('TELEGRAM_BOT_TOKEN', '')))
     telegram_chat_id: str = field(default_factory=lambda: os.getenv('TELEGRAM_CHAT_ID', ''))
 
