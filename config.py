@@ -351,26 +351,25 @@ VOL_BREAKOUT_MIN_MARGIN_PCT = 0.15
 VOL_BREAKOUT_EMA_PERIOD = 100
 VOL_BREAKOUT_RISK_REWARD_RATIO = 3
 
+# Shared MySQL credentials. RetailBot's DB_* names are canonical so the
+# screener, web auth, collectors, and RetailBot use the same .env values.
+# MYSQL_* remain supported as backwards-compatible aliases for deployments
+# that have not migrated their environment yet.
 MYSQL_CONFIG = {
-    "host": os.getenv("MYSQL_HOST", "localhost"),
-    "port": int(os.getenv("MYSQL_PORT", 3306)),
-    "user": os.getenv("MYSQL_USER", "crypto_bot"),
-    "password": os.getenv("MYSQL_PASSWORD", ""),
-    "database": os.getenv("MYSQL_DATABASE", "crypto_signals"),
+    "host": os.getenv("DB_HOST", os.getenv("MYSQL_HOST", "192.168.1.30")),
+    "port": int(os.getenv("DB_PORT", os.getenv("MYSQL_PORT", "3306"))),
+    "user": os.getenv("DB_USER", os.getenv("MYSQL_USER", "cms")),
+    "password": os.getenv("DB_PASS", os.getenv("MYSQL_PASSWORD", "")),
+    "database": os.getenv("DB_NAME", os.getenv("MYSQL_DATABASE", "crypto_signals")),
 }
 
-# paper/retailbot2.py runs as its own standalone process with its own
-# database (its BotConfig reads DB_HOST/DB_USER/DB_PASS/DB_NAME, default
-# database name "Binance"). This gives the web dashboard read access to
-# that same database for the visibility panel, reusing retailbot2.py's own
-# env var names so credentials aren't duplicated under a second set of
-# names -- override RETAILBOT2_DB_* individually only if the dashboard
-# needs different (e.g. more restricted, read-only) credentials than the
-# bot process itself uses.
+# RetailBot's visibility-panel connection can be overridden independently
+# (for example, with read-only credentials). Otherwise it reuses the same
+# DB_* credentials that RetailBot itself reads from .env.
 RETAILBOT2_DB_CONFIG = {
-    "host": os.getenv("RETAILBOT2_DB_HOST", os.getenv("DB_HOST", "192.168.1.30")),
-    "port": int(os.getenv("RETAILBOT2_DB_PORT", 3306)),
+    "host": os.getenv("RETAILBOT2_DB_HOST", os.getenv("DB_HOST", MYSQL_CONFIG["host"])),
+    "port": int(os.getenv("RETAILBOT2_DB_PORT", os.getenv("DB_PORT", MYSQL_CONFIG["port"]))),
     "user": os.getenv("RETAILBOT2_DB_USER", os.getenv("DB_USER", MYSQL_CONFIG["user"])),
     "password": os.getenv("RETAILBOT2_DB_PASSWORD", os.getenv("DB_PASS", MYSQL_CONFIG["password"])),
-    "database": os.getenv("RETAILBOT2_DB_NAME", os.getenv("DB_NAME", "Binance")),
+    "database": os.getenv("RETAILBOT2_DB_NAME", os.getenv("DB_NAME", MYSQL_CONFIG["database"])),
 }
