@@ -65,7 +65,7 @@ def make_bot(db, trade, equity_shadow=1000.0, equity_inverse=2000.0):
 
 class TestRetailBotDatabaseConfig(unittest.TestCase):
     def test_default_database_is_crypto_signals_even_when_generic_db_name_is_set(self):
-        with patch.dict(os.environ, {"DB_NAME": "Binance"}, clear=False):
+        with patch.dict(os.environ, {"DB_NAME": "Binance", "RETAILBOT2_DB_NAME": "Binance", "MYSQL_DATABASE": "crypto_signals"}, clear=False):
             from paper.retailbot2 import BotConfig
             config = BotConfig()
         self.assertEqual(config.db_name, "crypto_signals")
