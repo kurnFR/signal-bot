@@ -64,10 +64,21 @@ def make_bot(db, trade, equity_shadow=1000.0, equity_inverse=2000.0):
 
 
 class TestRetailBotDatabaseConfig(unittest.TestCase):
-    def test_default_database_is_crypto_signals_even_when_generic_db_name_is_set(self):
-        with patch.dict(os.environ, {"DB_NAME": "Binance", "RETAILBOT2_DB_NAME": "Binance", "MYSQL_DATABASE": "crypto_signals"}, clear=False):
-            from paper.retailbot2 import BotConfig
-            config = BotConfig()
+    def test_main_uses_shared_database_instead_of_legacy_retailbot_overrides(self):
+        from paper.retailbot2 import main
+
+        env = {
+            "MYSQL_HOST": "127.0.0.1",
+            "MYSQL_DATABASE": "crypto_signals",
+            "RETAILBOT2_DB_HOST": "192.0.2.10",
+            "RETAILBOT2_DB_NAME": "Binance",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            with patch("paper.retailbot2.RetailDeathTrapBot") as bot_class:
+                main()
+                config = bot_class.call_args.args[0]
+
+        self.assertEqual(config.db_host, "127.0.0.1")
         self.assertEqual(config.db_name, "crypto_signals")
 
 
