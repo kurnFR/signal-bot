@@ -1,4 +1,6 @@
 import unittest
+from unittest.mock import patch
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from web.app import app
@@ -10,6 +12,18 @@ class TestMLWebRoutes(unittest.TestCase):
         self.client = TestClient(app)
         self.token = create_access_token(user_id=1, username="admin", role="admin")
         self.headers = {"Authorization": f"Bearer {self.token}"}
+
+        # Avoid DB-backed token revocation/user lookup in route unit tests.
+        def authenticate_test_request(request):
+            if request.headers.get("Authorization") != self.headers["Authorization"]:
+                raise HTTPException(status_code=401, detail="Authentication credentials missing")
+            return {"id": 1, "username": "admin", "role": "admin", "is_active": 1}
+
+        self.auth_patcher = patch("web.app.authenticate_request", side_effect=authenticate_test_request)
+        self.auth_patcher.start()
+
+    def tearDown(self):
+        self.auth_patcher.stop()
 
     def test_list_experiments_endpoint(self):
         res = self.client.get("/api/ml/experiments", headers=self.headers)
