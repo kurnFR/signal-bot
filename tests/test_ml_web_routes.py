@@ -39,7 +39,11 @@ class TestMLWebRoutes(unittest.TestCase):
         self.assertIn("models", data)
         self.assertIsInstance(data["models"], list)
 
-    def test_circuit_breakers_endpoint(self):
+    @patch("paper.circuit_breaker.get_circuit_breaker_status", return_value={
+        "status": "normal", "can_open_new_position": True,
+        "max_concurrent_positions": 5,
+    })
+    def test_circuit_breakers_endpoint(self, mock_status):
         res = self.client.get("/api/paper/circuit-breakers", headers=self.headers)
         self.assertEqual(res.status_code, 200)
         data = res.json()
