@@ -24,12 +24,12 @@ ML_MODELS_DIR = Path("ml_models")
 
 
 class RunExperimentRequest(BaseModel):
-    symbol: str = Field("BTCUSDT", example="BTCUSDT")
-    market: str = Field("spot", example="spot")
-    timeframe: str = Field("1h", example="1h")
-    strategy_name: str = Field("trend_ema_v1", example="trend_ema_v1")
-    model_type: str = Field("all", example="all")  # all, logistic_regression, random_forest, hist_gradient_boosting
-    target_type: str = Field("binary_positive_r", example="binary_positive_r")
+    symbol: str = Field("BTCUSDT", json_schema_extra={"example": "BTCUSDT"})
+    market: str = Field("spot", json_schema_extra={"example": "spot"})
+    timeframe: str = Field("1h", json_schema_extra={"example": "1h"})
+    strategy_name: str = Field("trend_ema_v1", json_schema_extra={"example": "trend_ema_v1"})
+    model_type: str = Field("all", json_schema_extra={"example": "all"})  # all, logistic_regression, random_forest, hist_gradient_boosting
+    target_type: str = Field("binary_positive_r", json_schema_extra={"example": "binary_positive_r"})
     min_validation_trades: int = Field(5, ge=1, le=100)
 
 

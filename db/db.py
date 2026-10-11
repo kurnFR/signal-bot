@@ -7,6 +7,7 @@ import mysql.connector
 from mysql.connector import pooling
 import logging
 import json
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import sys, os
@@ -20,11 +21,9 @@ _retailbot2_pool = None
 
 
 def get_retailbot2_pool():
-    """Separate pool for paper/retailbot2.py's own database (see
-    RETAILBOT2_DB_CONFIG in config.py) -- read-only usage from the web
-    dashboard's visibility panel. Lazily initialized so importing db.db
-    doesn't require this second database to be reachable if retailbot2
-    isn't running / configured."""
+    """Compatibility pool for RetailBot dashboard helpers.
+    It uses the same centralized MYSQL_CONFIG as every other component;
+    this separate pool preserves existing callers only."""
     global _retailbot2_pool
     if _retailbot2_pool is None:
         _retailbot2_pool = pooling.MySQLConnectionPool(
@@ -950,9 +949,8 @@ def get_news_overlay_stats():
 
 
 # ----------------------------------------------------------------------------
-# retailbot2 -- read helpers for the web dashboard visibility panel.
-# Reads from RETAILBOT2_DB_CONFIG's database (default "Binance"), separate
-# from the main crypto_signals pool used everywhere else in this file.
+# RetailBot -- read helpers for the web dashboard visibility panel.
+# Uses the shared MYSQL_CONFIG database, same as the bot and all other components.
 # ----------------------------------------------------------------------------
 
 def get_retailbot2_open_trades(limit=100):
@@ -1108,9 +1106,8 @@ def get_smart_money_stats():
 
 # ----------------------------------------------------------------------------
 # Bot control -- read/write for the "enable + tunable params" toggle panels.
-# retailbot2's bot_control lives in ITS OWN database (RETAILBOT2_DB_CONFIG);
-# the screener's screener_control lives in the shared crypto_signals DB.
-# Both tables are self-created by their respective process on startup
+# RetailBot's bot_control and the screener's screener_control both live in
+# the shared MYSQL_CONFIG database. Tables are self-created by their processes on startup
 # (paper/retailbot2.py's DatabaseManager._create_tables(),
 # Screen/screening.py's ensure_signal_table()) -- these helpers assume the
 # table already exists, which it will once that process has run at least
@@ -1139,7 +1136,7 @@ SCREENER_TUNABLE_FIELDS = {
     "enable_divergence_detection", "enable_velocity_detection",
     "max_alerts_per_hour", "max_alerts_per_symbol_per_hour", "alert_cooldown_sec",
     "require_confluence", "min_signal_rvol", "min_signal_velocity",
-    "min_quote_volume_24h", "min_market_cap_usd",
+    "min_quote_volume_24h", "min_market_cap_usd", "min_quality_score",
 }
 
 
@@ -1174,6 +1171,112 @@ def set_retailbot2_control(enabled, overrides):
         )
         conn.commit()
         cur.close()
+    finally:
+        conn.close()
+
+
+def update_screener_heartbeat(*, pid=None, timeframe=None, symbols_monitored=None, last_signal_at=None, last_universe_refresh_at=None):
+    """Persist lightweight process telemetry so the dashboard can distinguish
+    a healthy-but-quiet screener from a process that is not running.
+
+    Screener candle timestamps arrive as ISO-8601 strings (for example,
+    2026-10-06T22:37:00Z), while MariaDB DATETIME expects a datetime
+    value. Normalize ISO strings to UTC-naive datetimes before binding them.
+    """
+    def _normalize_datetime(value):
+        if value is None or isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if parsed.tzinfo is not None:
+                    parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+                return parsed
+            except ValueError:
+                logger.warning("Invalid screener heartbeat datetime: %r", value)
+                return None
+        return value
+
+    last_signal_at = _normalize_datetime(last_signal_at)
+    last_universe_refresh_at = _normalize_datetime(last_universe_refresh_at)
+
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO screener_heartbeat
+                (id, pid, last_beat_at, timeframe, symbols_monitored, last_signal_at, last_universe_refresh_at)
+            VALUES (1, %s, UTC_TIMESTAMP(), %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                pid=VALUES(pid),
+                last_beat_at=UTC_TIMESTAMP(),
+                timeframe=COALESCE(VALUES(timeframe), timeframe),
+                symbols_monitored=COALESCE(VALUES(symbols_monitored), symbols_monitored),
+                last_signal_at=COALESCE(VALUES(last_signal_at), last_signal_at),
+                last_universe_refresh_at=COALESCE(VALUES(last_universe_refresh_at), last_universe_refresh_at)
+            """,
+            (pid, timeframe, symbols_monitored, last_signal_at, last_universe_refresh_at),
+        )
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+
+def get_screener_status():
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT pid, last_beat_at, timeframe, symbols_monitored, last_signal_at,
+                       last_universe_refresh_at
+                FROM screener_heartbeat
+                WHERE id=1
+                """
+            )
+            row = cur.fetchone()
+        except mysql.connector.Error as exc:
+            cur.close()
+            if exc.errno == 1146:
+                return {
+                    "running": False,
+                    "database_ok": True,
+                    "timeframe": None,
+                    "symbols_monitored": 0,
+                    "last_beat_at": None,
+                    "last_signal_at": None,
+                    "last_universe_refresh": None,
+                }
+            raise
+        cur.close()
+        if not row:
+            return {
+                "running": False,
+                "database_ok": True,
+                "timeframe": None,
+                "symbols_monitored": 0,
+                "last_beat_at": None,
+                "last_signal_at": None,
+                "last_universe_refresh": None,
+            }
+        last_beat_at = row.get("last_beat_at")
+        running = bool(last_beat_at and (datetime.utcnow() - last_beat_at).total_seconds() <= 150)
+        for key in ("last_beat_at", "last_signal_at", "last_universe_refresh_at"):
+            if row.get(key) is not None:
+                row[key] = str(row[key])
+        return {
+            "running": running,
+            "database_ok": True,
+            "pid": row.get("pid"),
+            "timeframe": row.get("timeframe"),
+            "symbols_monitored": int(row.get("symbols_monitored") or 0),
+            "last_beat_at": row.get("last_beat_at"),
+            "last_signal_at": row.get("last_signal_at"),
+            "last_universe_refresh": row.get("last_universe_refresh_at"),
+        }
     finally:
         conn.close()
 

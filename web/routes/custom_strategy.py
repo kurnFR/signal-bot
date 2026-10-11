@@ -16,15 +16,15 @@ CUSTOM_FILE = "/home/BIS/signal-bot/custom_strategies.json"
 
 
 class RuleCondition(BaseModel):
-    indicator: str = Field(..., example="rsi") # rsi, macd_hist, volume_ratio, atr_pct, close
-    operator: str = Field(..., example="<")    # <, <=, >, >=, ==
-    value: float = Field(..., example=30.0)
+    indicator: str = Field(..., json_schema_extra={"example": "rsi"}) # rsi, macd_hist, volume_ratio, atr_pct, close
+    operator: str = Field(..., json_schema_extra={"example": "<"})    # <, <=, >, >=, ==
+    value: float = Field(..., json_schema_extra={"example": 30.0})
 
 
 class CustomStrategyRequest(BaseModel):
-    name: str = Field(..., example="rsi_volume_surge_v1")
-    displayName: str = Field(..., example="RSI + Volume Surge")
-    description: str = Field("Custom rule-based strategy", example="Fades RSI extremes with volume confirmation")
+    name: str = Field(..., json_schema_extra={"example": "rsi_volume_surge_v1"})
+    displayName: str = Field(..., json_schema_extra={"example": "RSI + Volume Surge"})
+    description: str = Field("Custom rule-based strategy", json_schema_extra={"example": "Fades RSI extremes with volume confirmation"})
     longConditions: List[RuleCondition]
     shortConditions: List[RuleCondition]
     slAtrMult: float = Field(1.5, ge=0.5, le=5.0)
