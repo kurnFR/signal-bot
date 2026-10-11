@@ -20,6 +20,9 @@ const App = {
     paperTrades: [],
     paperConfigs: [],
     paperMetrics: {},
+    aiStrategyChatHistory: [],
+    availableIndicators: [],
+    strategyArchitectInitialized: false,
 
     async init() {
         this.bindEvents();
@@ -1144,6 +1147,7 @@ const App = {
             if (titleEl) titleEl.innerText = "Strategy Library & Rule Builder";
             if (descEl) descEl.innerText = "Explore strategy methodologies, benchmark performance, and create custom strategies";
             this.renderStrategyLibrary();
+            this.initStrategyArchitect();
         } else if (tabId === "news-ai") {
             if (titleEl) titleEl.innerText = "News AI Overlay Signals";
             if (descEl) descEl.innerText = "What the AI has read, how confident it was, and what it did about it";
@@ -1905,28 +1909,612 @@ const App = {
         }).join("");
     },
 
+    async initStrategyArchitect() {
+        if (this.strategyArchitectInitialized) return;
+        this.strategyArchitectInitialized = true;
+
+        // Fetch indicator definitions
+        try {
+            const res = await fetch(`${API_BASE}/api/custom-strategy/indicators`, {
+                headers: this.getAuthHeaders()
+            });
+            if (res.ok) {
+                const data = await res.json();
+                this.availableIndicators = data.indicators || [];
+            }
+        } catch (e) {
+            console.warn("Failed to fetch indicators metadata", e);
+        }
+
+        // Set default rules in form if empty
+        const longCont = document.getElementById("cust-long-rules-container");
+        const shortCont = document.getElementById("cust-short-rules-container");
+        if (longCont && longCont.children.length === 0) {
+            this.addRuleRow("long", "rsi", "<", 30);
+            this.addRuleRow("long", "volume_ratio", ">", 1.8);
+        }
+        if (shortCont && shortCont.children.length === 0) {
+            this.addRuleRow("short", "rsi", ">", 70);
+            this.addRuleRow("short", "volume_ratio", ">", 1.8);
+        }
+
+        if (window.lucide) lucide.createIcons();
+    },
+
+    addRuleRow(direction, indicator = "rsi", operator = "<", value = 30) {
+        const container = document.getElementById(`cust-${direction}-rules-container`);
+        if (!container) return;
+
+        const row = document.createElement("div");
+        row.className = "rule-condition-row flex items-center gap-2 p-2 rounded-xl bg-slate-900 border border-slate-800 text-xs";
+
+        // Build indicator options
+        const indOptions = (this.availableIndicators.length > 0 ? this.availableIndicators : [
+            { name: "rsi", label: "RSI (14)" },
+            { name: "volume_ratio", label: "Volume Ratio" },
+            { name: "macd", label: "MACD Line" },
+            { name: "macd_signal", label: "MACD Signal" },
+            { name: "macd_hist", label: "MACD Histogram" },
+            { name: "close", label: "Close Price" },
+            { name: "support", label: "Support Level" },
+            { name: "resistance", label: "Resistance Level" },
+            { name: "atr_pct", label: "ATR %" }
+        ]).map(ind => `<option value="${ind.name}" ${ind.name === indicator ? "selected" : ""}>${ind.label}</option>`).join("");
+
+        const opOptions = ["<", "<=", ">", ">=", "==", "!="].map(op => `
+            <option value="${op}" ${op === operator ? "selected" : ""}>${op}</option>
+        `).join("");
+
+        row.innerHTML = `
+            <select class="rule-ind-select flex-1 bg-slate-800 text-slate-100 rounded-lg p-2 border border-slate-700 text-xs font-semibold focus:outline-none">
+                ${indOptions}
+            </select>
+            <select class="rule-op-select w-16 bg-slate-800 text-amber-300 rounded-lg p-2 border border-slate-700 text-xs font-mono font-bold text-center focus:outline-none">
+                ${opOptions}
+            </select>
+            <input type="text" class="rule-val-input w-28 bg-slate-800 text-slate-100 rounded-lg p-2 border border-slate-700 text-xs font-mono font-semibold focus:outline-none" value="${value}" placeholder="Value / col">
+            <button type="button" onclick="this.closest('.rule-condition-row').remove()" class="p-2 rounded-lg bg-rose-950/40 hover:bg-rose-900 text-rose-400 hover:text-rose-200 border border-rose-900/50 transition-colors" title="Remove rule">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            </button>
+        `;
+
+        container.appendChild(row);
+        if (window.lucide) lucide.createIcons();
+    },
+
+    getRulesFromContainer(direction) {
+        const container = document.getElementById(`cust-${direction}-rules-container`);
+        if (!container) return [];
+        const rows = container.querySelectorAll(".rule-condition-row");
+        const rules = [];
+        rows.forEach(r => {
+            const ind = r.querySelector(".rule-ind-select")?.value;
+            const op = r.querySelector(".rule-op-select")?.value;
+            const rawVal = r.querySelector(".rule-val-input")?.value?.trim();
+            if (ind && op && rawVal !== undefined && rawVal !== "") {
+                const numVal = parseFloat(rawVal);
+                rules.push({
+                    indicator: ind,
+                    operator: op,
+                    value: isNaN(numVal) ? rawVal : numVal
+                });
+            }
+        });
+        return rules;
+    },
+
+    useStrategyPromptChip(promptText) {
+        const input = document.getElementById("strat-ai-prompt");
+        if (input) {
+            input.value = promptText;
+            this.generateStrategyWithAI();
+        }
+    },
+
+    async generateStrategyWithAI() {
+        const promptInput = document.getElementById("strat-ai-prompt");
+        const prompt = promptInput?.value?.trim();
+        if (!prompt) {
+            this.showToast("Please enter a strategy idea or instructions for the AI", "warning");
+            return;
+        }
+
+        const messagesContainer = document.getElementById("strat-ai-chat-messages");
+        const btn = document.getElementById("strat-ai-generate-btn");
+        const origBtnHtml = btn?.innerHTML;
+
+        // Append user prompt to chat UI
+        if (messagesContainer) {
+            const userMsgEl = document.createElement("div");
+            userMsgEl.className = "flex gap-2.5 items-start justify-end";
+            userMsgEl.innerHTML = `
+                <div class="p-3.5 rounded-2xl rounded-tr-sm bg-indigo-600 text-white leading-relaxed max-w-[85%] font-medium shadow-md">
+                    ${this.escapeHtml(prompt)}
+                </div>
+                <div class="w-6 h-6 rounded-full bg-slate-700 text-slate-300 flex-shrink-0 flex items-center justify-center text-[10px] font-bold">
+                    You
+                </div>
+            `;
+            messagesContainer.appendChild(userMsgEl);
+
+            // Typing indicator
+            const typingEl = document.createElement("div");
+            typingEl.id = "strat-ai-typing";
+            typingEl.className = "flex gap-2.5 items-start";
+            typingEl.innerHTML = `
+                <div class="w-6 h-6 rounded-full bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex-shrink-0 flex items-center justify-center text-[10px]">AI</div>
+                <div class="p-3 rounded-2xl rounded-tl-sm bg-slate-800 border border-slate-700 text-slate-400 flex items-center gap-1.5 text-xs font-mono">
+                    <span class="w-2 h-2 rounded-full bg-indigo-400 animate-ping"></span>
+                    Architecting strategy & parameters with LLM...
+                </div>
+            `;
+            messagesContainer.appendChild(typingEl);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>`;
+        }
+
+        // Collect current draft if available
+        const currentConfig = {
+            displayName: document.getElementById("cust-strat-disp")?.value || "",
+            name: document.getElementById("cust-strat-name")?.value || "",
+            slAtrMult: parseFloat(document.getElementById("cust-sl-atr")?.value) || 1.5,
+            riskRewardRatio: parseFloat(document.getElementById("cust-rr-ratio")?.value) || 2.5,
+            longConditions: this.getRulesFromContainer("long"),
+            shortConditions: this.getRulesFromContainer("short"),
+        };
+
+        try {
+            const res = await fetch(`${API_BASE}/api/custom-strategy/generate-ai`, {
+                method: "POST",
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify({
+                    prompt,
+                    history: this.aiStrategyChatHistory,
+                    currentConfig: currentConfig.displayName ? currentConfig : null
+                })
+            });
+
+            document.getElementById("strat-ai-typing")?.remove();
+
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.detail || `Server returned ${res.status}`);
+            }
+
+            const data = await res.json();
+            const strat = data.strategy;
+
+            // Record to conversation history
+            this.aiStrategyChatHistory.push({ role: "user", content: prompt });
+            this.aiStrategyChatHistory.push({ role: "assistant", content: data.chatResponse });
+
+            // Render AI response bubble
+            if (messagesContainer) {
+                const aiMsgEl = document.createElement("div");
+                aiMsgEl.className = "flex gap-2.5 items-start";
+                aiMsgEl.innerHTML = `
+                    <div class="w-6 h-6 rounded-full bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex-shrink-0 flex items-center justify-center text-[10px]">AI</div>
+                    <div class="p-3.5 rounded-2xl rounded-tl-sm bg-slate-800/90 border border-slate-700/80 text-slate-200 leading-relaxed max-w-[90%] space-y-2 shadow-lg">
+                        <div class="flex items-center justify-between text-[10px] text-slate-400 border-b border-slate-700/60 pb-1.5">
+                            <span class="font-bold text-indigo-300">${strat.displayName}</span>
+                            <span class="font-mono text-emerald-400">${data.provider || "LLM Engine"}</span>
+                        </div>
+                        <p class="text-xs text-slate-300 leading-relaxed">${this.escapeHtml(data.chatResponse)}</p>
+                        <div class="text-[11px] text-slate-400 bg-slate-900/80 p-2.5 rounded-xl border border-slate-800/80 space-y-1">
+                            <div><strong>Long:</strong> ${strat.longConditions.map(c => `<code>${c.indicator} ${c.operator} ${c.value}</code>`).join(" AND ") || "None"}</div>
+                            <div><strong>Short:</strong> ${strat.shortConditions.map(c => `<code>${c.indicator} ${c.operator} ${c.value}</code>`).join(" AND ") || "None"}</div>
+                            <div><strong>Risk:</strong> SL ${strat.slAtrMult}x ATR | RR ${strat.riskRewardRatio}x ${strat.useTrailingStop ? "| Trailing Stop" : ""}</div>
+                        </div>
+                    </div>
+                `;
+                messagesContainer.appendChild(aiMsgEl);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+
+            // Update Provider badge
+            const providerBadge = document.getElementById("ai-strat-provider-badge");
+            if (providerBadge && data.provider) {
+                providerBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> ${data.provider}`;
+            }
+
+            // Apply strategy to the form
+            this.applyStrategyToForm(strat);
+            this.showToast(`Strategy "${strat.displayName}" architected by AI!`, "success");
+
+            if (promptInput) promptInput.value = "";
+        } catch (e) {
+            document.getElementById("strat-ai-typing")?.remove();
+            this.showToast(`AI generation error: ${e.message}`, "error");
+            if (messagesContainer) {
+                const errEl = document.createElement("div");
+                errEl.className = "flex gap-2.5 items-start";
+                errEl.innerHTML = `
+                    <div class="w-6 h-6 rounded-full bg-rose-600/20 text-rose-400 border border-rose-500/30 flex-shrink-0 flex items-center justify-center text-[10px]">!</div>
+                    <div class="p-3 rounded-2xl rounded-tl-sm bg-rose-950/40 border border-rose-800 text-rose-300 text-xs">
+                        Failed to generate strategy: ${this.escapeHtml(e.message)}
+                    </div>
+                `;
+                messagesContainer.appendChild(errEl);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = origBtnHtml || `<i data-lucide="sparkles" class="w-4 h-4"></i><span>Generate</span>`;
+                if (window.lucide) lucide.createIcons();
+            }
+        }
+    },
+
+    applyStrategyToForm(strat) {
+        if (!strat) return;
+        const setVal = (id, val) => {
+            const el = document.getElementById(id);
+            if (el) el.value = val !== undefined && val !== null ? val : "";
+        };
+
+        setVal("cust-strat-name", strat.name || "");
+        setVal("cust-strat-disp", strat.displayName || "");
+        setVal("cust-strat-desc", strat.description || "");
+        setVal("cust-sl-atr", strat.slAtrMult || 1.5);
+        setVal("cust-rr-ratio", strat.riskRewardRatio || 2.5);
+        setVal("cust-trail-act", strat.trailActivationR || 1.0);
+        setVal("cust-trail-dist", strat.trailDistanceAtrMult || 1.5);
+
+        const trailCb = document.getElementById("cust-use-trailing");
+        if (trailCb) trailCb.checked = Boolean(strat.useTrailingStop);
+
+        const ratEl = document.getElementById("cust-strat-rationale");
+        if (ratEl) ratEl.innerText = strat.rationale || "Quantitative rules optimized for trend and volatility.";
+
+        const statusBadge = document.getElementById("cust-strat-status-badge");
+        if (statusBadge) {
+            statusBadge.className = "px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-950 text-indigo-300 border border-indigo-800";
+            statusBadge.innerText = "AI Proposed";
+        }
+
+        // Populate rules
+        const longCont = document.getElementById("cust-long-rules-container");
+        const shortCont = document.getElementById("cust-short-rules-container");
+        if (longCont) longCont.innerHTML = "";
+        if (shortCont) shortCont.innerHTML = "";
+
+        (strat.longConditions || []).forEach(c => {
+            this.addRuleRow("long", c.indicator, c.operator, c.value);
+        });
+        (strat.shortConditions || []).forEach(c => {
+            this.addRuleRow("short", c.indicator, c.operator, c.value);
+        });
+
+        // Hide quick test card until re-run
+        const qtCard = document.getElementById("cust-quick-test-card");
+        if (qtCard) qtCard.classList.add("hidden");
+    },
+
+    newStrategyDraft() {
+        const setVal = (id, val) => {
+            const el = document.getElementById(id);
+            if (el) el.value = val;
+        };
+
+        const randomId = `strat_custom_${Math.floor(Date.now() / 1000).toString().slice(-4)}`;
+        setVal("cust-strat-name", randomId);
+        setVal("cust-strat-disp", "Custom Strategy");
+        setVal("cust-strat-desc", "Custom indicator rule set");
+        setVal("cust-sl-atr", 1.5);
+        setVal("cust-rr-ratio", 2.5);
+        setVal("cust-trail-act", 1.0);
+        setVal("cust-trail-dist", 1.5);
+
+        const trailCb = document.getElementById("cust-use-trailing");
+        if (trailCb) trailCb.checked = false;
+
+        const ratEl = document.getElementById("cust-strat-rationale");
+        if (ratEl) ratEl.innerText = "Custom user draft. Add entry rules or prompt the AI to auto-populate.";
+
+        const statusBadge = document.getElementById("cust-strat-status-badge");
+        if (statusBadge) {
+            statusBadge.className = "px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300";
+            statusBadge.innerText = "Draft";
+        }
+
+        const longCont = document.getElementById("cust-long-rules-container");
+        const shortCont = document.getElementById("cust-short-rules-container");
+        if (longCont) longCont.innerHTML = "";
+        if (shortCont) shortCont.innerHTML = "";
+        this.addRuleRow("long", "rsi", "<", 30);
+        this.addRuleRow("short", "rsi", ">", 70);
+
+        const qtCard = document.getElementById("cust-quick-test-card");
+        if (qtCard) qtCard.classList.add("hidden");
+
+        this.showToast("New strategy draft created", "info");
+    },
+
+    async runQuickTestCustomStrategy() {
+        const longRules = this.getRulesFromContainer("long");
+        const shortRules = this.getRulesFromContainer("short");
+
+        if (longRules.length === 0 && shortRules.length === 0) {
+            this.showToast("Please add at least one long or short condition to test", "warning");
+            return;
+        }
+
+        const name = document.getElementById("cust-strat-name")?.value.trim() || "quick_test_strat";
+        const disp = document.getElementById("cust-strat-disp")?.value.trim() || "Quick Test Strategy";
+        const desc = document.getElementById("cust-strat-desc")?.value.trim() || "";
+        const slAtr = parseFloat(document.getElementById("cust-sl-atr")?.value) || 1.5;
+        const rr = parseFloat(document.getElementById("cust-rr-ratio")?.value) || 2.5;
+        const useTrailing = Boolean(document.getElementById("cust-use-trailing")?.checked);
+        const trailAct = parseFloat(document.getElementById("cust-trail-act")?.value) || 1.0;
+        const trailDist = parseFloat(document.getElementById("cust-trail-dist")?.value) || 1.5;
+
+        const stratPayload = {
+            name,
+            displayName: disp,
+            description: desc,
+            longConditions: longRules,
+            shortConditions: shortRules,
+            slAtrMult: slAtr,
+            riskRewardRatio: rr,
+            useTrailingStop: useTrailing,
+            trailActivationR: trailAct,
+            trailDistanceAtrMult: trailDist,
+        };
+
+        const qtCard = document.getElementById("cust-quick-test-card");
+        const winEl = document.getElementById("quick-test-winrate");
+        const tradesEl = document.getElementById("quick-test-trades");
+        const netEl = document.getElementById("quick-test-netr");
+        const pfEl = document.getElementById("quick-test-pf");
+
+        if (qtCard) qtCard.classList.remove("hidden");
+        if (winEl) winEl.innerText = "...";
+        if (tradesEl) tradesEl.innerText = "...";
+        if (netEl) netEl.innerText = "...";
+        if (pfEl) pfEl.innerText = "...";
+
+        try {
+            const res = await fetch(`${API_BASE}/api/custom-strategy/quick-test`, {
+                method: "POST",
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify({
+                    strategy: stratPayload,
+                    symbol: "BTCUSDT",
+                    market: "spot",
+                    timeframe: "1h"
+                })
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `Server returned ${res.status}`);
+            }
+
+            const data = await res.json();
+            if (winEl) winEl.innerText = `${(data.winRate * 100).toFixed(1)}%`;
+            if (tradesEl) tradesEl.innerText = `${data.totalTrades} trades`;
+            if (netEl) {
+                const rVal = parseFloat(data.netR || 0);
+                netEl.innerText = `${rVal > 0 ? "+" : ""}${rVal.toFixed(2)}R`;
+                netEl.className = `text-lg font-black font-mono ${rVal >= 0 ? "text-emerald-400" : "text-rose-400"}`;
+            }
+            if (pfEl) {
+                const pf = data.profitFactor;
+                pfEl.innerText = pf != null ? pf.toFixed(2) : "N/A";
+            }
+            this.showToast(`Simulation complete: ${data.totalTrades} trades, ${(data.winRate * 100).toFixed(1)}% win rate`, "success");
+        } catch (e) {
+            this.showToast(`Simulation test failed: ${e.message}`, "error");
+            if (winEl) winEl.innerText = "Error";
+        }
+    },
+
+    async submitCustomStrategy(autoRunBacktest = false) {
+        const nameInput = document.getElementById("cust-strat-name");
+        const dispInput = document.getElementById("cust-strat-disp");
+        const descInput = document.getElementById("cust-strat-desc");
+        const ratInput = document.getElementById("cust-strat-rationale");
+
+        const name = nameInput?.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_") || "";
+        const disp = dispInput?.value.trim() || name;
+        const desc = descInput?.value.trim() || "Custom AI strategy";
+        const rationale = ratInput?.innerText.trim() || "";
+
+        if (!name) {
+            this.showToast("Strategy ID cannot be empty", "warning");
+            nameInput?.focus();
+            return;
+        }
+
+        const longRules = this.getRulesFromContainer("long");
+        const shortRules = this.getRulesFromContainer("short");
+
+        if (longRules.length === 0 && shortRules.length === 0) {
+            this.showToast("Strategy must have at least one long or short condition", "warning");
+            return;
+        }
+
+        const slAtr = parseFloat(document.getElementById("cust-sl-atr")?.value) || 1.5;
+        const rr = parseFloat(document.getElementById("cust-rr-ratio")?.value) || 2.5;
+        const useTrailing = Boolean(document.getElementById("cust-use-trailing")?.checked);
+        const trailAct = parseFloat(document.getElementById("cust-trail-act")?.value) || 1.0;
+        const trailDist = parseFloat(document.getElementById("cust-trail-dist")?.value) || 1.5;
+
+        try {
+            const res = await fetch(`${API_BASE}/api/custom-strategy/create`, {
+                method: "POST",
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify({
+                    name,
+                    displayName: disp,
+                    description: desc,
+                    rationale,
+                    longConditions: longRules,
+                    shortConditions: shortRules,
+                    slAtrMult: slAtr,
+                    riskRewardRatio: rr,
+                    useTrailingStop: useTrailing,
+                    trailActivationR: trailAct,
+                    trailDistanceAtrMult: trailDist,
+                })
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `Server returned ${res.status}`);
+            }
+
+            const data = await res.json();
+            await this.fetchStrategies();
+
+            const statusBadge = document.getElementById("cust-strat-status-badge");
+            if (statusBadge) {
+                statusBadge.className = "px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800";
+                statusBadge.innerText = "Registered & Saved";
+            }
+
+            this.showToast(`Strategy "${disp}" saved to catalog!`, "success");
+
+            if (autoRunBacktest) {
+                this.selectStrategyForBacktest(name);
+                setTimeout(() => {
+                    this.runBacktest();
+                }, 300);
+            } else {
+                this.renderStrategyLibrary();
+            }
+        } catch (e) {
+            this.showToast(`Error saving strategy: ${e.message}`, "error");
+        }
+    },
+
+    async deleteCustomStrategy(name) {
+        if (!confirm(`Are you sure you want to delete strategy "${name}"?`)) return;
+
+        try {
+            const res = await fetch(`${API_BASE}/api/custom-strategy/${name}`, {
+                method: "DELETE",
+                headers: this.getAuthHeaders(),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `Server returned ${res.status}`);
+            }
+            await this.fetchStrategies();
+            this.renderStrategyLibrary();
+            this.showToast(`Strategy "${name}" deleted`, "info");
+        } catch (e) {
+            this.showToast(`Error deleting strategy: ${e.message}`, "error");
+        }
+    },
+
+    editCustomStrategy(stratId) {
+        const strat = this.strategiesList.find(s => s.id === stratId);
+        if (!strat) return;
+
+        // Apply to editor form
+        this.applyStrategyToForm({
+            name: strat.id,
+            displayName: strat.displayName,
+            description: strat.description,
+            rationale: strat.rationale,
+            longConditions: strat.longConditions || [],
+            shortConditions: strat.shortConditions || [],
+            slAtrMult: (strat.params?.find(p => p.key === "CUSTOM_SL_ATR_MULT")?.default) || 1.5,
+            riskRewardRatio: (strat.params?.find(p => p.key === "CUSTOM_RISK_REWARD_RATIO")?.default) || 2.5,
+            useTrailingStop: strat.useTrailingStop || false,
+        });
+
+        const statusBadge = document.getElementById("cust-strat-status-badge");
+        if (statusBadge) {
+            statusBadge.className = "px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-950 text-amber-300 border border-amber-800";
+            statusBadge.innerText = "Editing Saved";
+        }
+
+        // Scroll to editor
+        document.getElementById("cust-strat-disp")?.scrollIntoView({ behavior: "smooth" });
+        this.showToast(`Loaded "${strat.displayName}" into Strategy Architect`, "info");
+    },
+
+    filterStrategyCatalog() {
+        this.renderStrategyLibrary();
+    },
+
     renderStrategyLibrary() {
         const container = document.getElementById("strategies-grid-container");
         if (!container) return;
 
-        container.innerHTML = this.strategiesList.map(st => `
-            <div class="p-5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between space-y-4">
-                <div>
-                    <div class="flex items-center justify-between">
-                        <span class="px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-slate-800 text-slate-300">${st.category}</span>
-                        ${st.validated ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">HOLDOUT VALIDATED</span>` : ""}
+        const search = document.getElementById("strat-catalog-search")?.value.trim().toLowerCase() || "";
+        const filterMode = document.getElementById("strat-catalog-filter")?.value || "all";
+
+        let filtered = this.strategiesList;
+
+        if (filterMode === "custom") {
+            filtered = filtered.filter(st => st.category === "Custom AI Strategy" || st.category === "Custom Strategy");
+        } else if (filterMode === "builtin") {
+            filtered = filtered.filter(st => st.category !== "Custom AI Strategy" && st.category !== "Custom Strategy");
+        }
+
+        if (search) {
+            filtered = filtered.filter(st =>
+                (st.displayName && st.displayName.toLowerCase().includes(search)) ||
+                (st.id && st.id.toLowerCase().includes(search)) ||
+                (st.description && st.description.toLowerCase().includes(search)) ||
+                (st.category && st.category.toLowerCase().includes(search))
+            );
+        }
+
+        if (filtered.length === 0) {
+            container.innerHTML = `
+                <div class="col-span-full py-12 text-center text-slate-500 text-xs">
+                    No strategies found matching your search.
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = filtered.map(st => {
+            const isCustom = st.category === "Custom AI Strategy" || st.category === "Custom Strategy";
+            return `
+                <div class="p-5 rounded-2xl bg-slate-900 border ${isCustom ? "border-indigo-500/30 bg-gradient-to-b from-indigo-950/10 to-slate-900" : "border-slate-800"} hover:border-slate-700 transition-all flex flex-col justify-between space-y-4 shadow-sm">
+                    <div>
+                        <div class="flex items-center justify-between">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${isCustom ? "bg-indigo-950 text-indigo-300 border border-indigo-800/80" : "bg-slate-800 text-slate-300"}">${st.category}</span>
+                            ${st.validated ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">HOLDOUT VALIDATED</span>` : ""}
+                        </div>
+                        <h3 class="text-base font-bold text-slate-100 mt-2.5 flex items-center justify-between">
+                            <span>${this.escapeHtml(st.displayName)}</span>
+                            ${isCustom ? `<span class="text-[10px] font-mono text-indigo-400 font-normal">AI Custom</span>` : ""}
+                        </h3>
+                        <p class="text-xs text-slate-400 mt-1 leading-relaxed">${this.escapeHtml(st.description)}</p>
                     </div>
-                    <h3 class="text-base font-bold text-slate-100 mt-2">${st.displayName}</h3>
-                    <p class="text-xs text-slate-400 mt-1 leading-relaxed">${st.description}</p>
+                    <div class="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                        <span class="font-mono text-[11px] text-slate-500">${(st.params || []).length} params</span>
+                        <div class="flex items-center gap-1.5">
+                            ${isCustom ? `
+                                <button onclick="App.editCustomStrategy('${st.id}')" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors" title="Edit in Architect">
+                                    <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                                </button>
+                                <button onclick="App.deleteCustomStrategy('${st.id}')" class="p-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900 text-rose-400 hover:text-white border border-rose-900/40 transition-colors" title="Delete Strategy">
+                                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                                </button>
+                            ` : ""}
+                            <button onclick="App.selectStrategyForBacktest('${st.id}')" class="px-3 py-1.5 text-xs rounded-lg bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30 font-semibold transition-colors flex items-center gap-1">
+                                <span>Simulate</span>
+                                <i data-lucide="arrow-right" class="w-3 h-3"></i>
+                            </button>
+                        </div>
+                    </div>
                 </div>
-                <div class="pt-3 border-t border-slate-800 flex items-center justify-between">
-                    <span class="font-mono text-[11px] text-slate-500">${(st.params || []).length} adjustable params</span>
-                    <button onclick="App.selectStrategyForBacktest('${st.id}')" class="px-3 py-1 text-xs rounded bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30 font-medium transition-colors">
-                        Simulate →
-                    </button>
-                </div>
-            </div>
-        `).join("");
+            `;
+        }).join("");
+
+        if (window.lucide) lucide.createIcons();
     },
 
     selectStrategyForBacktest(stratId) {
@@ -1935,42 +2523,6 @@ const App = {
         if (el) {
             el.value = stratId;
             this.onStrategyChanged();
-        }
-    },
-
-    async submitCustomStrategy() {
-        const name = document.getElementById("cust-strat-name").value.trim();
-        const disp = document.getElementById("cust-strat-disp").value.trim();
-        const desc = document.getElementById("cust-strat-desc").value.trim();
-
-        const rsiLong = parseFloat(document.getElementById("cust-rsi-long").value) || 30;
-        const rsiShort = parseFloat(document.getElementById("cust-rsi-short").value) || 70;
-        const slAtr = parseFloat(document.getElementById("cust-sl-atr").value) || 1.5;
-        const rr = parseFloat(document.getElementById("cust-rr-ratio").value) || 2.5;
-
-        try {
-            const res = await fetch(`${API_BASE}/api/custom-strategy/create`, {
-                method: "POST",
-                headers: this.getAuthHeaders(),
-                body: JSON.stringify({
-                    name, displayName: disp, description: desc,
-                    longConditions: [
-                        { indicator: "rsi", operator: "<", value: rsiLong }
-                    ],
-                    shortConditions: [
-                        { indicator: "rsi", operator: ">", value: rsiShort }
-                    ],
-                    slAtrMult: slAtr,
-                    riskRewardRatio: rr,
-                    useTrailingStop: false
-                })
-            });
-            const data = await res.json();
-            await this.fetchStrategies();
-            this.showToast(`Custom Strategy "${disp || name}" created and registered!`, "success");
-            this.switchTab("backtest");
-        } catch (e) {
-            alert("Error creating custom strategy: " + e);
         }
     },
 
