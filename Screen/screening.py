@@ -57,6 +57,10 @@ CONFIG = {
     "max_quality_without_htf": float(os.getenv("MAX_QUALITY_WITHOUT_HTF", "79")),
     "use_taker_buy_confirmation": os.getenv("USE_TAKER_BUY_CONFIRMATION", "true").lower() == "true",
     "alert_selection_window_sec": float(os.getenv("ALERT_SELECTION_WINDOW_SEC", "3")),
+    "max_pending_signals": int(os.getenv("MAX_PENDING_SIGNALS", "200")),
+    "max_signal_age_sec": int(os.getenv("MAX_SIGNAL_AGE_SEC", "180")),
+    "max_delivery_attempts": int(os.getenv("MAX_DELIVERY_ATTEMPTS", "5")),
+    "delivery_poll_interval_sec": float(os.getenv("DELIVERY_POLL_INTERVAL_SEC", "1.0")),
     "daily_reset_utc_hour": int(os.getenv("DAILY_RESET_UTC_HOUR", "0")),
     "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN"),
     "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID"),
@@ -348,10 +352,47 @@ class SmartMoneyState:
         )
 
     def register_signal(self, signal):
+        """Queue a candidate without allowing the in-memory queue to grow indefinitely.
+
+        The database write is handled by the caller even when this returns False.
+        When full, retain the highest-ranked candidates (priority_score is negative
+        ranking, so smaller values are better).
+        """
         key = (signal.symbol, signal.signal_type, signal.candle_time)
         with self.lock:
-            if key in self.pending_keys: return False
-            self.pending_keys.add(key); heapq.heappush(self.pending_signals, signal); return True
+            if key in self.pending_keys:
+                return False
+
+            max_pending = max(1, int(CONFIG.get("max_pending_signals", 200)))
+            if len(self.pending_signals) < max_pending:
+                self.pending_keys.add(key)
+                heapq.heappush(self.pending_signals, signal)
+                return True
+
+            worst_index = max(
+                range(len(self.pending_signals)),
+                key=lambda index: self.pending_signals[index].priority_score,
+            )
+            worst = self.pending_signals[worst_index]
+            if signal.priority_score >= worst.priority_score:
+                logger.warning(
+                    "Alert queue full (%d); candidate not queued: %s %s quality=%.1f",
+                    max_pending, signal.symbol, signal.signal_type, signal.quality_score,
+                )
+                return False
+
+            evicted_key = (worst.symbol, worst.signal_type, worst.candle_time)
+            self.pending_keys.discard(evicted_key)
+            self.pending_signals[worst_index] = signal
+            heapq.heapify(self.pending_signals)
+            self.pending_keys.add(key)
+            logger.warning(
+                "Alert queue full (%d); replaced lower-ranked %s %s (quality=%.1f) "
+                "with %s %s (quality=%.1f)",
+                max_pending, worst.symbol, worst.signal_type, worst.quality_score,
+                signal.symbol, signal.signal_type, signal.quality_score,
+            )
+            return True
 
     def _can_alert(self, symbol):
         now = time.time()
@@ -372,8 +413,16 @@ class SmartMoneyState:
     def pop_best_eligible(self):
         with self.lock:
             self._check_hourly_reset(); deferred=[]; selected=None
+            max_age = max(0, int(CONFIG.get("max_signal_age_sec", 180)))
+            now = time.time()
             while self.pending_signals:
                 candidate=heapq.heappop(self.pending_signals); key=(candidate.symbol,candidate.signal_type,candidate.candle_time); self.pending_keys.discard(key)
+                if max_age and now - candidate.timestamp > max_age:
+                    logger.info(
+                        "Discarding stale queued signal: %s %s age=%.0fs max_age=%ss",
+                        candidate.symbol, candidate.signal_type, now - candidate.timestamp, max_age,
+                    )
+                    continue
                 if not CONFIG.get("enabled",True): deferred.append(candidate); continue
                 if self._can_alert(candidate.symbol): selected=candidate; break
                 deferred.append(candidate)
@@ -439,6 +488,14 @@ def ensure_signal_table():
         cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS taker_buy_ratio DECIMAL(8,6) NULL")
         cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS htf_alignment TINYINT NOT NULL DEFAULT 0")
         cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS htf_context VARCHAR(64) NOT NULL DEFAULT 'UNAVAILABLE'")
+        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(16) NOT NULL DEFAULT 'PENDING'")
+        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS delivery_attempts INT NOT NULL DEFAULT 0")
+        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS next_attempt_at DATETIME NULL")
+        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS delivery_updated_at DATETIME NULL")
+        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS delivered_at DATETIME NULL")
+        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS last_delivery_error VARCHAR(500) NULL")
+        cur.execute("UPDATE smart_money_signals SET delivery_status='SENT' WHERE telegram_sent=TRUE AND delivery_status='PENDING'")
+        cur.execute("UPDATE smart_money_signals SET delivered_at=detected_at WHERE telegram_sent=TRUE AND delivered_at IS NULL")
         cur.execute("""CREATE TABLE IF NOT EXISTS screener_control (id INT PRIMARY KEY DEFAULT 1, enabled BOOLEAN NOT NULL DEFAULT TRUE, overrides_json TEXT NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, CONSTRAINT chk_screener_control_singleton CHECK (id = 1)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
         cur.execute("""CREATE TABLE IF NOT EXISTS screener_heartbeat (id INT PRIMARY KEY DEFAULT 1, pid INT NULL, last_beat_at DATETIME NULL, timeframe VARCHAR(20) NULL, symbols_monitored INT NOT NULL DEFAULT 0, last_signal_at DATETIME NULL, last_universe_refresh_at DATETIME NULL, CONSTRAINT chk_screener_heartbeat_singleton CHECK (id = 1)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
         cur.execute("ALTER TABLE screener_heartbeat ADD COLUMN IF NOT EXISTS timeframe VARCHAR(20) NULL")
@@ -535,22 +592,198 @@ def process_kline_message(raw_msg):
         if not kline.get("x"): return
         volume=float(kline["v"]); quote_volume=float(kline["q"]); open_price=float(kline["o"]); close_price=float(kline["c"]); high_price=float(kline["h"]); low_price=float(kline["l"]); taker_buy_quote=float(kline.get("Q", 0.0)) if kline.get("Q") is not None else None; close_time=datetime.fromtimestamp(kline["t"]/1000,tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         candidate=state.detect_smart_money_signal(symbol,volume,quote_volume,close_price,open_price,high_price,low_price,close_time,taker_buy_quote=taker_buy_quote)
-        if candidate and state.register_signal(candidate): save_signal_to_db(candidate,telegram_sent=False); logger.info("📥 Candidate queued: %s | %s | Quality %.0f | RVOL %.2fx",candidate.symbol,candidate.signal_type,candidate.quality_score,candidate.rvol)
+        if candidate:
+            # MySQL is the durable source of truth for delivery; do not rely on RAM for pending alerts.
+            save_signal_to_db(candidate, telegram_sent=False)
+            logger.info("🗃️ Candidate persisted for delivery: %s | %s | Quality %.0f | RVOL %.2fx", candidate.symbol, candidate.signal_type, candidate.quality_score, candidate.rvol)
     except (json.JSONDecodeError,KeyError,ValueError,TypeError) as e: logger.warning("Invalid kline message: %s",e)
     except Exception as e: logger.error("Error processing message: %s",e,exc_info=True)
 
+def claim_next_pending_signal():
+    """Atomically claim the highest-ranked recent candidate from the durable MySQL queue."""
+    conn = None
+    cur = None
+    try:
+        conn = get_pool().get_connection()
+        cur = conn.cursor(dictionary=True)
+        max_age = max(1, int(CONFIG.get("max_signal_age_sec", 180)))
+        # Recover claims abandoned by a crashed process, and expire old work.
+        cur.execute("UPDATE smart_money_signals SET delivery_status='PENDING', delivery_updated_at=UTC_TIMESTAMP() WHERE delivery_status='SENDING' AND delivery_updated_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 MINUTE)")
+        cur.execute("UPDATE smart_money_signals SET delivery_status='EXPIRED', last_delivery_error='Signal expired before delivery', delivery_updated_at=UTC_TIMESTAMP() WHERE delivery_status='PENDING' AND detected_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)", (max_age,))
+        conn.commit()
+        cur.execute("""SELECT id,symbol,signal_type,rvol,volume,quote_volume,price,price_change_pct,volume_velocity,quality_score,direction,taker_buy_ratio,htf_alignment,htf_context,candle_time,detected_at
+                       FROM smart_money_signals
+                       WHERE delivery_status='PENDING' AND (next_attempt_at IS NULL OR next_attempt_at <= UTC_TIMESTAMP())
+                         AND detected_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)
+                       ORDER BY quality_score DESC, rvol DESC, detected_at ASC LIMIT 1 FOR UPDATE""", (max_age,))
+        row = cur.fetchone()
+        if not row:
+            conn.commit()
+            return None
+        cur.execute("UPDATE smart_money_signals SET delivery_status='SENDING', delivery_attempts=delivery_attempts+1, delivery_updated_at=UTC_TIMESTAMP() WHERE id=%s AND delivery_status='PENDING'", (row["id"],))
+        if getattr(cur, "rowcount", 1) != 1:
+            conn.rollback()
+            return None
+        conn.commit()
+        detected = row.get("detected_at")
+        if isinstance(detected, datetime):
+            detected = detected.replace(tzinfo=timezone.utc).timestamp()
+        else:
+            detected = time.time()
+        quality = float(row.get("quality_score") or 0)
+        rvol = float(row.get("rvol") or 0)
+        return SmartMoneySignal(
+            -(quality * 1000.0 + rvol * 10.0), str(row["symbol"]), str(row["signal_type"]),
+            rvol, float(row.get("volume") or 0), float(row.get("quote_volume") or 0),
+            float(row.get("price") or 0), float(row.get("price_change_pct") or 0),
+            float(row.get("volume_velocity") or 0), detected, str(row["candle_time"]), quality,
+            direction=str(row.get("direction") or "NEUTRAL"),
+            taker_buy_ratio=float(row["taker_buy_ratio"]) if row.get("taker_buy_ratio") is not None else None,
+            htf_alignment=int(row.get("htf_alignment") or 0),
+            htf_context=str(row.get("htf_context") or "UNAVAILABLE"),
+        )
+    except Exception as exc:
+        if conn:
+            try: conn.rollback()
+            except Exception: pass
+        logger.error("Durable alert queue claim failed: %s", exc)
+        return None
+    finally:
+        if cur:
+            try: cur.close()
+            except Exception: pass
+        if conn:
+            try: conn.close()
+            except Exception: pass
+
+def complete_signal_delivery(signal, sent, error=None):
+    """Record delivery outcome; retry transient failures with bounded exponential backoff."""
+    conn = None
+    cur = None
+    try:
+        conn = get_pool().get_connection()
+        cur = conn.cursor()
+        key = (signal.symbol, signal.signal_type, signal.candle_time)
+        if sent:
+            cur.execute("""UPDATE smart_money_signals SET telegram_sent=TRUE, delivery_status='SENT', delivered_at=UTC_TIMESTAMP(), delivery_updated_at=UTC_TIMESTAMP(), last_delivery_error=NULL, next_attempt_at=NULL WHERE symbol=%s AND signal_type=%s AND candle_time=%s""", key)
+        else:
+            max_attempts = max(1, int(CONFIG.get("max_delivery_attempts", 5)))
+            cur.execute("SELECT delivery_attempts FROM smart_money_signals WHERE symbol=%s AND signal_type=%s AND candle_time=%s", key)
+            row = cur.fetchone()
+            attempts = int(row[0]) if row else max_attempts
+            if attempts >= max_attempts:
+                status, delay = "FAILED", 0
+            else:
+                status, delay = "PENDING", min(900, 30 * (2 ** max(0, attempts - 1)))
+            cur.execute("""UPDATE smart_money_signals SET delivery_status=%s, delivery_updated_at=UTC_TIMESTAMP(), next_attempt_at=IF(%s='PENDING', DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s SECOND), NULL), last_delivery_error=%s WHERE symbol=%s AND signal_type=%s AND candle_time=%s""", (status, status, delay, str(error or "Telegram delivery failed")[:500], *key))
+        conn.commit()
+    except Exception as exc:
+        if conn:
+            try: conn.rollback()
+            except Exception: pass
+        logger.error("Failed to record delivery outcome for %s: %s", signal.symbol, exc)
+    finally:
+        if cur:
+            try: cur.close()
+            except Exception: pass
+        if conn:
+            try: conn.close()
+            except Exception: pass
+
+def release_signal_claim(signal):
+    """Return a claimed signal to the queue when rate limits currently block delivery."""
+    conn = None
+    cur = None
+    try:
+        conn = get_pool().get_connection()
+        cur = conn.cursor()
+        cur.execute("""UPDATE smart_money_signals SET delivery_status='PENDING', delivery_attempts=GREATEST(delivery_attempts-1,0), next_attempt_at=DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 SECOND), delivery_updated_at=UTC_TIMESTAMP() WHERE symbol=%s AND signal_type=%s AND candle_time=%s AND delivery_status='SENDING'""", (signal.symbol, signal.signal_type, signal.candle_time))
+        conn.commit()
+    except Exception as exc:
+        if conn:
+            try: conn.rollback()
+            except Exception: pass
+        logger.error("Failed to release alert claim for %s: %s", signal.symbol, exc)
+    finally:
+        if cur:
+            try: cur.close()
+            except Exception: pass
+        if conn:
+            try: conn.close()
+            except Exception: pass
+
+def persistent_alert_limit_allows(symbol):
+    """Enforce hourly and per-symbol limits across process restarts using delivery history."""
+    conn = None
+    cur = None
+    try:
+        conn = get_pool().get_connection()
+        cur = conn.cursor()
+        cur.execute("""SELECT COUNT(*), COALESCE(SUM(symbol=%s),0), MAX(CASE WHEN symbol=%s THEN delivered_at ELSE NULL END)
+                       FROM smart_money_signals
+                       WHERE delivery_status='SENT' AND delivered_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR)""", (symbol, symbol))
+        row = cur.fetchone() or (0, 0, None)
+        total_sent, symbol_sent, last_symbol_sent = int(row[0] or 0), int(row[1] or 0), row[2]
+        if total_sent >= int(CONFIG.get("max_alerts_per_hour", 5)):
+            return False
+        if symbol_sent >= int(CONFIG.get("max_alerts_per_symbol_per_hour", 2)):
+            return False
+        if last_symbol_sent is not None:
+            if isinstance(last_symbol_sent, str):
+                last_symbol_sent = datetime.fromisoformat(last_symbol_sent)
+            if last_symbol_sent.tzinfo is None:
+                last_symbol_sent = last_symbol_sent.replace(tzinfo=timezone.utc)
+            if time.time() - last_symbol_sent.timestamp() < int(CONFIG.get("alert_cooldown_sec", 900)):
+                return False
+        return True
+    except Exception as exc:
+        # Fail closed: do not bypass trading-alert rate limits when the DB is unavailable.
+        logger.error("Persistent alert rate-limit check failed; delivery paused: %s", exc)
+        return False
+    finally:
+        if cur:
+            try: cur.close()
+            except Exception: pass
+        if conn:
+            try: conn.close()
+            except Exception: pass
+
 def dispatch_alerts():
+    """Deliver from MySQL so pending work survives process restarts."""
     while not state.shutdown_flag:
-        if not state.pending_signals:
-            time.sleep(0.25); continue
-        window=max(0.0,CONFIG.get("alert_selection_window_sec",3.0)); deadline=time.monotonic()+window
-        while not state.shutdown_flag and time.monotonic()<deadline: time.sleep(min(0.1,max(0.0,deadline-time.monotonic())))
-        candidate=state.pop_best_eligible()
-        if candidate is None: continue
-        sent=telegram.send_early_alert(candidate) if CONFIG.get("enabled",True) else False
-        if not sent: state.release_alert_slot(candidate.symbol)
-        save_signal_to_db(candidate,telegram_sent=sent)
-        logger.info("🎯 Selected alert: %s | %s | Quality %.0f | RVOL %.2fx | pending=%d | sent=%s",candidate.symbol,candidate.signal_type,candidate.quality_score,candidate.rvol,len(state.pending_signals),sent)
+        if not CONFIG.get("enabled", True):
+            time.sleep(max(0.25, CONFIG.get("delivery_poll_interval_sec", 1.0)))
+            continue
+        candidate = claim_next_pending_signal()
+        if candidate is None:
+            time.sleep(max(0.25, CONFIG.get("delivery_poll_interval_sec", 1.0)))
+            continue
+        if not persistent_alert_limit_allows(candidate.symbol) or not state._can_alert(candidate.symbol):
+            release_signal_claim(candidate)
+            time.sleep(1.0)
+            continue
+        try:
+            sent = telegram.send_early_alert(candidate)
+        except Exception as exc:
+            # Treat raised transport/client errors like a failed send so the
+            # dispatcher survives and the durable queue can retry this signal.
+            state.release_alert_slot(candidate.symbol)
+            complete_signal_delivery(
+                candidate, False, f"Telegram send raised {type(exc).__name__}: {exc}"
+            )
+            logger.exception(
+                "Telegram delivery raised an exception; retry state saved for %s %s",
+                candidate.symbol, candidate.signal_type,
+            )
+            continue
+
+        if sent:
+            complete_signal_delivery(candidate, True)
+            logger.info("🎯 Durable alert delivered: %s | %s | Quality %.0f | RVOL %.2fx", candidate.symbol, candidate.signal_type, candidate.quality_score, candidate.rvol)
+        else:
+            state.release_alert_slot(candidate.symbol)
+            complete_signal_delivery(candidate, False, "Telegram send returned false")
+            logger.warning("Telegram delivery failed; retry state saved for %s %s", candidate.symbol, candidate.signal_type)
 
 def on_message(ws,message): process_kline_message(message)
 def on_error(ws,error): logger.error("WebSocket error: %s",error)

@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from web.app import app
@@ -11,6 +12,55 @@ class TestResearchRoutes(unittest.TestCase):
         self.client = TestClient(app)
         self.token = create_access_token(user_id=1, username="admin", role="admin")
         self.headers = {"Authorization": f"Bearer {self.token}"}
+
+        # Route tests must not depend on a live MySQL server. The real auth
+        # module checks token revocation and the active user in MySQL on every
+        # request, which made these endpoint tests block in CI. Keep the
+        # middleware boundary in the request path, but stub its DB-backed
+        # identity lookup; missing credentials must still be rejected.
+        def authenticate_test_request(request):
+            if request.headers.get("Authorization") != self.headers["Authorization"]:
+                raise HTTPException(status_code=401, detail="Authentication credentials missing")
+            return {"id": 1, "username": "admin", "role": "admin", "is_active": 1}
+
+        self.auth_patcher = patch("web.app.authenticate_request", side_effect=authenticate_test_request)
+        self.auth_patcher.start()
+
+        # Stub route-level database helpers as well as authentication. These
+        # tests assert HTTP contracts; database behavior is covered separately.
+        self.route_patches = [
+            patch("web.routes.research_routes.get_retailbot2_open_trades", return_value=[]),
+            patch("web.routes.research_routes.get_retailbot2_recent_trades", return_value=[]),
+            patch("web.routes.research_routes.get_retailbot2_stats", return_value={
+                "by_strategy": [], "by_mode": {"inverse": [], "shadow": []}
+            }),
+            patch("web.routes.research_routes.get_recent_smart_money_signals", return_value=[]),
+            patch("web.routes.research_routes.get_smart_money_stats", return_value={
+                "total_signals": 0, "signals_last_24h": 0, "by_type_last_24h": []
+            }),
+            patch("web.routes.research_routes.get_retailbot2_control", return_value={
+                "enabled": True, "overrides": {}, "updated_at": None
+            }),
+            patch("web.routes.research_routes.set_retailbot2_control"),
+            patch("web.routes.research_routes.get_screener_control", return_value={
+                "enabled": True, "overrides": {}, "updated_at": None
+            }),
+            patch("web.routes.research_routes.set_screener_control"),
+            patch("web.routes.research_routes.get_screener_status", return_value={
+                "running": True, "database_ok": True, "pid": 1234,
+                "timeframe": "5m", "symbols_monitored": 247,
+                "last_beat_at": "2026-10-06 03:30:00",
+                "last_signal_at": "2026-10-06 03:29:00",
+                "last_universe_refresh": "2026-10-06 03:00:00",
+            }),
+        ]
+        for route_patch in self.route_patches:
+            route_patch.start()
+
+    def tearDown(self):
+        for route_patch in reversed(self.route_patches):
+            route_patch.stop()
+        self.auth_patcher.stop()
 
     def test_unauthorized_access(self):
         """Endpoints under /api/research must require authentication."""
