@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from web.app import app
@@ -11,6 +12,22 @@ class TestResearchRoutes(unittest.TestCase):
         self.client = TestClient(app)
         self.token = create_access_token(user_id=1, username="admin", role="admin")
         self.headers = {"Authorization": f"Bearer {self.token}"}
+
+        # Route tests must not depend on a live MySQL server. The real auth
+        # module checks token revocation and the active user in MySQL on every
+        # request, which made these endpoint tests block in CI. Keep the
+        # middleware boundary in the request path, but stub its DB-backed
+        # identity lookup; missing credentials must still be rejected.
+        def authenticate_test_request(request):
+            if request.headers.get("Authorization") != self.headers["Authorization"]:
+                raise HTTPException(status_code=401, detail="Authentication credentials missing")
+            return {"id": 1, "username": "admin", "role": "admin", "is_active": 1}
+
+        self.auth_patcher = patch("web.app.authenticate_request", side_effect=authenticate_test_request)
+        self.auth_patcher.start()
+
+    def tearDown(self):
+        self.auth_patcher.stop()
 
     def test_unauthorized_access(self):
         """Endpoints under /api/research must require authentication."""

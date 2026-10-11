@@ -21,11 +21,9 @@ _retailbot2_pool = None
 
 
 def get_retailbot2_pool():
-    """Separate pool for paper/retailbot2.py's own database (see
-    RETAILBOT2_DB_CONFIG in config.py) -- read-only usage from the web
-    dashboard's visibility panel. Lazily initialized so importing db.db
-    doesn't require this second database to be reachable if retailbot2
-    isn't running / configured."""
+    """Compatibility pool for RetailBot dashboard helpers.
+    It uses the same centralized MYSQL_CONFIG as every other component;
+    this separate pool preserves existing callers only."""
     global _retailbot2_pool
     if _retailbot2_pool is None:
         _retailbot2_pool = pooling.MySQLConnectionPool(
@@ -951,9 +949,8 @@ def get_news_overlay_stats():
 
 
 # ----------------------------------------------------------------------------
-# retailbot2 -- read helpers for the web dashboard visibility panel.
-# Reads from RETAILBOT2_DB_CONFIG's database (default "Binance"), separate
-# from the main crypto_signals pool used everywhere else in this file.
+# RetailBot -- read helpers for the web dashboard visibility panel.
+# Uses the shared MYSQL_CONFIG database, same as the bot and all other components.
 # ----------------------------------------------------------------------------
 
 def get_retailbot2_open_trades(limit=100):
@@ -1109,9 +1106,8 @@ def get_smart_money_stats():
 
 # ----------------------------------------------------------------------------
 # Bot control -- read/write for the "enable + tunable params" toggle panels.
-# retailbot2's bot_control lives in ITS OWN database (RETAILBOT2_DB_CONFIG);
-# the screener's screener_control lives in the shared crypto_signals DB.
-# Both tables are self-created by their respective process on startup
+# RetailBot's bot_control and the screener's screener_control both live in
+# the shared MYSQL_CONFIG database. Tables are self-created by their processes on startup
 # (paper/retailbot2.py's DatabaseManager._create_tables(),
 # Screen/screening.py's ensure_signal_table()) -- these helpers assume the
 # table already exists, which it will once that process has run at least

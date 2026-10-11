@@ -10,14 +10,18 @@ sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
 
-def make_signal(symbol, quality, candle="2026-09-30T00:00:00Z"):
-    return module.SmartMoneySignal(-quality * 1000, symbol, "RVOL_SPIKE", quality / 10, 1000, 100000, 100, 0.5, 5, 1.0, candle, quality)
+def make_signal(symbol, quality, candle="2026-09-30T00:00:00Z", timestamp=None):
+    if timestamp is None:
+        timestamp = module.time.time()
+    return module.SmartMoneySignal(-quality * 1000, symbol, "RVOL_SPIKE", quality / 10, 1000, 100000, 100, 0.5, 5, timestamp, candle, quality)
 
 
 def reset_limits(max_per_hour=5, max_per_symbol=5, cooldown=0):
     module.CONFIG["alert_cooldown_sec"] = cooldown
     module.CONFIG["max_alerts_per_hour"] = max_per_hour
     module.CONFIG["max_alerts_per_symbol_per_hour"] = max_per_symbol
+    module.CONFIG["max_pending_signals"] = 200
+    module.CONFIG["max_signal_age_sec"] = 180
 
 
 def test_pending_candidates_are_ranked_by_quality():
@@ -173,4 +177,140 @@ def test_database_upsert_replaces_score_with_matching_confirmation_context(monke
     assert params[9] == "BULLISH"
     assert params[10] == 0.72
     assert params[12] == "UNAVAILABLE"
+
+
+
+
+def test_pending_queue_is_bounded_and_keeps_higher_ranked_signals():
+    reset_limits()
+    module.CONFIG["max_pending_signals"] = 2
+    state = module.SmartMoneyState(10, 7, 5)
+
+    assert state.register_signal(make_signal("LOWUSDT", 70))
+    assert state.register_signal(make_signal("MIDUSDT", 80))
+    assert state.register_signal(make_signal("HIGHUSDT", 95))
+
+    assert len(state.pending_signals) == 2
+    assert {item.symbol for item in state.pending_signals} == {"MIDUSDT", "HIGHUSDT"}
+    assert ("LOWUSDT", "RVOL_SPIKE", "2026-09-30T00:00:00Z") not in state.pending_keys
+    assert len(state.pending_keys) == 2
+
+
+def test_full_queue_rejects_lower_ranked_candidate_without_growing():
+    reset_limits()
+    module.CONFIG["max_pending_signals"] = 1
+    state = module.SmartMoneyState(10, 7, 5)
+
+    assert state.register_signal(make_signal("HIGHUSDT", 95))
+    assert not state.register_signal(make_signal("LOWUSDT", 70))
+
+    assert len(state.pending_signals) == 1
+    assert state.pending_signals[0].symbol == "HIGHUSDT"
+
+
+def test_stale_candidate_is_removed_without_delivery():
+    reset_limits()
+    module.CONFIG["max_signal_age_sec"] = 60
+    state = module.SmartMoneyState(10, 7, 5)
+    assert state.register_signal(make_signal("OLDUSDT", 95, timestamp=module.time.time() - 120))
+
+    assert state.pop_best_eligible() is None
+    assert state.pending_signals == []
+    assert state.pending_keys == set()
+
+
+
+def test_persistent_rate_limit_blocks_when_hourly_cap_reached(monkeypatch):
+    reset_limits(max_per_hour=5)
+    class FakeCursor:
+        def execute(self, query, params=None):
+            self.query = query
+        def fetchone(self):
+            return (5, 0, None)
+        def close(self):
+            pass
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+        def close(self):
+            pass
+    class FakePool:
+        def get_connection(self):
+            return FakeConnection()
+    monkeypatch.setattr(module, "get_pool", lambda: FakePool())
+
+    assert not module.persistent_alert_limit_allows("BTCUSDT")
+
+
+def test_persistent_rate_limit_fails_closed_when_database_is_unavailable(monkeypatch):
+    reset_limits()
+    def unavailable_pool():
+        raise RuntimeError("database unavailable")
+    monkeypatch.setattr(module, "get_pool", unavailable_pool)
+
+    assert not module.persistent_alert_limit_allows("BTCUSDT")
+
+
+def test_delivery_failure_is_scheduled_for_bounded_retry(monkeypatch):
+    reset_limits()
+    captured = {"updates": []}
+    class FakeCursor:
+        def execute(self, query, params=None):
+            captured["updates"].append((query, params))
+        def fetchone(self):
+            return (2,)
+        def close(self):
+            pass
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+        def commit(self):
+            pass
+        def close(self):
+            pass
+    class FakePool:
+        def get_connection(self):
+            return FakeConnection()
+    monkeypatch.setattr(module, "get_pool", lambda: FakePool())
+    module.CONFIG["max_delivery_attempts"] = 5
+
+    module.complete_signal_delivery(make_signal("BTCUSDT", 90), False, "temporary Telegram error")
+
+    update_query, update_params = captured["updates"][-1]
+    assert "delivery_status=%s" in update_query
+    assert update_params[0] == "PENDING"
+    assert update_params[2] == 60
+    assert update_params[3] == "temporary Telegram error"
+
+def test_dispatcher_survives_telegram_exception_and_schedules_retry(monkeypatch):
+    reset_limits()
+    candidate = make_signal("BTCUSDT", 90)
+    completed = []
+    released = []
+
+    monkeypatch.setattr(module.state, "shutdown_flag", False)
+    monkeypatch.setattr(module, "persistent_alert_limit_allows", lambda symbol: True)
+    monkeypatch.setattr(module.state, "_can_alert", lambda symbol: True)
+    monkeypatch.setattr(module.state, "release_alert_slot", lambda symbol: released.append(symbol))
+    monkeypatch.setattr(module, "complete_signal_delivery", lambda signal, sent, error=None: completed.append((signal, sent, error)))
+
+    def claim_once():
+        # Return one candidate, then stop the loop after it has been processed.
+        module.state.shutdown_flag = True
+        return candidate
+
+    def raise_telegram_error(signal):
+        raise RuntimeError("simulated Telegram timeout")
+
+    monkeypatch.setattr(module, "claim_next_pending_signal", claim_once)
+    monkeypatch.setattr(module.telegram, "send_early_alert", raise_telegram_error)
+
+    module.dispatch_alerts()
+
+    assert released == ["BTCUSDT"]
+    assert len(completed) == 1
+    assert completed[0][0] is candidate
+    assert completed[0][1] is False
+    assert "RuntimeError" in completed[0][2]
+    assert "simulated Telegram timeout" in completed[0][2]
 
