@@ -632,7 +632,7 @@ def ensure_signal_table():
     except Exception as e: logger.error("❌ ensure_signal_table failed: %s",e)
     finally: conn.close()
 
-_TUNABLE_CONFIG_KEYS={"rvol_multiplier","divergence_max_price_change","velocity_threshold","enable_divergence_detection","enable_velocity_detection","max_alerts_per_hour","max_alerts_per_symbol_per_hour","alert_cooldown_sec","require_confluence","min_signal_rvol","min_signal_velocity","min_quote_volume_24h","min_market_cap_usd","min_quality_score"}
+_TUNABLE_CONFIG_KEYS={"rvol_multiplier","divergence_max_price_change","velocity_threshold","enable_divergence_detection","enable_velocity_detection","max_alerts_per_hour","max_alerts_per_symbol_per_hour","alert_cooldown_sec","require_confluence","min_signal_rvol","min_signal_velocity","min_quote_volume_24h","min_market_cap_usd","min_quality_score","min_alert_quality_score","max_signal_age_sec","expired_signal_retention_days","expired_signal_cleanup_interval_days"}
 
 def reload_control():
     conn=get_pool().get_connection()
@@ -832,14 +832,21 @@ def cleanup_expired_signal_history():
 
 
 def expired_signal_cleanup_loop():
-    """Run cleanup at startup and then at the configured weekly interval."""
-    interval_hours = max(1, int(CONFIG.get("expired_signal_cleanup_interval_days", 7))) * 24
+    """Clean up at startup, then honor the current dashboard-configured interval."""
+    last_cleanup = None
     while not state.shutdown_flag:
-        cleanup_expired_signal_history()
-        for _ in range(interval_hours):
+        interval_seconds = max(1, int(CONFIG.get("expired_signal_cleanup_interval_days", 7))) * 86400
+        now = time.monotonic()
+        if last_cleanup is None or now - last_cleanup >= interval_seconds:
+            cleanup_expired_signal_history()
+            last_cleanup = time.monotonic()
+
+        # Recheck the interval periodically so dashboard changes take effect
+        # without restarting the process. Retention is read at cleanup time.
+        for _ in range(60):
             if state.shutdown_flag:
                 return
-            time.sleep(3600)
+            time.sleep(1)
 
 
 def claim_next_pending_signal():
@@ -1073,7 +1080,7 @@ def main():
         update_screener_heartbeat(pid=os.getpid(), timeframe=CONFIG.get("timeframe", "1m"), symbols_monitored=0)
     except Exception as e:
         logger.warning("⚠️ initial screener heartbeat failed: %s", e)
-    dispatch_thread=threading.Thread(target=dispatch_alerts,daemon=True,name="SmartMoney-Dispatcher"); dispatch_thread.start(); threads=[]; ws_stop_event=threading.Event(); last_universe_refresh=0.0
+    cleanup_thread=threading.Thread(target=expired_signal_cleanup_loop,daemon=True,name="SmartMoney-ExpiredCleanup"); cleanup_thread.start(); dispatch_thread=threading.Thread(target=dispatch_alerts,daemon=True,name="SmartMoney-Dispatcher"); dispatch_thread.start(); threads=[]; ws_stop_event=threading.Event(); last_universe_refresh=0.0
     def start_connections(symbols):
         nonlocal threads,ws_stop_event
         # Restore the in-memory EMA from closed candles before subscribing.
