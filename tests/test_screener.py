@@ -478,4 +478,126 @@ def test_expired_signal_cleanup_rolls_back_on_database_error(monkeypatch):
     assert not connection.committed
     assert connection.rolled_back
 
+def test_durable_queue_claims_highest_quality_fresh_candidate(monkeypatch):
+    from datetime import datetime
+
+    candidate = {
+        "id": 41, "symbol": "STRONGUSDT", "signal_type": "RVOL_SPIKE",
+        "rvol": 8.5, "volume": 1000, "quote_volume": 100000,
+        "price": 100, "price_change_pct": 0.2, "volume_velocity": 6.0,
+        "quality_score": 91, "direction": "BULLISH", "taker_buy_ratio": 0.7,
+        "htf_alignment": 2, "htf_context": "5m:BULLISH,15m:BULLISH",
+        "candle_time": "2026-10-12T06:30:00Z", "detected_at": datetime.utcnow(),
+    }
+
+    class FakeCursor:
+        def __init__(self):
+            self.queries = []
+            self.last_query = ""
+
+        def execute(self, query, params=None):
+            normalized = " ".join(query.split())
+            self.queries.append((normalized, params))
+            self.last_query = normalized
+
+        def fetchone(self):
+            if "SELECT COUNT(*)" in self.last_query:
+                return (0,)
+            if "ORDER BY quality_score DESC, rvol DESC, detected_at ASC, id ASC" in self.last_query:
+                return candidate
+            return None
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def __init__(self):
+            self.fake_cursor = FakeCursor()
+            self.commits = 0
+            self.rolled_back = False
+
+        def cursor(self, dictionary=False):
+            assert dictionary is True
+            return self.fake_cursor
+
+        def commit(self):
+            self.commits += 1
+
+        def rollback(self):
+            self.rolled_back = True
+
+        def close(self):
+            pass
+
+    connection = FakeConnection()
+
+    class FakePool:
+        def get_connection(self):
+            return connection
+
+    reset_limits()
+    module.CONFIG["min_alert_quality_score"] = 80
+    module.CONFIG["max_signal_age_sec"] = 900
+    monkeypatch.setattr(module, "get_pool", lambda: FakePool())
+
+    selected = module.claim_next_pending_signal()
+
+    assert selected is not None
+    assert selected.symbol == "STRONGUSDT"
+    assert selected.quality_score == 91
+    select_queries = [q for q, _ in connection.fake_cursor.queries if q.startswith("SELECT id,symbol")]
+    assert len(select_queries) == 1
+    assert "quality_score >= %s" in select_queries[0]
+    assert "detected_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)" in select_queries[0]
+    assert connection.commits >= 2
+    assert not connection.rolled_back
+
+
+def test_durable_queue_does_not_claim_when_hourly_cap_is_full(monkeypatch):
+    class FakeCursor:
+        def __init__(self):
+            self.queries = []
+            self.last_query = ""
+
+        def execute(self, query, params=None):
+            self.last_query = " ".join(query.split())
+            self.queries.append(self.last_query)
+
+        def fetchone(self):
+            if "SELECT COUNT(*)" in self.last_query:
+                return (5,)
+            return None
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def __init__(self):
+            self.fake_cursor = FakeCursor()
+            self.committed = False
+
+        def cursor(self, dictionary=False):
+            return self.fake_cursor
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    connection = FakeConnection()
+
+    class FakePool:
+        def get_connection(self):
+            return connection
+
+    reset_limits(max_per_hour=5)
+    monkeypatch.setattr(module, "get_pool", lambda: FakePool())
+
+    assert module.claim_next_pending_signal() is None
+    assert not any(q.startswith("SELECT id,symbol") for q in connection.fake_cursor.queries)
+    assert connection.committed
 
