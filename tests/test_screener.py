@@ -314,3 +314,70 @@ def test_dispatcher_survives_telegram_exception_and_schedules_retry(monkeypatch)
     assert "RuntimeError" in completed[0][2]
     assert "simulated Telegram timeout" in completed[0][2]
 
+
+
+
+def test_neutral_direction_never_counts_neutral_htfs_as_aligned(monkeypatch):
+    reset_limits()
+    state = module.SmartMoneyState(7200, 7, 5)
+    module.CONFIG["htf_timeframes"] = ("5m", "15m")
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return [[0, "100", "100", "100", "100"] for _ in range(30)]
+
+    monkeypatch.setattr(module.requests, "get", lambda *args, **kwargs: Response())
+    alignment, context = state._fetch_htf_context("TESTUSDT", 1791462600000, "NEUTRAL")
+
+    assert alignment == 0
+    assert context == "5m:NEUTRAL,15m:NEUTRAL"
+    assert module.SmartMoneyState._score_htf(alignment, context, "NEUTRAL") == 0
+
+
+def test_neutral_direction_gets_no_orderflow_score():
+    assert module.SmartMoneyState._score_orderflow("NEUTRAL", 0.99) == 0
+    assert module.SmartMoneyState._score_orderflow("NEUTRAL", 0.01) == 0
+
+
+def test_extreme_velocity_does_not_dominate_candidate_priority():
+    reset_limits()
+    state = module.SmartMoneyState(7200, 7, 5)
+    state.ema_volume["TESTUSDT"] = 100.0
+    state.ema_quote_volume["TESTUSDT"] = 100.0
+    state.ema_initialized["TESTUSDT"] = state.warmup_candles
+    state.quote_volume_history["TESTUSDT"].extend([1.0] * 20)
+    state._fetch_htf_context = lambda *args: (1, "5m:BULLISH,15m:NEUTRAL")
+
+    signal = state.detect_smart_money_signal(
+        "TESTUSDT", 10.0, 1000.0, 101.0, 100.0, 101.2, 99.8,
+        "2026-10-08T12:30:00Z", taker_buy_quote=800.0,
+    )
+
+    assert signal is not None
+    assert signal.volume_velocity > 100
+    assert abs(signal.priority_score) < 101000
+
+
+def test_missing_websocket_taker_buy_quote_remains_unavailable(monkeypatch):
+    captured = {}
+
+    def detect(*args, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(module.state, "detect_smart_money_signal", detect)
+    event = {
+        "e": "kline",
+        "s": "BTCUSDT",
+        "k": {
+            "x": True, "v": "10", "q": "1000", "o": "100",
+            "c": "101", "h": "102", "l": "99", "t": 1791462600000,
+        },
+    }
+
+    module.process_kline_message(__import__("json").dumps(event))
+
+    assert captured["taker_buy_quote"] is None
