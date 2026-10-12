@@ -92,8 +92,8 @@ def test_save_signal_to_db_retries_connection_pool_exhaustion_and_commits():
     pool = Mock()
     pool.get_connection.side_effect = [RuntimeError("pool exhausted"), conn]
 
-    with patch.object(screening, "get_pool", return_value=pool), \\
-         patch.object(screening, "update_screener_heartbeat"), \\
+    with patch.object(screening, "get_pool", return_value=pool), \
+         patch.object(screening, "update_screener_heartbeat"), \
          patch.object(screening.time, "sleep"):
         assert screening.save_signal_to_db(_signal(), telegram_sent=False) is True
 
@@ -107,7 +107,7 @@ def test_save_signal_to_db_returns_false_when_all_retries_fail():
     pool = Mock()
     pool.get_connection.side_effect = RuntimeError("pool exhausted")
 
-    with patch.object(screening, "get_pool", return_value=pool), \\
+    with patch.object(screening, "get_pool", return_value=pool), \
          patch.object(screening.time, "sleep"):
         assert screening.save_signal_to_db(_signal(), telegram_sent=False) is False
 
