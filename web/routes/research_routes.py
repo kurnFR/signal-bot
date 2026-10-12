@@ -78,6 +78,10 @@ def _filter_overrides(overrides: Dict, allowed: set, bot_label: str) -> Dict:
         "min_signal_rvol": (1, 100), "min_signal_velocity": (1, 100),
         "min_quote_volume_24h": (0, 1e12), "min_market_cap_usd": (0, 1e12),
         "min_quality_score": (0, 100),
+        "min_alert_quality_score": (0, 100),
+        "max_signal_age_sec": (1, 86400),
+        "expired_signal_retention_days": (1, 3650),
+        "expired_signal_cleanup_interval_days": (1, 365),
     }
     for key, value in overrides.items():
         if key in bounds:
