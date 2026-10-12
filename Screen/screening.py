@@ -668,8 +668,9 @@ def save_signal_to_db(signal, telegram_sent):
         INSERT INTO smart_money_signals
             (symbol, signal_type, rvol, volume, quote_volume, price,
              price_change_pct, volume_velocity, quality_score, direction,
-             taker_buy_ratio, htf_alignment, htf_context, candle_time, telegram_sent)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+             taker_buy_ratio, htf_alignment, htf_context, candle_time,
+             telegram_sent, detected_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, UTC_TIMESTAMP())
         ON DUPLICATE KEY UPDATE
             quality_score=VALUES(quality_score),
             direction=VALUES(direction),
