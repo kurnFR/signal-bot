@@ -381,3 +381,101 @@ def test_missing_websocket_taker_buy_quote_remains_unavailable(monkeypatch):
     module.process_kline_message(__import__("json").dumps(event))
 
     assert captured["taker_buy_quote"] is None
+
+
+def test_expired_signal_cleanup_only_deletes_old_expired_rows(monkeypatch):
+    class FakeCursor:
+        rowcount = 7
+
+        def __init__(self):
+            self.query = None
+            self.params = None
+
+        def execute(self, query, params=None):
+            self.query = " ".join(query.split())
+            self.params = params
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def __init__(self):
+            self.fake_cursor = FakeCursor()
+            self.committed = False
+            self.rolled_back = False
+
+        def cursor(self):
+            return self.fake_cursor
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            self.rolled_back = True
+
+        def close(self):
+            pass
+
+    connection = FakeConnection()
+
+    class FakePool:
+        def get_connection(self):
+            return connection
+
+    module.CONFIG["expired_signal_retention_days"] = 30
+    monkeypatch.setattr(module, "get_pool", lambda: FakePool())
+
+    assert module.cleanup_expired_signal_history() == 7
+    assert "DELETE FROM smart_money_signals" in connection.fake_cursor.query
+    assert "delivery_status='EXPIRED'" in connection.fake_cursor.query
+    assert "delivery_updated_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s DAY)" in connection.fake_cursor.query
+    assert connection.fake_cursor.params == (30,)
+    assert connection.committed
+    assert not connection.rolled_back
+
+
+def test_expired_signal_cleanup_rolls_back_on_database_error(monkeypatch):
+    class FakeCursor:
+        def execute(self, query, params=None):
+            raise RuntimeError("database unavailable")
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def __init__(self):
+            self.committed = False
+            self.rolled_back = False
+
+        def cursor(self):
+            return FakeCursor()
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            self.rolled_back = True
+
+        def close(self):
+            pass
+
+    connection = FakeConnection()
+
+    class FakePool:
+        def get_connection(self):
+            return connection
+
+    monkeypatch.setattr(module, "get_pool", lambda: FakePool())
+
+    assert module.cleanup_expired_signal_history() == 0
+    assert not connection.committed
+    assert connection.rolled_back
+
+
+def test_smart_money_delivery_defaults_keep_detection_separate_from_alert_quality():
+    assert module.CONFIG["min_quality_score"] == 70
+    assert module.CONFIG["min_alert_quality_score"] == 80
+    assert module.CONFIG["max_signal_age_sec"] == 900
+    assert module.CONFIG["expired_signal_retention_days"] == 30
+    assert module.CONFIG["expired_signal_cleanup_interval_days"] == 7
+
