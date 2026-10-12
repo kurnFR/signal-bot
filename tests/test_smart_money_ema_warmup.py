@@ -99,6 +99,9 @@ def test_save_signal_to_db_retries_connection_pool_exhaustion_and_commits():
 
     assert pool.get_connection.call_count == 2
     conn.cursor.return_value.execute.assert_called_once()
+    insert_sql = conn.cursor.return_value.execute.call_args.args[0]
+    assert "detected_at" in insert_sql
+    assert "UTC_TIMESTAMP()" in insert_sql
     conn.commit.assert_called_once()
     conn.close.assert_called_once()
 
