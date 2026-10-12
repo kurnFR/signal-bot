@@ -59,7 +59,10 @@ CONFIG = {
     "use_taker_buy_confirmation": os.getenv("USE_TAKER_BUY_CONFIRMATION", "true").lower() == "true",
     "alert_selection_window_sec": float(os.getenv("ALERT_SELECTION_WINDOW_SEC", "3")),
     "max_pending_signals": int(os.getenv("MAX_PENDING_SIGNALS", "200")),
-    "max_signal_age_sec": int(os.getenv("MAX_SIGNAL_AGE_SEC", "180")),
+    "min_alert_quality_score": float(os.getenv("MIN_ALERT_QUALITY_SCORE", "80")),
+    "max_signal_age_sec": int(os.getenv("MAX_SIGNAL_AGE_SEC", "900")),
+    "expired_signal_retention_days": max(1, int(os.getenv("EXPIRED_SIGNAL_RETENTION_DAYS", "30"))),
+    "expired_signal_cleanup_interval_days": max(1, int(os.getenv("EXPIRED_SIGNAL_CLEANUP_INTERVAL_DAYS", "7"))),
     "max_delivery_attempts": int(os.getenv("MAX_DELIVERY_ATTEMPTS", "5")),
     "delivery_poll_interval_sec": float(os.getenv("DELIVERY_POLL_INTERVAL_SEC", "1.0")),
     "daily_reset_utc_hour": int(os.getenv("DAILY_RESET_UTC_HOUR", "0")),
@@ -789,23 +792,91 @@ def process_kline_message(raw_msg):
     except (json.JSONDecodeError,KeyError,ValueError,TypeError) as e: logger.warning("Invalid kline message: %s",e)
     except Exception as e: logger.error("Error processing message: %s",e,exc_info=True)
 
+def cleanup_expired_signal_history():
+    """Delete only old EXPIRED rows; retain SENT/FAILED/PENDING records for audit."""
+    conn = None
+    cur = None
+    try:
+        retention_days = max(1, int(CONFIG.get("expired_signal_retention_days", 30)))
+        conn = get_pool().get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """DELETE FROM smart_money_signals
+               WHERE delivery_status='EXPIRED'
+                 AND delivery_updated_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s DAY)""",
+            (retention_days,),
+        )
+        deleted = max(0, int(getattr(cur, "rowcount", 0) or 0))
+        conn.commit()
+        logger.info("Weekly expired-signal cleanup removed %d rows older than %d days", deleted, retention_days)
+        return deleted
+    except Exception as exc:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.error("Expired signal retention cleanup failed: %s", exc)
+        return 0
+    finally:
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def expired_signal_cleanup_loop():
+    """Run cleanup at startup and then at the configured weekly interval."""
+    interval_hours = max(1, int(CONFIG.get("expired_signal_cleanup_interval_days", 7))) * 24
+    while not state.shutdown_flag:
+        cleanup_expired_signal_history()
+        for _ in range(interval_hours):
+            if state.shutdown_flag:
+                return
+            time.sleep(3600)
+
+
 def claim_next_pending_signal():
-    """Atomically claim the highest-ranked recent candidate from the durable MySQL queue."""
+    """Atomically claim the highest-ranked fresh, quality-eligible candidate from MySQL."""
     conn = None
     cur = None
     try:
         conn = get_pool().get_connection()
         cur = conn.cursor(dictionary=True)
         max_age = max(1, int(CONFIG.get("max_signal_age_sec", 180)))
-        # Recover claims abandoned by a crashed process, and expire old work.
+        # Recover abandoned claims and classify candidates without deleting history.
         cur.execute("UPDATE smart_money_signals SET delivery_status='PENDING', delivery_updated_at=UTC_TIMESTAMP() WHERE delivery_status='SENDING' AND delivery_updated_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 MINUTE)")
+        min_quality = float(CONFIG.get("min_alert_quality_score", 80))
+        cur.execute("""UPDATE smart_money_signals
+                       SET delivery_status='FILTERED',
+                           last_delivery_error='Quality below Telegram alert threshold',
+                           delivery_updated_at=UTC_TIMESTAMP()
+                       WHERE delivery_status='PENDING' AND quality_score < %s""", (min_quality,))
         cur.execute("UPDATE smart_money_signals SET delivery_status='EXPIRED', last_delivery_error='Signal expired before delivery', delivery_updated_at=UTC_TIMESTAMP() WHERE delivery_status='PENDING' AND detected_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)", (max_age,))
         conn.commit()
+
+        # Avoid repeatedly claiming/releasing rows while the global rolling-hour cap is full.
+        cur.execute("""SELECT COUNT(*) FROM smart_money_signals
+                       WHERE delivery_status='SENT'
+                         AND delivered_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR)""")
+        sent_row = cur.fetchone()
+        sent_last_hour = int((sent_row[0] if sent_row else 0) or 0)
+        if sent_last_hour >= max(1, int(CONFIG.get("max_alerts_per_hour", 5))):
+            conn.commit()
+            return None
+
         cur.execute("""SELECT id,symbol,signal_type,rvol,volume,quote_volume,price,price_change_pct,volume_velocity,quality_score,direction,taker_buy_ratio,htf_alignment,htf_context,candle_time,detected_at
                        FROM smart_money_signals
-                       WHERE delivery_status='PENDING' AND (next_attempt_at IS NULL OR next_attempt_at <= UTC_TIMESTAMP())
+                       WHERE delivery_status='PENDING' AND quality_score >= %s
+                         AND (next_attempt_at IS NULL OR next_attempt_at <= UTC_TIMESTAMP())
                          AND detected_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)
-                       ORDER BY quality_score DESC, rvol DESC, detected_at ASC LIMIT 1 FOR UPDATE""", (max_age,))
+                       ORDER BY quality_score DESC, rvol DESC, detected_at ASC, id ASC LIMIT 1 FOR UPDATE""", (min_quality, max_age))
         row = cur.fetchone()
         if not row:
             conn.commit()
