@@ -10,6 +10,7 @@ import logging
 import threading
 import heapq
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from collections import defaultdict, deque
 from typing import Optional, Dict, List, Tuple, Deque
@@ -452,7 +453,110 @@ class SmartMoneyState:
                 if key not in self.pending_keys: self.pending_keys.add(key); heapq.heappush(self.pending_signals,candidate)
             return selected
 
+
 state=SmartMoneyState(CONFIG["ema_length"],CONFIG["rvol_multiplier"],CONFIG["max_alerts_per_hour"])
+
+
+def _fetch_closed_kline_history(symbol, required_candles):
+    """Fetch recent closed candles backwards, respecting Binance's 1000-row limit."""
+    required_candles = max(1, int(required_candles))
+    end_time = int(time.time() * 1000)
+    history = []
+
+    while len(history) < required_candles:
+        limit = min(1000, required_candles - len(history))
+        response = requests.get(
+            "https://api.binance.com/api/v3/klines",
+            params={
+                "symbol": symbol,
+                "interval": CONFIG.get("timeframe", "1m"),
+                "limit": limit,
+                "endTime": end_time - 1,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        page = response.json()
+        if not page:
+            break
+
+        now_ms = int(time.time() * 1000)
+        closed_page = [
+            row for row in page
+            if len(row) >= 8 and int(row[6]) < now_ms
+        ]
+        history = closed_page + history
+
+        # Move strictly before the oldest row in this page to avoid duplicates.
+        end_time = int(page[0][0])
+        if len(page) < limit:
+            break
+        # Keep the aggregate request rate below Binance's per-IP weight cap.
+        time.sleep(0.5)
+
+    return history[-required_candles:]
+
+
+def _seed_ema_history(symbol, candles):
+    """Initialize one symbol's EMA from chronological, already-closed Binance klines."""
+    required = state.warmup_candles
+    if len(candles) < required:
+        return False
+
+    with state.lock:
+        # Do not reset a symbol whose EMA is already fully warmed. A partially
+        # warmed symbol is replaced by history so it avoids a 40-hour restart wait.
+        if state.ema_initialized.get(symbol, 0) >= required:
+            return True
+        state.ema_volume.pop(symbol, None)
+        state.ema_quote_volume.pop(symbol, None)
+        state.ema_initialized.pop(symbol, None)
+        state.volume_history.pop(symbol, None)
+        state.quote_volume_history.pop(symbol, None)
+        for candle in candles[-required:]:
+            state.update_ema(symbol, float(candle[5]), float(candle[7]))
+        return state.ema_initialized.get(symbol, 0) >= required
+
+
+def bootstrap_ema_history(symbols):
+    """Warm up symbols from REST history before live WebSocket candles arrive."""
+    with state.lock:
+        needed = [
+            symbol for symbol in symbols
+            if state.ema_initialized.get(symbol, 0) < state.warmup_candles
+        ]
+    if not needed:
+        return
+
+    logger.info(
+        "⏳ Bootstrapping EMA history for %d symbols (%d closed candles each)",
+        len(needed), state.warmup_candles,
+    )
+
+    def fetch_one(symbol):
+        try:
+            return symbol, _fetch_closed_kline_history(symbol, state.warmup_candles), None
+        except Exception as exc:
+            return symbol, None, exc
+
+    with ThreadPoolExecutor(max_workers=min(4, len(needed))) as executor:
+        for symbol, candles, error in executor.map(fetch_one, needed):
+            if error is not None:
+                logger.warning("EMA history bootstrap failed for %s: %s", symbol, error)
+                continue
+            if not candles or len(candles) < state.warmup_candles:
+                logger.warning(
+                    "EMA history incomplete for %s: received %d/%d closed candles; "
+                    "signal detection remains in warmup",
+                    symbol, len(candles or []), state.warmup_candles,
+                )
+                continue
+            if _seed_ema_history(symbol, candles):
+                logger.info(
+                    "✅ EMA history ready for %s (%d closed candles)",
+                    symbol, len(candles[-state.warmup_candles:]),
+                )
+
 
 class SmartMoneyTelegram:
     def __init__(self, token, chat_id):
@@ -836,6 +940,9 @@ def main():
     dispatch_thread=threading.Thread(target=dispatch_alerts,daemon=True,name="SmartMoney-Dispatcher"); dispatch_thread.start(); threads=[]; ws_stop_event=threading.Event(); last_universe_refresh=0.0
     def start_connections(symbols):
         nonlocal threads,ws_stop_event
+        # Restore the in-memory EMA from closed candles before subscribing.
+        # Otherwise a restart suppresses signals for the 2400-candle warmup.
+        bootstrap_ema_history(symbols)
         ws_stop_event=threading.Event(); threads=[]; chunk_size=CONFIG["max_streams_per_conn"]
         logger.info("📡 Monitoring %d symbols for EARLY smart money signals",len(symbols))
         for i,start_idx in enumerate(range(0,len(symbols),chunk_size)):
