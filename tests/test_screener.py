@@ -10,6 +10,13 @@ sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
 
+def test_smart_money_delivery_defaults_keep_detection_separate_from_alert_quality():
+    assert module.CONFIG["min_quality_score"] == 70
+    assert module.CONFIG["min_alert_quality_score"] == 80
+    assert module.CONFIG["max_signal_age_sec"] == 900
+    assert module.CONFIG["expired_signal_retention_days"] == 30
+    assert module.CONFIG["expired_signal_cleanup_interval_days"] == 7
+
 def make_signal(symbol, quality, candle="2026-09-30T00:00:00Z", timestamp=None):
     if timestamp is None:
         timestamp = module.time.time()
@@ -471,11 +478,4 @@ def test_expired_signal_cleanup_rolls_back_on_database_error(monkeypatch):
     assert not connection.committed
     assert connection.rolled_back
 
-
-def test_smart_money_delivery_defaults_keep_detection_separate_from_alert_quality():
-    assert module.CONFIG["min_quality_score"] == 70
-    assert module.CONFIG["min_alert_quality_score"] == 80
-    assert module.CONFIG["max_signal_age_sec"] == 900
-    assert module.CONFIG["expired_signal_retention_days"] == 30
-    assert module.CONFIG["expired_signal_cleanup_interval_days"] == 7
 
