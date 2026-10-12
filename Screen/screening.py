@@ -223,13 +223,17 @@ class SmartMoneyState:
         if not trends:
             return 0, "UNAVAILABLE"
 
-        alignment = sum(
-            1 if item.endswith(direction) else -1
-            if direction != "NEUTRAL" and (
-                item.endswith("BULLISH") or item.endswith("BEARISH")
-            ) else 0
-            for item in trends
-        )
+        # Neutral price action has no directional bias: neutral HTFs must not
+        # count as aligned with a NEUTRAL signal.
+        if direction == "NEUTRAL":
+            alignment = 0
+        else:
+            alignment = sum(
+                1 if item.split(":", 1)[-1] == direction
+                else -1 if item.split(":", 1)[-1] in {"BULLISH", "BEARISH"}
+                else 0
+                for item in trends
+            )
         return alignment, ",".join(trends)
 
     @staticmethod
@@ -251,11 +255,12 @@ class SmartMoneyState:
     def _score_orderflow(direction: str, taker_buy_ratio: Optional[float]) -> float:
         if taker_buy_ratio is None:
             return 0.0
+        if direction == "NEUTRAL":
+            # Imbalanced taker flow without a directional price bias is not
+            # directional confirmation.
+            return 0.0
         ratio = min(max(taker_buy_ratio, 0.0), 1.0)
-        aligned = ratio if direction == "BULLISH" else (
-            1.0 - ratio if direction == "BEARISH"
-            else abs(ratio - 0.5) + 0.5
-        )
+        aligned = ratio if direction == "BULLISH" else 1.0 - ratio
         return min(15.0, max(0.0, (aligned - 0.5) / 0.20) * 15.0)
 
     @staticmethod
@@ -263,7 +268,7 @@ class SmartMoneyState:
         if context == "UNAVAILABLE":
             return 0.0
         if direction == "NEUTRAL":
-            return 5.0 if alignment == 0 else 0.0
+            return 0.0
         if alignment >= 2:
             return 20.0
         if alignment == 1:
@@ -291,11 +296,14 @@ class SmartMoneyState:
         )
         signal_type = None; base_priority = 0.0
         if rvol >= CONFIG["rvol_multiplier"]:
-            signal_type = "RVOL_SPIKE"; base_priority = rvol * 10
+            signal_type = "RVOL_SPIKE"
+            base_priority = min(rvol, CONFIG["rvol_multiplier"] * 3.0) * 10
         elif CONFIG["enable_divergence_detection"] and rvol >= CONFIG["rvol_multiplier"] * 0.8 and price_range_pct <= CONFIG["divergence_max_price_change"]:
-            signal_type = "DIVERGENCE_ACCUMULATION" if price_change_pct >= 0 else "DIVERGENCE_DISTRIBUTION"; base_priority = rvol * 15
+            signal_type = "DIVERGENCE_ACCUMULATION" if price_change_pct >= 0 else "DIVERGENCE_DISTRIBUTION"
+            base_priority = min(rvol, CONFIG["rvol_multiplier"] * 3.0) * 15
         elif CONFIG["enable_velocity_detection"] and velocity >= CONFIG["velocity_threshold"] and rvol >= CONFIG["rvol_multiplier"] * 0.7:
-            signal_type = "VELOCITY_SURGE"; base_priority = velocity * 8
+            signal_type = "VELOCITY_SURGE"
+            base_priority = min(velocity, CONFIG["velocity_threshold"] * 3.0) * 8
         if not signal_type: return None
         # Quality is evidence-weighted, not simply "how extreme is volume".
         # A pure 1m anomaly cannot earn 100/100 without HTF evidence.
@@ -320,22 +328,35 @@ class SmartMoneyState:
             100.0,
             rvol_score + velocity_score + structure_score + orderflow_score + htf_score,
         )
-        if htf_context == "UNAVAILABLE":
+        # Scores above the unconfirmed ceiling require a directional signal and
+        # at least one matching HTF. Merely having an HTF response is not enough.
+        has_directional_htf_confirmation = (
+            direction != "NEUTRAL"
+            and htf_context != "UNAVAILABLE"
+            and htf_alignment > 0
+        )
+        if not has_directional_htf_confirmation:
             quality_score = min(quality_score, CONFIG.get("max_quality_without_htf", 79.0))
         if quality_score < CONFIG.get("min_quality_score", 0): return None
         if CONFIG.get("require_confluence", True):
+            orderflow_confirmed = (
+                CONFIG.get("use_taker_buy_confirmation", True)
+                and taker_buy_ratio is not None
+                and (
+                    (direction == "BULLISH" and taker_buy_ratio >= 0.55)
+                    or (direction == "BEARISH" and taker_buy_ratio <= 0.45)
+                )
+            )
             conditions = (
                 int(rvol >= CONFIG["min_signal_rvol"])
                 + int(velocity >= CONFIG["min_signal_velocity"])
-                + int(
-                    price_range_pct <= CONFIG["divergence_max_price_change"]
-                    and rvol >= CONFIG["rvol_multiplier"] * 0.8
-                )
-                + int(taker_buy_ratio is not None)
+                + int(orderflow_confirmed)
+                + int(has_directional_htf_confirmation)
             )
             if conditions < 2: return None
-            # 80+ is reserved for signals with real HTF evidence.
-            if quality_score >= 80.0 and htf_context == "UNAVAILABLE":
+            # 80+ is reserved for directionally confirmed signals, not merely
+            # signals whose HTF endpoint returned neutral or conflicting trends.
+            if quality_score >= 80.0 and not has_directional_htf_confirmation:
                 return None
         signal_key = (symbol, signal_type)
         with self.lock:
@@ -590,7 +611,7 @@ def process_kline_message(raw_msg):
         if event.get("e")!="kline": return
         kline=event.get("k",{}); symbol=event.get("s","").upper()
         if not kline.get("x"): return
-        volume=float(kline["v"]); quote_volume=float(kline["q"]); open_price=float(kline["o"]); close_price=float(kline["c"]); high_price=float(kline["h"]); low_price=float(kline["l"]); taker_buy_quote=float(kline.get("Q", 0.0)) if kline.get("Q") is not None else None; close_time=datetime.fromtimestamp(kline["t"]/1000,tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        volume=float(kline["v"]); quote_volume=float(kline["q"]); open_price=float(kline["o"]); close_price=float(kline["c"]); high_price=float(kline["h"]); low_price=float(kline["l"]); taker_buy_quote=float(kline["Q"]) if "Q" in kline and kline["Q"] is not None else None; close_time=datetime.fromtimestamp(kline["t"]/1000,tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         candidate=state.detect_smart_money_signal(symbol,volume,quote_volume,close_price,open_price,high_price,low_price,close_time,taker_buy_quote=taker_buy_quote)
         if candidate:
             # MySQL is the durable source of truth for delivery; do not rely on RAM for pending alerts.
