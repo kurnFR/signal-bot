@@ -502,7 +502,7 @@ def test_expired_signal_cleanup_rolls_back_on_database_error(monkeypatch):
     assert connection.rolled_back
 
 def test_durable_queue_claims_highest_quality_fresh_candidate(monkeypatch):
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     candidate = {
         "id": 41, "symbol": "STRONGUSDT", "signal_type": "RVOL_SPIKE",
@@ -510,7 +510,7 @@ def test_durable_queue_claims_highest_quality_fresh_candidate(monkeypatch):
         "price": 100, "price_change_pct": 0.2, "volume_velocity": 6.0,
         "quality_score": 91, "direction": "BULLISH", "taker_buy_ratio": 0.7,
         "htf_alignment": 2, "htf_context": "5m:BULLISH,15m:BULLISH",
-        "candle_time": "2026-10-12T06:30:00Z", "detected_at": datetime.utcnow(),
+        "candle_time": "2026-10-12T06:30:00Z", "detected_at": datetime.now(timezone.utc),
     }
 
     class FakeCursor:
@@ -524,8 +524,8 @@ def test_durable_queue_claims_highest_quality_fresh_candidate(monkeypatch):
             self.last_query = normalized
 
         def fetchone(self):
-            if "SELECT COUNT(*)" in self.last_query:
-                return (0,)
+            if "SELECT COUNT(*) AS sent_count" in self.last_query:
+                return {"sent_count": 0}
             if "ORDER BY quality_score DESC, rvol DESC, detected_at ASC, id ASC" in self.last_query:
                 return candidate
             return None
@@ -587,8 +587,8 @@ def test_durable_queue_does_not_claim_when_hourly_cap_is_full(monkeypatch):
             self.queries.append(self.last_query)
 
         def fetchone(self):
-            if "SELECT COUNT(*)" in self.last_query:
-                return (5,)
+            if "SELECT COUNT(*) AS sent_count" in self.last_query:
+                return {"sent_count": 5}
             return None
 
         def close(self):

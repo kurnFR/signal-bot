@@ -869,11 +869,11 @@ def claim_next_pending_signal():
         conn.commit()
 
         # Avoid repeatedly claiming/releasing rows while the global rolling-hour cap is full.
-        cur.execute("""SELECT COUNT(*) FROM smart_money_signals
+        cur.execute("""SELECT COUNT(*) AS sent_count FROM smart_money_signals
                        WHERE delivery_status='SENT'
                          AND delivered_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR)""")
         sent_row = cur.fetchone()
-        sent_last_hour = int((sent_row[0] if sent_row else 0) or 0)
+        sent_last_hour = int((sent_row.get("sent_count", 0) if sent_row else 0) or 0)
         if sent_last_hour >= max(1, int(CONFIG.get("max_alerts_per_hour", 5))):
             conn.commit()
             return None
