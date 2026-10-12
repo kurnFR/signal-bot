@@ -435,7 +435,9 @@ const App = {
                "max_alerts_per_hour", "max_alerts_per_symbol_per_hour", "alert_cooldown_sec",
                "enable_divergence_detection", "enable_velocity_detection",
                "require_confluence", "min_signal_rvol", "min_signal_velocity",
-               "min_quote_volume_24h", "min_market_cap_usd", "min_quality_score"];
+               "min_quote_volume_24h", "min_market_cap_usd", "min_quality_score",
+               "min_alert_quality_score", "max_signal_age_sec",
+               "expired_signal_retention_days", "expired_signal_cleanup_interval_days"];
 
         const enabledEl = document.getElementById(`${prefix}enabled`);
         const overrides = {};

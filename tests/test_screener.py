@@ -17,6 +17,29 @@ def test_smart_money_delivery_defaults_keep_detection_separate_from_alert_qualit
     assert module.CONFIG["expired_signal_retention_days"] == 30
     assert module.CONFIG["expired_signal_cleanup_interval_days"] == 7
 
+def test_delivery_and_cleanup_settings_are_dashboard_tunable():
+    assert {
+        "min_alert_quality_score",
+        "max_signal_age_sec",
+        "expired_signal_retention_days",
+        "expired_signal_cleanup_interval_days",
+    }.issubset(module._TUNABLE_CONFIG_KEYS)
+
+
+def test_expired_cleanup_loop_runs_immediately_and_can_stop(monkeypatch):
+    calls = []
+    module.state.shutdown_flag = False
+    monkeypatch.setattr(module, "cleanup_expired_signal_history", lambda: calls.append(True))
+
+    def stop_after_first_sleep(_seconds):
+        module.state.shutdown_flag = True
+
+    monkeypatch.setattr(module.time, "sleep", stop_after_first_sleep)
+    module.expired_signal_cleanup_loop()
+
+    assert calls == [True]
+    module.state.shutdown_flag = False
+
 def make_signal(symbol, quality, candle="2026-09-30T00:00:00Z", timestamp=None):
     if timestamp is None:
         timestamp = module.time.time()
