@@ -10,6 +10,7 @@ import logging
 import threading
 import heapq
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from collections import defaultdict, deque
 from typing import Optional, Dict, List, Tuple, Deque
@@ -452,7 +453,110 @@ class SmartMoneyState:
                 if key not in self.pending_keys: self.pending_keys.add(key); heapq.heappush(self.pending_signals,candidate)
             return selected
 
+
 state=SmartMoneyState(CONFIG["ema_length"],CONFIG["rvol_multiplier"],CONFIG["max_alerts_per_hour"])
+
+
+def _fetch_closed_kline_history(symbol, required_candles):
+    """Fetch recent closed candles backwards, respecting Binance's 1000-row limit."""
+    required_candles = max(1, int(required_candles))
+    end_time = int(time.time() * 1000)
+    history = []
+
+    while len(history) < required_candles:
+        limit = min(1000, required_candles - len(history))
+        response = requests.get(
+            "https://api.binance.com/api/v3/klines",
+            params={
+                "symbol": symbol,
+                "interval": CONFIG.get("timeframe", "1m"),
+                "limit": limit,
+                "endTime": end_time - 1,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        page = response.json()
+        if not page:
+            break
+
+        now_ms = int(time.time() * 1000)
+        closed_page = [
+            row for row in page
+            if len(row) >= 8 and int(row[6]) < now_ms
+        ]
+        history = closed_page + history
+
+        # Move strictly before the oldest row in this page to avoid duplicates.
+        end_time = int(page[0][0])
+        if len(page) < limit:
+            break
+        # Keep the aggregate request rate below Binance's per-IP weight cap.
+        time.sleep(0.5)
+
+    return history[-required_candles:]
+
+
+def _seed_ema_history(symbol, candles):
+    """Initialize one symbol's EMA from chronological, already-closed Binance klines."""
+    required = state.warmup_candles
+    if len(candles) < required:
+        return False
+
+    with state.lock:
+        # Do not reset a symbol whose EMA is already fully warmed. A partially
+        # warmed symbol is replaced by history so it avoids a 40-hour restart wait.
+        if state.ema_initialized.get(symbol, 0) >= required:
+            return True
+        state.ema_volume.pop(symbol, None)
+        state.ema_quote_volume.pop(symbol, None)
+        state.ema_initialized.pop(symbol, None)
+        state.volume_history.pop(symbol, None)
+        state.quote_volume_history.pop(symbol, None)
+        for candle in candles[-required:]:
+            state.update_ema(symbol, float(candle[5]), float(candle[7]))
+        return state.ema_initialized.get(symbol, 0) >= required
+
+
+def bootstrap_ema_history(symbols):
+    """Warm up symbols from REST history before live WebSocket candles arrive."""
+    with state.lock:
+        needed = [
+            symbol for symbol in symbols
+            if state.ema_initialized.get(symbol, 0) < state.warmup_candles
+        ]
+    if not needed:
+        return
+
+    logger.info(
+        "⏳ Bootstrapping EMA history for %d symbols (%d closed candles each)",
+        len(needed), state.warmup_candles,
+    )
+
+    def fetch_one(symbol):
+        try:
+            return symbol, _fetch_closed_kline_history(symbol, state.warmup_candles), None
+        except Exception as exc:
+            return symbol, None, exc
+
+    with ThreadPoolExecutor(max_workers=min(4, len(needed))) as executor:
+        for symbol, candles, error in executor.map(fetch_one, needed):
+            if error is not None:
+                logger.warning("EMA history bootstrap failed for %s: %s", symbol, error)
+                continue
+            if not candles or len(candles) < state.warmup_candles:
+                logger.warning(
+                    "EMA history incomplete for %s: received %d/%d closed candles; "
+                    "signal detection remains in warmup",
+                    symbol, len(candles or []), state.warmup_candles,
+                )
+                continue
+            if _seed_ema_history(symbol, candles):
+                logger.info(
+                    "✅ EMA history ready for %s (%d closed candles)",
+                    symbol, len(candles[-state.warmup_candles:]),
+                )
+
 
 class SmartMoneyTelegram:
     def __init__(self, token, chat_id):
@@ -558,19 +662,81 @@ def reload_control():
     if applied: logger.info("🎛️ Applied config overrides: %s",", ".join(applied))
     return universe_changed
 
-def save_signal_to_db(signal,telegram_sent):
+def save_signal_to_db(signal, telegram_sent):
+    """Persist a candidate with bounded retries; return True only after commit."""
+    sql = """
+        INSERT INTO smart_money_signals
+            (symbol, signal_type, rvol, volume, quote_volume, price,
+             price_change_pct, volume_velocity, quality_score, direction,
+             taker_buy_ratio, htf_alignment, htf_context, candle_time, telegram_sent)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON DUPLICATE KEY UPDATE
+            quality_score=VALUES(quality_score),
+            direction=VALUES(direction),
+            taker_buy_ratio=VALUES(taker_buy_ratio),
+            htf_alignment=VALUES(htf_alignment),
+            htf_context=VALUES(htf_context),
+            telegram_sent=telegram_sent OR VALUES(telegram_sent)
+    """
+    params = (
+        signal.symbol, signal.signal_type, signal.rvol, signal.volume,
+        signal.quote_volume, signal.price, signal.price_change_pct,
+        signal.volume_velocity, signal.quality_score, signal.direction,
+        signal.taker_buy_ratio, signal.htf_alignment, signal.htf_context,
+        signal.candle_time, telegram_sent,
+    )
+
+    persisted = False
+    for attempt in range(3):
+        conn = None
+        cur = None
+        try:
+            conn = get_pool().get_connection()
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            conn.commit()
+            persisted = True
+            break
+        except Exception as exc:
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            if attempt < 2:
+                logger.warning(
+                    "Signal insert attempt %d/3 failed for %s: %s",
+                    attempt + 1, signal.symbol, exc,
+                )
+                time.sleep(0.25 * (attempt + 1))
+            else:
+                logger.error(
+                    "❌ save_signal_to_db failed for %s after 3 attempts: %s",
+                    signal.symbol, exc,
+                )
+        finally:
+            if cur is not None:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    if not persisted:
+        return False
+
+    # Heartbeat telemetry is secondary: never let it undo or misreport a
+    # successfully committed signal, and don't consume a second connection
+    # before the durable insert has succeeded.
     try:
         update_screener_heartbeat(last_signal_at=signal.candle_time)
-    except Exception as e:
-        logger.warning("⚠️ screener heartbeat signal update failed: %s", e)
-    try: conn=get_pool().get_connection()
-    except Exception as e: logger.error("❌ save_signal_to_db connection: %s",e); return
-    cur = None
-    try:
-        cur = conn.cursor()
-        cur.execute("""INSERT INTO smart_money_signals (symbol,signal_type,rvol,volume,quote_volume,price,price_change_pct,volume_velocity,quality_score,direction,taker_buy_ratio,htf_alignment,htf_context,candle_time,telegram_sent) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE quality_score=VALUES(quality_score),direction=VALUES(direction),taker_buy_ratio=VALUES(taker_buy_ratio),htf_alignment=VALUES(htf_alignment),htf_context=VALUES(htf_context),telegram_sent=telegram_sent OR VALUES(telegram_sent)""",(signal.symbol,signal.signal_type,signal.rvol,signal.volume,signal.quote_volume,signal.price,signal.price_change_pct,signal.volume_velocity,signal.quality_score,signal.direction,signal.taker_buy_ratio,signal.htf_alignment,signal.htf_context,signal.candle_time,telegram_sent)); conn.commit(); cur.close()
-    except Exception as e: logger.error("❌ save_signal_to_db failed for %s: %s",signal.symbol,e)
-    finally: conn.close()
+    except Exception as exc:
+        logger.warning("⚠️ screener heartbeat signal update failed: %s", exc)
+    return True
 
 def get_market_caps():
     if CONFIG["min_market_cap_usd"]<=0: return {}
@@ -615,8 +781,10 @@ def process_kline_message(raw_msg):
         candidate=state.detect_smart_money_signal(symbol,volume,quote_volume,close_price,open_price,high_price,low_price,close_time,taker_buy_quote=taker_buy_quote)
         if candidate:
             # MySQL is the durable source of truth for delivery; do not rely on RAM for pending alerts.
-            save_signal_to_db(candidate, telegram_sent=False)
-            logger.info("🗃️ Candidate persisted for delivery: %s | %s | Quality %.0f | RVOL %.2fx", candidate.symbol, candidate.signal_type, candidate.quality_score, candidate.rvol)
+            if save_signal_to_db(candidate, telegram_sent=False):
+                logger.info("🗃️ Candidate persisted for delivery: %s | %s | Quality %.0f | RVOL %.2fx", candidate.symbol, candidate.signal_type, candidate.quality_score, candidate.rvol)
+            else:
+                logger.error("❌ Candidate was NOT persisted after retries: %s | %s | %s", candidate.symbol, candidate.signal_type, candidate.candle_time)
     except (json.JSONDecodeError,KeyError,ValueError,TypeError) as e: logger.warning("Invalid kline message: %s",e)
     except Exception as e: logger.error("Error processing message: %s",e,exc_info=True)
 
@@ -836,6 +1004,9 @@ def main():
     dispatch_thread=threading.Thread(target=dispatch_alerts,daemon=True,name="SmartMoney-Dispatcher"); dispatch_thread.start(); threads=[]; ws_stop_event=threading.Event(); last_universe_refresh=0.0
     def start_connections(symbols):
         nonlocal threads,ws_stop_event
+        # Restore the in-memory EMA from closed candles before subscribing.
+        # Otherwise a restart suppresses signals for the 2400-candle warmup.
+        bootstrap_ema_history(symbols)
         ws_stop_event=threading.Event(); threads=[]; chunk_size=CONFIG["max_streams_per_conn"]
         logger.info("📡 Monitoring %d symbols for EARLY smart money signals",len(symbols))
         for i,start_idx in enumerate(range(0,len(symbols),chunk_size)):
