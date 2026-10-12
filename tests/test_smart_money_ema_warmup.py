@@ -1,5 +1,6 @@
 """Regression tests for Smart Money EMA startup warmup."""
 
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from Screen import screening
@@ -64,3 +65,50 @@ def test_seed_ema_history_restores_ready_state_from_closed_candles():
             state.volume_history.pop(symbol, None)
             state.quote_volume_history.pop(symbol, None)
         state.warmup_candles = old_warmup
+
+
+
+def _signal():
+    return SimpleNamespace(
+        symbol="TESTUSDT",
+        signal_type="RVOL_SPIKE",
+        rvol=8.5,
+        volume=100.0,
+        quote_volume=10000.0,
+        price=1.25,
+        price_change_pct=0.2,
+        volume_velocity=4.0,
+        quality_score=75.0,
+        direction="BULLISH",
+        taker_buy_ratio=0.7,
+        htf_alignment=1,
+        htf_context="5m:BULLISH",
+        candle_time="2026-10-12T05:00:00Z",
+    )
+
+
+def test_save_signal_to_db_retries_connection_pool_exhaustion_and_commits():
+    conn = Mock()
+    pool = Mock()
+    pool.get_connection.side_effect = [RuntimeError("pool exhausted"), conn]
+
+    with patch.object(screening, "get_pool", return_value=pool), \\
+         patch.object(screening, "update_screener_heartbeat"), \\
+         patch.object(screening.time, "sleep"):
+        assert screening.save_signal_to_db(_signal(), telegram_sent=False) is True
+
+    assert pool.get_connection.call_count == 2
+    conn.cursor.return_value.execute.assert_called_once()
+    conn.commit.assert_called_once()
+    conn.close.assert_called_once()
+
+
+def test_save_signal_to_db_returns_false_when_all_retries_fail():
+    pool = Mock()
+    pool.get_connection.side_effect = RuntimeError("pool exhausted")
+
+    with patch.object(screening, "get_pool", return_value=pool), \\
+         patch.object(screening.time, "sleep"):
+        assert screening.save_signal_to_db(_signal(), telegram_sent=False) is False
+
+    assert pool.get_connection.call_count == 3
