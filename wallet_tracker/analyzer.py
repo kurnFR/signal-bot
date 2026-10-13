@@ -82,34 +82,40 @@ def aggregate_wallet_flows(swaps, period_hours, now):
 
 
 def quality_follow_candidates(swaps, periods, now, min_net_usd, min_total_usd,
-                              min_trade_count=3, min_net_flow_ratio=0.25):
-    """Return one high-quality follow candidate per chain+wallet.
+                              min_trade_count=3, min_net_flow_ratio=0.25,
+                              max_trades_per_hour=20, high_frequency_min_ratio=0.50):
+    """Return one candidate per chain+wallet based on a single pool/token flow.
 
-    A wallet must show a material aggregate net USD flow, enough total traded
-    value and repeated activity. The directional-flow ratio rejects wallets
-    whose buys and sells are nearly balanced. Long-window and 24h flows are
-    both eligible; duplicate wallet candidates are collapsed to the strongest
-    absolute net flow.
+    USD buys and sells are never netted across unrelated pools. A wallet must
+    show material directional flow, enough turnover and repeated trades in the
+    same pool. Extremely high-frequency, round-trip-heavy activity is rejected,
+    while high-frequency directional activity is retained.
     """
     selected = {}
     for hours in periods:
-        for flow in aggregate_wallet_flows(swaps, hours, now):
-            if abs(flow["net_usd"]) < min_net_usd:
+        positions = aggregate_swaps(swaps, hours, now, min_net_usd)
+        for flow in positions:
+            total_usd = flow["total_usd"]
+            trade_count = flow["trade_count"]
+            ratio = abs(flow["net_usd"]) / total_usd if total_usd else 0.0
+            trades_per_hour = trade_count / max(float(hours), 1.0)
+            if total_usd < min_total_usd or trade_count < min_trade_count:
                 continue
-            if flow["total_usd"] < min_total_usd:
+            if ratio < min_net_flow_ratio:
                 continue
-            if flow["trade_count"] < min_trade_count:
+            # Penalize suspicious churn only when it is both unusually frequent
+            # and weakly directional. Do not blanket-exclude market makers.
+            if trades_per_hour > max_trades_per_hour and ratio < high_frequency_min_ratio:
                 continue
-            if flow["net_flow_ratio"] < min_net_flow_ratio:
-                continue
-            # A transparent 0-100 ranking score, not a calibrated probability.
-            # Weight capital flow, turnover, directionality, and repeated activity.
+            flow["period_hours"] = hours
+            flow["net_flow_ratio"] = ratio
+            flow["trades_per_hour"] = round(trades_per_hour, 2)
             net_strength = min(abs(flow["net_usd"]) / max(float(min_net_usd), 1.0), 2.0) / 2.0
-            volume_strength = min(flow["total_usd"] / max(float(min_total_usd), 1.0), 2.0) / 2.0
-            activity_strength = min(flow["trade_count"] / 10.0, 1.0)
+            volume_strength = min(total_usd / max(float(min_total_usd), 1.0), 2.0) / 2.0
+            activity_strength = min(trade_count / 10.0, 1.0)
             flow["quality_score"] = round(
                 30 * net_strength + 25 * volume_strength
-                + 25 * flow["net_flow_ratio"] + 20 * activity_strength, 1
+                + 25 * ratio + 20 * activity_strength, 1
             )
             if flow["quality_score"] < 50:
                 continue

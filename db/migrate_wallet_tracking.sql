@@ -60,12 +60,14 @@ CREATE TABLE IF NOT EXISTS tracked_wallets (
     wallet VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
     label VARCHAR(80) NULL,
     source ENUM('auto','manual') NOT NULL DEFAULT 'auto',
-    status ENUM('ACTIVE','IGNORED') NOT NULL DEFAULT 'ACTIVE',
+    status ENUM('ACTIVE','IGNORED','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
     last_net_usd DECIMAL(24,2) NULL,
     first_flagged_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_tracked (chain, wallet)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE tracked_wallets MODIFY status ENUM('ACTIVE','IGNORED','INACTIVE') NOT NULL DEFAULT 'ACTIVE';
 
 CREATE TABLE IF NOT EXISTS wallet_tracker_status (
     id TINYINT PRIMARY KEY,
