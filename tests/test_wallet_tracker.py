@@ -70,6 +70,7 @@ class TestAggregation(unittest.TestCase):
         pool2 = "0x" + "d" * 40
         swaps = [
             swap(W1, "buy", 300_000, 100, 10, pool=POOL),
+            swap(W1, "buy", 50_000, 25, 8, pool=POOL),
             swap(W1, "buy", 100_000, 50, 8, pool=pool2),
             swap(W1, "sell", 50_000, 20, 5, pool=POOL),
             # A single whale-sized trade must not qualify on its own.
@@ -84,8 +85,8 @@ class TestAggregation(unittest.TestCase):
         )
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["wallet"], W1)
-        self.assertEqual(candidates[0]["net_usd"], 250_000)
-        self.assertEqual(candidates[0]["total_usd"], 350_000)
+        self.assertEqual(candidates[0]["net_usd"], 300_000)
+        self.assertEqual(candidates[0]["total_usd"], 400_000)
         self.assertEqual(candidates[0]["trade_count"], 3)
 
     def test_follow_candidate_does_not_net_unrelated_pools(self):
