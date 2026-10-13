@@ -22,6 +22,56 @@ def swap(wallet, side, usd, tokens, minutes_ago, pool=POOL):
             "block_time": NOW - timedelta(minutes=minutes_ago)}
 
 
+class TestAtomicWalletToggle(unittest.TestCase):
+    def _run_toggle(self, insert_rowcount, current_status=None):
+        from unittest.mock import MagicMock
+
+        connection = MagicMock()
+        cursor = connection.cursor.return_value
+        cursor.rowcount = insert_rowcount
+        cursor.fetchone.return_value = (current_status,) if current_status is not None else None
+        pool = MagicMock()
+        pool.get_connection.return_value = connection
+        with patch("wallet_tracker.store.get_pool", return_value=pool):
+            result = store.toggle_wallet_tracking("eth", W1, "test")
+        return result, connection, cursor
+
+    def test_new_wallet_is_inserted_active(self):
+        result, connection, cursor = self._run_toggle(1)
+        self.assertTrue(result)
+        self.assertEqual(cursor.execute.call_count, 1)
+        connection.commit.assert_called_once()
+        connection.rollback.assert_not_called()
+        connection.close.assert_called_once()
+
+    def test_active_wallet_is_ignored(self):
+        result, connection, cursor = self._run_toggle(0, "ACTIVE")
+        self.assertFalse(result)
+        self.assertIn("SET status = 'IGNORED'", cursor.execute.call_args.args[0])
+        connection.commit.assert_called_once()
+
+    def test_inactive_wallet_is_reactivated_as_manual(self):
+        result, connection, cursor = self._run_toggle(0, "INACTIVE")
+        self.assertTrue(result)
+        self.assertIn("source = 'manual'", cursor.execute.call_args.args[0])
+        connection.commit.assert_called_once()
+
+    def test_missing_row_after_duplicate_insert_rolls_back(self):
+        from unittest.mock import MagicMock
+
+        connection = MagicMock()
+        cursor = connection.cursor.return_value
+        cursor.rowcount = 0
+        cursor.fetchone.return_value = None
+        pool = MagicMock()
+        pool.get_connection.return_value = connection
+        with patch("wallet_tracker.store.get_pool", return_value=pool):
+            with self.assertRaises(RuntimeError):
+                store.toggle_wallet_tracking("eth", W1)
+        connection.rollback.assert_called_once()
+        connection.close.assert_called_once()
+
+
 class TestStoreSerialization(unittest.TestCase):
     def test_datetime_serializes_as_explicit_utc_iso8601(self):
         row = {"block_time": datetime(2026, 10, 13, 7, 53, 10)}
@@ -381,21 +431,19 @@ class TestWalletRoutes(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         m.assert_called_once_with(24, None, None, 0.0, 100, only_tracked=True)
 
-    @patch("web.routes.wallet_routes.store.is_wallet_tracked", return_value=False)
-    @patch("web.routes.wallet_routes.store.track_wallet")
-    def test_toggle_track_on(self, track_mock, is_tracked_mock):
+    @patch("web.routes.wallet_routes.store.toggle_wallet_tracking", return_value=True)
+    def test_toggle_track_on(self, toggle_mock):
         r = self.client.post("/api/wallets/tracked/toggle", json={"chain": "eth", "wallet": W1}, headers=self.headers)
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.json()["tracked"])
-        track_mock.assert_called_once_with("eth", W1, None)
+        toggle_mock.assert_called_once_with("eth", W1, None)
 
-    @patch("web.routes.wallet_routes.store.is_wallet_tracked", return_value=True)
-    @patch("web.routes.wallet_routes.store.untrack_wallet_by_address", return_value=True)
-    def test_toggle_track_off(self, untrack_mock, is_tracked_mock):
+    @patch("web.routes.wallet_routes.store.toggle_wallet_tracking", return_value=False)
+    def test_toggle_track_off(self, toggle_mock):
         r = self.client.post("/api/wallets/tracked/toggle", json={"chain": "eth", "wallet": W1}, headers=self.headers)
         self.assertEqual(r.status_code, 200)
         self.assertFalse(r.json()["tracked"])
-        untrack_mock.assert_called_once_with("eth", W1)
+        toggle_mock.assert_called_once_with("eth", W1, None)
 
     @patch("web.routes.wallet_routes.store.get_all_positions_for_period")
     def test_token_flow(self, m):
