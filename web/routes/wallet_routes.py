@@ -21,13 +21,13 @@ logger = logging.getLogger("web.wallet_routes")
 class WalletSettingsRequest(BaseModel):
     enabled: bool = True
     networks: list[str] = Field(min_length=1, max_length=6)
-    pools_per_network: int = Field(8, ge=1, le=100)
-    min_trade_usd: float = Field(2000, ge=0, le=1e12)
-    min_net_usd: float = Field(100000, ge=0, le=1e12)
-    auto_track_net_usd: float = Field(250000, ge=0, le=1e12)
-    poll_interval_seconds: int = Field(120, ge=15, le=3600)
+    pools_per_network: int = Field(4, ge=1, le=100)
+    min_trade_usd: float = Field(10000, ge=0, le=1e12)
+    min_net_usd: float = Field(150000, ge=0, le=1e12)
+    auto_track_net_usd: float = Field(500000, ge=0, le=1e12)
+    poll_interval_seconds: int = Field(300, ge=15, le=3600)
     retention_days: int = Field(8, ge=1, le=90)
-    api_delay_seconds: float = Field(2.2, ge=0.5, le=60)
+    api_delay_seconds: float = Field(4.0, ge=0.5, le=60)
     token_mode: Literal["all", "selected"] = "all"
     token_addresses: list[str] = Field(default_factory=list, max_length=500)
 

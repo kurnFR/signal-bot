@@ -1,13 +1,4 @@
-"""Wallet-tracker worker loop.
-
-Each cycle:
-  1. for every configured network, pick hot pools (trending + top volume)
-  2. pull recent large swaps per pool and store them (idempotent)
-  3. re-aggregate swaps per wallet for each period (1h/6h/24h/7d)
-  4. store candidates (|net USD| >= threshold) and auto-monitor the big ones
-  5. prune old swaps, publish a status row for the dashboard
-A failure in one pool/network is logged and skipped; it never kills the loop.
-"""
+"""Wallet-tracker worker loop with aggregate wallet-quality gates."""
 import logging
 import time
 from datetime import datetime, timedelta, timezone
@@ -25,7 +16,7 @@ def _utcnow():
 
 
 def recompute(now=None, settings=None):
-    """Steps 3-4. Returns number of distinct candidate positions (longest period)."""
+    """Refresh pool-level positions and auto-follow only quality wallet flows."""
     now = now or _utcnow()
     settings = settings or store.get_settings()
     periods = sorted(config.WALLET_TRACKER_PERIODS_HOURS)
@@ -34,8 +25,26 @@ def recompute(now=None, settings=None):
     for hours in periods:
         positions = analyzer.aggregate_swaps(swaps, hours, now, settings["min_net_usd"])
         store.replace_positions(hours, positions)
-        store.auto_flag_wallets(positions, settings["auto_track_net_usd"])
         candidates_total = len(positions)
+
+    # Follow decisions aggregate USD flow across all pools for a wallet. Use
+    # 24h and 7d evidence, not a single large swap or a single pool snapshot.
+    auto_threshold = float(settings["auto_track_net_usd"])
+    min_total_usd = max(auto_threshold, float(settings["min_net_usd"]) * 2)
+    follow_candidates = analyzer.quality_follow_candidates(
+        swaps=swaps,
+        periods=[h for h in (24, 168) if h in periods],
+        now=now,
+        min_net_usd=auto_threshold,
+        min_total_usd=min_total_usd,
+        min_trade_count=3,
+        min_net_flow_ratio=0.25,
+    )
+    store.auto_flag_wallets(follow_candidates, auto_threshold)
+    logger.info(
+        "wallet quality gate: eligible=%d (net>=%.0f USD, total>=%.0f USD, trades>=3, net/total>=25%%)",
+        len(follow_candidates), auto_threshold, min_total_usd,
+    )
     return candidates_total
 
 
@@ -55,23 +64,43 @@ def run_cycle(provider):
     if not settings["enabled"]:
         store.set_status(0, 0, 0, 0, "Scanner disabled in Wallet Tracking settings")
         return
-    provider.delay = settings["api_delay_seconds"]
+    provider.set_base_delay(settings["api_delay_seconds"])
     started = time.monotonic()
     pools_scanned = swaps_new = 0
     errors = []
+    # A volume floor avoids spending a trades request on clearly illiquid pools.
+    # Unknown volume is retained because some provider payloads omit this field.
+    min_pool_volume = max(float(settings["min_trade_usd"]) * 10, 100_000)
+    stop_scanning = False
     for network in settings["networks"]:
+        if stop_scanning:
+            break
         if not is_supported_chain(network):
             errors.append(f"unsupported network '{network}'")
             continue
         try:
-            pools = provider.hot_pools(network, settings["pools_per_network"])
-        except Exception as exc:  # network down, bad payload, ...
+            # Fetch extra pool metadata, but cap trade endpoints to the configured
+            # pool budget after volume/token filtering.
+            pools = provider.hot_pools(network, settings["pools_per_network"] * 2)
+        except Exception as exc:
             logger.warning("%s: pool discovery failed: %s", network, exc)
             errors.append(f"{network}: {exc}")
+            if getattr(getattr(exc, "response", None), "status_code", None) == 429:
+                stop_scanning = True
+                break
             continue
+        pool_requests = 0
         for pool in pools:
+            if pool_requests >= settings["pools_per_network"]:
+                break
             if not _pool_matches_tokens(network, pool, settings):
                 continue
+            volume_24h = float(pool.get("volume_24h_usd") or 0)
+            if 0 < volume_24h < min_pool_volume:
+                logger.debug("%s %s skipped: 24h pool volume $%.0f below $%.0f",
+                             network, pool.get("name"), volume_24h, min_pool_volume)
+                continue
+            pool_requests += 1
             try:
                 swaps = provider.pool_trades(network, pool, settings["min_trade_usd"])
                 swaps_new += store.insert_swaps(swaps)
@@ -79,6 +108,13 @@ def run_cycle(provider):
             except Exception as exc:
                 logger.warning("%s %s: trade fetch failed: %s", network, pool.get("name"), exc)
                 errors.append(f"{network}/{pool.get('name')}: {exc}")
+                if getattr(getattr(exc, "response", None), "status_code", None) == 429:
+                    # Stop this cycle's external calls after a confirmed 429;
+                    # adaptive pacing will apply to the next cycle.
+                    stop_scanning = True
+                    break
+        if stop_scanning:
+            break
     candidates = recompute(settings=settings)
     store.prune_swaps(settings["retention_days"])
     elapsed = time.monotonic() - started
