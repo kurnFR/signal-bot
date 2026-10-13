@@ -65,6 +65,28 @@ class TestAggregation(unittest.TestCase):
         swaps = [swap(W1, "buy", 500_000, 10, 5), swap(W1, "sell", 480_000, 10, 4)]
         self.assertEqual(analyzer.aggregate_swaps(swaps, 24, NOW, 100_000), [])
 
+    def test_quality_follow_aggregates_across_pools_and_rejects_noise(self):
+        pool2 = "0x" + "d" * 40
+        swaps = [
+            swap(W1, "buy", 200_000, 100, 10, pool=POOL),
+            swap(W1, "buy", 100_000, 50, 8, pool=pool2),
+            swap(W1, "sell", 50_000, 20, 5, pool=POOL),
+            # A single whale-sized trade must not qualify on its own.
+            swap(W2, "buy", 900_000, 100, 3, pool=POOL),
+            # Large turnover but nearly balanced net flow is not directional.
+            swap("0x" + "e" * 40, "buy", 300_000, 100, 4, pool=POOL),
+            swap("0x" + "e" * 40, "sell", 290_000, 95, 2, pool=POOL),
+        ]
+        candidates = analyzer.quality_follow_candidates(
+            swaps, [24], NOW, min_net_usd=200_000, min_total_usd=300_000,
+            min_trade_count=3, min_net_flow_ratio=0.25,
+        )
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["wallet"], W1)
+        self.assertEqual(candidates[0]["net_usd"], 250_000)
+        self.assertEqual(candidates[0]["total_usd"], 350_000)
+        self.assertEqual(candidates[0]["trade_count"], 3)
+
     def test_token_flow_signal(self):
         swaps = [swap(W1, "buy", 300_000, 10, 5), swap(W2, "buy", 200_000, 10, 5),
                  swap("0x" + "d" * 40, "sell", 120_000, 10, 5)]
