@@ -71,7 +71,10 @@ def run_cycle(provider):
     # A volume floor avoids spending a trades request on clearly illiquid pools.
     # Unknown volume is retained because some provider payloads omit this field.
     min_pool_volume = max(float(settings["min_trade_usd"]) * 10, 100_000)
+    stop_scanning = False
     for network in settings["networks"]:
+        if stop_scanning:
+            break
         if not is_supported_chain(network):
             errors.append(f"unsupported network '{network}'")
             continue
@@ -102,6 +105,13 @@ def run_cycle(provider):
             except Exception as exc:
                 logger.warning("%s %s: trade fetch failed: %s", network, pool.get("name"), exc)
                 errors.append(f"{network}/{pool.get('name')}: {exc}")
+                if getattr(getattr(exc, "response", None), "status_code", None) == 429:
+                    # Stop this cycle's external calls after a confirmed 429;
+                    # adaptive pacing will apply to the next cycle.
+                    stop_scanning = True
+                    break
+        if stop_scanning:
+            break
     candidates = recompute(settings=settings)
     store.prune_swaps(settings["retention_days"])
     elapsed = time.monotonic() - started
