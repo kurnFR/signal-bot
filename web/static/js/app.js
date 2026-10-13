@@ -452,7 +452,7 @@ const App = {
     async saveWalletSettings() {
         const value = id => document.getElementById(id).value;
         const networks = Array.from(document.querySelectorAll(".wt-setting-network:checked")).map(el => el.value);
-        const token_addresses = value("wt-setting-token-addresses").split(/\\r?\\n/).map(x => x.trim()).filter(Boolean);
+        const token_addresses = value("wt-setting-token-addresses").split(/\r?\n/).map(x => x.trim()).filter(Boolean);
         const payload = {
             enabled: value("wt-setting-enabled") === "true", networks,
             pools_per_network: Number(value("wt-setting-pools")),
