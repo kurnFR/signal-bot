@@ -222,6 +222,7 @@ class TestWorkerRateLimitIsolation(unittest.TestCase):
             stack.enter_context(patch.object(worker.store, "get_settings", return_value=settings))
             stack.enter_context(patch.object(worker, "recompute", return_value=0))
             stack.enter_context(patch.object(worker.store, "prune_swaps"))
+            stack.enter_context(patch.object(worker.store, "prune_wallet_alerts"))
             stack.enter_context(patch.object(worker.store, "set_status"))
             stack.enter_context(patch.object(worker, "dispatch_telegram_alerts"))
             stack.enter_context(patch.object(worker, "_network_rotation_offset", 0))
