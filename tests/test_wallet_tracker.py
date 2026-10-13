@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from wallet_tracker import analyzer
 from wallet_tracker.chains import explorer_url, normalize_wallet
 from wallet_tracker.providers import GeckoTerminalProvider, parse_trade
+from wallet_tracker.stablecoins import is_stablecoin_base_pool
 
 NOW = datetime(2026, 10, 13, 12, 0, 0)
 W1 = "0x" + "a" * 40
@@ -95,6 +96,41 @@ class TestAggregation(unittest.TestCase):
         self.assertEqual(flow["signal"], "ACCUMULATION")
         self.assertEqual((flow["accumulating_wallets"], flow["distributing_wallets"]), (2, 1))
         self.assertEqual(flow["net_usd"], 380_000)
+
+    def test_token_flow_is_mixed_when_net_usd_conflicts_with_wallet_majority(self):
+        positions = [
+            {"chain": "eth", "pool_address": POOL, "pair": "X/WETH", "bias": "ACCUMULATING",
+             "buy_usd": 100_000, "sell_usd": 0, "net_usd": 100_000},
+            {"chain": "eth", "pool_address": POOL, "pair": "X/WETH", "bias": "ACCUMULATING",
+             "buy_usd": 100_000, "sell_usd": 0, "net_usd": 100_000},
+            {"chain": "eth", "pool_address": POOL, "pair": "X/WETH", "bias": "DISTRIBUTING",
+             "buy_usd": 0, "sell_usd": 500_000, "net_usd": -500_000},
+        ]
+        (flow,) = analyzer.token_flow(positions)
+        self.assertEqual(flow["signal"], "MIXED")
+        self.assertEqual(flow["net_usd"], -300_000)
+
+    def test_token_flow_needs_at_least_two_wallets(self):
+        positions = [
+            {"chain": "eth", "pool_address": POOL, "pair": "X/WETH", "bias": "ACCUMULATING",
+             "buy_usd": 200_000, "sell_usd": 0, "net_usd": 200_000},
+        ]
+        (flow,) = analyzer.token_flow(positions)
+        self.assertEqual(flow["signal"], "MIXED")
+
+    def test_stablecoin_base_pools_are_excluded_but_usdt_quote_pairs_remain(self):
+        self.assertTrue(is_stablecoin_base_pool("eth", {
+            "base_token_symbol": "USDC", "base_token_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "quote_token_symbol": "WETH", "quote_token_address": W2,
+        }))
+        self.assertTrue(is_stablecoin_base_pool("bsc", {
+            "base_token_symbol": "TOKEN", "base_token_address": "0x" + "1" * 40,
+            "quote_token_symbol": "USDT", "quote_token_address": "0x55d398326f99059ff775485246999027b3197955",
+        }) is False)
+        self.assertFalse(is_stablecoin_base_pool("bsc", {
+            "base_token_symbol": "ARK", "base_token_address": "0x" + "2" * 40,
+            "quote_token_symbol": "USDT", "quote_token_address": "0x55d398326f99059ff775485246999027b3197955",
+        }))
 
 
 class TestParsingAndValidation(unittest.TestCase):
