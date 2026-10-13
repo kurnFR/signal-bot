@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from wallet_tracker import analyzer
 from wallet_tracker.chains import explorer_url, normalize_wallet
-from wallet_tracker.providers import parse_trade
+from wallet_tracker.providers import GeckoTerminalProvider, parse_trade
 
 NOW = datetime(2026, 10, 13, 12, 0, 0)
 W1 = "0x" + "a" * 40
@@ -81,6 +81,17 @@ class TestParsingAndValidation(unittest.TestCase):
              "to_token_amount": "1000", "from_token_amount": "5", "price_to_in_usd": "12.3455",
              "price_from_in_usd": "2000"}
 
+    def test_pool_parser_exposes_base_token_address(self):
+        payload = {
+            "data": [{"attributes": {"address": POOL, "name": "PEPE / WETH", "volume_usd": {"h24": "1000000"}},
+                      "relationships": {"base_token": {"data": {"id": "eth_" + W1}},
+                                       "quote_token": {"data": {"id": "eth_" + W2}}}}],
+            "included": [{"id": "eth_" + W1, "attributes": {"address": W1, "symbol": "PEPE"}},
+                         {"id": "eth_" + W2, "attributes": {"address": W2, "symbol": "WETH"}}]
+        }
+        (pool,) = GeckoTerminalProvider._pools_from(payload)
+        self.assertEqual(pool["base_token_address"], W1)
+        self.assertEqual(pool["base_token_symbol"], "PEPE")
     def test_parse_buy_uses_to_token(self):
         s = parse_trade("eth", POOL, "PEPE / WETH", dict(self.ATTRS))
         self.assertEqual(s["wallet"], "0x" + "a" * 40)    # lower-cased
