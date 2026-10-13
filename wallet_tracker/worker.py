@@ -53,8 +53,12 @@ def recompute(now=None, settings=None):
         min_net_flow_ratio=0.25,
     )
     store.auto_flag_wallets(follow_candidates, auto_threshold)
+    inactive_days = max(1, int(getattr(config, "WALLET_TRACKER_AUTO_INACTIVE_DAYS", 7)))
+    expired = store.expire_inactive_auto_wallets(inactive_days)
+    if expired:
+        logger.info("expired %d inactive auto-follow wallet(s) after %d days", expired, inactive_days)
     logger.info(
-        "wallet quality gate: eligible=%d (net>=%.0f USD, total>=%.0f USD, trades>=3, net/total>=25%%)",
+        "wallet quality gate: eligible=%d (per-pool net>=%.0f USD, total>=%.0f USD, trades>=3, net/total>=25%%; high-frequency round-trip gate enabled)",
         len(follow_candidates), auto_threshold, min_total_usd,
     )
     return candidates_total
