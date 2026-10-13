@@ -102,11 +102,22 @@ def quality_follow_candidates(swaps, periods, now, min_net_usd, min_total_usd,
                 continue
             if flow["net_flow_ratio"] < min_net_flow_ratio:
                 continue
+            # A transparent 0-100 ranking score, not a calibrated probability.
+            # Weight capital flow, turnover, directionality, and repeated activity.
+            net_strength = min(abs(flow["net_usd"]) / min_net_usd, 2.0) / 2.0
+            volume_strength = min(flow["total_usd"] / min_total_usd, 2.0) / 2.0
+            activity_strength = min(flow["trade_count"] / 10.0, 1.0)
+            flow["quality_score"] = round(
+                30 * net_strength + 25 * volume_strength
+                + 25 * flow["net_flow_ratio"] + 20 * activity_strength, 1
+            )
+            if flow["quality_score"] < 50:
+                continue
             key = (flow["chain"], flow["wallet"])
             previous = selected.get(key)
-            if previous is None or abs(flow["net_usd"]) > abs(previous["net_usd"]):
+            if previous is None or flow["quality_score"] > previous["quality_score"]:
                 selected[key] = flow
-    return sorted(selected.values(), key=lambda f: abs(f["net_usd"]), reverse=True)
+    return sorted(selected.values(), key=lambda f: (f["quality_score"], abs(f["net_usd"])), reverse=True)
 
 
 def token_flow(positions):
