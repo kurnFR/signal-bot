@@ -24,44 +24,63 @@ def _utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def recompute(now=None):
+def recompute(now=None, settings=None):
     """Steps 3-4. Returns number of distinct candidate positions (longest period)."""
     now = now or _utcnow()
+    settings = settings or store.get_settings()
     periods = sorted(config.WALLET_TRACKER_PERIODS_HOURS)
     swaps = store.load_swaps_since(now - timedelta(hours=periods[-1]))
     candidates_total = 0
     for hours in periods:
-        positions = analyzer.aggregate_swaps(swaps, hours, now, config.WALLET_TRACKER_MIN_NET_USD)
+        positions = analyzer.aggregate_swaps(swaps, hours, now, settings["min_net_usd"])
         store.replace_positions(hours, positions)
-        store.auto_flag_wallets(positions, config.WALLET_TRACKER_AUTO_TRACK_NET_USD)
+        store.auto_flag_wallets(positions, settings["auto_track_net_usd"])
         candidates_total = len(positions)
     return candidates_total
 
 
+def _pool_matches_tokens(network, pool, settings):
+    if settings.get("token_mode", "all") == "all":
+        return True
+    address = pool.get("base_token_address")
+    if not address:
+        return False
+    normalized = str(address) if network == "solana" else str(address).lower()
+    selector = network + ":" + normalized
+    return selector in set(settings.get("token_addresses", []))
+
+
 def run_cycle(provider):
+    settings = store.get_settings()
+    if not settings["enabled"]:
+        store.set_status(0, 0, 0, 0, "Scanner disabled in Wallet Tracking settings")
+        return
+    provider.delay = settings["api_delay_seconds"]
     started = time.monotonic()
     pools_scanned = swaps_new = 0
     errors = []
-    for network in config.WALLET_TRACKER_NETWORKS:
+    for network in settings["networks"]:
         if not is_supported_chain(network):
             errors.append(f"unsupported network '{network}'")
             continue
         try:
-            pools = provider.hot_pools(network, config.WALLET_TRACKER_POOLS_PER_NETWORK)
+            pools = provider.hot_pools(network, settings["pools_per_network"])
         except Exception as exc:  # network down, bad payload, ...
             logger.warning("%s: pool discovery failed: %s", network, exc)
             errors.append(f"{network}: {exc}")
             continue
         for pool in pools:
+            if not _pool_matches_tokens(network, pool, settings):
+                continue
             try:
-                swaps = provider.pool_trades(network, pool, config.WALLET_TRACKER_MIN_TRADE_USD)
+                swaps = provider.pool_trades(network, pool, settings["min_trade_usd"])
                 swaps_new += store.insert_swaps(swaps)
                 pools_scanned += 1
             except Exception as exc:
                 logger.warning("%s %s: trade fetch failed: %s", network, pool.get("name"), exc)
                 errors.append(f"{network}/{pool.get('name')}: {exc}")
-    candidates = recompute()
-    store.prune_swaps(config.WALLET_TRACKER_RETENTION_DAYS)
+    candidates = recompute(settings=settings)
+    store.prune_swaps(settings["retention_days"])
     elapsed = time.monotonic() - started
     store.set_status(pools_scanned, swaps_new, candidates, elapsed, "; ".join(errors[:3]) or None)
     logger.info("cycle done: pools=%d new_swaps=%d candidates=%d (%.1fs)",
@@ -70,17 +89,14 @@ def run_cycle(provider):
 
 def run():
     store.ensure_tables()
-    if not config.WALLET_TRACKER_ENABLED:
-        logger.warning("WALLET_TRACKER_ENABLED=false -- idle (set it to true to scan).")
-        while True:
-            time.sleep(300)
-    provider = GeckoTerminalProvider(delay_seconds=config.WALLET_TRACKER_API_DELAY_SECONDS)
-    logger.info("Wallet tracker started: networks=%s pools/network=%d min_trade=$%.0f min_net=$%.0f",
-                config.WALLET_TRACKER_NETWORKS, config.WALLET_TRACKER_POOLS_PER_NETWORK,
-                config.WALLET_TRACKER_MIN_TRADE_USD, config.WALLET_TRACKER_MIN_NET_USD)
+    settings = store.get_settings()
+    provider = GeckoTerminalProvider(delay_seconds=settings["api_delay_seconds"])
+    logger.info("Wallet tracker started; settings are loaded from the dashboard.")
     while True:
         try:
             run_cycle(provider)
+            settings = store.get_settings()
         except Exception:
             logger.exception("cycle failed")
-        time.sleep(config.WALLET_TRACKER_POLL_INTERVAL_SECONDS)
+            settings = store.get_settings()
+        time.sleep(settings["poll_interval_seconds"])
