@@ -104,8 +104,8 @@ def quality_follow_candidates(swaps, periods, now, min_net_usd, min_total_usd,
                 continue
             # A transparent 0-100 ranking score, not a calibrated probability.
             # Weight capital flow, turnover, directionality, and repeated activity.
-            net_strength = min(abs(flow["net_usd"]) / min_net_usd, 2.0) / 2.0
-            volume_strength = min(flow["total_usd"] / min_total_usd, 2.0) / 2.0
+            net_strength = min(abs(flow["net_usd"]) / max(float(min_net_usd), 1.0), 2.0) / 2.0
+            volume_strength = min(flow["total_usd"] / max(float(min_total_usd), 1.0), 2.0) / 2.0
             activity_strength = min(flow["trade_count"] / 10.0, 1.0)
             flow["quality_score"] = round(
                 30 * net_strength + 25 * volume_strength
