@@ -124,6 +124,7 @@ def dispatch_telegram_alerts(notifier=None):
 
 def run_cycle(provider):
     settings = store.get_settings()
+    store.prune_wallet_alerts(config.WALLET_TRACKER_ALERT_RETENTION_DAYS)
     if not settings["enabled"]:
         store.set_status(0, 0, 0, 0, "Scanner disabled in Wallet Tracking settings")
         return
@@ -184,7 +185,6 @@ def run_cycle(provider):
                     break
     candidates = recompute(settings=settings)
     store.prune_swaps(settings["retention_days"])
-    store.prune_wallet_alerts(config.WALLET_TRACKER_ALERT_RETENTION_DAYS)
     elapsed = time.monotonic() - started
     store.set_status(pools_scanned, swaps_new, candidates, elapsed, "; ".join(errors[:3]) or None)
     logger.info("cycle done: pools=%d new_swaps=%d candidates=%d (%.1fs)",
