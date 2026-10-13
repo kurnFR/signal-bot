@@ -430,7 +430,55 @@ const App = {
         return res.json();
     },
 
+    async _wtLoadSettings() {
+        const s = await this._wtGet("/api/wallets/settings");
+        const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = String(value); };
+        set("wt-setting-enabled", s.enabled);
+        set("wt-setting-pools", s.pools_per_network);
+        set("wt-setting-mintrade", s.min_trade_usd);
+        set("wt-setting-minnet", s.min_net_usd);
+        set("wt-setting-autotrack", s.auto_track_net_usd);
+        set("wt-setting-poll", s.poll_interval_seconds);
+        set("wt-setting-delay", s.api_delay_seconds);
+        set("wt-setting-retention", s.retention_days);
+        set("wt-setting-token-mode", s.token_mode || "all");
+        set("wt-setting-token-addresses", (s.token_addresses || []).join("\n"));
+        document.querySelectorAll(".wt-setting-network").forEach(el => { el.checked = (s.networks || []).includes(el.value); });
+        const status = document.getElementById("wt-settings-status");
+        if (status) status.innerText = `Saved settings loaded · networks: ${(s.networks || []).join(", ")}`;
+        this._wtSettingsLoaded = true;
+    },
+
+    async saveWalletSettings() {
+        const value = id => document.getElementById(id).value;
+        const networks = Array.from(document.querySelectorAll(".wt-setting-network:checked")).map(el => el.value);
+        const token_addresses = value("wt-setting-token-addresses").split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+        const payload = {
+            enabled: value("wt-setting-enabled") === "true", networks,
+            pools_per_network: Number(value("wt-setting-pools")),
+            min_trade_usd: Number(value("wt-setting-mintrade")),
+            min_net_usd: Number(value("wt-setting-minnet")),
+            auto_track_net_usd: Number(value("wt-setting-autotrack")),
+            poll_interval_seconds: Number(value("wt-setting-poll")),
+            api_delay_seconds: Number(value("wt-setting-delay")),
+            retention_days: Number(value("wt-setting-retention")),
+            token_mode: value("wt-setting-token-mode"), token_addresses
+        };
+        const status = document.getElementById("wt-settings-status");
+        try {
+            const saved = await this._wtSend("PUT", "/api/wallets/settings", payload);
+            this._wtSettingsLoaded = true;
+            if (status) status.innerText = "Settings saved. The worker will apply them on its next cycle.";
+            this.showToast("Wallet scanner settings saved", "success");
+            this._wtRenderStatus(await this._wtGet("/api/wallets/status"), (await this._wtGet("/api/wallets/tracked")).tracked.length);
+        } catch (e) {
+            if (status) status.innerText = `Could not save settings: ${e.message || e}`;
+            this.showToast(`Could not save wallet settings: ${e.message || e}`, "error");
+        }
+    },
+
     async fetchWalletData(opts = {}) {
+        if (!this._wtSettingsLoaded) { try { await this._wtLoadSettings(); } catch (e) { const el = document.getElementById("wt-settings-status"); if (el) el.innerText = `Settings unavailable: ${e.message || e}`; } }
         const val = (id, d) => (document.getElementById(id) || {}).value || d;
         const period = val("wt-period", "24");
         const qs = new URLSearchParams({ period_hours: period, min_net_usd: val("wt-minnet", "0") || "0", limit: "100" });
@@ -566,6 +614,7 @@ const App = {
             try { detail = (await res.json()).detail || detail; } catch (_) {}
             throw new Error(detail);
         }
+        return res.json();
     },
 
     async walletTrack(btn) {

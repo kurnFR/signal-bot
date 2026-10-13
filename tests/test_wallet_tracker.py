@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from wallet_tracker import analyzer
 from wallet_tracker.chains import explorer_url, normalize_wallet
-from wallet_tracker.providers import parse_trade
+from wallet_tracker.providers import GeckoTerminalProvider, parse_trade
 
 NOW = datetime(2026, 10, 13, 12, 0, 0)
 W1 = "0x" + "a" * 40
@@ -47,6 +47,15 @@ class TestAggregation(unittest.TestCase):
         self.assertEqual(out[0]["bias"], analyzer.DISTRIBUTING)
         self.assertIsNone(out[0]["avg_buy_price"])
 
+    def test_side_uses_token_delta_not_usd_flow(self):
+        # Price/value changes can make net USD positive while token holdings fall.
+        swaps = [swap(W1, "buy", 200_000, 10, 20),
+                 swap(W1, "sell", 80_000, 20, 10)]
+        (p,) = analyzer.aggregate_swaps(swaps, 24, NOW, 100_000)
+        self.assertGreater(p["net_usd"], 0)
+        self.assertLess(p["net_tokens"], 0)
+        self.assertEqual(p["side"], "SELL")
+        self.assertEqual(p["bias"], analyzer.DISTRIBUTING)
     def test_period_window_excludes_old_swaps(self):
         swaps = [swap(W1, "buy", 200_000, 10, 90)]    # 90 min ago
         self.assertEqual(analyzer.aggregate_swaps(swaps, 1, NOW, 100_000), [])
@@ -72,6 +81,17 @@ class TestParsingAndValidation(unittest.TestCase):
              "to_token_amount": "1000", "from_token_amount": "5", "price_to_in_usd": "12.3455",
              "price_from_in_usd": "2000"}
 
+    def test_pool_parser_exposes_base_token_address(self):
+        payload = {
+            "data": [{"attributes": {"address": POOL, "name": "PEPE / WETH", "volume_usd": {"h24": "1000000"}},
+                      "relationships": {"base_token": {"data": {"id": "eth_" + W1}},
+                                       "quote_token": {"data": {"id": "eth_" + W2}}}}],
+            "included": [{"id": "eth_" + W1, "attributes": {"address": W1, "symbol": "PEPE"}},
+                         {"id": "eth_" + W2, "attributes": {"address": W2, "symbol": "WETH"}}]
+        }
+        (pool,) = GeckoTerminalProvider._pools_from(payload)
+        self.assertEqual(pool["base_token_address"], W1)
+        self.assertEqual(pool["base_token_symbol"], "PEPE")
     def test_parse_buy_uses_to_token(self):
         s = parse_trade("eth", POOL, "PEPE / WETH", dict(self.ATTRS))
         self.assertEqual(s["wallet"], "0x" + "a" * 40)    # lower-cased
@@ -129,6 +149,24 @@ class TestWalletRoutes(unittest.TestCase):
         self.assertEqual(self.client.get("/api/wallets/positions?chain=doge", headers=self.headers).status_code, 400)
         self.assertEqual(self.client.get("/api/wallets/positions?side=HODL", headers=self.headers).status_code, 422)
 
+    @patch("web.routes.wallet_routes.store.get_settings", return_value={"enabled": True, "networks": ["eth"], "pools_per_network": 8, "min_trade_usd": 2000, "min_net_usd": 100000, "auto_track_net_usd": 250000, "poll_interval_seconds": 120, "retention_days": 8, "api_delay_seconds": 2.2, "token_mode": "all", "token_addresses": []})
+    def test_wallet_settings_read(self, _m):
+        r = self.client.get("/api/wallets/settings", headers=self.headers)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["networks"], ["eth"])
+
+    @patch("web.routes.wallet_routes.store.get_settings", return_value={"enabled": True, "networks": ["eth"], "pools_per_network": 8, "min_trade_usd": 2000, "min_net_usd": 100000, "auto_track_net_usd": 250000, "poll_interval_seconds": 120, "retention_days": 8, "api_delay_seconds": 2.2, "token_mode": "all", "token_addresses": []})
+    @patch("web.routes.wallet_routes.store.save_settings")
+    def test_wallet_settings_validation_and_save(self, save, _get):
+        payload = {"enabled": True, "networks": ["eth"], "pools_per_network": 12, "min_trade_usd": 500, "min_net_usd": 5000, "auto_track_net_usd": 20000, "poll_interval_seconds": 30, "retention_days": 7, "api_delay_seconds": 1, "token_mode": "selected", "token_addresses": ["eth:" + W1]}
+        r = self.client.put("/api/wallets/settings", json=payload, headers=self.headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        saved = save.call_args.args[0]
+        self.assertEqual(saved["token_addresses"], ["eth:" + W1])
+        self.assertEqual(saved["pools_per_network"], 12)
+        payload["token_addresses"] = []
+        r = self.client.put("/api/wallets/settings", json=payload, headers=self.headers)
+        self.assertEqual(r.status_code, 400)
     @patch("web.routes.wallet_routes.store.get_positions", return_value=[{"wallet": W1}])
     def test_positions_ok(self, m):
         r = self.client.get("/api/wallets/positions?period_hours=24&side=BUY&min_net_usd=50000", headers=self.headers)

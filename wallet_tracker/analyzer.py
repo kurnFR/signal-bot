@@ -33,24 +33,28 @@ def aggregate_swaps(swaps, period_hours, now, min_net_usd):
         buy_tokens = sum(r["token_amount"] for r in buys)
         sell_tokens = sum(r["token_amount"] for r in sells)
         net_usd = buy_usd - sell_usd
-        if abs(net_usd) < min_net_usd:
+        net_tokens = buy_tokens - sell_tokens
+        # Dollar flow measures capital flow; token delta measures accumulation.
+        # Keep them separate so price changes cannot invert the BUY/SELL label.
+        if abs(net_usd) < min_net_usd or net_tokens == 0:
             continue
         total_usd = buy_usd + sell_usd
+        side = "BUY" if net_tokens > 0 else "SELL"
         out.append({
             "chain": chain,
             "wallet": wallet,
             "pool_address": pool,
             "pair": rows[0]["pair"],
             "period_hours": period_hours,
-            "side": "BUY" if net_usd > 0 else "SELL",
-            "bias": ACCUMULATING if net_usd > 0 else DISTRIBUTING,
+            "side": side,
+            "bias": ACCUMULATING if net_tokens > 0 else DISTRIBUTING,
             "buy_usd": round(buy_usd, 2),
             "sell_usd": round(sell_usd, 2),
             "net_usd": round(net_usd, 2),
             "total_usd": round(total_usd, 2),
             "buy_tokens": buy_tokens,
             "sell_tokens": sell_tokens,
-            "net_tokens": buy_tokens - sell_tokens,
+            "net_tokens": net_tokens,
             "avg_buy_price": _safe_div(buy_usd, buy_tokens),
             "avg_sell_price": _safe_div(sell_usd, sell_tokens),
             "avg_price": _safe_div(total_usd, buy_tokens + sell_tokens),
@@ -76,7 +80,7 @@ def token_flow(positions):
             "accumulating_wallets": 0, "distributing_wallets": 0,
             "buy_usd": 0.0, "sell_usd": 0.0, "net_usd": 0.0,
         })
-        if p["net_usd"] > 0:
+        if p.get("bias") == ACCUMULATING or (not p.get("bias") and p.get("net_tokens", 0) > 0):
             f["accumulating_wallets"] += 1
         else:
             f["distributing_wallets"] += 1
@@ -87,9 +91,9 @@ def token_flow(positions):
     result = []
     for f in flows.values():
         a, d = f["accumulating_wallets"], f["distributing_wallets"]
-        if f["net_usd"] > 0 and a > d:
+        if a > d:
             f["signal"] = "ACCUMULATION"
-        elif f["net_usd"] < 0 and d > a:
+        elif d > a:
             f["signal"] = "DISTRIBUTION"
         else:
             f["signal"] = "MIXED"
