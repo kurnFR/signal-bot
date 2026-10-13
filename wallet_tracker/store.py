@@ -45,6 +45,11 @@ def ensure_tables():
             stmt = stmt.strip()
             if stmt.upper().startswith("CREATE TABLE"):
                 cur.execute(stmt)
+        # Start at the current high-water mark to avoid replaying historical swaps.
+        cur.execute(
+            """INSERT IGNORE INTO wallet_tracker_alert_cursor (id, last_swap_id)
+               SELECT 1, COALESCE(MAX(id), 0) FROM wallet_swaps"""
+        )
         conn.commit()
         cur.close()
     finally:
@@ -77,6 +82,143 @@ def insert_swaps(swaps):
     finally:
         conn.close()
 
+
+
+# -------------------------------------------------------- Telegram alert queue
+def queue_new_wallet_alerts(min_trade_usd, limit=5000):
+    """Queue fresh swaps from active followed wallets without historical replay."""
+    conn = get_pool().get_connection()
+    try:
+        conn.start_transaction()
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT last_swap_id FROM wallet_tracker_alert_cursor WHERE id = 1 FOR UPDATE"
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.execute("SELECT COALESCE(MAX(id), 0) AS max_id FROM wallet_swaps")
+            max_id = int(cur.fetchone()["max_id"])
+            cur.execute(
+                "INSERT INTO wallet_tracker_alert_cursor (id, last_swap_id) VALUES (1, %s)",
+                (max_id,),
+            )
+            conn.commit()
+            cur.close()
+            return 0
+        last_id = int(row["last_swap_id"])
+        cur.execute("SELECT COALESCE(MAX(id), 0) AS max_id FROM wallet_swaps")
+        max_id = int(cur.fetchone()["max_id"])
+        if max_id <= last_id:
+            conn.commit()
+            cur.close()
+            return 0
+        cur.execute(
+            """INSERT IGNORE INTO wallet_telegram_alerts (swap_id, delivery_status)
+               SELECT s.id, 'PENDING'
+               FROM wallet_swaps s
+               JOIN tracked_wallets t
+                 ON t.chain = s.chain AND t.wallet = s.wallet
+               WHERE s.id > %s AND s.id <= %s
+                 AND s.usd_value >= %s AND t.status = 'ACTIVE'
+               ORDER BY s.id
+               LIMIT %s""",
+            (last_id, max_id, float(min_trade_usd), int(limit)),
+        )
+        queued = max(0, cur.rowcount)
+        cur.execute(
+            "UPDATE wallet_tracker_alert_cursor SET last_swap_id = %s WHERE id = 1",
+            (max_id,),
+        )
+        conn.commit()
+        cur.close()
+        return queued
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_pending_wallet_alerts(limit=50, max_attempts=5):
+    """Return due alerts only for wallets that are still actively followed."""
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """UPDATE wallet_telegram_alerts a
+               JOIN wallet_swaps s ON s.id = a.swap_id
+               LEFT JOIN tracked_wallets t
+                 ON t.chain = s.chain AND t.wallet = s.wallet
+               SET a.delivery_status = 'CANCELLED', a.updated_at = UTC_TIMESTAMP()
+               WHERE a.delivery_status = 'PENDING'
+                 AND (t.id IS NULL OR t.status <> 'ACTIVE')"""
+        )
+        cur.execute(
+            """SELECT a.swap_id, a.attempts, s.chain, s.wallet, s.pair, s.pool_address,
+                      s.side, s.usd_value, s.token_amount, s.price_usd, s.tx_hash,
+                      s.block_time, t.label
+               FROM wallet_telegram_alerts a
+               JOIN wallet_swaps s ON s.id = a.swap_id
+               JOIN tracked_wallets t
+                 ON t.chain = s.chain AND t.wallet = s.wallet
+               WHERE a.delivery_status = 'PENDING'
+                 AND t.status = 'ACTIVE' AND a.attempts < %s
+                 AND (a.next_attempt_at IS NULL OR a.next_attempt_at <= UTC_TIMESTAMP())
+               ORDER BY s.id
+               LIMIT %s""",
+            (int(max_attempts), int(limit)),
+        )
+        rows = [_clean(r) for r in cur.fetchall()]
+        cur.close()
+        conn.commit()
+        return rows
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def mark_wallet_alert_attempt(swap_id, success, error=None, max_attempts=5):
+    """Persist a delivery attempt with bounded exponential retry."""
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT attempts FROM wallet_telegram_alerts WHERE swap_id = %s FOR UPDATE",
+            (int(swap_id),),
+        )
+        row = cur.fetchone()
+        if not row:
+            conn.commit()
+            cur.close()
+            return False
+        attempts = int(row["attempts"]) + 1
+        if success:
+            status, next_attempt, delivered_at, last_error = "SENT", None, _utcnow(), None
+        elif attempts >= int(max_attempts):
+            status, next_attempt, delivered_at = "FAILED", None, None
+            last_error = str(error or "Telegram send failed")[:500]
+        else:
+            status = "PENDING"
+            next_attempt = _utcnow() + timedelta(seconds=min(300, 15 * (2 ** (attempts - 1))))
+            delivered_at = None
+            last_error = str(error or "Telegram send failed")[:500]
+        cur.execute(
+            """UPDATE wallet_telegram_alerts
+               SET attempts = %s, delivery_status = %s, next_attempt_at = %s,
+                   delivered_at = %s, last_error = %s, updated_at = UTC_TIMESTAMP()
+               WHERE swap_id = %s""",
+            (attempts, status, next_attempt, delivered_at, last_error, int(swap_id)),
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def load_swaps_since(since):
     conn = get_pool().get_connection()
