@@ -8,7 +8,7 @@ import logging
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 import config
 from wallet_tracker import analyzer, store
@@ -30,6 +30,14 @@ class WalletSettingsRequest(BaseModel):
     api_delay_seconds: float = Field(4.0, ge=0.5, le=60)
     token_mode: Literal["all", "selected"] = "all"
     token_addresses: list[str] = Field(default_factory=list, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_thresholds(self):
+        if self.auto_track_net_usd < self.min_net_usd:
+            raise ValueError("auto_track_net_usd must be greater than or equal to min_net_usd")
+        if self.min_trade_usd <= 0 or self.min_net_usd <= 0 or self.auto_track_net_usd <= 0:
+            raise ValueError("trade and net-flow thresholds must be greater than zero")
+        return self
 
 
 class TrackRequest(BaseModel):
