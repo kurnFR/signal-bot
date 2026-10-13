@@ -366,3 +366,26 @@ MYSQL_CONFIG = {
 # Dashboard reads the same database and endpoint as the rest of signal-bot.
 # Keep this alias for existing callers; do not allow a separate Binance DB.
 RETAILBOT2_DB_CONFIG = dict(MYSQL_CONFIG)
+
+
+# =============================================================================
+# Wallet Tracking (on-chain smart-money accumulation / distribution)
+# =============================================================================
+# Source: GeckoTerminal public API (keyless; ~30 requests/min). Swaps are read
+# per DEX pool, so a wallet is only visible in pools the worker scans.
+WALLET_TRACKER_ENABLED = os.getenv("WALLET_TRACKER_ENABLED", "true").lower() == "true"
+# GeckoTerminal network ids: eth, solana, base, bsc, arbitrum, polygon_pos
+WALLET_TRACKER_NETWORKS = [
+    n.strip() for n in os.getenv("WALLET_TRACKER_NETWORKS", "eth,solana,base,bsc").split(",") if n.strip()
+]
+WALLET_TRACKER_POOLS_PER_NETWORK = int(os.getenv("WALLET_TRACKER_POOLS_PER_NETWORK", 8))
+# Ignore individual swaps below this size (keeps the DB small, removes retail noise).
+WALLET_TRACKER_MIN_TRADE_USD = float(os.getenv("WALLET_TRACKER_MIN_TRADE_USD", 2000))
+# A wallet becomes a "candidate" when |buys - sells| in a period reaches this.
+WALLET_TRACKER_MIN_NET_USD = float(os.getenv("WALLET_TRACKER_MIN_NET_USD", 100000))
+# Candidates at or above this net amount are auto-added to the monitored list.
+WALLET_TRACKER_AUTO_TRACK_NET_USD = float(os.getenv("WALLET_TRACKER_AUTO_TRACK_NET_USD", 250000))
+WALLET_TRACKER_POLL_INTERVAL_SECONDS = int(os.getenv("WALLET_TRACKER_POLL_INTERVAL_SECONDS", 120))
+WALLET_TRACKER_PERIODS_HOURS = [1, 6, 24, 168]   # 1h, 6h, 24h, 7d
+WALLET_TRACKER_RETENTION_DAYS = int(os.getenv("WALLET_TRACKER_RETENTION_DAYS", 8))
+WALLET_TRACKER_API_DELAY_SECONDS = float(os.getenv("WALLET_TRACKER_API_DELAY_SECONDS", 2.2))

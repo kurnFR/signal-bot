@@ -48,6 +48,18 @@ python3 Screen/screening.py           # volume screener
 ```
 Open **`http://localhost:8050`** in your browser.
 
+### Wallet Tracking (on-chain smart money)
+
+Sidebar → **Wallet Tracking**. Finds wallets that accumulate (or dump) large USD amounts of a token, then lets you watch what those wallets do next.
+
+- **Candidate Wallets** – per wallet and pair, for a 1h / 6h / 24h / 7d window: side (buy/sell), token volume, total USD, net USD, volume-weighted avg buy and sell price, trade counts and the first→last trade range. A wallet is a candidate when `|buys − sells|` reaches `WALLET_TRACKER_MIN_NET_USD`.
+- **Token Flow** – rolls candidates up per pair: how many big wallets are net buying vs selling. Many wallets accumulating the same token is the early-detection signal.
+- **Live Feed** – latest buys/sells by *monitored* wallets (polls every 15s). Wallets with net flow ≥ `WALLET_TRACKER_AUTO_TRACK_NET_USD` are monitored automatically; you can add/remove wallets by hand (trader/admin role). Removed wallets stay removed.
+
+Run it with `python3 run_all.py` (process `wallet_tracker`) or alone: `python3 run_wallet_tracker.py`. Tables are created automatically; `db/migrate_wallet_tracking.sql` is the same DDL. No API key is needed (GeckoTerminal public API). Settings are the `WALLET_TRACKER_*` variables in `.env.example`.
+
+**Limitations to know:** swaps are read per DEX pool (trending + top-volume pools per network), so a wallet is only seen in pools the scanner covers, and trades below `WALLET_TRACKER_MIN_TRADE_USD` are ignored. The free API returns the latest ~300 trades per pool, so a very busy pool can be undersampled between scans. The tracked address is the transaction sender, which can be a bot/aggregator rather than a person. 7d windows are only complete after the scanner has been running for 7 days. This is a research signal, not a trade recommendation.
+
 ### Authentication and API verification
 
 The web API is intentionally protected. Only `POST /api/auth/login` is public; News AI endpoints such as `/api/news/stats`, `/api/news/signals`, and `/api/news/events` require a bearer token.
