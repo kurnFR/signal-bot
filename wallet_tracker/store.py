@@ -226,7 +226,7 @@ def config_value(name, default):
 def save_settings(settings):
     """Persist validated settings atomically; the worker reads them each cycle."""
     networks = ",".join(settings["networks"])
-    token_addresses = "\\n".join(settings.get("token_addresses", []))
+    token_addresses = "\n".join(settings.get("token_addresses", []))
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
