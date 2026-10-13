@@ -97,6 +97,12 @@ class WalletTelegramNotifier:
                     raise RuntimeError("Telegram API response did not report ok=true")
                 self._last_send = time.monotonic()
                 return True
-            except Exception:
-                logger.exception("Telegram wallet alert delivery failed")
+            except Exception as exc:
+                # The request URL contains the bot token. Never log the exception
+                # message or traceback because requests embeds that URL in errors.
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                logger.warning(
+                    "Telegram wallet alert delivery failed (error_type=%s, http_status=%s)",
+                    type(exc).__name__, status if status is not None else "unknown",
+                )
                 return False
