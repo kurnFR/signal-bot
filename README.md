@@ -50,11 +50,11 @@ Open **`http://localhost:8050`** in your browser.
 
 ### Wallet Tracking (on-chain smart money)
 
-Sidebar → **Wallet Tracking**. Finds wallets that accumulate (or dump) large USD amounts of a token, then lets you watch what those wallets do next.
+Sidebar → **Wallet Tracking**. Surfaces large flows in scanned DEX pools and lets you monitor wallets seen in those pools. This is a flow-ranking heuristic, not proof of wallet skill or profitability.
 
-- **Candidate Wallets** – per wallet and pair, for a 1h / 6h / 24h / 7d window: side (buy/sell), token volume, total USD, net USD, volume-weighted avg buy and sell price, trade counts and the first→last trade range. A wallet is a candidate when `|buys − sells|` reaches `WALLET_TRACKER_MIN_NET_USD`.
+- **Candidate Wallets** – per wallet and pair, for a 1h / 6h / 24h / 7d window: token bias (based on net token quantity), total token volume, total turnover, net tokens, net USD cash flow, volume-weighted average buy/sell prices, trade counts and first→last trade range. Token bias and net USD cash flow can point in different directions because they measure different things.
 - **Token Flow** – rolls candidates up per pair: how many big wallets are net buying vs selling. Many wallets accumulating the same token is the early-detection signal.
-- **Live Feed** – latest buys/sells by *monitored* wallets (polls every 15s). Wallets with net flow ≥ `WALLET_TRACKER_AUTO_TRACK_NET_USD` are monitored automatically; you can add/remove wallets by hand (trader/admin role). Removed wallets stay removed.
+- **Recent Activity** – latest stored buys/sells by *monitored* wallets, refreshed by the UI periodically. This is polling-based and only sees pools the scanner covers; it is not a real-time, wallet-wide feed. Wallets with qualifying flow may be auto-monitored; you can add/remove wallets by hand (trader/admin role).
 
 Run it with `python3 run_all.py` (process `wallet_tracker`) or alone: `python3 run_wallet_tracker.py`. Tables are created automatically; `db/migrate_wallet_tracking.sql` is the same DDL. No API key is needed (GeckoTerminal public API). Settings are the `WALLET_TRACKER_*` variables in `.env.example`.
 
