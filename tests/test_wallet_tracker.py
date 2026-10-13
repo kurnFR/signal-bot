@@ -23,13 +23,12 @@ def swap(wallet, side, usd, tokens, minutes_ago, pool=POOL):
 
 
 class TestAtomicWalletToggle(unittest.TestCase):
-    def _run_toggle(self, insert_rowcount, current_status=None):
+    def _run_toggle(self, lock_result=1, current_status=None):
         from unittest.mock import MagicMock
 
         connection = MagicMock()
         cursor = connection.cursor.return_value
-        cursor.rowcount = insert_rowcount
-        cursor.fetchone.return_value = (current_status,) if current_status is not None else None
+        cursor.fetchone.side_effect = [(lock_result,), (current_status,) if current_status is not None else None]
         pool = MagicMock()
         pool.get_connection.return_value = connection
         with patch("wallet_tracker.store.get_pool", return_value=pool):
@@ -37,39 +36,47 @@ class TestAtomicWalletToggle(unittest.TestCase):
         return result, connection, cursor
 
     def test_new_wallet_is_inserted_active(self):
-        result, connection, cursor = self._run_toggle(1)
+        result, connection, cursor = self._run_toggle(1, None)
         self.assertTrue(result)
-        self.assertEqual(cursor.execute.call_count, 1)
+        sql_calls = [call.args[0] for call in cursor.execute.call_args_list]
+        self.assertTrue(any("GET_LOCK" in sql for sql in sql_calls))
+        self.assertTrue(any("SELECT status FROM tracked_wallets" in sql for sql in sql_calls))
+        self.assertTrue(any("INSERT INTO tracked_wallets" in sql for sql in sql_calls))
         connection.commit.assert_called_once()
         connection.rollback.assert_not_called()
         connection.close.assert_called_once()
 
     def test_active_wallet_is_ignored(self):
-        result, connection, cursor = self._run_toggle(0, "ACTIVE")
+        result, connection, cursor = self._run_toggle(1, "ACTIVE")
         self.assertFalse(result)
-        self.assertIn("SET status = 'IGNORED'", cursor.execute.call_args.args[0])
+        self.assertTrue(any("SET status = 'IGNORED'" in call.args[0] for call in cursor.execute.call_args_list))
         connection.commit.assert_called_once()
 
     def test_inactive_wallet_is_reactivated_as_manual(self):
-        result, connection, cursor = self._run_toggle(0, "INACTIVE")
+        result, connection, cursor = self._run_toggle(1, "INACTIVE")
         self.assertTrue(result)
-        self.assertIn("source = 'manual'", cursor.execute.call_args.args[0])
+        self.assertTrue(any("source = 'manual'" in call.args[0] for call in cursor.execute.call_args_list))
         connection.commit.assert_called_once()
 
-    def test_missing_row_after_duplicate_insert_rolls_back(self):
+    def test_advisory_lock_timeout_rolls_back(self):
         from unittest.mock import MagicMock
 
         connection = MagicMock()
         cursor = connection.cursor.return_value
-        cursor.rowcount = 0
-        cursor.fetchone.return_value = None
+        cursor.fetchone.return_value = (0,)
         pool = MagicMock()
         pool.get_connection.return_value = connection
         with patch("wallet_tracker.store.get_pool", return_value=pool):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(TimeoutError):
                 store.toggle_wallet_tracking("eth", W1)
         connection.rollback.assert_called_once()
         connection.close.assert_called_once()
+
+    def test_missing_row_after_select_inserts_without_duplicate_race(self):
+        result, connection, cursor = self._run_toggle(1, None)
+        self.assertTrue(result)
+        self.assertTrue(any("INSERT INTO tracked_wallets" in call.args[0] for call in cursor.execute.call_args_list))
+        connection.commit.assert_called_once()
 
 
 class TestStoreSerialization(unittest.TestCase):
