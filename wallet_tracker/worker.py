@@ -64,7 +64,7 @@ def run_cycle(provider):
     if not settings["enabled"]:
         store.set_status(0, 0, 0, 0, "Scanner disabled in Wallet Tracking settings")
         return
-    provider.delay = settings["api_delay_seconds"]
+    provider.set_base_delay(settings["api_delay_seconds"])
     started = time.monotonic()
     pools_scanned = swaps_new = 0
     errors = []
