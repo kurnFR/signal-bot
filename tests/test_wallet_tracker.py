@@ -109,7 +109,7 @@ class TestAggregation(unittest.TestCase):
     def test_high_frequency_round_trip_activity_is_rejected_but_directional_activity_is_kept(self):
         noisy = []
         for minute in range(60):
-            noisy.append(swap(W1, "buy", 10_000, 100, minute, pool=POOL))
+            noisy.append(swap(W1, "buy", 20_000, 100, minute, pool=POOL))
             noisy.append(swap(W1, "sell", 9_000, 99, minute, pool=POOL))
         directional = [
             swap(W2, "buy", 300_000, 1000, 50, pool=POOL),
