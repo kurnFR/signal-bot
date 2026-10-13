@@ -32,7 +32,8 @@ class WalletSettingsRequest(BaseModel):
     token_addresses: list[str] = Field(default_factory=list, max_length=500)
 
 
-class TrackRequest(BaseModel):    chain: str
+class TrackRequest(BaseModel):
+    chain: str
     wallet: str
     label: Optional[str] = Field(default=None, max_length=80)
 
