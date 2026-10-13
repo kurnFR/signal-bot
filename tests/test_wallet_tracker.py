@@ -5,7 +5,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from wallet_tracker import analyzer
+from wallet_tracker import analyzer, worker
 from wallet_tracker.chains import explorer_url, normalize_wallet
 from wallet_tracker.providers import GeckoTerminalProvider, parse_trade
 from wallet_tracker.stablecoins import is_stablecoin_base_pool
@@ -198,6 +198,40 @@ class TestProviderRateLimit(unittest.TestCase):
         self.assertEqual(result, {"data": []})
         self.assertEqual(provider.session.get.call_count, 2)
         self.assertGreater(provider.delay, provider.base_delay)
+
+
+class TestWorkerRateLimitIsolation(unittest.TestCase):
+    def test_rate_limited_network_does_not_starve_other_networks(self):
+        from unittest.mock import MagicMock
+        import requests
+
+        settings = {
+            "enabled": True, "networks": ["eth", "solana", "base", "bsc"],
+            "pools_per_network": 1, "min_trade_usd": 10000,
+            "min_net_usd": 150000, "auto_track_net_usd": 250000,
+            "retention_days": 8, "api_delay_seconds": 1,
+        }
+        provider = MagicMock()
+        provider.hot_pools.side_effect = lambda network, limit: (
+            (_ for _ in ()).throw(requests.HTTPError(
+                "rate limited", response=MagicMock(status_code=429)
+            )) if network == "eth" else []
+        )
+        with patch.object(worker.store, "get_settings", return_value=settings), \\
+             patch.object(worker, "recompute", return_value=0), \\
+             patch.object(worker.store, "prune_swaps"), \\
+             patch.object(worker.store, "set_status"), \\
+             patch.object(worker, "dispatch_telegram_alerts"), \\
+             patch.object(worker, "_network_rotation_offset", 0), \\
+             patch.dict(worker._NETWORK_COOLDOWN_UNTIL, {}, clear=True):
+            worker.run_cycle(provider)
+
+        called_networks = [call.args[0] for call in provider.hot_pools.call_args_list]
+        self.assertEqual(called_networks, ["eth", "solana", "base", "bsc"])
+        self.assertIn("solana", called_networks)
+        self.assertIn("base", called_networks)
+        self.assertIn("bsc", called_networks)
+        self.assertIn("eth", worker._NETWORK_COOLDOWN_UNTIL)
 
 
 class TestWalletRoutes(unittest.TestCase):
