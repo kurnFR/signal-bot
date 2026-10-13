@@ -143,7 +143,7 @@ class TestWalletTelegramDispatch(unittest.TestCase):
         notifier.send.side_effect = [True, False]
         sent = worker.dispatch_telegram_alerts(notifier)
         self.assertEqual(sent, 1)
-        queued.assert_called_once_with(10000, max_age_minutes=30)
+        queued.assert_called_once_with(10000, max_age_minutes=30, cooldown_minutes=10)
         self.assertEqual(pending.call_count, 1)
         self.assertEqual(mark.call_count, 2)
         self.assertEqual(mark.call_args_list[0].args, (10,))
