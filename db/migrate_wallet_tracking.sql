@@ -76,3 +76,19 @@ CREATE TABLE IF NOT EXISTS wallet_tracker_status (
     candidates INT NOT NULL DEFAULT 0,
     last_error VARCHAR(500) NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS wallet_tracker_settings (
+    id TINYINT PRIMARY KEY,
+    enabled TINYINT(1) NOT NULL DEFAULT 1,
+    networks VARCHAR(255) NOT NULL DEFAULT 'eth,solana,base,bsc',
+    pools_per_network INT NOT NULL DEFAULT 8,
+    min_trade_usd DECIMAL(20,2) NOT NULL DEFAULT 2000,
+    min_net_usd DECIMAL(20,2) NOT NULL DEFAULT 100000,
+    auto_track_net_usd DECIMAL(20,2) NOT NULL DEFAULT 250000,
+    poll_interval_seconds INT NOT NULL DEFAULT 120,
+    retention_days INT NOT NULL DEFAULT 8,
+    api_delay_seconds DECIMAL(8,3) NOT NULL DEFAULT 2.2,
+    token_mode ENUM('all','selected') NOT NULL DEFAULT 'all',
+    token_addresses TEXT NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
