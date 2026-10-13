@@ -45,6 +45,12 @@ def ensure_tables():
             stmt = stmt.strip()
             if stmt.upper().startswith("CREATE TABLE"):
                 cur.execute(stmt)
+        # Upgrade existing installations idempotently; CREATE TABLE IF NOT EXISTS
+        # does not change an older status ENUM definition.
+        cur.execute(
+            "ALTER TABLE tracked_wallets MODIFY status "
+            "ENUM('ACTIVE','IGNORED','INACTIVE') NOT NULL DEFAULT 'ACTIVE'"
+        )
         # Start at the current high-water mark to avoid replaying historical swaps.
         cur.execute(
             """INSERT IGNORE INTO wallet_tracker_alert_cursor (id, last_swap_id)
@@ -288,8 +294,11 @@ def replace_positions(period_hours, positions):
 
 
 def auto_flag_wallets(positions, min_net_abs):
-    """Add big candidates to the monitored list. Never revives a wallet the
-    user IGNORED, and never overwrites a manual label."""
+    """Add qualifying auto candidates; preserve manual and user-ignored decisions.
+
+    Expired auto wallets can be reactivated when they qualify again, but IGNORED
+    wallets are never silently revived.
+"""
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
@@ -301,13 +310,43 @@ def auto_flag_wallets(positions, min_net_abs):
                 """INSERT INTO tracked_wallets (chain, wallet, source, last_net_usd)
                    VALUES (%s,%s,'auto',%s)
                    ON DUPLICATE KEY UPDATE last_net_usd = VALUES(last_net_usd),
-                                           last_seen_at = CURRENT_TIMESTAMP""",
+                                           last_seen_at = UTC_TIMESTAMP(),
+                                           status = IF(status = 'INACTIVE' AND source = 'auto',
+                                                       'ACTIVE', status)""",
                 (p["chain"], p["wallet"], p["net_usd"]),
             )
             flagged += 1
         conn.commit()
         cur.close()
         return flagged
+    finally:
+        conn.close()
+
+
+def expire_inactive_auto_wallets(inactive_days=7):
+    """Mark stale auto-followed wallets INACTIVE without touching manual follows.
+
+    INACTIVE wallets may be auto-reactivated by a later qualifying signal.
+    IGNORED is reserved for explicit user decisions.
+    """
+    inactive_days = max(1, min(int(inactive_days), 365))
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE tracked_wallets
+               SET status = 'INACTIVE'
+               WHERE source = 'auto' AND status = 'ACTIVE'
+                 AND last_seen_at < UTC_TIMESTAMP() - INTERVAL %s DAY""",
+            (inactive_days,),
+        )
+        changed = cur.rowcount
+        conn.commit()
+        cur.close()
+        return changed
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
