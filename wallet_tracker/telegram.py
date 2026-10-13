@@ -11,7 +11,6 @@ import time
 
 import requests
 from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 logger = logging.getLogger("wallet_tracker.telegram")
 
@@ -24,13 +23,9 @@ class WalletTelegramNotifier:
         self.chat_id = chat_id if chat_id is not None else os.getenv("TELEGRAM_CHAT_ID", "")
         self.url = f"https://api.telegram.org/bot{self.token}/sendMessage" if self.token else ""
         self.session = session or requests.Session()
-        self.session.mount(
-            "https://",
-            HTTPAdapter(max_retries=Retry(
-                total=3, backoff_factor=0.3,
-                status_forcelist=[429, 500, 502, 503, 504],
-            )),
-        )
+        # Do not retry POST at the transport layer: a connection failure may
+        # happen after Telegram accepted the message and would create duplicates.
+        self.session.mount("https://", HTTPAdapter(max_retries=0))
         self._last_send = 0.0
         self._lock = threading.Lock()
 
@@ -80,29 +75,52 @@ class WalletTelegramNotifier:
             elapsed = time.monotonic() - self._last_send
             if elapsed < 0.8:
                 time.sleep(0.8 - elapsed)
-            try:
-                response = self.session.post(
-                    self.url,
-                    json={
-                        "chat_id": self.chat_id,
-                        "text": self.format_message(alert),
-                        "parse_mode": "HTML",
-                        "disable_web_page_preview": True,
-                    },
-                    timeout=10,
-                )
-                response.raise_for_status()
-                payload = response.json()
+            body = {
+                "chat_id": self.chat_id,
+                "text": self.format_message(alert),
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            }
+            # Retry only explicit 429 / 5xx responses. Do not retry ambiguous
+            # connection failures, which might duplicate an accepted Telegram send.
+            for attempt in range(3):
+                try:
+                    response = self.session.post(self.url, json=body, timeout=10)
+                except Exception as exc:
+                    logger.warning(
+                        "Telegram wallet alert delivery failed (error_type=%s, http_status=unknown)",
+                        type(exc).__name__,
+                    )
+                    return False
+
+                status = getattr(response, "status_code", 200)
+                if not isinstance(status, int):
+                    status = 200
+                if status == 429 and attempt < 2:
+                    retry_after = 1
+                    try:
+                        retry_after = int((response.json().get("parameters") or {}).get("retry_after", 1))
+                    except (TypeError, ValueError, AttributeError):
+                        pass
+                    time.sleep(max(1, min(retry_after, 30)))
+                    continue
+                if status in (500, 502, 503, 504) and attempt < 2:
+                    time.sleep(min(2 ** attempt, 5))
+                    continue
+                try:
+                    response.raise_for_status()
+                    payload = response.json()
+                except Exception as exc:
+                    logger.warning(
+                        "Telegram wallet alert delivery failed (error_type=%s, http_status=%s)",
+                        type(exc).__name__, status,
+                    )
+                    return False
                 if payload.get("ok") is not True:
-                    raise RuntimeError("Telegram API response did not report ok=true")
+                    logger.warning("Telegram wallet alert delivery rejected (http_status=%s)", status)
+                    return False
                 self._last_send = time.monotonic()
                 return True
-            except Exception as exc:
-                # The request URL contains the bot token. Never log the exception
-                # message or traceback because requests embeds that URL in errors.
-                status = getattr(getattr(exc, "response", None), "status_code", None)
-                logger.warning(
-                    "Telegram wallet alert delivery failed (error_type=%s, http_status=%s)",
-                    type(exc).__name__, status if status is not None else "unknown",
-                )
-                return False
+            logger.warning("Telegram wallet alert delivery failed after bounded retries")
+            return False
+
