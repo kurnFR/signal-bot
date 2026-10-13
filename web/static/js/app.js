@@ -592,7 +592,7 @@ const App = {
         if (count) count.innerText = `${rows.length} wallets`;
         if (!tbody) return;
         if (!rows.length) {
-            tbody.innerHTML = `<tr><td colspan="12" class="text-center py-8 text-slate-500 text-xs">No candidate wallets for these filters. The scanner needs a few cycles to collect swaps; lower "Min Net USD" to see smaller wallets.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="13" class="text-center py-8 text-slate-500 text-xs">No candidate wallets for these filters. The scanner needs a few cycles to collect swaps; lower "Min Net USD" to see smaller wallets.</td></tr>`;
             return;
         }
         tbody.innerHTML = rows.map(r => {
@@ -600,7 +600,7 @@ const App = {
             const checklistBadge = r.is_tracked
                 ? `<button data-chain="${this._escapeHtml(r.chain)}" data-wallet="${this._escapeHtml(r.wallet)}" onclick="App.walletToggleTrack(this)" class="px-2 py-1 text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-600 hover:bg-rose-950 hover:text-rose-300 hover:border-rose-700 rounded-md transition-all flex items-center gap-1 whitespace-nowrap" title="Click to uncheck / remove from Smart Money checklist"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>✓ Smart Money</button>`
                 : `<button data-chain="${this._escapeHtml(r.chain)}" data-wallet="${this._escapeHtml(r.wallet)}" onclick="App.walletToggleTrack(this)" class="px-2 py-1 text-[10px] font-semibold bg-slate-800 text-cyan-300 border border-slate-700 hover:bg-cyan-900/80 hover:border-cyan-500 rounded-md transition-all flex items-center gap-1 whitespace-nowrap" title="Click to checklist as Smart Money"><span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>+ Checklist</button>`;
-            const followBtn = `<button onclick="App.followWallet('${this._escapeHtml(r.wallet)}', '${this._escapeHtml(r.chain)}')" class="px-2 py-1 text-[10px] font-semibold bg-cyan-950 text-cyan-300 border border-cyan-800 hover:bg-cyan-900 rounded-md whitespace-nowrap flex items-center gap-1" title="Follow this wallet's live trades">Follow Live</button>`;
+            const followBtn = `<button onclick="App.followWallet('${this._escapeHtml(r.wallet)}', '${this._escapeHtml(r.chain)}')" class="px-2 py-1 text-[10px] font-semibold bg-cyan-950 text-cyan-300 border border-cyan-800 hover:bg-cyan-900 rounded-md whitespace-nowrap flex items-center gap-1" title="Add this wallet to the checklist and filter recent polled activity">Watch Activity</button>`;
             return `<tr>
                 <td>${checklistBadge}</td>
                 <td>${this._wtWalletCell(r)}</td>
@@ -608,6 +608,7 @@ const App = {
                 <td>${this._wtSideBadge(r.side)}</td>
                 <td class="font-mono text-slate-200 font-bold">${this._wtNum(vol)}</td>
                 <td class="font-mono">${this._wtUsd(r.total_usd)}</td>
+                <td class="font-mono font-bold ${Number(r.net_tokens || 0) >= 0 ? "text-emerald-400" : "text-rose-400"}">${this._wtNum(r.net_tokens)}</td>
                 <td class="font-mono font-bold ${r.net_usd >= 0 ? "text-emerald-400" : "text-rose-400"}">${this._wtUsd(r.net_usd)}</td>
                 <td class="font-mono">${this._wtPrice(r.avg_buy_price)}</td>
                 <td class="font-mono">${this._wtPrice(r.avg_sell_price)}</td>
@@ -1546,7 +1547,7 @@ const App = {
             this.fetchScreenerData();
         } else if (tabId === "wallet-tracking") {
             if (titleEl) titleEl.innerText = "Wallet Tracking";
-            if (descEl) descEl.innerText = "Smart-money wallets accumulating or distributing large amounts, with live buy/sell activity";
+            if (descEl) descEl.innerText = "Large on-chain flows from scanned DEX pools, with periodically refreshed wallet activity";
             this.fetchWalletData();
         } else if (tabId === "settings") {
             if (titleEl) titleEl.innerText = "System Settings & User Administration";
