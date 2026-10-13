@@ -143,6 +143,27 @@ class TestParsingAndValidation(unittest.TestCase):
         self.assertIsNone(explorer_url("eth", "javascript:alert(1)"))
 
 
+class TestProviderRateLimit(unittest.TestCase):
+    def test_rate_limit_increases_delay_and_retries(self):
+        from unittest.mock import MagicMock
+
+        provider = GeckoTerminalProvider(delay_seconds=1, session=MagicMock())
+        limited = MagicMock()
+        limited.status_code = 429
+        limited.headers = {"Retry-After": "1"}
+        ok = MagicMock()
+        ok.status_code = 200
+        ok.headers = {}
+        ok.json.return_value = {"data": []}
+        provider.session.get.side_effect = [limited, ok]
+        with patch("wallet_tracker.providers.time.sleep"):
+            with patch("wallet_tracker.providers.time.monotonic", return_value=100.0):
+                result = provider._get("/networks/eth/pools")
+        self.assertEqual(result, {"data": []})
+        self.assertEqual(provider.session.get.call_count, 2)
+        self.assertGreater(provider.delay, provider.base_delay)
+
+
 class TestWalletRoutes(unittest.TestCase):
     def setUp(self):
         from web.app import app
