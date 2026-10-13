@@ -159,7 +159,7 @@ class GeckoTerminalProvider:
                 logger.warning("pool list %s failed: %s", path, exc)
                 # Once throttled, do not immediately call the alternate endpoint.
                 if getattr(getattr(exc, "response", None), "status_code", None) == 429:
-                    break
+                    raise
                 continue
             for pool in self._pools_from(payload):
                 key = pool["address"].lower()
