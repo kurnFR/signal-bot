@@ -583,31 +583,39 @@ def get_tracked(status="ACTIVE"):
 def toggle_wallet_tracking(chain, wallet, label=None):
     """Atomically toggle a wallet's monitoring state and return its new state.
 
-    The unique (chain, wallet) key plus a transaction prevents a stale
-    read-then-write decision from overwriting another request's state.
+    A per-wallet MariaDB advisory lock serializes the complete operation,
+    including the first toggle when the row does not exist yet. Locking only
+    the row is insufficient for a missing key and INSERT IGNORE can deadlock
+    when two transactions race to create/lock the same unique key.
     """
-    conn = get_pool().get_connection()
-    try:
-        conn.start_transaction()
-        cur = conn.cursor()
-        cur.execute(
-            """INSERT IGNORE INTO tracked_wallets (chain, wallet, label, source, status)
-               VALUES (%s,%s,%s,'manual','ACTIVE')""",
-            (chain, wallet, label),
-        )
-        inserted = cur.rowcount == 1
-        if inserted:
-            conn.commit()
-            cur.close()
-            return True
+    import hashlib
 
+    conn = get_pool().get_connection()
+    lock_name = hashlib.sha256(f"{chain}:{wallet}".encode("utf-8")).hexdigest()
+    lock_acquired = False
+    cur = None
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT GET_LOCK(%s, %s)", (lock_name, 10))
+        lock_row = cur.fetchone()
+        if not lock_row or lock_row[0] != 1:
+            raise TimeoutError("Timed out waiting for wallet tracking lock")
+        lock_acquired = True
+
+        conn.start_transaction()
         cur.execute(
             "SELECT status FROM tracked_wallets WHERE chain = %s AND wallet = %s FOR UPDATE",
             (chain, wallet),
         )
         row = cur.fetchone()
         if not row:
-            raise RuntimeError("Tracked wallet disappeared during toggle")
+            cur.execute(
+                """INSERT INTO tracked_wallets (chain, wallet, label, source, status)
+                   VALUES (%s,%s,%s,'manual','ACTIVE')""",
+                (chain, wallet, label),
+            )
+            conn.commit()
+            return True
 
         current_status = row[0]
         if current_status == "ACTIVE":
@@ -626,14 +634,25 @@ def toggle_wallet_tracking(chain, wallet, label=None):
             )
             tracked = True
         conn.commit()
-        cur.close()
         return tracked
     except Exception:
         conn.rollback()
         raise
     finally:
+        if lock_acquired:
+            try:
+                release_cur = conn.cursor()
+                release_cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                release_cur.fetchone()
+                release_cur.close()
+            except Exception:
+                logger.exception("Failed to release wallet tracking advisory lock")
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
         conn.close()
-
 
 def is_wallet_tracked(chain, wallet):
     conn = get_pool().get_connection()
