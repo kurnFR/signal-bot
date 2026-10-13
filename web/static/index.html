@@ -1482,7 +1482,7 @@
                             Wallet Tracking
                             <span class="px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 text-[9px] font-bold">SMART MONEY</span>
                         </h2>
-                        <p class="text-[11px] text-slate-500 mt-0.5">On-chain wallets accumulating or distributing large USD amounts, with live activity from the wallets you monitor</p>
+                        <p class="text-[11px] text-slate-500 mt-0.5">Large on-chain flows from the DEX pools scanned by this service. Activity is polled, not a real-time feed.</p>
                     </div>
                     <button onclick="App.fetchWalletData()" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
                         <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
@@ -1585,8 +1585,8 @@
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left custom-table">
-                            <thead><tr><th>Smart Money</th><th>Wallet</th><th>Crypto (Pair)</th><th>Bias / Side</th><th>Total Vol (Tokens)</th><th>Total Amount (USD)</th><th>Net USD</th><th>Avg Buy</th><th>Avg Sell</th><th>Trades</th><th>Period Range</th><th>Follow</th></tr></thead>
-                            <tbody id="wt-candidates-body"><tr><td colspan="12" class="text-center py-8 text-slate-500 text-xs">Loading...</td></tr></tbody>
+                            <thead><tr><th>Checklist</th><th>Wallet</th><th>Crypto (Pair)</th><th>Token Bias</th><th>Total Vol (Tokens)</th><th>Total Turnover (USD)</th><th>Net Tokens</th><th>Net Cash Flow (USD)</th><th>Avg Buy</th><th>Avg Sell</th><th>Trades</th><th>Period Range</th><th>Watch</th></tr></thead>
+                            <tbody id="wt-candidates-body"><tr><td colspan="13" class="text-center py-8 text-slate-500 text-xs">Loading...</td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -1596,8 +1596,8 @@
                     <div class="lg:col-span-2 p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
                         <div class="flex flex-wrap items-center justify-between gap-3">
                             <div>
-                                <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Live Activity Stream &mdash; Follow Smart Money</h3>
-                                <p class="text-[10px] text-slate-500">Real-time buy/sell trades executed by your checklisted smart-money wallets: what crypto, at what price, total volume, and total amount.</p>
+                                <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full bg-cyan-400"></span> Recent Activity &mdash; Watched Wallets</h3>
+                                <p class="text-[10px] text-slate-500">Polled swaps from checklisted wallets in the DEX pools this scanner covers. The table refreshes periodically; it is not a real-time wallet feed.</p>
                             </div>
                             <div class="flex items-center gap-2">
                                 <label class="text-[10px] text-slate-400 flex items-center gap-1.5">
@@ -1627,7 +1627,7 @@
                     <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
                         <div>
                             <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2"><i data-lucide="check-square" class="w-4 h-4 text-emerald-400"></i> Smart Money Checklist</h3>
-                            <p class="text-[10px] text-slate-500">Wallets currently marked as Smart Money. The live stream monitors their transactions in real time.</p>
+                            <p class="text-[10px] text-slate-500">Wallets you chose to monitor. Activity is visible only when a swap appears in a pool scanned by this service.</p>
                         </div>
                         <div class="space-y-2">
                             <div class="flex gap-2">
