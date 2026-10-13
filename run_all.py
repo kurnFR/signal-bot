@@ -52,6 +52,7 @@ PROCESSES = {
     "news_ai":      [sys.executable, "run_news_ai.py"],
     "retailbot2":   [sys.executable, "paper/retailbot2.py"],
     "screener":     [sys.executable, "Screen/screening.py"],
+    "wallet_tracker": [sys.executable, "run_wallet_tracker.py"],
 }
 
 _shutdown = threading.Event()
