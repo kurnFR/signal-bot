@@ -26,6 +26,7 @@ from web.routes.telegram_routes import router as telegram_router
 from web.routes.ml_routes import router as ml_router
 from web.routes.news_routes import router as news_router
 from web.routes.research_routes import router as research_router
+from web.routes.wallet_routes import router as wallet_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,6 +36,11 @@ async def lifespan(app: FastAPI):
         ensure_signal_table()
     except Exception as e:
         logger.warning(f"Could not initialize smart_money_signals table on startup: {e}")
+    try:
+        from wallet_tracker.store import ensure_tables as ensure_wallet_tables
+        ensure_wallet_tables()
+    except Exception as e:
+        logger.warning(f"Could not initialize wallet tracking tables on startup: {e}")
     try:
         from paper.retailbot2 import DatabaseManager, BotConfig
         cfg = BotConfig()
@@ -82,6 +88,7 @@ TRADER_OR_ADMIN_PREFIXES = (
     "/api/paper/circuit-breakers",
     "/api/backtest",
     "/api/ml",
+    "/api/wallets",
 )
 
 
@@ -145,6 +152,7 @@ app.include_router(telegram_router)
 app.include_router(ml_router)
 app.include_router(news_router)
 app.include_router(research_router)
+app.include_router(wallet_router)
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
