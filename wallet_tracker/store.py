@@ -1,4 +1,4 @@
-"""MySQL persistence for wallet tracking. Uses the shared pool in db.db."""
+import config\n"""MySQL persistence for wallet tracking. Uses the shared pool in db.db."""
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -177,6 +177,80 @@ def set_status(pools_scanned, swaps_ingested, candidates, seconds, error=None):
         )
         conn.commit()
         cur.close()
+    finally:
+        conn.close()
+
+
+
+# --------------------------------------------------------------- settings
+def get_settings():
+    """Return persisted UI settings, falling back to environment defaults."""
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM wallet_tracker_settings WHERE id = 1")
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            return {
+                "enabled": bool(config_value("WALLET_TRACKER_ENABLED", True)),
+                "networks": config_value("WALLET_TRACKER_NETWORKS", ["eth", "solana", "base", "bsc"]),
+                "pools_per_network": int(config_value("WALLET_TRACKER_POOLS_PER_NETWORK", 8)),
+                "min_trade_usd": float(config_value("WALLET_TRACKER_MIN_TRADE_USD", 2000)),
+                "min_net_usd": float(config_value("WALLET_TRACKER_MIN_NET_USD", 100000)),
+                "auto_track_net_usd": float(config_value("WALLET_TRACKER_AUTO_TRACK_NET_USD", 250000)),
+                "poll_interval_seconds": int(config_value("WALLET_TRACKER_POLL_INTERVAL_SECONDS", 120)),
+                "retention_days": int(config_value("WALLET_TRACKER_RETENTION_DAYS", 8)),
+                "api_delay_seconds": float(config_value("WALLET_TRACKER_API_DELAY_SECONDS", 2.2)),
+                "token_mode": "all",
+                "token_addresses": [],
+            }
+        row["enabled"] = bool(row["enabled"])
+        row["networks"] = [n.strip() for n in row["networks"].split(",") if n.strip()]
+        row["token_addresses"] = [v.strip() for v in (row.get("token_addresses") or "").splitlines() if v.strip()]
+        for k in ("min_trade_usd", "min_net_usd", "auto_track_net_usd", "api_delay_seconds"):
+            row[k] = float(row[k])
+        for k in ("pools_per_network", "poll_interval_seconds", "retention_days"):
+            row[k] = int(row[k])
+        return row
+    finally:
+        conn.close()
+
+
+def config_value(name, default):
+    # Import lazily to avoid introducing a module-level config/store cycle.
+    import config
+    return getattr(config, name, default)
+
+
+def save_settings(settings):
+    """Persist validated settings atomically; the worker reads them each cycle."""
+    networks = ",".join(settings["networks"])
+    token_addresses = "\\n".join(settings.get("token_addresses", []))
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO wallet_tracker_settings
+               (id, enabled, networks, pools_per_network, min_trade_usd, min_net_usd,
+                auto_track_net_usd, poll_interval_seconds, retention_days, api_delay_seconds,
+                token_mode, token_addresses)
+               VALUES (1,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               ON DUPLICATE KEY UPDATE enabled=VALUES(enabled), networks=VALUES(networks),
+                pools_per_network=VALUES(pools_per_network), min_trade_usd=VALUES(min_trade_usd),
+                min_net_usd=VALUES(min_net_usd), auto_track_net_usd=VALUES(auto_track_net_usd),
+                poll_interval_seconds=VALUES(poll_interval_seconds), retention_days=VALUES(retention_days),
+                api_delay_seconds=VALUES(api_delay_seconds), token_mode=VALUES(token_mode),
+                token_addresses=VALUES(token_addresses)""",
+            (int(settings["enabled"]), networks, settings["pools_per_network"], settings["min_trade_usd"],
+             settings["min_net_usd"], settings["auto_track_net_usd"], settings["poll_interval_seconds"],
+             settings["retention_days"], settings["api_delay_seconds"], settings["token_mode"], token_addresses),
+        )
+        conn.commit()
+        cur.close()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
