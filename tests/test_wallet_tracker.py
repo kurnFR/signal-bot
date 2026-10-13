@@ -5,7 +5,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from wallet_tracker import analyzer, worker
+from wallet_tracker import analyzer, store, worker
 from wallet_tracker.chains import explorer_url, normalize_wallet
 from wallet_tracker.providers import GeckoTerminalProvider, parse_trade
 from wallet_tracker.stablecoins import is_stablecoin_base_pool
@@ -234,6 +234,27 @@ class TestProviderRateLimit(unittest.TestCase):
         self.assertGreater(provider.delay, provider.base_delay)
 
 
+class TestAutoFollowExpiry(unittest.TestCase):
+    def test_expiry_only_targets_stale_active_auto_wallets(self):
+        from unittest.mock import MagicMock
+
+        connection = MagicMock()
+        connection.cursor.return_value.rowcount = 2
+        pool = MagicMock()
+        pool.get_connection.return_value = connection
+        with patch("wallet_tracker.store.get_pool", return_value=pool):
+            expired = store.expire_inactive_auto_wallets(7)
+
+        self.assertEqual(expired, 2)
+        sql, params = connection.cursor.return_value.execute.call_args.args
+        self.assertIn("source = 'auto'", sql)
+        self.assertIn("status = 'ACTIVE'", sql)
+        self.assertIn("status = 'INACTIVE'", sql)
+        self.assertEqual(params, (7,))
+        connection.commit.assert_called_once()
+        connection.close.assert_called_once()
+
+
 class TestWorkerRateLimitIsolation(unittest.TestCase):
     def test_rate_limited_network_does_not_starve_other_networks(self):
         from unittest.mock import MagicMock
@@ -317,6 +338,17 @@ class TestWalletRoutes(unittest.TestCase):
         payload["token_addresses"] = []
         r = self.client.put("/api/wallets/settings", json=payload, headers=self.headers)
         self.assertEqual(r.status_code, 400)
+    def test_wallet_settings_rejects_inconsistent_thresholds(self):
+        payload = {
+            "enabled": True, "networks": ["eth"], "pools_per_network": 4,
+            "min_trade_usd": 10000, "min_net_usd": 150000,
+            "auto_track_net_usd": 100000, "poll_interval_seconds": 300,
+            "retention_days": 8, "api_delay_seconds": 4.0,
+            "token_mode": "all", "token_addresses": [],
+        }
+        response = self.client.put("/api/wallets/settings", json=payload, headers=self.headers)
+        self.assertEqual(response.status_code, 422)
+
     @patch("web.routes.wallet_routes.store.get_positions", return_value=[{"wallet": W1}])
     def test_positions_ok(self, m):
         r = self.client.get("/api/wallets/positions?period_hours=24&side=BUY&min_net_usd=50000", headers=self.headers)
