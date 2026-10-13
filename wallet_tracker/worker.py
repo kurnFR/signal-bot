@@ -7,9 +7,20 @@ import config
 from wallet_tracker import analyzer, store
 from wallet_tracker.chains import is_supported_chain
 from wallet_tracker.providers import GeckoTerminalProvider
+from wallet_tracker.stablecoins import is_stablecoin_base_pool
 from wallet_tracker.telegram import WalletTelegramNotifier
 
 logger = logging.getLogger("wallet_tracker.worker")
+
+# Keep rate limiting isolated per chain. A blocked provider endpoint must not
+# prevent other configured networks from being scanned in the same cycle.
+_NETWORK_COOLDOWN_UNTIL = {}
+_NETWORK_COOLDOWN_SECONDS = 300
+_network_rotation_offset = 0
+
+
+def _is_rate_limited(exc):
+    return getattr(getattr(exc, "response", None), "status_code", None) == 429
 
 
 def _utcnow():
@@ -50,6 +61,11 @@ def recompute(now=None, settings=None):
 
 
 def _pool_matches_tokens(network, pool, settings):
+    # GeckoTerminal's buy/sell kind is relative to the base token. Exclude pools
+    # whose base asset is a stablecoin, but keep normal volatile-token/stablecoin
+    # quote pairs (e.g. ARK/USDT), which are relevant trading markets.
+    if is_stablecoin_base_pool(network, pool):
+        return False
     if settings.get("token_mode", "all") == "all":
         return True
     address = pool.get("base_token_address")
@@ -72,7 +88,7 @@ def dispatch_telegram_alerts(notifier=None):
         )
         return 0
     settings = store.get_settings()
-    queued = store.queue_new_wallet_alerts(settings["min_trade_usd"])
+    queued = store.queue_new_wallet_alerts(settings["min_trade_usd"], max_age_minutes=30)
     if queued:
         logger.info("queued %d followed-wallet Telegram alert(s)", queued)
     sent = 0
@@ -81,7 +97,9 @@ def dispatch_telegram_alerts(notifier=None):
             ok = notifier.send(alert)
         except Exception as exc:
             ok = False
-            error = str(exc)
+            # Never persist arbitrary exception text: transport errors can include
+            # credential-bearing request URLs.
+            error = f"Telegram delivery failed ({type(exc).__name__})"
         else:
             error = None if ok else "Telegram API returned an unsuccessful response"
         try:
@@ -112,23 +130,31 @@ def run_cycle(provider):
     # A volume floor avoids spending a trades request on clearly illiquid pools.
     # Unknown volume is retained because some provider payloads omit this field.
     min_pool_volume = max(float(settings["min_trade_usd"]) * 10, 100_000)
-    stop_scanning = False
-    for network in settings["networks"]:
-        if stop_scanning:
-            break
+    global _network_rotation_offset
+    networks = list(settings["networks"])
+    if networks:
+        offset = _network_rotation_offset % len(networks)
+        networks = networks[offset:] + networks[:offset]
+        _network_rotation_offset = (offset + 1) % len(networks)
+
+    now_mono = time.monotonic()
+    for network in networks:
         if not is_supported_chain(network):
             errors.append(f"unsupported network '{network}'")
+            continue
+        if _NETWORK_COOLDOWN_UNTIL.get(network, 0) > now_mono:
+            logger.info("%s: skipped during rate-limit cooldown", network)
             continue
         try:
             # Fetch extra pool metadata, but cap trade endpoints to the configured
             # pool budget after volume/token filtering.
             pools = provider.hot_pools(network, settings["pools_per_network"] * 2)
         except Exception as exc:
-            logger.warning("%s: pool discovery failed: %s", network, exc)
-            errors.append(f"{network}: {exc}")
-            if getattr(getattr(exc, "response", None), "status_code", None) == 429:
-                stop_scanning = True
-                break
+            logger.warning("%s: pool discovery failed (%s)", network, type(exc).__name__)
+            errors.append(f"{network}: pool discovery failed ({type(exc).__name__})")
+            if _is_rate_limited(exc):
+                _NETWORK_COOLDOWN_UNTIL[network] = time.monotonic() + _NETWORK_COOLDOWN_SECONDS
+                continue
             continue
         pool_requests = 0
         for pool in pools:
@@ -147,15 +173,11 @@ def run_cycle(provider):
                 swaps_new += store.insert_swaps(swaps)
                 pools_scanned += 1
             except Exception as exc:
-                logger.warning("%s %s: trade fetch failed: %s", network, pool.get("name"), exc)
-                errors.append(f"{network}/{pool.get('name')}: {exc}")
-                if getattr(getattr(exc, "response", None), "status_code", None) == 429:
-                    # Stop this cycle's external calls after a confirmed 429;
-                    # adaptive pacing will apply to the next cycle.
-                    stop_scanning = True
+                logger.warning("%s %s: trade fetch failed (%s)", network, pool.get("name"), type(exc).__name__)
+                errors.append(f"{network}/{pool.get('name')}: trade fetch failed ({type(exc).__name__})")
+                if _is_rate_limited(exc):
+                    _NETWORK_COOLDOWN_UNTIL[network] = time.monotonic() + _NETWORK_COOLDOWN_SECONDS
                     break
-        if stop_scanning:
-            break
     candidates = recompute(settings=settings)
     store.prune_swaps(settings["retention_days"])
     elapsed = time.monotonic() - started
