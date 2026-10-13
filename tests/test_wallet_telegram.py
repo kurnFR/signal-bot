@@ -46,6 +46,22 @@ class TestWalletTelegramNotifier(unittest.TestCase):
         self.assertEqual(kwargs["json"]["chat_id"], "chat")
         self.assertEqual(kwargs["json"]["parse_mode"], "HTML")
 
+    def test_send_failure_never_logs_token_bearing_request_url(self):
+        import logging
+        import requests
+
+        token = "123456:secret-bot-token"
+        session = MagicMock()
+        session.post.side_effect = requests.ConnectionError(
+            f"failed to connect to https://api.telegram.org/bot{token}/sendMessage"
+        )
+        notifier = WalletTelegramNotifier(token=token, chat_id="chat", session=session)
+        with self.assertLogs("wallet_tracker.telegram", level="WARNING") as captured:
+            with patch("wallet_tracker.telegram.time.sleep"):
+                self.assertFalse(notifier.send(self.alert))
+        self.assertNotIn(token, "\n".join(captured.output))
+        self.assertNotIn("/bot" + token, "\n".join(captured.output))
+
     def test_send_rejects_unsuccessful_telegram_payload(self):
         session = MagicMock()
         response = MagicMock()
@@ -75,7 +91,7 @@ class TestWalletTelegramDispatch(unittest.TestCase):
         notifier.send.side_effect = [True, False]
         sent = worker.dispatch_telegram_alerts(notifier)
         self.assertEqual(sent, 1)
-        queued.assert_called_once_with(10000)
+        queued.assert_called_once_with(10000, max_age_minutes=30)
         self.assertEqual(pending.call_count, 1)
         self.assertEqual(mark.call_count, 2)
         self.assertEqual(mark.call_args_list[0].args, (10,))
