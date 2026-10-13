@@ -580,6 +580,61 @@ def get_tracked(status="ACTIVE"):
         conn.close()
 
 
+def toggle_wallet_tracking(chain, wallet, label=None):
+    """Atomically toggle a wallet's monitoring state and return its new state.
+
+    The unique (chain, wallet) key plus a transaction prevents a stale
+    read-then-write decision from overwriting another request's state.
+    """
+    conn = get_pool().get_connection()
+    try:
+        conn.start_transaction()
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT IGNORE INTO tracked_wallets (chain, wallet, label, source, status)
+               VALUES (%s,%s,%s,'manual','ACTIVE')""",
+            (chain, wallet, label),
+        )
+        inserted = cur.rowcount == 1
+        if inserted:
+            conn.commit()
+            cur.close()
+            return True
+
+        cur.execute(
+            "SELECT status FROM tracked_wallets WHERE chain = %s AND wallet = %s FOR UPDATE",
+            (chain, wallet),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise RuntimeError("Tracked wallet disappeared during toggle")
+
+        current_status = row[0]
+        if current_status == "ACTIVE":
+            cur.execute(
+                "UPDATE tracked_wallets SET status = 'IGNORED' WHERE chain = %s AND wallet = %s",
+                (chain, wallet),
+            )
+            tracked = False
+        else:
+            cur.execute(
+                """UPDATE tracked_wallets
+                   SET status = 'ACTIVE', source = 'manual',
+                       label = COALESCE(%s, label), last_seen_at = UTC_TIMESTAMP()
+                   WHERE chain = %s AND wallet = %s""",
+                (label, chain, wallet),
+            )
+            tracked = True
+        conn.commit()
+        cur.close()
+        return tracked
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def is_wallet_tracked(chain, wallet):
     conn = get_pool().get_connection()
     try:
