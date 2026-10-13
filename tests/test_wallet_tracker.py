@@ -201,6 +201,26 @@ class TestWalletRoutes(unittest.TestCase):
         r = self.client.get("/api/wallets/token-flow?period_hours=24", headers=self.headers)
         self.assertEqual(r.json()["flows"][0]["signal"], "ACCUMULATION")
 
+    @patch("web.routes.wallet_routes.store.get_events", return_value=[])
+    def test_events_filter_by_chain_wallet_and_side(self, events_mock):
+        r = self.client.get(
+            f"/api/wallets/events?chain=eth&wallet={W1.upper().replace('0X', '0x')}&side=buy",
+            headers=self.headers,
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["events"], [])
+        events_mock.assert_called_once_with(
+            limit=100, since_id=0, chain="eth", wallet=W1, side="buy"
+        )
+
+    @patch("web.routes.wallet_routes.store.get_events", return_value=[])
+    def test_events_chain_filter_without_wallet(self, events_mock):
+        r = self.client.get("/api/wallets/events?chain=base&limit=25", headers=self.headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        events_mock.assert_called_once_with(
+            limit=25, since_id=0, chain="base", wallet=None, side=None
+        )
+
     @patch("web.routes.wallet_routes.store.track_wallet")
     def test_track_validates_and_normalises(self, m):
         bad = self.client.post("/api/wallets/tracked", json={"chain": "eth", "wallet": "0x1"}, headers=self.headers)

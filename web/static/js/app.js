@@ -487,9 +487,11 @@ const App = {
         if (val("wt-side", "")) qs.set("side", val("wt-side", ""));
         if (val("wt-chain", "")) qs.set("chain", val("wt-chain", ""));
 
-        const feedWallet = (document.getElementById("wt-feed-wallet") || {}).value || "";
+        const feedValue = (document.getElementById("wt-feed-wallet") || {}).value || "";
+        const [feedChain, feedWallet] = feedValue ? feedValue.split("::", 2) : ["", ""];
         const feedSide = (document.getElementById("wt-feed-side") || {}).value || "";
         const evQs = new URLSearchParams({ limit: "100" });
+        if (feedChain) evQs.set("chain", feedChain);
         if (feedWallet) evQs.set("wallet", feedWallet);
         if (feedSide) evQs.set("side", feedSide);
 
@@ -515,9 +517,11 @@ const App = {
     },
 
     async fetchWalletEvents(opts = {}) {
-        const feedWallet = (document.getElementById("wt-feed-wallet") || {}).value || "";
+        const feedValue = (document.getElementById("wt-feed-wallet") || {}).value || "";
+        const [feedChain, feedWallet] = feedValue ? feedValue.split("::", 2) : ["", ""];
         const feedSide = (document.getElementById("wt-feed-side") || {}).value || "";
         const evQs = new URLSearchParams({ limit: "100" });
+        if (feedChain) evQs.set("chain", feedChain);
         if (feedWallet) evQs.set("wallet", feedWallet);
         if (feedSide) evQs.set("side", feedSide);
         try {
@@ -539,10 +543,10 @@ const App = {
             const short = t.wallet.length > 12 ? `${t.wallet.slice(0, 6)}…${t.wallet.slice(-4)}` : t.wallet;
             const label = t.label ? `${t.label} ` : "";
             const chain = t.chain_label || t.chain;
-            options.push(`<option value="${this._escapeHtml(t.wallet)}">${this._escapeHtml(label + short)} (${this._escapeHtml(chain)})</option>`);
+            options.push(`<option value="${this._escapeHtml(t.chain + "::" + t.wallet)}">${this._escapeHtml(label + short)} (${this._escapeHtml(chain)})</option>`);
         });
         sel.innerHTML = options.join("");
-        if (currentVal && list.some(t => t.wallet === currentVal)) {
+        if (currentVal && list.some(t => (t.chain + "::" + t.wallet) === currentVal)) {
             sel.value = currentVal;
         }
     },
@@ -592,7 +596,7 @@ const App = {
             return;
         }
         tbody.innerHTML = rows.map(r => {
-            const vol = r.side === "BUY" ? r.buy_tokens : r.sell_tokens;
+            const vol = Number(r.buy_tokens || 0) + Number(r.sell_tokens || 0);
             const checklistBadge = r.is_tracked
                 ? `<button data-chain="${this._escapeHtml(r.chain)}" data-wallet="${this._escapeHtml(r.wallet)}" onclick="App.walletToggleTrack(this)" class="px-2 py-1 text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-600 hover:bg-rose-950 hover:text-rose-300 hover:border-rose-700 rounded-md transition-all flex items-center gap-1 whitespace-nowrap" title="Click to uncheck / remove from Smart Money checklist"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>✓ Smart Money</button>`
                 : `<button data-chain="${this._escapeHtml(r.chain)}" data-wallet="${this._escapeHtml(r.wallet)}" onclick="App.walletToggleTrack(this)" class="px-2 py-1 text-[10px] font-semibold bg-slate-800 text-cyan-300 border border-slate-700 hover:bg-cyan-900/80 hover:border-cyan-500 rounded-md transition-all flex items-center gap-1 whitespace-nowrap" title="Click to checklist as Smart Money"><span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>+ Checklist</button>`;
@@ -693,15 +697,34 @@ const App = {
         }
     },
 
-    followWallet(wallet, chain) {
-        const sel = document.getElementById("wt-feed-wallet");
-        if (sel) {
-            sel.value = wallet;
-            this.fetchWalletEvents();
+    async followWallet(wallet, chain) {
+        try {
+            // A live feed only includes checklisted wallets. Add a discovered candidate
+            // first so Follow Live never silently falls back to the unfiltered feed.
+            const tracked = await this._wtGet("/api/wallets/tracked");
+            const alreadyTracked = (tracked.tracked || []).some(t => t.chain === chain && t.wallet === wallet);
+            if (!alreadyTracked) {
+                await this._wtSend("POST", "/api/wallets/tracked/toggle", { chain, wallet });
+                await this.fetchWalletData({ silent: true });
+            }
+            const sel = document.getElementById("wt-feed-wallet");
+            const value = chain + "::" + wallet;
+            if (sel) {
+                sel.value = value;
+                if (sel.value !== value) {
+                    // Refresh the options after the checklist mutation before selecting.
+                    const refreshed = await this._wtGet("/api/wallets/tracked");
+                    this._wtUpdateFeedWalletSelect(refreshed.tracked || []);
+                    sel.value = value;
+                }
+                await this.fetchWalletEvents();
+            }
+            const feedSec = document.getElementById("wt-feed-body");
+            if (feedSec) feedSec.scrollIntoView({ behavior: "smooth", block: "center" });
+            this.showToast(`Following live trades for ${wallet.slice(0, 8)}… on ${chain}`, "success");
+        } catch (e) {
+            this.showToast(`Could not follow wallet: ${e.message || e}`, "error");
         }
-        const feedSec = document.getElementById("wt-feed-body");
-        if (feedSec) feedSec.scrollIntoView({ behavior: "smooth", block: "center" });
-        this.showToast(`Following live trades for ${wallet.slice(0, 8)}…`, "info");
     },
 
     async walletTrack(btn) {
