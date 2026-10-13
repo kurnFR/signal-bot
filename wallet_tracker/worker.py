@@ -76,12 +76,17 @@ def run_cycle(provider):
             errors.append(f"unsupported network '{network}'")
             continue
         try:
-            pools = provider.hot_pools(network, settings["pools_per_network"])
+            # Fetch extra pool metadata, but cap trade endpoints to the configured
+            # pool budget after volume/token filtering.
+            pools = provider.hot_pools(network, settings["pools_per_network"] * 2)
         except Exception as exc:
             logger.warning("%s: pool discovery failed: %s", network, exc)
             errors.append(f"{network}: {exc}")
             continue
+        pool_requests = 0
         for pool in pools:
+            if pool_requests >= settings["pools_per_network"]:
+                break
             if not _pool_matches_tokens(network, pool, settings):
                 continue
             volume_24h = float(pool.get("volume_24h_usd") or 0)
@@ -89,6 +94,7 @@ def run_cycle(provider):
                 logger.debug("%s %s skipped: 24h pool volume $%.0f below $%.0f",
                              network, pool.get("name"), volume_24h, min_pool_volume)
                 continue
+            pool_requests += 1
             try:
                 swaps = provider.pool_trades(network, pool, settings["min_trade_usd"])
                 swaps_new += store.insert_swaps(swaps)
