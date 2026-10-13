@@ -7,6 +7,7 @@ import config
 from wallet_tracker import analyzer, store
 from wallet_tracker.chains import is_supported_chain
 from wallet_tracker.providers import GeckoTerminalProvider
+from wallet_tracker.telegram import WalletTelegramNotifier
 
 logger = logging.getLogger("wallet_tracker.worker")
 
@@ -57,6 +58,46 @@ def _pool_matches_tokens(network, pool, settings):
     normalized = str(address) if network == "solana" else str(address).lower()
     selector = network + ":" + normalized
     return selector in set(settings.get("token_addresses", []))
+
+
+
+
+def dispatch_telegram_alerts(notifier=None):
+    """Queue and deliver fresh qualifying swaps for followed wallets."""
+    notifier = notifier or WalletTelegramNotifier()
+    if not notifier.configured:
+        logger.warning(
+            "Wallet Telegram alerts paused: TELEGRAM_TOKEN/TELEGRAM_BOT_TOKEN "
+            "or TELEGRAM_CHAT_ID is missing"
+        )
+        return 0
+    settings = store.get_settings()
+    queued = store.queue_new_wallet_alerts(settings["min_trade_usd"])
+    if queued:
+        logger.info("queued %d followed-wallet Telegram alert(s)", queued)
+    sent = 0
+    for alert in store.get_pending_wallet_alerts(limit=50):
+        try:
+            ok = notifier.send(alert)
+        except Exception as exc:
+            ok = False
+            error = str(exc)
+        else:
+            error = None if ok else "Telegram API returned an unsuccessful response"
+        try:
+            store.mark_wallet_alert_attempt(
+                alert["swap_id"], success=ok, error=error,
+            )
+        except Exception:
+            logger.exception(
+                "could not persist wallet Telegram delivery for swap_id=%s",
+                alert.get("swap_id"),
+            )
+        if ok:
+            sent += 1
+    if sent:
+        logger.info("sent %d followed-wallet Telegram alert(s)", sent)
+    return sent
 
 
 def run_cycle(provider):
@@ -121,6 +162,7 @@ def run_cycle(provider):
     store.set_status(pools_scanned, swaps_new, candidates, elapsed, "; ".join(errors[:3]) or None)
     logger.info("cycle done: pools=%d new_swaps=%d candidates=%d (%.1fs)",
                 pools_scanned, swaps_new, candidates, elapsed)
+    dispatch_telegram_alerts()
 
 
 def run():
