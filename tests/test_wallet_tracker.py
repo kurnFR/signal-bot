@@ -217,13 +217,15 @@ class TestWorkerRateLimitIsolation(unittest.TestCase):
                 "rate limited", response=MagicMock(status_code=429)
             )) if network == "eth" else []
         )
-        with patch.object(worker.store, "get_settings", return_value=settings), \\
-             patch.object(worker, "recompute", return_value=0), \\
-             patch.object(worker.store, "prune_swaps"), \\
-             patch.object(worker.store, "set_status"), \\
-             patch.object(worker, "dispatch_telegram_alerts"), \\
-             patch.object(worker, "_network_rotation_offset", 0), \\
-             patch.dict(worker._NETWORK_COOLDOWN_UNTIL, {}, clear=True):
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(worker.store, "get_settings", return_value=settings))
+            stack.enter_context(patch.object(worker, "recompute", return_value=0))
+            stack.enter_context(patch.object(worker.store, "prune_swaps"))
+            stack.enter_context(patch.object(worker.store, "set_status"))
+            stack.enter_context(patch.object(worker, "dispatch_telegram_alerts"))
+            stack.enter_context(patch.object(worker, "_network_rotation_offset", 0))
+            stack.enter_context(patch.dict(worker._NETWORK_COOLDOWN_UNTIL, {}, clear=True))
             worker.run_cycle(provider)
 
         called_networks = [call.args[0] for call in provider.hot_pools.call_args_list]
