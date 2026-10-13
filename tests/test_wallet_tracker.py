@@ -5,7 +5,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from wallet_tracker import analyzer, worker
+from wallet_tracker import analyzer, store, worker
 from wallet_tracker.chains import explorer_url, normalize_wallet
 from wallet_tracker.providers import GeckoTerminalProvider, parse_trade
 from wallet_tracker.stablecoins import is_stablecoin_base_pool
@@ -20,6 +20,17 @@ def swap(wallet, side, usd, tokens, minutes_ago, pool=POOL):
     return {"chain": "eth", "wallet": wallet, "pool_address": pool, "pair": "PEPE / WETH",
             "side": side, "usd_value": usd, "token_amount": tokens,
             "block_time": NOW - timedelta(minutes=minutes_ago)}
+
+
+class TestStoreSerialization(unittest.TestCase):
+    def test_datetime_serializes_as_explicit_utc_iso8601(self):
+        row = {"block_time": datetime(2026, 10, 13, 7, 53, 10)}
+        self.assertEqual(store._clean(row, wallet_chain_keys=False)["block_time"], "2026-10-13T07:53:10Z")
+
+    def test_aware_datetime_is_normalized_to_utc(self):
+        from datetime import timezone
+        row = {"created_at": datetime(2026, 10, 13, 15, 53, 10, tzinfo=timezone(timedelta(hours=8)))}
+        self.assertEqual(store._clean(row, wallet_chain_keys=False)["created_at"], "2026-10-13T07:53:10Z")
 
 
 class TestAggregation(unittest.TestCase):
@@ -256,6 +267,13 @@ class TestWalletRoutes(unittest.TestCase):
         p = patch("web.app.authenticate_request", side_effect=fake_auth)
         p.start()
         self.addCleanup(p.stop)
+
+    @patch("web.routes.wallet_routes.store.get_settings", side_effect=RuntimeError("private database connection detail"))
+    def test_settings_errors_do_not_leak_internal_exception(self, _mock):
+        response = self.client.get("/api/wallets/settings", headers=self.headers)
+        self.assertEqual(response.status_code, 500)
+        self.assertNotIn("private database connection detail", response.text)
+        self.assertEqual(response.json()["detail"], "Failed to load wallet tracker settings")
 
     def test_requires_auth(self):
         self.assertEqual(self.client.get("/api/wallets/positions").status_code, 401)
