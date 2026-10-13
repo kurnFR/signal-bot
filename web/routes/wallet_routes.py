@@ -202,13 +202,8 @@ def wallets_toggle_track(req: TrackRequest):
         raise HTTPException(status_code=400, detail=f"Not a valid {CHAINS.get(req.chain, {}).get('label', req.chain)} wallet address")
     label = (req.label or "").strip() or None
     try:
-        is_tracked = store.is_wallet_tracked(req.chain, wallet)
-        if is_tracked:
-            store.untrack_wallet_by_address(req.chain, wallet)
-            return {"status": "ok", "tracked": False, "chain": req.chain, "wallet": wallet}
-        else:
-            store.track_wallet(req.chain, wallet, label)
-            return {"status": "ok", "tracked": True, "chain": req.chain, "wallet": wallet}
+        tracked = store.toggle_wallet_tracking(req.chain, wallet, label)
+        return {"status": "ok", "tracked": tracked, "chain": req.chain, "wallet": wallet}
     except Exception as e:
         logger.exception("wallets_toggle_track failed")
         raise HTTPException(status_code=500, detail="Failed to toggle wallet monitoring")
