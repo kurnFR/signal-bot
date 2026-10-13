@@ -69,7 +69,7 @@ class TestAggregation(unittest.TestCase):
     def test_quality_follow_aggregates_across_pools_and_rejects_noise(self):
         pool2 = "0x" + "d" * 40
         swaps = [
-            swap(W1, "buy", 200_000, 100, 10, pool=POOL),
+            swap(W1, "buy", 300_000, 100, 10, pool=POOL),
             swap(W1, "buy", 100_000, 50, 8, pool=pool2),
             swap(W1, "sell", 50_000, 20, 5, pool=POOL),
             # A single whale-sized trade must not qualify on its own.
@@ -117,7 +117,7 @@ class TestAggregation(unittest.TestCase):
             swap(W2, "buy", 100_000, 500, 30, pool=POOL),
         ]
         candidates = analyzer.quality_follow_candidates(
-            noisy + directional, [24], NOW, min_net_usd=200_000, min_total_usd=300_000,
+            noisy + directional, [1], NOW, min_net_usd=200_000, min_total_usd=300_000,
             min_trade_count=3, min_net_flow_ratio=0.25,
         )
         self.assertEqual([c["wallet"] for c in candidates], [W2])
