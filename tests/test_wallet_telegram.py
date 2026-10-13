@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from wallet_tracker import worker
+from wallet_tracker import store, worker
 from wallet_tracker.telegram import WalletTelegramNotifier
 
 
@@ -62,6 +62,21 @@ class TestWalletTelegramNotifier(unittest.TestCase):
         self.assertNotIn(token, "\n".join(captured.output))
         self.assertNotIn("/bot" + token, "\n".join(captured.output))
 
+    def test_send_retries_429_using_retry_after_then_succeeds(self):
+        session = MagicMock()
+        limited = MagicMock()
+        limited.status_code = 429
+        limited.json.return_value = {"ok": False, "parameters": {"retry_after": 4}}
+        success = MagicMock()
+        success.status_code = 200
+        success.json.return_value = {"ok": True, "result": {"message_id": 123}}
+        session.post.side_effect = [limited, success]
+        notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session)
+        with patch("wallet_tracker.telegram.time.sleep") as sleep:
+            self.assertTrue(notifier.send(self.alert))
+        self.assertEqual(session.post.call_count, 2)
+        sleep.assert_any_call(4)
+
     def test_send_rejects_unsuccessful_telegram_payload(self):
         session = MagicMock()
         response = MagicMock()
@@ -78,6 +93,43 @@ class TestWalletTelegramNotifier(unittest.TestCase):
         self.assertEqual(notifier.chat_id, "chat")
 
 
+class TestWalletAlertQueueControls(unittest.TestCase):
+    def test_queue_query_limits_alerts_to_one_per_wallet_and_applies_cooldown(self):
+        connection = MagicMock()
+        cursor = connection.cursor.return_value
+        cursor.fetchone.side_effect = [{"last_swap_id": 10}, {"max_id": 20}]
+        cursor.rowcount = 1
+        pool = MagicMock()
+        pool.get_connection.return_value = connection
+        with patch("wallet_tracker.store.get_pool", return_value=pool):
+            queued = store.queue_new_wallet_alerts(10000, max_age_minutes=30, cooldown_minutes=10)
+
+        self.assertEqual(queued, 1)
+        sql, params = cursor.execute.call_args_list[2].args
+        self.assertIn("NOT EXISTS", sql)
+        self.assertIn("MIN(s2.id)", sql)
+        self.assertIn("delivery_status = 'PENDING'", sql)
+        self.assertIn("delivery_status = 'SENT'", sql)
+        self.assertEqual(params, (10, 20, 10000.0, 30, 10, 10, 20, 10000.0, 30))
+        connection.commit.assert_called_once()
+
+    def test_alert_retention_deletes_only_old_terminal_rows(self):
+        connection = MagicMock()
+        cursor = connection.cursor.return_value
+        cursor.rowcount = 7
+        pool = MagicMock()
+        pool.get_connection.return_value = connection
+        with patch("wallet_tracker.store.get_pool", return_value=pool):
+            deleted = store.prune_wallet_alerts(30)
+
+        self.assertEqual(deleted, 7)
+        sql, params = cursor.execute.call_args.args
+        self.assertIn("'SENT','FAILED','CANCELLED'", sql)
+        self.assertNotIn("'PENDING'", sql)
+        self.assertEqual(params, (30,))
+        connection.commit.assert_called_once()
+
+
 class TestWalletTelegramDispatch(unittest.TestCase):
     @patch.object(worker.store, "get_settings", return_value={"min_trade_usd": 10000})
     @patch.object(worker.store, "queue_new_wallet_alerts", return_value=1)
@@ -91,7 +143,7 @@ class TestWalletTelegramDispatch(unittest.TestCase):
         notifier.send.side_effect = [True, False]
         sent = worker.dispatch_telegram_alerts(notifier)
         self.assertEqual(sent, 1)
-        queued.assert_called_once_with(10000, max_age_minutes=30)
+        queued.assert_called_once_with(10000, max_age_minutes=30, cooldown_minutes=10)
         self.assertEqual(pending.call_count, 1)
         self.assertEqual(mark.call_count, 2)
         self.assertEqual(mark.call_args_list[0].args, (10,))

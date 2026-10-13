@@ -90,13 +90,14 @@ def insert_swaps(swaps):
 
 
 # -------------------------------------------------------- Telegram alert queue
-def queue_new_wallet_alerts(min_trade_usd, max_age_minutes=30):
-    """Queue only recent swaps from active followed wallets.
+def queue_new_wallet_alerts(min_trade_usd, max_age_minutes=30, cooldown_minutes=10):
+    """Queue fresh alerts with a per-wallet cooldown and at most one per batch.
 
-    The cursor still advances over stale rows, intentionally preventing old
-    provider backfill from being replayed as a live alert.
+    The cursor still advances over stale rows and cooldown-suppressed swaps,
+    intentionally preventing old provider backfill or queued bursts later.
     """
     max_age_minutes = max(1, min(int(max_age_minutes), 1440))
+    cooldown_minutes = max(1, min(int(cooldown_minutes), 1440))
     conn = get_pool().get_connection()
     try:
         conn.start_transaction()
@@ -131,8 +132,28 @@ def queue_new_wallet_alerts(min_trade_usd, max_age_minutes=30):
                WHERE s.id > %s AND s.id <= %s
                  AND s.usd_value >= %s AND t.status = 'ACTIVE'
                  AND s.block_time >= UTC_TIMESTAMP() - INTERVAL %s MINUTE
+                 AND NOT EXISTS (
+                     SELECT 1
+                     FROM wallet_telegram_alerts recent_a
+                     JOIN wallet_swaps recent_s ON recent_s.id = recent_a.swap_id
+                     WHERE recent_s.chain = s.chain AND recent_s.wallet = s.wallet
+                       AND (recent_a.delivery_status = 'PENDING'
+                            OR (recent_a.delivery_status = 'SENT'
+                                AND recent_a.delivered_at >= UTC_TIMESTAMP() - INTERVAL %s MINUTE))
+                 )
+                 AND s.id = (
+                     SELECT MIN(s2.id)
+                     FROM wallet_swaps s2
+                     JOIN tracked_wallets t2
+                       ON t2.chain = s2.chain AND t2.wallet = s2.wallet
+                     WHERE s2.id > %s AND s2.id <= %s
+                       AND s2.chain = s.chain AND s2.wallet = s.wallet
+                       AND s2.usd_value >= %s AND t2.status = 'ACTIVE'
+                       AND s2.block_time >= UTC_TIMESTAMP() - INTERVAL %s MINUTE
+                 )
                ORDER BY s.id""",
-            (last_id, max_id, float(min_trade_usd), max_age_minutes),
+            (last_id, max_id, float(min_trade_usd), max_age_minutes, cooldown_minutes,
+             last_id, max_id, float(min_trade_usd), max_age_minutes),
         )
         queued = max(0, cur.rowcount)
         cur.execute(
@@ -230,6 +251,29 @@ def mark_wallet_alert_attempt(swap_id, success, error=None, max_attempts=5):
         raise
     finally:
         conn.close()
+
+def prune_wallet_alerts(retention_days=30):
+    """Delete old terminal alert records while preserving all pending retries."""
+    retention_days = max(1, min(int(retention_days), 365))
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """DELETE FROM wallet_telegram_alerts
+               WHERE delivery_status IN ('SENT','FAILED','CANCELLED')
+                 AND created_at < UTC_TIMESTAMP() - INTERVAL %s DAY""",
+            (retention_days,),
+        )
+        deleted = cur.rowcount
+        conn.commit()
+        cur.close()
+        return deleted
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
 
 def load_swaps_since(since):
     conn = get_pool().get_connection()

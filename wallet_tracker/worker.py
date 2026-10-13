@@ -88,7 +88,11 @@ def dispatch_telegram_alerts(notifier=None):
         )
         return 0
     settings = store.get_settings()
-    queued = store.queue_new_wallet_alerts(settings["min_trade_usd"], max_age_minutes=30)
+    cooldown_minutes = max(1, int(config.WALLET_TRACKER_ALERT_COOLDOWN_MINUTES))
+    queued = store.queue_new_wallet_alerts(
+        settings["min_trade_usd"], max_age_minutes=30,
+        cooldown_minutes=cooldown_minutes,
+    )
     if queued:
         logger.info("queued %d followed-wallet Telegram alert(s)", queued)
     sent = 0
@@ -120,6 +124,7 @@ def dispatch_telegram_alerts(notifier=None):
 
 def run_cycle(provider):
     settings = store.get_settings()
+    store.prune_wallet_alerts(config.WALLET_TRACKER_ALERT_RETENTION_DAYS)
     if not settings["enabled"]:
         store.set_status(0, 0, 0, 0, "Scanner disabled in Wallet Tracking settings")
         return
