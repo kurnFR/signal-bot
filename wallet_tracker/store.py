@@ -85,7 +85,7 @@ def insert_swaps(swaps):
 
 
 # -------------------------------------------------------- Telegram alert queue
-def queue_new_wallet_alerts(min_trade_usd, limit=5000):
+def queue_new_wallet_alerts(min_trade_usd):
     """Queue fresh swaps from active followed wallets without historical replay."""
     conn = get_pool().get_connection()
     try:
@@ -120,9 +120,8 @@ def queue_new_wallet_alerts(min_trade_usd, limit=5000):
                  ON t.chain = s.chain AND t.wallet = s.wallet
                WHERE s.id > %s AND s.id <= %s
                  AND s.usd_value >= %s AND t.status = 'ACTIVE'
-               ORDER BY s.id
-               LIMIT %s""",
-            (last_id, max_id, float(min_trade_usd), int(limit)),
+               ORDER BY s.id""",
+            (last_id, max_id, float(min_trade_usd)),
         )
         queued = max(0, cur.rowcount)
         cur.execute(
@@ -183,6 +182,7 @@ def mark_wallet_alert_attempt(swap_id, success, error=None, max_attempts=5):
     """Persist a delivery attempt with bounded exponential retry."""
     conn = get_pool().get_connection()
     try:
+        conn.start_transaction()
         cur = conn.cursor(dictionary=True)
         cur.execute(
             "SELECT attempts FROM wallet_telegram_alerts WHERE swap_id = %s FOR UPDATE",
