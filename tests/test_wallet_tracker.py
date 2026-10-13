@@ -49,7 +49,7 @@ class TestAggregation(unittest.TestCase):
 
     def test_side_uses_token_delta_not_usd_flow(self):
         # Price/value changes can make net USD positive while token holdings fall.
-        swaps = [swap(W1, "buy", 100_000, 10, 20),
+        swaps = [swap(W1, "buy", 200_000, 10, 20),
                  swap(W1, "sell", 80_000, 20, 10)]
         (p,) = analyzer.aggregate_swaps(swaps, 24, NOW, 100_000)
         self.assertGreater(p["net_usd"], 0)
