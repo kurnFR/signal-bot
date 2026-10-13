@@ -45,6 +45,7 @@ const App = {
                 this.fetchSystemStatus();
                 if (this.currentTab === "paper") this.fetchPaperData();
                 if (this.currentTab === "market-screener") this.fetchScreenerData();
+                if (this.currentTab === "wallet-tracking") this.fetchWalletData({ silent: true });
             }
         }, 15000);
     },
@@ -373,6 +374,227 @@ const App = {
         } finally {
             if (window.lucide) window.lucide.createIcons();
         }
+    },
+
+    // ----------------------------------------------------
+    // WALLET TRACKING (on-chain smart money)
+    // ----------------------------------------------------
+    _wtUsd(n) {
+        if (n === null || n === undefined || isNaN(n)) return "--";
+        const a = Math.abs(n), sign = n < 0 ? "-" : "";
+        if (a >= 1e9) return `${sign}$${(a / 1e9).toFixed(2)}B`;
+        if (a >= 1e6) return `${sign}$${(a / 1e6).toFixed(2)}M`;
+        if (a >= 1e3) return `${sign}$${(a / 1e3).toFixed(1)}K`;
+        return `${sign}$${a.toFixed(2)}`;
+    },
+
+    _wtNum(n) {
+        if (n === null || n === undefined || isNaN(n)) return "--";
+        const a = Math.abs(n);
+        if (a >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+        if (a >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+        if (a >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+        return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+    },
+
+    _wtPrice(n) {
+        if (n === null || n === undefined || isNaN(n) || n === 0) return "--";
+        if (n >= 1) return `$${n.toLocaleString("en-US", { maximumFractionDigits: 4 })}`;
+        return `$${Number(n).toPrecision(4)}`;
+    },
+
+    _wtWalletCell(row) {
+        const w = String(row.wallet || "");
+        const short = w.length > 12 ? `${w.slice(0, 6)}…${w.slice(-4)}` : w;
+        const label = row.label ? `<span class="text-cyan-300 font-semibold mr-1">${this._escapeHtml(row.label)}</span>` : "";
+        const text = `${label}<span class="font-mono">${this._escapeHtml(short)}</span>`;
+        const url = row.explorer_url && String(row.explorer_url).startsWith("https://") ? row.explorer_url : null;
+        const chain = `<span class="text-[9px] text-slate-500 ml-1">${this._escapeHtml(row.chain_label || row.chain || "")}</span>`;
+        return url
+            ? `<a href="${this._escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${this._escapeHtml(w)}" class="text-slate-200 hover:text-cyan-300">${text}</a>${chain}`
+            : `<span title="${this._escapeHtml(w)}">${text}</span>${chain}`;
+    },
+
+    _wtSideBadge(side) {
+        const buy = String(side).toUpperCase() === "BUY";
+        return `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${buy ? "bg-emerald-950 text-emerald-300 border border-emerald-800" : "bg-rose-950 text-rose-300 border border-rose-800"}">${buy ? "BUY" : "SELL"}</span>`;
+    },
+
+    async _wtGet(path) {
+        const res = await fetch(`${API_BASE}${path}`, { headers: this.getAuthHeaders() });
+        if (!res.ok) {
+            let detail = `HTTP ${res.status}`;
+            try { detail = (await res.json()).detail || detail; } catch (_) {}
+            throw new Error(detail);
+        }
+        return res.json();
+    },
+
+    async fetchWalletData(opts = {}) {
+        const val = (id, d) => (document.getElementById(id) || {}).value || d;
+        const period = val("wt-period", "24");
+        const qs = new URLSearchParams({ period_hours: period, min_net_usd: val("wt-minnet", "0") || "0", limit: "100" });
+        if (val("wt-side", "")) qs.set("side", val("wt-side", ""));
+        if (val("wt-chain", "")) qs.set("chain", val("wt-chain", ""));
+        try {
+            const [status, pos, flow, ev, tracked] = await Promise.all([
+                this._wtGet("/api/wallets/status"),
+                this._wtGet(`/api/wallets/positions?${qs}`),
+                this._wtGet(`/api/wallets/token-flow?period_hours=${encodeURIComponent(period)}&limit=15`),
+                this._wtGet("/api/wallets/events?limit=100"),
+                this._wtGet("/api/wallets/tracked"),
+            ]);
+            this._wtRenderStatus(status, tracked.tracked.length);
+            this._wtRenderFlow(flow.flows);
+            this._wtRenderCandidates(pos.positions);
+            this._wtRenderFeed(ev.events);
+            this._wtRenderTracked(tracked.tracked);
+        } catch (e) {
+            if (!opts.silent) this.showToast(`Failed to load Wallet Tracking: ${e.message || e}`, "error");
+        } finally {
+            if (window.lucide) window.lucide.createIcons();
+        }
+    },
+
+    _wtRenderStatus(st, trackedCount) {
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.innerText = v; };
+        const ran = !!st.last_cycle_at;
+        const el = document.getElementById("wt-kpi-status");
+        if (el) {
+            el.innerText = !st.enabled ? "DISABLED" : (ran ? "RUNNING" : "WAITING");
+            el.className = `text-lg font-black mt-1 ${!st.enabled ? "text-slate-400" : (ran ? "text-emerald-400" : "text-amber-400")}`;
+        }
+        set("wt-kpi-status-detail", ran ? `${st.pools_scanned} pools · ${st.candidates} candidates${st.last_error ? " · errors, see logs" : ""}` : "Start run_wallet_tracker.py (or run_all.py)");
+        set("wt-kpi-last", ran ? `${this._formatDateTime(st.last_cycle_at)} (${this._timeAgo(st.last_cycle_at)})` : "--");
+        set("wt-kpi-swaps", String(st.swaps_24h ?? 0));
+        set("wt-kpi-tracked", String(trackedCount));
+    },
+
+    _wtRenderFlow(flows) {
+        const tbody = document.getElementById("wt-flow-body");
+        if (!tbody) return;
+        if (!flows || !flows.length) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-slate-500 text-xs">No pair has qualifying wallet flow yet in this period.</td></tr>`;
+            return;
+        }
+        const cls = { ACCUMULATION: "text-emerald-300 bg-emerald-950 border-emerald-800", DISTRIBUTION: "text-rose-300 bg-rose-950 border-rose-800", MIXED: "text-slate-300 bg-slate-800 border-slate-700" };
+        tbody.innerHTML = flows.map(f => `
+            <tr>
+                <td><span class="px-1.5 py-0.5 rounded text-[10px] font-bold border ${cls[f.signal] || cls.MIXED}">${this._escapeHtml(f.signal)}</span></td>
+                <td class="font-semibold text-slate-200">${this._escapeHtml(f.pair)}</td>
+                <td class="text-slate-400">${this._escapeHtml(f.chain)}</td>
+                <td class="font-mono text-emerald-400">${f.accumulating_wallets}</td>
+                <td class="font-mono text-rose-400">${f.distributing_wallets}</td>
+                <td class="font-mono">${this._wtUsd(f.buy_usd)}</td>
+                <td class="font-mono">${this._wtUsd(f.sell_usd)}</td>
+                <td class="font-mono font-bold ${f.net_usd >= 0 ? "text-emerald-400" : "text-rose-400"}">${this._wtUsd(f.net_usd)}</td>
+            </tr>`).join("");
+    },
+
+    _wtRenderCandidates(rows) {
+        const tbody = document.getElementById("wt-candidates-body");
+        const count = document.getElementById("wt-candidate-count");
+        if (count) count.innerText = `${rows.length} wallets`;
+        if (!tbody) return;
+        if (!rows.length) {
+            tbody.innerHTML = `<tr><td colspan="11" class="text-center py-8 text-slate-500 text-xs">No candidate wallets for these filters. The scanner needs a few cycles to collect swaps; lower "Min Net USD" to see smaller wallets.</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = rows.map(r => {
+            const vol = r.side === "BUY" ? r.buy_tokens : r.sell_tokens;
+            const action = r.is_tracked
+                ? `<span class="text-[10px] text-emerald-400">Monitoring</span>`
+                : `<button data-chain="${this._escapeHtml(r.chain)}" data-wallet="${this._escapeHtml(r.wallet)}" onclick="App.walletTrack(this)" class="px-2 py-1 text-[10px] font-semibold bg-cyan-800 hover:bg-cyan-700 text-white rounded">Monitor</button>`;
+            return `<tr>
+                <td>${this._wtWalletCell(r)}</td>
+                <td class="text-slate-200">${this._escapeHtml(r.pair)}</td>
+                <td>${this._wtSideBadge(r.side)}</td>
+                <td class="font-mono">${this._wtNum(vol)}</td>
+                <td class="font-mono">${this._wtUsd(r.total_usd)}</td>
+                <td class="font-mono font-bold ${r.net_usd >= 0 ? "text-emerald-400" : "text-rose-400"}">${this._wtUsd(r.net_usd)}</td>
+                <td class="font-mono">${this._wtPrice(r.avg_buy_price)}</td>
+                <td class="font-mono">${this._wtPrice(r.avg_sell_price)}</td>
+                <td class="font-mono text-slate-400">${r.buy_count}B / ${r.sell_count}S</td>
+                <td class="whitespace-nowrap text-slate-500">${this._formatDateTime(r.first_trade_at)} → ${this._formatDateTime(r.last_trade_at)}</td>
+                <td>${action}</td>
+            </tr>`;
+        }).join("");
+    },
+
+    _wtRenderFeed(events) {
+        const tbody = document.getElementById("wt-feed-body");
+        const count = document.getElementById("wt-feed-count");
+        if (count) count.innerText = `${events.length} events`;
+        if (!tbody) return;
+        if (!events.length) {
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-slate-500 text-xs">No activity from monitored wallets yet. Wallets are added automatically once they pass the auto-monitor threshold, or add one manually.</td></tr>`;
+            return;
+        }
+        const prev = this._wtLastEventId || 0;
+        const firstLoad = prev === 0;
+        this._wtLastEventId = Math.max(prev, ...events.map(e => e.id));
+        tbody.innerHTML = events.map(e => `
+            <tr class="${!firstLoad && e.id > prev ? "bg-cyan-950/40" : ""}">
+                <td class="whitespace-nowrap text-slate-400">${this._formatDateTime(e.block_time)}</td>
+                <td>${this._wtWalletCell(e)}</td>
+                <td class="text-slate-200">${this._escapeHtml(e.pair)}</td>
+                <td>${this._wtSideBadge(e.side)}</td>
+                <td class="font-mono">${this._wtUsd(e.usd_value)}</td>
+                <td class="font-mono text-slate-400">${this._wtPrice(e.price_usd)}</td>
+            </tr>`).join("");
+    },
+
+    _wtRenderTracked(list) {
+        const box = document.getElementById("wt-tracked-list");
+        if (!box) return;
+        if (!list.length) {
+            box.innerHTML = `<div class="text-slate-500 text-xs">No monitored wallets yet.</div>`;
+            return;
+        }
+        box.innerHTML = list.map(t => `
+            <div class="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-800/50 border border-slate-800">
+                <div class="min-w-0 text-[11px]">${this._wtWalletCell(t)}
+                    <div class="text-[9px] text-slate-500">${this._escapeHtml(t.source)}${t.last_net_usd !== null && t.last_net_usd !== undefined ? ` · net ${this._wtUsd(t.last_net_usd)}` : ""}</div></div>
+                <button data-id="${Number(t.id)}" onclick="App.walletUntrack(this)" class="px-2 py-1 text-[10px] font-semibold bg-slate-700 hover:bg-rose-800 text-slate-200 rounded">Remove</button>
+            </div>`).join("");
+    },
+
+    async _wtSend(method, path, body) {
+        const res = await fetch(`${API_BASE}${path}`, { method, headers: this.getAuthHeaders(), body: body ? JSON.stringify(body) : undefined });
+        if (!res.ok) {
+            let detail = `HTTP ${res.status}`;
+            try { detail = (await res.json()).detail || detail; } catch (_) {}
+            throw new Error(detail);
+        }
+    },
+
+    async walletTrack(btn) {
+        try {
+            await this._wtSend("POST", "/api/wallets/tracked", { chain: btn.dataset.chain, wallet: btn.dataset.wallet });
+            this.showToast("Wallet added to monitor list", "success");
+            this.fetchWalletData();
+        } catch (e) { this.showToast(`Could not monitor wallet: ${e.message || e}`, "error"); }
+    },
+
+    async walletAdd() {
+        const chain = document.getElementById("wt-add-chain").value;
+        const wallet = document.getElementById("wt-add-wallet").value.trim();
+        const label = document.getElementById("wt-add-label").value.trim();
+        if (!wallet) { this.showToast("Enter a wallet address", "error"); return; }
+        try {
+            await this._wtSend("POST", "/api/wallets/tracked", { chain, wallet, label: label || null });
+            document.getElementById("wt-add-wallet").value = "";
+            document.getElementById("wt-add-label").value = "";
+            this.showToast("Wallet added to monitor list", "success");
+            this.fetchWalletData();
+        } catch (e) { this.showToast(`Could not monitor wallet: ${e.message || e}`, "error"); }
+    },
+
+    async walletUntrack(btn) {
+        try {
+            await this._wtSend("DELETE", `/api/wallets/tracked/${encodeURIComponent(btn.dataset.id)}`);
+            this.fetchWalletData();
+        } catch (e) { this.showToast(`Could not remove wallet: ${e.message || e}`, "error"); }
     },
 
     async _fetchBotControl(botName) {
@@ -1162,6 +1384,10 @@ const App = {
             if (titleEl) titleEl.innerText = "Market Screener V2";
             if (descEl) descEl.innerText = "Smart-money volume detection, universe health, signal quality, and live alert controls";
             this.fetchScreenerData();
+        } else if (tabId === "wallet-tracking") {
+            if (titleEl) titleEl.innerText = "Wallet Tracking";
+            if (descEl) descEl.innerText = "Smart-money wallets accumulating or distributing large amounts, with live buy/sell activity";
+            this.fetchWalletData();
         } else if (tabId === "settings") {
             if (titleEl) titleEl.innerText = "System Settings & User Administration";
             if (descEl) descEl.innerText = "User accounts, password resets, MariaDB connection, and execution parameters";

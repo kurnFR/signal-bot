@@ -140,6 +140,13 @@
                         <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-amber-950 text-amber-300 border border-amber-800">V2</span>
                     </div>
                 </button>
+                <button data-tab="wallet-tracking" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-cyan-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="wallet" class="w-4 h-4 text-cyan-400"></i>
+                    <div class="flex items-center justify-between w-full">
+                        <span>Wallet Tracking</span>
+                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-cyan-950 text-cyan-300 border border-cyan-800">NEW</span>
+                    </div>
+                </button>
                 <button data-tab="settings" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="settings" class="w-4 h-4"></i>
                     <span>Settings & Users</span>
@@ -1460,6 +1467,121 @@
                                 <tr><td colspan="10" class="text-center py-8 text-slate-500 text-xs">Loading screener signals...</td></tr>
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================== -->
+            <!-- 6b. WALLET TRACKING VIEW (on-chain smart money) -->
+            <!-- ============================================== -->
+            <section id="view-wallet-tracking" class="view-section hidden space-y-6">
+                <div class="flex items-center gap-3">
+                    <div>
+                        <h2 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                            <i data-lucide="wallet" class="w-4 h-4 text-cyan-400"></i>
+                            Wallet Tracking
+                            <span class="px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 text-[9px] font-bold">SMART MONEY</span>
+                        </h2>
+                        <p class="text-[11px] text-slate-500 mt-0.5">On-chain wallets accumulating or distributing large USD amounts, with live activity from the wallets you monitor</p>
+                    </div>
+                    <button onclick="App.fetchWalletData()" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
+                    </button>
+                </div>
+
+                <!-- Worker status -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Scanner</div><div id="wt-kpi-status" class="text-lg font-black text-slate-300 mt-1">--</div><div id="wt-kpi-status-detail" class="text-[10px] text-slate-500 mt-1">Waiting for first scan</div></div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Last Scan</div><div id="wt-kpi-last" class="text-sm font-bold text-slate-200 mt-2">--</div></div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Swaps Stored (24h)</div><div id="wt-kpi-swaps" class="text-lg font-black font-mono text-cyan-400 mt-1">0</div></div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Monitored Wallets</div><div id="wt-kpi-tracked" class="text-lg font-black font-mono text-emerald-400 mt-1">0</div></div>
+                </div>
+
+                <!-- Filters -->
+                <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-wrap items-end gap-4">
+                    <label class="text-[11px] text-slate-400">Period
+                        <select id="wt-period" onchange="App.fetchWalletData()" class="cfg-input">
+                            <option value="1">1 hour</option><option value="6">6 hours</option>
+                            <option value="24" selected>24 hours</option><option value="168">7 days</option>
+                        </select></label>
+                    <label class="text-[11px] text-slate-400">Side
+                        <select id="wt-side" onchange="App.fetchWalletData()" class="cfg-input">
+                            <option value="">Buy &amp; Sell</option><option value="BUY">Accumulating (Buy)</option><option value="SELL">Distributing (Sell)</option>
+                        </select></label>
+                    <label class="text-[11px] text-slate-400">Chain
+                        <select id="wt-chain" onchange="App.fetchWalletData()" class="cfg-input">
+                            <option value="">All chains</option><option value="eth">Ethereum</option><option value="base">Base</option>
+                            <option value="bsc">BNB Chain</option><option value="arbitrum">Arbitrum</option>
+                            <option value="polygon_pos">Polygon</option><option value="solana">Solana</option>
+                        </select></label>
+                    <label class="text-[11px] text-slate-400">Min Net USD
+                        <input type="number" id="wt-minnet" min="0" step="10000" value="100000" onchange="App.fetchWalletData()" class="cfg-input"></label>
+                </div>
+
+                <!-- Token flow -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-100">Token Flow &mdash; Early Detection</h3>
+                        <p class="text-[10px] text-slate-500">Pairs where several large wallets are net buying (accumulation) or net selling (distribution) in the selected period.</p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left custom-table">
+                            <thead><tr><th>Signal</th><th>Pair</th><th>Chain</th><th>Wallets Buying</th><th>Wallets Selling</th><th>Buy USD</th><th>Sell USD</th><th>Net USD</th></tr></thead>
+                            <tbody id="wt-flow-body"><tr><td colspan="8" class="text-center py-8 text-slate-500 text-xs">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Candidate wallets -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-100">Candidate Wallets</h3>
+                            <p class="text-[10px] text-slate-500">Net position per wallet and pair. Avg prices are volume-weighted.</p>
+                        </div>
+                        <span id="wt-candidate-count" class="text-[10px] text-slate-500">--</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left custom-table">
+                            <thead><tr><th>Wallet</th><th>Pair</th><th>Side</th><th>Volume (tokens)</th><th>Total USD</th><th>Net USD</th><th>Avg Buy</th><th>Avg Sell</th><th>Trades</th><th>Period Range</th><th></th></tr></thead>
+                            <tbody id="wt-candidates-body"><tr><td colspan="11" class="text-center py-8 text-slate-500 text-xs">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Live feed + monitored list -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="lg:col-span-2 p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Live Feed &mdash; Monitored Wallets</h3>
+                                <p class="text-[10px] text-slate-500">Latest buys and sells by wallets on your monitor list (refreshes every 15s).</p>
+                            </div>
+                            <span id="wt-feed-count" class="text-[10px] text-slate-500">--</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left custom-table">
+                                <thead><tr><th>Time</th><th>Wallet</th><th>Pair</th><th>Side</th><th>USD</th><th>Price</th></tr></thead>
+                                <tbody id="wt-feed-body"><tr><td colspan="6" class="text-center py-8 text-slate-500 text-xs">Loading...</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-100">Monitored Wallets</h3>
+                            <p class="text-[10px] text-slate-500">Big candidates are added automatically. You can add or remove wallets.</p>
+                        </div>
+                        <div class="space-y-2">
+                            <div class="flex gap-2">
+                                <select id="wt-add-chain" class="cfg-input"><option value="eth">ETH</option><option value="base">Base</option><option value="bsc">BSC</option><option value="arbitrum">ARB</option><option value="polygon_pos">POLY</option><option value="solana">SOL</option></select>
+                                <input type="text" id="wt-add-wallet" placeholder="Wallet address" class="cfg-input" maxlength="64">
+                            </div>
+                            <div class="flex gap-2">
+                                <input type="text" id="wt-add-label" placeholder="Label (optional)" class="cfg-input" maxlength="80">
+                                <button onclick="App.walletAdd()" class="px-3 py-1.5 text-xs font-semibold bg-cyan-700 hover:bg-cyan-600 text-white rounded-lg whitespace-nowrap">Monitor</button>
+                            </div>
+                        </div>
+                        <div id="wt-tracked-list" class="space-y-2 max-h-96 overflow-y-auto"><div class="text-slate-500 text-xs">Loading...</div></div>
                     </div>
                 </div>
             </section>
