@@ -67,7 +67,7 @@ def wallets_get_settings():
         return store.get_settings()
     except Exception as e:
         logger.exception("wallets_get_settings failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load wallet tracker settings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load wallet tracker settings")
 
 
 @router.put("/settings")
@@ -100,7 +100,7 @@ def wallets_save_settings(req: WalletSettingsRequest):
         return store.get_settings()
     except Exception as e:
         logger.exception("wallets_save_settings failed")
-        raise HTTPException(status_code=500, detail=f"Failed to save wallet tracker settings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save wallet tracker settings")
 
 @router.get("/status")
 def wallets_status():
@@ -112,7 +112,7 @@ def wallets_status():
         return status
     except Exception as e:
         logger.exception("wallets_status failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load wallet tracker status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load wallet tracker status")
 
 
 @router.get("/positions")
@@ -130,7 +130,7 @@ def wallets_positions(
         return {"positions": store.get_positions(period_hours, side, chain, min_net_usd, limit, only_tracked=only_tracked)}
     except Exception as e:
         logger.exception("wallets_positions failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load wallet positions: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load wallet positions")
 
 
 @router.get("/token-flow")
@@ -141,7 +141,7 @@ def wallets_token_flow(period_hours: int = Query(24), limit: int = Query(20, ge=
         return {"flows": analyzer.token_flow(positions)[:limit]}
     except Exception as e:
         logger.exception("wallets_token_flow failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load token flow: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load token flow")
 
 
 @router.get("/events")
@@ -159,7 +159,7 @@ def wallets_events(
         return {"events": store.get_events(limit=limit, since_id=since_id, chain=chain, wallet=wallet, side=side)}
     except Exception as e:
         logger.exception("wallets_events failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load wallet events: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load wallet events")
 
 
 @router.get("/tracked")
@@ -168,7 +168,7 @@ def wallets_tracked():
         return {"tracked": store.get_tracked("ACTIVE")}
     except Exception as e:
         logger.exception("wallets_tracked failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load monitored wallets: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load monitored wallets")
 
 
 @router.post("/tracked")
@@ -183,7 +183,7 @@ def wallets_track(req: TrackRequest):
         return {"status": "ok", "chain": req.chain, "wallet": wallet}
     except Exception as e:
         logger.exception("wallets_track failed")
-        raise HTTPException(status_code=500, detail=f"Failed to monitor wallet: {e}")
+        raise HTTPException(status_code=500, detail="Failed to monitor wallet")
 
 
 @router.post("/tracked/toggle")
@@ -203,7 +203,7 @@ def wallets_toggle_track(req: TrackRequest):
             return {"status": "ok", "tracked": True, "chain": req.chain, "wallet": wallet}
     except Exception as e:
         logger.exception("wallets_toggle_track failed")
-        raise HTTPException(status_code=500, detail=f"Failed to toggle wallet monitoring: {e}")
+        raise HTTPException(status_code=500, detail="Failed to toggle wallet monitoring")
 
 
 @router.delete("/tracked")
@@ -218,7 +218,7 @@ def wallets_untrack_by_query(chain: str = Query(...), wallet: str = Query(...)):
         raise
     except Exception as e:
         logger.exception("wallets_untrack_by_query failed")
-        raise HTTPException(status_code=500, detail=f"Failed to stop monitoring wallet: {e}")
+        raise HTTPException(status_code=500, detail="Failed to stop monitoring wallet")
 
 
 @router.delete("/tracked/{tracked_id}")
@@ -231,4 +231,4 @@ def wallets_untrack(tracked_id: int):
         raise
     except Exception as e:
         logger.exception("wallets_untrack failed")
-        raise HTTPException(status_code=500, detail=f"Failed to stop monitoring wallet: {e}")
+        raise HTTPException(status_code=500, detail="Failed to stop monitoring wallet")

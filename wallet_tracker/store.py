@@ -24,7 +24,12 @@ def _clean(row, wallet_chain_keys=True):
         if isinstance(v, Decimal):
             row[k] = float(v)
         elif isinstance(v, datetime):
-            row[k] = v.isoformat(sep=" ")
+            # The shared DB pool uses UTC sessions; serialize naive DB DATETIME
+            # values explicitly as UTC so browsers never interpret them as local.
+            if v.tzinfo is None:
+                row[k] = v.isoformat(timespec="seconds") + "Z"
+            else:
+                row[k] = v.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     if wallet_chain_keys and "chain" in row:
         if "wallet" in row and row.get("wallet"):
             row["explorer_url"] = explorer_url(row["chain"], row["wallet"])
