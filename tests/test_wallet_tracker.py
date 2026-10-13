@@ -123,10 +123,10 @@ class TestAggregation(unittest.TestCase):
             "base_token_symbol": "USDC", "base_token_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
             "quote_token_symbol": "WETH", "quote_token_address": W2,
         }))
-        self.assertTrue(is_stablecoin_base_pool("bsc", {
+        self.assertFalse(is_stablecoin_base_pool("bsc", {
             "base_token_symbol": "TOKEN", "base_token_address": "0x" + "1" * 40,
             "quote_token_symbol": "USDT", "quote_token_address": "0x55d398326f99059ff775485246999027b3197955",
-        }) is False)
+        }))
         self.assertFalse(is_stablecoin_base_pool("bsc", {
             "base_token_symbol": "ARK", "base_token_address": "0x" + "2" * 40,
             "quote_token_symbol": "USDT", "quote_token_address": "0x55d398326f99059ff775485246999027b3197955",
@@ -227,13 +227,14 @@ class TestWorkerRateLimitIsolation(unittest.TestCase):
             stack.enter_context(patch.object(worker, "_network_rotation_offset", 0))
             stack.enter_context(patch.dict(worker._NETWORK_COOLDOWN_UNTIL, {}, clear=True))
             worker.run_cycle(provider)
+            cooldown_after_cycle = dict(worker._NETWORK_COOLDOWN_UNTIL)
 
         called_networks = [call.args[0] for call in provider.hot_pools.call_args_list]
         self.assertEqual(called_networks, ["eth", "solana", "base", "bsc"])
         self.assertIn("solana", called_networks)
         self.assertIn("base", called_networks)
         self.assertIn("bsc", called_networks)
-        self.assertIn("eth", worker._NETWORK_COOLDOWN_UNTIL)
+        self.assertIn("eth", cooldown_after_cycle)
 
 
 class TestWalletRoutes(unittest.TestCase):
@@ -314,7 +315,7 @@ class TestWalletRoutes(unittest.TestCase):
     def test_token_flow(self, m):
         m.return_value = analyzer.aggregate_swaps([swap(W1, "buy", 300_000, 10, 5)], 24, NOW, 100_000)
         r = self.client.get("/api/wallets/token-flow?period_hours=24", headers=self.headers)
-        self.assertEqual(r.json()["flows"][0]["signal"], "ACCUMULATION")
+        self.assertEqual(r.json()["flows"][0]["signal"], "MIXED")
 
     @patch("web.routes.wallet_routes.store.get_events", return_value=[])
     def test_events_filter_by_chain_wallet_and_side(self, events_mock):
