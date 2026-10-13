@@ -27,7 +27,10 @@ class TestAtomicWalletToggle(unittest.TestCase):
         from unittest.mock import MagicMock
 
         connection = MagicMock()
-        cursor = connection.cursor.return_value
+        cursor = MagicMock()
+        release_cursor = MagicMock()
+        release_cursor.fetchone.return_value = (1,)
+        connection.cursor.side_effect = [cursor, release_cursor]
         cursor.fetchone.side_effect = [(lock_result,), (current_status,) if current_status is not None else None]
         pool = MagicMock()
         pool.get_connection.return_value = connection
