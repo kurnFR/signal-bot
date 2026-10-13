@@ -141,7 +141,15 @@ def token_flow(positions):
     result = []
     for f in flows.values():
         a, d = f["accumulating_wallets"], f["distributing_wallets"]
-        f["signal"] = "ACCUMULATION" if a > d else "DISTRIBUTION" if d > a else "MIXED"
+        # Require a multi-wallet majority AND agreement with aggregate USD flow.
+        # A lone wallet or conflicting count/net-flow evidence is not a signal.
+        total_wallets = a + d
+        if total_wallets >= 2 and a > d and f["net_usd"] > 0:
+            f["signal"] = "ACCUMULATION"
+        elif total_wallets >= 2 and d > a and f["net_usd"] < 0:
+            f["signal"] = "DISTRIBUTION"
+        else:
+            f["signal"] = "MIXED"
         for k in ("buy_usd", "sell_usd", "net_usd"):
             f[k] = round(f[k], 2)
         result.append(f)

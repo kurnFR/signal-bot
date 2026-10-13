@@ -85,8 +85,13 @@ def insert_swaps(swaps):
 
 
 # -------------------------------------------------------- Telegram alert queue
-def queue_new_wallet_alerts(min_trade_usd):
-    """Queue fresh swaps from active followed wallets without historical replay."""
+def queue_new_wallet_alerts(min_trade_usd, max_age_minutes=30):
+    """Queue only recent swaps from active followed wallets.
+
+    The cursor still advances over stale rows, intentionally preventing old
+    provider backfill from being replayed as a live alert.
+    """
+    max_age_minutes = max(1, min(int(max_age_minutes), 1440))
     conn = get_pool().get_connection()
     try:
         conn.start_transaction()
@@ -120,8 +125,9 @@ def queue_new_wallet_alerts(min_trade_usd):
                  ON t.chain = s.chain AND t.wallet = s.wallet
                WHERE s.id > %s AND s.id <= %s
                  AND s.usd_value >= %s AND t.status = 'ACTIVE'
+                 AND s.block_time >= UTC_TIMESTAMP() - INTERVAL %s MINUTE
                ORDER BY s.id""",
-            (last_id, max_id, float(min_trade_usd)),
+            (last_id, max_id, float(min_trade_usd), max_age_minutes),
         )
         queued = max(0, cur.rowcount)
         cur.execute(

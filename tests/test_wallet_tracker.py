@@ -5,9 +5,10 @@ from unittest.mock import patch
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from wallet_tracker import analyzer
+from wallet_tracker import analyzer, worker
 from wallet_tracker.chains import explorer_url, normalize_wallet
 from wallet_tracker.providers import GeckoTerminalProvider, parse_trade
+from wallet_tracker.stablecoins import is_stablecoin_base_pool
 
 NOW = datetime(2026, 10, 13, 12, 0, 0)
 W1 = "0x" + "a" * 40
@@ -96,6 +97,41 @@ class TestAggregation(unittest.TestCase):
         self.assertEqual((flow["accumulating_wallets"], flow["distributing_wallets"]), (2, 1))
         self.assertEqual(flow["net_usd"], 380_000)
 
+    def test_token_flow_is_mixed_when_net_usd_conflicts_with_wallet_majority(self):
+        positions = [
+            {"chain": "eth", "pool_address": POOL, "pair": "X/WETH", "bias": "ACCUMULATING",
+             "buy_usd": 100_000, "sell_usd": 0, "net_usd": 100_000},
+            {"chain": "eth", "pool_address": POOL, "pair": "X/WETH", "bias": "ACCUMULATING",
+             "buy_usd": 100_000, "sell_usd": 0, "net_usd": 100_000},
+            {"chain": "eth", "pool_address": POOL, "pair": "X/WETH", "bias": "DISTRIBUTING",
+             "buy_usd": 0, "sell_usd": 500_000, "net_usd": -500_000},
+        ]
+        (flow,) = analyzer.token_flow(positions)
+        self.assertEqual(flow["signal"], "MIXED")
+        self.assertEqual(flow["net_usd"], -300_000)
+
+    def test_token_flow_needs_at_least_two_wallets(self):
+        positions = [
+            {"chain": "eth", "pool_address": POOL, "pair": "X/WETH", "bias": "ACCUMULATING",
+             "buy_usd": 200_000, "sell_usd": 0, "net_usd": 200_000},
+        ]
+        (flow,) = analyzer.token_flow(positions)
+        self.assertEqual(flow["signal"], "MIXED")
+
+    def test_stablecoin_base_pools_are_excluded_but_usdt_quote_pairs_remain(self):
+        self.assertTrue(is_stablecoin_base_pool("eth", {
+            "base_token_symbol": "USDC", "base_token_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "quote_token_symbol": "WETH", "quote_token_address": W2,
+        }))
+        self.assertFalse(is_stablecoin_base_pool("bsc", {
+            "base_token_symbol": "TOKEN", "base_token_address": "0x" + "1" * 40,
+            "quote_token_symbol": "USDT", "quote_token_address": "0x55d398326f99059ff775485246999027b3197955",
+        }))
+        self.assertFalse(is_stablecoin_base_pool("bsc", {
+            "base_token_symbol": "ARK", "base_token_address": "0x" + "2" * 40,
+            "quote_token_symbol": "USDT", "quote_token_address": "0x55d398326f99059ff775485246999027b3197955",
+        }))
+
 
 class TestParsingAndValidation(unittest.TestCase):
     ATTRS = {"kind": "buy", "tx_from_address": "0x" + "A" * 40, "tx_hash": "0xabc",
@@ -162,6 +198,43 @@ class TestProviderRateLimit(unittest.TestCase):
         self.assertEqual(result, {"data": []})
         self.assertEqual(provider.session.get.call_count, 2)
         self.assertGreater(provider.delay, provider.base_delay)
+
+
+class TestWorkerRateLimitIsolation(unittest.TestCase):
+    def test_rate_limited_network_does_not_starve_other_networks(self):
+        from unittest.mock import MagicMock
+        import requests
+
+        settings = {
+            "enabled": True, "networks": ["eth", "solana", "base", "bsc"],
+            "pools_per_network": 1, "min_trade_usd": 10000,
+            "min_net_usd": 150000, "auto_track_net_usd": 250000,
+            "retention_days": 8, "api_delay_seconds": 1,
+        }
+        provider = MagicMock()
+        provider.hot_pools.side_effect = lambda network, limit: (
+            (_ for _ in ()).throw(requests.HTTPError(
+                "rate limited", response=MagicMock(status_code=429)
+            )) if network == "eth" else []
+        )
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(worker.store, "get_settings", return_value=settings))
+            stack.enter_context(patch.object(worker, "recompute", return_value=0))
+            stack.enter_context(patch.object(worker.store, "prune_swaps"))
+            stack.enter_context(patch.object(worker.store, "set_status"))
+            stack.enter_context(patch.object(worker, "dispatch_telegram_alerts"))
+            stack.enter_context(patch.object(worker, "_network_rotation_offset", 0))
+            stack.enter_context(patch.dict(worker._NETWORK_COOLDOWN_UNTIL, {}, clear=True))
+            worker.run_cycle(provider)
+            cooldown_after_cycle = dict(worker._NETWORK_COOLDOWN_UNTIL)
+
+        called_networks = [call.args[0] for call in provider.hot_pools.call_args_list]
+        self.assertEqual(called_networks, ["eth", "solana", "base", "bsc"])
+        self.assertIn("solana", called_networks)
+        self.assertIn("base", called_networks)
+        self.assertIn("bsc", called_networks)
+        self.assertIn("eth", cooldown_after_cycle)
 
 
 class TestWalletRoutes(unittest.TestCase):
@@ -242,7 +315,7 @@ class TestWalletRoutes(unittest.TestCase):
     def test_token_flow(self, m):
         m.return_value = analyzer.aggregate_swaps([swap(W1, "buy", 300_000, 10, 5)], 24, NOW, 100_000)
         r = self.client.get("/api/wallets/token-flow?period_hours=24", headers=self.headers)
-        self.assertEqual(r.json()["flows"][0]["signal"], "ACCUMULATION")
+        self.assertEqual(r.json()["flows"][0]["signal"], "MIXED")
 
     @patch("web.routes.wallet_routes.store.get_events", return_value=[])
     def test_events_filter_by_chain_wallet_and_side(self, events_mock):
