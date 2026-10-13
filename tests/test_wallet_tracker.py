@@ -88,6 +88,40 @@ class TestAggregation(unittest.TestCase):
         self.assertEqual(candidates[0]["total_usd"], 350_000)
         self.assertEqual(candidates[0]["trade_count"], 3)
 
+    def test_follow_candidate_does_not_net_unrelated_pools(self):
+        pool2 = "0x" + "d" * 40
+        swaps = [
+            swap(W1, "buy", 120_000, 100, 20, pool=POOL),
+            swap(W1, "buy", 100_000, 80, 15, pool=POOL),
+            swap(W1, "buy", 100_000, 80, 10, pool=POOL),
+            swap(W1, "sell", 100_000, 90, 8, pool=pool2),
+            swap(W1, "sell", 90_000, 80, 6, pool=pool2),
+            swap(W1, "sell", 80_000, 70, 4, pool=pool2),
+        ]
+        candidates = analyzer.quality_follow_candidates(
+            swaps, [24], NOW, min_net_usd=200_000, min_total_usd=300_000,
+            min_trade_count=3, min_net_flow_ratio=0.25,
+        )
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["pool_address"], POOL)
+        self.assertEqual(candidates[0]["net_usd"], 320_000)
+
+    def test_high_frequency_round_trip_activity_is_rejected_but_directional_activity_is_kept(self):
+        noisy = []
+        for minute in range(60):
+            noisy.append(swap(W1, "buy", 10_000, 100, minute, pool=POOL))
+            noisy.append(swap(W1, "sell", 9_000, 99, minute, pool=POOL))
+        directional = [
+            swap(W2, "buy", 300_000, 1000, 50, pool=POOL),
+            swap(W2, "buy", 200_000, 700, 40, pool=POOL),
+            swap(W2, "buy", 100_000, 500, 30, pool=POOL),
+        ]
+        candidates = analyzer.quality_follow_candidates(
+            noisy + directional, [24], NOW, min_net_usd=200_000, min_total_usd=300_000,
+            min_trade_count=3, min_net_flow_ratio=0.25,
+        )
+        self.assertEqual([c["wallet"] for c in candidates], [W2])
+
     def test_token_flow_signal(self):
         swaps = [swap(W1, "buy", 300_000, 10, 5), swap(W2, "buy", 200_000, 10, 5),
                  swap("0x" + "d" * 40, "sell", 120_000, 10, 5)]
