@@ -81,25 +81,44 @@ def parse_trade(chain, pool_address, pair, attrs):
 
 
 class GeckoTerminalProvider:
-    def __init__(self, delay_seconds=2.2, timeout=15, session=None):
-        self.delay = delay_seconds
+    def __init__(self, delay_seconds=4.0, timeout=15, session=None):
+        self.base_delay = max(float(delay_seconds), 0.5)
+        self.delay = self.base_delay
         self.timeout = timeout
         self.session = session or requests.Session()
         self.session.headers.update({"Accept": "application/json;version=20230302"})
         self._last_call = 0.0
 
+    def set_base_delay(self, delay_seconds):
+        """Apply dashboard delay changes without discarding adaptive throttling."""
+        self.base_delay = max(float(delay_seconds), 0.5)
+        self.delay = max(self.delay, self.base_delay)
+
     def _get(self, path, params=None):
         wait = self.delay - (time.monotonic() - self._last_call)
         if wait > 0:
             time.sleep(wait)
-        for attempt in range(2):
+        for attempt in range(3):
             self._last_call = time.monotonic()
             resp = self.session.get(f"{BASE_URL}{path}", params=params, timeout=self.timeout)
-            if resp.status_code == 429 and attempt == 0:
-                logger.warning("GeckoTerminal rate limit hit; backing off 20s")
-                time.sleep(20)
-                continue
+            if resp.status_code == 429:
+                # Exponential cooldown and adaptive request pacing. Honor a
+                # provider Retry-After header when available, but cap one wait.
+                self.delay = min(max(self.delay * 2, self.delay + 1), 60.0)
+                retry_after = _to_float(resp.headers.get("Retry-After"))
+                backoff = min(max(retry_after or (20 * (2 ** attempt)), 1), 120)
+                if attempt < 2:
+                    logger.warning(
+                        "GeckoTerminal rate limit hit; retry %d/2 in %.0fs (request delay now %.1fs)",
+                        attempt + 1, backoff, self.delay,
+                    )
+                    time.sleep(backoff)
+                    continue
+                logger.error("GeckoTerminal rate limit persists after retries for %s", path)
             resp.raise_for_status()
+            # Recover pacing slowly, never instantly return to the burst rate.
+            if self.delay > self.base_delay:
+                self.delay = max(self.base_delay, self.delay * 0.9)
             return resp.json()
         return {}
 
