@@ -115,7 +115,7 @@ class GeckoTerminalProvider:
             relationships = item.get("relationships") or {}
             tokens = {}
             for side in ("base_token", "quote_token"):
-                rel = relationships.get(side, {}).get("data") or {}
+                rel = (relationships.get(side) or {}).get("data") or {}
                 token_obj = included.get(rel.get("id"), {})
                 token_attrs = token_obj.get("attributes") or {}
                 token_address = (attrs.get(side + "_address") or token_attrs.get("address") or
