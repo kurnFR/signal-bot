@@ -106,15 +106,28 @@ class GeckoTerminalProvider:
     @staticmethod
     def _pools_from(payload):
         pools = []
+        included = {item.get("id"): item for item in (payload or {}).get("included", []) or [] if item.get("id")}
         for item in (payload or {}).get("data", []) or []:
             attrs = item.get("attributes") or {}
             address = attrs.get("address")
             if not address:
                 continue
+            relationships = item.get("relationships") or {}
+            tokens = {}
+            for side in ("base_token", "quote_token"):
+                rel = relationships.get(side, {}).get("data") or {}
+                token_obj = included.get(rel.get("id"), {})
+                token_attrs = token_obj.get("attributes") or {}
+                token_address = (attrs.get(side + "_address") or token_attrs.get("address") or
+                                 (str(rel.get("id", "")).split("_", 1)[1] if "_" in str(rel.get("id", "")) else None))
+                tokens[side + "_address"] = str(token_address) if token_address else None
+                tokens[side + "_symbol"] = token_attrs.get("symbol") or attrs.get(side + "_symbol")
             vol = _to_float(((attrs.get("volume_usd") or {}).get("h24")))
-            pools.append({"address": address, "name": attrs.get("name") or address, "volume_24h_usd": vol or 0.0})
+            pools.append({
+                "address": address, "name": attrs.get("name") or address,
+                "volume_24h_usd": vol or 0.0, **tokens,
+            })
         return pools
-
     def hot_pools(self, network, limit):
         """Trending pools first (early-detection bias), then top pools, de-duplicated."""
         seen, result = set(), []
