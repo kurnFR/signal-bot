@@ -442,7 +442,7 @@ const App = {
         set("wt-setting-delay", s.api_delay_seconds);
         set("wt-setting-retention", s.retention_days);
         set("wt-setting-token-mode", s.token_mode || "all");
-        set("wt-setting-token-addresses", (s.token_addresses || []).join("\\n"));
+        set("wt-setting-token-addresses", (s.token_addresses || []).join("\n"));
         document.querySelectorAll(".wt-setting-network").forEach(el => { el.checked = (s.networks || []).includes(el.value); });
         const status = document.getElementById("wt-settings-status");
         if (status) status.innerText = `Saved settings loaded · networks: ${(s.networks || []).join(", ")}`;
