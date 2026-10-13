@@ -52,11 +52,12 @@ def _check_chain(chain: Optional[str]) -> Optional[str]:
 
 @router.get("/meta")
 def wallets_meta():
+    settings = store.get_settings()
     return {
         "periods_hours": config.WALLET_TRACKER_PERIODS_HOURS,
         "chains": {k: v["label"] for k, v in CHAINS.items()},
-        "min_net_usd": config.WALLET_TRACKER_MIN_NET_USD,
-        "auto_track_net_usd": config.WALLET_TRACKER_AUTO_TRACK_NET_USD,
+        "min_net_usd": settings["min_net_usd"],
+        "auto_track_net_usd": settings["auto_track_net_usd"],
     }
 
 
