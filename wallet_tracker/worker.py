@@ -88,7 +88,11 @@ def dispatch_telegram_alerts(notifier=None):
         )
         return 0
     settings = store.get_settings()
-    queued = store.queue_new_wallet_alerts(settings["min_trade_usd"], max_age_minutes=30)
+    cooldown_minutes = max(1, int(config.WALLET_TRACKER_ALERT_COOLDOWN_MINUTES))
+    queued = store.queue_new_wallet_alerts(
+        settings["min_trade_usd"], max_age_minutes=30,
+        cooldown_minutes=cooldown_minutes,
+    )
     if queued:
         logger.info("queued %d followed-wallet Telegram alert(s)", queued)
     sent = 0
@@ -180,6 +184,7 @@ def run_cycle(provider):
                     break
     candidates = recompute(settings=settings)
     store.prune_swaps(settings["retention_days"])
+    store.prune_wallet_alerts(config.WALLET_TRACKER_ALERT_RETENTION_DAYS)
     elapsed = time.monotonic() - started
     store.set_status(pools_scanned, swaps_new, candidates, elapsed, "; ".join(errors[:3]) or None)
     logger.info("cycle done: pools=%d new_swaps=%d candidates=%d (%.1fs)",
