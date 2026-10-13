@@ -1518,6 +1518,43 @@
                         <input type="number" id="wt-minnet" min="0" step="10000" value="100000" onchange="App.fetchWalletData()" class="cfg-input"></label>
                 </div>
 
+                <!-- Scanner settings are persisted server-side and reloaded by the worker each cycle. -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-cyan-900/60 space-y-4">
+                    <div class="flex items-start justify-between gap-4">
+                        <div><h3 class="text-sm font-bold text-slate-100">Scanner Settings</h3>
+                        <p class="text-[10px] text-slate-400 mt-1">Changes persist in MariaDB and are picked up by the scanner automatically. Token selection matches the pool base-token contract/mint.</p></div>
+                        <button onclick="App.saveWalletSettings()" class="px-4 py-2 text-xs font-bold bg-cyan-700 hover:bg-cyan-600 text-white rounded-lg whitespace-nowrap">Save Settings</button>
+                    </div>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <label class="text-[11px] text-slate-400">Scanner enabled<select id="wt-setting-enabled" class="cfg-input"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+                        <label class="text-[11px] text-slate-400">Pools per network<input id="wt-setting-pools" type="number" min="1" max="100" class="cfg-input"></label>
+                        <label class="text-[11px] text-slate-400">Minimum swap USD<input id="wt-setting-mintrade" type="number" min="0" step="100" class="cfg-input"></label>
+                        <label class="text-[11px] text-slate-400">Candidate net USD threshold<input id="wt-setting-minnet" type="number" min="0" step="1000" class="cfg-input"></label>
+                        <label class="text-[11px] text-slate-400">Auto-monitor net USD threshold<input id="wt-setting-autotrack" type="number" min="0" step="1000" class="cfg-input"></label>
+                        <label class="text-[11px] text-slate-400">Scan interval (seconds)<input id="wt-setting-poll" type="number" min="15" max="3600" class="cfg-input"></label>
+                        <label class="text-[11px] text-slate-400">API delay (seconds)<input id="wt-setting-delay" type="number" min="0.5" max="60" step="0.1" class="cfg-input"></label>
+                        <label class="text-[11px] text-slate-400">Swap retention (days)<input id="wt-setting-retention" type="number" min="1" max="90" class="cfg-input"></label>
+                    </div>
+                    <div class="space-y-2"><div class="text-[11px] font-semibold text-slate-300">Networks to scan</div>
+                        <div class="flex flex-wrap gap-x-4 gap-y-2 text-[11px] text-slate-300">
+                            <label><input type="checkbox" class="wt-setting-network" value="eth"> Ethereum</label>
+                            <label><input type="checkbox" class="wt-setting-network" value="solana"> Solana</label>
+                            <label><input type="checkbox" class="wt-setting-network" value="base"> Base</label>
+                            <label><input type="checkbox" class="wt-setting-network" value="bsc"> BNB Chain</label>
+                            <label><input type="checkbox" class="wt-setting-network" value="arbitrum"> Arbitrum</label>
+                            <label><input type="checkbox" class="wt-setting-network" value="polygon_pos"> Polygon</label>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <label class="text-[11px] text-slate-400">Crypto scope<select id="wt-setting-token-mode" class="cfg-input"><option value="all">All discovered tokens</option><option value="selected">Only selected tokens</option></select></label>
+                        <label class="md:col-span-2 text-[11px] text-slate-400">Selected token contracts / mints (one per line: chain:address)
+                            <textarea id="wt-setting-token-addresses" rows="3" placeholder="eth:0x...&#10;solana:TokenMintAddress..." class="cfg-input"></textarea>
+                        </label>
+                    </div>
+                    <p class="text-[10px] text-amber-300">Selected-token mode currently matches the pool base-token address only. A symbol such as BTC or PEPE is not unique; use the exact contract/mint address. This scanner covers indexed DEX pools, not private CEX wallet trades.</p>
+                    <div id="wt-settings-status" class="text-[11px] text-slate-400">Loading saved settings...</div>
+                </div>
+
                 <!-- Token flow -->
                 <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
                     <div>
