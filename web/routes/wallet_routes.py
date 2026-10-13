@@ -122,11 +122,12 @@ def wallets_positions(
     chain: Optional[str] = Query(None),
     min_net_usd: float = Query(0, ge=0, le=1e12),
     limit: int = Query(100, ge=1, le=300),
+    only_tracked: bool = Query(False),
 ):
     _check_period(period_hours)
     _check_chain(chain)
     try:
-        return {"positions": store.get_positions(period_hours, side, chain, min_net_usd, limit)}
+        return {"positions": store.get_positions(period_hours, side, chain, min_net_usd, limit, only_tracked=only_tracked)}
     except Exception as e:
         logger.exception("wallets_positions failed")
         raise HTTPException(status_code=500, detail=f"Failed to load wallet positions: {e}")
@@ -148,10 +149,14 @@ def wallets_events(
     limit: int = Query(100, ge=1, le=300),
     since_id: int = Query(0, ge=0),
     chain: Optional[str] = Query(None),
+    wallet: Optional[str] = Query(None),
+    side: Optional[str] = Query(None, pattern="^(buy|sell|BUY|SELL)$"),
 ):
     _check_chain(chain)
+    if wallet and chain:
+        wallet = normalize_wallet(chain, wallet) or wallet
     try:
-        return {"events": store.get_events(limit=limit, since_id=since_id, chain=chain)}
+        return {"events": store.get_events(limit=limit, since_id=since_id, chain=chain, wallet=wallet, side=side)}
     except Exception as e:
         logger.exception("wallets_events failed")
         raise HTTPException(status_code=500, detail=f"Failed to load wallet events: {e}")
@@ -179,6 +184,41 @@ def wallets_track(req: TrackRequest):
     except Exception as e:
         logger.exception("wallets_track failed")
         raise HTTPException(status_code=500, detail=f"Failed to monitor wallet: {e}")
+
+
+@router.post("/tracked/toggle")
+def wallets_toggle_track(req: TrackRequest):
+    _check_chain(req.chain or "invalid")
+    wallet = normalize_wallet(req.chain, req.wallet)
+    if wallet is None:
+        raise HTTPException(status_code=400, detail=f"Not a valid {CHAINS.get(req.chain, {}).get('label', req.chain)} wallet address")
+    label = (req.label or "").strip() or None
+    try:
+        is_tracked = store.is_wallet_tracked(req.chain, wallet)
+        if is_tracked:
+            store.untrack_wallet_by_address(req.chain, wallet)
+            return {"status": "ok", "tracked": False, "chain": req.chain, "wallet": wallet}
+        else:
+            store.track_wallet(req.chain, wallet, label)
+            return {"status": "ok", "tracked": True, "chain": req.chain, "wallet": wallet}
+    except Exception as e:
+        logger.exception("wallets_toggle_track failed")
+        raise HTTPException(status_code=500, detail=f"Failed to toggle wallet monitoring: {e}")
+
+
+@router.delete("/tracked")
+def wallets_untrack_by_query(chain: str = Query(...), wallet: str = Query(...)):
+    _check_chain(chain)
+    normalized = normalize_wallet(chain, wallet) or wallet
+    try:
+        if not store.untrack_wallet_by_address(chain, normalized):
+            raise HTTPException(status_code=404, detail="Monitored wallet not found")
+        return {"status": "ok", "chain": chain, "wallet": normalized}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("wallets_untrack_by_query failed")
+        raise HTTPException(status_code=500, detail=f"Failed to stop monitoring wallet: {e}")
 
 
 @router.delete("/tracked/{tracked_id}")

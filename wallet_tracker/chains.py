@@ -5,12 +5,12 @@ _EVM_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 _SOL_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")  # base58, no 0 O I l
 
 CHAINS = {
-    "eth":         {"label": "Ethereum", "kind": "evm",    "explorer": "https://etherscan.io/address/"},
-    "base":        {"label": "Base",     "kind": "evm",    "explorer": "https://basescan.org/address/"},
-    "bsc":         {"label": "BNB Chain", "kind": "evm",   "explorer": "https://bscscan.com/address/"},
-    "arbitrum":    {"label": "Arbitrum", "kind": "evm",    "explorer": "https://arbiscan.io/address/"},
-    "polygon_pos": {"label": "Polygon",  "kind": "evm",    "explorer": "https://polygonscan.com/address/"},
-    "solana":      {"label": "Solana",   "kind": "solana", "explorer": "https://solscan.io/account/"},
+    "eth":         {"label": "Ethereum", "kind": "evm",    "explorer": "https://etherscan.io/address/", "tx_explorer": "https://etherscan.io/tx/"},
+    "base":        {"label": "Base",     "kind": "evm",    "explorer": "https://basescan.org/address/", "tx_explorer": "https://basescan.org/tx/"},
+    "bsc":         {"label": "BNB Chain", "kind": "evm",   "explorer": "https://bscscan.com/address/",  "tx_explorer": "https://bscscan.com/tx/"},
+    "arbitrum":    {"label": "Arbitrum", "kind": "evm",    "explorer": "https://arbiscan.io/address/",  "tx_explorer": "https://arbiscan.io/tx/"},
+    "polygon_pos": {"label": "Polygon",  "kind": "evm",    "explorer": "https://polygonscan.com/address/", "tx_explorer": "https://polygonscan.com/tx/"},
+    "solana":      {"label": "Solana",   "kind": "solana", "explorer": "https://solscan.io/account/",   "tx_explorer": "https://solscan.io/tx/"},
 }
 
 
@@ -36,3 +36,11 @@ def explorer_url(chain: str, wallet: str):
     if not meta or normalize_wallet(chain, wallet) is None:
         return None
     return meta["explorer"] + wallet
+
+
+def tx_url(chain: str, tx_hash: str):
+    meta = CHAINS.get(chain)
+    if not meta or not tx_hash or not isinstance(tx_hash, str):
+        return None
+    h = tx_hash.strip()
+    return meta.get("tx_explorer", "") + h

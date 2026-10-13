@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from db.db import get_pool
-from wallet_tracker.chains import CHAINS, explorer_url
+from wallet_tracker.chains import CHAINS, explorer_url, tx_url
 
 logger = logging.getLogger("wallet_tracker.store")
 
@@ -25,8 +25,11 @@ def _clean(row, wallet_chain_keys=True):
             row[k] = float(v)
         elif isinstance(v, datetime):
             row[k] = v.isoformat(sep=" ")
-    if wallet_chain_keys and "chain" in row and "wallet" in row:
-        row["explorer_url"] = explorer_url(row["chain"], row["wallet"])
+    if wallet_chain_keys and "chain" in row:
+        if "wallet" in row and row.get("wallet"):
+            row["explorer_url"] = explorer_url(row["chain"], row["wallet"])
+        if "tx_hash" in row and row.get("tx_hash"):
+            row["tx_url"] = tx_url(row["chain"], row["tx_hash"])
         row["chain_label"] = CHAINS.get(row["chain"], {}).get("label", row["chain"])
     return row
 
@@ -257,7 +260,7 @@ def save_settings(settings):
 
 
 # --------------------------------------------------------------- API reads
-def get_positions(period_hours, side=None, chain=None, min_net_usd=0.0, limit=100):
+def get_positions(period_hours, side=None, chain=None, min_net_usd=0.0, limit=100, only_tracked=False):
     where = ["p.period_hours = %s", "ABS(p.net_usd) >= %s"]
     args = [period_hours, float(min_net_usd)]
     if side in ("BUY", "SELL"):
@@ -266,9 +269,12 @@ def get_positions(period_hours, side=None, chain=None, min_net_usd=0.0, limit=10
     if chain:
         where.append("p.chain = %s")
         args.append(chain)
+    if only_tracked:
+        where.append("t.id IS NOT NULL AND t.status = 'ACTIVE'")
     args.append(int(limit))
     sql = (
-        "SELECT p.*, (t.id IS NOT NULL AND t.status = 'ACTIVE') AS is_tracked "
+        "SELECT p.*, t.id AS tracked_id, t.label AS tracked_label, "
+        "(t.id IS NOT NULL AND t.status = 'ACTIVE') AS is_tracked "
         "FROM wallet_positions p "
         "LEFT JOIN tracked_wallets t ON t.chain = p.chain AND t.wallet = p.wallet "
         "WHERE " + " AND ".join(where) + " "
@@ -299,13 +305,15 @@ def get_all_positions_for_period(period_hours):
         conn.close()
 
 
-def get_events(limit=100, since_id=0, chain=None, wallet=None):
+def get_events(limit=100, since_id=0, chain=None, wallet=None, side=None):
     """Latest swaps by ACTIVE monitored wallets, newest first."""
     where, args = ["t.status = 'ACTIVE'", "s.id > %s"], [int(since_id)]
     if chain:
         where.append("s.chain = %s"); args.append(chain)
     if wallet:
         where.append("s.wallet = %s"); args.append(wallet)
+    if side and side.lower() in ("buy", "sell"):
+        where.append("s.side = %s"); args.append(side.lower())
     args.append(int(limit))
     conn = get_pool().get_connection()
     try:
@@ -336,6 +344,21 @@ def get_tracked(status="ACTIVE"):
         conn.close()
 
 
+def is_wallet_tracked(chain, wallet):
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT id FROM tracked_wallets WHERE chain = %s AND wallet = %s AND status = 'ACTIVE'",
+            (chain, wallet),
+        )
+        row = cur.fetchone()
+        cur.close()
+        return bool(row)
+    finally:
+        conn.close()
+
+
 def track_wallet(chain, wallet, label=None):
     """Manual add / re-activate."""
     conn = get_pool().get_connection()
@@ -359,6 +382,20 @@ def untrack_wallet(tracked_id):
     try:
         cur = conn.cursor()
         cur.execute("UPDATE tracked_wallets SET status='IGNORED' WHERE id=%s", (int(tracked_id),))
+        conn.commit()
+        changed = cur.rowcount
+        cur.close()
+        return changed > 0
+    finally:
+        conn.close()
+
+
+def untrack_wallet_by_address(chain, wallet):
+    """Soft-remove by chain and wallet address."""
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE tracked_wallets SET status='IGNORED' WHERE chain=%s AND wallet=%s", (chain, wallet))
         conn.commit()
         changed = cur.rowcount
         cur.close()

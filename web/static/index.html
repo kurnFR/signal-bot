@@ -1504,6 +1504,11 @@
                             <option value="1">1 hour</option><option value="6">6 hours</option>
                             <option value="24" selected>24 hours</option><option value="168">7 days</option>
                         </select></label>
+                    <label class="text-[11px] text-slate-400">Smart Money Scope
+                        <select id="wt-tracked-only" onchange="App.fetchWalletData()" class="cfg-input">
+                            <option value="false">All Discovered Wallets</option>
+                            <option value="true">Checklisted Only (Smart Money)</option>
+                        </select></label>
                     <label class="text-[11px] text-slate-400">Side
                         <select id="wt-side" onchange="App.fetchWalletData()" class="cfg-input">
                             <option value="">Buy &amp; Sell</option><option value="BUY">Accumulating (Buy)</option><option value="SELL">Distributing (Sell)</option>
@@ -1573,15 +1578,15 @@
                 <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
                     <div class="flex items-center justify-between">
                         <div>
-                            <h3 class="text-sm font-bold text-slate-100">Candidate Wallets</h3>
-                            <p class="text-[10px] text-slate-500">Net position per wallet and pair. Avg prices are volume-weighted.</p>
+                            <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2"><i data-lucide="crosshair" class="w-4 h-4 text-cyan-400"></i> Smart Money Candidates &amp; Discovery</h3>
+                            <p class="text-[10px] text-slate-500">Net position per wallet and pair. Check or uncheck wallets to manage your Smart Money Checklist.</p>
                         </div>
-                        <span id="wt-candidate-count" class="text-[10px] text-slate-500">--</span>
+                        <span id="wt-candidate-count" class="text-[10px] text-slate-500 font-mono">--</span>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left custom-table">
-                            <thead><tr><th>Wallet</th><th>Pair</th><th>Side</th><th>Volume (tokens)</th><th>Total USD</th><th>Net USD</th><th>Avg Buy</th><th>Avg Sell</th><th>Trades</th><th>Period Range</th><th></th></tr></thead>
-                            <tbody id="wt-candidates-body"><tr><td colspan="11" class="text-center py-8 text-slate-500 text-xs">Loading...</td></tr></tbody>
+                            <thead><tr><th>Smart Money</th><th>Wallet</th><th>Crypto (Pair)</th><th>Bias / Side</th><th>Total Vol (Tokens)</th><th>Total Amount (USD)</th><th>Net USD</th><th>Avg Buy</th><th>Avg Sell</th><th>Trades</th><th>Period Range</th><th>Follow</th></tr></thead>
+                            <tbody id="wt-candidates-body"><tr><td colspan="12" class="text-center py-8 text-slate-500 text-xs">Loading...</td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -1589,24 +1594,40 @@
                 <!-- Live feed + monitored list -->
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div class="lg:col-span-2 p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
-                        <div class="flex items-center justify-between">
+                        <div class="flex flex-wrap items-center justify-between gap-3">
                             <div>
-                                <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Live Feed &mdash; Monitored Wallets</h3>
-                                <p class="text-[10px] text-slate-500">Latest buys and sells by wallets on your monitor list (refreshes every 15s).</p>
+                                <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Live Activity Stream &mdash; Follow Smart Money</h3>
+                                <p class="text-[10px] text-slate-500">Real-time buy/sell trades executed by your checklisted smart-money wallets: what crypto, at what price, total volume, and total amount.</p>
                             </div>
-                            <span id="wt-feed-count" class="text-[10px] text-slate-500">--</span>
+                            <div class="flex items-center gap-2">
+                                <label class="text-[10px] text-slate-400 flex items-center gap-1.5">
+                                    <span>Follow:</span>
+                                    <select id="wt-feed-wallet" onchange="App.fetchWalletEvents()" class="cfg-input text-xs py-1">
+                                        <option value="">All Checklisted Wallets</option>
+                                    </select>
+                                </label>
+                                <label class="text-[10px] text-slate-400 flex items-center gap-1.5">
+                                    <span>Side:</span>
+                                    <select id="wt-feed-side" onchange="App.fetchWalletEvents()" class="cfg-input text-xs py-1">
+                                        <option value="">All Sides</option>
+                                        <option value="buy">Buy Only</option>
+                                        <option value="sell">Sell Only</option>
+                                    </select>
+                                </label>
+                                <span id="wt-feed-count" class="text-[10px] text-cyan-400 font-mono px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-800">--</span>
+                            </div>
                         </div>
                         <div class="overflow-x-auto">
                             <table class="w-full text-left custom-table">
-                                <thead><tr><th>Time</th><th>Wallet</th><th>Pair</th><th>Side</th><th>USD</th><th>Price</th></tr></thead>
-                                <tbody id="wt-feed-body"><tr><td colspan="6" class="text-center py-8 text-slate-500 text-xs">Loading...</td></tr></tbody>
+                                <thead><tr><th>Time</th><th>Smart Money Wallet</th><th>Crypto (Pair)</th><th>Action</th><th>At What Price</th><th>Total Vol (Tokens)</th><th>Total Amount (USD)</th><th>Tx</th></tr></thead>
+                                <tbody id="wt-feed-body"><tr><td colspan="8" class="text-center py-8 text-slate-500 text-xs">Loading...</td></tr></tbody>
                             </table>
                         </div>
                     </div>
                     <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
                         <div>
-                            <h3 class="text-sm font-bold text-slate-100">Monitored Wallets</h3>
-                            <p class="text-[10px] text-slate-500">Big candidates are added automatically. You can add or remove wallets.</p>
+                            <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2"><i data-lucide="check-square" class="w-4 h-4 text-emerald-400"></i> Smart Money Checklist</h3>
+                            <p class="text-[10px] text-slate-500">Wallets currently marked as Smart Money. The live stream monitors their transactions in real time.</p>
                         </div>
                         <div class="space-y-2">
                             <div class="flex gap-2">
@@ -1615,7 +1636,7 @@
                             </div>
                             <div class="flex gap-2">
                                 <input type="text" id="wt-add-label" placeholder="Label (optional)" class="cfg-input" maxlength="80">
-                                <button onclick="App.walletAdd()" class="px-3 py-1.5 text-xs font-semibold bg-cyan-700 hover:bg-cyan-600 text-white rounded-lg whitespace-nowrap">Monitor</button>
+                                <button onclick="App.walletAdd()" class="px-3 py-1.5 text-xs font-semibold bg-cyan-700 hover:bg-cyan-600 text-white rounded-lg whitespace-nowrap">+ Add to Checklist</button>
                             </div>
                         </div>
                         <div id="wt-tracked-list" class="space-y-2 max-h-96 overflow-y-auto"><div class="text-slate-500 text-xs">Loading...</div></div>

@@ -481,26 +481,69 @@ const App = {
         if (!this._wtSettingsLoaded) { try { await this._wtLoadSettings(); } catch (e) { const el = document.getElementById("wt-settings-status"); if (el) el.innerText = `Settings unavailable: ${e.message || e}`; } }
         const val = (id, d) => (document.getElementById(id) || {}).value || d;
         const period = val("wt-period", "24");
+        const trackedOnly = val("wt-tracked-only", "false") === "true";
         const qs = new URLSearchParams({ period_hours: period, min_net_usd: val("wt-minnet", "0") || "0", limit: "100" });
+        if (trackedOnly) qs.set("only_tracked", "true");
         if (val("wt-side", "")) qs.set("side", val("wt-side", ""));
         if (val("wt-chain", "")) qs.set("chain", val("wt-chain", ""));
+
+        const feedWallet = (document.getElementById("wt-feed-wallet") || {}).value || "";
+        const feedSide = (document.getElementById("wt-feed-side") || {}).value || "";
+        const evQs = new URLSearchParams({ limit: "100" });
+        if (feedWallet) evQs.set("wallet", feedWallet);
+        if (feedSide) evQs.set("side", feedSide);
+
         try {
             const [status, pos, flow, ev, tracked] = await Promise.all([
                 this._wtGet("/api/wallets/status"),
                 this._wtGet(`/api/wallets/positions?${qs}`),
                 this._wtGet(`/api/wallets/token-flow?period_hours=${encodeURIComponent(period)}&limit=15`),
-                this._wtGet("/api/wallets/events?limit=100"),
+                this._wtGet(`/api/wallets/events?${evQs}`),
                 this._wtGet("/api/wallets/tracked"),
             ]);
             this._wtRenderStatus(status, tracked.tracked.length);
             this._wtRenderFlow(flow.flows);
             this._wtRenderCandidates(pos.positions);
+            this._wtUpdateFeedWalletSelect(tracked.tracked);
             this._wtRenderFeed(ev.events);
             this._wtRenderTracked(tracked.tracked);
         } catch (e) {
             if (!opts.silent) this.showToast(`Failed to load Wallet Tracking: ${e.message || e}`, "error");
         } finally {
             if (window.lucide) window.lucide.createIcons();
+        }
+    },
+
+    async fetchWalletEvents(opts = {}) {
+        const feedWallet = (document.getElementById("wt-feed-wallet") || {}).value || "";
+        const feedSide = (document.getElementById("wt-feed-side") || {}).value || "";
+        const evQs = new URLSearchParams({ limit: "100" });
+        if (feedWallet) evQs.set("wallet", feedWallet);
+        if (feedSide) evQs.set("side", feedSide);
+        try {
+            const ev = await this._wtGet(`/api/wallets/events?${evQs}`);
+            this._wtRenderFeed(ev.events);
+        } catch (e) {
+            if (!opts.silent) this.showToast(`Failed to load live events: ${e.message || e}`, "error");
+        } finally {
+            if (window.lucide) window.lucide.createIcons();
+        }
+    },
+
+    _wtUpdateFeedWalletSelect(list) {
+        const sel = document.getElementById("wt-feed-wallet");
+        if (!sel) return;
+        const currentVal = sel.value;
+        const options = [`<option value="">All Checklisted Wallets (${list.length})</option>`];
+        list.forEach(t => {
+            const short = t.wallet.length > 12 ? `${t.wallet.slice(0, 6)}…${t.wallet.slice(-4)}` : t.wallet;
+            const label = t.label ? `${t.label} ` : "";
+            const chain = t.chain_label || t.chain;
+            options.push(`<option value="${this._escapeHtml(t.wallet)}">${this._escapeHtml(label + short)} (${this._escapeHtml(chain)})</option>`);
+        });
+        sel.innerHTML = options.join("");
+        if (currentVal && list.some(t => t.wallet === currentVal)) {
+            sel.value = currentVal;
         }
     },
 
@@ -545,26 +588,28 @@ const App = {
         if (count) count.innerText = `${rows.length} wallets`;
         if (!tbody) return;
         if (!rows.length) {
-            tbody.innerHTML = `<tr><td colspan="11" class="text-center py-8 text-slate-500 text-xs">No candidate wallets for these filters. The scanner needs a few cycles to collect swaps; lower "Min Net USD" to see smaller wallets.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="12" class="text-center py-8 text-slate-500 text-xs">No candidate wallets for these filters. The scanner needs a few cycles to collect swaps; lower "Min Net USD" to see smaller wallets.</td></tr>`;
             return;
         }
         tbody.innerHTML = rows.map(r => {
             const vol = r.side === "BUY" ? r.buy_tokens : r.sell_tokens;
-            const action = r.is_tracked
-                ? `<span class="text-[10px] text-emerald-400">Monitoring</span>`
-                : `<button data-chain="${this._escapeHtml(r.chain)}" data-wallet="${this._escapeHtml(r.wallet)}" onclick="App.walletTrack(this)" class="px-2 py-1 text-[10px] font-semibold bg-cyan-800 hover:bg-cyan-700 text-white rounded">Monitor</button>`;
+            const checklistBadge = r.is_tracked
+                ? `<button data-chain="${this._escapeHtml(r.chain)}" data-wallet="${this._escapeHtml(r.wallet)}" onclick="App.walletToggleTrack(this)" class="px-2 py-1 text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-600 hover:bg-rose-950 hover:text-rose-300 hover:border-rose-700 rounded-md transition-all flex items-center gap-1 whitespace-nowrap" title="Click to uncheck / remove from Smart Money checklist"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>✓ Smart Money</button>`
+                : `<button data-chain="${this._escapeHtml(r.chain)}" data-wallet="${this._escapeHtml(r.wallet)}" onclick="App.walletToggleTrack(this)" class="px-2 py-1 text-[10px] font-semibold bg-slate-800 text-cyan-300 border border-slate-700 hover:bg-cyan-900/80 hover:border-cyan-500 rounded-md transition-all flex items-center gap-1 whitespace-nowrap" title="Click to checklist as Smart Money"><span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>+ Checklist</button>`;
+            const followBtn = `<button onclick="App.followWallet('${this._escapeHtml(r.wallet)}', '${this._escapeHtml(r.chain)}')" class="px-2 py-1 text-[10px] font-semibold bg-cyan-950 text-cyan-300 border border-cyan-800 hover:bg-cyan-900 rounded-md whitespace-nowrap flex items-center gap-1" title="Follow this wallet's live trades">Follow Live</button>`;
             return `<tr>
+                <td>${checklistBadge}</td>
                 <td>${this._wtWalletCell(r)}</td>
-                <td class="text-slate-200">${this._escapeHtml(r.pair)}</td>
+                <td class="text-slate-200 font-semibold">${this._escapeHtml(r.pair)}</td>
                 <td>${this._wtSideBadge(r.side)}</td>
-                <td class="font-mono">${this._wtNum(vol)}</td>
+                <td class="font-mono text-slate-200 font-bold">${this._wtNum(vol)}</td>
                 <td class="font-mono">${this._wtUsd(r.total_usd)}</td>
                 <td class="font-mono font-bold ${r.net_usd >= 0 ? "text-emerald-400" : "text-rose-400"}">${this._wtUsd(r.net_usd)}</td>
                 <td class="font-mono">${this._wtPrice(r.avg_buy_price)}</td>
                 <td class="font-mono">${this._wtPrice(r.avg_sell_price)}</td>
                 <td class="font-mono text-slate-400">${r.buy_count}B / ${r.sell_count}S</td>
-                <td class="whitespace-nowrap text-slate-500">${this._formatDateTime(r.first_trade_at)} → ${this._formatDateTime(r.last_trade_at)}</td>
-                <td>${action}</td>
+                <td class="whitespace-nowrap text-slate-500 text-[10px]">${this._formatDateTime(r.first_trade_at)} → ${this._formatDateTime(r.last_trade_at)}</td>
+                <td>${followBtn}</td>
             </tr>`;
         }).join("");
     },
@@ -575,35 +620,50 @@ const App = {
         if (count) count.innerText = `${events.length} events`;
         if (!tbody) return;
         if (!events.length) {
-            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-slate-500 text-xs">No activity from monitored wallets yet. Wallets are added automatically once they pass the auto-monitor threshold, or add one manually.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-slate-500 text-xs">No activity from monitored wallets for the current filter. Wallets are added automatically once they pass the auto-monitor threshold, or check any wallet above.</td></tr>`;
             return;
         }
         const prev = this._wtLastEventId || 0;
         const firstLoad = prev === 0;
         this._wtLastEventId = Math.max(prev, ...events.map(e => e.id));
-        tbody.innerHTML = events.map(e => `
+        tbody.innerHTML = events.map(e => {
+            const txLink = e.tx_url
+                ? `<a href="${this._escapeHtml(e.tx_url)}" target="_blank" rel="noopener noreferrer" class="font-mono text-[10px] text-cyan-400 hover:text-cyan-200 underline inline-flex items-center gap-1" title="View on explorer">${this._escapeHtml(String(e.tx_hash || "").slice(0, 8))}… <i data-lucide="external-link" class="w-3 h-3 inline"></i></a>`
+                : `<span class="font-mono text-[10px] text-slate-500">${this._escapeHtml(String(e.tx_hash || "").slice(0, 8))}…</span>`;
+            const isBuy = String(e.side).toLowerCase() === "buy";
+            return `
             <tr class="${!firstLoad && e.id > prev ? "bg-cyan-950/40" : ""}">
-                <td class="whitespace-nowrap text-slate-400">${this._formatDateTime(e.block_time)}</td>
+                <td class="whitespace-nowrap text-slate-400 text-[11px]">${this._formatDateTime(e.block_time)}</td>
                 <td>${this._wtWalletCell(e)}</td>
-                <td class="text-slate-200">${this._escapeHtml(e.pair)}</td>
+                <td class="text-slate-100 font-semibold">${this._escapeHtml(e.pair)}</td>
                 <td>${this._wtSideBadge(e.side)}</td>
-                <td class="font-mono">${this._wtUsd(e.usd_value)}</td>
-                <td class="font-mono text-slate-400">${this._wtPrice(e.price_usd)}</td>
-            </tr>`).join("");
+                <td class="font-mono text-cyan-300 font-semibold">${this._wtPrice(e.price_usd)}</td>
+                <td class="font-mono text-slate-200 font-bold">${this._wtNum(e.token_amount)}</td>
+                <td class="font-mono font-bold ${isBuy ? "text-emerald-400" : "text-rose-400"}">${this._wtUsd(e.usd_value)}</td>
+                <td>${txLink}</td>
+            </tr>`;
+        }).join("");
     },
 
     _wtRenderTracked(list) {
         const box = document.getElementById("wt-tracked-list");
         if (!box) return;
         if (!list.length) {
-            box.innerHTML = `<div class="text-slate-500 text-xs">No monitored wallets yet.</div>`;
+            box.innerHTML = `<div class="text-slate-500 text-xs">No monitored wallets yet. Check any wallet above or add manually.</div>`;
             return;
         }
         box.innerHTML = list.map(t => `
             <div class="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-800/50 border border-slate-800">
                 <div class="min-w-0 text-[11px]">${this._wtWalletCell(t)}
-                    <div class="text-[9px] text-slate-500">${this._escapeHtml(t.source)}${t.last_net_usd !== null && t.last_net_usd !== undefined ? ` · net ${this._wtUsd(t.last_net_usd)}` : ""}</div></div>
-                <button data-id="${Number(t.id)}" onclick="App.walletUntrack(this)" class="px-2 py-1 text-[10px] font-semibold bg-slate-700 hover:bg-rose-800 text-slate-200 rounded">Remove</button>
+                    <div class="text-[9px] text-slate-500 flex items-center gap-2 mt-0.5">
+                        <span class="px-1 py-0.2 rounded bg-slate-800 text-slate-400 border border-slate-700">${this._escapeHtml(t.source)}</span>
+                        ${t.last_net_usd !== null && t.last_net_usd !== undefined ? `<span class="font-mono font-semibold ${t.last_net_usd >= 0 ? 'text-emerald-400' : 'text-rose-400'}">net ${this._wtUsd(t.last_net_usd)}</span>` : ""}
+                    </div>
+                </div>
+                <div class="flex items-center gap-1.5 shrink-0">
+                    <button onclick="App.followWallet('${this._escapeHtml(t.wallet)}', '${this._escapeHtml(t.chain)}')" class="px-2 py-1 text-[10px] font-semibold bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800 rounded">Follow</button>
+                    <button data-id="${Number(t.id)}" onclick="App.walletUntrack(this)" class="px-2 py-1 text-[10px] font-semibold bg-slate-700 hover:bg-rose-800 text-slate-200 rounded">Uncheck</button>
+                </div>
             </div>`).join("");
     },
 
@@ -617,10 +677,37 @@ const App = {
         return res.json();
     },
 
+    async walletToggleTrack(btn) {
+        const chain = btn.dataset.chain;
+        const wallet = btn.dataset.wallet;
+        try {
+            const res = await this._wtSend("POST", "/api/wallets/tracked/toggle", { chain, wallet });
+            if (res.tracked) {
+                this.showToast(`Wallet ${wallet.slice(0, 8)}… checklisted as Smart Money!`, "success");
+            } else {
+                this.showToast(`Wallet ${wallet.slice(0, 8)}… removed from checklist`, "info");
+            }
+            this.fetchWalletData({ silent: true });
+        } catch (e) {
+            this.showToast(`Could not toggle smart money status: ${e.message || e}`, "error");
+        }
+    },
+
+    followWallet(wallet, chain) {
+        const sel = document.getElementById("wt-feed-wallet");
+        if (sel) {
+            sel.value = wallet;
+            this.fetchWalletEvents();
+        }
+        const feedSec = document.getElementById("wt-feed-body");
+        if (feedSec) feedSec.scrollIntoView({ behavior: "smooth", block: "center" });
+        this.showToast(`Following live trades for ${wallet.slice(0, 8)}…`, "info");
+    },
+
     async walletTrack(btn) {
         try {
             await this._wtSend("POST", "/api/wallets/tracked", { chain: btn.dataset.chain, wallet: btn.dataset.wallet });
-            this.showToast("Wallet added to monitor list", "success");
+            this.showToast("Wallet added to Smart Money checklist", "success");
             this.fetchWalletData();
         } catch (e) { this.showToast(`Could not monitor wallet: ${e.message || e}`, "error"); }
     },
@@ -634,7 +721,7 @@ const App = {
             await this._wtSend("POST", "/api/wallets/tracked", { chain, wallet, label: label || null });
             document.getElementById("wt-add-wallet").value = "";
             document.getElementById("wt-add-label").value = "";
-            this.showToast("Wallet added to monitor list", "success");
+            this.showToast("Wallet added to Smart Money checklist", "success");
             this.fetchWalletData();
         } catch (e) { this.showToast(`Could not monitor wallet: ${e.message || e}`, "error"); }
     },
@@ -642,6 +729,7 @@ const App = {
     async walletUntrack(btn) {
         try {
             await this._wtSend("DELETE", `/api/wallets/tracked/${encodeURIComponent(btn.dataset.id)}`);
+            this.showToast("Wallet removed from Smart Money checklist", "info");
             this.fetchWalletData();
         } catch (e) { this.showToast(`Could not remove wallet: ${e.message || e}`, "error"); }
     },

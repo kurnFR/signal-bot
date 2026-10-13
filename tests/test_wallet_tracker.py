@@ -171,7 +171,29 @@ class TestWalletRoutes(unittest.TestCase):
     def test_positions_ok(self, m):
         r = self.client.get("/api/wallets/positions?period_hours=24&side=BUY&min_net_usd=50000", headers=self.headers)
         self.assertEqual(r.status_code, 200)
-        m.assert_called_once_with(24, "BUY", None, 50000.0, 100)
+        m.assert_called_once_with(24, "BUY", None, 50000.0, 100, only_tracked=False)
+
+    @patch("web.routes.wallet_routes.store.get_positions", return_value=[{"wallet": W1}])
+    def test_positions_only_tracked(self, m):
+        r = self.client.get("/api/wallets/positions?period_hours=24&only_tracked=true", headers=self.headers)
+        self.assertEqual(r.status_code, 200)
+        m.assert_called_once_with(24, None, None, 0.0, 100, only_tracked=True)
+
+    @patch("web.routes.wallet_routes.store.is_wallet_tracked", return_value=False)
+    @patch("web.routes.wallet_routes.store.track_wallet")
+    def test_toggle_track_on(self, track_mock, is_tracked_mock):
+        r = self.client.post("/api/wallets/tracked/toggle", json={"chain": "eth", "wallet": W1}, headers=self.headers)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["tracked"])
+        track_mock.assert_called_once_with("eth", W1, None)
+
+    @patch("web.routes.wallet_routes.store.is_wallet_tracked", return_value=True)
+    @patch("web.routes.wallet_routes.store.untrack_wallet_by_address", return_value=True)
+    def test_toggle_track_off(self, untrack_mock, is_tracked_mock):
+        r = self.client.post("/api/wallets/tracked/toggle", json={"chain": "eth", "wallet": W1}, headers=self.headers)
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.json()["tracked"])
+        untrack_mock.assert_called_once_with("eth", W1)
 
     @patch("web.routes.wallet_routes.store.get_all_positions_for_period")
     def test_token_flow(self, m):
