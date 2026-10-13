@@ -5,7 +5,7 @@ untrack a wallet) require the trader or admin role -- see TRADER_OR_ADMIN_PREFIX
 in web/app.py.
 """
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -18,8 +18,21 @@ router = APIRouter(prefix="/api/wallets", tags=["wallet-tracking"])
 logger = logging.getLogger("web.wallet_routes")
 
 
-class TrackRequest(BaseModel):
-    chain: str
+class WalletSettingsRequest(BaseModel):
+    enabled: bool = True
+    networks: list[str] = Field(min_length=1, max_length=6)
+    pools_per_network: int = Field(8, ge=1, le=100)
+    min_trade_usd: float = Field(2000, ge=0, le=1e12)
+    min_net_usd: float = Field(100000, ge=0, le=1e12)
+    auto_track_net_usd: float = Field(250000, ge=0, le=1e12)
+    poll_interval_seconds: int = Field(120, ge=15, le=3600)
+    retention_days: int = Field(8, ge=1, le=90)
+    api_delay_seconds: float = Field(2.2, ge=0.5, le=60)
+    token_mode: Literal["all", "selected"] = "all"
+    token_addresses: list[str] = Field(default_factory=list, max_length=500)
+
+
+class TrackRequest(BaseModel):    chain: str
     wallet: str
     label: Optional[str] = Field(default=None, max_length=80)
 
@@ -46,12 +59,54 @@ def wallets_meta():
     }
 
 
+@router.get("/settings")
+def wallets_get_settings():
+    try:
+        return store.get_settings()
+    except Exception as e:
+        logger.exception("wallets_get_settings failed")
+        raise HTTPException(status_code=500, detail=f"Failed to load wallet tracker settings: {e}")
+
+
+@router.put("/settings")
+def wallets_save_settings(req: WalletSettingsRequest):
+    networks = list(dict.fromkeys(n.strip().lower() for n in req.networks))
+    invalid = [n for n in networks if not is_supported_chain(n)]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Unsupported network(s): {invalid}. Allowed: {sorted(CHAINS)}")
+    selectors = []
+    for raw in req.token_addresses:
+        parts = raw.strip().split(":", 1)
+        if len(parts) != 2:
+            raise HTTPException(status_code=400, detail=f"Token selector must be chain:address: {raw}")
+        chain, address = parts[0].lower(), parts[1].strip()
+        normalized = normalize_wallet(chain, address)
+        if normalized is None:
+            raise HTTPException(status_code=400, detail=f"Invalid token address for {chain}: {address}")
+        selector = f"{chain}:{normalized}"
+        if chain not in networks:
+            raise HTTPException(status_code=400, detail=f"Token selector chain {chain} is not enabled in networks")
+        if selector not in selectors:
+            selectors.append(selector)
+    if req.token_mode == "selected" and not selectors:
+        raise HTTPException(status_code=400, detail="Add at least one chain:token-address selector or choose All tokens")
+    settings = req.model_dump()
+    settings["networks"] = networks
+    settings["token_addresses"] = selectors
+    try:
+        store.save_settings(settings)
+        return store.get_settings()
+    except Exception as e:
+        logger.exception("wallets_save_settings failed")
+        raise HTTPException(status_code=500, detail=f"Failed to save wallet tracker settings: {e}")
+
 @router.get("/status")
 def wallets_status():
     try:
         status = store.get_status()
-        status["enabled"] = config.WALLET_TRACKER_ENABLED
-        status["networks"] = config.WALLET_TRACKER_NETWORKS
+        settings = store.get_settings()
+        status["enabled"] = settings["enabled"]
+        status["networks"] = settings["networks"]
         return status
     except Exception as e:
         logger.exception("wallets_status failed")
