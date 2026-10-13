@@ -85,6 +85,9 @@ def run_cycle(provider):
         except Exception as exc:
             logger.warning("%s: pool discovery failed: %s", network, exc)
             errors.append(f"{network}: {exc}")
+            if getattr(getattr(exc, "response", None), "status_code", None) == 429:
+                stop_scanning = True
+                break
             continue
         pool_requests = 0
         for pool in pools:
