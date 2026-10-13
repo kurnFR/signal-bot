@@ -1,202 +1,88 @@
-# Wallet Tracker – Code Review & Findings
+# Wallet Tracker — Follow-up Review
 
-**Repo:** `kurnFR/signal-bot` · **Reviewed:** `master` @ `6387ebf` (2026-10-13)
-**Scope:** everything under `wallet_tracker/`, `web/routes/wallet_routes.py`, the Wallet Tracking page (`index.html` / `app.js`), config, migration, tests and CI. That includes PR #10 (my original) and the later PRs #11–#14 (smart-money v2, follow-by-chain, quality gates, Telegram alerts).
-**Status:** review only. No code in the repo was changed.
+**Repository:** `kurnFR/signal-bot`  
+**Reviewed:** 2026-10-14  
+**Baseline:** `master` at `9b070f3` (PR #20 merge)  
+**Follow-up branch:** `test/wallet-tracker-mariadb-concurrency`, PR [#21](https://github.com/kurnFR/signal-bot/pull/21)  
+**Scope:** Wallet Tracker analyzer, store, worker, routes, UI/docs, tests and CI.
 
----
+## 1. Current status
 
-## 1. Summary
+The earlier review document had become stale: it listed several issues as open after fixes had already landed. This version separates fixes present on `master`, the additional fix proposed in PR #21, and risks that still need work or live validation.
 
-The feature has grown well beyond the first version: configurable scanner, quality-gated auto-follow, durable Telegram alert queue, adaptive rate-limit handling. The engineering foundations are good (idempotent ingest, atomic updates, retry state machine, input validation, 33 passing tests, full suite in CI).
+### Verification on PR #21
 
-The weaknesses are in the **signal quality and alert correctness**, which is exactly what matters for "early detection". Five problems were reproduced with real runs (not just read from code):
+- Full repository test workflow: **207 passed, 3 skipped, 15 warnings**.
+- Wallet Tracker MariaDB 10.11 integration job: **3 passed**.
+- Screener/unit workflow and RetailBot accounting regression workflow: passed on the reviewed PR head.
+- The first real concurrency run reproduced MariaDB error **1213 (deadlock)** in the pre-fix toggle implementation. PR #21 replaces that path with a per-wallet advisory lock plus a transaction; the follow-up integration run passed.
 
-| # | Problem | Impact |
+These results validate the CI test environment only. They do not establish production readiness or validate live GeckoTerminal behavior.
+
+## 2. Fixes verified in the current code
+
+| Area | Current behavior | Verification / limitation |
 |---|---|---|
-| H1 | Token Flow can say **ACCUMULATION while net flow is −$2.68M**, and one wallet is enough to trigger it | The headline early-detection output can point the wrong way |
-| H2 | Telegram sends **22-hour-old trades as if they were live** | False "live" alerts after startup, and whenever a pool newly enters the scan |
-| H3 | **Telegram bot token is written to the logs** when a send fails | Credential exposure in log files |
-| M1 | One rate-limited network **starves the others forever** | Solana/Base/BSC may never be scanned |
-| M3 | A wallet with **199 trades in 24h scores 85/100** and is auto-followed | Bots and market makers pollute the "smart money" list |
+| Token-flow direction (H1) | Requires a minimum wallet count and keeps the headline signal `MIXED` when the wallet majority conflicts with aggregate net USD. | Regression tests cover conflicting flow and one-wallet cases. |
+| Freshness of Telegram alerts (H2) | Queueing filters old swaps rather than presenting provider backfill as live activity. | Covered by tests; live-provider timing remains unverified. |
+| Telegram credential redaction (H3) | Send failures avoid logging the full bot-token URL. | Code/tests reviewed; rotate any token previously exposed in shared logs. |
+| Network rate limits (M1) | Network rotation and per-network cooldown reduce the chance that one 429 starves all networks. | Unit/mock coverage; provider behavior still needs live observation. |
+| Follow quality (M2/M3) | Candidate qualification uses pool/token-specific flows and cautiously rejects high-frequency churn when directionality is weak. | This is a heuristic, not reliable wallet/bot identification. |
+| Stablecoin pools (M4) | Pools whose **base token** is a stablecoin are excluded; volatile-token pools quoted in USDT/USDC remain eligible. | Matches the requested trading scope. Live provider `kind` semantics are not independently verified. |
+| Auto-follow lifecycle (M7) | Inactive auto-followed wallets can be marked `INACTIVE`; manual and user-ignored choices are preserved. | Code and unit tests reviewed. |
+| Alert noise / retention (M8, L5, L6) | Per-wallet cooldown, pending-alert suppression, terminal-row retention and bounded Telegram 429 retry handling are present. | Pending retries are preserved during pruning. |
+| Settings validation (M9) | Thresholds and related settings are validated, including inconsistent threshold combinations. | Covered by route tests. |
+| USD/token presentation (M10) | UI distinguishes net token quantity from net cash flow and describes activity as polled/scanned-pool data rather than a truly live feed. | UI wording does not expand the underlying data coverage. |
+| API errors (L9) | Client responses are generic while server logs retain diagnostic detail. | Route tests cover settings error redaction. |
+| Timestamps (L11) | Naive database datetimes are serialized explicitly as UTC ISO-8601 strings ending in `Z`; aware values are normalized to UTC. | Serialization tests pass; database values are not shifted. |
+| Environment/docs (L10) | `.env.example` and README defaults/explanations were aligned with the current configuration. | Dashboard-persisted settings can override environment defaults. |
 
-The biggest gap relative to your goal is conceptual: the system measures **how much money moved**, not **whether the wallet is actually smart** (no profit/track-record scoring). See H4 and §5.
+## 3. Atomic Follow/Unfollow — important PR #21 change
 
----
+The prior atomic-toggle implementation in `master` used `INSERT IGNORE` before locking the existing row. The mocked tests passed, but the real MariaDB concurrency test reproduced a deadlock when two requests toggled the same existing wallet.
 
-## 2. How this was verified
+PR #21 changes the operation to:
 
-| Method | Result |
-|---|---|
-| Read all changed files in PRs #11–#14 | done |
-| `pytest tests/test_wallet_tracker.py tests/test_wallet_telegram.py` | 33 passed |
-| Logic probes against `analyzer.py` (scripts with crafted swaps) | reproduced H1, M2, M3 |
-| Real MariaDB 10.11 run of `store.queue_new_wallet_alerts` / `get_pending_wallet_alerts` | reproduced H2 |
-| Mock-provider run of `worker.run_cycle` with a 429 on the first network | reproduced M1 |
-| Fake-token send failure with log capture | reproduced H3 |
-| CI config check | `test.yml` runs the whole suite, so Telegram tests are covered |
+1. Acquire a MariaDB advisory lock derived from the chain and wallet.
+2. Start a transaction and read the row with `SELECT ... FOR UPDATE`.
+3. Insert a missing wallet or toggle the existing status.
+4. Commit, then release the advisory lock.
 
-**Not verified:** behaviour against the live GeckoTerminal API (my environment cannot reach it), anything in a browser (layout, Safari date parsing), and the actual `kind` semantics for pools where a stablecoin is the base token (see M4).
+The lock also serializes the first-time toggle when the row does not exist yet. Integration coverage now checks concurrent toggles of an existing wallet, concurrent first-time toggles, and rollback after a forced update failure. All three pass against MariaDB 10.11 in CI.
 
----
+**Rollout note:** this change is on PR #21 and is **not yet part of `master` unless the PR is merged**. It has not been deployed to CMS. Do not treat the pre-PR #21 `master` implementation as having passed real concurrency testing.
 
-## 3. What is done well
+## 4. Remaining risks / work
 
-- **Idempotent ingest** (`INSERT IGNORE` on a unique key) – re-reading the same trades is safe.
-- **Atomic position refresh** per period (single transaction), no half-written tables visible to the UI.
-- **Durable alert queue**: cursor table, `PENDING/SENT/FAILED/CANCELLED`, bounded exponential retry, cancels alerts for wallets that were un-followed.
-- **Rate-limit handling**: adaptive delay, `Retry-After` honoured, stops the cycle after a confirmed 429, slow recovery of pacing.
-- **Telegram messages are HTML-escaped**, links only emitted for `https://` URLs, sends are throttled.
-- **Validation**: Pydantic ranges on settings, chain/address validation, token-selector validation, mutations restricted to trader/admin.
-- **Transparent scoring**: the quality score is documented as a ranking, not a probability. Zero-threshold division is guarded.
-- Wallet columns use a binary collation, so Solana addresses are never case-folded together.
+### Signal quality and coverage
 
----
+- **Large flow is not proof of skill (H4).** The system ranks observed flow; it does not yet prove a wallet is profitable or predictive. There is no validated wallet PnL/track-record score or forward-return backtest for accumulation/distribution alerts.
+- **Absolute thresholds may miss early opportunities (M5).** Current USD floors are not yet consistently calibrated to pool liquidity or volume.
+- **Pool polling is not a wallet-wide live feed (M6).** A wallet is visible only when its trades occur in pools the scanner selected. Polling interval and provider limits constrain latency and coverage.
+- **Bot/market-maker filtering remains heuristic (M3).** Churn filtering helps but does not identify every bot, router, exchange wallet or losing whale.
+- **Provider semantics remain partly unverified.** Stablecoin-base filtering is implemented, but live transaction-level validation of provider buy/sell semantics has not been performed.
 
-## 4. Findings
+### Test coverage still missing
 
-Severity: **High** = wrong results or credential exposure; **Medium** = significantly weakens the goal or reliability; **Low** = hygiene / defence in depth.
+PR #21 adds a real MariaDB test for the atomic toggle only. Other database-backed paths—such as alert-queue cursor behavior, stale-swap suppression, retention, worker rate-limit handling, and settings persistence—still rely partly or wholly on mocked tests. Expand integration coverage selectively where SQL transaction or locking behavior is important.
 
-### High
+### Hygiene to revisit separately
 
-#### H1. Token Flow signal contradicts the money flow – `analyzer.token_flow`
-The signal is chosen only by wallet count (`a > d`), ignoring USD. Reproduced:
+- Re-review the older UI hygiene findings (inline JavaScript event construction, polling cost and duplicated event-query logic) against the current frontend before claiming they are fixed.
+- Remove obsolete local/remote feature branches only after checking that they are merged and no longer needed.
 
-```
-2 wallets buy $160k each, 1 wallet sells $3.0M  →
-signal=ACCUMULATION  accumulating=2 distributing=1  buy=$320k sell=$3.0M  net=-$2,680,000
-```
-A single accumulating wallet (and no one else) is also labelled `ACCUMULATION`.
-My original version required the net-USD sign to agree with the majority; that check was dropped in the later refactor.
+## 5. Production-validation boundary
 
-**Fix:** require both (a) majority of wallets and (b) net USD in the same direction, plus a minimum wallet count (e.g. ≥ 2–3); otherwise `MIXED`. Consider weighting by USD instead of counting wallets equally.
+Not performed as part of this review:
 
-#### H2. Stale trades are sent as live Telegram alerts – `store.queue_new_wallet_alerts`
-The alert cursor works on `wallet_swaps.id`, not trade time. The provider returns up to 24h of history per pool, and those rows get brand-new IDs the first time a pool is scanned (every restart, and every time trending pools change). Reproduced on a real DB:
+- No CMS database was used by CI or modified.
+- No CMS deployment or Wallet Tracker process restart was performed.
+- No live GeckoTerminal API validation or end-to-end Telegram delivery test was run.
+- CI passing is not a claim that the strategy has predictive trading edge.
 
-```
-would send: buy  80000 | trade time: 2026-10-12 11:57 | age: 22.0h
-would send: sell 60000 | trade time: 2026-10-12 18:57 | age: 15.0h
-would send: buy  90000 | trade time: 2026-10-13 09:54 | age: 0.1h   <- the only genuinely fresh one
-```
-**Fix:** add `AND s.block_time >= UTC_TIMESTAMP() - INTERVAL %s MINUTE` to the queue query (configurable, e.g. 15–30 min given a 5-minute poll), and mark older swaps as skipped so they are not retried. Also show "trade age" in the message.
+## 6. Recommended next steps
 
-#### H3. Telegram bot token leaks into logs – `telegram.py` `send()`
-`logger.exception(...)` prints the exception text, and `requests` includes the full URL, which contains the token:
-
-```
-requests.exceptions.HTTPError: 401 Client Error: None for url: https://api.telegram.org/bot123456789:AAF...xyz/sendMessage
-```
-Connection errors do the same (`Max retries exceeded with url: /bot<TOKEN>/sendMessage`).
-**Fix:** catch the exception and log only `type(exc).__name__` and the HTTP status; or redact with a regex such as `re.sub(r"/bot[^/]+/", "/bot<redacted>/", msg)`. **If any current logs were pasted or shared, rotate the Telegram token.**
-
-#### H4. "Smart money" is measured by size, not skill
-Candidates and follow decisions use net USD, volume, trade count and directionality. Nothing measures whether the wallet **makes money**. The UI labels followed wallets "✓ Smart Money", which implies skill. A large wallet can be a loser, a fund treasury, a market maker or an exchange. Following such wallets produces signals with unknown (possibly zero) predictive value.
-**Fix:** see §5 (unrealised/realised PnL per wallet, "early-ness", and a forward-return backtest of the signal). Until then, consider renaming the label to "Large Flow" so it does not overpromise.
-
-### Medium
-
-#### M1. One rate-limited network starves the others – `worker.run_cycle`
-Networks are always scanned in the same order and the cycle stops at the first 429. Reproduced with `eth` returning 429: over 3 cycles only `['eth','eth','eth']` was queried; Solana/Base/BSC were never scanned.
-**Fix:** rotate the starting network each cycle, keep a per-network cooldown instead of aborting everything, and show per-network "last scanned" in the status panel so gaps are visible.
-
-#### M2. Follow decision nets USD across different tokens – `aggregate_wallet_flows`
-Rotation is treated as a dump. Reproduced: a wallet sells $700k of token A and buys $170k of token B → net −$530k, score 60.9, **auto-followed as a big mover**.
-**Fix:** decide per `(chain, base token)`: net flow in that token, with the thresholds applied per token.
-
-#### M3. Bots and market makers are not filtered
-Reproduced: 140 buys + 59 sells of $30k each (199 trades in 24h) → score **85.2**, auto-followed. `tx_from_address` is also frequently a router, relayer or MEV bot. Nothing checks for contracts, known routers/CEX wallets, or bot-like cadence.
-**Fix (cheapest first):** cap trades/hour or trades/24h; measure round-trip ratio and median trade interval; penalise the score; add a small deny-list of router/CEX addresses; later, check whether the address is a contract (EVM `eth_getCode`).
-
-#### M4. No stablecoin / wrapped-native handling (unverified, potentially inverting)
-The code assumes `kind` is relative to the pool's **base** token (this assumption came from my original provider and was never confirmed against a live trade). If a pool's base is a stablecoin or WETH/WSOL, then "buy" means buying the stable/native token, which can invert the meaning, and the top-volume pool list is dominated by such majors.
-**Fix:** verify the semantics against one known transaction on a block explorer, then skip pools whose base token is a stablecoin and treat wrapped-native/majors in a separate lens. The pool dict already carries `base_token_address`.
-
-#### M5. Absolute USD thresholds work against "early detection"
-Defaults: trade ≥ $10k, net ≥ $150k, auto-follow ≥ $500k, and pools below `max(10×min_trade, $100k)` 24h volume are skipped. Early-stage tokens rarely have that much flow, so the system mostly sees large caps, where "smart money" signals are weakest.
-**Fix:** make "huge" relative: net flow as a % of pool liquidity (`reserve_in_usd`) or of 24h pool volume, with absolute floors only as noise guards.
-
-#### M6. "Follow Live" is not live, and only sees scanned pools
-Data is polled every 5 minutes, only from the pools the scanner picked, and alerts are dispatched at the end of each cycle. A followed wallet's trades in any other pool are invisible. For a small, bounded set of followed wallets, a per-wallet source (e.g. Helius webhooks for Solana, Alchemy/Moralis address activity for EVM) would give true low-latency feeds within free tiers.
-
-#### M7. Auto-followed wallets are never demoted
-Once flagged, a wallet stays `ACTIVE` until a human clicks Uncheck. There is no TTL, no cap and no ranking, so the list and the alert volume only grow.
-**Fix:** expire auto-followed wallets that no longer meet the criteria for N days; cap the active auto-follow count (keep the top-K by score).
-
-#### M8. Alert noise controls are missing
-Every new swap ≥ `min_trade_usd` from any followed wallet becomes an alert. Bots would flood the chat (Telegram group limit is roughly 20 messages/min). **Fix:** per-wallet cooldown, a separate alert threshold (higher than the scan threshold), and a digest mode.
-
-#### M9. Settings validation is too permissive – `WalletSettingsRequest`
-`min_net_usd=0` or `auto_track_net_usd=0` is accepted (follow everyone); `pools_per_network=100` with `api_delay_seconds=0.5` implies ~120 requests/min against a free limit of ~30; no check that `auto_track_net_usd ≥ min_net_usd`.
-**Fix:** lower bounds, a cross-field validator, and a computed "estimated requests/minute" warning in the UI.
-
-#### M10. Position `side` can disagree with the displayed net USD
-By design (and tested) `side` follows net **tokens**. A wallet that buys cheap and sells high can show a green BUY badge with a red negative net USD (reproduced: `side=BUY, net_usd=-200000, net_tokens=+500000`). It is defensible but confusing without explanation.
-**Fix:** show a "Net tokens" column and rename the USD column "Net cash flow", or add a tooltip.
-
-### Low
-
-| # | Finding | Fix |
-|---|---|---|
-| L1 | `followWallet('${escapeHtml(wallet)}', …)` builds JS inside an inline `onclick`. HTML-escaping does not protect a JS string context. Not exploitable today (values are validated), but fragile. The earlier code used `data-*` attributes safely. | Use `data-*` + `this.dataset` again |
-| L2 | The page refreshes all 5 endpoints every 15s while the scanner updates every 5 min | Poll only `events` (+ status) at 15s; the heavy tables at 60s |
-| L3 | Event query building is duplicated in `fetchWalletData` and `fetchWalletEvents`; the "new row" highlight compares IDs across different filters | Extract one helper; reset `_wtLastEventId` when filters change |
-| L4 | `store.py` starts with `import config` before the module docstring; missing blank line before `hot_pools`; `config_value` lazily imports a module already imported | Tidy |
-| L5 | `wallet_telegram_alerts` has no FK/cleanup: rows (and orphans after `prune_swaps`) grow forever | Prune `SENT/FAILED/CANCELLED` older than N days |
-| L6 | `Retry(status_forcelist=[429,5xx])` does not apply to POST (urllib3 default `allowed_methods`), so it is ineffective; retries effectively happen once per poll cycle | Handle `retry_after` from Telegram 429 explicitly |
-| L7 | "Telegram alerts paused" warning is logged every cycle | Log once |
-| L8 | `POST /tracked/toggle` is check-then-act (race on double-click) | Single atomic upsert with explicit target state |
-| L9 | API errors return `f"...{e}"`, leaking internal error text to clients (repo-wide pattern) | Generic message to client, details to log |
-| L10 | Settings now live in the DB and override env; `.env.example` still has old values (8 pools / $2k / $100k / $250k / 120s vs code 4 / $10k / $150k / $500k / 300s) and lacks `API_DELAY`; README does not mention settings panel, quality gate, follow-live or Telegram. (`.env.example` and README were my PR #10; later PRs did not update them.) | Update both |
-| L11 | Wallet timestamps are emitted as `YYYY-MM-DD HH:MM:SS`; JS appends `Z`. Works in Chrome, may show "Invalid Date" in Safari (unverified) | Emit ISO `T…Z` from `_clean` |
-| L12 | 26 branches, including `do-not-use`, `ignore2`, `tmp-ignore`, `x`, `master-check`, and merged feature branches | Delete merged/obsolete branches |
-| L13 | No tests for `run_cycle` (429 path), the DB queue SQL, `PUT /settings` role enforcement, or the H1 contradiction case. All DB code is mocked, so SQL regressions would not be caught | Add an integration test against a MariaDB service container in CI |
-
----
-
-## 5. How to get better results (improvement plan)
-
-### Quick wins (small, low risk)
-1. **H1** token-flow rule (USD sign + min wallet count).
-2. **H2** alert freshness window.
-3. **H3** log redaction.
-4. **M1** network rotation + per-network cooldown.
-5. **M9** settings cross-validation.
-6. **L10** refresh `.env.example` and README.
-
-### Signal quality (the main lever)
-7. **Per-token follow decisions** (M2) and **bot/router filtering** (M3).
-8. **Stablecoin / native-token pool handling** (M4), after confirming `kind` semantics on a known tx.
-9. **Liquidity-relative thresholds** (M5).
-10. **Wallet performance score (H4).** The data already exists in `wallet_swaps`:
-    - Unrealised PnL per wallet+token: `(latest pool price − avg buy price) / avg buy price`, using the newest swap price as the mark.
-    - Realised PnL via FIFO matching of buys and sells.
-    - **Early-ness**: how far price moved in the hours after the wallet's buys (did it buy before the move?).
-    - Follow only wallets whose recent calls were profitable, not just large.
-11. **Measure whether the signal works.** Record price at detection time and evaluate forward returns at +1h / +6h / +24h for every ACCUMULATION / DISTRIBUTION signal. A small `signal_outcomes` table plus a dashboard card tells you if "smart money accumulation" has any edge, and lets you tune thresholds on evidence instead of guesses. This is the single most valuable addition.
-
-### Coverage and "live" quality
-12. **Wallet-level feed for followed wallets** (M6) so they are visible in every pool, with seconds-level latency.
-13. **Alert policy** (M7, M8): TTL for auto-follow, cap, per-wallet cooldown, digest mode, separate alert threshold.
-
-### Engineering hygiene
-14. Integration test with a MariaDB service in CI (L13).
-15. Branch cleanup (L12), small UI/code tidy-ups (L1–L4).
-
----
-
-## 6. Honest notes on my own earlier work
-
-- The `kind`-relative-to-base-token comment in `providers.py` came from my memory of the API docs and was **not verified live**; M4 depends on it.
-- My original `.env.example` and README (PR #10) are now out of date (L10).
-- My original `token_flow` required net-USD agreement; the later refactor dropped it (H1). I should have added a test that pins that behaviour.
-- My own tests mocked the provider, so they could not catch the stale-trade backfill problem (H2) or starvation (M1).
-
----
-
-## 7. Suggested order of work
-
-1. H1 + H2 + H3 (one small PR, each with a regression test).
-2. M1 + M9 (reliability).
-3. M2 + M3 + M4 (signal quality), then H4 + signal-outcome tracking.
-4. M6 (true live feed) once the signal is shown to be useful.
+1. Review and merge PR #21 only after inspecting its diff and green checks; keep the production deployment separate.
+2. If approved, deploy using the existing CMS procedure and verify the running Wallet Tracker process and logs before/after.
+3. Add targeted database integration tests for alert queue/cursor and worker failure paths.
+4. Measure signal quality with wallet performance and forward-return outcomes before describing the ranking as profitable or predictive.
