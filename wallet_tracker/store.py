@@ -1,4 +1,5 @@
-import config\n"""MySQL persistence for wallet tracking. Uses the shared pool in db.db."""
+import config
+"""MySQL persistence for wallet tracking. Uses the shared pool in db.db."""
 import logging
 import os
 from datetime import datetime, timedelta, timezone
