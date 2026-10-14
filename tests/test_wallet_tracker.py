@@ -553,3 +553,37 @@ class TestWalletRoutes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class TestWalletTrackerSingleInstanceLock(unittest.TestCase):
+    def test_lock_acquisition_holds_connection_when_successful(self):
+        from unittest.mock import MagicMock
+        import run_wallet_tracker
+
+        connection = MagicMock()
+        connection.cursor.return_value.fetchone.return_value = (1,)
+        pool = MagicMock()
+        pool.get_connection.return_value = connection
+        with patch("run_wallet_tracker.get_pool", return_value=pool):
+            result = run_wallet_tracker.acquire_single_instance_lock()
+
+        self.assertIs(result, connection)
+        connection.close.assert_not_called()
+        connection.cursor.return_value.execute.assert_called_once_with(
+            "SELECT GET_LOCK(%s, 0)", ("signal_bot_wallet_tracker",)
+        )
+
+    def test_lock_contention_closes_connection_and_refuses_start(self):
+        from unittest.mock import MagicMock
+        import run_wallet_tracker
+
+        connection = MagicMock()
+        connection.cursor.return_value.fetchone.return_value = (0,)
+        pool = MagicMock()
+        pool.get_connection.return_value = connection
+        with patch("run_wallet_tracker.get_pool", return_value=pool):
+            result = run_wallet_tracker.acquire_single_instance_lock()
+
+        self.assertIsNone(result)
+        connection.close.assert_called_once()
