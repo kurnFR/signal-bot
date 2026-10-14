@@ -64,7 +64,7 @@ def recompute(now=None, settings=None):
     return candidates_total
 
 
-def _pool_matches_tokens(network, pool, settings):
+def _pool_matches_tokens(network, pool, settings, selected_tokens=None):
     # GeckoTerminal's buy/sell kind is relative to the base token. Exclude pools
     # whose base asset is a stablecoin, but keep normal volatile-token/stablecoin
     # quote pairs (e.g. ARK/USDT), which are relevant trading markets.
@@ -77,7 +77,9 @@ def _pool_matches_tokens(network, pool, settings):
         return False
     normalized = str(address) if network == "solana" else str(address).lower()
     selector = network + ":" + normalized
-    return selector in set(settings.get("token_addresses", []))
+    if selected_tokens is None:
+        selected_tokens = set(settings.get("token_addresses", []))
+    return selector in selected_tokens
 
 
 
@@ -147,6 +149,7 @@ def run_cycle(provider):
         _network_rotation_offset = (offset + 1) % len(networks)
 
     now_mono = time.monotonic()
+    selected_tokens = set(settings.get("token_addresses", []))
     for network in networks:
         if not is_supported_chain(network):
             errors.append(f"unsupported network '{network}'")
@@ -169,7 +172,7 @@ def run_cycle(provider):
         for pool in pools:
             if pool_requests >= settings["pools_per_network"]:
                 break
-            if not _pool_matches_tokens(network, pool, settings):
+            if not _pool_matches_tokens(network, pool, settings, selected_tokens):
                 continue
             volume_24h = float(pool.get("volume_24h_usd") or 0)
             if 0 < volume_24h < min_pool_volume:
