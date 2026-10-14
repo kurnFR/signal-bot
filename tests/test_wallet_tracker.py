@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 
 from wallet_tracker import analyzer, store, worker
 from wallet_tracker.chains import explorer_url, normalize_wallet
-from wallet_tracker.providers import (BirdeyeProvider, GeckoTerminalProvider,\n                                      parse_birdeye_trade, parse_trade)
+from wallet_tracker.providers import (BirdeyeProvider, GeckoTerminalProvider,
+                                      parse_birdeye_trade, parse_trade)
 from wallet_tracker.stablecoins import is_stablecoin_base_pool
 
 NOW = datetime(2026, 10, 13, 12, 0, 0)
