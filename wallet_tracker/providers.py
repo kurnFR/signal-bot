@@ -181,7 +181,7 @@ class GeckoTerminalProvider:
         cache_key = (str(network), int(limit))
         now = time.monotonic()
         cached = self._pool_cache.get(cache_key)
-        if cached and now - cached[0] < self.pool_cache_ttl:
+        if cached and cached[1] and now - cached[0] < self.pool_cache_ttl:
             return [dict(pool) for pool in cached[1]]
 
         seen, result = set(), []
@@ -196,7 +196,7 @@ class GeckoTerminalProvider:
                 if getattr(getattr(exc, "response", None), "status_code", None) == 429:
                     # Preserve the last known pool universe during a provider
                     # outage; the worker can still scan it with the fallback feed.
-                    if cached:
+                    if cached and cached[1]:
                         logger.warning(
                             "GeckoTerminal discovery rate-limited; using %d cached pools for %s",
                             len(cached[1]), network,
@@ -211,7 +211,12 @@ class GeckoTerminalProvider:
                     result.append(pool)
                 if len(result) >= limit:
                     break
-        self._pool_cache[cache_key] = (time.monotonic(), [dict(pool) for pool in result])
+        if result:
+            self._pool_cache[cache_key] = (time.monotonic(), [dict(pool) for pool in result])
+        elif cached and cached[1]:
+            logger.warning("GeckoTerminal discovery returned no pools; keeping %d cached pools for %s",
+                           len(cached[1]), network)
+            return [dict(pool) for pool in cached[1]]
         return result
 
     def pool_trades(self, network, pool, min_trade_usd):
