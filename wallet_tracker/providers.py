@@ -318,7 +318,8 @@ def parse_birdeye_trade(chain, pool, item):
             from_token["address"].lower() == str(base_address).lower()):
         selected = from_token
     else:
-        selected = base if base else (to_token if side == "buy" else from_token)
+        # Never guess which token amount represents the pool's base asset.
+        selected = base if base.get("address") and base.get("address").lower() == str(base_address or "").lower() else {}
     tokens = selected.get("amount")
     price = selected.get("price")
     if not tokens or tokens <= 0:
