@@ -443,7 +443,7 @@ class TestWorkerProviderFailover(unittest.TestCase):
             stack.enter_context(patch.object(worker.store, "prune_swaps"))
             stack.enter_context(patch.object(worker.store, "prune_wallet_alerts"))
             stack.enter_context(patch.object(worker.store, "set_status"))
-            stack.enter_context(patch.object(worker.store, "insert_swaps", return_value=1))
+            insert_swaps = stack.enter_context(patch.object(worker.store, "insert_swaps", return_value=1))
             stack.enter_context(patch.object(worker, "dispatch_telegram_alerts"))
             stack.enter_context(patch.object(worker, "_network_rotation_offset", 0))
             stack.enter_context(patch.dict(worker._NETWORK_COOLDOWN_UNTIL, {}, clear=True))
@@ -451,7 +451,7 @@ class TestWorkerProviderFailover(unittest.TestCase):
 
         primary.pool_trades.assert_called_once_with("eth", pool, 10000)
         fallback.pool_trades.assert_called_once_with("eth", pool, 10000)
-        worker.store.insert_swaps.assert_called_once()
+        insert_swaps.assert_called_once()
 
     def test_cooldown_uses_fallback_instead_of_skipping_network(self):
         from contextlib import ExitStack
