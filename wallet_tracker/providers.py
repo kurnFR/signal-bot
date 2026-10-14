@@ -9,6 +9,7 @@ the last 24h (max ~300). `kind` is relative to the pool's BASE token:
 import logging
 import time
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import requests
 
@@ -25,6 +26,23 @@ def _to_float(value):
     except (TypeError, ValueError):
         return None
     return f if f == f and f not in (float("inf"), float("-inf")) else None
+
+
+def _retry_after_seconds(value, now=None):
+    """Parse Retry-After as seconds or an HTTP date; return None if invalid."""
+    if value is None:
+        return None
+    seconds = _to_float(value)
+    if seconds is not None:
+        return max(0.0, seconds)
+    try:
+        target = parsedate_to_datetime(str(value))
+        if target.tzinfo is None:
+            target = target.replace(tzinfo=timezone.utc)
+        current = now or datetime.now(timezone.utc)
+        return max(0.0, (target - current).total_seconds())
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def _parse_time(value):
@@ -88,6 +106,8 @@ class GeckoTerminalProvider:
         self.session = session or requests.Session()
         self.session.headers.update({"Accept": "application/json;version=20230302"})
         self._last_call = 0.0
+        self._pool_cache = {}
+        self.pool_cache_ttl = 300.0
 
     def set_base_delay(self, delay_seconds):
         """Apply dashboard delay changes without discarding adaptive throttling."""
@@ -105,8 +125,17 @@ class GeckoTerminalProvider:
                 # Exponential cooldown and adaptive request pacing. Honor a
                 # provider Retry-After header when available, but cap one wait.
                 self.delay = min(max(self.delay * 2, self.delay + 1), 60.0)
-                retry_after = _to_float(resp.headers.get("Retry-After"))
-                backoff = min(max(retry_after or (20 * (2 ** attempt)), 1), 120)
+                retry_after = _retry_after_seconds(resp.headers.get("Retry-After"))
+                # If the provider asks us to wait longer than our synchronous
+                # retry budget, defer to the worker's network cooldown instead
+                # of retrying early and worsening the rate limit.
+                if retry_after is not None and retry_after > 120:
+                    logger.warning(
+                        "GeckoTerminal Retry-After %.0fs exceeds retry budget; deferring request",
+                        retry_after,
+                    )
+                    resp.raise_for_status()
+                backoff = min(max(retry_after if retry_after is not None else (20 * (2 ** attempt)), 1), 120)
                 if attempt < 2:
                     logger.warning(
                         "GeckoTerminal rate limit hit; retry %d/2 in %.0fs (request delay now %.1fs)",
@@ -148,7 +177,13 @@ class GeckoTerminalProvider:
             })
         return pools
     def hot_pools(self, network, limit):
-        """Trending pools first (early-detection bias), then top pools, de-duplicated."""
+        """Trending pools first, cached briefly to reduce discovery API calls."""
+        cache_key = (str(network), int(limit))
+        now = time.monotonic()
+        cached = self._pool_cache.get(cache_key)
+        if cached and now - cached[0] < self.pool_cache_ttl:
+            return [dict(pool) for pool in cached[1]]
+
         seen, result = set(), []
         for path in (f"/networks/{network}/trending_pools", f"/networks/{network}/pools"):
             if len(result) >= limit:
@@ -168,6 +203,7 @@ class GeckoTerminalProvider:
                     result.append(pool)
                 if len(result) >= limit:
                     break
+        self._pool_cache[cache_key] = (time.monotonic(), [dict(pool) for pool in result])
         return result
 
     def pool_trades(self, network, pool, min_trade_usd):
