@@ -1,5 +1,6 @@
 """Wallet-tracker worker loop with aggregate wallet-quality gates."""
 import logging
+import os
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -235,7 +236,7 @@ def run():
     settings = store.get_settings()
     provider = GeckoTerminalProvider(delay_seconds=settings["api_delay_seconds"])
     try:
-        fallback_provider = BirdeyeProvider() if __import__("os").getenv("BIRDEYE_API_KEY", "").strip() else None
+        fallback_provider = BirdeyeProvider() if os.getenv("BIRDEYE_API_KEY", "").strip() else None
     except Exception:
         logger.exception("Could not initialize optional Birdeye fallback; GeckoTerminal remains active")
         fallback_provider = None
