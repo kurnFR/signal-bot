@@ -194,6 +194,14 @@ class GeckoTerminalProvider:
                 logger.warning("pool list %s failed: %s", path, exc)
                 # Once throttled, do not immediately call the alternate endpoint.
                 if getattr(getattr(exc, "response", None), "status_code", None) == 429:
+                    # Preserve the last known pool universe during a provider
+                    # outage; the worker can still scan it with the fallback feed.
+                    if cached:
+                        logger.warning(
+                            "GeckoTerminal discovery rate-limited; using %d cached pools for %s",
+                            len(cached[1]), network,
+                        )
+                        return [dict(pool) for pool in cached[1]]
                     raise
                 continue
             for pool in self._pools_from(payload):
