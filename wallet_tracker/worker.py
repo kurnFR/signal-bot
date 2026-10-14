@@ -154,9 +154,12 @@ def run_cycle(provider, fallback_provider=None):
         if not is_supported_chain(network):
             errors.append(f"unsupported network '{network}'")
             continue
-        if _NETWORK_COOLDOWN_UNTIL.get(network, 0) > now_mono:
-            logger.info("%s: skipped during rate-limit cooldown", network)
+        network_in_cooldown = _NETWORK_COOLDOWN_UNTIL.get(network, 0) > now_mono
+        if network_in_cooldown and fallback_provider is None:
+            logger.info("%s: skipped during rate-limit cooldown (no fallback configured)", network)
             continue
+        if network_in_cooldown:
+            logger.info("%s: using Birdeye during GeckoTerminal rate-limit cooldown", network)
         try:
             # Fetch extra pool metadata, but cap trade endpoints to the configured
             # pool budget after volume/token filtering.
@@ -169,7 +172,7 @@ def run_cycle(provider, fallback_provider=None):
                 continue
             continue
         pool_requests = 0
-        network_fallback_active = False
+        network_fallback_active = network_in_cooldown
         for pool in pools:
             if pool_requests >= settings["pools_per_network"]:
                 break
