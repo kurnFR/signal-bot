@@ -286,6 +286,50 @@ class TestParsingAndValidation(unittest.TestCase):
 
 
 class TestProviderRateLimit(unittest.TestCase):
+    def test_retry_after_parses_seconds_and_http_date(self):
+        from datetime import timezone
+        from wallet_tracker.providers import _retry_after_seconds
+
+        now = datetime(2026, 10, 13, 12, 0, 0, tzinfo=timezone.utc)
+        self.assertEqual(_retry_after_seconds("45", now=now), 45.0)
+        self.assertEqual(
+            _retry_after_seconds("Tue, 13 Oct 2026 12:01:00 GMT", now=now),
+            60.0,
+        )
+        self.assertIsNone(_retry_after_seconds("not-a-date", now=now))
+
+    def test_long_retry_after_defers_instead_of_retrying_early(self):
+        from unittest.mock import MagicMock
+        import requests
+
+        provider = GeckoTerminalProvider(delay_seconds=1, session=MagicMock())
+        limited = MagicMock()
+        limited.status_code = 429
+        limited.headers = {"Retry-After": "300"}
+        limited.raise_for_status.side_effect = requests.HTTPError(
+            "rate limited", response=limited
+        )
+        provider.session.get.return_value = limited
+        with patch("wallet_tracker.providers.time.sleep") as sleep:
+            with self.assertRaises(requests.HTTPError):
+                provider._get("/networks/eth/pools")
+        self.assertEqual(provider.session.get.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_pool_discovery_is_cached_for_ttl(self):
+        from unittest.mock import MagicMock
+
+        provider = GeckoTerminalProvider(delay_seconds=1, session=MagicMock())
+        provider._pools_from = MagicMock(return_value=[
+            {"address": "pool-1", "name": "TOKEN / WETH", "volume_24h_usd": 200000}
+        ])
+        provider._get = MagicMock(return_value={"data": []})
+        with patch("wallet_tracker.providers.time.monotonic", side_effect=[100.0, 100.0, 101.0]):
+            first = provider.hot_pools("eth", 4)
+            second = provider.hot_pools("eth", 4)
+        self.assertEqual(first, second)
+        self.assertEqual(provider._get.call_count, 2)
+
     def test_rate_limit_increases_delay_and_retries(self):
         from unittest.mock import MagicMock
 
