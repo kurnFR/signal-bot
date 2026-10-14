@@ -410,6 +410,83 @@ class TestWorkerRateLimitIsolation(unittest.TestCase):
         self.assertIn("eth", cooldown_after_cycle)
 
 
+
+class TestWorkerProviderFailover(unittest.TestCase):
+    def test_birdeye_takes_over_after_geckoterminal_trade_rate_limit(self):
+        from contextlib import ExitStack
+        from unittest.mock import MagicMock
+        import requests
+
+        settings = {
+            "enabled": True, "networks": ["eth", "solana", "base", "bsc"],
+            "pools_per_network": 1, "min_trade_usd": 10000,
+            "min_net_usd": 150000, "auto_track_net_usd": 250000,
+            "retention_days": 8, "api_delay_seconds": 1, "token_mode": "all",
+            "token_addresses": [],
+        }
+        pool = {
+            "address": POOL, "name": "PEPE / WETH", "volume_24h_usd": 200000,
+            "base_token_address": W1, "base_token_symbol": "PEPE",
+            "quote_token_address": W2, "quote_token_symbol": "WETH",
+        }
+        primary = MagicMock()
+        primary.hot_pools.side_effect = lambda network, limit: [pool] if network == "eth" else []
+        primary.pool_trades.side_effect = requests.HTTPError(
+            "rate limited", response=MagicMock(status_code=429)
+        )
+        fallback = MagicMock()
+        fallback.pool_trades.return_value = [swap(W1, "buy", 20000, 5, 1)]
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(worker.store, "get_settings", return_value=settings))
+            stack.enter_context(patch.object(worker, "recompute", return_value=0))
+            stack.enter_context(patch.object(worker.store, "prune_swaps"))
+            stack.enter_context(patch.object(worker.store, "prune_wallet_alerts"))
+            stack.enter_context(patch.object(worker.store, "set_status"))
+            stack.enter_context(patch.object(worker.store, "insert_swaps", return_value=1))
+            stack.enter_context(patch.object(worker, "dispatch_telegram_alerts"))
+            stack.enter_context(patch.object(worker, "_network_rotation_offset", 0))
+            stack.enter_context(patch.dict(worker._NETWORK_COOLDOWN_UNTIL, {}, clear=True))
+            worker.run_cycle(primary, fallback_provider=fallback)
+
+        primary.pool_trades.assert_called_once_with("eth", pool, 10000)
+        fallback.pool_trades.assert_called_once_with("eth", pool, 10000)
+        worker.store.insert_swaps.assert_called_once()
+
+    def test_cooldown_uses_fallback_instead_of_skipping_network(self):
+        from contextlib import ExitStack
+        from unittest.mock import MagicMock
+
+        settings = {
+            "enabled": True, "networks": ["eth"], "pools_per_network": 1,
+            "min_trade_usd": 10000, "min_net_usd": 150000,
+            "auto_track_net_usd": 250000, "retention_days": 8,
+            "api_delay_seconds": 1, "token_mode": "all", "token_addresses": [],
+        }
+        pool = {"address": POOL, "name": "PEPE / WETH", "volume_24h_usd": 200000,
+                "base_token_address": W1, "base_token_symbol": "PEPE",
+                "quote_token_address": W2, "quote_token_symbol": "WETH"}
+        primary = MagicMock()
+        primary.hot_pools.return_value = [pool]
+        fallback = MagicMock()
+        fallback.pool_trades.return_value = [swap(W1, "buy", 20000, 5, 1)]
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(worker.store, "get_settings", return_value=settings))
+            stack.enter_context(patch.object(worker, "recompute", return_value=0))
+            stack.enter_context(patch.object(worker.store, "prune_swaps"))
+            stack.enter_context(patch.object(worker.store, "prune_wallet_alerts"))
+            stack.enter_context(patch.object(worker.store, "set_status"))
+            stack.enter_context(patch.object(worker.store, "insert_swaps", return_value=1))
+            stack.enter_context(patch.object(worker, "dispatch_telegram_alerts"))
+            stack.enter_context(patch.object(worker, "_network_rotation_offset", 0))
+            stack.enter_context(patch.dict(worker._NETWORK_COOLDOWN_UNTIL, {"eth": 9999999999}, clear=True))
+            worker.run_cycle(primary, fallback_provider=fallback)
+
+        primary.pool_trades.assert_not_called()
+        fallback.pool_trades.assert_called_once_with("eth", pool, 10000)
+
+
 class TestWalletRoutes(unittest.TestCase):
     def setUp(self):
         from web.app import app
