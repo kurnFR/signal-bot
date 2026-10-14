@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from wallet_tracker import analyzer, store, worker
 from wallet_tracker.chains import explorer_url, normalize_wallet
-from wallet_tracker.providers import GeckoTerminalProvider, parse_trade
+from wallet_tracker.providers import (BirdeyeProvider, GeckoTerminalProvider,\n                                      parse_birdeye_trade, parse_trade)
 from wallet_tracker.stablecoins import is_stablecoin_base_pool
 
 NOW = datetime(2026, 10, 13, 12, 0, 0)
@@ -587,3 +587,79 @@ class TestWalletTrackerSingleInstanceLock(unittest.TestCase):
 
         self.assertIsNone(result)
         connection.close.assert_called_once()
+
+
+
+class TestBirdeyeFallbackProvider(unittest.TestCase):
+    def _trade_row(self):
+        return {
+            "txHash": "0xabc",
+            "blockUnixTime": 1791898800,
+            "owner": W1,
+            "volumeUSD": 25000.0,
+            "from": {"address": W2, "uiAmount": 100.0, "price": 250.0},
+            "to": {"address": W1, "uiAmount": 5.0, "price": 5000.0},
+        }
+
+    def test_pair_trade_parser_maps_wallet_direction_and_usd_value(self):
+        pool = {"address": POOL, "name": "PEPE / WETH", "base_token_address": W1}
+        row = self._trade_row()
+        parsed = parse_birdeye_trade("eth", pool, row)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["wallet"], W1)
+        self.assertEqual(parsed["side"], "buy")
+        self.assertEqual(parsed["usd_value"], 25000.0)
+        self.assertEqual(parsed["token_amount"], 5.0)
+        self.assertEqual(parsed["price_usd"], 5000.0)
+        self.assertEqual(parsed["tx_hash"], "0xabc")
+        self.assertEqual(parsed["pool_address"], POOL.lower())
+
+    def test_pair_trade_parser_uses_base_token_direction_from_v3_shape(self):
+        pool = {"address": POOL, "name": "PEPE / WETH", "base_token_address": W1}
+        row = {
+            "tx_hash": "0xdef", "block_unix_time": 1791898800, "owner": W1,
+            "volume_usd": 20000,
+            "base": {"address": W1, "ui_amount": 4.0, "price": 5000.0, "type_swap": "from"},
+            "quote": {"address": W2, "ui_amount": 2.0, "price": 10000.0, "type_swap": "to"},
+        }
+        parsed = parse_birdeye_trade("eth", pool, row)
+        self.assertEqual(parsed["side"], "sell")
+        self.assertEqual(parsed["token_amount"], 4.0)
+
+    def test_pair_trade_parser_rejects_ambiguous_or_incomplete_rows(self):
+        pool = {"address": POOL, "name": "PEPE / WETH", "base_token_address": W1}
+        self.assertIsNone(parse_birdeye_trade("eth", pool, {"owner": W1}))
+        row = self._trade_row()
+        row["volumeUSD"] = None
+        row["volume_usd"] = None
+        row["volume_in_usd"] = None
+        row["usd_value"] = None
+        self.assertIsNone(parse_birdeye_trade("eth", pool, row))
+        row = self._trade_row()
+        row["from"]["address"] = W2
+        row["to"]["address"] = W2
+        self.assertIsNone(parse_birdeye_trade("eth", pool, row))
+
+    def test_provider_calls_free_pair_trade_endpoint_with_chain_and_api_key(self):
+        from unittest.mock import MagicMock
+
+        session = MagicMock()
+        response = MagicMock()
+        response.json.return_value = {"success": True, "data": {"items": [self._trade_row()]}}
+        session.get.return_value = response
+        provider = BirdeyeProvider(api_key="test-key", session=session)
+        pool = {"address": POOL, "name": "PEPE / WETH", "base_token_address": W1}
+        with patch("wallet_tracker.providers.time.sleep"):
+            swaps = provider.pool_trades("eth", pool, 10000)
+        self.assertEqual(len(swaps), 1)
+        args, kwargs = session.get.call_args
+        self.assertTrue(args[0].endswith("/defi/txs/pair"))
+        self.assertEqual(kwargs["headers"]["X-API-KEY"], "test-key")
+        self.assertEqual(kwargs["headers"]["x-chain"], "ethereum")
+        self.assertEqual(kwargs["params"]["address"], POOL)
+        self.assertEqual(kwargs["params"]["tx_type"], "swap")
+
+    def test_provider_requires_explicit_api_key(self):
+        with patch.dict("os.environ", {"BIRDEYE_API_KEY": ""}):
+            with self.assertRaises(ValueError):
+                BirdeyeProvider()
