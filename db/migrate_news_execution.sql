@@ -4,7 +4,7 @@
 -- signal (Phase 1/2 only stored symbol, which wasn't enough on its own).
 -- skip_reason records why a signal that WAS acted upon didn't result in a
 -- trade (confluence block, daily cap, still-pending macro release, etc.),
--- for observability -- see NEWS_AI_STRATEGY_PLAN.md §4.
+-- for observability -- see docs/NEWS_AI.md §2.
 -- Safe to run after migrate_news_events.sql.
 -- ============================================================================
 

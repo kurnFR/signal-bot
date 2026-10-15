@@ -2,7 +2,7 @@
 Macro economic calendar poller (Finnhub) -- Phase 1 "data plumbing" for the
 News AI Overlay strategy. Stores scheduled macro events (CPI, FOMC, NFP,
 rate decisions, etc.) that move crypto even though they're not "crypto news"
-themselves. See NEWS_AI_STRATEGY_PLAN.md for the full design.
+themselves. See docs/NEWS_AI.md for the full design.
 
 Runs on a much slower cadence than news_poller (release times are known in
 advance -- default hourly, see ECON_CALENDAR_POLL_INTERVAL_SECONDS). No AI

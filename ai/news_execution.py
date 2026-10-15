@@ -3,7 +3,7 @@ News AI Overlay strategy -- Phase 3: execution.
 
 Reads high-confidence, not-yet-acted-on signals from `news_ai_signals`
 (written by ai/news_strategy_engine.py, Phase 2), applies the guardrails from
-NEWS_AI_STRATEGY_PLAN.md §4, and for signals that pass:
+docs/NEWS_AI.md §2, and for signals that pass:
   1. computes entry/stop/target using the same ATR + R-multiple conventions
      as the technical strategies
   2. opens a real paper position through paper.engine.insert_paper_position()
@@ -17,7 +17,7 @@ skip_reason (confluence block, daily cap, still waiting on a scheduled
 release, market data unavailable, etc.) -- so nothing is silently dropped
 and nothing gets retried forever.
 
-Guardrails implemented here (see NEWS_AI_STRATEGY_PLAN.md §4):
+Guardrails implemented here (see docs/NEWS_AI.md §2):
   - Confluence: blocked if the symbol's active technical strategy already
     has an open position (no stacking independent, possibly conflicting
     positions on the same underlying asset).

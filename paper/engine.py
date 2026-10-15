@@ -36,7 +36,7 @@ logger = logging.getLogger("paper.engine")
 # paper_configs row with one of these strategy_names still gets exit
 # management (SL/TP/trailing/circuit-breakers) from the loop in
 # sync_and_evaluate_paper_trading() -- it just never auto-opens a position
-# from price action alone. See NEWS_AI_STRATEGY_PLAN.md §4/§6.
+# from price action alone. See docs/NEWS_AI.md §2.
 OVERLAY_STRATEGIES = {"news_ai_overlay"}
 
 
@@ -656,7 +656,7 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                 # for news_ai_overlay), using insert_paper_position(). This
                 # branch's only job for them is the exit-management above,
                 # which already ran. Deliberately NOT in STRATEGIES / not
-                # backtestable the normal way -- see NEWS_AI_STRATEGY_PLAN.md §4.
+                # backtestable the normal way -- see docs/NEWS_AI.md §2.
                 continue
             # Cheap guards first (no strategy run needed): this candle's
             # signal was already traded, or already rejected by the ML gate.

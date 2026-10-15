@@ -191,7 +191,7 @@ def send_news_signal_alert(
     """News AI Overlay strategy (Phase 3) entry alert -- same chat/bot as
     send_signal_alert(), deliberately distinct visual template (📰 header,
     'Paper trade' footer) so it's never mistaken for a technical-strategy
-    signal. See NEWS_AI_STRATEGY_PLAN.md §3.4."""
+    signal. See docs/NEWS_AI.md §3."""
     dir_emoji = "🟢" if direction.upper() == "LONG" else "🔴"
     risk = abs(entry_price - stop_loss)
     reward = abs(take_profit - entry_price)

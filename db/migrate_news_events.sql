@@ -3,7 +3,7 @@
 -- Adds storage for raw news/economic-calendar events. `news_ai_signals` is
 -- created now too (schema-only) so the Phase 2 AI reasoning layer has
 -- somewhere to write without a second migration, but nothing populates it
--- yet -- see NEWS_AI_STRATEGY_PLAN.md.
+-- yet -- see docs/NEWS_AI.md.
 -- Safe to run after migrate_p0_paper_accounting.sql.
 -- ============================================================================
 
