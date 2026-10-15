@@ -1,4 +1,4 @@
-""""Entry point for the on-chain wallet tracker (smart-money accumulation scanner).
+"""Entry point for the on-chain wallet tracker (smart-money accumulation scanner).
 
     python3 run_wallet_tracker.py
 """
@@ -100,4 +100,3 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
-"
