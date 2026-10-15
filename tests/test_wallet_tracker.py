@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 
 from wallet_tracker import analyzer, store, worker
 from wallet_tracker.chains import explorer_url, normalize_wallet
-from wallet_tracker.providers import GeckoTerminalProvider, parse_trade
+from wallet_tracker.providers import (BirdeyeProvider, GeckoTerminalProvider,
+                                      parse_birdeye_trade, parse_trade)
 from wallet_tracker.stablecoins import is_stablecoin_base_pool
 
 NOW = datetime(2026, 10, 13, 12, 0, 0)
@@ -286,6 +287,50 @@ class TestParsingAndValidation(unittest.TestCase):
 
 
 class TestProviderRateLimit(unittest.TestCase):
+    def test_retry_after_parses_seconds_and_http_date(self):
+        from datetime import timezone
+        from wallet_tracker.providers import _retry_after_seconds
+
+        now = datetime(2026, 10, 13, 12, 0, 0, tzinfo=timezone.utc)
+        self.assertEqual(_retry_after_seconds("45", now=now), 45.0)
+        self.assertEqual(
+            _retry_after_seconds("Tue, 13 Oct 2026 12:01:00 GMT", now=now),
+            60.0,
+        )
+        self.assertIsNone(_retry_after_seconds("not-a-date", now=now))
+
+    def test_long_retry_after_defers_instead_of_retrying_early(self):
+        from unittest.mock import MagicMock
+        import requests
+
+        provider = GeckoTerminalProvider(delay_seconds=1, session=MagicMock())
+        limited = MagicMock()
+        limited.status_code = 429
+        limited.headers = {"Retry-After": "300"}
+        limited.raise_for_status.side_effect = requests.HTTPError(
+            "rate limited", response=limited
+        )
+        provider.session.get.return_value = limited
+        with patch("wallet_tracker.providers.time.sleep") as sleep:
+            with self.assertRaises(requests.HTTPError):
+                provider._get("/networks/eth/pools")
+        self.assertEqual(provider.session.get.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_pool_discovery_is_cached_for_ttl(self):
+        from unittest.mock import MagicMock
+
+        provider = GeckoTerminalProvider(delay_seconds=1, session=MagicMock())
+        provider._pools_from = MagicMock(return_value=[
+            {"address": "pool-1", "name": "TOKEN / WETH", "volume_24h_usd": 200000}
+        ])
+        provider._get = MagicMock(return_value={"data": []})
+        with patch("wallet_tracker.providers.time.monotonic", side_effect=[100.0, 100.0, 101.0]):
+            first = provider.hot_pools("eth", 4)
+            second = provider.hot_pools("eth", 4)
+        self.assertEqual(first, second)
+        self.assertEqual(provider._get.call_count, 2)
+
     def test_rate_limit_increases_delay_and_retries(self):
         from unittest.mock import MagicMock
 
@@ -363,6 +408,83 @@ class TestWorkerRateLimitIsolation(unittest.TestCase):
         self.assertIn("base", called_networks)
         self.assertIn("bsc", called_networks)
         self.assertIn("eth", cooldown_after_cycle)
+
+
+
+class TestWorkerProviderFailover(unittest.TestCase):
+    def test_birdeye_takes_over_after_geckoterminal_trade_rate_limit(self):
+        from contextlib import ExitStack
+        from unittest.mock import MagicMock
+        import requests
+
+        settings = {
+            "enabled": True, "networks": ["eth", "solana", "base", "bsc"],
+            "pools_per_network": 1, "min_trade_usd": 10000,
+            "min_net_usd": 150000, "auto_track_net_usd": 250000,
+            "retention_days": 8, "api_delay_seconds": 1, "token_mode": "all",
+            "token_addresses": [],
+        }
+        pool = {
+            "address": POOL, "name": "PEPE / WETH", "volume_24h_usd": 200000,
+            "base_token_address": W1, "base_token_symbol": "PEPE",
+            "quote_token_address": W2, "quote_token_symbol": "WETH",
+        }
+        primary = MagicMock()
+        primary.hot_pools.side_effect = lambda network, limit: [pool] if network == "eth" else []
+        primary.pool_trades.side_effect = requests.HTTPError(
+            "rate limited", response=MagicMock(status_code=429)
+        )
+        fallback = MagicMock()
+        fallback.pool_trades.return_value = [swap(W1, "buy", 20000, 5, 1)]
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(worker.store, "get_settings", return_value=settings))
+            stack.enter_context(patch.object(worker, "recompute", return_value=0))
+            stack.enter_context(patch.object(worker.store, "prune_swaps"))
+            stack.enter_context(patch.object(worker.store, "prune_wallet_alerts"))
+            stack.enter_context(patch.object(worker.store, "set_status"))
+            insert_swaps = stack.enter_context(patch.object(worker.store, "insert_swaps", return_value=1))
+            stack.enter_context(patch.object(worker, "dispatch_telegram_alerts"))
+            stack.enter_context(patch.object(worker, "_network_rotation_offset", 0))
+            stack.enter_context(patch.dict(worker._NETWORK_COOLDOWN_UNTIL, {}, clear=True))
+            worker.run_cycle(primary, fallback_provider=fallback)
+
+        primary.pool_trades.assert_called_once_with("eth", pool, 10000)
+        fallback.pool_trades.assert_called_once_with("eth", pool, 10000)
+        insert_swaps.assert_called_once()
+
+    def test_cooldown_uses_fallback_instead_of_skipping_network(self):
+        from contextlib import ExitStack
+        from unittest.mock import MagicMock
+
+        settings = {
+            "enabled": True, "networks": ["eth"], "pools_per_network": 1,
+            "min_trade_usd": 10000, "min_net_usd": 150000,
+            "auto_track_net_usd": 250000, "retention_days": 8,
+            "api_delay_seconds": 1, "token_mode": "all", "token_addresses": [],
+        }
+        pool = {"address": POOL, "name": "PEPE / WETH", "volume_24h_usd": 200000,
+                "base_token_address": W1, "base_token_symbol": "PEPE",
+                "quote_token_address": W2, "quote_token_symbol": "WETH"}
+        primary = MagicMock()
+        primary.hot_pools.return_value = [pool]
+        fallback = MagicMock()
+        fallback.pool_trades.return_value = [swap(W1, "buy", 20000, 5, 1)]
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(worker.store, "get_settings", return_value=settings))
+            stack.enter_context(patch.object(worker, "recompute", return_value=0))
+            stack.enter_context(patch.object(worker.store, "prune_swaps"))
+            stack.enter_context(patch.object(worker.store, "prune_wallet_alerts"))
+            stack.enter_context(patch.object(worker.store, "set_status"))
+            stack.enter_context(patch.object(worker.store, "insert_swaps", return_value=1))
+            stack.enter_context(patch.object(worker, "dispatch_telegram_alerts"))
+            stack.enter_context(patch.object(worker, "_network_rotation_offset", 0))
+            stack.enter_context(patch.dict(worker._NETWORK_COOLDOWN_UNTIL, {"eth": 9999999999}, clear=True))
+            worker.run_cycle(primary, fallback_provider=fallback)
+
+        primary.pool_trades.assert_not_called()
+        fallback.pool_trades.assert_called_once_with("eth", pool, 10000)
 
 
 class TestWalletRoutes(unittest.TestCase):
@@ -509,3 +631,127 @@ class TestWalletRoutes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class TestWalletTrackerSingleInstanceLock(unittest.TestCase):
+    def test_lock_acquisition_holds_connection_when_successful(self):
+        from unittest.mock import MagicMock
+        import run_wallet_tracker
+
+        connection = MagicMock()
+        connection.cursor.return_value.fetchone.return_value = (1,)
+        pool = MagicMock()
+        pool.get_connection.return_value = connection
+        with patch("run_wallet_tracker.get_pool", return_value=pool):
+            result = run_wallet_tracker.acquire_single_instance_lock()
+
+        self.assertIs(result, connection)
+        connection.close.assert_not_called()
+        connection.cursor.return_value.execute.assert_called_once_with(
+            "SELECT GET_LOCK(%s, 0)", ("signal_bot_wallet_tracker",)
+        )
+
+    def test_lock_heartbeat_checks_connection_still_owns_lock(self):
+        from unittest.mock import MagicMock
+        import run_wallet_tracker
+
+        connection = MagicMock()
+        connection.cursor.return_value.fetchone.return_value = (123, 123)
+        self.assertTrue(run_wallet_tracker.verify_lock_connection(connection))
+        connection.cursor.return_value.execute.assert_called_once_with(
+            "SELECT IS_USED_LOCK(%s), CONNECTION_ID()", ("signal_bot_wallet_tracker",)
+        )
+
+        connection.cursor.return_value.fetchone.return_value = (456, 123)
+        self.assertFalse(run_wallet_tracker.verify_lock_connection(connection))
+
+    def test_lock_contention_closes_connection_and_refuses_start(self):
+        from unittest.mock import MagicMock
+        import run_wallet_tracker
+
+        connection = MagicMock()
+        connection.cursor.return_value.fetchone.return_value = (0,)
+        pool = MagicMock()
+        pool.get_connection.return_value = connection
+        with patch("run_wallet_tracker.get_pool", return_value=pool):
+            result = run_wallet_tracker.acquire_single_instance_lock()
+
+        self.assertIsNone(result)
+        connection.close.assert_called_once()
+
+
+
+class TestBirdeyeFallbackProvider(unittest.TestCase):
+    def _trade_row(self):
+        return {
+            "txHash": "0xabc",
+            "blockUnixTime": 1791898800,
+            "owner": W1,
+            "volumeUSD": 25000.0,
+            "from": {"address": W2, "uiAmount": 100.0, "price": 250.0},
+            "to": {"address": W1, "uiAmount": 5.0, "price": 5000.0},
+        }
+
+    def test_pair_trade_parser_maps_wallet_direction_and_usd_value(self):
+        pool = {"address": POOL, "name": "PEPE / WETH", "base_token_address": W1}
+        row = self._trade_row()
+        parsed = parse_birdeye_trade("eth", pool, row)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["wallet"], W1)
+        self.assertEqual(parsed["side"], "buy")
+        self.assertEqual(parsed["usd_value"], 25000.0)
+        self.assertEqual(parsed["token_amount"], 5.0)
+        self.assertEqual(parsed["price_usd"], 5000.0)
+        self.assertEqual(parsed["tx_hash"], "0xabc")
+        self.assertEqual(parsed["pool_address"], POOL.lower())
+
+    def test_pair_trade_parser_uses_base_token_direction_from_v3_shape(self):
+        pool = {"address": POOL, "name": "PEPE / WETH", "base_token_address": W1}
+        row = {
+            "tx_hash": "0xdef", "block_unix_time": 1791898800, "owner": W1,
+            "volume_usd": 20000,
+            "base": {"address": W1, "ui_amount": 4.0, "price": 5000.0, "type_swap": "from"},
+            "quote": {"address": W2, "ui_amount": 2.0, "price": 10000.0, "type_swap": "to"},
+        }
+        parsed = parse_birdeye_trade("eth", pool, row)
+        self.assertEqual(parsed["side"], "sell")
+        self.assertEqual(parsed["token_amount"], 4.0)
+
+    def test_pair_trade_parser_rejects_ambiguous_or_incomplete_rows(self):
+        pool = {"address": POOL, "name": "PEPE / WETH", "base_token_address": W1}
+        self.assertIsNone(parse_birdeye_trade("eth", pool, {"owner": W1}))
+        row = self._trade_row()
+        row["volumeUSD"] = None
+        row["volume_usd"] = None
+        row["volume_in_usd"] = None
+        row["usd_value"] = None
+        self.assertIsNone(parse_birdeye_trade("eth", pool, row))
+        row = self._trade_row()
+        row["from"]["address"] = W2
+        row["to"]["address"] = W2
+        self.assertIsNone(parse_birdeye_trade("eth", pool, row))
+
+    def test_provider_calls_free_pair_trade_endpoint_with_chain_and_api_key(self):
+        from unittest.mock import MagicMock
+
+        session = MagicMock()
+        response = MagicMock()
+        response.json.return_value = {"success": True, "data": {"items": [self._trade_row()]}}
+        session.get.return_value = response
+        provider = BirdeyeProvider(api_key="test-key", session=session)
+        pool = {"address": POOL, "name": "PEPE / WETH", "base_token_address": W1}
+        with patch("wallet_tracker.providers.time.sleep"):
+            swaps = provider.pool_trades("eth", pool, 10000)
+        self.assertEqual(len(swaps), 1)
+        args, kwargs = session.get.call_args
+        self.assertTrue(args[0].endswith("/defi/txs/pair"))
+        self.assertEqual(kwargs["headers"]["X-API-KEY"], "test-key")
+        self.assertEqual(kwargs["headers"]["x-chain"], "ethereum")
+        self.assertEqual(kwargs["params"]["address"], POOL)
+        self.assertEqual(kwargs["params"]["tx_type"], "swap")
+
+    def test_provider_requires_explicit_api_key(self):
+        with patch.dict("os.environ", {"BIRDEYE_API_KEY": ""}):
+            with self.assertRaises(ValueError):
+                BirdeyeProvider()

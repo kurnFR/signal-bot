@@ -1,12 +1,13 @@
 """Wallet-tracker worker loop with aggregate wallet-quality gates."""
 import logging
+import os
 import time
 from datetime import datetime, timedelta, timezone
 
 import config
 from wallet_tracker import analyzer, store
 from wallet_tracker.chains import is_supported_chain
-from wallet_tracker.providers import GeckoTerminalProvider
+from wallet_tracker.providers import BirdeyeProvider, GeckoTerminalProvider
 from wallet_tracker.stablecoins import is_stablecoin_base_pool
 from wallet_tracker.telegram import WalletTelegramNotifier
 
@@ -64,7 +65,7 @@ def recompute(now=None, settings=None):
     return candidates_total
 
 
-def _pool_matches_tokens(network, pool, settings):
+def _pool_matches_tokens(network, pool, settings, selected_tokens=None):
     # GeckoTerminal's buy/sell kind is relative to the base token. Exclude pools
     # whose base asset is a stablecoin, but keep normal volatile-token/stablecoin
     # quote pairs (e.g. ARK/USDT), which are relevant trading markets.
@@ -77,7 +78,9 @@ def _pool_matches_tokens(network, pool, settings):
         return False
     normalized = str(address) if network == "solana" else str(address).lower()
     selector = network + ":" + normalized
-    return selector in set(settings.get("token_addresses", []))
+    if selected_tokens is None:
+        selected_tokens = set(settings.get("token_addresses", []))
+    return selector in selected_tokens
 
 
 
@@ -126,7 +129,7 @@ def dispatch_telegram_alerts(notifier=None):
     return sent
 
 
-def run_cycle(provider):
+def run_cycle(provider, fallback_provider=None):
     settings = store.get_settings()
     store.prune_wallet_alerts(config.WALLET_TRACKER_ALERT_RETENTION_DAYS)
     if not settings["enabled"]:
@@ -147,13 +150,17 @@ def run_cycle(provider):
         _network_rotation_offset = (offset + 1) % len(networks)
 
     now_mono = time.monotonic()
+    selected_tokens = set(settings.get("token_addresses", []))
     for network in networks:
         if not is_supported_chain(network):
             errors.append(f"unsupported network '{network}'")
             continue
-        if _NETWORK_COOLDOWN_UNTIL.get(network, 0) > now_mono:
-            logger.info("%s: skipped during rate-limit cooldown", network)
+        network_in_cooldown = _NETWORK_COOLDOWN_UNTIL.get(network, 0) > now_mono
+        if network_in_cooldown and fallback_provider is None:
+            logger.info("%s: skipped during rate-limit cooldown (no fallback configured)", network)
             continue
+        if network_in_cooldown:
+            logger.info("%s: using Birdeye during GeckoTerminal rate-limit cooldown", network)
         try:
             # Fetch extra pool metadata, but cap trade endpoints to the configured
             # pool budget after volume/token filtering.
@@ -166,10 +173,11 @@ def run_cycle(provider):
                 continue
             continue
         pool_requests = 0
+        network_fallback_active = network_in_cooldown
         for pool in pools:
             if pool_requests >= settings["pools_per_network"]:
                 break
-            if not _pool_matches_tokens(network, pool, settings):
+            if not _pool_matches_tokens(network, pool, settings, selected_tokens):
                 continue
             volume_24h = float(pool.get("volume_24h_usd") or 0)
             if 0 < volume_24h < min_pool_volume:
@@ -177,11 +185,38 @@ def run_cycle(provider):
                              network, pool.get("name"), volume_24h, min_pool_volume)
                 continue
             pool_requests += 1
+            active_provider = fallback_provider if network_fallback_active else provider
             try:
-                swaps = provider.pool_trades(network, pool, settings["min_trade_usd"])
+                swaps = active_provider.pool_trades(network, pool, settings["min_trade_usd"])
                 swaps_new += store.insert_swaps(swaps)
                 pools_scanned += 1
             except Exception as exc:
+                # Switch to Birdeye for the remainder of this network's cycle
+                # when GeckoTerminal fails. The DB's unique key deduplicates
+                # overlapping trades from either source.
+                if active_provider is provider and fallback_provider is not None:
+                    if _is_rate_limited(exc):
+                        _NETWORK_COOLDOWN_UNTIL[network] = time.monotonic() + _NETWORK_COOLDOWN_SECONDS
+                    network_fallback_active = True
+                    try:
+                        swaps = fallback_provider.pool_trades(network, pool, settings["min_trade_usd"])
+                        swaps_new += store.insert_swaps(swaps)
+                        pools_scanned += 1
+                        logger.warning(
+                            "%s %s: GeckoTerminal trade request failed (%s); Birdeye fallback succeeded",
+                            network, pool.get("name"), type(exc).__name__,
+                        )
+                        continue
+                    except Exception as fallback_exc:
+                        logger.warning(
+                            "%s %s: GeckoTerminal and Birdeye trade fetch failed (%s / %s)",
+                            network, pool.get("name"), type(exc).__name__, type(fallback_exc).__name__,
+                        )
+                        errors.append(
+                            f"{network}/{pool.get('name')}: both trade providers failed "
+                            f"({type(exc).__name__}/{type(fallback_exc).__name__})"
+                        )
+                        continue
                 logger.warning("%s %s: trade fetch failed (%s)", network, pool.get("name"), type(exc).__name__)
                 errors.append(f"{network}/{pool.get('name')}: trade fetch failed ({type(exc).__name__})")
                 if _is_rate_limited(exc):
@@ -196,16 +231,30 @@ def run_cycle(provider):
     dispatch_telegram_alerts()
 
 
-def run():
+def run(stop_event=None):
+    """Run polling cycles until stopped; optional event is used if lock ownership is lost."""
     store.ensure_tables()
     settings = store.get_settings()
     provider = GeckoTerminalProvider(delay_seconds=settings["api_delay_seconds"])
+    try:
+        fallback_provider = BirdeyeProvider() if os.getenv("BIRDEYE_API_KEY", "").strip() else None
+    except Exception:
+        logger.exception("Could not initialize optional Birdeye fallback; GeckoTerminal remains active")
+        fallback_provider = None
+    if fallback_provider:
+        logger.info("Birdeye free-tier pair-trade fallback enabled (1 request/second pacing).")
+    else:
+        logger.info("Birdeye fallback disabled; set BIRDEYE_API_KEY to enable it.")
     logger.info("Wallet tracker started; settings are loaded from the dashboard.")
-    while True:
+    while stop_event is None or not stop_event.is_set():
         try:
-            run_cycle(provider)
+            run_cycle(provider, fallback_provider=fallback_provider)
             settings = store.get_settings()
         except Exception:
             logger.exception("cycle failed")
             settings = store.get_settings()
-        time.sleep(settings["poll_interval_seconds"])
+        if stop_event is not None:
+            if stop_event.wait(settings["poll_interval_seconds"]):
+                break
+        else:
+            time.sleep(settings["poll_interval_seconds"])
