@@ -524,6 +524,8 @@ def get_positions(period_hours, side=None, chain=None, min_net_usd=0.0, limit=10
         cur.close()
         for r in rows:
             r["is_tracked"] = bool(r["is_tracked"])
+            if r.get("label") is None and r.get("tracked_label") is not None:
+                r["label"] = r["tracked_label"]
         return rows
     finally:
         conn.close()
