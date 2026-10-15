@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
@@ -25,8 +26,32 @@ from web.routes.telegram_routes import router as telegram_router
 from web.routes.ml_routes import router as ml_router
 from web.routes.news_routes import router as news_router
 from web.routes.research_routes import router as research_router
+from web.routes.wallet_routes import router as wallet_router
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    seed_default_admin()
+    try:
+        from Screen.screening import ensure_signal_table
+        ensure_signal_table()
+    except Exception as e:
+        logger.warning(f"Could not initialize smart_money_signals table on startup: {e}")
+    try:
+        from wallet_tracker.store import ensure_tables as ensure_wallet_tables
+        ensure_wallet_tables()
+    except Exception as e:
+        logger.warning(f"Could not initialize wallet tracking tables on startup: {e}")
+    try:
+        from paper.retailbot2 import DatabaseManager, BotConfig
+        cfg = BotConfig()
+        DatabaseManager(cfg, logger)
+    except Exception as e:
+        logger.warning(f"Could not initialize retailbot2 tables on startup: {e}")
+    yield
+
 
 app = FastAPI(
+    lifespan=lifespan,
     title="Crypto Signal Bot — Quantitative Trading Platform",
     description="Institutional trading dashboard: Real-time search, historical backfill, strategy simulation, and Phase B paper trading.",
     version="2.0.0",
@@ -63,6 +88,7 @@ TRADER_OR_ADMIN_PREFIXES = (
     "/api/paper/circuit-breakers",
     "/api/backtest",
     "/api/ml",
+    "/api/wallets",
 )
 
 
@@ -115,22 +141,6 @@ async def api_security_boundary(request: Request, call_next):
     return await call_next(request)
 
 
-@app.on_event("startup")
-def on_startup():
-    seed_default_admin()
-    try:
-        from Screen.screening import ensure_signal_table
-        ensure_signal_table()
-    except Exception as e:
-        logger.warning(f"Could not initialize smart_money_signals table on startup: {e}")
-    try:
-        from paper.retailbot2 import DatabaseManager, BotConfig
-        cfg = BotConfig()
-        DatabaseManager(cfg, logger)
-    except Exception as e:
-        logger.warning(f"Could not initialize retailbot2 tables on startup: {e}")
-
-
 app.include_router(auth_router)
 app.include_router(paper_router)
 app.include_router(search_router)
@@ -142,6 +152,7 @@ app.include_router(telegram_router)
 app.include_router(ml_router)
 app.include_router(news_router)
 app.include_router(research_router)
+app.include_router(wallet_router)
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)

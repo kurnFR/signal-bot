@@ -48,6 +48,18 @@ python3 Screen/screening.py           # volume screener
 ```
 Open **`http://localhost:8050`** in your browser.
 
+### Wallet Tracking (on-chain smart money)
+
+Sidebar → **Wallet Tracking**. Surfaces large flows in scanned DEX pools and lets you monitor wallets seen in those pools. This is a flow-ranking heuristic, not proof of wallet skill or profitability.
+
+- **Candidate Wallets** – per wallet and pair, for a 1h / 6h / 24h / 7d window: token bias (based on net token quantity), total token volume, total turnover, net tokens, net USD cash flow, volume-weighted average buy/sell prices, trade counts and first→last trade range. Token bias and net USD cash flow can point in different directions because they measure different things.
+- **Token Flow** – rolls candidates up per pair: how many big wallets are net buying vs selling. Many wallets accumulating the same token is the early-detection signal.
+- **Recent Activity** – latest stored buys/sells by *monitored* wallets, refreshed by the UI periodically. This is polling-based and only sees pools the scanner covers; it is not a real-time, wallet-wide feed. Wallets with qualifying flow may be auto-monitored; you can add/remove wallets by hand (trader/admin role).
+
+Run it with `python3 run_all.py` (process `wallet_tracker`) or alone: `python3 run_wallet_tracker.py`. Tables are created automatically; `db/migrate_wallet_tracking.sql` is the same DDL. No API key is needed (GeckoTerminal public API). Settings are the `WALLET_TRACKER_*` variables in `.env.example`.
+
+**Limitations to know:** swaps are read per DEX pool (trending + top-volume pools per network), so a wallet is only seen in pools the scanner covers, and trades below `WALLET_TRACKER_MIN_TRADE_USD` are ignored. The free API returns the latest ~300 trades per pool, so a very busy pool can be undersampled between scans. The tracked address is the transaction sender, which can be a bot/aggregator rather than a person. 7d windows are only complete after the scanner has been running for 7 days. This is a research signal, not a trade recommendation.
+
 ### Authentication and API verification
 
 The web API is intentionally protected. Only `POST /api/auth/login` is public; News AI endpoints such as `/api/news/stats`, `/api/news/signals`, and `/api/news/events` require a bearer token.

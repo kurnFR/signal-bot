@@ -1,7 +1,6 @@
 import os
 import unittest
 from decimal import Decimal
-from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from paper.retailbot2 import DatabaseManager, RetailDeathTrapBot
@@ -69,6 +68,24 @@ class TestRetailBotDatabaseConfig(unittest.TestCase):
         with patch.dict(os.environ, {"DB_NAME": "crypto_signals"}, clear=False):
             from paper.retailbot2 import BotConfig
             config = BotConfig()
+
+        self.assertEqual(config.db_name, "crypto_signals")
+
+    def test_main_uses_shared_database_instead_of_legacy_retailbot_overrides(self):
+        from paper.retailbot2 import main
+
+        env = {
+            "MYSQL_HOST": "127.0.0.1",
+            "MYSQL_DATABASE": "crypto_signals",
+            "RETAILBOT2_DB_HOST": "192.0.2.10",
+            "RETAILBOT2_DB_NAME": "Binance",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            with patch("paper.retailbot2.RetailDeathTrapBot") as bot_class:
+                main()
+                config = bot_class.call_args.args[0]
+
+        self.assertEqual(config.db_host, "127.0.0.1")
         self.assertEqual(config.db_name, "crypto_signals")
 
 

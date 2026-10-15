@@ -351,26 +351,44 @@ VOL_BREAKOUT_MIN_MARGIN_PCT = 0.15
 VOL_BREAKOUT_EMA_PERIOD = 100
 VOL_BREAKOUT_RISK_REWARD_RATIO = 3
 
+# One connection configuration for every signal-bot component.
+# MYSQL_* matches the existing host .env. Legacy DB_* names remain fallback
+# aliases for connection details, but database selection is intentionally
+# centralized: every component uses MYSQL_DATABASE (default crypto_signals).
 MYSQL_CONFIG = {
-    "host": os.getenv("MYSQL_HOST", "localhost"),
-    "port": int(os.getenv("MYSQL_PORT", 3306)),
-    "user": os.getenv("MYSQL_USER", "crypto_bot"),
-    "password": os.getenv("MYSQL_PASSWORD", ""),
+    "host": os.getenv("MYSQL_HOST", os.getenv("DB_HOST", "192.168.1.30")),
+    "port": int(os.getenv("MYSQL_PORT", os.getenv("DB_PORT", "3306"))),
+    "user": os.getenv("MYSQL_USER", os.getenv("DB_USER", "cms")),
+    "password": os.getenv("MYSQL_PASSWORD", os.getenv("DB_PASS", "")),
     "database": os.getenv("MYSQL_DATABASE", "crypto_signals"),
 }
 
-# paper/retailbot2.py runs as its own standalone process with its own
-# database (its BotConfig reads DB_HOST/DB_USER/DB_PASS/DB_NAME, default
-# database name "Binance"). This gives the web dashboard read access to
-# that same database for the visibility panel, reusing retailbot2.py's own
-# env var names so credentials aren't duplicated under a second set of
-# names -- override RETAILBOT2_DB_* individually only if the dashboard
-# needs different (e.g. more restricted, read-only) credentials than the
-# bot process itself uses.
-RETAILBOT2_DB_CONFIG = {
-    "host": os.getenv("RETAILBOT2_DB_HOST", os.getenv("DB_HOST", "192.168.1.30")),
-    "port": int(os.getenv("RETAILBOT2_DB_PORT", 3306)),
-    "user": os.getenv("RETAILBOT2_DB_USER", os.getenv("DB_USER", MYSQL_CONFIG["user"])),
-    "password": os.getenv("RETAILBOT2_DB_PASSWORD", os.getenv("DB_PASS", MYSQL_CONFIG["password"])),
-    "database": os.getenv("RETAILBOT2_DB_NAME", os.getenv("DB_NAME", "Binance")),
-}
+# Dashboard reads the same database and endpoint as the rest of signal-bot.
+# Keep this alias for existing callers; do not allow a separate Binance DB.
+RETAILBOT2_DB_CONFIG = dict(MYSQL_CONFIG)
+
+
+# =============================================================================
+# Wallet Tracking (on-chain smart-money accumulation / distribution)
+# =============================================================================
+# Source: GeckoTerminal public API (keyless; ~30 requests/min). Swaps are read
+# per DEX pool, so a wallet is only visible in pools the worker scans.
+WALLET_TRACKER_ENABLED = os.getenv("WALLET_TRACKER_ENABLED", "true").lower() == "true"
+# GeckoTerminal network ids: eth, solana, base, bsc, arbitrum, polygon_pos
+WALLET_TRACKER_NETWORKS = [
+    n.strip() for n in os.getenv("WALLET_TRACKER_NETWORKS", "eth,solana,base,bsc").split(",") if n.strip()
+]
+WALLET_TRACKER_POOLS_PER_NETWORK = int(os.getenv("WALLET_TRACKER_POOLS_PER_NETWORK", 4))
+# Ignore individual swaps below this size (keeps the DB small, removes retail noise).
+WALLET_TRACKER_MIN_TRADE_USD = float(os.getenv("WALLET_TRACKER_MIN_TRADE_USD", 10000))
+# A wallet becomes a "candidate" when |buys - sells| in a period reaches this.
+WALLET_TRACKER_MIN_NET_USD = float(os.getenv("WALLET_TRACKER_MIN_NET_USD", 150000))
+# Candidates at or above this net amount are auto-added to the monitored list.
+WALLET_TRACKER_AUTO_TRACK_NET_USD = float(os.getenv("WALLET_TRACKER_AUTO_TRACK_NET_USD", 500000))
+WALLET_TRACKER_AUTO_INACTIVE_DAYS = int(os.getenv("WALLET_TRACKER_AUTO_INACTIVE_DAYS", 7))
+WALLET_TRACKER_POLL_INTERVAL_SECONDS = int(os.getenv("WALLET_TRACKER_POLL_INTERVAL_SECONDS", 300))
+WALLET_TRACKER_PERIODS_HOURS = [1, 6, 24, 168]   # 1h, 6h, 24h, 7d
+WALLET_TRACKER_ALERT_COOLDOWN_MINUTES = int(os.getenv("WALLET_TRACKER_ALERT_COOLDOWN_MINUTES", 10))
+WALLET_TRACKER_ALERT_RETENTION_DAYS = int(os.getenv("WALLET_TRACKER_ALERT_RETENTION_DAYS", 30))
+WALLET_TRACKER_RETENTION_DAYS = int(os.getenv("WALLET_TRACKER_RETENTION_DAYS", 8))
+WALLET_TRACKER_API_DELAY_SECONDS = float(os.getenv("WALLET_TRACKER_API_DELAY_SECONDS", 4.0))

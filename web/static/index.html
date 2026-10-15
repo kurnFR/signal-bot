@@ -133,6 +133,20 @@
                         <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-purple-950 text-purple-300 border border-purple-800">NEW</span>
                     </div>
                 </button>
+                <button data-tab="market-screener" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-amber-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="scan-search" class="w-4 h-4 text-amber-400"></i>
+                    <div class="flex items-center justify-between w-full">
+                        <span>Market Screener</span>
+                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-amber-950 text-amber-300 border border-amber-800">V2</span>
+                    </div>
+                </button>
+                <button data-tab="wallet-tracking" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-cyan-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="wallet" class="w-4 h-4 text-cyan-400"></i>
+                    <div class="flex items-center justify-between w-full">
+                        <span>Wallet Tracking</span>
+                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-cyan-950 text-cyan-300 border border-cyan-800">NEW</span>
+                    </div>
+                </button>
                 <button data-tab="settings" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="settings" class="w-4 h-4"></i>
                     <span>Settings & Users</span>
@@ -821,64 +835,268 @@
             <!-- ============================================== -->
             <!-- 5. STRATEGY LIBRARY & BUILDER VIEW -->
             <!-- ============================================== -->
-            <section id="view-strategies" class="view-section hidden space-y-8">
-                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
-                                <i data-lucide="plus-circle" class="w-4 h-4 text-emerald-400"></i>
-                                Create Custom Rule-Based Strategy
-                            </h3>
-                            <p class="text-xs text-slate-400 mt-0.5">Define your own entry rules and stop parameters — immediately registers into the simulation engine</p>
+            <!-- 5. STRATEGY LIBRARY & BUILDER VIEW -->
+            <!-- ============================================== -->
+            <section id="view-strategies" class="view-section hidden space-y-6">
+                <!-- Top Banner with Title, Subtitle, and AI Status -->
+                <div class="p-6 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900/95 to-indigo-950/40 border border-slate-800 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <div class="flex items-center gap-2.5">
+                            <span class="px-2.5 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">AI Strategy Lab</span>
+                            <span id="ai-strat-provider-badge" class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
+                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                AI Engine Ready
+                            </span>
                         </div>
+                        <h2 class="text-xl font-black text-slate-100 tracking-tight mt-1.5 flex items-center gap-2">
+                            Quantitative Strategy Architect & Rule Builder
+                        </h2>
+                        <p class="text-xs text-slate-400 max-w-2xl mt-1 leading-relaxed">
+                            Prompt our conversational AI to architect custom trading logic, indicators, and risk management parameters. Review and fine-tune rules, approve & save to your strategy catalog, and simulate in Backtest Studio to measure win rate and PnL.
+                        </p>
                     </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div>
-                            <label class="block text-xs font-semibold text-slate-400 mb-1">Strategy ID (lowercase, no spaces)</label>
-                            <input type="text" id="cust-strat-name" placeholder="my_momentum_v1" class="w-full text-xs bg-slate-800 text-slate-200 rounded p-2 border border-slate-700 font-mono">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold text-slate-400 mb-1">Display Title</label>
-                            <input type="text" id="cust-strat-disp" placeholder="My Momentum Strategy" class="w-full text-xs bg-slate-800 text-slate-200 rounded p-2 border border-slate-700">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold text-slate-400 mb-1">Description</label>
-                            <input type="text" id="cust-strat-desc" placeholder="Enters on oversold RSI with volume confirmation" class="w-full text-xs bg-slate-800 text-slate-200 rounded p-2 border border-slate-700">
-                        </div>
-                    </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 pt-2">
-                        <div>
-                            <label class="block text-xs font-semibold text-slate-400 mb-1">Long Entry: RSI < Value</label>
-                            <input type="number" id="cust-rsi-long" value="30" class="w-full text-xs bg-slate-800 text-slate-200 rounded p-2 border border-slate-700 font-mono">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold text-slate-400 mb-1">Short Entry: RSI > Value</label>
-                            <input type="number" id="cust-rsi-short" value="70" class="w-full text-xs bg-slate-800 text-slate-200 rounded p-2 border border-slate-700 font-mono">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold text-slate-400 mb-1">Stop-Loss (x ATR)</label>
-                            <input type="number" id="cust-sl-atr" value="1.5" step="0.25" class="w-full text-xs bg-slate-800 text-slate-200 rounded p-2 border border-slate-700 font-mono">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold text-slate-400 mb-1">Risk:Reward Ratio</label>
-                            <input type="number" id="cust-rr-ratio" value="2.5" step="0.5" class="w-full text-xs bg-slate-800 text-slate-200 rounded p-2 border border-slate-700 font-mono">
-                        </div>
-                    </div>
-
-                    <div class="flex justify-end pt-2">
-                        <button onclick="App.submitCustomStrategy()" class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-colors">
-                            <i data-lucide="check" class="w-4 h-4"></i> Save & Register Strategy
+                    <div class="flex items-center gap-2.5 self-start md:self-auto">
+                        <button onclick="App.newStrategyDraft()" class="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 transition-colors">
+                            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Clear / New Draft
                         </button>
                     </div>
                 </div>
 
-                <div class="space-y-3">
-                    <h3 class="text-sm font-bold text-slate-200 flex items-center gap-2">
-                        <i data-lucide="book-open" class="w-4 h-4 text-sky-400"></i>
-                        Registered Strategy Catalog
-                    </h3>
+                <!-- Main Studio: 2 Columns (Left: Conversational AI Assistant, Right: Strategy Specification & Interactive Editor) -->
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    <!-- LEFT COLUMN: AI Chat & Prompt Assistant (5 cols) -->
+                    <div class="lg:col-span-5 flex flex-col h-[760px] rounded-2xl bg-slate-900/90 border border-slate-800 overflow-hidden shadow-lg">
+                        <!-- Chat Header -->
+                        <div class="p-4 border-b border-slate-800 bg-slate-950/40 flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <div class="w-7 h-7 rounded-lg bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center">
+                                    <i data-lucide="bot" class="w-4 h-4"></i>
+                                </div>
+                                <div>
+                                    <h4 class="text-xs font-bold text-slate-200">AI Trading Strategist</h4>
+                                    <p class="text-[10px] text-slate-400">Natural Language Strategy Generator</p>
+                                </div>
+                            </div>
+                            <span class="text-[10px] text-slate-500 font-mono">Chat & Refine</span>
+                        </div>
+
+                        <!-- Chat Messages Container -->
+                        <div id="strat-ai-chat-messages" class="flex-1 p-4 overflow-y-auto space-y-3.5 text-xs">
+                            <!-- Welcome bubble -->
+                            <div class="flex gap-2.5 items-start">
+                                <div class="w-6 h-6 rounded-full bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex-shrink-0 flex items-center justify-center text-[10px]">
+                                    AI
+                                </div>
+                                <div class="p-3.5 rounded-2xl rounded-tl-sm bg-slate-800/80 border border-slate-700/60 text-slate-300 leading-relaxed max-w-[90%] space-y-2">
+                                    <p>👋 <strong>Welcome to AI Strategy Architect!</strong> Tell me about the trading strategy you want to create.</p>
+                                    <p class="text-slate-400 text-[11px]">For example: <em>"Create an ETH breakout strategy that enters long when volume is 2x average and RSI > 55, with 1.8 ATR stop and 3.0 RR"</em> or <em>"Mean reversion fading oversold RSI &lt; 28 near support"</em>.</p>
+                                    <p class="text-slate-400 text-[11px]">I will generate the complete indicator rules and parameters which you can review and backtest!</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Prompt Suggestions Chips -->
+                        <div class="px-4 py-2 border-t border-slate-800/60 bg-slate-950/30">
+                            <span class="text-[10px] uppercase font-semibold text-slate-500 block mb-1.5">Try an idea:</span>
+                            <div class="flex flex-wrap gap-1.5">
+                                <button onclick="App.useStrategyPromptChip('Create an aggressive momentum strategy buying when volume_ratio > 2.0 and RSI between 45 and 65, with 1.5 ATR stop and 2.5 RR')" class="px-2 py-1 rounded bg-slate-800 hover:bg-indigo-900/40 hover:text-indigo-300 border border-slate-700 text-[11px] text-slate-300 transition-colors">
+                                    ⚡ Volume Surge Momentum
+                                </button>
+                                <button onclick="App.useStrategyPromptChip('Create an oversold mean reversion strategy that buys when RSI < 30 and MACD histogram turns positive (> 0), with 1.5 ATR stop and 2.0 RR')" class="px-2 py-1 rounded bg-slate-800 hover:bg-indigo-900/40 hover:text-indigo-300 border border-slate-700 text-[11px] text-slate-300 transition-colors">
+                                    📉 RSI Reversal + MACD
+                                </button>
+                                <button onclick="App.useStrategyPromptChip('Create a support bounce strategy that enters long when close > support and RSI < 40, short when close < resistance and RSI > 60, with trailing stop')" class="px-2 py-1 rounded bg-slate-800 hover:bg-indigo-900/40 hover:text-indigo-300 border border-slate-700 text-[11px] text-slate-300 transition-colors">
+                                    🛡️ Support Bounce + Trail
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Prompt Input Area -->
+                        <div class="p-3.5 border-t border-slate-800 bg-slate-950/60">
+                            <div class="flex gap-2">
+                                <textarea id="strat-ai-prompt" rows="2" placeholder="Describe your strategy or instructions (e.g., 'Make the stop loss tighter to 1.2 ATR and add MACD histogram > 0')..." class="w-full text-xs bg-slate-900 text-slate-100 rounded-xl p-3 border border-slate-700 focus:outline-none focus:border-indigo-500 resize-none font-sans leading-relaxed"></textarea>
+                                <button id="strat-ai-generate-btn" onclick="App.generateStrategyWithAI()" class="px-4 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 hover:from-indigo-400 hover:to-blue-500 text-white font-bold text-xs flex flex-col items-center justify-center gap-1 shadow-lg shadow-indigo-500/20 transition-all flex-shrink-0">
+                                    <i data-lucide="sparkles" class="w-4 h-4"></i>
+                                    <span>Generate</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- RIGHT COLUMN: Interactive Strategy Specification & Editor (7 cols) -->
+                    <div class="lg:col-span-7 flex flex-col h-[760px] rounded-2xl bg-slate-900/90 border border-slate-800 overflow-hidden shadow-lg">
+                        <!-- Strategy Editor Header -->
+                        <div class="p-4 border-b border-slate-800 bg-slate-950/40 flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <div class="w-7 h-7 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center">
+                                    <i data-lucide="sliders" class="w-4 h-4"></i>
+                                </div>
+                                <div>
+                                    <h4 class="text-xs font-bold text-slate-200">Strategy Parameters & Rules</h4>
+                                    <p class="text-[10px] text-slate-400">Interactive specification ready for backtesting</p>
+                                </div>
+                            </div>
+                            <span id="cust-strat-status-badge" class="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300">Draft</span>
+                        </div>
+
+                        <!-- Form Scrollable Body -->
+                        <div class="flex-1 p-5 overflow-y-auto space-y-5">
+                            <!-- Basic Identifiers -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-slate-400 mb-1">Display Title</label>
+                                    <input type="text" id="cust-strat-disp" placeholder="RSI + Volume Surge Momentum" class="w-full text-xs bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700 focus:outline-none focus:border-sky-500">
+                                </div>
+                                <div>
+                                    <label class="block text-[11px] font-semibold text-slate-400 mb-1">Strategy ID (Unique machine identifier)</label>
+                                    <input type="text" id="cust-strat-name" placeholder="rsi_vol_surge_v1" class="w-full text-xs font-mono bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700 focus:outline-none focus:border-sky-500">
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="block text-[11px] font-semibold text-slate-400 mb-1">Summary Description</label>
+                                <input type="text" id="cust-strat-desc" placeholder="Enters on momentum confirmation with volume expansion" class="w-full text-xs bg-slate-800 text-slate-200 rounded-lg p-2.5 border border-slate-700 focus:outline-none focus:border-sky-500">
+                            </div>
+
+                            <!-- AI Rationale Card (if generated by AI) -->
+                            <div id="cust-strat-rationale-box" class="p-3.5 rounded-xl bg-indigo-950/30 border border-indigo-900/50 space-y-1">
+                                <span class="text-[10px] uppercase font-bold tracking-wider text-indigo-400 flex items-center gap-1.5">
+                                    <i data-lucide="lightbulb" class="w-3.5 h-3.5"></i> Quantitative Logic Rationale
+                                </span>
+                                <p id="cust-strat-rationale" class="text-xs text-indigo-200/90 leading-relaxed font-sans">
+                                    Awaiting strategy generation. Prompt the AI on the left or customize parameters below.
+                                </p>
+                            </div>
+
+                            <!-- LONG Entry Conditions -->
+                            <div class="space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <h5 class="text-xs font-bold text-emerald-400 uppercase tracking-wide flex items-center gap-1.5">
+                                        <i data-lucide="trending-up" class="w-3.5 h-3.5"></i> Long Entry Rules (Buy)
+                                    </h5>
+                                    <button onclick="App.addRuleRow('long')" class="px-2.5 py-1 rounded bg-emerald-950/60 hover:bg-emerald-900 text-emerald-300 border border-emerald-800/80 text-[11px] font-semibold flex items-center gap-1 transition-colors">
+                                        <i data-lucide="plus" class="w-3 h-3"></i> Add Rule
+                                    </button>
+                                </div>
+                                <div id="cust-long-rules-container" class="space-y-2">
+                                    <!-- Dynamic rows injected here -->
+                                </div>
+                            </div>
+
+                            <!-- SHORT Entry Conditions -->
+                            <div class="space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <h5 class="text-xs font-bold text-rose-400 uppercase tracking-wide flex items-center gap-1.5">
+                                        <i data-lucide="trending-down" class="w-3.5 h-3.5"></i> Short Entry Rules (Sell)
+                                    </h5>
+                                    <button onclick="App.addRuleRow('short')" class="px-2.5 py-1 rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/80 text-[11px] font-semibold flex items-center gap-1 transition-colors">
+                                        <i data-lucide="plus" class="w-3 h-3"></i> Add Rule
+                                    </button>
+                                </div>
+                                <div id="cust-short-rules-container" class="space-y-2">
+                                    <!-- Dynamic rows injected here -->
+                                </div>
+                            </div>
+
+                            <!-- Risk & Position Management -->
+                            <div class="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-3.5">
+                                <h5 class="text-xs font-bold text-slate-300 uppercase tracking-wide flex items-center gap-1.5">
+                                    <i data-lucide="shield" class="w-3.5 h-3.5 text-sky-400"></i> Risk & Trade Exits
+                                </h5>
+                                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                    <div>
+                                        <label class="block text-[11px] text-slate-400 mb-1">Stop-Loss (x ATR)</label>
+                                        <input type="number" id="cust-sl-atr" value="1.5" step="0.25" min="0.5" max="5.0" class="w-full text-xs font-mono bg-slate-800 text-slate-100 rounded-lg p-2 border border-slate-700">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[11px] text-slate-400 mb-1">Risk:Reward Ratio</label>
+                                        <input type="number" id="cust-rr-ratio" value="2.5" step="0.5" min="1.0" max="6.0" class="w-full text-xs font-mono bg-slate-100 text-slate-900 font-bold rounded-lg p-2 border border-slate-700">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[11px] text-slate-400 mb-1">Trail Activation (R)</label>
+                                        <input type="number" id="cust-trail-act" value="1.0" step="0.25" min="0.5" max="5.0" class="w-full text-xs font-mono bg-slate-800 text-slate-100 rounded-lg p-2 border border-slate-700">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[11px] text-slate-400 mb-1">Trail Distance (x ATR)</label>
+                                        <input type="number" id="cust-trail-dist" value="1.5" step="0.25" min="0.5" max="5.0" class="w-full text-xs font-mono bg-slate-800 text-slate-100 rounded-lg p-2 border border-slate-700">
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2 pt-1">
+                                    <input type="checkbox" id="cust-use-trailing" class="rounded bg-slate-800 border-slate-700 text-sky-500 focus:ring-0">
+                                    <label for="cust-use-trailing" class="text-xs text-slate-300 cursor-pointer">
+                                        Enable Trailing Stop Loss once price reaches Activation R
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Quick Test Scorecard (expands when tested) -->
+                            <div id="cust-quick-test-card" class="hidden p-4 rounded-xl bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950/30 border border-slate-700 space-y-2.5">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                                        <i data-lucide="activity" class="w-3.5 h-3.5 text-sky-400"></i> Fast Backtest Simulation Preview
+                                    </span>
+                                    <span id="quick-test-meta" class="text-[11px] text-slate-400 font-mono">BTCUSDT 1h (Full Data)</span>
+                                </div>
+                                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                                    <div class="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                                        <span class="text-[10px] text-slate-500 uppercase">Win Rate</span>
+                                        <div id="quick-test-winrate" class="text-lg font-black font-mono text-emerald-400">--%</div>
+                                    </div>
+                                    <div class="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                                        <span class="text-[10px] text-slate-500 uppercase">Total Trades</span>
+                                        <div id="quick-test-trades" class="text-lg font-black font-mono text-slate-200">0</div>
+                                    </div>
+                                    <div class="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                                        <span class="text-[10px] text-slate-500 uppercase">Net Return (R)</span>
+                                        <div id="quick-test-netr" class="text-lg font-black font-mono text-sky-400">--</div>
+                                    </div>
+                                    <div class="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800">
+                                        <span class="text-[10px] text-slate-500 uppercase">Profit Factor</span>
+                                        <div id="quick-test-pf" class="text-lg font-black font-mono text-amber-400">--</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Footer Actions -->
+                        <div class="p-4 border-t border-slate-800 bg-slate-950/60 flex flex-wrap items-center justify-between gap-3">
+                            <button onclick="App.runQuickTestCustomStrategy()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-white border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors">
+                                <i data-lucide="play" class="w-3.5 h-3.5"></i>
+                                <span>Preview Simulation</span>
+                            </button>
+                            <div class="flex items-center gap-2.5">
+                                <button onclick="App.submitCustomStrategy(false)" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 transition-colors">
+                                    <i data-lucide="check" class="w-3.5 h-3.5"></i>
+                                    <span>Approve & Save Strategy</span>
+                                </button>
+                                <button onclick="App.submitCustomStrategy(true)" class="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-sky-500/20 flex items-center gap-1.5 transition-all">
+                                    <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+                                    <span>Save & Run in Backtest Studio →</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BOTTOM: Strategy Catalog -->
+                <div class="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                                <i data-lucide="book-open" class="w-4 h-4 text-sky-400"></i>
+                                Registered Strategy Catalog
+                            </h3>
+                            <p class="text-xs text-slate-400 mt-0.5">All strategies registered in the platform, available for instant simulation, tournament, and paper execution.</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input type="text" id="strat-catalog-search" oninput="App.filterStrategyCatalog()" placeholder="Search strategies..." class="text-xs bg-slate-800 text-slate-200 rounded-lg px-3 py-1.5 border border-slate-700 focus:outline-none focus:border-sky-500 w-48">
+                            <select id="strat-catalog-filter" onchange="App.filterStrategyCatalog()" class="text-xs bg-slate-800 text-slate-200 rounded-lg px-3 py-1.5 border border-slate-700 focus:outline-none focus:border-sky-500">
+                                <option value="all">All Strategies</option>
+                                <option value="custom">Custom AI Strategies Only</option>
+                                <option value="builtin">Built-In Strategies Only</option>
+                            </select>
+                        </div>
+                    </div>
                     <div id="strategies-grid-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"></div>
                 </div>
             </section>
@@ -1110,74 +1328,143 @@
                     </div>
                 </div>
 
-                <!-- ===== Smart Money Volume Screener ===== -->
-                <div class="flex items-center gap-2 pt-2">
-                    <i data-lucide="zap" class="w-4 h-4 text-purple-400"></i>
-                    <h2 class="text-sm font-bold text-slate-100">Smart Money Volume Screener</h2>
-                    <span class="text-[10px] text-slate-500">RVOL / divergence / velocity volume-spike detector &middot; Telegram-only alerts, now logged</span>
+            </section>
+
+            <!-- ============================================== -->
+            <!-- 6. MARKET SCREENER V2 VIEW -->
+            <!-- ============================================== -->
+            <section id="view-market-screener" class="view-section hidden space-y-6">
+                <div class="flex items-center gap-3">
+                    <div>
+                        <h2 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                            <i data-lucide="scan-search" class="w-4 h-4 text-amber-400"></i>
+                            Market Screener
+                            <span class="px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 text-[9px] font-bold">V2</span>
+                        </h2>
+                        <p class="text-[11px] text-slate-500 mt-0.5">Smart-money volume detection across the liquid Binance USDT universe</p>
+                    </div>
+                    <button onclick="App.fetchScreenerData()" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
+                    </button>
                 </div>
 
-                <!-- Bot Control: screener -->
-                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                <!-- Runtime Status -->
+                <div class="grid grid-cols-2 md:grid-cols-6 gap-4">
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 uppercase font-semibold">Process</span>
+                        <div id="screener-v2-status" class="text-lg font-black text-slate-300 mt-1">--</div>
+                        <div id="screener-v2-status-detail" class="text-[10px] text-slate-500 mt-1">Waiting for heartbeat</div>
+                    </div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 uppercase font-semibold">Alerts</span>
+                        <div id="screener-v2-enabled" class="text-lg font-black text-slate-300 mt-1">--</div>
+                        <div class="text-[10px] text-slate-500 mt-1">Telegram gate</div>
+                    </div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 uppercase font-semibold">Symbols Monitored</span>
+                        <div id="screener-v2-symbols" class="text-lg font-black text-slate-100 font-mono mt-1">0</div>
+                        <div class="text-[10px] text-slate-500 mt-1">Current universe</div>
+                    </div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 uppercase font-semibold">Timeframe</span>
+                        <div id="screener-v2-timeframe" class="text-lg font-black text-sky-400 font-mono mt-1">--</div>
+                        <div class="text-[10px] text-slate-500 mt-1">Configured kline interval</div>
+                    </div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 uppercase font-semibold">Last Signal</span>
+                        <div id="screener-v2-last-signal" class="text-sm font-bold text-slate-200 mt-2">--</div>
+                        <div class="text-[10px] text-slate-500 mt-1">Candle time</div>
+                    </div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-[10px] text-slate-500 uppercase font-semibold">Universe Refresh</span>
+                        <div id="screener-v2-last-refresh" class="text-sm font-bold text-slate-200 mt-2">--</div>
+                        <div class="text-[10px] text-slate-500 mt-1">Last successful rebuild</div>
+                    </div>
+                </div>
+
+                <!-- Configuration -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-5">
                     <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-3">
-                            <label class="relative inline-flex items-center cursor-pointer">
-                                <input type="checkbox" id="screener-ctl-enabled" class="sr-only peer">
-                                <div class="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:bg-emerald-600 transition-all"></div>
-                                <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-all peer-checked:translate-x-5"></span>
-                            </label>
-                            <span class="text-xs font-semibold text-slate-200">Alerts Enabled</span>
-                            <span class="text-[10px] text-slate-500">Detection keeps running either way -- this only suppresses Telegram sends when off</span>
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-100">Screener Configuration</h3>
+                            <p class="text-[10px] text-slate-500 mt-0.5">Changes are persisted and picked up by the running screener on its next control-loop tick.</p>
                         </div>
                         <span id="screener-ctl-updated" class="text-[10px] text-slate-600"></span>
                     </div>
+                    <div class="flex items-center gap-3">
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="screener-ctl-enabled" class="sr-only peer">
+                            <div class="w-10 h-5 bg-slate-700 rounded-full peer peer-checked:bg-emerald-600 transition-all"></div>
+                            <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-all peer-checked:translate-x-5"></span>
+                        </label>
+                        <span class="text-xs font-semibold text-slate-200">Alerting Enabled</span>
+                        <span class="text-[10px] text-slate-500">Detection continues while alerting is paused</span>
+                    </div>
                     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                        <label class="text-[11px] text-slate-400">Min 24h Quote Volume<input type="number" step="100000" id="screener-ctl-min_quote_volume_24h" class="cfg-input" placeholder="1000000"></label>
+                        <label class="text-[11px] text-slate-400">Min Market Cap (USD)<input type="number" step="1000000" id="screener-ctl-min_market_cap_usd" class="cfg-input" placeholder="50000000"></label>
                         <label class="text-[11px] text-slate-400">RVOL Multiplier<input type="number" step="0.1" id="screener-ctl-rvol_multiplier" class="cfg-input" placeholder="7.0"></label>
-                        <label class="text-[11px] text-slate-400">Divergence Max Price Chg %<input type="number" step="0.1" id="screener-ctl-divergence_max_price_change" class="cfg-input" placeholder="1.0"></label>
-                        <label class="text-[11px] text-slate-400">Velocity Threshold<input type="number" step="0.1" id="screener-ctl-velocity_threshold" class="cfg-input" placeholder="3.0"></label>
-                        <label class="text-[11px] text-slate-400">Max Alerts / Hour (global)<input type="number" step="1" id="screener-ctl-max_alerts_per_hour" class="cfg-input" placeholder="5"></label>
-                        <label class="text-[11px] text-slate-400">Max Alerts / Symbol / Hour<input type="number" step="1" id="screener-ctl-max_alerts_per_symbol_per_hour" class="cfg-input" placeholder="2"></label>
-                        <label class="text-[11px] text-slate-400">Alert Cooldown (sec)<input type="number" step="10" id="screener-ctl-alert_cooldown_sec" class="cfg-input" placeholder="120"></label>
-                        <label class="text-[11px] text-slate-400 flex items-center gap-2 mt-3">
-                            <input type="checkbox" id="screener-ctl-enable_divergence_detection" class="w-3.5 h-3.5"> Divergence Detection
-                        </label>
-                        <label class="text-[11px] text-slate-400 flex items-center gap-2 mt-3">
-                            <input type="checkbox" id="screener-ctl-enable_velocity_detection" class="w-3.5 h-3.5"> Velocity Detection
-                        </label>
+                        <label class="text-[11px] text-slate-400">Min Signal RVOL<input type="number" step="0.1" id="screener-ctl-min_signal_rvol" class="cfg-input" placeholder="5.0"></label>
+                        <label class="text-[11px] text-slate-400">Velocity Threshold<input type="number" step="0.1" id="screener-ctl-velocity_threshold" class="cfg-input" placeholder="5.0"></label>
+                        <label class="text-[11px] text-slate-400">Min Signal Velocity<input type="number" step="0.1" id="screener-ctl-min_signal_velocity" class="cfg-input" placeholder="3.0"></label>
+                        <label class="text-[11px] text-slate-400">Divergence Max Price Chg %<input type="number" step="0.1" id="screener-ctl-divergence_max_price_change" class="cfg-input" placeholder="0.3"></label>
+                        <label class="text-[11px] text-slate-400">Min Quality Score<input type="number" step="1" id="screener-ctl-min_quality_score" class="cfg-input" placeholder="70"></label>
+                        <label class="text-[11px] text-slate-400">Max Alerts / Hour<input type="number" min="1" max="1000" step="1" id="screener-ctl-max_alerts_per_hour" class="cfg-input" placeholder="5"></label>
+                        <label class="text-[11px] text-slate-400">Max Alerts / Symbol / Hour<input type="number" min="1" max="100" step="1" id="screener-ctl-max_alerts_per_symbol_per_hour" class="cfg-input" placeholder="1"></label>
+                        <label class="text-[11px] text-slate-400">Alert Cooldown (sec)<input type="number" min="0" max="86400" step="10" id="screener-ctl-alert_cooldown_sec" class="cfg-input" placeholder="900"></label>
+                        <label class="text-[11px] text-slate-400">Min Telegram Alert Quality<input type="number" min="0" max="100" step="1" id="screener-ctl-min_alert_quality_score" class="cfg-input" placeholder="80"></label>
+                        <label class="text-[11px] text-slate-400">Max Signal Age (sec)<input type="number" min="1" max="86400" step="30" id="screener-ctl-max_signal_age_sec" class="cfg-input" placeholder="900"></label>
+                        <label class="text-[11px] text-slate-400">Expired History Retention (days)<input type="number" min="1" max="3650" step="1" id="screener-ctl-expired_signal_retention_days" class="cfg-input" placeholder="30"></label>
+                        <label class="text-[11px] text-slate-400">Expired Cleanup Interval (days)<input type="number" min="1" max="365" step="1" id="screener-ctl-expired_signal_cleanup_interval_days" class="cfg-input" placeholder="7"></label>
+                        <label class="text-[11px] text-slate-400 flex items-center gap-2 mt-3"><input type="checkbox" id="screener-ctl-enable_divergence_detection" class="w-3.5 h-3.5"> Divergence Detection</label>
+                        <label class="text-[11px] text-slate-400 flex items-center gap-2 mt-3"><input type="checkbox" id="screener-ctl-enable_velocity_detection" class="w-3.5 h-3.5"> Velocity Detection</label>
+                        <label class="text-[11px] text-slate-400 flex items-center gap-2 mt-3"><input type="checkbox" id="screener-ctl-require_confluence" class="w-3.5 h-3.5"> Require Confluence</label>
                     </div>
                     <div class="flex items-center gap-3">
-                        <button onclick="App.saveBotControl('screener')" class="px-4 py-2 text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white rounded-lg transition-all">Save Changes</button>
-                        <span class="text-[10px] text-slate-500">Takes effect within ~60s on the running process -- no restart needed</span>
+                        <button onclick="App.saveBotControl('screener')" class="px-4 py-2 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-all">Save Changes</button>
+                        <span class="text-[10px] text-slate-500">No process restart required.</span>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                <!-- Live Summary -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800">
                         <span class="text-xs text-slate-400 uppercase font-semibold">Signals (24h)</span>
-                        <div id="screener-kpi-24h" class="text-3xl font-black font-mono text-purple-400 mt-2">0</div>
+                        <div id="screener-kpi-24h" class="text-3xl font-black font-mono text-amber-400 mt-2">0</div>
                     </div>
-                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-                        <span class="text-xs text-slate-400 uppercase font-semibold">Signals (all-time)</span>
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Signals (All-time)</span>
                         <div id="screener-kpi-total" class="text-3xl font-black font-mono text-slate-100 mt-2">0</div>
                     </div>
-                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-                        <span class="text-xs text-slate-400 uppercase font-semibold">24h Breakdown</span>
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Signal Types (24h)</span>
                         <div id="screener-kpi-breakdown" class="text-xs text-slate-300 mt-2 space-y-0.5">--</div>
+                    </div>
+                    <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Database</span>
+                        <div id="screener-kpi-db" class="text-lg font-black text-slate-300 mt-2">--</div>
                     </div>
                 </div>
 
+                <!-- Recent Signals -->
                 <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
-                    <h3 class="text-sm font-bold text-slate-100">Recent Signals</h3>
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-100">Recent Signals</h3>
+                            <p class="text-[10px] text-slate-500">Latest persisted signals; click any column header to sort.</p>
+                        </div>
+                        <span id="screener-signal-count" class="text-[10px] text-slate-500">--</span>
+                    </div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left custom-table">
                             <thead>
                                 <tr>
-                                    <th>Time</th><th>Symbol</th><th>Type</th><th>RVOL</th>
-                                    <th>Price</th><th>Price Chg</th><th>Velocity</th><th>Alerted</th>
+                                    <th>Time</th><th>Symbol</th><th>Type</th><th>RVOL</th><th>Velocity</th>
+                                    <th>Quality</th><th>Price</th><th>Price Chg</th><th>Quote Volume</th><th>Alerted</th>
                                 </tr>
                             </thead>
                             <tbody id="screener-signals-table-body">
-                                <tr><td colspan="8" class="text-center py-6 text-slate-500 text-xs">Loading...</td></tr>
+                                <tr><td colspan="10" class="text-center py-8 text-slate-500 text-xs">Loading screener signals...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -1185,7 +1472,180 @@
             </section>
 
             <!-- ============================================== -->
-            <!-- 6. SETTINGS & USER MANAGEMENT VIEW -->
+            <!-- 6b. WALLET TRACKING VIEW (on-chain smart money) -->
+            <!-- ============================================== -->
+            <section id="view-wallet-tracking" class="view-section hidden space-y-6">
+                <div class="flex items-center gap-3">
+                    <div>
+                        <h2 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                            <i data-lucide="wallet" class="w-4 h-4 text-cyan-400"></i>
+                            Wallet Tracking
+                            <span class="px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 text-[9px] font-bold">SMART MONEY</span>
+                        </h2>
+                        <p class="text-[11px] text-slate-500 mt-0.5">Large on-chain flows from the DEX pools scanned by this service. Activity is polled, not a real-time feed.</p>
+                    </div>
+                    <button onclick="App.fetchWalletData()" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
+                    </button>
+                </div>
+
+                <!-- Worker status -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Scanner</div><div id="wt-kpi-status" class="text-lg font-black text-slate-300 mt-1">--</div><div id="wt-kpi-status-detail" class="text-[10px] text-slate-500 mt-1">Waiting for first scan</div></div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Last Scan</div><div id="wt-kpi-last" class="text-sm font-bold text-slate-200 mt-2">--</div></div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Swaps Stored (24h)</div><div id="wt-kpi-swaps" class="text-lg font-black font-mono text-cyan-400 mt-1">0</div></div>
+                    <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Monitored Wallets</div><div id="wt-kpi-tracked" class="text-lg font-black font-mono text-emerald-400 mt-1">0</div></div>
+                </div>
+
+                <!-- Filters -->
+                <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-wrap items-end gap-4">
+                    <label class="text-[11px] text-slate-400">Period
+                        <select id="wt-period" onchange="App.fetchWalletData()" class="cfg-input">
+                            <option value="1">1 hour</option><option value="6">6 hours</option>
+                            <option value="24" selected>24 hours</option><option value="168">7 days</option>
+                        </select></label>
+                    <label class="text-[11px] text-slate-400">Smart Money Scope
+                        <select id="wt-tracked-only" onchange="App.fetchWalletData()" class="cfg-input">
+                            <option value="false">All Discovered Wallets</option>
+                            <option value="true">Checklisted Only (Smart Money)</option>
+                        </select></label>
+                    <label class="text-[11px] text-slate-400">Side
+                        <select id="wt-side" onchange="App.fetchWalletData()" class="cfg-input">
+                            <option value="">Buy &amp; Sell</option><option value="BUY">Accumulating (Buy)</option><option value="SELL">Distributing (Sell)</option>
+                        </select></label>
+                    <label class="text-[11px] text-slate-400">Chain
+                        <select id="wt-chain" onchange="App.fetchWalletData()" class="cfg-input">
+                            <option value="">All chains</option><option value="eth">Ethereum</option><option value="base">Base</option>
+                            <option value="bsc">BNB Chain</option><option value="arbitrum">Arbitrum</option>
+                            <option value="polygon_pos">Polygon</option><option value="solana">Solana</option>
+                        </select></label>
+                    <label class="text-[11px] text-slate-400">Min Net USD
+                        <input type="number" id="wt-minnet" min="0" step="10000" value="100000" onchange="App.fetchWalletData()" class="cfg-input"></label>
+                </div>
+
+                <!-- Scanner settings are persisted server-side and reloaded by the worker each cycle. -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-cyan-900/60 space-y-4">
+                    <div class="flex items-start justify-between gap-4">
+                        <div><h3 class="text-sm font-bold text-slate-100">Scanner Settings</h3>
+                        <p class="text-[10px] text-slate-400 mt-1">Changes persist in MariaDB and are picked up by the scanner automatically. Token selection matches the pool base-token contract/mint.</p></div>
+                        <button onclick="App.saveWalletSettings()" class="px-4 py-2 text-xs font-bold bg-cyan-700 hover:bg-cyan-600 text-white rounded-lg whitespace-nowrap">Save Settings</button>
+                    </div>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <label class="text-[11px] text-slate-400">Scanner enabled<select id="wt-setting-enabled" class="cfg-input"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+                        <label class="text-[11px] text-slate-400">Pools per network<input id="wt-setting-pools" type="number" min="1" max="100" class="cfg-input"></label>
+                        <label class="text-[11px] text-slate-400">Minimum swap USD<input id="wt-setting-mintrade" type="number" min="0" step="100" class="cfg-input"></label>
+                        <label class="text-[11px] text-slate-400">Candidate net USD threshold<input id="wt-setting-minnet" type="number" min="0" step="1000" class="cfg-input"></label>
+                        <label class="text-[11px] text-slate-400">Auto-monitor net USD threshold<input id="wt-setting-autotrack" type="number" min="0" step="1000" class="cfg-input"></label>
+                        <label class="text-[11px] text-slate-400">Scan interval (seconds)<input id="wt-setting-poll" type="number" min="15" max="3600" class="cfg-input"></label>
+                        <label class="text-[11px] text-slate-400">API delay (seconds)<input id="wt-setting-delay" type="number" min="0.5" max="60" step="0.1" class="cfg-input"></label>
+                        <label class="text-[11px] text-slate-400">Swap retention (days)<input id="wt-setting-retention" type="number" min="1" max="90" class="cfg-input"></label>
+                    </div>
+                    <div class="space-y-2"><div class="text-[11px] font-semibold text-slate-300">Networks to scan</div>
+                        <div class="flex flex-wrap gap-x-4 gap-y-2 text-[11px] text-slate-300">
+                            <label><input type="checkbox" class="wt-setting-network" value="eth"> Ethereum</label>
+                            <label><input type="checkbox" class="wt-setting-network" value="solana"> Solana</label>
+                            <label><input type="checkbox" class="wt-setting-network" value="base"> Base</label>
+                            <label><input type="checkbox" class="wt-setting-network" value="bsc"> BNB Chain</label>
+                            <label><input type="checkbox" class="wt-setting-network" value="arbitrum"> Arbitrum</label>
+                            <label><input type="checkbox" class="wt-setting-network" value="polygon_pos"> Polygon</label>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <label class="text-[11px] text-slate-400">Crypto scope<select id="wt-setting-token-mode" class="cfg-input"><option value="all">All discovered tokens</option><option value="selected">Only selected tokens</option></select></label>
+                        <label class="md:col-span-2 text-[11px] text-slate-400">Selected token contracts / mints (one per line: chain:address)
+                            <textarea id="wt-setting-token-addresses" rows="3" placeholder="eth:0x...&#10;solana:TokenMintAddress..." class="cfg-input"></textarea>
+                        </label>
+                    </div>
+                    <p class="text-[10px] text-amber-300">Selected-token mode currently matches the pool base-token address only. A symbol such as BTC or PEPE is not unique; use the exact contract/mint address. This scanner covers indexed DEX pools, not private CEX wallet trades.</p>
+                    <div id="wt-settings-status" class="text-[11px] text-slate-400">Loading saved settings...</div>
+                </div>
+
+                <!-- Token flow -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-100">Token Flow &mdash; Early Detection</h3>
+                        <p class="text-[10px] text-slate-500">Pairs where several large wallets are net buying (accumulation) or net selling (distribution) in the selected period.</p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left custom-table">
+                            <thead><tr><th>Signal</th><th>Pair</th><th>Chain</th><th>Wallets Buying</th><th>Wallets Selling</th><th>Buy USD</th><th>Sell USD</th><th>Net USD</th></tr></thead>
+                            <tbody id="wt-flow-body"><tr><td colspan="8" class="text-center py-8 text-slate-500 text-xs">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Candidate wallets -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2"><i data-lucide="crosshair" class="w-4 h-4 text-cyan-400"></i> Smart Money Candidates &amp; Discovery</h3>
+                            <p class="text-[10px] text-slate-500">Net position per wallet and pair. Check or uncheck wallets to manage your Smart Money Checklist.</p>
+                        </div>
+                        <span id="wt-candidate-count" class="text-[10px] text-slate-500 font-mono">--</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left custom-table">
+                            <thead><tr><th>Checklist</th><th>Wallet</th><th>Crypto (Pair)</th><th>Token Bias</th><th>Total Vol (Tokens)</th><th>Total Turnover (USD)</th><th>Net Tokens</th><th>Net Cash Flow (USD)</th><th>Avg Buy</th><th>Avg Sell</th><th>Trades</th><th>Period Range</th><th>Watch</th></tr></thead>
+                            <tbody id="wt-candidates-body"><tr><td colspan="13" class="text-center py-8 text-slate-500 text-xs">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Live feed + monitored list -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="lg:col-span-2 p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                        <div class="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full bg-cyan-400"></span> Recent Activity &mdash; Watched Wallets</h3>
+                                <p class="text-[10px] text-slate-500">Polled swaps from checklisted wallets in the DEX pools this scanner covers. The table refreshes periodically; it is not a real-time wallet feed.</p>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <label class="text-[10px] text-slate-400 flex items-center gap-1.5">
+                                    <span>Follow:</span>
+                                    <select id="wt-feed-wallet" onchange="App.fetchWalletEvents()" class="cfg-input text-xs py-1">
+                                        <option value="">All Checklisted Wallets</option>
+                                    </select>
+                                </label>
+                                <label class="text-[10px] text-slate-400 flex items-center gap-1.5">
+                                    <span>Side:</span>
+                                    <select id="wt-feed-side" onchange="App.fetchWalletEvents()" class="cfg-input text-xs py-1">
+                                        <option value="">All Sides</option>
+                                        <option value="buy">Buy Only</option>
+                                        <option value="sell">Sell Only</option>
+                                    </select>
+                                </label>
+                                <span id="wt-feed-count" class="text-[10px] text-cyan-400 font-mono px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-800">--</span>
+                            </div>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left custom-table">
+                                <thead><tr><th>Time</th><th>Smart Money Wallet</th><th>Crypto (Pair)</th><th>Action</th><th>At What Price</th><th>Total Vol (Tokens)</th><th>Total Amount (USD)</th><th>Tx</th></tr></thead>
+                                <tbody id="wt-feed-body"><tr><td colspan="8" class="text-center py-8 text-slate-500 text-xs">Loading...</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2"><i data-lucide="check-square" class="w-4 h-4 text-emerald-400"></i> Smart Money Checklist</h3>
+                            <p class="text-[10px] text-slate-500">Wallets you chose to monitor. Activity is visible only when a swap appears in a pool scanned by this service.</p>
+                        </div>
+                        <div class="space-y-2">
+                            <div class="flex gap-2">
+                                <select id="wt-add-chain" class="cfg-input"><option value="eth">ETH</option><option value="base">Base</option><option value="bsc">BSC</option><option value="arbitrum">ARB</option><option value="polygon_pos">POLY</option><option value="solana">SOL</option></select>
+                                <input type="text" id="wt-add-wallet" placeholder="Wallet address" class="cfg-input" maxlength="64">
+                            </div>
+                            <div class="flex gap-2">
+                                <input type="text" id="wt-add-label" placeholder="Label (optional)" class="cfg-input" maxlength="80">
+                                <button onclick="App.walletAdd()" class="px-3 py-1.5 text-xs font-semibold bg-cyan-700 hover:bg-cyan-600 text-white rounded-lg whitespace-nowrap">+ Add to Checklist</button>
+                            </div>
+                        </div>
+                        <div id="wt-tracked-list" class="space-y-2 max-h-96 overflow-y-auto"><div class="text-slate-500 text-xs">Loading...</div></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================== -->
+            <!-- 7. SETTINGS & USER MANAGEMENT VIEW -->
             <!-- ============================================== -->
             <section id="view-settings" class="view-section hidden space-y-8">
                 <!-- User Administration Panel -->
@@ -1684,7 +2144,7 @@
          browsers can keep serving a stale cached copy indefinitely since
          this file has no explicit Cache-Control header. See the
          "still seeing the old bug after a fix was pushed" class of report. -->
-    <script src="/static/js/app.js?v=20260929-2"></script>
+    <script src="/static/js/app.js?v=20261006-3"></script>
     <script src="/static/js/dashboard_enhancements.js?v=20261006-1"></script>
     <script>
         if (window.lucide) window.lucide.createIcons();
