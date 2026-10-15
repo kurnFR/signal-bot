@@ -146,7 +146,10 @@ def wallets_token_flow(period_hours: int = Query(24), limit: int = Query(20, ge=
     _check_period(period_hours)
     try:
         positions = store.get_all_positions_for_period(period_hours)
-        return {"flows": analyzer.token_flow(positions)[:limit]}
+        flows = analyzer.token_flow(positions)[:limit]
+        for f in flows:
+            f["chain_label"] = CHAINS.get(f["chain"], {}).get("label", f["chain"])
+        return {"flows": flows}
     except Exception as e:
         logger.exception("wallets_token_flow failed")
         raise HTTPException(status_code=500, detail="Failed to load token flow")
