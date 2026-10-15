@@ -652,6 +652,20 @@ class TestWalletTrackerSingleInstanceLock(unittest.TestCase):
             "SELECT GET_LOCK(%s, 0)", ("signal_bot_wallet_tracker",)
         )
 
+    def test_lock_heartbeat_checks_connection_still_owns_lock(self):
+        from unittest.mock import MagicMock
+        import run_wallet_tracker
+
+        connection = MagicMock()
+        connection.cursor.return_value.fetchone.return_value = (123, 123)
+        self.assertTrue(run_wallet_tracker.verify_lock_connection(connection))
+        connection.cursor.return_value.execute.assert_called_once_with(
+            "SELECT IS_USED_LOCK(%s), CONNECTION_ID()", ("signal_bot_wallet_tracker",)
+        )
+
+        connection.cursor.return_value.fetchone.return_value = (456, 123)
+        self.assertFalse(run_wallet_tracker.verify_lock_connection(connection))
+
     def test_lock_contention_closes_connection_and_refuses_start(self):
         from unittest.mock import MagicMock
         import run_wallet_tracker
