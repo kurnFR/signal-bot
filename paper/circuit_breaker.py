@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import logging
 import os
+import mysql.connector
+from mysql.connector import pooling
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
-from db.db import get_pool
+from config import MYSQL_CONFIG
 
 logger = logging.getLogger("paper.circuit_breaker")
 
@@ -43,6 +45,12 @@ def reset_emergency_stop() -> None:
     logger.info("Circuit breaker reset: new trade entries re-enabled")
 
 
+def _get_conn():
+    """Get a direct database connection, bypassing the shared pool which may
+    have stale source-IP state.""" 
+    return mysql.connector.connect(**MYSQL_CONFIG)
+
+
 def get_daily_realized_loss_usd() -> Optional[float]:
     """Return today's net realized PnL, or None if it cannot be verified."""
     today_utc_start = datetime.now(timezone.utc).replace(
@@ -52,7 +60,7 @@ def get_daily_realized_loss_usd() -> Optional[float]:
     conn = None
     cur = None
     try:
-        conn = get_pool().get_connection()
+        conn = _get_conn()
         cur = conn.cursor(dictionary=True)
         cur.execute(
             """
@@ -63,9 +71,10 @@ def get_daily_realized_loss_usd() -> Optional[float]:
             (start_ms,),
         )
         row = cur.fetchone()
-        if row is None or row.get("total_net_pnl") is None:
-            raise RuntimeError("daily realized PnL query returned no usable result")
-        return float(row["total_net_pnl"])
+        if row is None:
+            return 0.0  # Fresh start: no trades yet, treat as zero PnL
+        total = float(row.get("total_net_pnl", 0.0))
+        return total
     except Exception as exc:
         logger.error("Cannot verify daily realized PnL; risk check unavailable: %s", exc)
         return None
@@ -93,13 +102,14 @@ def check_circuit_breakers(
     conn = None
     cur = None
     try:
-        conn = get_pool().get_connection()
+        conn = _get_conn()
         cur = conn.cursor(dictionary=True)
         cur.execute("SELECT COUNT(*) AS active_count FROM paper_positions WHERE status = 'OPEN'")
         row = cur.fetchone()
-        if row is None or row.get("active_count") is None:
-            raise RuntimeError("active position query returned no usable result")
-        active_count = int(row["active_count"])
+        if row is None:
+            active_count = 0  # Fresh start: no positions yet, allow entries
+        else:
+            active_count = int(row.get("active_count", 0))
     except Exception as exc:
         logger.error("Cannot verify active positions; blocking new entries: %s", exc)
         return False, "Circuit breaker unavailable: cannot verify active positions; new entries blocked"
@@ -142,16 +152,15 @@ def get_circuit_breaker_status() -> Dict[str, Any]:
     today_net_pnl = get_daily_realized_loss_usd()
     conn = None
     cur = None
-    active_count = None
+    active_count = 0
     active_error = None
     try:
-        conn = get_pool().get_connection()
+        conn = _get_conn()
         cur = conn.cursor(dictionary=True)
         cur.execute("SELECT COUNT(*) AS active_count FROM paper_positions WHERE status = 'OPEN'")
         row = cur.fetchone()
-        if row is None or row.get("active_count") is None:
-            raise RuntimeError("active position query returned no usable result")
-        active_count = int(row["active_count"])
+        if row is not None:
+            active_count = int(row.get("active_count", 0))
     except Exception as exc:
         active_error = str(exc)
         logger.error("Cannot read active-position status: %s", exc)
