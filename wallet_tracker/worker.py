@@ -231,7 +231,8 @@ def run_cycle(provider, fallback_provider=None):
     dispatch_telegram_alerts()
 
 
-def run():
+def run(stop_event=None):
+    """Run polling cycles until stopped; optional event is used if lock ownership is lost."""
     store.ensure_tables()
     settings = store.get_settings()
     provider = GeckoTerminalProvider(delay_seconds=settings["api_delay_seconds"])
@@ -245,11 +246,15 @@ def run():
     else:
         logger.info("Birdeye fallback disabled; set BIRDEYE_API_KEY to enable it.")
     logger.info("Wallet tracker started; settings are loaded from the dashboard.")
-    while True:
+    while stop_event is None or not stop_event.is_set():
         try:
             run_cycle(provider, fallback_provider=fallback_provider)
             settings = store.get_settings()
         except Exception:
             logger.exception("cycle failed")
             settings = store.get_settings()
-        time.sleep(settings["poll_interval_seconds"])
+        if stop_event is not None:
+            if stop_event.wait(settings["poll_interval_seconds"]):
+                break
+        else:
+            time.sleep(settings["poll_interval_seconds"])
