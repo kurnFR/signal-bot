@@ -1976,18 +1976,22 @@ const App = {
                 container.innerHTML = jobs.slice(0, 5).map(j => {
                     const isDone = j.status === "completed";
                     const isFailed = j.status === "failed";
+                    const progressValue = Number(j.progress);
+                    const safeProgress = Number.isFinite(progressValue)
+                        ? Math.min(100, Math.max(0, progressValue))
+                        : 0;
                     return `
                         <div class="p-3 rounded bg-slate-900 border border-slate-800 space-y-2">
                             <div class="flex items-center justify-between text-xs">
-                                <span class="font-bold text-slate-200 font-mono">${j.symbol || ""} ${j.timeframe || ""} (${j.type})</span>
+                                <span class="font-bold text-slate-200 font-mono">${this._escapeHtml(j.symbol || "")} ${this._escapeHtml(j.timeframe || "")} (${this._escapeHtml(j.type || "")})</span>
                                 <span class="px-2 py-0.5 rounded text-[10px] uppercase font-bold ${isDone ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : isFailed ? "bg-rose-950 text-rose-400" : "bg-sky-950 text-sky-400 animate-pulse"}">
-                                    ${j.status}
+                                    ${this._escapeHtml(j.status || "")}
                                 </span>
                             </div>
                             <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                                <div class="h-full bg-sky-500 transition-all duration-300" style="width: ${j.progress}%"></div>
+                                <div class="h-full bg-sky-500 transition-all duration-300" style="width: ${safeProgress}%"></div>
                             </div>
-                            <div class="text-[11px] text-slate-400 truncate">${j.message || ""}</div>
+                            <div class="text-[11px] text-slate-400 truncate">${this._escapeHtml(j.message || "")}</div>
                         </div>
                     `;
                 }).join("");
