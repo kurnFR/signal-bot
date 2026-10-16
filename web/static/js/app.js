@@ -624,8 +624,8 @@ const App = {
         tbody.innerHTML = rows.map(r => {
             const vol = Number(r.buy_tokens || 0) + Number(r.sell_tokens || 0);
             const checklistBadge = r.is_tracked
-                ? `<button data-chain="${this._escapeHtml(r.chain)}" data-wallet="${this._escapeHtml(r.wallet)}" onclick="App.walletToggleTrack(this)" class="px-2 py-1 text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-600 hover:bg-rose-950 hover:text-rose-300 hover:border-rose-700 rounded-md transition-all flex items-center gap-1 whitespace-nowrap" title="Click to uncheck / remove from Smart Money checklist"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>✓ Smart Money</button>`
-                : `<button data-chain="${this._escapeHtml(r.chain)}" data-wallet="${this._escapeHtml(r.wallet)}" onclick="App.walletToggleTrack(this)" class="px-2 py-1 text-[10px] font-semibold bg-slate-800 text-cyan-300 border border-slate-700 hover:bg-cyan-900/80 hover:border-cyan-500 rounded-md transition-all flex items-center gap-1 whitespace-nowrap" title="Click to checklist as Smart Money"><span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>+ Checklist</button>`;
+                ? `<button data-chain="${this._escapeHtml(r.chain)}" data-wallet="${this._escapeHtml(r.wallet)}" data-wt-toggle-track="true" class="px-2 py-1 text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-600 hover:bg-rose-950 hover:text-rose-300 hover:border-rose-700 rounded-md transition-all flex items-center gap-1 whitespace-nowrap" title="Click to uncheck / remove from Smart Money checklist"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>✓ Smart Money</button>`
+                : `<button data-chain="${this._escapeHtml(r.chain)}" data-wallet="${this._escapeHtml(r.wallet)}" data-wt-toggle-track="true" class="px-2 py-1 text-[10px] font-semibold bg-slate-800 text-cyan-300 border border-slate-700 hover:bg-cyan-900/80 hover:border-cyan-500 rounded-md transition-all flex items-center gap-1 whitespace-nowrap" title="Click to checklist as Smart Money"><span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>+ Checklist</button>`;
             const followBtn = `<button type="button" data-wt-follow-wallet="${this._escapeHtml(r.wallet)}" data-wt-follow-chain="${this._escapeHtml(r.chain)}" class="px-2 py-1 text-[10px] font-semibold bg-cyan-950 text-cyan-300 border border-cyan-800 hover:bg-cyan-900 rounded-md whitespace-nowrap flex items-center gap-1" title="Add this wallet to the checklist and filter recent polled activity">Watch Activity</button>`;
             return `<tr>
                 <td>${checklistBadge}</td>
@@ -643,6 +643,9 @@ const App = {
                 <td>${followBtn}</td>
             </tr>`;
         }).join("");
+        tbody.querySelectorAll("[data-wt-toggle-track]").forEach(button => {
+            button.addEventListener("click", () => this.walletToggleTrack(button));
+        });
         tbody.querySelectorAll("[data-wt-follow-wallet]").forEach(button => {
             button.addEventListener("click", () => this.followWallet(button.dataset.wtFollowWallet || "", button.dataset.wtFollowChain || ""));
         });
@@ -697,11 +700,14 @@ const App = {
                 </div>
                 <div class="flex items-center gap-1.5 shrink-0">
                     <button type="button" data-wt-follow-wallet="${this._escapeHtml(t.wallet)}" data-wt-follow-chain="${this._escapeHtml(t.chain)}" class="px-2 py-1 text-[10px] font-semibold bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800 rounded">Follow</button>
-                    <button data-id="${Number(t.id)}" onclick="App.walletUntrack(this)" class="px-2 py-1 text-[10px] font-semibold bg-slate-700 hover:bg-rose-800 text-slate-200 rounded">Uncheck</button>
+                    <button type="button" data-wt-untrack="true" data-id="${Number(t.id)}" class="px-2 py-1 text-[10px] font-semibold bg-slate-700 hover:bg-rose-800 text-slate-200 rounded">Uncheck</button>
                 </div>
             </div>`).join("");
         box.querySelectorAll("[data-wt-follow-wallet]").forEach(button => {
             button.addEventListener("click", () => this.followWallet(button.dataset.wtFollowWallet || "", button.dataset.wtFollowChain || ""));
+        });
+        box.querySelectorAll("[data-wt-untrack]").forEach(button => {
+            button.addEventListener("click", () => this.walletUntrack(button));
         });
     },
 
@@ -2497,12 +2503,13 @@ const App = {
                 ${opOptions}
             </select>
             <input type="text" class="rule-val-input w-28 bg-slate-800 text-slate-100 rounded-lg p-2 border border-slate-700 text-xs font-mono font-semibold focus:outline-none" value="${this._escapeHtml(value)}" placeholder="Value / col">
-            <button type="button" onclick="this.closest('.rule-condition-row').remove()" class="p-2 rounded-lg bg-rose-950/40 hover:bg-rose-900 text-rose-400 hover:text-rose-200 border border-rose-900/50 transition-colors" title="Remove rule">
+            <button type="button" data-remove-rule="true" class="p-2 rounded-lg bg-rose-950/40 hover:bg-rose-900 text-rose-400 hover:text-rose-200 border border-rose-900/50 transition-colors" title="Remove rule">
                 <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
             </button>
         `;
 
         container.appendChild(row);
+        row.querySelector("[data-remove-rule]")?.addEventListener("click", () => row.remove());
         if (window.lucide) lucide.createIcons();
     },
 
