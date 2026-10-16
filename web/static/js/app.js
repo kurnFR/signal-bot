@@ -131,6 +131,18 @@ const App = {
         return div.innerHTML;
     },
 
+    // Only allow safe web links from API/database content. HTML escaping alone
+    // does not prevent javascript: or other executable URL schemes.
+    _safeHttpUrl(value) {
+        if (typeof value !== "string" || !value.trim()) return "";
+        try {
+            const url = new URL(value.trim(), window.location.origin);
+            return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+        } catch (_) {
+            return "";
+        }
+    },
+
     escapeHtml(str) {
         return this._escapeHtml(str);
     },
@@ -257,13 +269,14 @@ const App = {
                 outcome = `<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-950 text-amber-300 border border-amber-800">PENDING</span>`;
             }
             const confColor = s.confidence >= 85 ? "text-emerald-400" : s.confidence >= 75 ? "text-amber-400" : "text-slate-300";
+            const safeUrl = this._safeHttpUrl(s.url);
             return `
                 <tr>
                     <td class="whitespace-nowrap text-slate-400">${this._formatDateTime(s.created_at)}</td>
                     <td class="font-semibold text-slate-100">${this._escapeHtml(s.symbol)}<div class="text-[10px] text-slate-500">${this._escapeHtml(s.market)}/${this._escapeHtml(s.timeframe)}</div></td>
                     <td><span class="px-2 py-0.5 text-[10px] font-bold rounded border ${biasColor}">${this._escapeHtml((s.bias || "").toUpperCase())}</span></td>
                     <td class="font-mono font-bold ${confColor}">${s.confidence}%</td>
-                    <td class="max-w-[220px] text-slate-300">${s.url ? `<a href="${this._escapeHtml(s.url)}" target="_blank" rel="noopener" class="hover:text-sky-400 underline decoration-dotted">${this._escapeHtml(s.headline || "(no linked event)")}</a>` : this._escapeHtml(s.headline || "(no linked event)")}</td>
+                    <td class="max-w-[220px] text-slate-300">${safeUrl ? `<a href="${this._escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" class="hover:text-sky-400 underline decoration-dotted">${this._escapeHtml(s.headline || "(no linked event)")}</a>` : this._escapeHtml(s.headline || "(no linked event)")}</td>
                     <td class="max-w-[260px] text-slate-400">${this._escapeHtml(s.reasoning || "--")}</td>
                     <td class="text-slate-400">${this._escapeHtml(s.time_horizon || "--")}</td>
                     <td>${outcome}</td>
@@ -290,8 +303,9 @@ const App = {
             } else if (e.symbols) {
                 metaLine = `Tagged: ${this._escapeHtml(e.symbols)}`;
             }
-            const headline = e.url
-                ? `<a href="${this._escapeHtml(e.url)}" target="_blank" rel="noopener" class="hover:text-sky-400">${this._escapeHtml(e.headline)}</a>`
+            const safeUrl = this._safeHttpUrl(e.url);
+            const headline = safeUrl
+                ? `<a href="${this._escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" class="hover:text-sky-400">${this._escapeHtml(e.headline)}</a>`
                 : this._escapeHtml(e.headline);
             return `
                 <div class="flex items-start gap-3 p-2.5 rounded-lg hover:bg-slate-800/40 transition-all">
@@ -646,8 +660,9 @@ const App = {
         const firstLoad = prev === 0;
         this._wtLastEventId = Math.max(prev, ...events.map(e => e.id));
         tbody.innerHTML = events.map(e => {
-            const txLink = e.tx_url
-                ? `<a href="${this._escapeHtml(e.tx_url)}" target="_blank" rel="noopener noreferrer" class="font-mono text-[10px] text-cyan-400 hover:text-cyan-200 underline inline-flex items-center gap-1" title="View on explorer">${this._escapeHtml(String(e.tx_hash || "").slice(0, 8))}… <i data-lucide="external-link" class="w-3 h-3 inline"></i></a>`
+            const safeTxUrl = this._safeHttpUrl(e.tx_url);
+            const txLink = safeTxUrl
+                ? `<a href="${this._escapeHtml(safeTxUrl)}" target="_blank" rel="noopener noreferrer" class="font-mono text-[10px] text-cyan-400 hover:text-cyan-200 underline inline-flex items-center gap-1" title="View on explorer">${this._escapeHtml(String(e.tx_hash || "").slice(0, 8))}… <i data-lucide="external-link" class="w-3 h-3 inline"></i></a>`
                 : `<span class="font-mono text-[10px] text-slate-500">${this._escapeHtml(String(e.tx_hash || "").slice(0, 8))}…</span>`;
             const isBuy = String(e.side).toLowerCase() === "buy";
             return `
