@@ -171,7 +171,7 @@ def serve_index():
         html = handle.read()
     # The stylesheet is linked by index.html; inject only the versioned JS bundle here.
     # Avoid duplicate CSS requests and refresh browsers when the enhancement bundle changes.
-    enhancement = '<script src="/static/js/dashboard_enhancements.js?v=20261016-1"></script>\n'
+    enhancement = '<script src="/static/js/dashboard_enhancements.js?v=20261016-2"></script>\n'
     if "dashboard_enhancements.js" not in html:
         html = html.replace("</body>", enhancement + "</body>", 1)
     return HTMLResponse(content=html)
