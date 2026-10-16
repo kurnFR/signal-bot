@@ -93,12 +93,17 @@
             th.setAttribute("role", "button");
             th.setAttribute("tabindex", "0");
             th.setAttribute("aria-label", `Sort by ${label}`);
+            th.setAttribute("aria-sort", "none");
             th.addEventListener("click", () => {
                 const current = table.dataset.sortColumn === String(index) ? Number(table.dataset.sortDirection || 0) : 0;
                 const direction = current === 1 ? -1 : 1;
                 table.dataset.sortColumn = String(index);
                 table.dataset.sortDirection = String(direction);
-                Array.from(thead.rows[0].cells).forEach((cell, i) => setSortIndicator(cell, i === index ? direction : 0));
+                Array.from(thead.rows[0].cells).forEach((cell, i) => {
+                    setSortIndicator(cell, i === index ? direction : 0);
+                    cell.setAttribute("aria-sort", i === index ? (direction === 1 ? "ascending" : "descending") : "none");
+                });
+                th.setAttribute("aria-label", `Sort by ${label}, ${direction === 1 ? "ascending" : "descending"}`);
                 sortTable(table, index, direction);
             });
             th.addEventListener("keydown", event => {
