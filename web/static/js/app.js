@@ -1670,7 +1670,7 @@ const App = {
                     <tr class="cursor-pointer hover:bg-slate-800/50 transition-colors">
                         <td class="font-mono font-medium text-slate-200">${this._escapeHtml(r.symbol)}</td>
                         <td class="text-xs text-slate-400"><span class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">${this._escapeHtml(r.market)}</span> ${this._escapeHtml(r.timeframe)}</td>
-                        <td class="text-xs font-mono text-sky-400 max-w-[140px] truncate" title="${this._escapeHtml(r.strategy)}">${r.strategy}</td>
+                        <td class="text-xs font-mono text-sky-400 max-w-[140px] truncate" title="${this._escapeHtml(r.strategy)}">${this._escapeHtml(r.strategy)}</td>
                         <td class="text-xs text-slate-300 font-mono">${this._escapeHtml(String(r.totalTrades ?? 0))}</td>
                         <td class="text-xs font-mono">${this._escapeHtml(r.winRatePct != null ? `${r.winRatePct}%` : "-")}</td>
                         <td class="text-xs font-mono font-semibold ${isPos ? "text-emerald-400" : "text-rose-400"}">
