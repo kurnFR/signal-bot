@@ -3637,7 +3637,7 @@ const App = {
             const container = document.getElementById("inspect-ml-content");
             container.innerHTML = `
                 <div class="grid grid-cols-2 gap-3 p-3 rounded-lg bg-slate-800/80 border border-slate-700">
-                    <div><span class="text-slate-400">Winner Model:</span> <b class="text-purple-400">${winner.model_type || 'N/A'}</b></div>
+                    <div><span class="text-slate-400">Winner Model:</span> <b class="text-purple-400">${this._escapeHtml(winner.model_type || 'N/A')}</b></div>
                     <div><span class="text-slate-400">Selected Threshold:</span> <b class="text-amber-400 font-mono">${(exp.threshold * 100).toFixed(1)}%</b></div>
                     <div><span class="text-slate-400">ROC-AUC:</span> <b class="text-sky-400 font-mono">${diag.roc_auc !== null && diag.roc_auc !== undefined ? diag.roc_auc.toFixed(4) : 'N/A'}</b></div>
                     <div><span class="text-slate-400">Brier Score:</span> <b class="text-slate-200 font-mono">${diag.brier_score !== null && diag.brier_score !== undefined ? diag.brier_score.toFixed(4) : 'N/A'}</b></div>
@@ -3688,7 +3688,7 @@ const App = {
                 <div class="p-3 rounded-lg bg-slate-850 border border-slate-800 space-y-1.5">
                     <h4 class="font-bold text-slate-200 text-xs">Features Used</h4>
                     <div class="flex flex-wrap gap-1.5">
-                        ${(winner.feature_columns || []).map(f => `<span class="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-300 border border-slate-700">${f}</span>`).join("")}
+                        ${(winner.feature_columns || []).map(f => `<span class="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-300 border border-slate-700">${this._escapeHtml(f)}</span>`).join("")}
                     </div>
                 </div>
             `;
