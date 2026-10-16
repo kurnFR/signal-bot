@@ -36,7 +36,11 @@
 .table-sortable-header:focus-visible {
     color: #e2e8f0;
     background-color: #172033;
-    outline: none;
+}
+
+.table-sortable-header:focus-visible {
+    outline: 2px solid var(--dashboard-focus, #38bdf8);
+    outline-offset: -2px;
 }
 
 .table-sort-indicator {
