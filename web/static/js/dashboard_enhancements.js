@@ -222,3 +222,72 @@
         init();
     }
 })();
+
+
+/* Theme preference: presentation-only enhancement; does not touch trading/API logic. */
+(function () {
+    "use strict";
+
+    const STORAGE_KEY = "signal-bot-theme";
+    const root = document.documentElement;
+
+    function readPreference() {
+        try {
+            const saved = window.localStorage.getItem(STORAGE_KEY);
+            return saved === "light" || saved === "dark" ? saved : "dark";
+        } catch (_) {
+            return "dark";
+        }
+    }
+
+    function applyTheme(theme) {
+        const normalized = theme === "light" ? "light" : "dark";
+        root.dataset.theme = normalized;
+        root.classList.toggle("dark", normalized === "dark");
+
+        const button = document.getElementById("dashboard-theme-toggle");
+        if (button) {
+            const nextTheme = normalized === "dark" ? "light" : "dark";
+            button.setAttribute("aria-label", "Switch to " + nextTheme + " theme");
+            button.setAttribute("title", "Switch to " + nextTheme + " theme");
+            button.setAttribute("aria-pressed", String(normalized === "light"));
+            const icon = button.querySelector("[data-lucide]");
+            if (icon) icon.setAttribute("data-lucide", normalized === "dark" ? "sun" : "moon");
+            const label = button.querySelector(".dashboard-theme-label");
+            if (label) label.textContent = normalized === "dark" ? "Light" : "Dark";
+            if (window.lucide && typeof window.lucide.createIcons === "function") {
+                window.lucide.createIcons();
+            }
+        }
+    }
+
+    function mountToggle() {
+        if (document.getElementById("dashboard-theme-toggle")) return;
+        const brandRow = document.querySelector("aside > div:first-child > div:first-child");
+        if (!brandRow) return;
+
+        const button = document.createElement("button");
+        button.id = "dashboard-theme-toggle";
+        button.type = "button";
+        button.className = "dashboard-theme-toggle";
+        button.innerHTML = '<i data-lucide="sun" aria-hidden="true"></i><span class="dashboard-theme-label">Light</span>';
+        button.addEventListener("click", function () {
+            const next = root.dataset.theme === "dark" ? "light" : "dark";
+            try { window.localStorage.setItem(STORAGE_KEY, next); } catch (_) {}
+            applyTheme(next);
+        });
+        brandRow.appendChild(button);
+        applyTheme(root.dataset.theme || readPreference());
+    }
+
+    function initTheme() {
+        applyTheme(readPreference());
+        mountToggle();
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initTheme, { once: true });
+    } else {
+        initTheme();
+    }
+})();
