@@ -162,7 +162,10 @@
 }
 
 :root[data-theme="light"] [class~="text-slate-100"],
-:root[data-theme="light"] [class~="text-slate-200"],
+:root[data-theme="light"] [class~="text-slate-200"] {
+    color: var(--dashboard-text) !important;
+}
+
 :root[data-theme="light"] [class~="text-slate-300"],
 :root[data-theme="light"] [class~="text-slate-400"],
 :root[data-theme="light"] [class~="text-slate-500"] {
@@ -172,9 +175,7 @@
 :root[data-theme="light"] h1,
 :root[data-theme="light"] h2,
 :root[data-theme="light"] h3,
-:root[data-theme="light"] h4,
-:root[data-theme="light"] [class~="text-slate-100"],
-:root[data-theme="light"] [class~="text-white"] {
+:root[data-theme="light"] h4 {
     color: var(--dashboard-text);
 }
 
