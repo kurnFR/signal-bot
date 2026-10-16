@@ -99,7 +99,7 @@ def parse_trade(chain, pool_address, pair, attrs):
 
 
 class GeckoTerminalProvider:
-    def __init__(self, delay_seconds=4.0, timeout=15, session=None):
+    def __init__(self, delay_seconds=4.0, timeout=15, session=None, fast_fail_429=False):
         self.base_delay = max(float(delay_seconds), 0.5)
         self.delay = self.base_delay
         self.timeout = timeout
@@ -108,23 +108,31 @@ class GeckoTerminalProvider:
         self._last_call = 0.0
         self._pool_cache = {}
         self.pool_cache_ttl = 300.0
+        self.fast_fail_429 = bool(fast_fail_429)
 
     def set_base_delay(self, delay_seconds):
         """Apply dashboard delay changes without discarding adaptive throttling."""
         self.base_delay = max(float(delay_seconds), 0.5)
         self.delay = max(self.delay, self.base_delay)
 
-    def _get(self, path, params=None):
+    def _get(self, path, params=None, fast_fail_429=None):
+        should_fast_fail = self.fast_fail_429 if fast_fail_429 is None else bool(fast_fail_429)
         wait = self.delay - (time.monotonic() - self._last_call)
         if wait > 0:
             time.sleep(wait)
-        for attempt in range(3):
+        for attempt in range(1 if should_fast_fail else 3):
             self._last_call = time.monotonic()
             resp = self.session.get(f"{BASE_URL}{path}", params=params, timeout=self.timeout)
             if resp.status_code == 429:
                 # Exponential cooldown and adaptive request pacing. Honor a
                 # provider Retry-After header when available, but cap one wait.
                 self.delay = min(max(self.delay * 2, self.delay + 1), 60.0)
+                if should_fast_fail:
+                    logger.warning(
+                        "GeckoTerminal 429 rate limit hit on %s; failing fast for fallback provider (request delay now %.1fs)",
+                        path, self.delay,
+                    )
+                    resp.raise_for_status()
                 retry_after = _retry_after_seconds(resp.headers.get("Retry-After"))
                 # If the provider asks us to wait longer than our synchronous
                 # retry budget, defer to the worker's network cooldown instead
@@ -138,7 +146,7 @@ class GeckoTerminalProvider:
                 backoff = min(max(retry_after if retry_after is not None else (20 * (2 ** attempt)), 1), 120)
                 if attempt < 2:
                     logger.warning(
-                        "GeckoTerminal rate limit hit; retry %d/2 in %.0fs (request delay now %.1fs)",
+                        "GeckoTerminal rate limit hit; retry %d/2 in %.0fs (no trade fallback active; request delay now %.1fs)",
                         attempt + 1, backoff, self.delay,
                     )
                     time.sleep(backoff)
@@ -176,6 +184,13 @@ class GeckoTerminalProvider:
                 "volume_24h_usd": vol or 0.0, **tokens,
             })
         return pools
+    def _find_cached_pools(self, network):
+        """Find any cached pools for a network regardless of limit."""
+        for (k_net, _), c_val in self._pool_cache.items():
+            if str(k_net) == str(network) and c_val and c_val[1]:
+                return c_val[1]
+        return None
+
     def hot_pools(self, network, limit):
         """Trending pools first, cached briefly to reduce discovery API calls."""
         cache_key = (str(network), int(limit))
@@ -189,19 +204,20 @@ class GeckoTerminalProvider:
             if len(result) >= limit:
                 break
             try:
-                payload = self._get(path)
+                payload = self._get(path, fast_fail_429=self.fast_fail_429)
             except requests.RequestException as exc:
                 logger.warning("pool list %s failed: %s", path, exc)
                 # Once throttled, do not immediately call the alternate endpoint.
                 if getattr(getattr(exc, "response", None), "status_code", None) == 429:
                     # Preserve the last known pool universe during a provider
                     # outage; the worker can still scan it with the fallback feed.
-                    if cached and cached[1]:
+                    fallback_pools = (cached[1] if cached and cached[1] else self._find_cached_pools(network))
+                    if fallback_pools:
                         logger.warning(
                             "GeckoTerminal discovery rate-limited; using %d cached pools for %s",
-                            len(cached[1]), network,
+                            len(fallback_pools), network,
                         )
-                        return [dict(pool) for pool in cached[1]]
+                        return [dict(pool) for pool in fallback_pools]
                     raise
                 continue
             for pool in self._pools_from(payload):
@@ -213,16 +229,19 @@ class GeckoTerminalProvider:
                     break
         if result:
             self._pool_cache[cache_key] = (time.monotonic(), [dict(pool) for pool in result])
-        elif cached and cached[1]:
-            logger.warning("GeckoTerminal discovery returned no pools; keeping %d cached pools for %s",
-                           len(cached[1]), network)
-            return [dict(pool) for pool in cached[1]]
+        else:
+            fallback_pools = (cached[1] if cached and cached[1] else self._find_cached_pools(network))
+            if fallback_pools:
+                logger.warning("GeckoTerminal discovery returned no pools; keeping %d cached pools for %s",
+                               len(fallback_pools), network)
+                return [dict(pool) for pool in fallback_pools]
         return result
 
     def pool_trades(self, network, pool, min_trade_usd):
         payload = self._get(
             f"/networks/{network}/pools/{pool['address']}/trades",
             params={"trade_volume_in_usd_greater_than": int(min_trade_usd)},
+            fast_fail_429=self.fast_fail_429,
         )
         swaps = []
         for item in (payload or {}).get("data", []) or []:
@@ -240,6 +259,8 @@ BIRDEYE_CHAIN_IDS = {
     "solana": "solana",
     "base": "base",
     "bsc": "bsc",
+    "arbitrum": "arbitrum",
+    "polygon_pos": "polygon",
 }
 
 
@@ -396,4 +417,97 @@ class BirdeyeProvider:
             swap = parse_birdeye_trade(network, pool, item)
             if swap and swap["usd_value"] >= float(min_trade_usd):
                 swaps.append(swap)
+        if items and not swaps:
+            logger.debug(
+                "Birdeye returned %d items for %s %s but none passed parsing or min_trade_usd ($%.0f)",
+                len(items), network, pool.get("name"), float(min_trade_usd),
+            )
         return swaps
+
+
+# -----------------------------------------------------------------------------
+# DexScreener Public Provider (Keyless Pool Discovery Fallback)
+# -----------------------------------------------------------------------------
+DEXSCREENER_CHAIN_IDS = {
+    "eth": ("ethereum", ["WETH", "ETH", "USDC"]),
+    "solana": ("solana", ["SOL", "USDC", "solana"]),
+    "base": ("base", ["base", "USDC", "AERO"]),
+    "bsc": ("bsc", ["bsc", "BNB", "USDT"]),
+    "arbitrum": ("arbitrum", ["arbitrum", "ARB", "USDC"]),
+    "polygon_pos": ("polygon", ["polygon", "MATIC", "USDC"]),
+}
+
+
+class DexScreenerProvider:
+    """Keyless public DexScreener provider for fallback pool discovery.
+
+    Used when GeckoTerminal hits rate limits or is in network cooldown.
+    Requires no API key and queries DexScreener's public search API.
+    """
+
+    def __init__(self, timeout=10, session=None):
+        self.timeout = timeout
+        self.session = session or requests.Session()
+        self.session.headers.update({"Accept": "application/json", "User-Agent": "signal-bot/1.0"})
+        self._pool_cache = {}
+        self.pool_cache_ttl = 300.0
+
+    def hot_pools(self, network, limit=10):
+        """Discover active DEX pools on the network using DexScreener search."""
+        chain_info = DEXSCREENER_CHAIN_IDS.get(network)
+        if not chain_info:
+            logger.debug("DexScreener does not have chain mapping for %s", network)
+            return []
+        ds_chain, queries = chain_info
+
+        cache_key = (str(network), int(limit))
+        now = time.monotonic()
+        cached = self._pool_cache.get(cache_key)
+        if cached and cached[1] and now - cached[0] < self.pool_cache_ttl:
+            return [dict(p) for p in cached[1]]
+
+        seen = set()
+        pools = []
+        for q in queries:
+            if len(pools) >= limit * 2:
+                break
+            try:
+                resp = self.session.get(
+                    f"https://api.dexscreener.com/latest/dex/search?q={q}",
+                    timeout=self.timeout,
+                )
+                if resp.status_code != 200:
+                    continue
+                pairs = (resp.json() or {}).get("pairs") or []
+                for p in pairs:
+                    if p.get("chainId") != ds_chain:
+                        continue
+                    addr = p.get("pairAddress")
+                    if not addr:
+                        continue
+                    key = addr.lower() if network != "solana" else addr
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    base = p.get("baseToken") or {}
+                    quote = p.get("quoteToken") or {}
+                    vol_24h = float((p.get("volume") or {}).get("h24") or 0.0)
+                    pools.append({
+                        "address": addr,
+                        "name": f"{base.get('symbol', '')} / {quote.get('symbol', '')}".strip(" /") or addr,
+                        "volume_24h_usd": vol_24h,
+                        "base_token_address": base.get("address"),
+                        "base_token_symbol": base.get("symbol"),
+                        "quote_token_address": quote.get("address"),
+                        "quote_token_symbol": quote.get("symbol"),
+                    })
+            except Exception as exc:
+                logger.debug("DexScreener search query %r for %s failed: %s", q, network, exc)
+
+        pools.sort(key=lambda x: x["volume_24h_usd"], reverse=True)
+        result = pools[:limit]
+        if result:
+            self._pool_cache[cache_key] = (now, [dict(p) for p in result])
+        elif cached and cached[1]:
+            return [dict(p) for p in cached[1]]
+        return result

@@ -360,7 +360,7 @@ def load_custom_strategies():
         logger.error(f"Failed to load custom strategies: {e}")
 
 
-def _call_openai_compatible_api(url: str, api_key: str, model: str, messages: list, timeout: int = 25) -> Optional[str]:
+def _call_openai_compatible_api(url: str, api_key: str, model: str, messages: list, timeout: Union[int, float, tuple] = (3.0, 25.0)) -> Optional[str]:
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -380,8 +380,21 @@ def _call_openai_compatible_api(url: str, api_key: str, model: str, messages: li
             data = json.loads(raw_text)
             choice = data.get("choices", [{}])[0]
             msg = choice.get("message", {})
-            text = msg.get("content") or msg.get("reasoning") or ""
-            return text.strip()
+            content = msg.get("content")
+            if content is None or content == "":
+                content = msg.get("reasoning") or ""
+
+            if isinstance(content, dict):
+                return json.dumps(content)
+            elif isinstance(content, list):
+                parts = []
+                for item in content:
+                    if isinstance(item, dict):
+                        parts.append(item.get("text") or str(item))
+                    else:
+                        parts.append(str(item))
+                return "\n".join(parts).strip()
+            return str(content).strip()
         else:
             logger.warning(f"LLM request to {url} returned status {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
@@ -415,10 +428,12 @@ def _call_anthropic_api(api_key: str, model: str, system_prompt: str, user_promp
     return None
 
 
-def _parse_llm_json(raw_text: str) -> Optional[dict]:
+def _parse_llm_json(raw_text: Any) -> Optional[dict]:
     if not raw_text:
         return None
-    text = raw_text.strip()
+    if isinstance(raw_text, dict):
+        return raw_text
+    text = str(raw_text).strip()
 
     # Match ```json ... ``` blocks
     match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
@@ -644,6 +659,7 @@ def generate_ai_strategy(req: GenerateAIStrategyRequest):
             api_key=NINEROUTER_API_KEY,
             model=NINEROUTER_MODEL,
             messages=messages,
+            timeout=(2.5, 20.0),
         )
         if raw_response:
             provider_used = f"9Router ({NINEROUTER_MODEL.split('/')[-1]})"
@@ -655,6 +671,7 @@ def generate_ai_strategy(req: GenerateAIStrategyRequest):
             api_key=OPENROUTER_API_KEY,
             model=OPENROUTER_MODEL,
             messages=messages,
+            timeout=(3.5, 25.0),
         )
         if raw_response:
             provider_used = f"OpenRouter ({OPENROUTER_MODEL.split('/')[-1]})"

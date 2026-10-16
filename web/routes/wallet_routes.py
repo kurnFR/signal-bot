@@ -30,6 +30,7 @@ class WalletSettingsRequest(BaseModel):
     api_delay_seconds: float = Field(4.0, ge=0.5, le=60)
     token_mode: Literal["all", "selected"] = "all"
     token_addresses: list[str] = Field(default_factory=list, max_length=500)
+    birdeye_api_key: Optional[str] = Field(default="", max_length=255)
 
     @model_validator(mode="after")
     def validate_thresholds(self):
@@ -69,10 +70,20 @@ def wallets_meta():
     }
 
 
+def _mask_api_key(key: str) -> str:
+    if not key:
+        return ""
+    return ("•" * 8) + key[-4:] if len(key) >= 8 else "•" * len(key)
+
+
 @router.get("/settings")
 def wallets_get_settings():
     try:
-        return store.get_settings()
+        data = store.get_settings()
+        raw_key = data.get("birdeye_api_key", "")
+        data["birdeye_api_key_masked"] = _mask_api_key(raw_key)
+        data["has_birdeye_key"] = bool(raw_key)
+        return data
     except Exception as e:
         logger.exception("wallets_get_settings failed")
         raise HTTPException(status_code=500, detail="Failed to load wallet tracker settings")
@@ -103,9 +114,22 @@ def wallets_save_settings(req: WalletSettingsRequest):
     settings = req.model_dump()
     settings["networks"] = networks
     settings["token_addresses"] = selectors
+
+    # Preserve existing secret if input is masked or unchanged
+    current = store.get_settings()
+    key_input = (req.birdeye_api_key or "").strip()
+    if key_input.startswith("•") or key_input.startswith("*"):
+        settings["birdeye_api_key"] = current.get("birdeye_api_key", "")
+    else:
+        settings["birdeye_api_key"] = key_input
+
     try:
         store.save_settings(settings)
-        return store.get_settings()
+        result = store.get_settings()
+        raw_key = result.get("birdeye_api_key", "")
+        result["birdeye_api_key_masked"] = _mask_api_key(raw_key)
+        result["has_birdeye_key"] = bool(raw_key)
+        return result
     except Exception as e:
         logger.exception("wallets_save_settings failed")
         raise HTTPException(status_code=500, detail="Failed to save wallet tracker settings")
@@ -117,6 +141,9 @@ def wallets_status():
         settings = store.get_settings()
         status["enabled"] = settings["enabled"]
         status["networks"] = settings["networks"]
+        status["birdeye_fallback_active"] = bool(settings.get("birdeye_api_key") or getattr(config, "BIRDEYE_API_KEY", ""))
+        status["pool_discovery_sources"] = ["GeckoTerminal", "DexScreener", "Database"]
+        status["trade_sources"] = ["GeckoTerminal"] + (["Birdeye"] if status["birdeye_fallback_active"] else [])
         return status
     except Exception as e:
         logger.exception("wallets_status failed")

@@ -131,6 +131,10 @@ const App = {
         return div.innerHTML;
     },
 
+    escapeHtml(str) {
+        return this._escapeHtml(str);
+    },
+
     async fetchNewsData() {
         const grid = document.getElementById("news-heartbeats-grid");
         const tbody = document.getElementById("news-signals-table-body");
@@ -443,14 +447,15 @@ const App = {
         set("wt-setting-retention", s.retention_days);
         set("wt-setting-token-mode", s.token_mode || "all");
         set("wt-setting-token-addresses", (s.token_addresses || []).join("\n"));
+        set("wt-setting-birdeye-key", s.birdeye_api_key_masked || s.birdeye_api_key || "");
         document.querySelectorAll(".wt-setting-network").forEach(el => { el.checked = (s.networks || []).includes(el.value); });
         const status = document.getElementById("wt-settings-status");
-        if (status) status.innerText = `Saved settings loaded · networks: ${(s.networks || []).join(", ")}`;
+        if (status) status.innerText = `Saved settings loaded · networks: ${(s.networks || []).join(", ")}${s.has_birdeye_key ? " · Birdeye fallback active" : ""}`;
         this._wtSettingsLoaded = true;
     },
 
     async saveWalletSettings() {
-        const value = id => document.getElementById(id).value;
+        const value = id => (document.getElementById(id) || {}).value || "";
         const networks = Array.from(document.querySelectorAll(".wt-setting-network:checked")).map(el => el.value);
         const token_addresses = value("wt-setting-token-addresses").split(/\r?\n/).map(x => x.trim()).filter(Boolean);
         const payload = {
@@ -462,7 +467,8 @@ const App = {
             poll_interval_seconds: Number(value("wt-setting-poll")),
             api_delay_seconds: Number(value("wt-setting-delay")),
             retention_days: Number(value("wt-setting-retention")),
-            token_mode: value("wt-setting-token-mode"), token_addresses
+            token_mode: value("wt-setting-token-mode"), token_addresses,
+            birdeye_api_key: value("wt-setting-birdeye-key")
         };
         const status = document.getElementById("wt-settings-status");
         try {
@@ -559,8 +565,13 @@ const App = {
             el.innerText = !st.enabled ? "DISABLED" : (ran ? "RUNNING" : "WAITING");
             el.className = `text-lg font-black mt-1 ${!st.enabled ? "text-slate-400" : (ran ? "text-emerald-400" : "text-amber-400")}`;
         }
-        set("wt-kpi-status-detail", ran ? `${st.pools_scanned} pools · ${st.candidates} candidates${st.last_error ? " · errors, see logs" : ""}` : "Start run_wallet_tracker.py (or run_all.py)");
+        const fallbackActive = st.birdeye_fallback_active ? " · Birdeye fallback active" : " · DexScreener fallback ready";
+        set("wt-kpi-status-detail", ran ? `${st.pools_scanned} pools · ${st.candidates} candidates${fallbackActive}${st.last_error ? " · " + st.last_error : ""}` : "Start run_wallet_tracker.py (or run_all.py)");
         set("wt-kpi-last", ran ? `${this._formatDateTime(st.last_cycle_at)} (${this._timeAgo(st.last_cycle_at)})` : "--");
+        const sourcesEl = document.getElementById("wt-kpi-sources");
+        if (sourcesEl) {
+            sourcesEl.innerText = `Sources: GeckoTerminal, DexScreener${st.birdeye_fallback_active ? ", Birdeye" : ""}`;
+        }
         set("wt-kpi-swaps", String(st.swaps_24h ?? 0));
         set("wt-kpi-tracked", String(trackedCount));
     },
@@ -1077,8 +1088,13 @@ const App = {
             this.updateUserUI();
             this.showToast(`Welcome back, ${this.currentUser.username}!`, "success");
 
-            // Refresh user & settings
-            this.fetchUsers();
+            // Refresh platform state, coverage, strategies & user administration
+            await Promise.allSettled([
+                this.fetchSystemStatus(),
+                this.fetchCoverage(),
+                this.fetchStrategies(),
+                this.fetchUsers()
+            ]);
         } catch (err) {
             if (errEl) {
                 errEl.innerText = err.message;
@@ -1533,6 +1549,7 @@ const App = {
             if (descEl) descEl.innerText = "Explore strategy methodologies, benchmark performance, and create custom strategies";
             this.renderStrategyLibrary();
             this.initStrategyArchitect();
+            this.fetchStrategies().then(() => this.renderStrategyLibrary());
         } else if (tabId === "news-ai") {
             if (titleEl) titleEl.innerText = "News AI Overlay Signals";
             if (descEl) descEl.innerText = "What the AI has read, how confident it was, and what it did about it";
@@ -2299,20 +2316,18 @@ const App = {
     },
 
     async initStrategyArchitect() {
-        if (this.strategyArchitectInitialized) return;
-        this.strategyArchitectInitialized = true;
-
-        // Fetch indicator definitions
-        try {
-            const res = await fetch(`${API_BASE}/api/custom-strategy/indicators`, {
-                headers: this.getAuthHeaders()
-            });
-            if (res.ok) {
-                const data = await res.json();
-                this.availableIndicators = data.indicators || [];
+        if (!this.availableIndicators || this.availableIndicators.length === 0) {
+            try {
+                const res = await fetch(`${API_BASE}/api/custom-strategy/indicators`, {
+                    headers: this.getAuthHeaders()
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    this.availableIndicators = data.indicators || [];
+                }
+            } catch (e) {
+                console.warn("Failed to fetch indicators metadata", e);
             }
-        } catch (e) {
-            console.warn("Failed to fetch indicators metadata", e);
         }
 
         // Set default rules in form if empty
@@ -2327,6 +2342,7 @@ const App = {
             this.addRuleRow("short", "volume_ratio", ">", 1.8);
         }
 
+        this.strategyArchitectInitialized = true;
         if (window.lucide) lucide.createIcons();
     },
 
@@ -2338,17 +2354,29 @@ const App = {
         row.className = "rule-condition-row flex items-center gap-2 p-2 rounded-xl bg-slate-900 border border-slate-800 text-xs";
 
         // Build indicator options
-        const indOptions = (this.availableIndicators.length > 0 ? this.availableIndicators : [
-            { name: "rsi", label: "RSI (14)" },
-            { name: "volume_ratio", label: "Volume Ratio" },
-            { name: "macd", label: "MACD Line" },
-            { name: "macd_signal", label: "MACD Signal" },
-            { name: "macd_hist", label: "MACD Histogram" },
-            { name: "close", label: "Close Price" },
-            { name: "support", label: "Support Level" },
-            { name: "resistance", label: "Resistance Level" },
-            { name: "atr_pct", label: "ATR %" }
-        ]).map(ind => `<option value="${ind.name}" ${ind.name === indicator ? "selected" : ""}>${ind.label}</option>`).join("");
+        const baseIndicators = (this.availableIndicators && this.availableIndicators.length > 0)
+            ? [...this.availableIndicators]
+            : [
+                { name: "rsi", label: "RSI (14)" },
+                { name: "volume_ratio", label: "Volume Ratio" },
+                { name: "macd", label: "MACD Line" },
+                { name: "macd_signal", label: "MACD Signal" },
+                { name: "macd_hist", label: "MACD Histogram" },
+                { name: "close", label: "Close Price" },
+                { name: "support", label: "Support Level" },
+                { name: "resistance", label: "Resistance Level" },
+                { name: "atr_pct", label: "ATR %" }
+            ];
+
+        if (indicator && !baseIndicators.some(ind => ind.name === indicator)) {
+            baseIndicators.push({ name: indicator, label: indicator });
+        }
+
+        const indOptions = baseIndicators.map(ind => `
+            <option value="${this._escapeHtml(ind.name)}" ${ind.name === indicator ? "selected" : ""}>
+                ${this._escapeHtml(ind.label || ind.name)}
+            </option>
+        `).join("");
 
         const opOptions = ["<", "<=", ">", ">=", "==", "!="].map(op => `
             <option value="${op}" ${op === operator ? "selected" : ""}>${op}</option>
@@ -2361,7 +2389,7 @@ const App = {
             <select class="rule-op-select w-16 bg-slate-800 text-amber-300 rounded-lg p-2 border border-slate-700 text-xs font-mono font-bold text-center focus:outline-none">
                 ${opOptions}
             </select>
-            <input type="text" class="rule-val-input w-28 bg-slate-800 text-slate-100 rounded-lg p-2 border border-slate-700 text-xs font-mono font-semibold focus:outline-none" value="${value}" placeholder="Value / col">
+            <input type="text" class="rule-val-input w-28 bg-slate-800 text-slate-100 rounded-lg p-2 border border-slate-700 text-xs font-mono font-semibold focus:outline-none" value="${this._escapeHtml(value)}" placeholder="Value / col">
             <button type="button" onclick="this.closest('.rule-condition-row').remove()" class="p-2 rounded-lg bg-rose-950/40 hover:bg-rose-900 text-rose-400 hover:text-rose-200 border border-rose-900/50 transition-colors" title="Remove rule">
                 <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
             </button>
@@ -2418,7 +2446,7 @@ const App = {
             userMsgEl.className = "flex gap-2.5 items-start justify-end";
             userMsgEl.innerHTML = `
                 <div class="p-3.5 rounded-2xl rounded-tr-sm bg-indigo-600 text-white leading-relaxed max-w-[85%] font-medium shadow-md">
-                    ${this.escapeHtml(prompt)}
+                    ${this._escapeHtml(prompt)}
                 </div>
                 <div class="w-6 h-6 rounded-full bg-slate-700 text-slate-300 flex-shrink-0 flex items-center justify-center text-[10px] font-bold">
                     You
@@ -2476,10 +2504,16 @@ const App = {
 
             const data = await res.json();
             const strat = data.strategy;
+            if (!strat) {
+                throw new Error("No strategy payload returned by generator");
+            }
 
             // Record to conversation history
             this.aiStrategyChatHistory.push({ role: "user", content: prompt });
-            this.aiStrategyChatHistory.push({ role: "assistant", content: data.chatResponse });
+            this.aiStrategyChatHistory.push({ role: "assistant", content: data.chatResponse || "Strategy parameters architected." });
+
+            const longRules = Array.isArray(strat.longConditions) ? strat.longConditions : [];
+            const shortRules = Array.isArray(strat.shortConditions) ? strat.shortConditions : [];
 
             // Render AI response bubble
             if (messagesContainer) {
@@ -2489,14 +2523,14 @@ const App = {
                     <div class="w-6 h-6 rounded-full bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex-shrink-0 flex items-center justify-center text-[10px]">AI</div>
                     <div class="p-3.5 rounded-2xl rounded-tl-sm bg-slate-800/90 border border-slate-700/80 text-slate-200 leading-relaxed max-w-[90%] space-y-2 shadow-lg">
                         <div class="flex items-center justify-between text-[10px] text-slate-400 border-b border-slate-700/60 pb-1.5">
-                            <span class="font-bold text-indigo-300">${strat.displayName}</span>
-                            <span class="font-mono text-emerald-400">${data.provider || "LLM Engine"}</span>
+                            <span class="font-bold text-indigo-300">${this._escapeHtml(strat.displayName || "AI Strategy")}</span>
+                            <span class="font-mono text-emerald-400">${this._escapeHtml(data.provider || "LLM Engine")}</span>
                         </div>
-                        <p class="text-xs text-slate-300 leading-relaxed">${this.escapeHtml(data.chatResponse)}</p>
+                        <p class="text-xs text-slate-300 leading-relaxed">${this._escapeHtml(data.chatResponse || "")}</p>
                         <div class="text-[11px] text-slate-400 bg-slate-900/80 p-2.5 rounded-xl border border-slate-800/80 space-y-1">
-                            <div><strong>Long:</strong> ${strat.longConditions.map(c => `<code>${c.indicator} ${c.operator} ${c.value}</code>`).join(" AND ") || "None"}</div>
-                            <div><strong>Short:</strong> ${strat.shortConditions.map(c => `<code>${c.indicator} ${c.operator} ${c.value}</code>`).join(" AND ") || "None"}</div>
-                            <div><strong>Risk:</strong> SL ${strat.slAtrMult}x ATR | RR ${strat.riskRewardRatio}x ${strat.useTrailingStop ? "| Trailing Stop" : ""}</div>
+                            <div><strong>Long:</strong> ${longRules.map(c => `<code>${this._escapeHtml(c.indicator)} ${this._escapeHtml(c.operator)} ${this._escapeHtml(c.value)}</code>`).join(" AND ") || "None"}</div>
+                            <div><strong>Short:</strong> ${shortRules.map(c => `<code>${this._escapeHtml(c.indicator)} ${this._escapeHtml(c.operator)} ${this._escapeHtml(c.value)}</code>`).join(" AND ") || "None"}</div>
+                            <div><strong>Risk:</strong> SL ${strat.slAtrMult != null ? strat.slAtrMult : 1.5}x ATR | RR ${strat.riskRewardRatio != null ? strat.riskRewardRatio : 2.5}x ${strat.useTrailingStop ? "| Trailing Stop" : ""}</div>
                         </div>
                     </div>
                 `;
@@ -2507,12 +2541,12 @@ const App = {
             // Update Provider badge
             const providerBadge = document.getElementById("ai-strat-provider-badge");
             if (providerBadge && data.provider) {
-                providerBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> ${data.provider}`;
+                providerBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> ${this._escapeHtml(data.provider)}`;
             }
 
             // Apply strategy to the form
             this.applyStrategyToForm(strat);
-            this.showToast(`Strategy "${strat.displayName}" architected by AI!`, "success");
+            this.showToast(`Strategy "${strat.displayName || strat.name}" architected by AI!`, "success");
 
             if (promptInput) promptInput.value = "";
         } catch (e) {
@@ -2524,7 +2558,7 @@ const App = {
                 errEl.innerHTML = `
                     <div class="w-6 h-6 rounded-full bg-rose-600/20 text-rose-400 border border-rose-500/30 flex-shrink-0 flex items-center justify-center text-[10px]">!</div>
                     <div class="p-3 rounded-2xl rounded-tl-sm bg-rose-950/40 border border-rose-800 text-rose-300 text-xs">
-                        Failed to generate strategy: ${this.escapeHtml(e.message)}
+                        Failed to generate strategy: ${this._escapeHtml(e.message)}
                     </div>
                 `;
                 messagesContainer.appendChild(errEl);
@@ -2549,10 +2583,10 @@ const App = {
         setVal("cust-strat-name", strat.name || "");
         setVal("cust-strat-disp", strat.displayName || "");
         setVal("cust-strat-desc", strat.description || "");
-        setVal("cust-sl-atr", strat.slAtrMult || 1.5);
-        setVal("cust-rr-ratio", strat.riskRewardRatio || 2.5);
-        setVal("cust-trail-act", strat.trailActivationR || 1.0);
-        setVal("cust-trail-dist", strat.trailDistanceAtrMult || 1.5);
+        setVal("cust-sl-atr", strat.slAtrMult != null ? strat.slAtrMult : 1.5);
+        setVal("cust-rr-ratio", strat.riskRewardRatio != null ? strat.riskRewardRatio : 2.5);
+        setVal("cust-trail-act", strat.trailActivationR != null ? strat.trailActivationR : 1.0);
+        setVal("cust-trail-dist", strat.trailDistanceAtrMult != null ? strat.trailDistanceAtrMult : 1.5);
 
         const trailCb = document.getElementById("cust-use-trailing");
         if (trailCb) trailCb.checked = Boolean(strat.useTrailingStop);
@@ -2572,10 +2606,13 @@ const App = {
         if (longCont) longCont.innerHTML = "";
         if (shortCont) shortCont.innerHTML = "";
 
-        (strat.longConditions || []).forEach(c => {
+        const longConds = Array.isArray(strat.longConditions) ? strat.longConditions : [];
+        const shortConds = Array.isArray(strat.shortConditions) ? strat.shortConditions : [];
+
+        longConds.forEach(c => {
             this.addRuleRow("long", c.indicator, c.operator, c.value);
         });
-        (strat.shortConditions || []).forEach(c => {
+        shortConds.forEach(c => {
             this.addRuleRow("short", c.indicator, c.operator, c.value);
         });
 
@@ -2841,7 +2878,7 @@ const App = {
         const search = document.getElementById("strat-catalog-search")?.value.trim().toLowerCase() || "";
         const filterMode = document.getElementById("strat-catalog-filter")?.value || "all";
 
-        let filtered = this.strategiesList;
+        let filtered = Array.isArray(this.strategiesList) ? [...this.strategiesList] : [];
 
         if (filterMode === "custom") {
             filtered = filtered.filter(st => st.category === "Custom AI Strategy" || st.category === "Custom Strategy");
@@ -2869,31 +2906,37 @@ const App = {
 
         container.innerHTML = filtered.map(st => {
             const isCustom = st.category === "Custom AI Strategy" || st.category === "Custom Strategy";
+            const safeId = this._escapeHtml(st.id || "");
+            const safeDisp = this._escapeHtml(st.displayName || st.id || "Untitled Strategy");
+            const safeDesc = this._escapeHtml(st.description || "No description provided.");
+            const safeCat = this._escapeHtml(st.category || "General");
+            const paramCount = Array.isArray(st.params) ? st.params.length : 0;
+
             return `
                 <div class="p-5 rounded-2xl bg-slate-900 border ${isCustom ? "border-indigo-500/30 bg-gradient-to-b from-indigo-950/10 to-slate-900" : "border-slate-800"} hover:border-slate-700 transition-all flex flex-col justify-between space-y-4 shadow-sm">
                     <div>
                         <div class="flex items-center justify-between">
-                            <span class="px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${isCustom ? "bg-indigo-950 text-indigo-300 border border-indigo-800/80" : "bg-slate-800 text-slate-300"}">${st.category}</span>
+                            <span class="px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${isCustom ? "bg-indigo-950 text-indigo-300 border border-indigo-800/80" : "bg-slate-800 text-slate-300"}">${safeCat}</span>
                             ${st.validated ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">HOLDOUT VALIDATED</span>` : ""}
                         </div>
                         <h3 class="text-base font-bold text-slate-100 mt-2.5 flex items-center justify-between">
-                            <span>${this.escapeHtml(st.displayName)}</span>
+                            <span>${safeDisp}</span>
                             ${isCustom ? `<span class="text-[10px] font-mono text-indigo-400 font-normal">AI Custom</span>` : ""}
                         </h3>
-                        <p class="text-xs text-slate-400 mt-1 leading-relaxed">${this.escapeHtml(st.description)}</p>
+                        <p class="text-xs text-slate-400 mt-1 leading-relaxed">${safeDesc}</p>
                     </div>
                     <div class="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                        <span class="font-mono text-[11px] text-slate-500">${(st.params || []).length} params</span>
+                        <span class="font-mono text-[11px] text-slate-500">${paramCount} params</span>
                         <div class="flex items-center gap-1.5">
                             ${isCustom ? `
-                                <button onclick="App.editCustomStrategy('${st.id}')" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors" title="Edit in Architect">
+                                <button onclick="App.editCustomStrategy('${safeId}')" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors" title="Edit in Architect">
                                     <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
                                 </button>
-                                <button onclick="App.deleteCustomStrategy('${st.id}')" class="p-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900 text-rose-400 hover:text-white border border-rose-900/40 transition-colors" title="Delete Strategy">
+                                <button onclick="App.deleteCustomStrategy('${safeId}')" class="p-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900 text-rose-400 hover:text-white border border-rose-900/40 transition-colors" title="Delete Strategy">
                                     <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
                                 </button>
                             ` : ""}
-                            <button onclick="App.selectStrategyForBacktest('${st.id}')" class="px-3 py-1.5 text-xs rounded-lg bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30 font-semibold transition-colors flex items-center gap-1">
+                            <button onclick="App.selectStrategyForBacktest('${safeId}')" class="px-3 py-1.5 text-xs rounded-lg bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30 font-semibold transition-colors flex items-center gap-1">
                                 <span>Simulate</span>
                                 <i data-lucide="arrow-right" class="w-3 h-3"></i>
                             </button>

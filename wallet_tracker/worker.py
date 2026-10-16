@@ -7,7 +7,8 @@ from datetime import datetime, timedelta, timezone
 import config
 from wallet_tracker import analyzer, store
 from wallet_tracker.chains import is_supported_chain
-from wallet_tracker.providers import BirdeyeProvider, GeckoTerminalProvider
+from wallet_tracker.providers import (BirdeyeProvider, DexScreenerProvider,
+                                      GeckoTerminalProvider)
 from wallet_tracker.stablecoins import is_stablecoin_base_pool
 from wallet_tracker.telegram import WalletTelegramNotifier
 
@@ -129,7 +130,58 @@ def dispatch_telegram_alerts(notifier=None):
     return sent
 
 
-def run_cycle(provider, fallback_provider=None):
+def _discover_pools(network, limit, provider, dexscreener_provider=None, network_in_cooldown=False):
+    """Multi-source pool discovery with automatic fallback across providers and DB history."""
+    pools = []
+    pool_source = None
+    gecko_failed = False
+
+    if not network_in_cooldown:
+        try:
+            pools = provider.hot_pools(network, limit)
+            pool_source = "GeckoTerminal"
+        except Exception as exc:
+            gecko_failed = True
+            logger.warning("%s: GeckoTerminal pool discovery failed (%s)", network, type(exc).__name__)
+            if _is_rate_limited(exc):
+                _NETWORK_COOLDOWN_UNTIL[network] = time.monotonic() + _NETWORK_COOLDOWN_SECONDS
+    else:
+        # In cooldown, try GeckoTerminal (which may have pools cached in memory)
+        try:
+            pools = provider.hot_pools(network, limit)
+            if pools:
+                pool_source = "GeckoTerminal"
+            else:
+                gecko_failed = True
+        except Exception as exc:
+            gecko_failed = True
+            if not _is_rate_limited(exc):
+                logger.warning("%s: GeckoTerminal pool discovery in cooldown failed (%s)", network, type(exc).__name__)
+
+    # Fallback to DexScreener and Database only if GeckoTerminal failed or was rate limited
+    if gecko_failed:
+        if dexscreener_provider is not None:
+            try:
+                pools = dexscreener_provider.hot_pools(network, limit)
+                if pools:
+                    pool_source = "DexScreener"
+                    logger.info("%s: discovered %d pools via DexScreener fallback", network, len(pools))
+            except Exception as exc:
+                logger.warning("%s: DexScreener pool discovery failed (%s)", network, type(exc).__name__)
+
+        if not pools:
+            try:
+                pools = store.get_active_pools(network, limit)
+                if pools:
+                    pool_source = "Database"
+                    logger.info("%s: loaded %d active pools from database history fallback", network, len(pools))
+            except Exception as exc:
+                logger.warning("%s: database active pool discovery failed (%s)", network, type(exc).__name__)
+
+    return pools, pool_source
+
+
+def run_cycle(provider, fallback_provider=None, dexscreener_provider=None):
     settings = store.get_settings()
     store.prune_wallet_alerts(config.WALLET_TRACKER_ALERT_RETENTION_DAYS)
     if not settings["enabled"]:
@@ -161,17 +213,19 @@ def run_cycle(provider, fallback_provider=None):
             continue
         if network_in_cooldown:
             logger.info("%s: using Birdeye during GeckoTerminal rate-limit cooldown", network)
-        try:
-            # Fetch extra pool metadata, but cap trade endpoints to the configured
-            # pool budget after volume/token filtering.
-            pools = provider.hot_pools(network, settings["pools_per_network"] * 2)
-        except Exception as exc:
-            logger.warning("%s: pool discovery failed (%s)", network, type(exc).__name__)
-            errors.append(f"{network}: pool discovery failed ({type(exc).__name__})")
-            if _is_rate_limited(exc):
-                _NETWORK_COOLDOWN_UNTIL[network] = time.monotonic() + _NETWORK_COOLDOWN_SECONDS
-                continue
+
+        pools, pool_source = _discover_pools(
+            network,
+            settings["pools_per_network"] * 2,
+            provider,
+            dexscreener_provider=dexscreener_provider,
+            network_in_cooldown=network_in_cooldown,
+        )
+        if not pools:
+            logger.warning("%s: all pool discovery sources failed; skipping network for this cycle", network)
+            errors.append(f"{network}: all pool discovery sources failed")
             continue
+
         pool_requests = 0
         network_fallback_active = network_in_cooldown
         for pool in pools:
@@ -185,7 +239,7 @@ def run_cycle(provider, fallback_provider=None):
                              network, pool.get("name"), volume_24h, min_pool_volume)
                 continue
             pool_requests += 1
-            active_provider = fallback_provider if network_fallback_active else provider
+            active_provider = fallback_provider if network_fallback_active and fallback_provider is not None else provider
             try:
                 swaps = active_provider.pool_trades(network, pool, settings["min_trade_usd"])
                 swaps_new += store.insert_swaps(swaps)
@@ -221,6 +275,12 @@ def run_cycle(provider, fallback_provider=None):
                 errors.append(f"{network}/{pool.get('name')}: trade fetch failed ({type(exc).__name__})")
                 if _is_rate_limited(exc):
                     _NETWORK_COOLDOWN_UNTIL[network] = time.monotonic() + _NETWORK_COOLDOWN_SECONDS
+                    if fallback_provider is None:
+                        logger.warning(
+                            "%s: GeckoTerminal rate-limited and no Birdeye fallback configured. "
+                            "Set BIRDEYE_API_KEY in Scanner Settings to enable zero-downtime trade fallback.",
+                            network,
+                        )
                     break
     candidates = recompute(settings=settings)
     store.prune_swaps(settings["retention_days"])
@@ -231,25 +291,47 @@ def run_cycle(provider, fallback_provider=None):
     dispatch_telegram_alerts()
 
 
+def _init_fallback_provider(settings):
+    """Instantiate Birdeye fallback provider if an API key is available."""
+    key = (settings.get("birdeye_api_key") or os.getenv("BIRDEYE_API_KEY") or getattr(config, "BIRDEYE_API_KEY", "") or "").strip()
+    if not key:
+        return None
+    try:
+        return BirdeyeProvider(api_key=key)
+    except Exception:
+        logger.exception("Could not initialize Birdeye fallback; GeckoTerminal remains active")
+        return None
+
+
 def run(stop_event=None):
     """Run polling cycles until stopped; optional event is used if lock ownership is lost."""
     store.ensure_tables()
     settings = store.get_settings()
-    provider = GeckoTerminalProvider(delay_seconds=settings["api_delay_seconds"])
-    try:
-        fallback_provider = BirdeyeProvider() if os.getenv("BIRDEYE_API_KEY", "").strip() else None
-    except Exception:
-        logger.exception("Could not initialize optional Birdeye fallback; GeckoTerminal remains active")
-        fallback_provider = None
+    fallback_provider = _init_fallback_provider(settings)
+    provider = GeckoTerminalProvider(
+        delay_seconds=settings["api_delay_seconds"],
+        fast_fail_429=bool(fallback_provider is not None),
+    )
+    dexscreener_provider = DexScreenerProvider()
     if fallback_provider:
         logger.info("Birdeye free-tier pair-trade fallback enabled (1 request/second pacing).")
     else:
-        logger.info("Birdeye fallback disabled; set BIRDEYE_API_KEY to enable it.")
+        logger.info("Birdeye fallback disabled; set BIRDEYE_API_KEY in settings to enable it.")
     logger.info("Wallet tracker started; settings are loaded from the dashboard.")
     while stop_event is None or not stop_event.is_set():
         try:
-            run_cycle(provider, fallback_provider=fallback_provider)
+            run_cycle(provider, fallback_provider=fallback_provider, dexscreener_provider=dexscreener_provider)
             settings = store.get_settings()
+            provider.set_base_delay(settings["api_delay_seconds"])
+            current_key = (settings.get("birdeye_api_key") or os.getenv("BIRDEYE_API_KEY") or getattr(config, "BIRDEYE_API_KEY", "") or "").strip()
+            fb_key = getattr(fallback_provider, "api_key", "")
+            if current_key != fb_key:
+                fallback_provider = _init_fallback_provider(settings)
+                provider.fast_fail_429 = bool(fallback_provider is not None)
+                if fallback_provider:
+                    logger.info("Birdeye fallback enabled/updated from settings.")
+                else:
+                    logger.info("Birdeye fallback disabled (no key configured).")
         except Exception:
             logger.exception("cycle failed")
             settings = store.get_settings()

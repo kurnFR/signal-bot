@@ -1556,6 +1556,20 @@
                             <textarea id="wt-setting-token-addresses" rows="3" placeholder="eth:0x...&#10;solana:TokenMintAddress..." class="cfg-input"></textarea>
                         </label>
                     </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 bg-slate-950/60 rounded-lg border border-slate-800">
+                        <div>
+                            <label class="text-[11px] text-slate-300 font-semibold flex items-center gap-1.5">
+                                <i data-lucide="key" class="w-3.5 h-3.5 text-cyan-400"></i> Birdeye API Key (Trade Fallback)
+                            </label>
+                            <input id="wt-setting-birdeye-key" type="password" placeholder="Optional: enter Birdeye API key for trade failover" class="cfg-input mt-1 w-full font-mono text-xs">
+                            <p class="text-[10px] text-slate-500 mt-1">Free-tier standard API key for instant trade swap failover when GeckoTerminal rate limits.</p>
+                        </div>
+                        <div class="flex flex-col justify-center text-[11px] text-slate-400 space-y-1">
+                            <span class="text-slate-300 font-semibold">Active Discovery &amp; Fallback Architecture:</span>
+                            <span>• <strong>Pool Discovery:</strong> GeckoTerminal &rarr; DexScreener (keyless fallback) &rarr; DB History</span>
+                            <span>• <strong>Trade Swaps:</strong> GeckoTerminal &rarr; Birdeye (with API key)</span>
+                        </div>
+                    </div>
                     <p class="text-[10px] text-amber-300">Selected-token mode currently matches the pool base-token address only. A symbol such as BTC or PEPE is not unique; use the exact contract/mint address. This scanner covers indexed DEX pools, not private CEX wallet trades.</p>
                     <div id="wt-settings-status" class="text-[11px] text-slate-400">Loading saved settings...</div>
                 </div>

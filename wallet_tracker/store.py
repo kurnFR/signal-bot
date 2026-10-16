@@ -56,6 +56,10 @@ def ensure_tables():
             "ALTER TABLE tracked_wallets MODIFY status "
             "ENUM('ACTIVE','IGNORED','INACTIVE') NOT NULL DEFAULT 'ACTIVE'"
         )
+        cur.execute(
+            "ALTER TABLE wallet_tracker_settings ADD COLUMN IF NOT EXISTS "
+            "birdeye_api_key VARCHAR(255) NULL"
+        )
         # Start at the current high-water mark to avoid replaying historical swaps.
         cur.execute(
             """INSERT IGNORE INTO wallet_tracker_alert_cursor (id, last_swap_id)
@@ -444,10 +448,12 @@ def get_settings():
                 "api_delay_seconds": float(config_value("WALLET_TRACKER_API_DELAY_SECONDS", 4.0)),
                 "token_mode": "all",
                 "token_addresses": [],
+                "birdeye_api_key": str(config_value("BIRDEYE_API_KEY", "") or "").strip(),
             }
         row["enabled"] = bool(row["enabled"])
         row["networks"] = [n.strip() for n in row["networks"].split(",") if n.strip()]
         row["token_addresses"] = [v.strip() for v in (row.get("token_addresses") or "").splitlines() if v.strip()]
+        row["birdeye_api_key"] = str(row.get("birdeye_api_key") or config_value("BIRDEYE_API_KEY", "") or "").strip()
         for k in ("min_trade_usd", "min_net_usd", "auto_track_net_usd", "api_delay_seconds"):
             row[k] = float(row[k])
         for k in ("pools_per_network", "poll_interval_seconds", "retention_days"):
@@ -467,6 +473,7 @@ def save_settings(settings):
     """Persist validated settings atomically; the worker reads them each cycle."""
     networks = ",".join(settings["networks"])
     token_addresses = "\n".join(settings.get("token_addresses", []))
+    birdeye_api_key = str(settings.get("birdeye_api_key") or "").strip()
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
@@ -474,23 +481,48 @@ def save_settings(settings):
             """INSERT INTO wallet_tracker_settings
                (id, enabled, networks, pools_per_network, min_trade_usd, min_net_usd,
                 auto_track_net_usd, poll_interval_seconds, retention_days, api_delay_seconds,
-                token_mode, token_addresses)
-               VALUES (1,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                token_mode, token_addresses, birdeye_api_key)
+               VALUES (1,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON DUPLICATE KEY UPDATE enabled=VALUES(enabled), networks=VALUES(networks),
                 pools_per_network=VALUES(pools_per_network), min_trade_usd=VALUES(min_trade_usd),
                 min_net_usd=VALUES(min_net_usd), auto_track_net_usd=VALUES(auto_track_net_usd),
                 poll_interval_seconds=VALUES(poll_interval_seconds), retention_days=VALUES(retention_days),
                 api_delay_seconds=VALUES(api_delay_seconds), token_mode=VALUES(token_mode),
-                token_addresses=VALUES(token_addresses)""",
+                token_addresses=VALUES(token_addresses), birdeye_api_key=VALUES(birdeye_api_key)""",
             (int(settings["enabled"]), networks, settings["pools_per_network"], settings["min_trade_usd"],
              settings["min_net_usd"], settings["auto_track_net_usd"], settings["poll_interval_seconds"],
-             settings["retention_days"], settings["api_delay_seconds"], settings["token_mode"], token_addresses),
+             settings["retention_days"], settings["api_delay_seconds"], settings["token_mode"], token_addresses,
+             birdeye_api_key),
         )
         conn.commit()
         cur.close()
     except Exception:
         conn.rollback()
         raise
+    finally:
+        conn.close()
+
+
+def get_active_pools(chain, limit=10):
+    """Retrieve recently active pools from historical swaps as a discovery fallback."""
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """SELECT pool_address AS address, pair AS name,
+                      COALESCE(SUM(usd_value), 0) AS volume_24h_usd
+               FROM wallet_swaps
+               WHERE chain = %s AND block_time >= UTC_TIMESTAMP() - INTERVAL 7 DAY
+               GROUP BY pool_address, pair
+               ORDER BY volume_24h_usd DESC
+               LIMIT %s""",
+            (chain, int(limit)),
+        )
+        rows = [_clean(r, wallet_chain_keys=False) for r in cur.fetchall()]
+        cur.close()
+        for r in rows:
+            r["volume_24h_usd"] = float(r.get("volume_24h_usd") or 0.0)
+        return rows
     finally:
         conn.close()
 

@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 
 from wallet_tracker import analyzer, store, worker
 from wallet_tracker.chains import explorer_url, normalize_wallet
-from wallet_tracker.providers import (BirdeyeProvider, GeckoTerminalProvider,
+from wallet_tracker.providers import (BirdeyeProvider, DexScreenerProvider,
+                                      GeckoTerminalProvider,
                                       parse_birdeye_trade, parse_trade)
 from wallet_tracker.stablecoins import is_stablecoin_base_pool
 
@@ -755,3 +756,177 @@ class TestBirdeyeFallbackProvider(unittest.TestCase):
         with patch.dict("os.environ", {"BIRDEYE_API_KEY": ""}):
             with self.assertRaises(ValueError):
                 BirdeyeProvider()
+
+    def test_provider_supports_arbitrum_and_polygon_chains(self):
+        from wallet_tracker.providers import BIRDEYE_CHAIN_IDS
+        self.assertEqual(BIRDEYE_CHAIN_IDS.get("arbitrum"), "arbitrum")
+        self.assertEqual(BIRDEYE_CHAIN_IDS.get("polygon_pos"), "polygon")
+
+
+class TestDexScreenerProvider(unittest.TestCase):
+    def test_hot_pools_discovers_and_normalizes_pairs(self):
+        from unittest.mock import MagicMock
+        session = MagicMock()
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {
+            "pairs": [
+                {
+                    "chainId": "ethereum",
+                    "pairAddress": "0x1111111111111111111111111111111111111111",
+                    "baseToken": {"address": "0xaaa", "symbol": "PEPE"},
+                    "quoteToken": {"address": "0xbbb", "symbol": "WETH"},
+                    "volume": {"h24": 500000.0},
+                },
+                {
+                    "chainId": "ethereum",
+                    "pairAddress": "0x2222222222222222222222222222222222222222",
+                    "baseToken": {"address": "0xccc", "symbol": "UNI"},
+                    "quoteToken": {"address": "0xddd", "symbol": "USDC"},
+                    "volume": {"h24": 1500000.0},
+                },
+                {
+                    "chainId": "bsc",  # Different chain, should be filtered out
+                    "pairAddress": "0x3333333333333333333333333333333333333333",
+                    "baseToken": {"address": "0xeee", "symbol": "CAKE"},
+                    "quoteToken": {"address": "0xfff", "symbol": "USDT"},
+                    "volume": {"h24": 9999999.0},
+                },
+            ]
+        }
+        session.get.return_value = response
+        provider = DexScreenerProvider(session=session)
+        pools = provider.hot_pools("eth", limit=5)
+        self.assertEqual(len(pools), 2)
+        # Sorted by volume descending
+        self.assertEqual(pools[0]["name"], "UNI / USDC")
+        self.assertEqual(pools[0]["volume_24h_usd"], 1500000.0)
+        self.assertEqual(pools[1]["name"], "PEPE / WETH")
+        self.assertEqual(pools[1]["volume_24h_usd"], 500000.0)
+
+    def test_hot_pools_handles_network_failure(self):
+        from unittest.mock import MagicMock
+        session = MagicMock()
+        session.get.side_effect = Exception("Network timeout")
+        provider = DexScreenerProvider(session=session)
+        pools = provider.hot_pools("eth", limit=5)
+        self.assertEqual(pools, [])
+
+
+class TestGeckoTerminalFastFailAndCache(unittest.TestCase):
+    def test_fast_fail_429_raises_immediately_without_sleeping(self):
+        from unittest.mock import MagicMock
+        import requests
+        session = MagicMock()
+        resp = MagicMock()
+        resp.status_code = 429
+        resp.headers = {}
+        http_err = requests.exceptions.HTTPError(response=resp)
+        resp.raise_for_status.side_effect = http_err
+        session.get.return_value = resp
+
+        provider = GeckoTerminalProvider(delay_seconds=0.5, session=session, fast_fail_429=True)
+        with patch("wallet_tracker.providers.time.sleep") as mock_sleep:
+            with self.assertRaises(requests.exceptions.HTTPError):
+                provider._get("/test")
+            # Should NOT sleep for the 20s or 40s retry backoff
+            for call in mock_sleep.call_args_list:
+                self.assertLess(call[0][0], 5.0)
+
+    def test_hot_pools_uses_cached_pools_when_rate_limited(self):
+        from unittest.mock import MagicMock
+        import requests
+        session = MagicMock()
+        provider = GeckoTerminalProvider(delay_seconds=0.5, session=session)
+        # Prepopulate cache
+        cached_pool = {"address": "0x123", "name": "TEST / WETH", "volume_24h_usd": 1000.0}
+        provider._pool_cache[("eth", 4)] = (0.0, [cached_pool])
+
+        resp = MagicMock()
+        resp.status_code = 429
+        resp.headers = {}
+        http_err = requests.exceptions.HTTPError(response=resp)
+        resp.raise_for_status.side_effect = http_err
+        session.get.return_value = resp
+
+        with patch("wallet_tracker.providers.time.sleep"):
+            pools = provider.hot_pools("eth", limit=4)
+        self.assertEqual(len(pools), 1)
+        self.assertEqual(pools[0]["address"], "0x123")
+
+
+class TestMultiSourceDiscoveryAndFailover(unittest.TestCase):
+    def test_discover_pools_falls_back_to_dexscreener_on_gecko_failure(self):
+        from unittest.mock import MagicMock
+        gecko = MagicMock()
+        gecko.hot_pools.side_effect = Exception("Gecko rate limit")
+        ds = MagicMock()
+        ds.hot_pools.return_value = [{"address": "0xabc", "name": "DS / WETH", "volume_24h_usd": 50000.0}]
+
+        pools, source = worker._discover_pools("eth", 4, gecko, dexscreener_provider=ds)
+        self.assertEqual(source, "DexScreener")
+        self.assertEqual(len(pools), 1)
+        self.assertEqual(pools[0]["name"], "DS / WETH")
+
+    def test_discover_pools_falls_back_to_db_when_both_apis_fail(self):
+        from unittest.mock import MagicMock
+        gecko = MagicMock()
+        gecko.hot_pools.side_effect = Exception("Gecko 429")
+        ds = MagicMock()
+        ds.hot_pools.side_effect = Exception("DexScreener down")
+
+        with patch("wallet_tracker.store.get_active_pools", return_value=[{"address": "0xdb", "name": "DB / WETH", "volume_24h_usd": 10000.0}]):
+            pools, source = worker._discover_pools("eth", 4, gecko, dexscreener_provider=ds)
+        self.assertEqual(source, "Database")
+        self.assertEqual(len(pools), 1)
+        self.assertEqual(pools[0]["name"], "DB / WETH")
+
+    def test_trade_fetch_fast_failover_to_birdeye(self):
+        from unittest.mock import MagicMock
+        import requests
+        gecko = MagicMock()
+        resp = MagicMock()
+        resp.status_code = 429
+        gecko.pool_trades.side_effect = requests.exceptions.HTTPError(response=resp)
+
+        birdeye = MagicMock()
+        trade_swap = {
+            "chain": "eth", "wallet": W1, "pool_address": POOL, "pair": "PEPE / WETH",
+            "side": "buy", "usd_value": 25000.0, "token_amount": 5.0, "price_usd": 5000.0,
+            "tx_hash": "0xabc", "block_time": NOW,
+        }
+        birdeye.pool_trades.return_value = [trade_swap]
+
+        pool = {"address": POOL, "name": "PEPE / WETH", "volume_24h_usd": 500000.0}
+        with patch("wallet_tracker.store.get_settings", return_value={
+            "enabled": True, "networks": ["eth"], "pools_per_network": 1,
+            "min_trade_usd": 10000, "min_net_usd": 150000, "retention_days": 8,
+            "api_delay_seconds": 0.5, "token_mode": "all", "token_addresses": [],
+        }), patch("wallet_tracker.store.insert_swaps", return_value=1) as mock_insert, \
+           patch("wallet_tracker.worker.recompute", return_value=0), \
+           patch("wallet_tracker.store.prune_swaps"), \
+           patch("wallet_tracker.store.set_status"), \
+           patch("wallet_tracker.worker.dispatch_telegram_alerts"):
+            ds = MagicMock()
+            gecko.hot_pools.return_value = [pool]
+            worker.run_cycle(gecko, fallback_provider=birdeye, dexscreener_provider=ds)
+            mock_insert.assert_called_once_with([trade_swap])
+
+
+class TestWalletSettingsWithBirdeye(unittest.TestCase):
+    def test_settings_preserves_masked_key(self):
+        from web.routes.wallet_routes import _mask_api_key, wallets_save_settings, WalletSettingsRequest
+        masked = _mask_api_key("1234567890abcdef")
+        self.assertEqual(masked, "••••••••cdef")
+
+        req = WalletSettingsRequest(
+            enabled=True, networks=["eth"], pools_per_network=4,
+            min_trade_usd=10000, min_net_usd=150000, auto_track_net_usd=500000,
+            poll_interval_seconds=300, retention_days=8, api_delay_seconds=4.0,
+            token_mode="all", token_addresses=[], birdeye_api_key="••••••••cdef",
+        )
+        with patch("wallet_tracker.store.get_settings", return_value={"birdeye_api_key": "1234567890abcdef", "networks": ["eth"]}), \
+             patch("wallet_tracker.store.save_settings") as mock_save:
+            wallets_save_settings(req)
+            saved_settings = mock_save.call_args[0][0]
+            self.assertEqual(saved_settings["birdeye_api_key"], "1234567890abcdef")
