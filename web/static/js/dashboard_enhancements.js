@@ -268,8 +268,9 @@
 
     function mountToggle() {
         if (document.getElementById("dashboard-theme-toggle")) return;
-        const brandRow = document.querySelector("aside > div:first-child > div:first-child");
-        if (!brandRow) return;
+        const brandContainer = document.querySelector("aside > div:first-child");
+        const brandRow = brandContainer && brandContainer.querySelector(":scope > div:first-child");
+        if (!brandContainer || !brandRow) return;
 
         const button = document.createElement("button");
         button.id = "dashboard-theme-toggle";
@@ -281,7 +282,11 @@
             try { window.localStorage.setItem(STORAGE_KEY, next); } catch (_) {}
             applyTheme(next);
         });
-        brandRow.appendChild(button);
+        // Keep the toggle on its own row so it cannot squeeze or overflow the logo/title row.
+        button.style.margin = "0.75rem 1.25rem 0";
+        button.style.width = "calc(100% - 2.5rem)";
+        button.style.justifyContent = "center";
+        brandRow.insertAdjacentElement("afterend", button);
         applyTheme(root.dataset.theme || readPreference());
     }
 
