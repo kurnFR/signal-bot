@@ -3438,7 +3438,7 @@ const App = {
                                     <td class="py-3 px-3 font-mono text-xs ${rocColor}">${rocText}</td>
                                     <td class="py-3 px-3 font-mono text-xs ${baseColor}">${exp.baseline_test_r >= 0 ? "+" : ""}${exp.baseline_test_r.toFixed(2)}R</td>
                                     <td class="py-3 px-3 font-mono text-xs ${rColor}">${exp.ml_test_r >= 0 ? "+" : ""}${exp.ml_test_r.toFixed(2)}R</td>
-                                    <td class="py-3 px-3 font-mono text-xs text-slate-300">${exp.ml_test_win_rate ? exp.ml_test_win_rate.toFixed(1) + "%" : "N/A"} <span class="text-[10px] text-slate-500">(${exp.ml_test_trades}t)</span></td>
+                                    <td class="py-3 px-3 font-mono text-xs text-slate-300">${exp.ml_test_win_rate != null ? exp.ml_test_win_rate.toFixed(1) + "%" : "N/A"} <span class="text-[10px] text-slate-500">(${exp.ml_test_trades}t)</span></td>
                                     <td class="py-3 px-3">
                                         <div class="flex items-center gap-2">
                                             <button type="button" data-ml-action="inspect" data-experiment-id="${safeExperimentId}" class="px-2.5 py-1 rounded text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors">
