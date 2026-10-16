@@ -1191,34 +1191,56 @@ const App = {
         const tbody = document.getElementById("users-table-body");
         if (!tbody) return;
 
-        tbody.innerHTML = this.usersList.map(u => `
-            <tr>
-                <td class="font-bold text-slate-100 font-mono">#${u.id}</td>
-                <td class="font-mono text-sky-400 font-semibold">${u.username}</td>
-                <td class="text-xs text-slate-400">${u.email || "-"}</td>
-                <td>
-                    <span class="px-2 py-0.5 rounded text-[10px] uppercase font-bold ${u.role === "admin" ? "bg-purple-950 text-purple-300 border border-purple-800" : "bg-slate-800 text-slate-300"}">
-                        ${u.role}
-                    </span>
-                </td>
-                <td>
-                    <span class="px-2 py-0.5 rounded text-[10px] font-semibold ${u.is_active ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-rose-950 text-rose-400 border border-rose-800"}">
-                        ${u.is_active ? "Active" : "Disabled"}
-                    </span>
-                </td>
-                <td class="text-xs text-slate-500 font-mono">${(u.created_at || "").slice(0, 10)}</td>
-                <td class="text-right space-x-2">
-                    <button onclick="App.openResetPasswordModal(${u.id}, '${u.username}')" class="px-2 py-1 text-xs rounded bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30">
-                        Reset Pass
-                    </button>
-                    ${u.id !== this.currentUser.id ? `
-                        <button onclick="App.toggleUserStatus(${u.id}, ${!u.is_active})" class="px-2 py-1 text-xs rounded bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30">
-                            ${u.is_active ? "Disable" : "Enable"}
+        tbody.innerHTML = this.usersList.map(u => {
+            const userId = this._escapeHtml(String(u.id ?? ""));
+            const username = this._escapeHtml(u.username || "");
+            const email = this._escapeHtml(u.email || "-");
+            const role = this._escapeHtml(u.role || "");
+            const createdAt = this._escapeHtml((u.created_at || "").slice(0, 10));
+            const nextActive = String(!u.is_active);
+
+            return `
+                <tr>
+                    <td class="font-bold text-slate-100 font-mono">#${userId}</td>
+                    <td class="font-mono text-sky-400 font-semibold">${username}</td>
+                    <td class="text-xs text-slate-400">${email}</td>
+                    <td>
+                        <span class="px-2 py-0.5 rounded text-[10px] uppercase font-bold ${u.role === "admin" ? "bg-purple-950 text-purple-300 border border-purple-800" : "bg-slate-800 text-slate-300"}">
+                            ${role}
+                        </span>
+                    </td>
+                    <td>
+                        <span class="px-2 py-0.5 rounded text-[10px] font-semibold ${u.is_active ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-rose-950 text-rose-400 border border-rose-800"}">
+                            ${u.is_active ? "Active" : "Disabled"}
+                        </span>
+                    </td>
+                    <td class="text-xs text-slate-500 font-mono">${createdAt}</td>
+                    <td class="text-right space-x-2">
+                        <button type="button" data-user-action="reset-password" data-user-id="${userId}" data-username="${username}" class="px-2 py-1 text-xs rounded bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30">
+                            Reset Pass
                         </button>
-                    ` : ""}
-                </td>
-            </tr>
-        `).join("");
+                        ${u.id !== this.currentUser.id ? `
+                            <button type="button" data-user-action="toggle-status" data-user-id="${userId}" data-next-active="${nextActive}" class="px-2 py-1 text-xs rounded bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30">
+                                ${u.is_active ? "Disable" : "Enable"}
+                            </button>
+                        ` : ""}
+                    </td>
+                </tr>
+            `;
+        }).join("");
+
+        tbody.querySelectorAll("[data-user-action]").forEach(button => {
+            button.addEventListener("click", () => {
+                const userId = Number(button.dataset.userId);
+                if (!Number.isSafeInteger(userId)) return;
+
+                if (button.dataset.userAction === "reset-password") {
+                    this.openResetPasswordModal(userId, button.dataset.username || "");
+                } else if (button.dataset.userAction === "toggle-status") {
+                    this.toggleUserStatus(userId, button.dataset.nextActive === "true");
+                }
+            });
+        });
     },
 
     async handleCreateUser() {
