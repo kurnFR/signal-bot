@@ -90,10 +90,10 @@
             const label = (th.textContent || "").replace(/[↑↓]/g, "").trim();
             if (!label || SORTABLE_EXCLUDES.has(label) || th.querySelector("button")) return;
             th.classList.add("table-sortable-header");
-            th.setAttribute("role", "button");
+            // Keep the native column-header role; tabindex + keyboard handling provide activation.
             th.setAttribute("tabindex", "0");
-            th.setAttribute("aria-label", `Sort by ${label}`);
-            th.setAttribute("aria-sort", "none");
+            th.setAttribute("aria-label", `${label}, sortable`);
+            th.removeAttribute("aria-sort");
             th.addEventListener("click", () => {
                 const current = table.dataset.sortColumn === String(index) ? Number(table.dataset.sortDirection || 0) : 0;
                 const direction = current === 1 ? -1 : 1;
@@ -101,9 +101,10 @@
                 table.dataset.sortDirection = String(direction);
                 Array.from(thead.rows[0].cells).forEach((cell, i) => {
                     setSortIndicator(cell, i === index ? direction : 0);
-                    cell.setAttribute("aria-sort", i === index ? (direction === 1 ? "ascending" : "descending") : "none");
+                    cell.removeAttribute("aria-sort");
                 });
-                th.setAttribute("aria-label", `Sort by ${label}, ${direction === 1 ? "ascending" : "descending"}`);
+                th.setAttribute("aria-sort", direction === 1 ? "ascending" : "descending");
+                th.setAttribute("aria-label", `${label}, sorted ${direction === 1 ? "ascending" : "descending"}`);
                 sortTable(table, index, direction);
             });
             th.addEventListener("keydown", event => {
