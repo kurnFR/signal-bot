@@ -1847,28 +1847,40 @@ const App = {
 
         tbody.innerHTML = this.coverageData.map(c => `
             <tr>
-                <td class="font-bold font-mono text-slate-200">${c.symbol}</td>
-                <td><span class="px-1.5 py-0.5 text-xs rounded uppercase ${c.market === "futures" ? "bg-purple-950 text-purple-400 border border-purple-800" : "bg-slate-800 text-slate-300"}">${c.market}</span></td>
-                <td><span class="font-mono font-semibold text-xs text-amber-400">${c.timeframe}</span></td>
-                <td class="font-mono text-slate-300 text-xs">${c.candleCount.toLocaleString()}</td>
+                <td class="font-bold font-mono text-slate-200">${this._escapeHtml(c.symbol)}</td>
+                <td><span class="px-1.5 py-0.5 text-xs rounded uppercase ${c.market === "futures" ? "bg-purple-950 text-purple-400 border border-purple-800" : "bg-slate-800 text-slate-300"}">${this._escapeHtml(c.market)}</span></td>
+                <td><span class="font-mono font-semibold text-xs text-amber-400">${this._escapeHtml(c.timeframe)}</span></td>
+                <td class="font-mono text-slate-300 text-xs">${this._escapeHtml(c.candleCount.toLocaleString())}</td>
                 <td>
                     <span class="px-2 py-0.5 text-[11px] rounded font-medium ${c.hasFeatures ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-amber-950 text-amber-400 border border-amber-800"}">
-                        ${c.hasFeatures ? `✓ Computed (${c.featureCount.toLocaleString()})` : "Missing"}
+                        ${c.hasFeatures ? `✓ Computed (${this._escapeHtml(c.featureCount.toLocaleString())})` : "Missing"}
                     </span>
                 </td>
-                <td class="text-xs text-slate-400 font-mono">${(c.startDate || "").slice(0, 10)} → ${(c.endDate || "").slice(0, 10)}</td>
+                <td class="text-xs text-slate-400 font-mono">${this._escapeHtml((c.startDate || "").slice(0, 10))} → ${this._escapeHtml((c.endDate || "").slice(0, 10))}</td>
                 <td class="text-right space-x-1.5">
                     ${!c.hasFeatures ? `
-                        <button onclick="App.triggerComputeFeatures('${c.symbol}', '${c.market}', '${c.timeframe}')" class="px-2.5 py-1 text-xs rounded bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30">
+                        <button type="button" data-coverage-action="compute" data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" class="px-2.5 py-1 text-xs rounded bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30">
                             Build Features
                         </button>
                     ` : ""}
-                    <button onclick="App.launchBacktestFromCoverage('${c.symbol}', '${c.market}', '${c.timeframe}')" class="px-2.5 py-1 text-xs rounded bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30 font-medium">
+                    <button type="button" data-coverage-action="backtest" data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" class="px-2.5 py-1 text-xs rounded bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30 font-medium">
                         Backtest →
                     </button>
                 </td>
             </tr>
         `).join("");
+        tbody.querySelectorAll("[data-coverage-action]").forEach(button => {
+            button.addEventListener("click", () => {
+                const symbol = button.dataset.symbol || "";
+                const market = button.dataset.market || "";
+                const timeframe = button.dataset.timeframe || "";
+                if (button.dataset.coverageAction === "compute") {
+                    this.triggerComputeFeatures(symbol, market, timeframe);
+                } else if (button.dataset.coverageAction === "backtest") {
+                    this.launchBacktestFromCoverage(symbol, market, timeframe);
+                }
+            });
+        });
     },
 
     openBackfillModal(symbol, market) {
