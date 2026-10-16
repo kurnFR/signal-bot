@@ -396,6 +396,7 @@ class TestWorkerRateLimitIsolation(unittest.TestCase):
             stack.enter_context(patch.object(worker, "recompute", return_value=0))
             stack.enter_context(patch.object(worker.store, "prune_swaps"))
             stack.enter_context(patch.object(worker.store, "prune_wallet_alerts"))
+            stack.enter_context(patch.object(worker.store, "get_active_pools", return_value=[]))
             stack.enter_context(patch.object(worker.store, "set_status"))
             stack.enter_context(patch.object(worker, "dispatch_telegram_alerts"))
             stack.enter_context(patch.object(worker, "_network_rotation_offset", 0))
@@ -905,6 +906,7 @@ class TestMultiSourceDiscoveryAndFailover(unittest.TestCase):
         }), patch("wallet_tracker.store.insert_swaps", return_value=1) as mock_insert, \
            patch("wallet_tracker.worker.recompute", return_value=0), \
            patch("wallet_tracker.store.prune_swaps"), \
+           patch("wallet_tracker.store.prune_wallet_alerts"), \
            patch("wallet_tracker.store.set_status"), \
            patch("wallet_tracker.worker.dispatch_telegram_alerts"):
             ds = MagicMock()
