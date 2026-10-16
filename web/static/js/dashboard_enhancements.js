@@ -101,10 +101,17 @@
                 table.dataset.sortDirection = String(direction);
                 Array.from(thead.rows[0].cells).forEach((cell, i) => {
                     setSortIndicator(cell, i === index ? direction : 0);
-                    cell.removeAttribute("aria-sort");
+                    if (i === index) {
+                        cell.setAttribute("aria-sort", direction === 1 ? "ascending" : "descending");
+                        cell.setAttribute("aria-label", `${label}, sorted ${direction === 1 ? "ascending" : "descending"}`);
+                    } else {
+                        cell.removeAttribute("aria-sort");
+                        if (cell.classList.contains("table-sortable-header")) {
+                            const cellLabel = (cell.textContent || "").replace(/[↑↓]/g, "").trim();
+                            cell.setAttribute("aria-label", `${cellLabel}, sortable`);
+                        }
+                    }
                 });
-                th.setAttribute("aria-sort", direction === 1 ? "ascending" : "descending");
-                th.setAttribute("aria-label", `${label}, sorted ${direction === 1 ? "ascending" : "descending"}`);
                 sortTable(table, index, direction);
             });
             th.addEventListener("keydown", event => {
