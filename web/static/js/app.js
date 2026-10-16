@@ -128,7 +128,8 @@ const App = {
         if (str === null || str === undefined) return "";
         const div = document.createElement("div");
         div.textContent = String(str);
-        return div.innerHTML;
+        // Also escape quotes so this helper is safe in quoted HTML attributes.
+        return div.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
     },
 
     // Only allow safe web links from API/database content. HTML escaping alone
@@ -2033,9 +2034,12 @@ const App = {
         }
 
         const currentVal = symbolSelect.value;
-        symbolSelect.innerHTML = uniqueSymbols.map(s => `
-            <option value="${s}" ${s === currentVal ? "selected" : ""}>${s}</option>
-        `).join("");
+        symbolSelect.innerHTML = uniqueSymbols.map(s => {
+            const safeSymbol = this._escapeHtml(s);
+            return `
+                <option value="${safeSymbol}" ${s === currentVal ? "selected" : ""}>${safeSymbol}</option>
+            `;
+        }).join("");
     },
 
     updateStrategySelectors() {
