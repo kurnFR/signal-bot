@@ -1,14 +1,8 @@
 # Status
 
-What exists and works today, and the known gaps. Every item below was checked against the code (and, where noted, by running it) on `master` @ `18ea335`, 2026-10-15. Keep this file short: when a gap is fixed, delete the line; when you add a capability, add one row. Do not add dated reviews or history here (use pull-request descriptions).
+What exists and works today, and the known gaps. Every item below was checked against the code (and, where noted, by running it) on `master` (after PR #24), 2026-10-15. Keep this file short: when a gap is fixed, delete the line; when you add a capability, add one row. Do not add dated reviews or history here (use pull-request descriptions).
 
-## 1. Needs attention now
-
-| Gap | Detail |
-|---|---|
-| **`master` CI is red** | The full `Test` workflow fails on `18ea335`: 6 tests in `tests/test_circuit_breaker.py` patch `paper.circuit_breaker.get_pool`, which the "fresh starts" fix removed when it switched to a direct connection. The code itself behaves correctly on an empty database (verified), but the fail-closed behaviours those tests cover are currently untested. Update the tests to patch the new connection helper. |
-
-## 2. Implemented
+## 1. Implemented
 
 | Area | What exists | Where |
 |---|---|---|
@@ -23,9 +17,9 @@ What exists and works today, and the known gaps. Every item below was checked ag
 | Web and security | FastAPI app, central fail-closed authentication, three roles, token revocation, audit log, login rate limiting, random first-admin password | [SECURITY.md](SECURITY.md) |
 | Operations | `run_all.py` supervisor with restart backoff; CI on Python 3.11 including a MariaDB integration job | `.github/workflows/` |
 
-Verified this session: a fresh database built from the README steps boots the app and the admin login works; all 74 API operations reject unauthenticated calls except login; the viewer role can call 0 of 29 mutating operations; the paper circuit breaker allows entries on an empty database.
+Verified this session: a fresh database built from the README steps boots the app and the admin login works; all 74 API operations reject unauthenticated calls except login; the viewer role can call 0 of 29 mutating operations; the paper circuit breaker allows entries on an empty database (now covered by tests).
 
-## 3. Known gaps (verified open)
+## 2. Known gaps (verified open)
 
 **Trading and analytics**
 
@@ -49,11 +43,11 @@ Verified this session: a fresh database built from the README steps boots the ap
 
 **Wallet tracking** has its own list of verified limitations in [WALLET_TRACKER.md](WALLET_TRACKER.md#6-known-limitations-verified-open) (alert digest, per-pool grouping, stablecoin metadata, bot filtering, no skill scoring, Birdeye fallback unvalidated, startup ALTER privilege).
 
-## 4. Tests
+## 3. Tests
 
-In my environment: **205 passed, 6 failed, 3 skipped** (the 6 failures are the circuit-breaker tests above; one file, `tests/test_retailbot_accounting.py`, was excluded because it needs `ccxt`, and the 3 skipped are the opt-in MariaDB tests, which pass when run with `WALLET_TRACKER_MARIADB_TESTS=1`). Passing tests show the code does what the tests say; they are not evidence of trading edge. Only the two strategies in [STRATEGIES.md](STRATEGIES.md#4-results-that-passed-holdout) have passed holdout.
+Full suite as CI runs it (`python -m pytest`, pinned `requirements.txt`): **225 passed, 0 failed, 3 skipped**; the 3 skipped are the opt-in MariaDB tests, which pass when run with `WALLET_TRACKER_MARIADB_TESTS=1`. Passing tests show the code does what the tests say; they are not evidence of trading edge. Only the two strategies in [STRATEGIES.md](STRATEGIES.md#4-results-that-passed-holdout) have passed holdout.
 
-## 5. Documentation map
+## 4. Documentation map
 
 | File | Purpose |
 |---|---|
