@@ -2005,8 +2005,8 @@ const App = {
 
         const currentVal = stratSelect.value || "confluence_ensemble_v1";
         stratSelect.innerHTML = this.strategiesList.map(st => `
-            <option value="${st.id}" ${st.id === currentVal ? "selected" : ""}>
-                ${st.validated ? "⭐ " : ""}${st.displayName}
+            <option value="${this._escapeHtml(st.id)}" ${st.id === currentVal ? "selected" : ""}>
+                ${st.validated ? "⭐ " : ""}${this._escapeHtml(st.displayName || st.id || "Unnamed strategy")}
             </option>
         `).join("");
 
@@ -2031,11 +2031,11 @@ const App = {
                     </div>
                     <div>
                         <div class="flex items-center gap-2">
-                            <span class="font-bold text-sm text-slate-100">${strat.displayName}</span>
-                            <span class="px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-slate-800 text-slate-300">${strat.category}</span>
+                            <span class="font-bold text-sm text-slate-100">${this._escapeHtml(strat.displayName || strat.id || "Unnamed strategy")}</span>
+                            <span class="px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-slate-800 text-slate-300">${this._escapeHtml(strat.category || "Other")}</span>
                             ${strat.validated ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">HOLDOUT VALIDATED</span>` : ""}
                         </div>
-                        <p class="text-xs text-slate-400 mt-1">${strat.description}</p>
+                        <p class="text-xs text-slate-400 mt-1">${this._escapeHtml(strat.description || "")}</p>
                     </div>
                 </div>
             `;
@@ -2054,30 +2054,37 @@ const App = {
         paramsForm.innerHTML = `
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 ${allParams.map(p => {
-                    const id = `param-input-${p.key}`;
+                    const id = `param-input-${String(p.key ?? "")}`;
+                    const safeId = this._escapeHtml(id);
+                    const safeKey = this._escapeHtml(String(p.key ?? ""));
+                    const safeLabel = this._escapeHtml(p.label || p.key || "Parameter");
+                    const safeDefault = this._escapeHtml(String(p.default ?? ""));
                     if (p.type === "bool") {
                         return `
                             <div class="flex items-center justify-between p-2.5 rounded bg-slate-900 border border-slate-800">
-                                <label for="${id}" class="text-xs text-slate-300 font-medium">${p.label}</label>
-                                <input type="checkbox" id="${id}" data-key="${p.key}" ${p.default ? "checked" : ""} class="w-4 h-4 accent-sky-500 rounded bg-slate-800 border-slate-700">
+                                <label for="${safeId}" class="text-xs text-slate-300 font-medium">${safeLabel}</label>
+                                <input type="checkbox" id="${safeId}" data-key="${safeKey}" ${p.default ? "checked" : ""} class="w-4 h-4 accent-sky-500 rounded bg-slate-800 border-slate-700">
                             </div>
                         `;
                     } else if (p.type === "string") {
                         return `
                             <div class="p-2.5 rounded bg-slate-900 border border-slate-800">
-                                <label for="${id}" class="block text-xs text-slate-400 font-medium mb-1">${p.label}</label>
-                                <input type="text" id="${id}" data-key="${p.key}" value="${p.default}" class="w-full text-xs bg-slate-800 text-slate-200 rounded px-2.5 py-1.5 border border-slate-750 font-mono">
+                                <label for="${safeId}" class="block text-xs text-slate-400 font-medium mb-1">${safeLabel}</label>
+                                <input type="text" id="${safeId}" data-key="${safeKey}" value="${safeDefault}" class="w-full text-xs bg-slate-800 text-slate-200 rounded px-2.5 py-1.5 border border-slate-750 font-mono">
                             </div>
                         `;
                     } else {
+                        const min = this._escapeHtml(String(p.min != null ? p.min : 0));
+                        const max = this._escapeHtml(String(p.max != null ? p.max : 100));
+                        const step = this._escapeHtml(String(p.step || 1));
+                        const valueTarget = this._escapeHtml(`val-${id}`);
                         return `
                             <div class="p-2.5 rounded bg-slate-900 border border-slate-800">
                                 <div class="flex justify-between items-center mb-1">
-                                    <label for="${id}" class="text-xs text-slate-400 font-medium">${p.label}</label>
-                                    <span id="val-${id}" class="text-xs font-mono text-sky-400 font-semibold">${p.default}</span>
+                                    <label for="${safeId}" class="text-xs text-slate-400 font-medium">${safeLabel}</label>
+                                    <span id="${valueTarget}" class="text-xs font-mono text-sky-400 font-semibold">${safeDefault}</span>
                                 </div>
-                                <input type="range" id="${id}" data-key="${p.key}" min="${p.min != null ? p.min : 0}" max="${p.max != null ? p.max : 100}" step="${p.step || 1}" value="${p.default}" 
-                                    oninput="document.getElementById('val-${id}').innerText = this.value"
+                                <input type="range" id="${safeId}" data-key="${safeKey}" data-value-target="${valueTarget}" min="${min}" max="${max}" step="${step}" value="${safeDefault}"
                                     class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer">
                             </div>
                         `;
@@ -2085,6 +2092,13 @@ const App = {
                 }).join("")}
             </div>
         `;
+
+        paramsForm.querySelectorAll('input[type="range"][data-value-target]').forEach(input => {
+            input.addEventListener("input", () => {
+                const output = document.getElementById(input.dataset.valueTarget);
+                if (output) output.textContent = input.value;
+            });
+        });
     },
 
     collectBacktestParams() {
