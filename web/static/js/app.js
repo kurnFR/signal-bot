@@ -611,7 +611,7 @@ const App = {
             const checklistBadge = r.is_tracked
                 ? `<button data-chain="${this._escapeHtml(r.chain)}" data-wallet="${this._escapeHtml(r.wallet)}" onclick="App.walletToggleTrack(this)" class="px-2 py-1 text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-600 hover:bg-rose-950 hover:text-rose-300 hover:border-rose-700 rounded-md transition-all flex items-center gap-1 whitespace-nowrap" title="Click to uncheck / remove from Smart Money checklist"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>✓ Smart Money</button>`
                 : `<button data-chain="${this._escapeHtml(r.chain)}" data-wallet="${this._escapeHtml(r.wallet)}" onclick="App.walletToggleTrack(this)" class="px-2 py-1 text-[10px] font-semibold bg-slate-800 text-cyan-300 border border-slate-700 hover:bg-cyan-900/80 hover:border-cyan-500 rounded-md transition-all flex items-center gap-1 whitespace-nowrap" title="Click to checklist as Smart Money"><span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>+ Checklist</button>`;
-            const followBtn = `<button onclick="App.followWallet('${this._escapeHtml(r.wallet)}', '${this._escapeHtml(r.chain)}')" class="px-2 py-1 text-[10px] font-semibold bg-cyan-950 text-cyan-300 border border-cyan-800 hover:bg-cyan-900 rounded-md whitespace-nowrap flex items-center gap-1" title="Add this wallet to the checklist and filter recent polled activity">Watch Activity</button>`;
+            const followBtn = `<button type="button" data-wt-follow-wallet="${this._escapeHtml(r.wallet)}" data-wt-follow-chain="${this._escapeHtml(r.chain)}" class="px-2 py-1 text-[10px] font-semibold bg-cyan-950 text-cyan-300 border border-cyan-800 hover:bg-cyan-900 rounded-md whitespace-nowrap flex items-center gap-1" title="Add this wallet to the checklist and filter recent polled activity">Watch Activity</button>`;
             return `<tr>
                 <td>${checklistBadge}</td>
                 <td>${this._wtWalletCell(r)}</td>
@@ -628,6 +628,9 @@ const App = {
                 <td>${followBtn}</td>
             </tr>`;
         }).join("");
+        tbody.querySelectorAll("[data-wt-follow-wallet]").forEach(button => {
+            button.addEventListener("click", () => this.followWallet(button.dataset.wtFollowWallet || "", button.dataset.wtFollowChain || ""));
+        });
     },
 
     _wtRenderFeed(events) {
@@ -677,10 +680,13 @@ const App = {
                     </div>
                 </div>
                 <div class="flex items-center gap-1.5 shrink-0">
-                    <button onclick="App.followWallet('${this._escapeHtml(t.wallet)}', '${this._escapeHtml(t.chain)}')" class="px-2 py-1 text-[10px] font-semibold bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800 rounded">Follow</button>
+                    <button type="button" data-wt-follow-wallet="${this._escapeHtml(t.wallet)}" data-wt-follow-chain="${this._escapeHtml(t.chain)}" class="px-2 py-1 text-[10px] font-semibold bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800 rounded">Follow</button>
                     <button data-id="${Number(t.id)}" onclick="App.walletUntrack(this)" class="px-2 py-1 text-[10px] font-semibold bg-slate-700 hover:bg-rose-800 text-slate-200 rounded">Uncheck</button>
                 </div>
             </div>`).join("");
+        box.querySelectorAll("[data-wt-follow-wallet]").forEach(button => {
+            button.addEventListener("click", () => this.followWallet(button.dataset.wtFollowWallet || "", button.dataset.wtFollowChain || ""));
+        });
     },
 
     async _wtSend(method, path, body) {
