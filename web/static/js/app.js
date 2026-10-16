@@ -124,6 +124,12 @@ const App = {
     // ----------------------------------------------------
     // NEWS AI OVERLAY SIGNALS
     // ----------------------------------------------------
+    _safeNumber(value, fallback = 0) {
+        if (value === null || value === undefined || value === "") return fallback;
+        const number = Number(value);
+        return Number.isFinite(number) ? number : fallback;
+    },
+
     _escapeHtml(str) {
         if (str === null || str === undefined) return "";
         const div = document.createElement("div");
@@ -262,7 +268,7 @@ const App = {
                 : "text-slate-400 bg-slate-800 border-slate-700";
             let outcome;
             if (s.paper_position_id) {
-                outcome = `<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-950 text-emerald-300 border border-emerald-800">OPENED #${s.paper_position_id}</span>`;
+                outcome = `<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-emerald-950 text-emerald-300 border border-emerald-800">OPENED #${this._safeNumber(s.paper_position_id)}</span>`;
             } else if (s.acted_on) {
                 outcome = `<span class="px-2 py-0.5 text-[10px] font-bold rounded bg-slate-800 text-slate-400 border border-slate-700" title="${this._escapeHtml(s.skip_reason || '')}">SKIPPED</span>
                     <div class="text-[10px] text-slate-500 mt-0.5">${this._escapeHtml(s.skip_reason || '')}</div>`;
@@ -276,7 +282,7 @@ const App = {
                     <td class="whitespace-nowrap text-slate-400">${this._formatDateTime(s.created_at)}</td>
                     <td class="font-semibold text-slate-100">${this._escapeHtml(s.symbol)}<div class="text-[10px] text-slate-500">${this._escapeHtml(s.market)}/${this._escapeHtml(s.timeframe)}</div></td>
                     <td><span class="px-2 py-0.5 text-[10px] font-bold rounded border ${biasColor}">${this._escapeHtml((s.bias || "").toUpperCase())}</span></td>
-                    <td class="font-mono font-bold ${confColor}">${s.confidence}%</td>
+                    <td class="font-mono font-bold ${confColor}">${this._safeNumber(s.confidence)}%</td>
                     <td class="max-w-[220px] text-slate-300">${safeUrl ? `<a href="${this._escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" class="hover:text-sky-400 underline decoration-dotted">${this._escapeHtml(s.headline || "(no linked event)")}</a>` : this._escapeHtml(s.headline || "(no linked event)")}</td>
                     <td class="max-w-[260px] text-slate-400">${this._escapeHtml(s.reasoning || "--")}</td>
                     <td class="text-slate-400">${this._escapeHtml(s.time_horizon || "--")}</td>
@@ -604,8 +610,8 @@ const App = {
                 <td><span class="px-1.5 py-0.5 rounded text-[10px] font-bold border ${cls[f.signal] || cls.MIXED}">${this._escapeHtml(f.signal)}</span></td>
                 <td class="font-semibold text-slate-200">${this._escapeHtml(f.pair)}</td>
                 <td class="text-slate-400">${this._escapeHtml(f.chain)}</td>
-                <td class="font-mono text-emerald-400">${f.accumulating_wallets}</td>
-                <td class="font-mono text-rose-400">${f.distributing_wallets}</td>
+                <td class="font-mono text-emerald-400">${this._safeNumber(f.accumulating_wallets).toLocaleString()}</td>
+                <td class="font-mono text-rose-400">${this._safeNumber(f.distributing_wallets).toLocaleString()}</td>
                 <td class="font-mono">${this._wtUsd(f.buy_usd)}</td>
                 <td class="font-mono">${this._wtUsd(f.sell_usd)}</td>
                 <td class="font-mono font-bold ${f.net_usd >= 0 ? "text-emerald-400" : "text-rose-400"}">${this._wtUsd(f.net_usd)}</td>
@@ -638,7 +644,7 @@ const App = {
                 <td class="font-mono font-bold ${r.net_usd >= 0 ? "text-emerald-400" : "text-rose-400"}">${this._wtUsd(r.net_usd)}</td>
                 <td class="font-mono">${this._wtPrice(r.avg_buy_price)}</td>
                 <td class="font-mono">${this._wtPrice(r.avg_sell_price)}</td>
-                <td class="font-mono text-slate-400">${r.buy_count}B / ${r.sell_count}S</td>
+                <td class="font-mono text-slate-400">${this._safeNumber(r.buy_count)}B / ${this._safeNumber(r.sell_count)}S</td>
                 <td class="whitespace-nowrap text-slate-500 text-[10px]">${this._formatDateTime(r.first_trade_at)} → ${this._formatDateTime(r.last_trade_at)}</td>
                 <td>${followBtn}</td>
             </tr>`;
@@ -933,7 +939,7 @@ const App = {
                     <td class="font-mono text-rose-400">$${Number(p.stop_price).toFixed(4)}</td>
                     <td class="font-mono text-emerald-400">$${Number(p.target_price).toFixed(4)}</td>
                     <td class="text-slate-400">${this._escapeHtml(p.strategy)}</td>
-                    <td class="text-slate-400">${p.confluence_score ?? 1}/7</td>
+                    <td class="text-slate-400">${this._safeNumber(p.confluence_score, 1)}/7</td>
                     <td class="whitespace-nowrap text-slate-500">${this._formatDateTime(p.entry_time)}</td>
                 </tr>`;
         }).join("");
@@ -956,9 +962,9 @@ const App = {
                 <tr>
                     <td class="font-semibold text-slate-100">${this._escapeHtml(r.strategy)}</td>
                     <td><span class="px-2 py-0.5 text-[10px] font-bold rounded border ${modeColor}">${this._escapeHtml(r.mode)}</span></td>
-                    <td class="text-slate-300">${total}</td>
-                    <td class="text-emerald-400">${r.wins || 0}</td>
-                    <td class="text-rose-400">${r.losses || 0}</td>
+                    <td class="text-slate-300">${this._safeNumber(total)}</td>
+                    <td class="text-emerald-400">${this._safeNumber(r.wins)}</td>
+                    <td class="text-rose-400">${this._safeNumber(r.losses)}</td>
                     <td class="text-slate-300">${wr}${wr !== "--" ? "%" : ""}</td>
                     <td class="font-mono ${pnlColor}">${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}</td>
                 </tr>`;
@@ -997,7 +1003,7 @@ const App = {
             const byType = stats.by_type_last_24h || {};
             const entries = Object.entries(byType);
             breakdownEl.innerHTML = entries.length
-                ? entries.map(([type, n]) => `<div>${this._escapeHtml(type)}: <span class="font-mono text-slate-100">${n}</span></div>`).join("")
+                ? entries.map(([type, n]) => `<div>${this._escapeHtml(type)}: <span class="font-mono text-slate-100">${this._safeNumber(n).toLocaleString()}</span></div>`).join("")
                 : `<span class="text-slate-500">No signals in 24h</span>`;
         }
     },
