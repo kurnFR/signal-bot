@@ -2354,22 +2354,22 @@ const App = {
                     <td class="font-mono text-xs text-slate-400">#${idx + 1}</td>
                     <td>
                         <span class="px-2 py-0.5 rounded text-[10px] font-bold ${t.direction === "LONG" ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-rose-950 text-rose-400 border border-rose-800"}">
-                            ${t.direction}
+                            ${this._escapeHtml(t.direction)}
                         </span>
                     </td>
-                    <td class="font-mono text-xs text-slate-300">${t.entryTimeWib || "-"}</td>
-                    <td class="font-mono text-xs text-slate-200">$${t.entryPrice.toLocaleString()}</td>
-                    <td class="font-mono text-xs text-slate-300">${t.exitTimeWib || "-"}</td>
-                    <td class="font-mono text-xs text-slate-200">$${t.exitPrice.toLocaleString()}</td>
+                    <td class="font-mono text-xs text-slate-300">${this._escapeHtml(t.entryTimeWib || "-")}</td>
+                    <td class="font-mono text-xs text-slate-200">$${this._escapeHtml(t.entryPrice.toLocaleString())}</td>
+                    <td class="font-mono text-xs text-slate-300">${this._escapeHtml(t.exitTimeWib || "-")}</td>
+                    <td class="font-mono text-xs text-slate-200">$${this._escapeHtml(t.exitPrice.toLocaleString())}</td>
                     <td>
                         <span class="px-1.5 py-0.5 rounded text-[10px] uppercase font-semibold ${t.exitReason === "TP" ? "bg-emerald-950 text-emerald-400" : t.exitReason === "SL" ? "bg-rose-950 text-rose-400" : "bg-amber-950 text-amber-400"}">
-                            ${t.exitReason}
+                            ${this._escapeHtml(t.exitReason)}
                         </span>
                     </td>
                     <td class="font-mono text-xs font-semibold ${isWin ? "text-emerald-400" : "text-rose-400"}">
-                        ${t.rMultiple != null ? `${t.rMultiple > 0 ? "+" : ""}${t.rMultiple}R` : "-"}
+                        ${this._escapeHtml(t.rMultiple != null ? `${t.rMultiple > 0 ? "+" : ""}${t.rMultiple}R` : "-")}
                     </td>
-                    <td class="font-mono text-xs text-slate-400">${t.holdingBars} bars</td>
+                    <td class="font-mono text-xs text-slate-400">${this._escapeHtml(String(t.holdingBars ?? "N/A"))} bars</td>
                 </tr>
             `;
         }).join("");
