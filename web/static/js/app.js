@@ -1709,9 +1709,9 @@ const App = {
                     <div class="flex items-center justify-between p-2.5 rounded bg-slate-800/40 border border-slate-750">
                         <div class="flex items-center gap-2">
                             <span class="w-2 h-2 rounded-full ${b.status === "ok" ? "bg-emerald-400" : "bg-amber-400"}"></span>
-                            <span class="font-mono text-xs text-slate-300">${b.collector}</span>
+                            <span class="font-mono text-xs text-slate-300">${this._escapeHtml(b.collector || "")}</span>
                         </div>
-                        <div class="text-xs text-slate-400">${b.lastBeat || "Never"}</div>
+                        <div class="text-xs text-slate-400">${this._escapeHtml(b.lastBeat || "Never")}</div>
                     </div>
                 `).join("");
             }
