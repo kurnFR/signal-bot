@@ -3065,7 +3065,7 @@ const App = {
                         <i data-lucide="alert-triangle" class="w-8 h-8 text-amber-400 mx-auto mb-2"></i>
                         <h4 class="text-sm font-bold text-slate-200">No Models Met Minimum Profitability Criteria</h4>
                         <p class="text-xs text-slate-400 mt-1 max-w-md mx-auto">
-                            None of the 24 strategy models yielded net positive expectancy (R > 0) with at least 10 trades on ${data.symbol} (${data.timeframe}). Try a higher timeframe (4h, 1d) or backfill more data.
+                            None of the 24 strategy models yielded net positive expectancy (R > 0) with at least 10 trades on ${this._escapeHtml(data.symbol)} (${this._escapeHtml(data.timeframe)}). Try a higher timeframe (4h, 1d) or backfill more data.
                         </p>
                     </div>
                 `;
@@ -3082,43 +3082,53 @@ const App = {
                             <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-800/90 ${cfg.accent} border border-slate-700">
                                 ${cfg.badge}
                             </span>
-                            <span class="text-[11px] font-mono text-slate-400">Score: <b class="text-slate-100">${strat.rankScore}</b></span>
+                            <span class="text-[11px] font-mono text-slate-400">Score: <b class="text-slate-100">${this._escapeHtml(String(strat.rankScore ?? 'N/A'))}</b></span>
                         </div>
 
                         <div>
-                            <h4 class="text-sm font-bold text-slate-100 leading-snug">${strat.displayName || strat.strategy}</h4>
-                            <span class="text-[11px] text-slate-400 uppercase tracking-wider">${strat.category || 'Quantitative'}</span>
+                            <h4 class="text-sm font-bold text-slate-100 leading-snug">${this._escapeHtml(strat.displayName || strat.strategy || 'Unknown strategy')}</h4>
+                            <span class="text-[11px] text-slate-400 uppercase tracking-wider">${this._escapeHtml(strat.category || 'Quantitative')}</span>
                         </div>
 
                         <div class="grid grid-cols-2 gap-2 text-xs bg-slate-950/50 p-3 rounded-lg border border-slate-800/60 font-mono">
                             <div>
                                 <span class="text-[10px] text-slate-500 uppercase">Expectancy</span>
-                                <div class="font-bold ${isExpPos ? 'text-emerald-400' : 'text-rose-400'}">${m.expectancy_r > 0 ? '+' : ''}${m.expectancy_r}R</div>
+                                <div class="font-bold ${isExpPos ? 'text-emerald-400' : 'text-rose-400'}">${this._escapeHtml(`${m.expectancy_r > 0 ? '+' : ''}${m.expectancy_r ?? 'N/A'}R`)}</div>
                             </div>
                             <div>
                                 <span class="text-[10px] text-slate-500 uppercase">Profit Factor</span>
-                                <div class="font-bold text-slate-100">${m.profit_factor}</div>
+                                <div class="font-bold text-slate-100">${this._escapeHtml(String(m.profit_factor ?? 'N/A'))}</div>
                             </div>
                             <div>
                                 <span class="text-[10px] text-slate-500 uppercase">Win Rate</span>
-                                <div class="font-bold text-slate-100">${m.win_rate_pct}%</div>
+                                <div class="font-bold text-slate-100">${this._escapeHtml(String(m.win_rate_pct ?? 'N/A'))}%</div>
                             </div>
                             <div>
                                 <span class="text-[10px] text-slate-500 uppercase">Total Trades</span>
-                                <div class="font-bold text-slate-100">${m.total_trades}</div>
+                                <div class="font-bold text-slate-100">${this._escapeHtml(String(m.total_trades ?? 'N/A'))}</div>
                             </div>
                         </div>
 
                         <div class="space-y-2 pt-1">
-                            <button onclick="App.openDeployModal('${strat.strategy}', '${strat.displayName}', ${idx + 1}, ${strat.rankScore})" class="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold text-xs shadow-md shadow-emerald-500/20 flex items-center justify-center gap-1.5 transition-all">
+                            <button type="button" data-br-action="deploy" data-strategy="${this._escapeHtml(strat.strategy || '')}" data-display-name="${this._escapeHtml(strat.displayName || strat.strategy || '')}" data-rank="${idx + 1}" data-score="${this._escapeHtml(String(strat.rankScore ?? 0))}" class="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold text-xs shadow-md shadow-emerald-500/20 flex items-center justify-center gap-1.5 transition-all">
                                 <i data-lucide="zap" class="w-3.5 h-3.5"></i> Deploy to Paper & Telegram
                             </button>
-                            <button onclick="App.inspectStrategyInBacktest('${strat.strategy}')" class="w-full py-1.5 px-3 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 font-semibold text-xs flex items-center justify-center gap-1.5 border border-slate-700 transition-colors">
+                            <button type="button" data-br-action="inspect" data-strategy="${this._escapeHtml(strat.strategy || '')}" class="w-full py-1.5 px-3 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 font-semibold text-xs flex items-center justify-center gap-1.5 border border-slate-700 transition-colors">
                                 <i data-lucide="line-chart" class="w-3.5 h-3.5"></i> View Candlestick Chart
                             </button>
                         </div>
                     `;
                     topCardsContainer.appendChild(card);
+                    card.querySelectorAll("[data-br-action]").forEach(button => {
+                        button.addEventListener("click", () => {
+                            const strategy = button.dataset.strategy || "";
+                            if (button.dataset.brAction === "deploy") {
+                                this.openDeployModal(strategy, button.dataset.displayName || strategy, Number(button.dataset.rank), Number(button.dataset.score));
+                            } else if (button.dataset.brAction === "inspect") {
+                                this.inspectStrategyInBacktest(strategy);
+                            }
+                        });
+                    });
                 });
             }
         }
@@ -3140,7 +3150,7 @@ const App = {
                             <div class="flex items-center gap-2">
                                 <h3 class="text-sm font-bold text-slate-100">AI Quantitative Strategy Diagnosis</h3>
                                 <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${badgeBg}">
-                                    ${ai.verdictLabel}
+                                    ${this._escapeHtml(ai.verdictLabel || ai.verdict || 'N/A')}
                                 </span>
                             </div>
                             <p class="text-xs text-slate-400 mt-0.5">Automated algorithmic analysis and regime compatibility engine</p>
@@ -3155,7 +3165,7 @@ const App = {
                 </div>
 
                 <div class="p-4 rounded-xl bg-slate-850/80 border border-slate-800 text-xs text-slate-200 leading-relaxed font-medium">
-                    ${ai.headline}
+                    ${this._escapeHtml(ai.headline || '')}
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -3164,9 +3174,9 @@ const App = {
                         <span class="text-[11px] font-bold uppercase tracking-wider text-sky-400 flex items-center gap-1.5">
                             <i data-lucide="compass" class="w-3.5 h-3.5"></i> Market Regime
                         </span>
-                        <div class="text-xs font-bold text-slate-100">${ai.regime?.state || 'Neutral'}</div>
-                        <div class="text-[11px] text-slate-400">${ai.regime?.volatility || 'Normal Volatility'}</div>
-                        <p class="text-[11px] text-slate-500 pt-1 leading-normal">${ai.regime?.fitNote || ''}</p>
+                        <div class="text-xs font-bold text-slate-100">${this._escapeHtml(ai.regime?.state || 'Neutral')}</div>
+                        <div class="text-[11px] text-slate-400">${this._escapeHtml(ai.regime?.volatility || 'Normal Volatility')}</div>
+                        <p class="text-[11px] text-slate-500 pt-1 leading-normal">${this._escapeHtml(ai.regime?.fitNote || '')}</p>
                     </div>
 
                     <!-- Column 2: Statistical Reliability -->
@@ -3174,8 +3184,8 @@ const App = {
                         <span class="text-[11px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
                             <i data-lucide="shield-check" class="w-3.5 h-3.5"></i> Statistical Confidence
                         </span>
-                        <div class="text-xs font-bold text-slate-100">${ai.topStrategy?.sampleConfidence || 'Moderate'}</div>
-                        <p class="text-[11px] text-slate-400 pt-1 leading-normal">${ai.topStrategy?.sampleNote || ''}</p>
+                        <div class="text-xs font-bold text-slate-100">${this._escapeHtml(ai.topStrategy?.sampleConfidence || 'Moderate')}</div>
+                        <p class="text-[11px] text-slate-400 pt-1 leading-normal">${this._escapeHtml(ai.topStrategy?.sampleNote || '')}</p>
                     </div>
 
                     <!-- Column 3: Sizing & Risk -->
@@ -3183,10 +3193,10 @@ const App = {
                         <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
                             <i data-lucide="percent" class="w-3.5 h-3.5"></i> Risk Sizing Prescription
                         </span>
-                        <div class="text-xs font-bold text-slate-100 font-mono">Recommended: ${ai.riskProfile?.recommendedRiskPct || 1.0}% / trade</div>
-                        <div class="text-[11px] text-slate-400 font-mono">Half-Kelly Max: ${ai.riskProfile?.halfKellyPct || 1.0}%</div>
+                        <div class="text-xs font-bold text-slate-100 font-mono">Recommended: ${this._escapeHtml(String(ai.riskProfile?.recommendedRiskPct ?? 1.0))}% / trade</div>
+                        <div class="text-[11px] text-slate-400 font-mono">Half-Kelly Max: ${this._escapeHtml(String(ai.riskProfile?.halfKellyPct ?? 1.0))}%</div>
                         <p class="text-[11px] text-slate-500 pt-1 leading-normal">
-                            Risk of 4 Consecutive Losses: <b class="text-slate-300 font-mono">${ai.riskProfile?.prob4Losses || 0}%</b>
+                            Risk of 4 Consecutive Losses: <b class="text-slate-300 font-mono">${this._escapeHtml(String(ai.riskProfile?.prob4Losses ?? 0))}%</b>
                         </p>
                     </div>
                 </div>
@@ -3200,7 +3210,7 @@ const App = {
                         ${(ai.prescriptions || []).map(p => `
                             <div class="p-3 rounded-lg bg-slate-850/60 border border-slate-800/80 text-xs text-slate-300 flex items-start gap-2">
                                 <span class="text-emerald-400 font-bold mt-0.5">➔</span>
-                                <div>${p}</div>
+                                <div>${this._escapeHtml(p)}</div>
                             </div>
                         `).join('')}
                     </div>
@@ -3224,30 +3234,41 @@ const App = {
                         ${isTop3 ? `🥇 #${idx + 1}` : `#${idx + 1}`}
                     </td>
                     <td>
-                        <div class="font-bold text-slate-200 text-xs">${r.displayName || r.strategy}</div>
-                        <div class="text-[10px] text-slate-500 font-mono">${r.strategy}</div>
+                        <div class="font-bold text-slate-200 text-xs">${this._escapeHtml(r.displayName || r.strategy || 'Unknown strategy')}</div>
+                        <div class="text-[10px] text-slate-500 font-mono">${this._escapeHtml(r.strategy || '')}</div>
                     </td>
-                    <td class="text-xs text-slate-400">${r.category || 'Other'}</td>
-                    <td class="font-mono text-xs text-slate-200">${m.total_trades || 0}</td>
-                    <td class="font-mono text-xs text-slate-200">${m.win_rate_pct != null ? `${m.win_rate_pct}%` : '-'}</td>
+                    <td class="text-xs text-slate-400">${this._escapeHtml(r.category || 'Other')}</td>
+                    <td class="font-mono text-xs text-slate-200">${this._escapeHtml(String(m.total_trades ?? 0))}</td>
+                    <td class="font-mono text-xs text-slate-200">${this._escapeHtml(m.win_rate_pct != null ? `${m.win_rate_pct}%` : '-')}</td>
                     <td class="font-mono text-xs font-bold ${ (m.expectancy_r || 0) > 0 ? 'text-emerald-400' : 'text-rose-400' }">
-                        ${m.expectancy_r != null ? `${m.expectancy_r > 0 ? '+' : ''}${m.expectancy_r}R` : '-'}
+                        ${this._escapeHtml(m.expectancy_r != null ? `${m.expectancy_r > 0 ? '+' : ''}${m.expectancy_r}R` : '-')}
                     </td>
-                    <td class="font-mono text-xs text-slate-200">${m.profit_factor != null ? m.profit_factor : '-'}</td>
-                    <td class="font-mono text-xs text-rose-400">${m.max_drawdown_r != null ? `${m.max_drawdown_r}R` : '-'}</td>
-                    <td class="font-mono text-xs text-slate-300 font-bold">${r.rankScore > 0 ? r.rankScore : '-'}</td>
+                    <td class="font-mono text-xs text-slate-200">${this._escapeHtml(String(m.profit_factor != null ? m.profit_factor : '-'))}</td>
+                    <td class="font-mono text-xs text-rose-400">${this._escapeHtml(m.max_drawdown_r != null ? `${m.max_drawdown_r}R` : '-')}</td>
+                    <td class="font-mono text-xs text-slate-300 font-bold">${this._escapeHtml(String(r.rankScore > 0 ? r.rankScore : '-'))}</td>
                     <td class="text-xs">
                         ${isProf 
                             ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">PROFITABLE</span>` 
-                            : `<span class="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">${r.rankNote || 'Unprofitable'}</span>`}
+                            : `<span class="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">${this._escapeHtml(r.rankNote || 'Unprofitable')}</span>`}
                     </td>
                     <td class="text-right">
-                        <button onclick="App.openDeployModal('${r.strategy}', '${r.displayName}', ${idx + 1}, ${r.rankScore})" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-emerald-600 hover:text-white text-slate-300 font-semibold text-[11px] border border-slate-700 transition-colors">
+                        <button type="button" data-br-action="deploy-row" data-strategy="${this._escapeHtml(r.strategy || '')}" data-display-name="${this._escapeHtml(r.displayName || r.strategy || '')}" data-rank="${idx + 1}" data-score="${this._escapeHtml(String(r.rankScore ?? 0))}" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-emerald-600 hover:text-white text-slate-300 font-semibold text-[11px] border border-slate-700 transition-colors">
                             Deploy
                         </button>
                     </td>
                 `;
                 allTbody.appendChild(tr);
+                const deployButton = tr.querySelector("[data-br-action='deploy-row']");
+                if (deployButton) {
+                    deployButton.addEventListener("click", () => {
+                        this.openDeployModal(
+                            deployButton.dataset.strategy || "",
+                            deployButton.dataset.displayName || deployButton.dataset.strategy || "",
+                            Number(deployButton.dataset.rank),
+                            Number(deployButton.dataset.score)
+                        );
+                    });
+                }
             });
         }
 
