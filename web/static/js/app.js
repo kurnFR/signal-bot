@@ -298,7 +298,7 @@ const App = {
                     <i data-lucide="${icon}" class="w-3.5 h-3.5 text-slate-500 flex-shrink-0 mt-0.5"></i>
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-2">
-                            <span class="px-1.5 py-0.2 text-[9px] font-bold rounded border ${badgeColor}">${badgeText}</span>
+                            <span class="px-1.5 py-0.2 text-[9px] font-bold rounded border ${badgeColor}">${this._escapeHtml(badgeText)}</span>
                             <span class="text-[11px] text-slate-500">${this._formatDateTime(when)}</span>
                             ${!e.processed_at ? `<span class="text-[9px] text-amber-500">not yet evaluated</span>` : ""}
                         </div>
