@@ -169,10 +169,9 @@ def serve_index():
     # index.html. This keeps the trading/dashboard markup untouched.
     with open(index_path, "r", encoding="utf-8") as handle:
         html = handle.read()
-    enhancement = (
-        '<link rel="stylesheet" href="/static/css/dashboard_enhancements.css">\n'
-        '<script src="/static/js/dashboard_enhancements.js"></script>\n'
-    )
+    # The stylesheet is linked by index.html; inject only the versioned JS bundle here.
+    # Avoid duplicate CSS requests and refresh browsers when the enhancement bundle changes.
+    enhancement = '<script src="/static/js/dashboard_enhancements.js?v=20261016-1"></script>\n'
     if "dashboard_enhancements.js" not in html:
         html = html.replace("</body>", enhancement + "</body>", 1)
     return HTMLResponse(content=html)
