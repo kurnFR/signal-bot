@@ -46,7 +46,7 @@ MARKETS = ["spot", "futures"] if ENABLE_FUTURES else ["spot"]
 
 # ---------------------------------------------------------------------------
 # News + economic calendar (Phase 1 of the News AI Overlay strategy --
-# data plumbing only; see NEWS_AI_STRATEGY_PLAN.md for the full design).
+# data plumbing only; see docs/NEWS_AI.md for the full design).
 # Both keys are optional at this stage: if unset, the corresponding poller
 # logs a warning and exits cleanly rather than crashing the rest of the app,
 # since this feature is additive and shouldn't block existing collectors.
@@ -80,7 +80,7 @@ NEWS_RELEVANCE_KEYWORDS = [
 # evaluates news/calendar events and stores a bias+confidence recommendation
 # in news_ai_signals, but does NOT open positions or send Telegram alerts
 # yet (that's Phase 3, gated on this phase's signal quality first -- see
-# NEWS_AI_STRATEGY_PLAN.md).
+# docs/NEWS_AI.md).
 # Supports multiple providers: 9router (local gateway), openrouter, or anthropic.
 # ---------------------------------------------------------------------------
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "9router").lower()  # 9router | openrouter | anthropic
@@ -126,7 +126,7 @@ NEWS_AI_EXECUTION_POLL_INTERVAL_SECONDS = int(os.getenv("NEWS_AI_EXECUTION_POLL_
 PAPER_ENGINE_POLL_INTERVAL_SECONDS = int(os.getenv("PAPER_ENGINE_POLL_INTERVAL_SECONDS", 60))
 # Hard cap on how many news-driven positions can be opened per UTC day,
 # regardless of how many high-confidence signals fire -- news can cluster
-# false signals around a single narrative (NEWS_AI_STRATEGY_PLAN.md §4).
+# false signals around a single narrative (docs/NEWS_AI.md §2).
 NEWS_AI_MAX_TRADES_PER_DAY = int(os.getenv("NEWS_AI_MAX_TRADES_PER_DAY", 3))
 # ATR multiplier for the initial stop, applied in the signal's direction.
 NEWS_AI_STOP_ATR_MULT = float(os.getenv("NEWS_AI_STOP_ATR_MULT", 1.5))

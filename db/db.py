@@ -520,11 +520,9 @@ def upsert_news_events(rows):
 def get_active_paper_symbols():
     """(symbol, market, timeframe) tuples for currently active paper_configs.
     Deliberately implemented as a direct query here rather than importing
-    paper.engine.get_paper_configs() -- that module still has the
-    import-time DB side effect flagged in PROFESSIONAL_TRADER_REVIEW.md
-    §2.6 (unresolved), so importing it from a lightweight poller like
-    ai/news_strategy_engine.py would make this feature depend on that bug
-    staying harmless. Revisit once §2.6 is fixed."""
+    paper.engine.get_paper_configs(), so that a lightweight poller such as
+    ai/news_strategy_engine.py does not depend on paper.engine's import-time
+    behaviour."""
     sql = "SELECT DISTINCT symbol, market, timeframe FROM paper_configs WHERE is_active = 1"
     conn = get_pool().get_connection()
     try:

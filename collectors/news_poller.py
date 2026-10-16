@@ -1,7 +1,7 @@
 """
 Crypto news poller (CryptoPanic) -- Phase 1 "data plumbing" for the News AI
 Overlay strategy. This collector only fetches and stores news; no AI
-reasoning happens here (see NEWS_AI_STRATEGY_PLAN.md for the full design and
+reasoning happens here (see docs/NEWS_AI.md for the full design and
 phased rollout). It's additive and independent of the existing OHLCV/funding
 collectors -- if CRYPTOPANIC_API_KEY is unset, this poller logs a warning and
 exits cleanly rather than crashing anything else.

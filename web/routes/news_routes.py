@@ -6,7 +6,7 @@ acted on (news_events, news_ai_signals) so it can be shown in the dashboard.
 It does not trigger any polling, AI calls, or trades itself -- those remain
 collectors/news_poller.py, collectors/econ_calendar_poller.py,
 ai/news_strategy_engine.py and ai/news_execution.py, run as separate
-long-running processes. See NEWS_AI_STRATEGY_PLAN.md.
+long-running processes. See docs/NEWS_AI.md.
 """
 import logging
 from fastapi import APIRouter, HTTPException
