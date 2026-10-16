@@ -1333,28 +1333,36 @@ const App = {
                     const isProfitable = (p.unrealized_r || 0) >= 0;
                     return `
                         <tr>
-                            <td class="font-bold font-mono text-slate-100">${p.symbol}</td>
-                            <td><span class="px-1.5 py-0.5 text-xs rounded uppercase ${p.market === "futures" ? "bg-purple-950 text-purple-400 border border-purple-800" : "bg-slate-800 text-slate-300"}">${p.market}</span> ${p.timeframe}</td>
+                            <td class="font-bold font-mono text-slate-100">${this._escapeHtml(p.symbol)}</td>
+                            <td><span class="px-1.5 py-0.5 text-xs rounded uppercase ${p.market === "futures" ? "bg-purple-950 text-purple-400 border border-purple-800" : "bg-slate-800 text-slate-300"}">${this._escapeHtml(p.market)}</span> ${this._escapeHtml(p.timeframe)}</td>
                             <td>
                                 <span class="px-2 py-0.5 rounded text-[10px] font-bold ${p.direction === "LONG" ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-rose-950 text-rose-400 border border-rose-800"}">
-                                    ${p.direction}
+                                    ${this._escapeHtml(p.direction)}
                                 </span>
                             </td>
-                            <td class="font-mono text-xs text-sky-400">${p.strategy_name}</td>
-                            <td class="font-mono text-xs text-slate-200">$${p.entry_price.toLocaleString()}</td>
-                            <td class="font-mono text-xs font-bold text-slate-100">$${p.current_price.toLocaleString()}</td>
+                            <td class="font-mono text-xs text-sky-400">${this._escapeHtml(p.strategy_name)}</td>
+                            <td class="font-mono text-xs text-slate-200">$${this._escapeHtml(p.entry_price.toLocaleString())}</td>
+                            <td class="font-mono text-xs font-bold text-slate-100">$${this._escapeHtml(p.current_price.toLocaleString())}</td>
                             <td class="font-mono text-xs ${isProfitable ? "text-emerald-400" : "text-rose-400"} font-semibold">
-                                ${(p.unrealized_pnl_pct * 100).toFixed(2)}% (${p.unrealized_r > 0 ? "+" : ""}${p.unrealized_r.toFixed(2)}R)
+                                ${this._escapeHtml(`${(p.unrealized_pnl_pct * 100).toFixed(2)}% (${p.unrealized_r > 0 ? "+" : ""}${p.unrealized_r.toFixed(2)}R)`)}
                             </td>
-                            <td class="text-xs text-slate-400 font-mono">${p.holding_bars} bars</td>
+                            <td class="text-xs text-slate-400 font-mono">${this._escapeHtml(String(p.holding_bars))} bars</td>
                             <td class="text-right">
-                                <button onclick="App.manualClosePaperPosition(${p.id})" class="px-2.5 py-1 text-xs rounded bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 font-medium transition-colors">
+                                <button type="button" data-paper-close-id="${this._escapeHtml(String(p.id))}" class="px-2.5 py-1 text-xs rounded bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 font-medium transition-colors">
                                     Close Position
                                 </button>
                             </td>
                         </tr>
                     `;
                 }).join("");
+                posBody.querySelectorAll("[data-paper-close-id]").forEach(button => {
+                    button.addEventListener("click", () => {
+                        const positionId = Number(button.dataset.paperCloseId);
+                        if (Number.isSafeInteger(positionId) && positionId > 0) {
+                            this.manualClosePaperPosition(positionId);
+                        }
+                    });
+                });
             }
         }
 
@@ -1365,21 +1373,37 @@ const App = {
                 <div class="p-4 rounded-xl bg-slate-900 border ${c.is_active ? "border-emerald-800/60" : "border-slate-800"} flex items-center justify-between">
                     <div>
                         <div class="flex items-center gap-2">
-                            <span class="font-bold text-slate-100 font-mono">${c.symbol}</span>
-                            <span class="text-xs text-slate-400 uppercase">${c.market} • ${c.timeframe}</span>
+                            <span class="font-bold text-slate-100 font-mono">${this._escapeHtml(c.symbol)}</span>
+                            <span class="text-xs text-slate-400 uppercase">${this._escapeHtml(c.market)} • ${this._escapeHtml(c.timeframe)}</span>
                             ${c.is_active ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">ACTIVE LIVE</span>` : `<span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-500">PAUSED</span>`}
                         </div>
-                        <div class="text-xs font-mono text-sky-400 mt-1">${c.strategy_name}</div>
-                        <div class="text-[10px] text-slate-500 mt-0.5">$${Number(c.allocated_capital).toLocaleString()} capital &middot; ${c.risk_per_trade_pct}% risk/trade</div>
+                        <div class="text-xs font-mono text-sky-400 mt-1">${this._escapeHtml(c.strategy_name)}</div>
+                        <div class="text-[10px] text-slate-500 mt-0.5">$${this._escapeHtml(Number(c.allocated_capital).toLocaleString())} capital &middot; ${this._escapeHtml(String(c.risk_per_trade_pct))}% risk/trade</div>
                     </div>
                     <div>
-                        <button onclick="App.togglePaperStrategy('${c.symbol}', '${c.market}', '${c.timeframe}', '${c.strategy_name}', ${!c.is_active}, ${c.allocated_capital}, ${c.risk_per_trade_pct})" 
+                        <button type="button" data-paper-config-toggle data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-next-active="${!c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}" 
                             class="px-3 py-1.5 rounded text-xs font-semibold ${c.is_active ? "bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30" : "bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30"}">
                             ${c.is_active ? "Pause" : "Activate"}
                         </button>
                     </div>
                 </div>
             `).join("");
+            cfgContainer.querySelectorAll("[data-paper-config-toggle]").forEach(button => {
+                button.addEventListener("click", () => {
+                    const capital = Number(button.dataset.capital);
+                    const risk = Number(button.dataset.risk);
+                    if (!Number.isFinite(capital) || !Number.isFinite(risk)) return;
+                    this.togglePaperStrategy(
+                        button.dataset.symbol || "",
+                        button.dataset.market || "",
+                        button.dataset.timeframe || "",
+                        button.dataset.strategy || "",
+                        button.dataset.nextActive === "true",
+                        capital,
+                        risk
+                    );
+                });
+            });
         }
 
         // 4. Render Closed Paper Trades Ledger
@@ -1392,24 +1416,24 @@ const App = {
                     const isWin = t.r_multiple > 0;
                     return `
                         <tr>
-                            <td class="font-bold font-mono text-slate-200">${t.symbol}</td>
-                            <td class="text-xs font-mono text-sky-400">${t.strategy_name}</td>
+                            <td class="font-bold font-mono text-slate-200">${this._escapeHtml(t.symbol)}</td>
+                            <td class="text-xs font-mono text-sky-400">${this._escapeHtml(t.strategy_name)}</td>
                             <td>
                                 <span class="px-2 py-0.5 rounded text-[10px] font-bold ${t.direction === "LONG" ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-rose-950 text-rose-400 border border-rose-800"}">
-                                    ${t.direction}
+                                    ${this._escapeHtml(t.direction)}
                                 </span>
                             </td>
-                            <td class="font-mono text-xs text-slate-300">${t.entry_time_wib}</td>
-                            <td class="font-mono text-xs text-slate-300">${t.exit_time_wib}</td>
+                            <td class="font-mono text-xs text-slate-300">${this._escapeHtml(t.entry_time_wib)}</td>
+                            <td class="font-mono text-xs text-slate-300">${this._escapeHtml(t.exit_time_wib)}</td>
                             <td>
                                 <span class="px-1.5 py-0.5 rounded text-[10px] uppercase font-semibold ${t.exit_reason === "TP" ? "bg-emerald-950 text-emerald-400" : t.exit_reason === "SL" ? "bg-rose-950 text-rose-400" : "bg-amber-950 text-amber-400"}">
-                                    ${t.exit_reason}
+                                    ${this._escapeHtml(t.exit_reason)}
                                 </span>
                             </td>
                             <td class="font-mono text-xs ${isWin ? "text-emerald-400" : "text-rose-400"} font-semibold">
-                                ${t.net_return_pct}% (${t.r_multiple > 0 ? "+" : ""}${t.r_multiple}R)
+                                ${this._escapeHtml(`${t.net_return_pct}% (${t.r_multiple > 0 ? "+" : ""}${t.r_multiple}R)`)}
                             </td>
-                            <td class="font-mono text-xs text-slate-400">${t.holding_bars} bars</td>
+                            <td class="font-mono text-xs text-slate-400">${this._escapeHtml(String(t.holding_bars))} bars</td>
                         </tr>
                     `;
                 }).join("");
