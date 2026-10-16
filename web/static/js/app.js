@@ -125,6 +125,7 @@ const App = {
     // NEWS AI OVERLAY SIGNALS
     // ----------------------------------------------------
     _safeNumber(value, fallback = 0) {
+        if (value === null || value === undefined || value === "") return fallback;
         const number = Number(value);
         return Number.isFinite(number) ? number : fallback;
     },
