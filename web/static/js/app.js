@@ -1752,20 +1752,23 @@ const App = {
             container.innerHTML = (data.items || []).map(coin => `
                 <div class="p-3 rounded-lg bg-slate-900 border border-slate-800 hover:border-sky-500/50 transition-all flex flex-col justify-between">
                     <div class="flex items-center justify-between">
-                        <span class="font-bold text-slate-200">${coin.symbol}</span>
+                        <span class="font-bold text-slate-200">${this._escapeHtml(coin.symbol)}</span>
                         <span class="text-xs font-mono ${coin.priceChangePercent >= 0 ? "text-emerald-400" : "text-rose-400"}">
-                            ${coin.priceChangePercent >= 0 ? "+" : ""}${coin.priceChangePercent.toFixed(2)}%
+                            ${this._escapeHtml(`${coin.priceChangePercent >= 0 ? "+" : ""}${coin.priceChangePercent.toFixed(2)}%`)}
                         </span>
                     </div>
                     <div class="my-1.5 flex items-baseline justify-between">
-                        <span class="text-sm font-mono text-slate-300">$${coin.lastPrice.toLocaleString()}</span>
-                        <span class="text-[11px] text-slate-500 font-mono">Vol: $${(coin.quoteVolume / 1e6).toFixed(1)}M</span>
+                        <span class="text-sm font-mono text-slate-300">$${this._escapeHtml(coin.lastPrice.toLocaleString())}</span>
+                        <span class="text-[11px] text-slate-500 font-mono">Vol: $${this._escapeHtml((coin.quoteVolume / 1e6).toFixed(1))}M</span>
                     </div>
-                    <button onclick="App.openBackfillModal('${coin.symbol}', '${coin.market}')" class="mt-2 w-full text-xs font-medium py-1.5 rounded bg-slate-800 hover:bg-sky-600 text-sky-300 hover:text-white transition-colors flex items-center justify-center gap-1">
+                    <button type="button" data-backfill-symbol="${this._escapeHtml(coin.symbol)}" data-backfill-market="${this._escapeHtml(coin.market)}" class="mt-2 w-full text-xs font-medium py-1.5 rounded bg-slate-800 hover:bg-sky-600 text-sky-300 hover:text-white transition-colors flex items-center justify-center gap-1">
                         <i data-lucide="download" class="w-3.5 h-3.5"></i> Backfill
                     </button>
                 </div>
             `).join("");
+            container.querySelectorAll("[data-backfill-symbol]").forEach(button => {
+                button.addEventListener("click", () => this.openBackfillModal(button.dataset.backfillSymbol || "", button.dataset.backfillMarket || ""));
+            });
             if (window.lucide) window.lucide.createIcons();
         } catch (e) {
             console.error("Error popular coins:", e);
@@ -1808,15 +1811,15 @@ const App = {
                     <tbody>
                         ${items.map(c => `
                             <tr>
-                                <td class="font-bold text-slate-100 font-mono">${c.symbol}</td>
-                                <td><span class="px-2 py-0.5 rounded text-[11px] uppercase font-semibold ${c.market === "futures" ? "bg-purple-950 text-purple-300 border border-purple-800" : "bg-sky-950 text-sky-300 border border-sky-800"}">${c.market}</span></td>
-                                <td class="font-mono text-slate-200">$${c.lastPrice.toLocaleString()}</td>
+                                <td class="font-bold text-slate-100 font-mono">${this._escapeHtml(c.symbol)}</td>
+                                <td><span class="px-2 py-0.5 rounded text-[11px] uppercase font-semibold ${c.market === "futures" ? "bg-purple-950 text-purple-300 border border-purple-800" : "bg-sky-950 text-sky-300 border border-sky-800"}">${this._escapeHtml(c.market)}</span></td>
+                                <td class="font-mono text-slate-200">$${this._escapeHtml(c.lastPrice.toLocaleString())}</td>
                                 <td class="font-mono text-xs ${c.priceChangePercent >= 0 ? "text-emerald-400" : "text-rose-400"}">
-                                    ${c.priceChangePercent >= 0 ? "+" : ""}${c.priceChangePercent.toFixed(2)}%
+                                    ${this._escapeHtml(`${c.priceChangePercent >= 0 ? "+" : ""}${c.priceChangePercent.toFixed(2)}%`)}
                                 </td>
-                                <td class="font-mono text-xs text-slate-400">$${(c.quoteVolume).toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+                                <td class="font-mono text-xs text-slate-400">$${this._escapeHtml(c.quoteVolume.toLocaleString(undefined, {maximumFractionDigits: 0}))}</td>
                                 <td class="text-right">
-                                    <button onclick="App.openBackfillModal('${c.symbol}', '${c.market}')" class="px-3 py-1 rounded bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30 text-xs font-semibold transition-all">
+                                    <button type="button" data-backfill-symbol="${this._escapeHtml(c.symbol)}" data-backfill-market="${this._escapeHtml(c.market)}" class="px-3 py-1 rounded bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30 text-xs font-semibold transition-all">
                                         ⚡ Backfill
                                     </button>
                                 </td>
@@ -1825,8 +1828,11 @@ const App = {
                     </tbody>
                 </table>
             `;
+            resultsContainer.querySelectorAll("[data-backfill-symbol]").forEach(button => {
+                button.addEventListener("click", () => this.openBackfillModal(button.dataset.backfillSymbol || "", button.dataset.backfillMarket || ""));
+            });
         } catch (e) {
-            resultsContainer.innerHTML = `<div class="text-center py-6 text-rose-400 text-xs">Error querying Binance: ${e}</div>`;
+            resultsContainer.innerHTML = `<div class="text-center py-6 text-rose-400 text-xs">Error querying Binance: ${this._escapeHtml(e?.message || String(e))}</div>`;
         }
     },
 
