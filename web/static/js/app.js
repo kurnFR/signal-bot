@@ -3417,30 +3417,34 @@ const App = {
                             const rocText = exp.roc_auc !== null ? exp.roc_auc.toFixed(3) : "N/A";
                             const rColor = exp.ml_test_r >= 0 ? "text-emerald-400 font-bold" : "text-rose-400 font-bold";
                             const baseColor = exp.baseline_test_r >= 0 ? "text-slate-300" : "text-slate-400";
+                            const experimentId = String(exp.experiment_id || "");
+                            const winnerModel = String(exp.winner_model || "N/A");
+                            const safeExperimentId = this._escapeHtml(experimentId);
+                            const safeWinnerModel = this._escapeHtml(winnerModel);
 
                             return `
                                 <tr class="border-b border-slate-800/60 hover:bg-slate-800/30 transition-colors">
                                     <td class="py-3 px-3">
-                                        <div class="font-mono text-xs font-bold text-slate-200">${exp.symbol} <span class="text-[10px] text-sky-400 uppercase font-sans">(${exp.market})</span></div>
-                                        <div class="text-[10px] text-slate-400 font-mono">${exp.timeframe} • ${exp.experiment_id.split("-").slice(-2).join("-")}</div>
+                                        <div class="font-mono text-xs font-bold text-slate-200">${this._escapeHtml(exp.symbol)} <span class="text-[10px] text-sky-400 uppercase font-sans">(${this._escapeHtml(exp.market)})</span></div>
+                                        <div class="text-[10px] text-slate-400 font-mono">${this._escapeHtml(exp.timeframe)} • ${this._escapeHtml(experimentId.split("-").slice(-2).join("-"))}</div>
                                     </td>
-                                    <td class="py-3 px-3 font-mono text-xs text-sky-300">${exp.strategy}</td>
+                                    <td class="py-3 px-3 font-mono text-xs text-sky-300">${this._escapeHtml(exp.strategy)}</td>
                                     <td class="py-3 px-3">
                                         <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-purple-950/70 text-purple-300 border border-purple-800/50">
-                                            ${exp.winner_model}
+                                            ${safeWinnerModel}
                                         </span>
                                     </td>
                                     <td class="py-3 px-3 font-mono text-xs font-bold text-amber-400">${(exp.threshold * 100).toFixed(0)}%</td>
                                     <td class="py-3 px-3 font-mono text-xs ${rocColor}">${rocText}</td>
                                     <td class="py-3 px-3 font-mono text-xs ${baseColor}">${exp.baseline_test_r >= 0 ? "+" : ""}${exp.baseline_test_r.toFixed(2)}R</td>
                                     <td class="py-3 px-3 font-mono text-xs ${rColor}">${exp.ml_test_r >= 0 ? "+" : ""}${exp.ml_test_r.toFixed(2)}R</td>
-                                    <td class="py-3 px-3 font-mono text-xs text-slate-300">${exp.ml_test_win_rate ? exp.ml_test_win_rate.toFixed(1) + "%" : "N/A"} <span class="text-[10px] text-slate-500">(${exp.ml_test_trades}t)</span></td>
+                                    <td class="py-3 px-3 font-mono text-xs text-slate-300">${exp.ml_test_win_rate != null ? exp.ml_test_win_rate.toFixed(1) + "%" : "N/A"} <span class="text-[10px] text-slate-500">(${exp.ml_test_trades}t)</span></td>
                                     <td class="py-3 px-3">
                                         <div class="flex items-center gap-2">
-                                            <button onclick="App.inspectMLExperiment('${exp.experiment_id}')" class="px-2.5 py-1 rounded text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors">
+                                            <button type="button" data-ml-action="inspect" data-experiment-id="${safeExperimentId}" class="px-2.5 py-1 rounded text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors">
                                                 Inspect
                                             </button>
-                                            <button onclick="App.openDeployMLModal('${exp.experiment_id}', '${exp.winner_model}', ${exp.threshold})" class="px-2.5 py-1 rounded text-[11px] font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-sm transition-all flex items-center gap-1">
+                                            <button type="button" data-ml-action="deploy" data-experiment-id="${safeExperimentId}" data-winner-model="${safeWinnerModel}" data-threshold="${this._escapeHtml(String(exp.threshold))}" class="px-2.5 py-1 rounded text-[11px] font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-sm transition-all flex items-center gap-1">
                                                 <i data-lucide="zap" class="w-3 h-3"></i> Deploy
                                             </button>
                                         </div>
@@ -3448,6 +3452,20 @@ const App = {
                                 </tr>
                             `;
                         }).join("");
+                        tbody.querySelectorAll("[data-ml-action]").forEach(button => {
+                            button.addEventListener("click", () => {
+                                const experimentId = button.dataset.experimentId;
+                                if (button.dataset.mlAction === "inspect") {
+                                    this.inspectMLExperiment(experimentId);
+                                } else if (button.dataset.mlAction === "deploy") {
+                                    this.openDeployMLModal(
+                                        experimentId,
+                                        button.dataset.winnerModel,
+                                        Number(button.dataset.threshold)
+                                    );
+                                }
+                            });
+                        });
                         if (window.lucide) window.lucide.createIcons();
                     }
                 }
