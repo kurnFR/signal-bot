@@ -1039,19 +1039,24 @@ const App = {
         };
         tbody.innerHTML = signals.map(s => {
             const color = typeColors[s.signal_type] || "text-slate-300 bg-slate-800 border-slate-700";
-            const changeColor = s.price_change_pct > 0 ? "text-emerald-400" : s.price_change_pct < 0 ? "text-rose-400" : "text-slate-400";
-            const quality = Number(s.quality_score || 0);
+            const rvol = this._safeNumber(s.rvol);
+            const velocity = this._safeNumber(s.volume_velocity);
+            const quality = this._safeNumber(s.quality_score);
+            const price = this._safeNumber(s.price);
+            const priceChange = this._safeNumber(s.price_change_pct);
+            const quoteVolume = this._safeNumber(s.quote_volume);
+            const changeColor = priceChange > 0 ? "text-emerald-400" : priceChange < 0 ? "text-rose-400" : "text-slate-400";
             return `
                 <tr>
                     <td class="whitespace-nowrap text-slate-500" data-sort-value="${this._escapeHtml(s.detected_at || "")}">${this._formatDateTime(s.detected_at)}</td>
                     <td class="font-semibold text-slate-100">${this._escapeHtml(s.symbol)}</td>
                     <td><span class="px-2 py-0.5 text-[10px] font-bold rounded border ${color}">${this._escapeHtml(s.signal_type)}</span></td>
-                    <td class="font-mono text-slate-300" data-sort-value="${Number(s.rvol || 0)}">${Number(s.rvol || 0).toFixed(2)}x</td>
-                    <td class="font-mono text-slate-300" data-sort-value="${Number(s.volume_velocity || 0)}">${Number(s.volume_velocity || 0).toFixed(2)}x</td>
+                    <td class="font-mono text-slate-300" data-sort-value="${rvol}">${rvol.toFixed(2)}x</td>
+                    <td class="font-mono text-slate-300" data-sort-value="${velocity}">${velocity.toFixed(2)}x</td>
                     <td class="font-mono font-bold ${quality >= 70 ? "text-emerald-400" : quality >= 50 ? "text-amber-400" : "text-slate-400"}" data-sort-value="${quality}">${quality.toFixed(0)}</td>
-                    <td class="font-mono text-slate-300" data-sort-value="${Number(s.price || 0)}">$${Number(s.price || 0).toFixed(4)}</td>
-                    <td class="font-mono ${changeColor}" data-sort-value="${Number(s.price_change_pct || 0)}">${s.price_change_pct >= 0 ? "+" : ""}${Number(s.price_change_pct || 0).toFixed(3)}%</td>
-                    <td class="font-mono text-slate-300" data-sort-value="${Number(s.quote_volume || 0)}">$${Number(s.quote_volume || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+                    <td class="font-mono text-slate-300" data-sort-value="${price}">$ ${price.toFixed(4)}</td>
+                    <td class="font-mono ${changeColor}" data-sort-value="${priceChange}">${priceChange >= 0 ? "+" : ""}${priceChange.toFixed(3)}%</td>
+                    <td class="font-mono text-slate-300" data-sort-value="${quoteVolume}">$ ${quoteVolume.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
                     <td>${s.telegram_sent ? `<i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400"></i>` : `<i data-lucide="x" class="w-3.5 h-3.5 text-slate-600"></i>`}</td>
                 </tr>`;
         }).join("");
