@@ -570,7 +570,25 @@ const App = {
             this._wtRenderFeed(ev.events);
             this._wtRenderTracked(tracked.tracked);
         } catch (e) {
-            if (!opts.silent) this.showToast(`Failed to load Wallet Tracking: ${e.message || e}`, "error");
+            const message = e && e.message ? e.message : String(e || "Unknown error");
+            const statusEl = document.getElementById("wt-kpi-status");
+            if (statusEl) {
+                statusEl.innerText = "DATA UNAVAILABLE";
+                statusEl.className = "text-lg font-black text-rose-400 mt-1";
+            }
+            const detailEl = document.getElementById("wt-kpi-status-detail");
+            if (detailEl) detailEl.innerText = `Refresh failed: ${message}`;
+            const safeMessage = this._escapeHtml(message);
+            const errorRow = (colspan) => `<tr><td colspan="${colspan}" class="text-center py-8 text-rose-300 text-xs">Unable to refresh Wallet Tracking data. Check your connection or sign-in, then retry. ${safeMessage}</td></tr>`;
+            const flowBody = document.getElementById("wt-flow-body");
+            if (flowBody) flowBody.innerHTML = errorRow(8);
+            const candidatesBody = document.getElementById("wt-candidates-body");
+            if (candidatesBody) candidatesBody.innerHTML = errorRow(13);
+            const feedBody = document.getElementById("wt-feed-body");
+            if (feedBody) feedBody.innerHTML = errorRow(8);
+            const trackedList = document.getElementById("wt-tracked-list");
+            if (trackedList) trackedList.innerHTML = `<div class="text-rose-300 text-xs">Unable to refresh monitored wallets. ${safeMessage}</div>`;
+            if (!opts.silent) this.showToast(`Failed to load Wallet Tracking: ${message}`, "error");
         } finally {
             if (window.lucide) window.lucide.createIcons();
         }

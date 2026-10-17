@@ -56,6 +56,19 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('colspan="10"', fetcher)
         self.assertIn("Unable to refresh Market Screener data", fetcher)
 
+
+    def test_wallet_refresh_failure_is_visible_and_escapes_api_error(self):
+        fetch_start = self.app_js.index("    async fetchWalletData(opts = {}) {")
+        fetch_end = self.app_js.index("    async fetchWalletEvents(opts = {}) {", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn('statusEl.innerText = "DATA UNAVAILABLE"', fetcher)
+        self.assertIn('detailEl.innerText = `Refresh failed: ${message}`', fetcher)
+        self.assertIn("const safeMessage = this._escapeHtml(message)", fetcher)
+        for element_id, colspan in (("wt-flow-body", 8), ("wt-candidates-body", 13), ("wt-feed-body", 8)):
+            self.assertIn(f'document.getElementById("{element_id}")', fetcher)
+            self.assertIn(f"errorRow({colspan})", fetcher)
+        self.assertIn('if (!opts.silent) this.showToast', fetcher)
+
     def test_dashboard_script_cache_token_is_present(self):
         match = re.search(r'/static/js/app\.js\?v=([^"\']+)', self.index_html)
         self.assertIsNotNone(match, "index.html must version the dashboard app.js asset")
