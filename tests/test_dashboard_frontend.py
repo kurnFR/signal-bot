@@ -48,6 +48,14 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIsNotNone(match, "index.html must version the dashboard app.js asset")
         self.assertTrue(match.group(1).strip(), "app.js cache token must not be empty")
 
+    def test_ml_experiment_rows_normalize_numeric_fields_before_formatting(self):
+        renderer_start = self.app_js.index("tbody.innerHTML = experiments.map(exp => {", self.app_js.index("async fetchML"))
+        renderer_end = self.app_js.index('}).join("");', renderer_start)
+        renderer = self.app_js[renderer_start:renderer_end]
+        for field in ("threshold", "roc_auc", "baseline_test_r", "ml_test_r", "ml_test_win_rate", "ml_test_trades"):
+            self.assertIn(f"this._safeNumber(exp.{field}", renderer)
+        self.assertIn("Number.isFinite(Number(exp.roc_auc))", renderer)
+
 
 if __name__ == "__main__":
     unittest.main()
