@@ -33,6 +33,16 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn(r"(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)", formatter)
         self.assertIn('if (!Number.isFinite(parsedMs)) return "--";', formatter)
 
+    def test_screener_numeric_rendering_uses_finite_number_fallbacks(self):
+        renderer_start = self.app_js.index("_renderScreenerSignals(signals)")
+        renderer_end = self.app_js.index("\n    // ----------------------------------------------------\n    // AUTHENTICATION & SESSIONS", renderer_start)
+        renderer = self.app_js[renderer_start:renderer_end]
+        for field in ("rvol", "volume_velocity", "quality_score", "price", "price_change_pct", "quote_volume"):
+            self.assertIn(f"this._safeNumber(s.{field})", renderer)
+        self.assertNotIn("Number(s.rvol || 0)", renderer)
+        self.assertNotIn("Number(s.volume_velocity || 0)", renderer)
+        self.assertNotIn("Number(s.quote_volume || 0)", renderer)
+
     def test_dashboard_script_cache_token_is_present(self):
         match = re.search(r'/static/js/app\.js\?v=([^"\']+)', self.index_html)
         self.assertIsNotNone(match, "index.html must version the dashboard app.js asset")
