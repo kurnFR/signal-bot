@@ -8,6 +8,7 @@ import unittest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 APP_JS = REPO_ROOT / "web" / "static" / "js" / "app.js"
 INDEX_HTML = REPO_ROOT / "web" / "static" / "index.html"
+DASHBOARD_CSS = REPO_ROOT / "web" / "static" / "css" / "dashboard_enhancements.css"
 
 
 class TestDashboardFrontendRegressions(unittest.TestCase):
@@ -15,6 +16,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
     def setUpClass(cls):
         cls.app_js = APP_JS.read_text(encoding="utf-8")
         cls.index_html = INDEX_HTML.read_text(encoding="utf-8")
+        cls.dashboard_css = DASHBOARD_CSS.read_text(encoding="utf-8")
 
     def test_dynamic_dashboard_handlers_are_not_inline(self):
         # Dynamic templates must bind handlers through addEventListener/data attributes.
@@ -74,6 +76,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('toast.setAttribute("role", type === "error" ? "alert" : "status")', toast)
         self.assertIn('toast.setAttribute("aria-atomic", "true")', toast)
         self.assertIn('aria-label="Dismiss"', toast)
+
+
+    def test_mobile_navigation_keeps_sections_reachable_without_sidebar(self):
+        self.assertIn("@media (max-width: 767px)", self.dashboard_css)
+        self.assertIn("body > aside nav {", self.dashboard_css)
+        self.assertIn("overflow-x: auto;", self.dashboard_css)
+        self.assertIn("body > aside nav .nav-btn {", self.dashboard_css)
+        self.assertIn("min-height: 2.75rem;", self.dashboard_css)
+        self.assertIn("body > aside > div:last-child {", self.dashboard_css)
+        self.assertIn("dashboard_enhancements.css?v=20261017-1", self.index_html)
+
 
 if __name__ == "__main__":
     unittest.main()
