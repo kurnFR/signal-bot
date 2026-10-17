@@ -348,7 +348,7 @@ const App = {
         const value = isoString.trim();
         // Preserve explicit UTC offsets (including negative offsets); DB timestamps without
         // a zone are treated as UTC, matching the heartbeat and _timeAgo helpers.
-        const timestamp = /(?:Z|[+-]\\d{2}:?\\d{2})$/i.test(value) ? value : `${value}Z`;
+        const timestamp = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value}Z`;
         const parsedMs = new Date(timestamp).getTime();
         if (!Number.isFinite(parsedMs)) return "--";
         return new Date(parsedMs).toLocaleString("en-GB", {
