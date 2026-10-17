@@ -70,6 +70,19 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('if (!opts.silent) this.showToast', fetcher)
 
 
+    def test_strategy_list_failure_clears_stale_selection_and_shows_error(self):
+        fetcher_start = self.app_js.index("    async fetchStrategies()")
+        fetcher_end = self.app_js.index("\n    renderHome()", fetcher_start)
+        fetcher = self.app_js[fetcher_start:fetcher_end]
+        self.assertIn('if (!res.ok) throw new Error(`HTTP ${res.status}`)', fetcher)
+        self.assertIn('!Array.isArray(data.strategies)', fetcher)
+        self.assertIn('this.strategiesList = []', fetcher)
+        self.assertIn('this.selectedStrategy = null', fetcher)
+        self.assertIn('this.updateStrategySelectors()', fetcher)
+        self.assertIn('id="bt-strategy-info"', fetcher)
+        self.assertIn('role="status"', fetcher)
+        self.assertIn('this.showToast("Failed to load strategies.', fetcher)
+
     def test_popular_markets_failure_replaces_stale_cards_and_allows_retry(self):
         fetch_start = self.app_js.index("    async fetchPopularCoins() {")
         fetch_end = self.app_js.index("    async handleSearchCrypto() {", fetch_start)
