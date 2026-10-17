@@ -13,6 +13,7 @@ import base64
 import hmac
 import hashlib
 import secrets
+import tempfile
 import logging
 from typing import Optional, Dict, Any
 from fastapi import Request, HTTPException, Depends
@@ -23,13 +24,53 @@ from db.db import get_pool
 logger = logging.getLogger("web.auth")
 
 SECRET_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".app_secret")
-if os.path.exists(SECRET_FILE):
-    with open(SECRET_FILE, "r") as f:
-        SECRET_KEY = f.read().strip()
-else:
-    SECRET_KEY = secrets.token_hex(32)
-    with open(SECRET_FILE, "w") as f:
-        f.write(SECRET_KEY)
+
+
+def _load_or_create_secret(path: str) -> str:
+    """Load the token-signing key, ensuring it is private and safe under concurrent startup."""
+    try:
+        os.chmod(path, 0o600)
+    except FileNotFoundError:
+        pass
+    else:
+        with open(path, "r", encoding="utf-8") as secret_file:
+            existing = secret_file.read().strip()
+        if existing:
+            return existing
+
+    directory = os.path.dirname(path) or "."
+    secret = secrets.token_hex(32)
+    fd, temp_path = tempfile.mkstemp(prefix=".app_secret.", dir=directory)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as secret_file:
+            fd = -1
+            secret_file.write(secret)
+            secret_file.flush()
+            os.fsync(secret_file.fileno())
+
+        # Linking a fully written temporary file avoids exposing an empty/partial key
+        # if multiple application workers start at the same time. The first link wins.
+        try:
+            os.link(temp_path, path)
+            return secret
+        except FileExistsError:
+            os.chmod(path, 0o600)
+            with open(path, "r", encoding="utf-8") as secret_file:
+                existing = secret_file.read().strip()
+            if not existing:
+                raise RuntimeError("Application secret file exists but is empty")
+            return existing
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            os.unlink(temp_path)
+        except FileNotFoundError:
+            pass
+
+
+SECRET_KEY = _load_or_create_secret(SECRET_FILE)
 
 TOKEN_EXPIRY_SECONDS = 86400
 security_bearer = HTTPBearer(auto_error=False)
