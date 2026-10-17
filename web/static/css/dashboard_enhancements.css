@@ -382,8 +382,8 @@
         width: 100%;
     }
 
-    .view-section .grid.grid-cols-2.md\\:grid-cols-4,
-    .view-section .grid.grid-cols-2.md\\:grid-cols-6 {
+    .view-section .grid[class~="grid-cols-2"][class~="md:grid-cols-4"],
+    .view-section .grid[class~="grid-cols-2"][class~="md:grid-cols-6"] {
         grid-template-columns: minmax(0, 1fr);
     }
 
