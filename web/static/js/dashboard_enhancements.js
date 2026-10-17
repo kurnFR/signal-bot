@@ -205,9 +205,9 @@
 
                 const bot = data.bot || {};
                 const target = data.chat_id ? ` → chat ${data.chat_id}` : "";
-                this.showToast(`Telegram OK: @${escapeHtml(bot.username || "bot")} verified${target}. Test message sent.`, "success");
+                this.showToast(`Telegram OK: @${bot.username || "bot"} verified${target}. Test message sent.`, "success");
             } catch (error) {
-                this.showToast(`Telegram Ping failed: ${escapeHtml(error.message || error)}. Check bot token, chat ID, and that the bot can message the target chat.`, "error");
+                this.showToast(`Telegram Ping failed: ${error.message || error}. Check bot token, chat ID, and that the bot can message the target chat.`, "error");
             } finally {
                 if (btn) {
                     btn.disabled = false;
