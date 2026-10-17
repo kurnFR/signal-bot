@@ -75,6 +75,8 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         fetch_end = self.app_js.index("    _wtUpdateFeedWalletSelect(list) {", fetch_start)
         fetcher = self.app_js[fetch_start:fetch_end]
         self.assertIn('document.getElementById("wt-feed-body")', fetcher)
+        self.assertIn('const feedCount = document.getElementById("wt-feed-count")', fetcher)
+        self.assertIn('feedCount.innerText = "Unavailable"', fetcher)
         self.assertIn('colspan="8"', fetcher)
         self.assertIn("Unable to refresh live wallet activity", fetcher)
         self.assertIn("this._escapeHtml(message)", fetcher)
