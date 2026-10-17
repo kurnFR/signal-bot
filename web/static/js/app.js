@@ -1309,13 +1309,21 @@ const App = {
             const res = await fetch(`${API_BASE}/api/users`, {
                 headers: this.getAuthHeaders()
             });
-            if (res.ok) {
-                const data = await res.json();
-                this.usersList = data.users || [];
-                this.renderUsersTable();
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            if (!data || !Array.isArray(data.users)) {
+                throw new Error("Invalid users response");
             }
+            this.usersList = data.users;
+            this.renderUsersTable();
         } catch (e) {
             console.error("Failed to fetch users:", e);
+            this.usersList = [];
+            const tbody = document.getElementById("users-table-body");
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center py-6 text-amber-300 text-xs" role="status">User management data is temporarily unavailable. Check the connection and retry.</td></tr>';
+            }
+            this.showToast("Failed to load user management data. Check the connection and try again.", "error");
         }
     },
 
