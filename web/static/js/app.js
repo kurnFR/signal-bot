@@ -344,13 +344,16 @@ const App = {
     },
 
     _formatDateTime(isoString) {
-        if (!isoString) return "--";
-        try {
-            const d = new Date(isoString.includes("Z") || isoString.includes("+") ? isoString : isoString + "Z");
-            return d.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-        } catch (_) {
-            return isoString;
-        }
+        if (typeof isoString !== "string" || !isoString.trim()) return "--";
+        const value = isoString.trim();
+        // Preserve explicit UTC offsets (including negative offsets); DB timestamps without
+        // a zone are treated as UTC, matching the heartbeat and _timeAgo helpers.
+        const timestamp = /(?:Z|[+-]\\d{2}:?\\d{2})$/i.test(value) ? value : `${value}Z`;
+        const parsedMs = new Date(timestamp).getTime();
+        if (!Number.isFinite(parsedMs)) return "--";
+        return new Date(parsedMs).toLocaleString("en-GB", {
+            day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
+        });
     },
 
     // ----------------------------------------------------
