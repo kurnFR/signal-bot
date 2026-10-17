@@ -65,5 +65,15 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("Number.isFinite(Number(diag.roc_auc))", renderer)
 
 
+    def test_toast_notifications_expose_accessible_live_regions(self):
+        toast_start = self.app_js.index("    showToast(message, type = \"info\")")
+        toast_end = self.app_js.index("\n    // ----------------------------------------------------", toast_start)
+        toast = self.app_js[toast_start:toast_end]
+        self.assertIn('container.setAttribute("aria-live", "polite")', toast)
+        self.assertIn('container.setAttribute("aria-relevant", "additions text")', toast)
+        self.assertIn('toast.setAttribute("role", type === "error" ? "alert" : "status")', toast)
+        self.assertIn('toast.setAttribute("aria-atomic", "true")', toast)
+        self.assertIn('aria-label="Dismiss"', toast)
+
 if __name__ == "__main__":
     unittest.main()
