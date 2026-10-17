@@ -70,6 +70,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('if (!opts.silent) this.showToast', fetcher)
 
 
+    def test_admin_users_refresh_failure_clears_stale_rows_and_shows_error(self):
+        fetch_start = self.app_js.index("    async fetchUsers()")
+        fetch_end = self.app_js.index("    renderUsersTable()", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn('if (!res.ok) throw new Error(`HTTP ${res.status}`)', fetcher)
+        self.assertIn('!Array.isArray(data.users)', fetcher)
+        self.assertIn('this.usersList = []', fetcher)
+        self.assertIn('getElementById("users-table-body")', fetcher)
+        self.assertIn('role="status"', fetcher)
+        self.assertIn('this.showToast("Failed to load user management data.', fetcher)
+
     def test_coverage_refresh_failure_clears_stale_data_and_shows_error(self):
         fetch_start = self.app_js.index("    async fetchCoverage()")
         fetch_end = self.app_js.index("    async fetchStrategies()", fetch_start)
