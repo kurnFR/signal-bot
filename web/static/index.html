@@ -311,7 +311,7 @@
                                 <input type="text" id="search-crypto-input" placeholder="Search symbol (e.g. SOL, PEPE, SUI)..." 
                                     onkeydown="if(event.key === 'Enter') App.handleSearchCrypto()"
                                     class="w-64 text-xs bg-slate-800 text-slate-100 placeholder-slate-500 rounded-lg pl-3 pr-8 py-2 border border-slate-700 font-mono focus:outline-none focus:border-sky-500">
-                                <button onclick="App.handleSearchCrypto()" class="absolute right-2.5 top-2.5 text-slate-400 hover:text-white">
+                                <button type="button" aria-label="Search cryptocurrency" onclick="App.handleSearchCrypto()" class="absolute right-2.5 top-2.5 text-slate-400 hover:text-white">
                                     <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
                                 </button>
                             </div>
@@ -1850,7 +1850,7 @@
                     <i data-lucide="download-cloud" class="w-4 h-4 text-sky-400"></i>
                     Launch Historical Backfill
                 </h3>
-                <button onclick="App.closeBackfillModal()" class="text-slate-400 hover:text-white">
+                <button type="button" aria-label="Close backfill dialog" onclick="App.closeBackfillModal()" class="text-slate-400 hover:text-white">
                     <i data-lucide="x" class="w-4 h-4"></i>
                 </button>
             </div>
@@ -1923,7 +1923,7 @@
                         <p class="text-xs text-slate-400">Activate shadow execution and live Telegram alerts</p>
                     </div>
                 </div>
-                <button onclick="App.closeDeployModal()" class="text-slate-400 hover:text-white">
+                <button type="button" aria-label="Close deployment dialog" onclick="App.closeDeployModal()" class="text-slate-400 hover:text-white">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
@@ -1985,7 +1985,7 @@
                         <p class="text-xs text-slate-400">Execution-aware multi-model validation tournament</p>
                     </div>
                 </div>
-                <button onclick="App.closeRunMLModal()" class="text-slate-400 hover:text-white">
+                <button type="button" aria-label="Close ML run dialog" onclick="App.closeRunMLModal()" class="text-slate-400 hover:text-white">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
@@ -2076,7 +2076,7 @@
                         <p class="text-xs text-slate-400">Gated live execution with AI confidence filtering</p>
                     </div>
                 </div>
-                <button onclick="App.closeDeployMLModal()" class="text-slate-400 hover:text-white">
+                <button type="button" aria-label="Close ML deployment dialog" onclick="App.closeDeployMLModal()" class="text-slate-400 hover:text-white">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
@@ -2134,7 +2134,7 @@
                     <h3 id="inspect-ml-title" class="text-sm font-bold text-slate-100 font-mono">Experiment Details</h3>
                     <p class="text-xs text-slate-400">Full tournament breakdown, validation metrics &amp; test diagnostics</p>
                 </div>
-                <button onclick="App.closeInspectMLModal()" class="text-slate-400 hover:text-white">
+                <button type="button" aria-label="Close ML inspection dialog" onclick="App.closeInspectMLModal()" class="text-slate-400 hover:text-white">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
