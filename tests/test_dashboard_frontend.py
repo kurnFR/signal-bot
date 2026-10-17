@@ -99,5 +99,15 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("dashboard_enhancements.css?v=20261017-2", self.index_html)
 
 
+
+    def test_icon_only_dashboard_buttons_have_accessible_names(self):
+        self.assertIn('aria-label="Search cryptocurrency"', self.index_html)
+        self.assertIn('aria-label="Close backfill dialog"', self.index_html)
+        self.assertIn('aria-label="Close deployment dialog"', self.index_html)
+        self.assertIn('aria-label="Close ML run dialog"', self.index_html)
+        self.assertIn('aria-label="Close ML deployment dialog"', self.index_html)
+        self.assertIn('aria-label="Close ML inspection dialog"', self.index_html)
+
+
 if __name__ == "__main__":
     unittest.main()
