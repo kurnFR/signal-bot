@@ -232,3 +232,111 @@
         display: none;
     }
 }
+
+
+/* Mobile-first navigation: keep every dashboard section reachable without a permanent sidebar. */
+@media (max-width: 767px) {
+    body {
+        flex-direction: column;
+        min-width: 320px;
+    }
+
+    body > aside {
+        position: relative !important;
+        top: auto !important;
+        width: 100% !important;
+        height: auto !important;
+        min-height: 0;
+        flex: 0 0 auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--dashboard-border, #263247);
+    }
+
+    body > aside > div:first-child {
+        min-width: 0;
+    }
+
+    body > aside > div:first-child > div:first-child {
+        padding: 0.75rem 1rem;
+    }
+
+    body > aside nav {
+        display: flex;
+        gap: 0.375rem;
+        margin-top: 0;
+        padding: 0.5rem 0.75rem 0.75rem;
+        overflow-x: auto;
+        overflow-y: hidden;
+        overscroll-behavior-x: contain;
+        scrollbar-width: thin;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    body > aside nav .nav-btn {
+        width: auto;
+        min-width: max-content;
+        min-height: 2.75rem;
+        flex: 0 0 auto;
+        padding: 0.625rem 0.75rem;
+        white-space: nowrap;
+    }
+
+    body > aside nav .nav-btn.active {
+        border-left: 0;
+        border-bottom: 2px solid var(--dashboard-focus, #38bdf8);
+    }
+
+    body > aside > div:last-child {
+        display: none;
+    }
+
+    body > div.flex-1.flex.flex-col.min-w-0 {
+        width: 100%;
+        height: auto !important;
+        min-height: calc(100vh - 7rem);
+        overflow: visible;
+    }
+
+    body > div.flex-1.flex.flex-col.min-w-0 > header {
+        position: sticky;
+        top: 0;
+        min-height: 4rem;
+        height: auto;
+        gap: 0.75rem;
+        padding: 0.75rem 1rem;
+        align-items: center;
+    }
+
+    #view-header-title {
+        font-size: 0.9rem;
+        line-height: 1.25rem;
+    }
+
+    #view-header-desc {
+        max-width: 58vw;
+        font-size: 0.6875rem;
+        line-height: 1rem;
+    }
+
+    body > div.flex-1.flex.flex-col.min-w-0 > header > div:last-child {
+        gap: 0.5rem;
+        flex-shrink: 0;
+    }
+
+    body > div.flex-1.flex.flex-col.min-w-0 > main {
+        padding: 1rem;
+        gap: 1.25rem;
+    }
+}
+
+@media (max-width: 420px) {
+    body > aside nav .nav-btn {
+        gap: 0.4rem;
+        padding: 0.55rem 0.625rem;
+        font-size: 0.6875rem;
+    }
+
+    body > div.flex-1.flex.flex-col.min-w-0 > header > div:last-child > button span {
+        display: none;
+    }
+}
