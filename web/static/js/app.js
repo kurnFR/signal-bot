@@ -3834,13 +3834,33 @@ const App = {
 
             document.getElementById("inspect-ml-title").innerText = data.experiment_id;
             const container = document.getElementById("inspect-ml-content");
+            const threshold = this._safeNumber(exp.threshold, 0.5);
+            const hasRocAuc = diag.roc_auc !== null && diag.roc_auc !== undefined && Number.isFinite(Number(diag.roc_auc));
+            const rocAuc = this._safeNumber(diag.roc_auc);
+            const hasBrierScore = diag.brier_score !== null && diag.brier_score !== undefined && Number.isFinite(Number(diag.brier_score));
+            const brierScore = this._safeNumber(diag.brier_score);
+            const baseOutcomeR = this._safeNumber(baseTest.total_outcome_r);
+            const mlOutcomeR = this._safeNumber(mlTest.total_outcome_r);
+            const hasBaseWinRate = baseTest.win_rate_pct !== null && baseTest.win_rate_pct !== undefined && Number.isFinite(Number(baseTest.win_rate_pct));
+            const baseWinRate = this._safeNumber(baseTest.win_rate_pct);
+            const hasMlWinRate = mlTest.win_rate_pct !== null && mlTest.win_rate_pct !== undefined && Number.isFinite(Number(mlTest.win_rate_pct));
+            const mlWinRate = this._safeNumber(mlTest.win_rate_pct);
+            const hasBaseProfitFactor = baseTest.profit_factor !== null && baseTest.profit_factor !== undefined && Number.isFinite(Number(baseTest.profit_factor));
+            const baseProfitFactor = this._safeNumber(baseTest.profit_factor);
+            const hasMlProfitFactor = mlTest.profit_factor !== null && mlTest.profit_factor !== undefined && Number.isFinite(Number(mlTest.profit_factor));
+            const mlProfitFactor = this._safeNumber(mlTest.profit_factor);
+            const baseTradeCount = this._safeNumber(baseTest.trade_count);
+            const mlTradeCount = this._safeNumber(mlTest.trade_count);
+            const baseDrawdownR = this._safeNumber(baseTest.max_drawdown_r);
+            const mlDrawdownR = this._safeNumber(mlTest.max_drawdown_r);
+            const datasetRows = this._safeNumber(data.dataset_rows);
             container.innerHTML = `
                 <div class="grid grid-cols-2 gap-3 p-3 rounded-lg bg-slate-800/80 border border-slate-700">
                     <div><span class="text-slate-400">Winner Model:</span> <b class="text-purple-400">${this._escapeHtml(winner.model_type || 'N/A')}</b></div>
-                    <div><span class="text-slate-400">Selected Threshold:</span> <b class="text-amber-400 font-mono">${(exp.threshold * 100).toFixed(1)}%</b></div>
-                    <div><span class="text-slate-400">ROC-AUC:</span> <b class="text-sky-400 font-mono">${diag.roc_auc !== null && diag.roc_auc !== undefined ? diag.roc_auc.toFixed(4) : 'N/A'}</b></div>
-                    <div><span class="text-slate-400">Brier Score:</span> <b class="text-slate-200 font-mono">${diag.brier_score !== null && diag.brier_score !== undefined ? diag.brier_score.toFixed(4) : 'N/A'}</b></div>
-                    <div><span class="text-slate-400">Dataset Rows:</span> <b class="text-slate-200 font-mono">${data.dataset_rows || 0}</b></div>
+                    <div><span class="text-slate-400">Selected Threshold:</span> <b class="text-amber-400 font-mono">${(threshold * 100).toFixed(1)}%</b></div>
+                    <div><span class="text-slate-400">ROC-AUC:</span> <b class="text-sky-400 font-mono">${hasRocAuc ? rocAuc.toFixed(4) : 'N/A'}</b></div>
+                    <div><span class="text-slate-400">Brier Score:</span> <b class="text-slate-200 font-mono">${hasBrierScore ? brierScore.toFixed(4) : 'N/A'}</b></div>
+                    <div><span class="text-slate-400">Dataset Rows:</span> <b class="text-slate-200 font-mono">${datasetRows}</b></div>
                     <div><span class="text-slate-400">Evaluation Mode:</span> <b class="text-emerald-400">No-Lookahead Chronological</b></div>
                 </div>
 
@@ -3851,34 +3871,34 @@ const App = {
                             <tr>
                                 <th>Metric</th>
                                 <th>Rule-Based Baseline</th>
-                                <th>ML Filter (${(exp.threshold * 100).toFixed(0)}% Gate)</th>
+                                <th>ML Filter (${(threshold * 100).toFixed(0)}% Gate)</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr>
                                 <td>Net Outcome R</td>
-                                <td class="font-mono">${baseTest.total_outcome_r !== undefined ? baseTest.total_outcome_r.toFixed(2) + "R" : "0.00R"}</td>
-                                <td class="font-mono font-bold ${mlTest.total_outcome_r >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${mlTest.total_outcome_r !== undefined ? (mlTest.total_outcome_r >= 0 ? "+" : "") + mlTest.total_outcome_r.toFixed(2) + "R" : "0.00R"}</td>
+                                <td class="font-mono">${baseOutcomeR.toFixed(2)}R</td>
+                                <td class="font-mono font-bold ${mlOutcomeR >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${mlOutcomeR >= 0 ? "+" : ""}${mlOutcomeR.toFixed(2)}R</td>
                             </tr>
                             <tr>
                                 <td>Win Rate</td>
-                                <td class="font-mono">${baseTest.win_rate_pct !== undefined ? baseTest.win_rate_pct.toFixed(1) + "%" : "N/A"}</td>
-                                <td class="font-mono font-bold text-sky-400">${mlTest.win_rate_pct !== undefined ? mlTest.win_rate_pct.toFixed(1) + "%" : "N/A"}</td>
+                                <td class="font-mono">${hasBaseWinRate ? baseWinRate.toFixed(1) + "%" : "N/A"}</td>
+                                <td class="font-mono font-bold text-sky-400">${hasMlWinRate ? mlWinRate.toFixed(1) + "%" : "N/A"}</td>
                             </tr>
                             <tr>
                                 <td>Profit Factor</td>
-                                <td class="font-mono">${baseTest.profit_factor !== undefined ? baseTest.profit_factor.toFixed(2) : "N/A"}</td>
-                                <td class="font-mono font-bold text-amber-400">${mlTest.profit_factor !== undefined ? mlTest.profit_factor.toFixed(2) : "N/A"}</td>
+                                <td class="font-mono">${hasBaseProfitFactor ? baseProfitFactor.toFixed(2) : "N/A"}</td>
+                                <td class="font-mono font-bold text-amber-400">${hasMlProfitFactor ? mlProfitFactor.toFixed(2) : "N/A"}</td>
                             </tr>
                             <tr>
                                 <td>Trade Count</td>
-                                <td class="font-mono">${baseTest.trade_count || 0}</td>
-                                <td class="font-mono">${mlTest.trade_count || 0}</td>
+                                <td class="font-mono">${baseTradeCount}</td>
+                                <td class="font-mono">${mlTradeCount}</td>
                             </tr>
                             <tr>
                                 <td>Max Drawdown R</td>
-                                <td class="font-mono text-rose-400">-${baseTest.max_drawdown_r !== undefined ? baseTest.max_drawdown_r.toFixed(2) + "R" : "0.00R"}</td>
-                                <td class="font-mono text-rose-400">-${mlTest.max_drawdown_r !== undefined ? mlTest.max_drawdown_r.toFixed(2) + "R" : "0.00R"}</td>
+                                <td class="font-mono text-rose-400">-${baseDrawdownR.toFixed(2)}R</td>
+                                <td class="font-mono text-rose-400">-${mlDrawdownR.toFixed(2)}R</td>
                             </tr>
                         </tbody>
                     </table>
