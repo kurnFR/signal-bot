@@ -184,10 +184,21 @@ const App = {
             this._renderNewsSignalsTable(signals);
             this._renderNewsFeed(events);
         } catch (e) {
-            this.showToast(`Failed to load News AI data: ${e.message || e}`, "error");
-            if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-rose-400 text-xs">Failed to load -- ${this._escapeHtml(e.message || e)}</td></tr>`;
-            if (feed) feed.innerHTML = "";
-            if (grid) grid.innerHTML = "";
+            const message = e && e.message ? e.message : String(e || "Unknown error");
+            const safeMessage = this._escapeHtml(message);
+            for (const id of [
+                "news-kpi-events", "news-kpi-processed", "news-kpi-signals",
+                "news-kpi-avgconf", "news-kpi-trades", "news-kpi-pending",
+                "news-perf-closed", "news-perf-winrate", "news-perf-expectancy",
+                "news-perf-pf", "news-perf-r", "news-perf-dd",
+            ]) {
+                const el = document.getElementById(id);
+                if (el) el.innerText = "Unavailable";
+            }
+            this.showToast(`Failed to load News AI data: ${message}`, "error");
+            if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-rose-300 text-xs">Unable to refresh News AI signals. Check your connection or sign-in, then retry. ${safeMessage}</td></tr>`;
+            if (feed) feed.innerHTML = `<div class="text-center py-6 text-rose-300 text-xs">News AI event feed unavailable. ${safeMessage}</div>`;
+            if (grid) grid.innerHTML = `<div class="text-center py-6 text-rose-300 text-xs">News AI service status unavailable. ${safeMessage}</div>`;
         } finally {
             if (window.lucide) window.lucide.createIcons();
         }
