@@ -1054,9 +1054,9 @@ const App = {
                     <td class="font-mono text-slate-300" data-sort-value="${rvol}">${rvol.toFixed(2)}x</td>
                     <td class="font-mono text-slate-300" data-sort-value="${velocity}">${velocity.toFixed(2)}x</td>
                     <td class="font-mono font-bold ${quality >= 70 ? "text-emerald-400" : quality >= 50 ? "text-amber-400" : "text-slate-400"}" data-sort-value="${quality}">${quality.toFixed(0)}</td>
-                    <td class="font-mono text-slate-300" data-sort-value="${price}">$ ${price.toFixed(4)}</td>
+                    <td class="font-mono text-slate-300" data-sort-value="${price}">${price.toFixed(4)}</td>
                     <td class="font-mono ${changeColor}" data-sort-value="${priceChange}">${priceChange >= 0 ? "+" : ""}${priceChange.toFixed(3)}%</td>
-                    <td class="font-mono text-slate-300" data-sort-value="${quoteVolume}">$ ${quoteVolume.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+                    <td class="font-mono text-slate-300" data-sort-value="${quoteVolume}">${quoteVolume.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
                     <td>${s.telegram_sent ? `<i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400"></i>` : `<i data-lucide="x" class="w-3.5 h-3.5 text-slate-600"></i>`}</td>
                 </tr>`;
         }).join("");
