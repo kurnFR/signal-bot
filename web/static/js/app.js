@@ -348,7 +348,7 @@ const App = {
         const value = isoString.trim();
         // Preserve explicit UTC offsets (including negative offsets); DB timestamps without
         // a zone are treated as UTC, matching the heartbeat and _timeAgo helpers.
-        const timestamp = /(?:Z|[+-]\\d{2}:?\\d{2})$/i.test(value) ? value : `${value}Z`;
+        const timestamp = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value}Z`;
         const parsedMs = new Date(timestamp).getTime();
         if (!Number.isFinite(parsedMs)) return "--";
         return new Date(parsedMs).toLocaleString("en-GB", {
@@ -1763,7 +1763,7 @@ const App = {
             listEl.innerHTML = data.runs.map(r => {
                 const isPos = (r.expectancyR || 0) > 0;
                 return `
-                    <tr class="cursor-pointer hover:bg-slate-800/50 transition-colors">
+                    <tr>
                         <td class="font-mono font-medium text-slate-200">${this._escapeHtml(r.symbol)}</td>
                         <td class="text-xs text-slate-400"><span class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">${this._escapeHtml(r.market)}</span> ${this._escapeHtml(r.timeframe)}</td>
                         <td class="text-xs font-mono text-sky-400 max-w-[140px] truncate" title="${this._escapeHtml(r.strategy)}">${this._escapeHtml(r.strategy)}</td>
