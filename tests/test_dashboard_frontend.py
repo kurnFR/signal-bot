@@ -70,6 +70,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('if (!opts.silent) this.showToast', fetcher)
 
 
+    def test_popular_markets_failure_replaces_stale_cards_and_allows_retry(self):
+        fetch_start = self.app_js.index("    async fetchPopularCoins() {")
+        fetch_end = self.app_js.index("    async handleSearchCrypto() {", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn("if (!res.ok) throw new Error", fetcher)
+        self.assertIn("!Array.isArray(data.items)", fetcher)
+        self.assertIn("Popular markets are temporarily unavailable.", fetcher)
+        self.assertIn('role="status"', fetcher)
+        self.assertIn("data-retry-popular-coins", fetcher)
+        self.assertIn('this.fetchPopularCoins()', fetcher)
+
     def test_system_status_failure_marks_database_unavailable(self):
         fetch_start = self.app_js.index("    async fetchSystemStatus() {")
         fetch_end = self.app_js.index("    async fetchCoverage() {", fetch_start)
