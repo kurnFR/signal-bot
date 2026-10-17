@@ -1442,21 +1442,44 @@ const App = {
     // ----------------------------------------------------
     async fetchPaperData() {
         try {
-            const [posRes, tradesRes, cfgsRes, metricsRes] = await Promise.all([
+            const responses = await Promise.all([
                 fetch(`${API_BASE}/api/paper/positions`, { headers: this.getAuthHeaders() }),
                 fetch(`${API_BASE}/api/paper/trades`, { headers: this.getAuthHeaders() }),
                 fetch(`${API_BASE}/api/paper/configs`, { headers: this.getAuthHeaders() }),
                 fetch(`${API_BASE}/api/paper/metrics`, { headers: this.getAuthHeaders() }),
             ]);
+            const failed = responses.find(response => !response.ok);
+            if (failed) {
+                let detail = `HTTP ${failed.status}`;
+                try { detail = (await failed.json()).detail || detail; } catch (_) {}
+                throw new Error(detail);
+            }
 
-            this.paperPositions = (await posRes.json()).positions || [];
-            this.paperTrades = (await tradesRes.json()).trades || [];
-            this.paperConfigs = (await cfgsRes.json()).configs || [];
-            this.paperMetrics = (await metricsRes.json()).metrics || {};
-
+            // Parse every response before mutating the displayed snapshot.
+            const [positionsData, tradesData, configsData, metricsData] = await Promise.all(
+                responses.map(response => response.json())
+            );
+            this.paperPositions = positionsData.positions || [];
+            this.paperTrades = tradesData.trades || [];
+            this.paperConfigs = configsData.configs || [];
+            this.paperMetrics = metricsData.metrics || {};
             this.renderPaperView();
         } catch (e) {
-            console.error("Failed to fetch paper data:", e);
+            const message = e && e.message ? e.message : String(e || "Unknown error");
+            const safeMessage = this._escapeHtml(message);
+            for (const id of ["paper-kpi-open", "paper-kpi-total", "paper-kpi-winrate", "paper-kpi-cumr"]) {
+                const el = document.getElementById(id);
+                if (el) el.innerText = "Unavailable";
+            }
+            const posBody = document.getElementById("paper-positions-body");
+            if (posBody) posBody.innerHTML = `<tr><td colspan="9" class="text-center py-6 text-rose-300 text-xs">Unable to refresh paper positions. Check your connection or sign-in, then retry. ${safeMessage}</td></tr>`;
+            const cfgContainer = document.getElementById("paper-configs-container");
+            if (cfgContainer) cfgContainer.innerHTML = `<div class="text-xs text-rose-300">Unable to refresh paper strategy configurations. ${safeMessage}</div>`;
+            const tradesBody = document.getElementById("paper-trades-body");
+            if (tradesBody) tradesBody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-rose-300 text-xs">Unable to refresh paper trade history. ${safeMessage}</td></tr>`;
+            this.showToast(`Failed to load paper trading data: ${message}`, "error");
+        } finally {
+            if (window.lucide) window.lucide.createIcons();
         }
     },
 
