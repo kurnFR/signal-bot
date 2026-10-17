@@ -1823,11 +1823,23 @@ const App = {
     async fetchStrategies() {
         try {
             const res = await fetch(`${API_BASE}/api/backtest/strategies`, { headers: this.getAuthHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            this.strategiesList = data.strategies || [];
+            if (!data || !Array.isArray(data.strategies)) {
+                throw new Error("Invalid strategies response");
+            }
+            this.strategiesList = data.strategies;
             this.updateStrategySelectors();
         } catch (e) {
             console.error("Failed to fetch strategies:", e);
+            this.strategiesList = [];
+            this.selectedStrategy = null;
+            this.updateStrategySelectors();
+            const infoBanner = document.getElementById("bt-strategy-info");
+            if (infoBanner) {
+                infoBanner.innerHTML = '<div class="p-3 rounded bg-amber-950/40 border border-amber-800/50 text-xs text-amber-200" role="status">Strategy list is temporarily unavailable. Check the connection and retry.</div>';
+            }
+            this.showToast("Failed to load strategies. Check the connection and try again.", "error");
         }
     },
 
