@@ -79,9 +79,9 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         for element_id in ("paper-kpi-open", "paper-kpi-total", "paper-kpi-winrate", "paper-kpi-cumr"):
             self.assertIn(f'"{element_id}"', fetcher)
         self.assertIn('if (el) el.innerText = "Unavailable"', fetcher)
-        self.assertIn('id="paper-positions-body"', fetcher)
-        self.assertIn('id="paper-configs-container"', fetcher)
-        self.assertIn('id="paper-trades-body"', fetcher)
+        self.assertIn('document.getElementById("paper-positions-body")', fetcher)
+        self.assertIn('document.getElementById("paper-configs-container")', fetcher)
+        self.assertIn('document.getElementById("paper-trades-body")', fetcher)
         self.assertIn("this._escapeHtml(message)", fetcher)
         self.assertIn('this.showToast(`Failed to load paper trading data:', fetcher)
 
