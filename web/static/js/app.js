@@ -450,6 +450,15 @@ const App = {
             }
             const detailEl = document.getElementById("screener-v2-status-detail");
             if (detailEl) detailEl.innerText = `Refresh failed: ${message}`;
+            for (const id of [
+                "screener-v2-enabled", "screener-v2-symbols", "screener-v2-timeframe",
+                "screener-v2-last-signal", "screener-v2-last-refresh",
+                "screener-kpi-24h", "screener-kpi-total", "screener-kpi-breakdown",
+                "screener-kpi-db",
+            ]) {
+                const el = document.getElementById(id);
+                if (el) el.innerText = "Unavailable";
+            }
             const tbody = document.getElementById("screener-signals-table-body");
             if (tbody) {
                 tbody.innerHTML = `<tr><td colspan="10" class="text-center py-8 text-rose-300 text-xs">Unable to refresh Market Screener data. Check your connection or sign-in, then retry. ${this._escapeHtml(message)}</td></tr>`;
