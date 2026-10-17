@@ -75,6 +75,9 @@ const App = {
         if (!container) {
             container = document.createElement("div");
             container.id = "toast-container";
+            container.setAttribute("aria-live", "polite");
+            container.setAttribute("aria-relevant", "additions text");
+            container.setAttribute("aria-atomic", "false");
             container.style.cssText = [
                 "position:fixed", "top:1rem", "right:1rem", "z-index:9999",
                 "display:flex", "flex-direction:column", "gap:0.5rem",
@@ -92,6 +95,8 @@ const App = {
         const style = palette[type] || palette.info;
 
         const toast = document.createElement("div");
+        toast.setAttribute("role", type === "error" ? "alert" : "status");
+        toast.setAttribute("aria-atomic", "true");
         toast.style.cssText = [
             "pointer-events:auto", "background:#111827", `border-left:3px solid ${style.border}`,
             "border-top:1px solid #1f293d", "border-right:1px solid #1f293d", "border-bottom:1px solid #1f293d",
