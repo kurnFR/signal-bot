@@ -91,3 +91,49 @@ input[type="range"] {
     outline: none;
     border-color: var(--primary);
 }
+
+/* Accessibility and responsive polish: visual-only, no trading behavior changes. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+    outline: 3px solid #38bdf8;
+    outline-offset: 3px;
+}
+
+:where(button, a, input, select, textarea):disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+@media (max-width: 767px) {
+    body {
+        min-width: 320px;
+    }
+
+    .custom-table th,
+    .custom-table td {
+        padding: 0.625rem 0.75rem;
+        white-space: nowrap;
+    }
+
+    .nav-btn {
+        min-height: 2.75rem;
+    }
+
+    #dashboard-theme-toggle {
+        min-height: 2.5rem;
+    }
+
+    :where(button, a, input, select, textarea) {
+        scroll-margin-block: 1rem;
+    }
+}
