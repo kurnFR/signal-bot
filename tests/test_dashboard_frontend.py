@@ -70,6 +70,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('if (!opts.silent) this.showToast', fetcher)
 
 
+    def test_research_refresh_failure_replaces_stale_data_safely(self):
+        fetch_start = self.app_js.index("    async fetchResearchData() {")
+        fetch_end = self.app_js.index("    async fetchScreenerData() {", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn('const safeMessage = this._escapeHtml(message)', fetcher)
+        for element_id, colspan in (("rb2-positions-table-body", 9), ("rb2-strategy-table-body", 7)):
+            self.assertIn(f'document.getElementById("{element_id}")', fetcher)
+            self.assertIn(f'colspan="{colspan}"', fetcher)
+        self.assertIn('setUnavailable(id)', fetcher)
+        self.assertIn('this.showToast(`Failed to load Research Bots data:', fetcher)
+
     def test_wallet_events_filter_failure_replaces_stale_activity_safely(self):
         fetch_start = self.app_js.index("    async fetchWalletEvents(opts = {}) {")
         fetch_end = self.app_js.index("    _wtUpdateFeedWalletSelect(list) {", fetch_start)
