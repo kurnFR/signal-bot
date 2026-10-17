@@ -24,18 +24,16 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         helper_start = self.app_js.index("_safeHttpUrl(value)")
         helper_end = self.app_js.index("\n    },", helper_start)
         helper = self.app_js[helper_start:helper_end]
-        self.assertIn('url.protocol === "http:"', helper)
-        self.assertIn('url.protocol === "https:"', helper)
-        self.assertNotIn("return url.href;", helper.split("url.protocol ===", 1)[0])
+        self.assertIn('url.protocol === "http:" || url.protocol === "https:" ? url.href : ""', helper)
 
     def test_dashboard_datetime_preserves_explicit_offsets_and_rejects_invalid_values(self):
         formatter_start = self.app_js.index("_formatDateTime(isoString)")
         formatter_end = self.app_js.index("\n    },", formatter_start)
         formatter = self.app_js[formatter_start:formatter_end]
-        self.assertRegex(formatter, r"\\(\?:Z\|\[\+\-\]\\d\{2\}:\?\\d\{2\}\)")
-        self.assertIn("if (!Number.isFinite(parsedMs)) return \"--\";", formatter)
+        self.assertIn(r"(?:Z|[+-]\\d{2}:?\\d{2})$/i.test(value)", formatter)
+        self.assertIn('if (!Number.isFinite(parsedMs)) return "--";', formatter)
 
-    def test_dashboard_script_cache_token_matches_the_current_app_asset(self):
+    def test_dashboard_script_cache_token_is_present(self):
         match = re.search(r'/static/js/app\\.js\\?v=([^"\']+)', self.index_html)
         self.assertIsNotNone(match, "index.html must version the dashboard app.js asset")
         self.assertTrue(match.group(1).strip(), "app.js cache token must not be empty")
