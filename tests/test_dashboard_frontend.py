@@ -88,5 +88,16 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("dashboard_enhancements.css?v=20261017-1", self.index_html)
 
 
+
+    def test_mobile_filters_and_data_tables_remain_usable(self):
+        self.assertIn(".view-section .cfg-input", self.dashboard_css)
+        self.assertIn("max-width: 100%;", self.dashboard_css)
+        self.assertIn(".view-section .overflow-x-auto", self.dashboard_css)
+        self.assertIn("overscroll-behavior-x: contain;", self.dashboard_css)
+        self.assertIn("min-height: 2.5rem;", self.dashboard_css)
+        self.assertIn("flex: 1 1 100%;", self.dashboard_css)
+        self.assertIn("dashboard_enhancements.css?v=20261017-2", self.index_html)
+
+
 if __name__ == "__main__":
     unittest.main()

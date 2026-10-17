@@ -340,3 +340,50 @@
         display: none;
     }
 }
+
+
+/* Consistent control sizing and resilient filter layouts for data-heavy views. */
+.view-section .cfg-input,
+.view-section input:not([type="checkbox"]):not([type="radio"]),
+.view-section select,
+.view-section textarea {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.view-section .overflow-x-auto,
+.view-section .overflow-x-scroll {
+    max-width: 100%;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
+.view-section .custom-table {
+    min-width: max-content;
+}
+
+@media (max-width: 767px) {
+    .view-section .cfg-input,
+    .view-section input:not([type="checkbox"]):not([type="radio"]),
+    .view-section select,
+    .view-section textarea {
+        min-height: 2.5rem;
+        font-size: 0.8125rem;
+    }
+
+    .view-section .flex.flex-wrap.items-end > label {
+        flex: 1 1 100%;
+        min-width: 0;
+    }
+
+    .view-section .flex.flex-wrap.items-end > label .cfg-input,
+    .view-section .flex.flex-wrap.items-end > label select,
+    .view-section .flex.flex-wrap.items-end > label input {
+        width: 100%;
+    }
+
+
+    .view-section table {
+        font-size: 0.75rem;
+    }
+}
