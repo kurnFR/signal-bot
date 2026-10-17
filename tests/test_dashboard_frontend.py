@@ -56,6 +56,14 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             self.assertIn(f"this._safeNumber(exp.{field}", renderer)
         self.assertIn("Number.isFinite(Number(exp.roc_auc))", renderer)
 
+    def test_ml_experiment_detail_normalizes_metrics_before_formatting(self):
+        renderer_start = self.app_js.index("async inspectMLExperiment(experimentId)")
+        renderer_end = self.app_js.index("closeInspectMLModal()", renderer_start)
+        renderer = self.app_js[renderer_start:renderer_end]
+        for field in ("exp.threshold", "diag.roc_auc", "diag.brier_score", "baseTest.total_outcome_r", "mlTest.total_outcome_r", "baseTest.win_rate_pct", "mlTest.win_rate_pct", "baseTest.profit_factor", "mlTest.profit_factor"):
+            self.assertIn(f"this._safeNumber({field}", renderer)
+        self.assertIn("Number.isFinite(Number(diag.roc_auc))", renderer)
+
 
 if __name__ == "__main__":
     unittest.main()
