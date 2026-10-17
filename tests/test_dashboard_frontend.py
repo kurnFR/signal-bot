@@ -70,6 +70,18 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('if (!opts.silent) this.showToast', fetcher)
 
 
+    def test_coverage_refresh_failure_clears_stale_data_and_shows_error(self):
+        fetch_start = self.app_js.index("    async fetchCoverage()")
+        fetch_end = self.app_js.index("    async fetchStrategies()", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn('if (!res.ok) throw new Error(`HTTP ${res.status}`)', fetcher)
+        self.assertIn('!Array.isArray(data.coverage)', fetcher)
+        self.assertIn('this.coverageData = []', fetcher)
+        self.assertIn('this.coverageSummary = {}', fetcher)
+        self.assertIn('getElementById("coverage-table-body")', fetcher)
+        self.assertIn('role="status"', fetcher)
+        self.assertIn('this.showToast("Failed to load historical coverage.', fetcher)
+
     def test_strategy_list_failure_clears_stale_selection_and_shows_error(self):
         fetcher_start = self.app_js.index("    async fetchStrategies()")
         fetcher_end = self.app_js.index("\n    renderHome()", fetcher_start)
