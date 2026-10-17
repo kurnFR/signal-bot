@@ -222,13 +222,21 @@ const App = {
             const hb = byName[exp.name];
             let dotColor = "bg-slate-600", label = "Not running", sub = "No heartbeat recorded yet";
             if (hb) {
-                const age = Date.now() - new Date(hb.last_beat_time + "Z").getTime();
+                const beatValue = typeof hb.last_beat_time === "string" ? hb.last_beat_time.trim() : "";
+                const beatTimestamp = beatValue && /(?:Z|[+-]\\d{2}:?\\d{2})$/i.test(beatValue)
+                    ? beatValue
+                    : `${beatValue}Z`;
+                const beatMs = beatValue ? new Date(beatTimestamp).getTime() : NaN;
+                const hasValidBeat = Number.isFinite(beatMs);
+                const age = hasValidBeat ? Date.now() - beatMs : Infinity;
                 if (hb.status === "error") {
                     dotColor = "bg-rose-400 animate-pulse"; label = "Error";
                     sub = this._escapeHtml(hb.detail || "See process logs");
-                } else if (age > STALE_MS) {
+                } else if (!hasValidBeat || age > STALE_MS) {
                     dotColor = "bg-slate-600"; label = "Not running";
-                    sub = `Last seen ${this._timeAgo(hb.last_beat_time)}`;
+                    sub = hasValidBeat
+                        ? `Last seen ${this._timeAgo(hb.last_beat_time)}`
+                        : "Missing or invalid heartbeat timestamp";
                 } else {
                     dotColor = "bg-emerald-400"; label = "Running";
                     sub = this._escapeHtml(hb.detail || `Last beat ${this._timeAgo(hb.last_beat_time)}`);
@@ -246,7 +254,12 @@ const App = {
     },
 
     _timeAgo(isoString) {
-        const diffMs = Date.now() - new Date(isoString + "Z").getTime();
+        if (typeof isoString !== "string" || !isoString.trim()) return "unknown";
+        const value = isoString.trim();
+        const timestamp = /(?:Z|[+-]\\d{2}:?\\d{2})$/i.test(value) ? value : `${value}Z`;
+        const parsedMs = new Date(timestamp).getTime();
+        if (!Number.isFinite(parsedMs)) return "unknown";
+        const diffMs = Date.now() - parsedMs;
         const mins = Math.floor(diffMs / 60000);
         if (mins < 1) return "just now";
         if (mins < 60) return `${mins}m ago`;
