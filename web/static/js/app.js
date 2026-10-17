@@ -384,7 +384,22 @@ const App = {
             this._renderRb2Positions(positions);
             this._renderRb2StrategyTable(rb2Stats.by_strategy || []);
         } catch (e) {
-            this.showToast(`Failed to load Research Bots data: ${e.message || e}`, "error");
+            const message = e && e.message ? e.message : String(e || "Unknown error");
+            const safeMessage = this._escapeHtml(message);
+            const setUnavailable = (id) => {
+                const el = document.getElementById(id);
+                if (el) el.innerText = "Unavailable";
+            };
+            for (const id of [
+                "rb2-kpi-shadow-pnl", "rb2-kpi-shadow-open", "rb2-kpi-shadow-wr",
+                "rb2-kpi-inverse-pnl", "rb2-kpi-inverse-open", "rb2-kpi-inverse-wr",
+                "rb2-kpi-shadow-closed", "rb2-kpi-inverse-closed",
+            ]) setUnavailable(id);
+            const positionsBody = document.getElementById("rb2-positions-table-body");
+            if (positionsBody) positionsBody.innerHTML = `<tr><td colspan="9" class="text-center py-6 text-rose-300 text-xs">Unable to refresh Research Bots positions. Check your connection or sign-in, then retry. ${safeMessage}</td></tr>`;
+            const strategyBody = document.getElementById("rb2-strategy-table-body");
+            if (strategyBody) strategyBody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-rose-300 text-xs">Unable to refresh Research Bots strategy statistics. ${safeMessage}</td></tr>`;
+            this.showToast(`Failed to load Research Bots data: ${message}`, "error");
         } finally {
             if (window.lucide) window.lucide.createIcons();
         }
