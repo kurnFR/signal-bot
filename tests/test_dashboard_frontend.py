@@ -70,6 +70,19 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('if (!opts.silent) this.showToast', fetcher)
 
 
+    def test_system_status_failure_marks_database_unavailable(self):
+        fetch_start = self.app_js.index("    async fetchSystemStatus() {")
+        fetch_end = self.app_js.index("    async fetchCoverage() {", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn("if (!res.ok) throw new Error", fetcher)
+        self.assertIn('this.systemStatus = null;', fetcher)
+        self.assertIn("this.updateStatusBar();", fetcher)
+        status_bar_start = self.app_js.index("    updateStatusBar() {")
+        status_bar_end = self.app_js.index("    async fetchCoverage() {", status_bar_start)
+        status_bar = self.app_js[status_bar_start:status_bar_end]
+        self.assertIn("MariaDB: Unavailable", status_bar)
+        self.assertIn("this.systemStatus?.database?.status", status_bar)
+
     def test_recent_backtest_history_failure_replaces_stale_rows_safely(self):
         fetch_start = self.app_js.index("    async fetchRecentBacktests() {")
         fetch_end = self.app_js.index("    renderMasterData() {", fetch_start)
