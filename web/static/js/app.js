@@ -1856,8 +1856,13 @@ const App = {
     async fetchRecentBacktests() {
         try {
             const res = await fetch(`${API_BASE}/api/backtest/history?limit=10`, { headers: this.getAuthHeaders() });
-            const data = await res.json();
             const listEl = document.getElementById("home-recent-backtests");
+            if (!res.ok) {
+                let detail = `HTTP ${res.status}`;
+                try { detail = (await res.json()).detail || detail; } catch (_) {}
+                throw new Error(detail);
+            }
+            const data = await res.json();
             if (!listEl) return;
 
             if (!data.runs || data.runs.length === 0) {
@@ -1882,6 +1887,11 @@ const App = {
                 `;
             }).join("");
         } catch (e) {
+            const message = e && e.message ? e.message : String(e || "Unknown error");
+            const listEl = document.getElementById("home-recent-backtests");
+            if (listEl) {
+                listEl.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-rose-300 text-xs">Unable to refresh recent backtests. Check your connection or sign-in, then retry. ${this._escapeHtml(message)}</td></tr>`;
+            }
             console.error("Failed to fetch backtest history:", e);
         }
     },

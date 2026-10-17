@@ -70,6 +70,16 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('if (!opts.silent) this.showToast', fetcher)
 
 
+    def test_recent_backtest_history_failure_replaces_stale_rows_safely(self):
+        fetch_start = self.app_js.index("    async fetchRecentBacktests() {")
+        fetch_end = self.app_js.index("    renderMasterData() {", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn("if (!res.ok)", fetcher)
+        self.assertIn('document.getElementById("home-recent-backtests")', fetcher)
+        self.assertIn('colspan="7"', fetcher)
+        self.assertIn("Unable to refresh recent backtests", fetcher)
+        self.assertIn("this._escapeHtml(message)", fetcher)
+
     def test_paper_refresh_failure_replaces_stale_data_safely(self):
         fetch_start = self.app_js.index("    async fetchPaperData() {")
         fetch_end = self.app_js.index("    renderPaperView() {", fetch_start)
