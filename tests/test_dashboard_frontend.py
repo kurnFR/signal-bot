@@ -34,7 +34,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('if (!Number.isFinite(parsedMs)) return "--";', formatter)
 
     def test_screener_numeric_rendering_uses_finite_number_fallbacks(self):
-        renderer_start = self.app_js.index("_renderScreenerSignals(signals)")
+        renderer_start = self.app_js.index("    _renderScreenerSignals(signals) {")
         renderer_end = self.app_js.index("\n    // ----------------------------------------------------\n    // AUTHENTICATION & SESSIONS", renderer_start)
         renderer = self.app_js[renderer_start:renderer_end]
         for field in ("rvol", "volume_velocity", "quality_score", "price", "price_change_pct", "quote_volume"):
