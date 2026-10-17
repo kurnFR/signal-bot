@@ -3586,10 +3586,18 @@ const App = {
                         tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-500 text-xs">No ML tournaments found. Launch a new tournament using the button above.</td></tr>`;
                     } else {
                         tbody.innerHTML = experiments.map(exp => {
-                            const rocColor = exp.roc_auc !== null ? (exp.roc_auc >= 0.55 ? "text-emerald-400 font-bold" : (exp.roc_auc >= 0.5 ? "text-sky-400" : "text-amber-400")) : "text-slate-500";
-                            const rocText = exp.roc_auc !== null ? exp.roc_auc.toFixed(3) : "N/A";
-                            const rColor = exp.ml_test_r >= 0 ? "text-emerald-400 font-bold" : "text-rose-400 font-bold";
-                            const baseColor = exp.baseline_test_r >= 0 ? "text-slate-300" : "text-slate-400";
+                            const threshold = this._safeNumber(exp.threshold, 0.5);
+                            const hasRoc = exp.roc_auc !== null && exp.roc_auc !== undefined && Number.isFinite(Number(exp.roc_auc));
+                            const rocAuc = this._safeNumber(exp.roc_auc);
+                            const rocColor = !hasRoc ? "text-slate-500" : (rocAuc >= 0.55 ? "text-emerald-400 font-bold" : (rocAuc >= 0.5 ? "text-sky-400" : "text-amber-400"));
+                            const rocText = hasRoc ? rocAuc.toFixed(3) : "N/A";
+                            const baselineTestR = this._safeNumber(exp.baseline_test_r);
+                            const mlTestR = this._safeNumber(exp.ml_test_r);
+                            const hasWinRate = exp.ml_test_win_rate !== null && exp.ml_test_win_rate !== undefined && Number.isFinite(Number(exp.ml_test_win_rate));
+                            const mlTestWinRate = this._safeNumber(exp.ml_test_win_rate);
+                            const mlTestTrades = this._safeNumber(exp.ml_test_trades);
+                            const rColor = mlTestR >= 0 ? "text-emerald-400 font-bold" : "text-rose-400 font-bold";
+                            const baseColor = baselineTestR >= 0 ? "text-slate-300" : "text-slate-400";
                             const experimentId = String(exp.experiment_id || "");
                             const winnerModel = String(exp.winner_model || "N/A");
                             const safeExperimentId = this._escapeHtml(experimentId);
@@ -3607,17 +3615,17 @@ const App = {
                                             ${safeWinnerModel}
                                         </span>
                                     </td>
-                                    <td class="py-3 px-3 font-mono text-xs font-bold text-amber-400">${(exp.threshold * 100).toFixed(0)}%</td>
+                                    <td class="py-3 px-3 font-mono text-xs font-bold text-amber-400">${(threshold * 100).toFixed(0)}%</td>
                                     <td class="py-3 px-3 font-mono text-xs ${rocColor}">${rocText}</td>
-                                    <td class="py-3 px-3 font-mono text-xs ${baseColor}">${exp.baseline_test_r >= 0 ? "+" : ""}${exp.baseline_test_r.toFixed(2)}R</td>
-                                    <td class="py-3 px-3 font-mono text-xs ${rColor}">${exp.ml_test_r >= 0 ? "+" : ""}${exp.ml_test_r.toFixed(2)}R</td>
-                                    <td class="py-3 px-3 font-mono text-xs text-slate-300">${exp.ml_test_win_rate != null ? exp.ml_test_win_rate.toFixed(1) + "%" : "N/A"} <span class="text-[10px] text-slate-500">(${exp.ml_test_trades}t)</span></td>
+                                    <td class="py-3 px-3 font-mono text-xs ${baseColor}">${baselineTestR >= 0 ? "+" : ""}${baselineTestR.toFixed(2)}R</td>
+                                    <td class="py-3 px-3 font-mono text-xs ${rColor}">${mlTestR >= 0 ? "+" : ""}${mlTestR.toFixed(2)}R</td>
+                                    <td class="py-3 px-3 font-mono text-xs text-slate-300">${hasWinRate ? mlTestWinRate.toFixed(1) + "%" : "N/A"} <span class="text-[10px] text-slate-500">(${mlTestTrades}t)</span></td>
                                     <td class="py-3 px-3">
                                         <div class="flex items-center gap-2">
                                             <button type="button" data-ml-action="inspect" data-experiment-id="${safeExperimentId}" class="px-2.5 py-1 rounded text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors">
                                                 Inspect
                                             </button>
-                                            <button type="button" data-ml-action="deploy" data-experiment-id="${safeExperimentId}" data-winner-model="${safeWinnerModel}" data-threshold="${this._escapeHtml(String(exp.threshold))}" class="px-2.5 py-1 rounded text-[11px] font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-sm transition-all flex items-center gap-1">
+                                            <button type="button" data-ml-action="deploy" data-experiment-id="${safeExperimentId}" data-winner-model="${safeWinnerModel}" data-threshold="${this._escapeHtml(String(threshold))}" class="px-2.5 py-1 rounded text-[11px] font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-sm transition-all flex items-center gap-1">
                                                 <i data-lucide="zap" class="w-3 h-3"></i> Deploy
                                             </button>
                                         </div>
