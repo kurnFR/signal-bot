@@ -1919,7 +1919,9 @@ const App = {
         if (!container) return;
         try {
             const res = await fetch(`${API_BASE}/api/crypto/popular?market=spot`, { headers: this.getAuthHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
+            if (!data || !Array.isArray(data.items)) throw new Error("Invalid popular coins response");
             container.innerHTML = (data.items || []).map(coin => `
                 <div class="p-3 rounded-lg bg-slate-900 border border-slate-800 hover:border-sky-500/50 transition-all flex flex-col justify-between">
                     <div class="flex items-center justify-between">
@@ -1943,6 +1945,9 @@ const App = {
             if (window.lucide) window.lucide.createIcons();
         } catch (e) {
             console.error("Error popular coins:", e);
+            container.innerHTML = `<div class="col-span-full rounded-lg border border-amber-800/60 bg-amber-950/20 p-4 text-sm text-amber-200" role="status"><p class="font-medium">Popular markets are temporarily unavailable.</p><p class="mt-1 text-xs text-amber-200/80">Check the connection and try again.</p><button type="button" data-retry-popular-coins class="mt-3 rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700">Retry</button></div>`;
+            const retryButton = container.querySelector("[data-retry-popular-coins]");
+            if (retryButton) retryButton.addEventListener("click", () => this.fetchPopularCoins());
         }
     },
 
