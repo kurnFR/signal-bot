@@ -416,7 +416,19 @@ const App = {
             this._renderScreenerSignals(signals);
             this._fetchBotControl("screener");
         } catch (e) {
-            this.showToast(`Failed to load Market Screener: ${e.message || e}`, "error");
+            const message = e && e.message ? e.message : String(e || "Unknown error");
+            const statusEl = document.getElementById("screener-v2-status");
+            if (statusEl) {
+                statusEl.innerText = "DATA UNAVAILABLE";
+                statusEl.className = "text-lg font-black mt-1 text-rose-400";
+            }
+            const detailEl = document.getElementById("screener-v2-status-detail");
+            if (detailEl) detailEl.innerText = `Refresh failed: ${message}`;
+            const tbody = document.getElementById("screener-signals-table-body");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="10" class="text-center py-8 text-rose-300 text-xs">Unable to refresh Market Screener data. Check your connection or sign-in, then retry. ${this._escapeHtml(message)}</td></tr>`;
+            }
+            this.showToast(`Failed to load Market Screener: ${message}`, "error");
         } finally {
             if (window.lucide) window.lucide.createIcons();
         }

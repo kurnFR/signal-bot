@@ -45,6 +45,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertNotIn("Number(s.volume_velocity || 0)", renderer)
         self.assertNotIn("Number(s.quote_volume || 0)", renderer)
 
+
+    def test_screener_refresh_failure_is_visible_and_escapes_api_error(self):
+        fetch_start = self.app_js.index("    async fetchScreenerData() {")
+        fetch_end = self.app_js.index("    // ----------------------------------------------------\n    // WALLET TRACKING", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn('statusEl.innerText = "DATA UNAVAILABLE"', fetcher)
+        self.assertIn('detailEl.innerText = `Refresh failed: ${message}`', fetcher)
+        self.assertIn('this._escapeHtml(message)', fetcher)
+        self.assertIn('colspan="10"', fetcher)
+        self.assertIn("Unable to refresh Market Screener data", fetcher)
+
     def test_dashboard_script_cache_token_is_present(self):
         match = re.search(r'/static/js/app\.js\?v=([^"\']+)', self.index_html)
         self.assertIsNotNone(match, "index.html must version the dashboard app.js asset")
