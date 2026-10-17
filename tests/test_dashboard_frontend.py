@@ -69,6 +69,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             self.assertIn(f"errorRow({colspan})", fetcher)
         self.assertIn('if (!opts.silent) this.showToast', fetcher)
 
+
+    def test_wallet_events_filter_failure_replaces_stale_activity_safely(self):
+        fetch_start = self.app_js.index("    async fetchWalletEvents(opts = {}) {")
+        fetch_end = self.app_js.index("    _wtUpdateFeedWalletSelect(list) {", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn('document.getElementById("wt-feed-body")', fetcher)
+        self.assertIn('colspan="8"', fetcher)
+        self.assertIn("Unable to refresh live wallet activity", fetcher)
+        self.assertIn("this._escapeHtml(message)", fetcher)
+        self.assertIn('if (!opts.silent) this.showToast', fetcher)
+
     def test_dashboard_script_cache_token_is_present(self):
         match = re.search(r'/static/js/app\.js\?v=([^"\']+)', self.index_html)
         self.assertIsNotNone(match, "index.html must version the dashboard app.js asset")
