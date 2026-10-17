@@ -607,6 +607,8 @@ const App = {
             this._wtRenderFeed(ev.events);
         } catch (e) {
             const message = e && e.message ? e.message : String(e || "Unknown error");
+            const feedCount = document.getElementById("wt-feed-count");
+            if (feedCount) feedCount.innerText = "Unavailable";
             const tbody = document.getElementById("wt-feed-body");
             if (tbody) {
                 tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-rose-300 text-xs">Unable to refresh live wallet activity. Check your connection or sign-in, then retry. ${this._escapeHtml(message)}</td></tr>`;
