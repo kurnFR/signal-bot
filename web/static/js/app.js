@@ -606,7 +606,12 @@ const App = {
             const ev = await this._wtGet(`/api/wallets/events?${evQs}`);
             this._wtRenderFeed(ev.events);
         } catch (e) {
-            if (!opts.silent) this.showToast(`Failed to load live events: ${e.message || e}`, "error");
+            const message = e && e.message ? e.message : String(e || "Unknown error");
+            const tbody = document.getElementById("wt-feed-body");
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-rose-300 text-xs">Unable to refresh live wallet activity. Check your connection or sign-in, then retry. ${this._escapeHtml(message)}</td></tr>`;
+            }
+            if (!opts.silent) this.showToast(`Failed to load live events: ${message}`, "error");
         } finally {
             if (window.lucide) window.lucide.createIcons();
         }
