@@ -70,6 +70,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('if (!opts.silent) this.showToast', fetcher)
 
 
+    def test_screener_refresh_failure_marks_kpis_unavailable(self):
+        fetch_start = self.app_js.index("    async fetchScreenerData() {")
+        fetch_end = self.app_js.index("    // ----------------------------------------------------", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn('statusEl.innerText = "DATA UNAVAILABLE"', fetcher)
+        self.assertIn('if (detailEl) detailEl.innerText = `Refresh failed:', fetcher)
+        self.assertIn('if (el) el.innerText = "Unavailable"', fetcher)
+        for element_id in ("screener-kpi-24h", "screener-kpi-total", "screener-kpi-breakdown", "screener-kpi-db"):
+            self.assertIn(f'"{element_id}"', fetcher)
+        self.assertIn('this._escapeHtml(message)', fetcher)
+
     def test_news_ai_refresh_failure_replaces_stale_data_safely(self):
         fetch_start = self.app_js.index("    async fetchNewsData() {")
         fetch_end = self.app_js.index("    _renderNewsKpis(stats) {", fetch_start)
