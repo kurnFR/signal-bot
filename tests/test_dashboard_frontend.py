@@ -70,6 +70,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('if (!opts.silent) this.showToast', fetcher)
 
 
+    def test_news_ai_refresh_failure_replaces_stale_data_safely(self):
+        fetch_start = self.app_js.index("    async fetchNewsData() {")
+        fetch_end = self.app_js.index("    _renderNewsKpis(stats) {", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn('const safeMessage = this._escapeHtml(message)', fetcher)
+        self.assertIn('Unable to refresh News AI signals', fetcher)
+        self.assertIn('News AI event feed unavailable', fetcher)
+        self.assertIn('News AI service status unavailable', fetcher)
+        self.assertIn('if (el) el.innerText = "Unavailable"', fetcher)
+        self.assertIn('colspan="8"', fetcher)
+
     def test_research_refresh_failure_replaces_stale_data_safely(self):
         fetch_start = self.app_js.index("    async fetchResearchData() {")
         fetch_end = self.app_js.index("    async fetchScreenerData() {", fetch_start)
