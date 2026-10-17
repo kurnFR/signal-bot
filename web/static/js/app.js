@@ -1811,12 +1811,24 @@ const App = {
     async fetchCoverage() {
         try {
             const res = await fetch(`${API_BASE}/api/master-data/coverage`, { headers: this.getAuthHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            this.coverageData = data.coverage || [];
-            this.coverageSummary = data.summary || {};
+            if (!data || !Array.isArray(data.coverage) || !data.summary || typeof data.summary !== "object") {
+                throw new Error("Invalid coverage response");
+            }
+            this.coverageData = data.coverage;
+            this.coverageSummary = data.summary;
             this.updateSymbolSelectors();
         } catch (e) {
             console.error("Failed to fetch coverage:", e);
+            this.coverageData = [];
+            this.coverageSummary = {};
+            this.updateSymbolSelectors();
+            const tbody = document.getElementById("coverage-table-body");
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center py-6 text-amber-300 text-xs" role="status">Historical coverage is temporarily unavailable. Check the connection and retry.</td></tr>';
+            }
+            this.showToast("Failed to load historical coverage. Check the connection and try again.", "error");
         }
     },
 
