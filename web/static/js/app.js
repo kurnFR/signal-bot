@@ -344,12 +344,14 @@ const App = {
     },
 
     _formatDateTime(isoString) {
-        if (!isoString) return "--";
+        if (!isoString || typeof isoString !== "string") return "--";
         try {
             const d = new Date(isoString.includes("Z") || isoString.includes("+") ? isoString : isoString + "Z");
+            if (Number.isNaN(d.getTime())) return "--";
             return d.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
         } catch (_) {
-            return isoString;
+            // Never return untrusted raw timestamp text into HTML-rendered dashboard cells.
+            return "--";
         }
     },
 
