@@ -79,7 +79,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('this.strategiesList = []', fetcher)
         self.assertIn('this.selectedStrategy = null', fetcher)
         self.assertIn('this.updateStrategySelectors()', fetcher)
-        self.assertIn('id="bt-strategy-info"', fetcher)
+        self.assertIn('getElementById("bt-strategy-info")', fetcher)
         self.assertIn('role="status"', fetcher)
         self.assertIn('this.showToast("Failed to load strategies.', fetcher)
 
