@@ -10,6 +10,39 @@ from web.auth import (
 
 
 class TestAuthSecurity(unittest.TestCase):
+    def test_secret_file_is_created_private_and_reused(self):
+        import os
+        import stat
+        import tempfile
+        from web.auth import _load_or_create_secret
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, ".app_secret")
+            first = _load_or_create_secret(path)
+            mode = stat.S_IMODE(os.stat(path).st_mode)
+            second = _load_or_create_secret(path)
+
+            self.assertEqual(mode, 0o600)
+            self.assertEqual(len(first), 64)
+            self.assertEqual(second, first)
+
+    def test_existing_secret_permissions_are_restricted(self):
+        import os
+        import stat
+        import tempfile
+        from web.auth import _load_or_create_secret
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, ".app_secret")
+            with open(path, "w", encoding="utf-8") as secret_file:
+                secret_file.write("existing-secret")
+            os.chmod(path, 0o644)
+
+            loaded = _load_or_create_secret(path)
+
+            self.assertEqual(loaded, "existing-secret")
+            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+
     def test_login_rate_limiting(self):
         key = "test_ip:test_user"
         reset_login_attempts(key)
