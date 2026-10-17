@@ -18,7 +18,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
 
     def test_dynamic_dashboard_handlers_are_not_inline(self):
         # Dynamic templates must bind handlers through addEventListener/data attributes.
-        self.assertNotRegex(self.app_js, re.compile(r"\\bonclick\\s*=", re.IGNORECASE))
+        self.assertNotRegex(self.app_js, re.compile(r"\bonclick\s*=", re.IGNORECASE))
 
     def test_api_links_are_restricted_to_http_schemes(self):
         helper_start = self.app_js.index("_safeHttpUrl(value)")
@@ -30,11 +30,11 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         formatter_start = self.app_js.index("_formatDateTime(isoString)")
         formatter_end = self.app_js.index("\n    },", formatter_start)
         formatter = self.app_js[formatter_start:formatter_end]
-        self.assertIn(r"(?:Z|[+-]\\d{2}:?\\d{2})$/i.test(value)", formatter)
+        self.assertIn(r"(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)", formatter)
         self.assertIn('if (!Number.isFinite(parsedMs)) return "--";', formatter)
 
     def test_dashboard_script_cache_token_is_present(self):
-        match = re.search(r'/static/js/app\\.js\\?v=([^"\']+)', self.index_html)
+        match = re.search(r'/static/js/app\.js\?v=([^"\']+)', self.index_html)
         self.assertIsNotNone(match, "index.html must version the dashboard app.js asset")
         self.assertTrue(match.group(1).strip(), "app.js cache token must not be empty")
 
