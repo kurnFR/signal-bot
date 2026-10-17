@@ -70,6 +70,21 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('if (!opts.silent) this.showToast', fetcher)
 
 
+    def test_paper_refresh_failure_replaces_stale_data_safely(self):
+        fetch_start = self.app_js.index("    async fetchPaperData() {")
+        fetch_end = self.app_js.index("    renderPaperView() {", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn("const failed = responses.find(response => !response.ok)", fetcher)
+        self.assertIn("// Parse every response before mutating the displayed snapshot.", fetcher)
+        for element_id in ("paper-kpi-open", "paper-kpi-total", "paper-kpi-winrate", "paper-kpi-cumr"):
+            self.assertIn(f'"{element_id}"', fetcher)
+        self.assertIn('if (el) el.innerText = "Unavailable"', fetcher)
+        self.assertIn('id="paper-positions-body"', fetcher)
+        self.assertIn('id="paper-configs-container"', fetcher)
+        self.assertIn('id="paper-trades-body"', fetcher)
+        self.assertIn("this._escapeHtml(message)", fetcher)
+        self.assertIn('this.showToast(`Failed to load paper trading data:', fetcher)
+
     def test_screener_refresh_failure_marks_kpis_unavailable(self):
         fetch_start = self.app_js.index("    async fetchScreenerData() {")
         fetch_end = self.app_js.index("    // ----------------------------------------------------", fetch_start)
