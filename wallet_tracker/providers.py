@@ -161,26 +161,50 @@ class GeckoTerminalProvider:
 
     @staticmethod
     def _pools_from(payload):
+        """Extract valid pools while tolerating malformed provider records."""
+        if not isinstance(payload, dict):
+            return []
         pools = []
-        included = {item.get("id"): item for item in (payload or {}).get("included", []) or [] if item.get("id")}
-        for item in (payload or {}).get("data", []) or []:
-            attrs = item.get("attributes") or {}
-            address = attrs.get("address")
-            if not address:
+        included_items = payload.get("included") or []
+        included = {
+            item.get("id"): item
+            for item in included_items
+            if isinstance(item, dict) and item.get("id")
+        } if isinstance(included_items, list) else {}
+        data_items = payload.get("data") or []
+        if not isinstance(data_items, list):
+            return []
+        for item in data_items:
+            if not isinstance(item, dict):
                 continue
-            relationships = item.get("relationships") or {}
+            attrs = item.get("attributes")
+            if not isinstance(attrs, dict):
+                continue
+            address = attrs.get("address")
+            if not isinstance(address, str) or not address.strip():
+                continue
+            relationships = item.get("relationships")
+            if not isinstance(relationships, dict):
+                relationships = {}
             tokens = {}
             for side in ("base_token", "quote_token"):
-                rel = (relationships.get(side) or {}).get("data") or {}
+                rel = relationships.get(side)
+                rel = rel.get("data") if isinstance(rel, dict) else None
+                rel = rel if isinstance(rel, dict) else {}
                 token_obj = included.get(rel.get("id"), {})
-                token_attrs = token_obj.get("attributes") or {}
+                token_attrs = token_obj.get("attributes") if isinstance(token_obj, dict) else {}
+                if not isinstance(token_attrs, dict):
+                    token_attrs = {}
+                token_id = str(rel.get("id", ""))
                 token_address = (attrs.get(side + "_address") or token_attrs.get("address") or
-                                 (str(rel.get("id", "")).split("_", 1)[1] if "_" in str(rel.get("id", "")) else None))
+                                 (token_id.split("_", 1)[1] if "_" in token_id else None))
                 tokens[side + "_address"] = str(token_address) if token_address else None
                 tokens[side + "_symbol"] = token_attrs.get("symbol") or attrs.get(side + "_symbol")
-            vol = _to_float(((attrs.get("volume_usd") or {}).get("h24")))
+            volume = attrs.get("volume_usd")
+            volume = volume.get("h24") if isinstance(volume, dict) else None
+            vol = _to_float(volume)
             pools.append({
-                "address": address, "name": attrs.get("name") or address,
+                "address": address.strip(), "name": attrs.get("name") or address.strip(),
                 "volume_24h_usd": vol or 0.0, **tokens,
             })
         return pools
