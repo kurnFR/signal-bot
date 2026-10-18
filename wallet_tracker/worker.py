@@ -139,7 +139,13 @@ def _discover_pools(network, limit, provider, dexscreener_provider=None, network
     if not network_in_cooldown:
         try:
             pools = provider.hot_pools(network, limit)
-            pool_source = "GeckoTerminal"
+            if pools:
+                pool_source = "GeckoTerminal"
+            else:
+                # A successful HTTP response with no usable pools is still a
+                # discovery miss; allow the fallback sources to keep scanning.
+                gecko_failed = True
+                logger.warning("%s: GeckoTerminal returned no pools; trying discovery fallbacks", network)
         except Exception as exc:
             gecko_failed = True
             logger.warning("%s: GeckoTerminal pool discovery failed (%s)", network, type(exc).__name__)
