@@ -399,11 +399,20 @@ const App = {
                 try { detail = (await failed.json()).detail || detail; } catch (_) {}
                 throw new Error(detail);
             }
-            const { positions } = await posRes.json();
+            const positionsData = await posRes.json();
             const rb2Stats = await statsRes.json();
+            const validObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
+            if (
+                !validObject(positionsData) || !Array.isArray(positionsData.positions) ||
+                !validObject(rb2Stats) ||
+                (rb2Stats.by_strategy !== undefined && !Array.isArray(rb2Stats.by_strategy))
+            ) {
+                throw new Error("Invalid Research Bots response");
+            }
 
+            // Validate both endpoints before rendering any part of this dashboard.
             this._renderRb2Kpis(rb2Stats);
-            this._renderRb2Positions(positions);
+            this._renderRb2Positions(positionsData.positions);
             this._renderRb2StrategyTable(rb2Stats.by_strategy || []);
         } catch (e) {
             const message = e && e.message ? e.message : String(e || "Unknown error");
