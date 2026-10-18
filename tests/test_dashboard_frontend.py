@@ -185,6 +185,18 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("Unable to refresh recent backtests", fetcher)
         self.assertIn("this._escapeHtml(message)", fetcher)
 
+    def test_recent_backtest_history_rejects_malformed_payload_before_rendering(self):
+        fetch_start = self.app_js.index("    async fetchRecentBacktests() {")
+        fetch_end = self.app_js.index("    renderMasterData() {", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn("!Array.isArray(data.runs)", fetcher)
+        self.assertIn("data.runs.some(run => run === null || typeof run !== \"object\" || Array.isArray(run))", fetcher)
+        validation_end = fetcher.index('throw new Error("Invalid backtest history response")')
+        render_start = fetcher.index("if (data.runs.length === 0)")
+        self.assertLess(validation_end, render_start)
+        self.assertIn("Unable to refresh recent backtests", fetcher)
+
+
     def test_paper_refresh_failure_replaces_stale_data_safely(self):
         fetch_start = self.app_js.index("    async fetchPaperData() {")
         fetch_end = self.app_js.index("    renderPaperView() {", fetch_start)
