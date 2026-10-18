@@ -460,7 +460,8 @@ class TestWorkerProviderFailover(unittest.TestCase):
 
         with ExitStack() as stack:
             stack.enter_context(patch.object(worker.store, "get_settings", return_value=settings))
-            stack.enter_context(patch.object(worker, "recompute", return_value=0))
+            stack.enter_context(patch.object(worker.store, "get_active_pools", return_value=[]))
+            stack.enter_context(patch.object(worker, "recompute", return_value=0)
             stack.enter_context(patch.object(worker.store, "prune_swaps"))
             stack.enter_context(patch.object(worker.store, "prune_wallet_alerts"))
             stack.enter_context(patch.object(worker.store, "set_status"))
