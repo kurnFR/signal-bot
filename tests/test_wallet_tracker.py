@@ -882,6 +882,39 @@ class TestMultiSourceDiscoveryAndFailover(unittest.TestCase):
         self.assertEqual(len(pools), 1)
         self.assertEqual(pools[0]["name"], "DB / WETH")
 
+    def test_cooldown_without_birdeye_still_uses_dexscreener_pool_discovery(self):
+        from contextlib import ExitStack
+        from unittest.mock import MagicMock
+
+        settings = {
+            "enabled": True, "networks": ["eth"], "pools_per_network": 1,
+            "min_trade_usd": 10000, "min_net_usd": 150000,
+            "auto_track_net_usd": 250000, "retention_days": 8,
+            "api_delay_seconds": 1, "token_mode": "all", "token_addresses": [],
+        }
+        pool = {"address": POOL, "name": "PEPE / WETH", "volume_24h_usd": 200000}
+        gecko = MagicMock()
+        gecko.hot_pools.return_value = []
+        gecko.pool_trades.return_value = []
+        dexscreener = MagicMock()
+        dexscreener.hot_pools.return_value = [pool]
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(worker.store, "get_settings", return_value=settings))
+            stack.enter_context(patch.object(worker, "recompute", return_value=0))
+            stack.enter_context(patch.object(worker.store, "prune_swaps"))
+            stack.enter_context(patch.object(worker.store, "prune_wallet_alerts"))
+            stack.enter_context(patch.object(worker.store, "insert_swaps", return_value=0))
+            stack.enter_context(patch.object(worker.store, "prune_swaps"))
+            stack.enter_context(patch.object(worker.store, "set_status"))
+            stack.enter_context(patch.object(worker, "dispatch_telegram_alerts"))
+            stack.enter_context(patch.dict(worker._NETWORK_COOLDOWN_UNTIL, {"eth": 9999999999}, clear=True))
+            stack.enter_context(patch.object(worker.time, "monotonic", return_value=100.0))
+            worker.run_cycle(gecko, dexscreener_provider=dexscreener)
+
+        dexscreener.hot_pools.assert_called_once_with("eth", settings["pools_per_network"] * 2)
+        gecko.pool_trades.assert_called_once_with("eth", pool, settings["min_trade_usd"])
+
     def test_trade_fetch_fast_failover_to_birdeye(self):
         from unittest.mock import MagicMock
         import requests
