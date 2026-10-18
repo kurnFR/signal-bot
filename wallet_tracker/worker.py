@@ -208,11 +208,14 @@ def run_cycle(provider, fallback_provider=None, dexscreener_provider=None):
             errors.append(f"unsupported network '{network}'")
             continue
         network_in_cooldown = _NETWORK_COOLDOWN_UNTIL.get(network, 0) > now_mono
-        if network_in_cooldown and fallback_provider is None:
-            logger.info("%s: skipped during rate-limit cooldown (no fallback configured)", network)
-            continue
         if network_in_cooldown:
-            logger.info("%s: using Birdeye during GeckoTerminal rate-limit cooldown", network)
+            if fallback_provider is not None:
+                logger.info("%s: using Birdeye during GeckoTerminal rate-limit cooldown", network)
+            else:
+                logger.info(
+                    "%s: GeckoTerminal is in cooldown; trying cached pools and free discovery fallbacks",
+                    network,
+                )
 
         pools, pool_source = _discover_pools(
             network,
