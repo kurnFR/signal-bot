@@ -176,9 +176,20 @@ const App = {
                 throw new Error(detail);
             }
             const stats = await statsRes.json();
-            const { signals } = await signalsRes.json();
-            const { events } = await eventsRes.json();
+            const signalsData = await signalsRes.json();
+            const eventsData = await eventsRes.json();
+            const validObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
+            if (
+                !validObject(stats) ||
+                (stats.heartbeats !== undefined && !Array.isArray(stats.heartbeats)) ||
+                !validObject(signalsData) || !Array.isArray(signalsData.signals) ||
+                !validObject(eventsData) || !Array.isArray(eventsData.events)
+            ) {
+                throw new Error("Invalid News AI response");
+            }
 
+            const { signals } = signalsData;
+            const { events } = eventsData;
             this._renderNewsKpis(stats);
             this._renderNewsHeartbeats(stats.heartbeats || []);
             this._renderNewsSignalsTable(signals);

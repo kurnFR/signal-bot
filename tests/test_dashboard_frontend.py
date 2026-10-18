@@ -57,6 +57,21 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("Unable to refresh Market Screener data", fetcher)
 
 
+    def test_news_refresh_validates_all_payload_shapes_before_rendering(self):
+        fetch_start = self.app_js.index("    async fetchNewsData() {")
+        fetch_end = self.app_js.index("    _renderNewsKpis(stats) {", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn("!validObject(stats)", fetcher)
+        self.assertIn("!Array.isArray(stats.heartbeats)", fetcher)
+        self.assertIn("!Array.isArray(signalsData.signals)", fetcher)
+        self.assertIn("!Array.isArray(eventsData.events)", fetcher)
+        validation_end = fetcher.index('throw new Error("Invalid News AI response")')
+        render_start = fetcher.index("this._renderNewsKpis(stats)")
+        self.assertLess(validation_end, render_start)
+        self.assertIn("Unable to refresh News AI signals", fetcher)
+        self.assertIn("News AI event feed unavailable", fetcher)
+
+
     def test_paper_refresh_validates_all_payload_shapes_before_mutating_snapshot(self):
         fetch_start = self.app_js.index("    async fetchPaperData() {")
         fetch_end = self.app_js.index("    renderPaperView() {", fetch_start)
