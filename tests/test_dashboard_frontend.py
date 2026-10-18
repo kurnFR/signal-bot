@@ -155,6 +155,16 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("this._escapeHtml(message)", fetcher)
         self.assertIn('this.showToast(`Failed to load paper trading data:', fetcher)
 
+    def test_screener_refresh_rejects_malformed_payloads(self):
+        fetch_start = self.app_js.index("    async fetchScreenerData()")
+        fetch_end = self.app_js.index("    async fetchUsers()", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn("!Array.isArray(signalsData.signals)", fetcher)
+        self.assertIn('throw new Error("Invalid Market Screener response")', fetcher)
+        self.assertIn("const signals = signalsData.signals", fetcher)
+        self.assertIn('statusEl.innerText = "DATA UNAVAILABLE"', fetcher)
+        self.assertIn('this.showToast(`Failed to load Market Screener:', fetcher)
+
     def test_screener_refresh_failure_marks_kpis_unavailable(self):
         fetch_start = self.app_js.index("    async fetchScreenerData() {")
         fetch_end = self.app_js.index("    // ----------------------------------------------------", fetch_start)
