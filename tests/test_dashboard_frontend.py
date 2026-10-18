@@ -57,6 +57,21 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("Unable to refresh Market Screener data", fetcher)
 
 
+    def test_paper_refresh_validates_all_payload_shapes_before_mutating_snapshot(self):
+        fetch_start = self.app_js.index("    async fetchPaperData() {")
+        fetch_end = self.app_js.index("    renderPaperView() {", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn("!Array.isArray(positionsData.positions)", fetcher)
+        self.assertIn("!Array.isArray(tradesData.trades)", fetcher)
+        self.assertIn("!Array.isArray(configsData.configs)", fetcher)
+        self.assertIn("!validObject(metricsData.metrics)", fetcher)
+        validation_end = fetcher.index('throw new Error("Invalid paper trading response")')
+        assignments_start = fetcher.index("this.paperPositions = positionsData.positions")
+        self.assertLess(validation_end, assignments_start)
+        self.assertIn('if (posBody) posBody.innerHTML =', fetcher)
+        self.assertIn('this.showToast(`Failed to load paper trading data:', fetcher)
+
+
     def test_wallet_refresh_failure_is_visible_and_escapes_api_error(self):
         fetch_start = self.app_js.index("    async fetchWalletData(opts = {}) {")
         fetch_end = self.app_js.index("    async fetchWalletEvents(opts = {}) {", fetch_start)
