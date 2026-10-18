@@ -72,6 +72,21 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("News AI event feed unavailable", fetcher)
 
 
+    def test_research_bots_refresh_validates_payloads_before_rendering(self):
+        fetch_start = self.app_js.index("    async fetchResearchData() {")
+        fetch_end = self.app_js.index("    async fetchScreenerData() {", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        self.assertIn("!validObject(positionsData)", fetcher)
+        self.assertIn("!Array.isArray(positionsData.positions)", fetcher)
+        self.assertIn("!validObject(rb2Stats)", fetcher)
+        self.assertIn("!Array.isArray(rb2Stats.by_strategy)", fetcher)
+        validation_end = fetcher.index('throw new Error("Invalid Research Bots response")')
+        render_start = fetcher.index("this._renderRb2Kpis(rb2Stats)")
+        self.assertLess(validation_end, render_start)
+        self.assertIn("Unable to refresh Research Bots positions", fetcher)
+        self.assertIn("Unable to refresh Research Bots strategy statistics", fetcher)
+
+
     def test_paper_refresh_validates_all_payload_shapes_before_mutating_snapshot(self):
         fetch_start = self.app_js.index("    async fetchPaperData() {")
         fetch_end = self.app_js.index("    renderPaperView() {", fetch_start)
