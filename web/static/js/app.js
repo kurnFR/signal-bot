@@ -866,8 +866,15 @@ const App = {
         try {
             // A live feed only includes checklisted wallets. Add a discovered candidate
             // first so Follow Live never silently falls back to the unfiltered feed.
-            const tracked = await this._wtGet("/api/wallets/tracked");
-            const alreadyTracked = (tracked.tracked || []).some(t => t.chain === chain && t.wallet === wallet);
+            const getTrackedWallets = async () => {
+                const payload = await this._wtGet("/api/wallets/tracked");
+                if (!payload || typeof payload !== "object" || Array.isArray(payload) || !Array.isArray(payload.tracked)) {
+                    throw new Error("Invalid tracked-wallet response");
+                }
+                return payload.tracked;
+            };
+            const trackedWallets = await getTrackedWallets();
+            const alreadyTracked = trackedWallets.some(t => t && t.chain === chain && t.wallet === wallet);
             if (!alreadyTracked) {
                 await this._wtSend("POST", "/api/wallets/tracked/toggle", { chain, wallet });
                 await this.fetchWalletData({ silent: true });
@@ -877,9 +884,8 @@ const App = {
             if (sel) {
                 sel.value = value;
                 if (sel.value !== value) {
-                    // Refresh the options after the checklist mutation before selecting.
-                    const refreshed = await this._wtGet("/api/wallets/tracked");
-                    this._wtUpdateFeedWalletSelect(refreshed.tracked || []);
+                    // Refresh and validate options after the checklist mutation before selecting.
+                    this._wtUpdateFeedWalletSelect(await getTrackedWallets());
                     sel.value = value;
                 }
                 await this.fetchWalletEvents();
