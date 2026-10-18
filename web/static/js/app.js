@@ -1473,10 +1473,22 @@ const App = {
             const [positionsData, tradesData, configsData, metricsData] = await Promise.all(
                 responses.map(response => response.json())
             );
-            this.paperPositions = positionsData.positions || [];
-            this.paperTrades = tradesData.trades || [];
-            this.paperConfigs = configsData.configs || [];
-            this.paperMetrics = metricsData.metrics || {};
+            const validObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
+            if (
+                !validObject(positionsData) || !Array.isArray(positionsData.positions) ||
+                !validObject(tradesData) || !Array.isArray(tradesData.trades) ||
+                !validObject(configsData) || !Array.isArray(configsData.configs) ||
+                !validObject(metricsData) || !validObject(metricsData.metrics)
+            ) {
+                throw new Error("Invalid paper trading response");
+            }
+
+            // Validate the complete snapshot before changing state, so malformed
+            // API data cannot leave positions, trades, configs, and metrics out of sync.
+            this.paperPositions = positionsData.positions;
+            this.paperTrades = tradesData.trades;
+            this.paperConfigs = configsData.configs;
+            this.paperMetrics = metricsData.metrics;
             this.renderPaperView();
         } catch (e) {
             const message = e && e.message ? e.message : String(e || "Unknown error");
