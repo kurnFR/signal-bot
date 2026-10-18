@@ -1945,9 +1945,16 @@ const App = {
                 throw new Error(detail);
             }
             const data = await res.json();
+            if (
+                data === null || typeof data !== "object" || Array.isArray(data) ||
+                !Array.isArray(data.runs) ||
+                data.runs.some(run => run === null || typeof run !== "object" || Array.isArray(run))
+            ) {
+                throw new Error("Invalid backtest history response");
+            }
             if (!listEl) return;
 
-            if (!data.runs || data.runs.length === 0) {
+            if (data.runs.length === 0) {
                 listEl.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-500 text-xs">No backtests run yet. Go to Backtest Studio to run your first simulation!</td></tr>`;
                 return;
             }
