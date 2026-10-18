@@ -3746,8 +3746,16 @@ const App = {
             const cbRes = await fetch(`${API_BASE}/api/paper/circuit-breakers`, {
                 headers: this.getAuthHeaders()
             });
-            if (cbRes.ok) {
+            if (!cbRes.ok) throw new Error(`Circuit-breaker request failed: HTTP ${cbRes.status}`);
+            {
                 const cb = await cbRes.json();
+                if (cb === null || typeof cb !== "object" || Array.isArray(cb) ||
+                    !Number.isFinite(Number(cb.active_positions)) ||
+                    !Number.isFinite(Number(cb.max_concurrent_positions)) ||
+                    !Number.isFinite(Number(cb.today_realized_pnl_usd)) ||
+                    typeof cb.status !== "string") {
+                    throw new Error("Invalid circuit-breaker response");
+                }
                 const badge = document.getElementById("ml-breaker-badge");
                 const details = document.getElementById("ml-breaker-details");
                 if (badge) {
@@ -3768,8 +3776,13 @@ const App = {
             const modelsRes = await fetch(`${API_BASE}/api/ml/models`, {
                 headers: this.getAuthHeaders()
             });
-            if (modelsRes.ok) {
+            if (!modelsRes.ok) throw new Error(`ML models request failed: HTTP ${modelsRes.status}`);
+            {
                 const md = await modelsRes.json();
+                if (md === null || typeof md !== "object" || Array.isArray(md) ||
+                    (md.models !== undefined && !Array.isArray(md.models))) {
+                    throw new Error("Invalid ML models response");
+                }
                 const modelsStat = document.getElementById("ml-stat-models");
                 if (modelsStat) modelsStat.innerText = md.models ? md.models.length : 0;
             }
@@ -3778,9 +3791,15 @@ const App = {
             const expRes = await fetch(`${API_BASE}/api/ml/experiments`, {
                 headers: this.getAuthHeaders()
             });
-            if (expRes.ok) {
+            if (!expRes.ok) throw new Error(`ML experiments request failed: HTTP ${expRes.status}`);
+            {
                 const expData = await expRes.json();
-                const experiments = expData.experiments || [];
+                if (expData === null || typeof expData !== "object" || Array.isArray(expData) ||
+                    !Array.isArray(expData.experiments) ||
+                    expData.experiments.some(exp => exp === null || typeof exp !== "object" || Array.isArray(exp))) {
+                    throw new Error("Invalid ML experiments response");
+                }
+                const experiments = expData.experiments;
                 const statExp = document.getElementById("ml-stat-experiments");
                 if (statExp) statExp.innerText = experiments.length;
 
@@ -3857,6 +3876,21 @@ const App = {
             }
         } catch (e) {
             console.error("fetchMLData error:", e);
+            const message = e && e.message ? e.message : String(e || "Unknown error");
+            const badge = document.getElementById("ml-breaker-badge");
+            if (badge) {
+                badge.className = "mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-amber-950 text-amber-300 border border-amber-800";
+                badge.innerText = "UNAVAILABLE";
+            }
+            const details = document.getElementById("ml-breaker-details");
+            if (details) details.innerText = `Refresh failed: ${message}`;
+            for (const id of ["ml-stat-models", "ml-stat-experiments"]) {
+                const el = document.getElementById(id);
+                if (el) el.innerText = "Unavailable";
+            }
+            const tbody = document.getElementById("ml-experiments-table-body");
+            if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-rose-300 text-xs">Unable to refresh ML experiments. Check your connection or sign-in, then retry. ${this._escapeHtml(message)}</td></tr>`;
+            this.showToast(`Failed to load ML dashboard data: ${message}`, "error");
         }
     },
 
