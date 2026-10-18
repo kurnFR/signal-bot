@@ -1011,3 +1011,41 @@ class TestWalletSettingsWithBirdeye(unittest.TestCase):
             wallets_save_settings(req)
             saved_settings = mock_save.call_args[0][0]
             self.assertEqual(saved_settings["birdeye_api_key"], "1234567890abcdef")
+
+
+class TestWalletTrackerPoolDiscoveryFallback(unittest.TestCase):
+    def test_empty_geckoterminal_result_uses_dexscreener_fallback(self):
+        from unittest.mock import MagicMock
+
+        primary = MagicMock()
+        primary.hot_pools.return_value = []
+        fallback = MagicMock()
+        pool = {"address": POOL, "name": "PEPE / WETH", "volume_24h_usd": 200000}
+        fallback.hot_pools.return_value = [pool]
+
+        pools, source = worker._discover_pools(
+            "eth", 4, primary, dexscreener_provider=fallback,
+        )
+
+        self.assertEqual(pools, [pool])
+        self.assertEqual(source, "DexScreener")
+        primary.hot_pools.assert_called_once_with("eth", 4)
+        fallback.hot_pools.assert_called_once_with("eth", 4)
+
+    def test_empty_geckoterminal_result_uses_database_fallback_when_needed(self):
+        from unittest.mock import MagicMock
+
+        primary = MagicMock()
+        primary.hot_pools.return_value = []
+        fallback = MagicMock()
+        fallback.hot_pools.return_value = []
+        pool = {"address": POOL, "name": "PEPE / WETH", "volume_24h_usd": 200000}
+
+        with patch.object(worker.store, "get_active_pools", return_value=[pool]) as get_active:
+            pools, source = worker._discover_pools(
+                "eth", 4, primary, dexscreener_provider=fallback,
+            )
+
+        self.assertEqual(pools, [pool])
+        self.assertEqual(source, "Database")
+        get_active.assert_called_once_with("eth", 4)
