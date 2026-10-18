@@ -289,6 +289,28 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("Number.isFinite(Number(diag.roc_auc))", renderer)
 
 
+    def test_ml_dashboard_validates_payloads_and_surfaces_refresh_failures(self):
+        fetch_start = self.app_js.index("    async fetchMLData() {")
+        fetch_end = self.app_js.index("    async ", fetch_start + 15)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        for expected in (
+            "if (!cbRes.ok) throw new Error",
+            "Invalid circuit-breaker response",
+            "if (!modelsRes.ok) throw new Error",
+            "Invalid ML models response",
+            "if (!expRes.ok) throw new Error",
+            "Invalid ML experiments response",
+            'badge.innerText = "UNAVAILABLE"',
+            'el.innerText = "Unavailable"',
+            "Unable to refresh ML experiments",
+            "this._escapeHtml(message)",
+        ):
+            self.assertIn(expected, fetcher)
+        validation_end = fetcher.index('throw new Error("Invalid ML experiments response")')
+        render_start = fetcher.index("const statExp = document.getElementById")
+        self.assertLess(validation_end, render_start)
+
+
     def test_toast_notifications_expose_accessible_live_regions(self):
         toast_start = self.app_js.index("    showToast(message, type = \"info\")")
         toast_end = self.app_js.index("\n    // ----------------------------------------------------", toast_start)
