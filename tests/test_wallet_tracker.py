@@ -258,6 +258,25 @@ class TestParsingAndValidation(unittest.TestCase):
         (pool,) = GeckoTerminalProvider._pools_from(payload)
         self.assertEqual(pool["base_token_address"], W1)
         self.assertEqual(pool["base_token_symbol"], "PEPE")
+    def test_pool_parser_skips_malformed_provider_records(self):
+        payload = {
+            "data": [
+                None,
+                {"attributes": None},
+                {"attributes": {"address": "0xpool", "volume_usd": "unexpected"}},
+                {"attributes": {"address": "0xvalid", "volume_usd": {"h24": "1200"}}},
+            ],
+            "included": [None, {"id": "eth_token", "attributes": None}],
+        }
+        pools = GeckoTerminalProvider._pools_from(payload)
+        self.assertEqual(len(pools), 2)
+        self.assertEqual(pools[0]["volume_24h_usd"], 0.0)
+        self.assertEqual(pools[1]["volume_24h_usd"], 1200.0)
+
+    def test_pool_parser_rejects_non_object_payload(self):
+        for payload in (None, [], "invalid", {"data": "not-a-list"}):
+            self.assertEqual(GeckoTerminalProvider._pools_from(payload), [])
+
     def test_parse_buy_uses_to_token(self):
         s = parse_trade("eth", POOL, "PEPE / WETH", dict(self.ATTRS))
         self.assertEqual(s["wallet"], "0x" + "a" * 40)    # lower-cased
