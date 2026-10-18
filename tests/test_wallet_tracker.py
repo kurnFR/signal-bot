@@ -834,6 +834,31 @@ class TestDexScreenerProvider(unittest.TestCase):
 
 
 class TestGeckoTerminalFastFailAndCache(unittest.TestCase):
+    def test_pool_trades_skips_malformed_provider_payloads(self):
+        from unittest.mock import MagicMock
+
+        provider = GeckoTerminalProvider(session=MagicMock())
+        pool = {"address": POOL, "name": "PEPE / WETH"}
+        for payload in (None, [], {"data": {}}, {"data": [None, "bad", {"attributes": []}]}):
+            with self.subTest(payload=payload), patch.object(provider, "_get", return_value=payload):
+                self.assertEqual(provider.pool_trades("eth", pool, 10000), [])
+
+    def test_pool_trades_keeps_valid_rows_when_other_rows_are_malformed(self):
+        from unittest.mock import MagicMock
+
+        provider = GeckoTerminalProvider(session=MagicMock())
+        pool = {"address": POOL, "name": "PEPE / WETH"}
+        attrs = {
+            "kind": "buy", "tx_from_address": W1, "volume_in_usd": "25000",
+            "block_timestamp": "2026-10-13T11:55:00Z", "tx_hash": "0xabc",
+            "to_token_amount": "5", "price_to_in_usd": "5000",
+        }
+        payload = {"data": [None, {"attributes": []}, {"attributes": attrs}]}
+        with patch.object(provider, "_get", return_value=payload):
+            swaps = provider.pool_trades("eth", pool, 10000)
+        self.assertEqual(len(swaps), 1)
+        self.assertEqual(swaps[0]["tx_hash"], "0xabc")
+
     def test_fast_fail_429_raises_immediately_without_sleeping(self):
         from unittest.mock import MagicMock
         import requests
