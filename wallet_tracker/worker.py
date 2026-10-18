@@ -229,6 +229,19 @@ def run_cycle(provider, fallback_provider=None, dexscreener_provider=None):
             errors.append(f"{network}: all pool discovery sources failed")
             continue
 
+        # When GeckoTerminal is rate-limited and no trade fallback is configured,
+        # do not immediately call its trade endpoint again just because discovery
+        # succeeded via cache/DexScreener/DB. Keep the cooldown effective for the
+        # whole provider path and continue scanning other networks.
+        if network_in_cooldown and fallback_provider is None:
+            logger.info(
+                "%s: skipping trade requests during GeckoTerminal cooldown; "
+                "configure Birdeye for trade ingestion during the cooldown",
+                network,
+            )
+            errors.append(f"{network}: GeckoTerminal cooldown; no trade fallback configured")
+            continue
+
         pool_requests = 0
         network_fallback_active = network_in_cooldown
         for pool in pools:

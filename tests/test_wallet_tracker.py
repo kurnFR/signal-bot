@@ -913,7 +913,9 @@ class TestMultiSourceDiscoveryAndFailover(unittest.TestCase):
             worker.run_cycle(gecko, dexscreener_provider=dexscreener)
 
         dexscreener.hot_pools.assert_called_once_with("eth", settings["pools_per_network"] * 2)
-        gecko.pool_trades.assert_called_once_with("eth", pool, settings["min_trade_usd"])
+        # Discovery can fall back to free sources, but trade requests must honor
+        # the active GeckoTerminal cooldown when Birdeye is not configured.
+        gecko.pool_trades.assert_not_called()
 
     def test_trade_fetch_fast_failover_to_birdeye(self):
         from unittest.mock import MagicMock
