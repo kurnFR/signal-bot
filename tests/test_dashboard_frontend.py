@@ -289,6 +289,18 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("Number.isFinite(Number(diag.roc_auc))", renderer)
 
 
+    def test_follow_wallet_validates_tracked_list_before_toggling(self):
+        fetch_start = self.app_js.index("    async followWallet(wallet, chain) {")
+        fetch_end = self.app_js.index("    async walletTrack(btn) {", fetch_start)
+        follow = self.app_js[fetch_start:fetch_end]
+        self.assertIn('!Array.isArray(payload.tracked)', follow)
+        self.assertIn('throw new Error("Invalid tracked-wallet response")', follow)
+        self.assertLess(follow.index('await getTrackedWallets()'), follow.index('"/api/wallets/tracked/toggle"'))
+        self.assertIn('this._wtUpdateFeedWalletSelect(await getTrackedWallets())', follow)
+        self.assertNotIn('(tracked.tracked || [])', follow)
+        self.assertNotIn('(refreshed.tracked || [])', follow)
+
+
     def test_ml_dashboard_validates_payloads_and_surfaces_refresh_failures(self):
         fetch_start = self.app_js.index("    async fetchMLData() {")
         fetch_end = self.app_js.index("    async ", fetch_start + 15)
