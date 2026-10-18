@@ -435,8 +435,14 @@ const App = {
                 throw new Error(detail);
             }
             const status = await statusRes.json();
-            const { signals } = await sigRes.json();
+            const signalsData = await sigRes.json();
             const stats = await statsRes.json();
+            if (!status || typeof status !== "object" || Array.isArray(status) ||
+                !signalsData || !Array.isArray(signalsData.signals) ||
+                !stats || typeof stats !== "object" || Array.isArray(stats)) {
+                throw new Error("Invalid Market Screener response");
+            }
+            const signals = signalsData.signals;
             this._renderScreenerStatus(status);
             this._renderScreenerKpis(stats);
             this._renderScreenerSignals(signals);
