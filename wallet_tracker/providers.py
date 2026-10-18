@@ -268,7 +268,16 @@ class GeckoTerminalProvider:
             fast_fail_429=self.fast_fail_429,
         )
         swaps = []
-        for item in (payload or {}).get("data", []) or []:
+        # Provider responses are external input: malformed top-level payloads
+        # and individual rows must not abort the worker's entire scan cycle.
+        if not isinstance(payload, dict):
+            return swaps
+        items = payload.get("data")
+        if not isinstance(items, list):
+            return swaps
+        for item in items:
+            if not isinstance(item, dict):
+                continue
             swap = parse_trade(network, pool["address"], pool["name"], item.get("attributes"))
             if swap and swap["usd_value"] >= min_trade_usd:
                 swaps.append(swap)
