@@ -434,6 +434,13 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('type="button"', toast)
         self.assertIn('window.matchMedia("(prefers-reduced-motion: reduce)").matches', toast)
         self.assertIn('if (reduceMotion) {\n                toast.remove();\n                return;\n            }', toast)
+        self.assertIn('let remainingMs = 4500;', toast)
+        self.assertIn('toast.addEventListener("mouseenter", pauseDismissTimer)', toast)
+        self.assertIn('toast.addEventListener("mouseleave", resumeDismissTimer)', toast)
+        self.assertIn('toast.addEventListener("focusin", pauseDismissTimer)', toast)
+        self.assertIn('toast.addEventListener("focusout", resumeDismissTimer)', toast)
+        self.assertIn('remainingMs = Math.max(0, remainingMs - (Date.now() - timerStartedAt));', toast)
+        self.assertIn('if (toast.matches(":hover") || toast.contains(document.activeElement)) return;', toast)
 
 
     def test_toast_dismiss_button_has_visible_keyboard_focus(self):
