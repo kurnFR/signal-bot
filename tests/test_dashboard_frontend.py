@@ -305,6 +305,26 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("Number.isFinite(Number(diag.roc_auc))", renderer)
 
 
+    def test_wallet_refresh_validates_all_payload_shapes_before_rendering(self):
+        fetch_start = self.app_js.index("    async fetchWalletData(opts = {}) {")
+        fetch_end = self.app_js.index("    async fetchWalletEvents(opts = {}) {", fetch_start)
+        fetcher = self.app_js[fetch_start:fetch_end]
+        for expected in (
+            "Invalid Wallet Tracker response",
+            "!validObject(status)",
+            "!Array.isArray(pos.positions)",
+            "!Array.isArray(flow.flows)",
+            "!Array.isArray(ev.events)",
+            "!Array.isArray(tracked.tracked)",
+        ):
+            self.assertIn(expected, fetcher)
+        validation_end = fetcher.index('throw new Error("Invalid Wallet Tracker response")')
+        render_start = fetcher.index("this._wtRenderStatus(status, tracked.tracked.length)")
+        self.assertLess(validation_end, render_start)
+        self.assertIn("Unable to refresh Wallet Tracking data", fetcher)
+        self.assertIn("this._escapeHtml(message)", fetcher)
+
+
     def test_follow_wallet_validates_tracked_list_before_toggling(self):
         fetch_start = self.app_js.index("    async followWallet(wallet, chain) {")
         fetch_end = self.app_js.index("    async walletTrack(btn) {", fetch_start)
