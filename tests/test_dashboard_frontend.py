@@ -449,6 +449,12 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
 
 
 
+    def test_reduced_motion_preference_disables_dashboard_css_motion(self):
+        self.assertIn("@media (prefers-reduced-motion: reduce)", self.dashboard_css)
+        self.assertIn("animation-duration: 0.01ms !important;", self.dashboard_css)
+        self.assertIn("transition-duration: 0.01ms !important;", self.dashboard_css)
+        self.assertIn("scroll-behavior: auto !important;", self.dashboard_css)
+
     def test_keyboard_focus_indicators_cover_interactive_controls(self):
         self.assertIn(":focus-visible", self.dashboard_css)
         self.assertIn("outline: 2px solid #38bdf8;", self.dashboard_css)
