@@ -559,3 +559,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_theme_tracks_system_changes_until_user_selects_a_theme(self):
+        theme_start = self.dashboard_enhancements_js.index("    function initTheme()")
+        theme_end = self.dashboard_enhancements_js.index("\n    if (document.readyState", theme_start)
+        theme_init = self.dashboard_enhancements_js[theme_start:theme_end]
+        self.assertIn('window.matchMedia("(prefers-color-scheme: light)")', theme_init)
+        self.assertIn('mediaQuery.addEventListener("change", onSystemThemeChange)', theme_init)
+        self.assertIn('mediaQuery.addListener(onSystemThemeChange)', theme_init)
+        self.assertIn("if (userOverride) return;", theme_init)
+        self.assertIn('if (saved === "light" || saved === "dark") return;', theme_init)
+        self.assertIn("applyTheme(systemPreference());", theme_init)
+        self.assertIn('button.addEventListener("click", () => { userOverride = true; });', theme_init)
+        self.assertIn("dashboard_enhancements.js?v=20261019-5", self.index_html)
