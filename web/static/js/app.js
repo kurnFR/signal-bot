@@ -2283,11 +2283,27 @@ const App = {
         });
     },
 
+    rememberModalReturnFocus(modal) {
+        const activeElement = document.activeElement;
+        if (activeElement && activeElement !== document.body && !modal.contains(activeElement)) {
+            modal._returnFocusElement = activeElement;
+        }
+    },
+
+    restoreModalReturnFocus(modal) {
+        const returnFocus = modal?._returnFocusElement;
+        if (modal) delete modal._returnFocusElement;
+        if (returnFocus && returnFocus.isConnected && !returnFocus.disabled) {
+            returnFocus.focus();
+        }
+    },
+
     openBackfillModal(symbol, market) {
         const modal = document.getElementById("backfill-modal");
         if (!modal) return;
         document.getElementById("modal-backfill-symbol").value = symbol || "BTCUSDT";
         document.getElementById("modal-backfill-market").value = market || "spot";
+        this.rememberModalReturnFocus(modal);
         modal.classList.remove("hidden");
         modal.classList.add("flex");
     },
@@ -2297,6 +2313,7 @@ const App = {
         if (modal) {
             modal.classList.add("hidden");
             modal.classList.remove("flex");
+            this.restoreModalReturnFocus(modal);
         }
     },
 
@@ -3786,6 +3803,7 @@ const App = {
         document.getElementById("deploy-modal-pair").innerText = `${sym} (${mkt.toUpperCase()} / ${tf})`;
         document.getElementById("deploy-modal-rank").innerText = rank ? `Rank #${rank} (Score: ${score || '-'})` : "Custom Model";
 
+        this.rememberModalReturnFocus(modal);
         modal.classList.remove("hidden");
         modal.classList.add("flex");
         if (window.lucide) window.lucide.createIcons();
@@ -3796,6 +3814,7 @@ const App = {
         if (modal) {
             modal.classList.add("hidden");
             modal.classList.remove("flex");
+            this.restoreModalReturnFocus(modal);
         }
     },
 
@@ -4075,7 +4094,8 @@ const App = {
     openRunMLModal() {
         const modal = document.getElementById("modal-run-ml");
         if (modal) {
-            modal.classList.remove("hidden");
+            this.rememberModalReturnFocus(modal);
+        modal.classList.remove("hidden");
             modal.classList.add("flex");
         }
     },
@@ -4085,6 +4105,7 @@ const App = {
         if (modal) {
             modal.classList.add("hidden");
             modal.classList.remove("flex");
+            this.restoreModalReturnFocus(modal);
         }
     },
 
@@ -4143,7 +4164,8 @@ const App = {
 
         const modal = document.getElementById("modal-deploy-ml");
         if (modal) {
-            modal.classList.remove("hidden");
+            this.rememberModalReturnFocus(modal);
+        modal.classList.remove("hidden");
             modal.classList.add("flex");
         }
     },
@@ -4153,6 +4175,7 @@ const App = {
         if (modal) {
             modal.classList.add("hidden");
             modal.classList.remove("flex");
+            this.restoreModalReturnFocus(modal);
         }
     },
 
@@ -4299,7 +4322,8 @@ const App = {
 
             const modal = document.getElementById("modal-inspect-ml");
             if (modal) {
-                modal.classList.remove("hidden");
+                this.rememberModalReturnFocus(modal);
+        modal.classList.remove("hidden");
                 modal.classList.add("flex");
             }
         } catch (e) {
@@ -4312,6 +4336,7 @@ const App = {
         if (modal) {
             modal.classList.add("hidden");
             modal.classList.remove("flex");
+            this.restoreModalReturnFocus(modal);
         }
     },
 };
