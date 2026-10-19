@@ -128,6 +128,8 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("!Array.isArray(positionsData.positions)", fetcher)
         self.assertIn("!validObject(rb2Stats)", fetcher)
         self.assertIn("!Array.isArray(rb2Stats.by_strategy)", fetcher)
+        self.assertIn('positionsData.positions.some(item => !item || typeof item !== "object" || Array.isArray(item))', fetcher)
+        self.assertIn('rb2Stats.by_strategy.some(item => !item || typeof item !== "object" || Array.isArray(item))', fetcher)
         validation_end = fetcher.index('throw new Error("Invalid Research Bots response")')
         render_start = fetcher.index("this._renderRb2Kpis(rb2Stats)")
         self.assertLess(validation_end, render_start)
