@@ -603,3 +603,10 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_login_error_message_is_announced_accessibly(self):
+        self.assertRegex(
+            self.index_html,
+            r'<div id="login-error-msg"[^>]*role="alert"[^>]*aria-live="assertive"[^>]*aria-atomic="true"',
+        )
