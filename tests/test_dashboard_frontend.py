@@ -600,5 +600,16 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             r'<div id="login-error-msg"[^>]*role="alert"[^>]*aria-live="assertive"[^>]*aria-atomic="true"',
         )
 
+
+    def test_login_error_is_described_by_both_credential_fields(self):
+        self.assertRegex(
+            self.index_html,
+            r'<input type="text" id="login-username"[^>]*aria-describedby="login-error-msg"',
+        )
+        self.assertRegex(
+            self.index_html,
+            r'<input type="password" id="login-password"[^>]*aria-describedby="login-error-msg"',
+        )
+
 if __name__ == "__main__":
     unittest.main()
