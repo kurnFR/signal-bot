@@ -733,3 +733,22 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWorkflowDialogAccessibility(unittest.TestCase):
+    def test_workflow_dialogs_have_dialog_semantics_and_accessible_names(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        dialogs = {
+            "backfill-modal": "Backfill historical data",
+            "deploy-modal": "Deploy strategy",
+            "modal-run-ml": "Run machine learning workflow",
+            "modal-deploy-ml": "Deploy machine learning workflow",
+            "modal-inspect-ml": "Inspect machine learning workflow",
+        }
+        for dialog_id, accessible_name in dialogs.items():
+            with self.subTest(dialog=dialog_id):
+                match = re.search(r'<div id="' + re.escape(dialog_id) + r'"[^>]*>', html)
+                self.assertIsNotNone(match, f"Missing workflow dialog: {dialog_id}")
+                self.assertIn('role="dialog"', match.group(0))
+                self.assertIn('aria-modal="true"', match.group(0))
+                self.assertIn(f'aria-label="{accessible_name}"', match.group(0))
