@@ -64,8 +64,15 @@
         if (!tbody) return;
         const rows = Array.from(tbody.rows);
         if (rows.length < 2) return;
-        rows.forEach((row, index) => {
-            if (row.dataset.originalIndex === undefined) row.dataset.originalIndex = String(index);
+        // Assign newly inserted rows indices after all existing rows to preserve stable tie order.
+        let nextOriginalIndex = rows.reduce((max, row) => {
+            const value = Number(row.dataset.originalIndex);
+            return Number.isFinite(value) ? Math.max(max, value) : max;
+        }, -1) + 1;
+        rows.forEach(row => {
+            if (row.dataset.originalIndex === undefined) {
+                row.dataset.originalIndex = String(nextOriginalIndex++);
+            }
         });
         rows.sort((ra, rb) => {
             const result = compareValues(rawCellValue(ra.cells[columnIndex]), rawCellValue(rb.cells[columnIndex]), direction);
