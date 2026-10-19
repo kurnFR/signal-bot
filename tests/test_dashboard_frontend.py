@@ -469,6 +469,12 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('saved === "light" || saved === "dark" ? saved : systemPreference()', theme_logic)
         self.assertIn("catch (_) {\n            return systemPreference();\n        }", theme_logic)
 
+    def test_dynamic_table_rows_keep_stable_sort_order(self):
+        self.assertIn("let nextOriginalIndex = rows.reduce((max, row) => {", self.dashboard_enhancements_js)
+        self.assertIn("Number.isFinite(value) ? Math.max(max, value) : max", self.dashboard_enhancements_js)
+        self.assertIn("row.dataset.originalIndex = String(nextOriginalIndex++);", self.dashboard_enhancements_js)
+        self.assertIn("Assign newly inserted rows indices after all existing rows", self.dashboard_enhancements_js)
+
     def test_sortable_tables_announce_sort_changes_to_screen_readers(self):
         self.assertIn('statusRegion.setAttribute("role", "status")', self.dashboard_enhancements_js)
         self.assertIn('statusRegion.setAttribute("aria-live", "polite")', self.dashboard_enhancements_js)
@@ -484,7 +490,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('table.caption.textContent.trim()', self.dashboard_enhancements_js)
         self.assertIn('table.dataset.label', self.dashboard_enhancements_js)
         self.assertIn('bar.setAttribute("aria-label", "Horizontal scroll for " + tableLabel)', self.dashboard_enhancements_js)
-        self.assertIn("dashboard_enhancements.js?v=20261019-6", self.index_html)
+        self.assertIn("dashboard_enhancements.js?v=20261019-7", self.index_html)
 
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
@@ -574,7 +580,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('document.addEventListener("click", event => {', theme_init)
         self.assertIn('event.target.closest("#dashboard-theme-toggle")', theme_init)
         self.assertNotIn('button.addEventListener("click", () => { userOverride = true; });', theme_init)
-        self.assertIn("dashboard_enhancements.js?v=20261019-6", self.index_html)
+        self.assertIn("dashboard_enhancements.js?v=20261019-7", self.index_html)
 
     def test_skip_link_bypasses_sidebar_navigation(self):
         self.assertIn('<a class="dashboard-skip-link" href="#main-content">Skip to main content</a>', self.index_html)
