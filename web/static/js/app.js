@@ -1302,6 +1302,31 @@ const App = {
         if (modal) {
             modal.classList.remove("hidden");
             modal.classList.add("flex");
+
+            // Keep keyboard navigation inside this modal until sign-in is complete.
+            if (modal.dataset.focusTrapInitialized !== "true") {
+                modal.addEventListener("keydown", (event) => {
+                    if (event.key !== "Tab") return;
+                    const focusable = Array.from(modal.querySelectorAll(
+                        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+                    )).filter((element) => !element.hidden && element.getClientRects().length > 0);
+                    if (focusable.length === 0) {
+                        event.preventDefault();
+                        return;
+                    }
+                    const first = focusable[0];
+                    const last = focusable[focusable.length - 1];
+                    if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
+                        event.preventDefault();
+                        last.focus();
+                    } else if (!event.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))) {
+                        event.preventDefault();
+                        first.focus();
+                    }
+                });
+                modal.dataset.focusTrapInitialized = "true";
+            }
+
             // Place keyboard focus at the start of the sign-in flow when it opens.
             document.getElementById("login-username")?.focus();
         }
