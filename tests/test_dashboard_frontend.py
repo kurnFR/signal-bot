@@ -463,6 +463,14 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
 
 
 
+    def test_theme_defaults_to_system_preference_without_overriding_saved_choice(self):
+        theme_start = self.dashboard_enhancements_js.index("    function systemPreference()")
+        theme_end = self.dashboard_enhancements_js.index("    function applyTheme(theme)", theme_start)
+        theme_logic = self.dashboard_enhancements_js[theme_start:theme_end]
+        self.assertIn('window.matchMedia("(prefers-color-scheme: light)")', theme_logic)
+        self.assertIn('saved === "light" || saved === "dark" ? saved : systemPreference()', theme_logic)
+        self.assertIn("catch (_) {\n            return systemPreference();\n        }", theme_logic)
+
     def test_horizontal_table_scroll_region_is_keyboard_accessible(self):
         self.assertIn('bar.setAttribute("role", "region")', self.dashboard_enhancements_js)
         self.assertIn('bar.setAttribute("tabindex", "0")', self.dashboard_enhancements_js)
@@ -470,7 +478,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('table.caption.textContent.trim()', self.dashboard_enhancements_js)
         self.assertIn('table.dataset.label', self.dashboard_enhancements_js)
         self.assertIn('bar.setAttribute("aria-label", "Horizontal scroll for " + tableLabel)', self.dashboard_enhancements_js)
-        self.assertIn("dashboard_enhancements.js?v=20261019-3", self.index_html)
+        self.assertIn("dashboard_enhancements.js?v=20261019-4", self.index_html)
 
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
