@@ -23,6 +23,7 @@ const App = {
     aiStrategyChatHistory: [],
     availableIndicators: [],
     strategyArchitectInitialized: false,
+    autoRefreshInProgress: false,
 
     async init() {
         this.bindEvents();
@@ -39,13 +40,19 @@ const App = {
         // 3. Switch to default view
         this.switchTab("home");
         
-        // Auto refresh telemetry & paper positions every 15s
-        setInterval(() => {
-            if (this.authToken) {
-                this.fetchSystemStatus();
-                if (this.currentTab === "paper") this.fetchPaperData();
-                if (this.currentTab === "market-screener") this.fetchScreenerData();
-                if (this.currentTab === "wallet-tracking") this.fetchWalletData({ silent: true });
+        // Keep slow API responses from spawning overlapping polling cycles.
+        setInterval(async () => {
+            if (!this.authToken || this.autoRefreshInProgress) return;
+            this.autoRefreshInProgress = true;
+            try {
+                await this.fetchSystemStatus();
+                if (this.currentTab === "paper") await this.fetchPaperData();
+                if (this.currentTab === "market-screener") await this.fetchScreenerData();
+                if (this.currentTab === "wallet-tracking") await this.fetchWalletData({ silent: true });
+            } catch (error) {
+                console.error("Dashboard auto-refresh failed", error);
+            } finally {
+                this.autoRefreshInProgress = false;
             }
         }, 15000);
     },
