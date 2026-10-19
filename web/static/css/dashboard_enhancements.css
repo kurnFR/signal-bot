@@ -12,6 +12,13 @@
     min-width: max-content;
 }
 
+/* The page disables accidental selection globally; keep dashboard table data copyable. */
+.dashboard-table-scroll td,
+.dashboard-table-scroll th {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
 .dashboard-sticky-head,
 .dashboard-sticky-head tr,
 .dashboard-sticky-head th {
