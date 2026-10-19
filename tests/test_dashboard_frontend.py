@@ -488,7 +488,10 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
 
     def test_keyboard_focus_indicators_cover_interactive_controls(self):
         self.assertIn(":focus-visible", self.dashboard_css)
-        self.assertIn("outline: 2px solid #38bdf8;", self.dashboard_css)
+        self.assertIn("outline: 2px solid var(--dashboard-focus, #38bdf8);", self.dashboard_css)
+        self.assertIn(':root[data-theme="light"]', self.dashboard_css)
+        self.assertIn("--dashboard-focus: #0369a1;", self.dashboard_css)
+        self.assertIn("--dashboard-focus: #38bdf8;", self.dashboard_css)
         self.assertIn("outline-offset: 2px;", self.dashboard_css)
         for control in ("button", "a", "input", "select", "textarea", "[tabindex]"):
             self.assertIn(control, self.dashboard_css)
