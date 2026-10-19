@@ -443,10 +443,14 @@ class BirdeyeProvider:
             params={"address": pool["address"], "offset": 0, "limit": 50,
                     "tx_type": "swap", "sort_type": "desc"},
         )
-        data = payload.get("data") or {}
-        items = data.get("items", []) if isinstance(data, dict) else []
+        data = payload.get("data")
+        items = data.get("items") if isinstance(data, dict) else None
+        # Provider envelopes are external input. Ignore malformed item
+        # containers instead of iterating dictionary keys or string characters.
+        if not isinstance(items, list):
+            items = []
         swaps = []
-        for item in items or []:
+        for item in items:
             swap = parse_birdeye_trade(network, pool, item)
             if swap and swap["usd_value"] >= float(min_trade_usd):
                 swaps.append(swap)
