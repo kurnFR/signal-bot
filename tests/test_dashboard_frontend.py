@@ -471,6 +471,13 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('saved === "light" || saved === "dark" ? saved : systemPreference()', theme_logic)
         self.assertIn("catch (_) {\n            return systemPreference();\n        }", theme_logic)
 
+    def test_dashboard_table_cells_remain_selectable_for_copying(self):
+        self.assertIn(".dashboard-table-scroll td,", self.dashboard_css)
+        self.assertIn(".dashboard-table-scroll th {", self.dashboard_css)
+        self.assertIn("-webkit-user-select: text;", self.dashboard_css)
+        self.assertIn("user-select: text;", self.dashboard_css)
+        self.assertIn("dashboard_enhancements.css?v=20261019-10", self.index_html)
+
     def test_dynamic_table_rows_keep_stable_sort_order(self):
         self.assertIn("let nextOriginalIndex = rows.reduce((max, row) => {", self.dashboard_enhancements_js)
         self.assertIn("Number.isFinite(value) ? Math.max(max, value) : max", self.dashboard_enhancements_js)
