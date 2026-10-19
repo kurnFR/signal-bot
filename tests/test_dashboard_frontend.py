@@ -211,6 +211,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         fetcher = self.app_js[fetcher_start:fetcher_end]
         self.assertIn('if (!res.ok) throw new Error(`HTTP ${res.status}`)', fetcher)
         self.assertIn('!Array.isArray(data.strategies)', fetcher)
+        self.assertIn('data.strategies.some(strategy => !strategy || typeof strategy !== "object" || Array.isArray(strategy))', fetcher)
         self.assertIn('this.strategiesList = []', fetcher)
         self.assertIn('this.selectedStrategy = null', fetcher)
         self.assertIn('this.updateStrategySelectors()', fetcher)
