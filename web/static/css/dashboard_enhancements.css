@@ -412,3 +412,29 @@
         transition-duration: 0.01ms !important;
     }
 }
+
+
+/* Let keyboard users bypass repeated sidebar navigation and land on the main workspace. */
+.dashboard-skip-link {
+    position: fixed;
+    top: 0.75rem;
+    left: 0.75rem;
+    z-index: 100;
+    transform: translateY(calc(-100% - 1rem));
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--dashboard-focus, #38bdf8);
+    border-radius: 0.5rem;
+    background: var(--dashboard-surface, #0c1222);
+    color: var(--dashboard-text, #e2e8f0);
+    font-size: 0.875rem;
+    font-weight: 700;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+}
+
+.dashboard-skip-link:focus {
+    transform: translateY(0);
+}
+
+#main-content:focus {
+    outline: none;
+}
