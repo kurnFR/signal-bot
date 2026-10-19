@@ -93,7 +93,7 @@ const App = {
             container.style.cssText = [
                 "position:fixed", "top:1rem", "right:1rem", "z-index:9999",
                 "display:flex", "flex-direction:column", "gap:0.5rem",
-                "max-width:22rem", "pointer-events:none",
+                "width:calc(100vw - 2rem)", "max-width:22rem", "box-sizing:border-box", "pointer-events:none",
             ].join(";");
             document.body.appendChild(container);
         }
