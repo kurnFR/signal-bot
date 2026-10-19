@@ -464,6 +464,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         for control in ("button", "a", "input", "select", "textarea", "[tabindex]"):
             self.assertIn(control, self.dashboard_css)
 
+    def test_escape_dismisses_visible_workflow_dialogs_without_bypassing_login(self):
+        escape_handler = self.app_js[self.app_js.index('document.addEventListener("keydown", (event) => {', self.app_js.index("window.App = App;")):]
+        self.assertIn('if (event.key !== "Escape") return;', escape_handler)
+        self.assertIn('["modal-inspect-ml", "closeInspectMLModal"]', escape_handler)
+        self.assertIn('["modal-deploy-ml", "closeDeployMLModal"]', escape_handler)
+        self.assertIn('["modal-run-ml", "closeRunMLModal"]', escape_handler)
+        self.assertIn('["deploy-modal", "closeDeployModal"]', escape_handler)
+        self.assertIn('["backfill-modal", "closeBackfillModal"]', escape_handler)
+        self.assertIn('modal && !modal.classList.contains("hidden")', escape_handler)
+        self.assertNotIn('"login-modal"', escape_handler)
+
     def test_modal_dialogs_have_accessible_names_and_modal_semantics(self):
         for modal_id, title_id in (
             ("login-modal", "login-modal-title"),
