@@ -4250,5 +4250,26 @@ const App = {
 };
 
 window.App = App;
+
+// Allow Escape to dismiss the topmost visible workflow dialog. Keep the login
+// modal excluded so the keyboard cannot bypass the authentication flow.
+document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const dismissibleModals = [
+        ["modal-inspect-ml", "closeInspectMLModal"],
+        ["modal-deploy-ml", "closeDeployMLModal"],
+        ["modal-run-ml", "closeRunMLModal"],
+        ["deploy-modal", "closeDeployModal"],
+        ["backfill-modal", "closeBackfillModal"],
+    ];
+    for (const [modalId, closeMethod] of dismissibleModals) {
+        const modal = document.getElementById(modalId);
+        if (modal && !modal.classList.contains("hidden")) {
+            App[closeMethod]();
+            event.preventDefault();
+            return;
+        }
+    }
+});
 document.addEventListener("DOMContentLoaded", () => App.init());
 
