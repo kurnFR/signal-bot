@@ -557,6 +557,26 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('aria-label="Close ML inspection dialog"', self.index_html)
 
 
+    def test_theme_tracks_system_changes_until_user_selects_a_theme(self):
+        theme_start = self.dashboard_enhancements_js.index("    function initTheme()")
+        theme_end = self.dashboard_enhancements_js.index("\n    if (document.readyState", theme_start)
+        theme_init = self.dashboard_enhancements_js[theme_start:theme_end]
+        self.assertIn('window.matchMedia && window.matchMedia("(prefers-color-scheme: light)")', theme_init)
+        self.assertIn('mediaQuery.addEventListener("change", onSystemThemeChange)', theme_init)
+        self.assertIn('mediaQuery.addListener(onSystemThemeChange)', theme_init)
+        self.assertIn("if (userOverride) return;", theme_init)
+        self.assertIn('if (saved === "light" || saved === "dark") return;', theme_init)
+        self.assertIn("applyTheme(systemPreference());", theme_init)
+        self.assertIn('button.addEventListener("click", () => { userOverride = true; });', theme_init)
+        self.assertIn("dashboard_enhancements.js?v=20261019-5", self.index_html)
+
+    def test_skip_link_bypasses_sidebar_navigation(self):
+        self.assertIn('<a class="dashboard-skip-link" href="#main-content">Skip to main content</a>', self.index_html)
+        self.assertIn('<main id="main-content" tabindex="-1"', self.index_html)
+        self.assertIn(".dashboard-skip-link:focus", self.dashboard_css)
+        self.assertIn("transform: translateY(0);", self.dashboard_css)
+        self.assertIn("dashboard_enhancements.css?v=20261019-7", self.index_html)
+
 if __name__ == "__main__":
     unittest.main()
 
