@@ -651,6 +651,18 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         )
 
 
+    def test_workflow_modals_close_on_backdrop_click_without_closing_from_panel_clicks(self):
+        start = self.app_js.index('// Allow clicks on the backdrop (not the dialog panel) to dismiss workflow dialogs.')
+        end = self.app_js.index('// Allow Escape to dismiss the topmost visible workflow dialog.', start)
+        backdrop_handler = self.app_js[start:end]
+        self.assertIn('document.addEventListener("click", (event) => {', backdrop_handler)
+        self.assertIn('event.target === modal', backdrop_handler)
+        self.assertIn('!modal.classList.contains("hidden")', backdrop_handler)
+        self.assertIn('App[closeMethod]();', backdrop_handler)
+        for modal_id in ("modal-inspect-ml", "modal-deploy-ml", "modal-run-ml", "deploy-modal", "backfill-modal"):
+            self.assertIn(f'["{modal_id}",', backdrop_handler)
+        self.assertIn("app.js?v=20261019-24", self.index_html)
+
     def test_workflow_modals_restore_focus_to_the_opening_control(self):
         self.assertIn("rememberModalReturnFocus(modal)", self.app_js)
         self.assertIn("modal._returnFocusElement = activeElement", self.app_js)
@@ -664,7 +676,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             start = self.app_js.index(f"    {close_method} {{")
             end = self.app_js.index("\n    },", start)
             self.assertIn("this.restoreModalReturnFocus(modal)", self.app_js[start:end])
-        self.assertIn("app.js?v=20261019-23", self.index_html)
+        self.assertIn("app.js?v=20261019-24", self.index_html)
 
     def test_workflow_modals_trap_tab_and_focus_an_initial_control(self):
         self.assertIn("getModalFocusableElements(modal)", self.app_js)
@@ -675,7 +687,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("first.focus()", self.app_js)
         self.assertIn("this.focusModalInitialControl(modal)", self.app_js)
         self.assertIn('modal.dataset.focusTrapInitialized = "1"', self.app_js)
-        self.assertIn("app.js?v=20261019-23", self.index_html)
+        self.assertIn("app.js?v=20261019-24", self.index_html)
 
     def test_login_modal_places_focus_on_username_when_opened(self):
         start = self.app_js.index("    showLoginModal()")
