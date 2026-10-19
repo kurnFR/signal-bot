@@ -611,5 +611,13 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             r'<input type="password" id="login-password"[^>]*aria-describedby="login-error-msg"',
         )
 
+
+    def test_login_modal_places_focus_on_username_when_opened(self):
+        start = self.app_js.index("    showLoginModal()")
+        end = self.app_js.index("    hideLoginModal()", start)
+        show_modal = self.app_js[start:end]
+        self.assertIn('modal.classList.remove("hidden")', show_modal)
+        self.assertIn('document.getElementById("login-username")?.focus()', show_modal)
+
 if __name__ == "__main__":
     unittest.main()
