@@ -461,8 +461,6 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("body > aside > div:last-child {", self.dashboard_css)
         self.assertIn("dashboard_enhancements.css?v=20261019-8", self.index_html)
 
-
-
     def test_theme_defaults_to_system_preference_without_overriding_saved_choice(self):
         theme_start = self.dashboard_enhancements_js.index("    function systemPreference()")
         theme_end = self.dashboard_enhancements_js.index("    function applyTheme(theme)", theme_start)
@@ -488,8 +486,6 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("min-height: 2.5rem;", self.dashboard_css)
         self.assertIn("flex: 1 1 100%;", self.dashboard_css)
         self.assertIn("dashboard_enhancements.css?v=20261019-8", self.index_html)
-
-
 
     def test_reduced_motion_preference_disables_dashboard_css_motion(self):
         self.assertIn("@media (prefers-reduced-motion: reduce)", self.dashboard_css)
@@ -580,9 +576,6 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
     def test_dashboard_navigation_has_accessible_landmark_name(self):
         self.assertIn('<nav aria-label="Dashboard sections"', self.index_html)
 
-
-
-
     def test_login_fields_have_accessible_labels_and_password_manager_hints(self):
         self.assertRegex(
             self.index_html,
@@ -601,12 +594,11 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             r'<input type="password" id="login-password"[^>]*name="password"[^>]*autocomplete="current-password"[^>]*required',
         )
 
-if __name__ == "__main__":
-    unittest.main()
-
-
     def test_login_error_message_is_announced_accessibly(self):
         self.assertRegex(
             self.index_html,
             r'<div id="login-error-msg"[^>]*role="alert"[^>]*aria-live="assertive"[^>]*aria-atomic="true"',
         )
+
+if __name__ == "__main__":
+    unittest.main()
