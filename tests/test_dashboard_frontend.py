@@ -649,6 +649,8 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("new MutationObserver(() => {", init_theme)
         self.assertIn('if (!document.getElementById("dashboard-theme-toggle")) mountToggle();', init_theme)
         self.assertIn('sidebarObserver.observe(document.body, { childList: true, subtree: true });', init_theme)
+        self.assertIn('event.target.closest("#dashboard-theme-toggle")', init_theme)
+        self.assertNotIn('button.addEventListener("click", () => { userOverride = true; });', init_theme)
         self.assertIn("function mountToggle()", self.dashboard_enhancements_js)
         self.assertIn("applyTheme(root.dataset.theme || readPreference());", self.dashboard_enhancements_js)
 
