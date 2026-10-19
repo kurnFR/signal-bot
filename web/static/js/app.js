@@ -87,9 +87,6 @@ const App = {
         if (!container) {
             container = document.createElement("div");
             container.id = "toast-container";
-            container.setAttribute("aria-live", "polite");
-            container.setAttribute("aria-relevant", "additions text");
-            container.setAttribute("aria-atomic", "false");
             container.style.cssText = [
                 "position:fixed", "top:1rem", "right:1rem", "z-index:9999",
                 "display:flex", "flex-direction:column", "gap:0.5rem",
