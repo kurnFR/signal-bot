@@ -71,6 +71,10 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('this._escapeHtml(message)', fetcher)
         self.assertIn('colspan="10"', fetcher)
         self.assertIn("Unable to refresh Market Screener data", fetcher)
+        self.assertIn('signalsData.signals.some(signal => !signal || typeof signal !== "object" || Array.isArray(signal))', fetcher)
+        validation_end = fetcher.index('throw new Error("Invalid Market Screener response")')
+        render_start = fetcher.index("this._renderScreenerStatus(status)")
+        self.assertLess(validation_end, render_start)
 
 
     def test_wallet_settings_save_success_is_not_overwritten_by_refresh_failure(self):
