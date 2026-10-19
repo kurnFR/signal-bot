@@ -149,7 +149,8 @@ const App = {
             dismissTimer = setTimeout(remove, remainingMs);
         };
         const resumeDismissTimer = () => {
-            if (document.hidden || toast.matches(":hover") || toast.contains(document.activeElement)) return;
+            if (document.hidden) return;
+            if (toast.matches(":hover") || toast.contains(document.activeElement)) return;
             scheduleDismiss();
         };
         const handleVisibilityChange = () => {
