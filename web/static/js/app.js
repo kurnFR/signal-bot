@@ -120,7 +120,7 @@ const App = {
         toast.innerHTML = `
             <i data-lucide="${style.icon}" style="width:16px;height:16px;flex-shrink:0;margin-top:1px;color:${style.iconColor}"></i>
             <span style="flex:1;line-height:1.35;word-break:break-word;">${this._escapeHtml(message)}</span>
-            <button type="button" style="background:none;border:none;color:#64748b;cursor:pointer;line-height:1;font-size:0.9rem;padding:0 0 0 0.25rem;" aria-label="Dismiss">&times;</button>
+            <button type="button" style="background:none;border:none;color:#64748b;cursor:pointer;line-height:1;font-size:0.9rem;padding:0 0 0 0.25rem;min-width:24px;min-height:24px;display:flex;align-items:center;justify-content:center;" aria-label="Dismiss">&times;</button>
         `;
         if (reduceMotion) {
             toast.style.transition = "none";

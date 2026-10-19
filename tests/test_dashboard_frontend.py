@@ -422,6 +422,8 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('toast.setAttribute("role", type === "error" ? "alert" : "status")', toast)
         self.assertIn('toast.setAttribute("aria-atomic", "true")', toast)
         self.assertIn('aria-label="Dismiss"', toast)
+        self.assertIn("min-width:24px;min-height:24px;", toast)
+        self.assertIn("display:flex;align-items:center;justify-content:center;", toast)
         self.assertIn('type="button"', toast)
         self.assertIn('window.matchMedia("(prefers-reduced-motion: reduce)").matches', toast)
         self.assertIn('if (reduceMotion) {\n                toast.remove();\n                return;\n            }', toast)
