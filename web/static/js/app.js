@@ -134,17 +134,48 @@ const App = {
             if (!reduceMotion) toast.style.transform = "translateX(0)";
         });
 
+        let dismissTimer = null;
+        let removalTimer = null;
+        let remainingMs = 4500;
+        let timerStartedAt = 0;
+        let removing = false;
+
+        const pauseDismissTimer = () => {
+            if (dismissTimer === null) return;
+            clearTimeout(dismissTimer);
+            dismissTimer = null;
+            remainingMs = Math.max(0, remainingMs - (Date.now() - timerStartedAt));
+        };
+        const scheduleDismiss = () => {
+            if (removing || dismissTimer !== null) return;
+            timerStartedAt = Date.now();
+            dismissTimer = setTimeout(remove, remainingMs);
+        };
+        const resumeDismissTimer = () => {
+            if (toast.matches(":hover") || toast.contains(document.activeElement)) return;
+            scheduleDismiss();
+        };
         const remove = () => {
+            if (removing) return;
+            removing = true;
+            if (dismissTimer !== null) clearTimeout(dismissTimer);
+            if (removalTimer !== null) clearTimeout(removalTimer);
+            dismissTimer = null;
             if (reduceMotion) {
                 toast.remove();
                 return;
             }
             toast.style.opacity = "0";
             toast.style.transform = "translateX(1rem)";
-            setTimeout(() => toast.remove(), 200);
+            removalTimer = setTimeout(() => toast.remove(), 200);
         };
+
         toast.querySelector("button").addEventListener("click", remove);
-        setTimeout(remove, 4500);
+        toast.addEventListener("mouseenter", pauseDismissTimer);
+        toast.addEventListener("mouseleave", resumeDismissTimer);
+        toast.addEventListener("focusin", pauseDismissTimer);
+        toast.addEventListener("focusout", resumeDismissTimer);
+        scheduleDismiss();
     },
 
     // ----------------------------------------------------
