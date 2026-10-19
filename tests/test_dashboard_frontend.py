@@ -605,6 +605,13 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("@media (forced-colors: active)", self.index_html)
         self.assertIn("outline-color: Highlight !important;", self.index_html)
 
+    def test_reduced_motion_preference_disables_nonessential_css_motion(self):
+        self.assertIn("@media (prefers-reduced-motion: reduce)", self.index_html)
+        self.assertIn("scroll-behavior: auto !important;", self.index_html)
+        self.assertIn("animation-duration: 0.01ms !important;", self.index_html)
+        self.assertIn("animation-iteration-count: 1 !important;", self.index_html)
+        self.assertIn("transition-duration: 0.01ms !important;", self.index_html)
+
     def test_dashboard_navigation_has_accessible_landmark_name(self):
         self.assertIn('<nav aria-label="Dashboard sections"', self.index_html)
 
