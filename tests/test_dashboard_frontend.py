@@ -463,6 +463,14 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
 
 
 
+    def test_theme_defaults_to_system_preference_without_overriding_saved_choice(self):
+        theme_start = self.dashboard_enhancements_js.index("    function systemPreference()")
+        theme_end = self.dashboard_enhancements_js.index("    function applyTheme(theme)", theme_start)
+        theme_logic = self.dashboard_enhancements_js[theme_start:theme_end]
+        self.assertIn('window.matchMedia("(prefers-color-scheme: light)")', theme_logic)
+        self.assertIn('saved === "light" || saved === "dark" ? saved : systemPreference()', theme_logic)
+        self.assertIn("catch (_) {\n            return systemPreference();\n        }", theme_logic)
+
     def test_horizontal_table_scroll_region_is_keyboard_accessible(self):
         self.assertIn('bar.setAttribute("role", "region")', self.dashboard_enhancements_js)
         self.assertIn('bar.setAttribute("tabindex", "0")', self.dashboard_enhancements_js)
