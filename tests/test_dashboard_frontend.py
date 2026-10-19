@@ -581,8 +581,6 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('<nav aria-label="Dashboard sections"', self.index_html)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
     def test_login_fields_have_accessible_labels_and_password_manager_hints(self):
@@ -602,3 +600,6 @@ if __name__ == "__main__":
             self.index_html,
             r'<input type="password" id="login-password"[^>]*name="password"[^>]*autocomplete="current-password"[^>]*required',
         )
+
+if __name__ == "__main__":
+    unittest.main()
