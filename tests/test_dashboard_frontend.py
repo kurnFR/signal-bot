@@ -73,6 +73,18 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("Unable to refresh Market Screener data", fetcher)
 
 
+    def test_wallet_settings_save_success_is_not_overwritten_by_refresh_failure(self):
+        fetch_start = self.app_js.index("    async saveWalletSettings() {")
+        fetch_end = self.app_js.index("    async fetchWalletData(opts = {}) {", fetch_start)
+        saver = self.app_js[fetch_start:fetch_end]
+        self.assertIn('throw new Error("Invalid Wallet Tracker settings save response")', saver)
+        self.assertIn('this._wtSettingsLoaded = false', saver)
+        self.assertIn('Settings saved, but status refresh failed:', saver)
+        self.assertIn('this._wtRenderStatus(scannerStatus, tracked.tracked.length)', saver)
+        self.assertLess(saver.index('this.showToast("Wallet scanner settings saved", "success")'),
+                        saver.index('Settings saved, but status refresh failed:'))
+
+
     def test_wallet_settings_validates_optional_array_fields_before_mutating_controls(self):
         fetch_start = self.app_js.index("    async _wtLoadSettings() {")
         fetch_end = self.app_js.index("    async saveWalletSettings() {", fetch_start)
