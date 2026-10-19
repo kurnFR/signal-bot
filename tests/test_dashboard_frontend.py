@@ -648,7 +648,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             "closeDeployModal()", "closeInspectMLModal()",
         ):
             start = self.app_js.index(f"    {close_method} {{")
-            end = self.app_js.index("\\n    },", start)
+            end = self.app_js.index("\n    },", start)
             self.assertIn("this.restoreModalReturnFocus(modal)", self.app_js[start:end])
         self.assertIn("app.js?v=20261019-22", self.index_html)
 
