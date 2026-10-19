@@ -563,7 +563,9 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("if (userOverride) return;", theme_init)
         self.assertIn('if (saved === "light" || saved === "dark") return;', theme_init)
         self.assertIn("applyTheme(systemPreference());", theme_init)
-        self.assertIn('button.addEventListener("click", () => { userOverride = true; });', theme_init)
+        self.assertIn('document.addEventListener("click", event => {', theme_init)
+        self.assertIn('event.target.closest("#dashboard-theme-toggle")', theme_init)
+        self.assertNotIn('button.addEventListener("click", () => { userOverride = true; });', theme_init)
         self.assertIn("dashboard_enhancements.js?v=20261019-5", self.index_html)
 
     def test_skip_link_bypasses_sidebar_navigation(self):
