@@ -637,6 +637,21 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         )
 
 
+    def test_workflow_modals_restore_focus_to_the_opening_control(self):
+        self.assertIn("rememberModalReturnFocus(modal)", self.app_js)
+        self.assertIn("modal._returnFocusElement = activeElement", self.app_js)
+        self.assertIn("const returnFocus = modal?._returnFocusElement", self.app_js)
+        self.assertIn("returnFocus.isConnected && !returnFocus.disabled", self.app_js)
+        self.assertIn("returnFocus.focus()", self.app_js)
+        for close_method in (
+            "closeBackfillModal()", "closeRunMLModal()", "closeDeployMLModal()",
+            "closeDeployModal()", "closeInspectMLModal()",
+        ):
+            start = self.app_js.index(f"    {close_method} {{")
+            end = self.app_js.index("\\n    },", start)
+            self.assertIn("this.restoreModalReturnFocus(modal)", self.app_js[start:end])
+        self.assertIn("app.js?v=20261019-22", self.index_html)
+
     def test_login_modal_places_focus_on_username_when_opened(self):
         start = self.app_js.index("    showLoginModal()")
         end = self.app_js.index("    hideLoginModal()", start)
