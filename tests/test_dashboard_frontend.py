@@ -418,6 +418,9 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         toast_end = self.app_js.index("\n    // ----------------------------------------------------", toast_start)
         toast = self.app_js[toast_start:toast_end]
         self.assertIn('container.setAttribute("aria-live", "polite")', toast)
+        self.assertIn('"width:calc(100vw - 2rem)"', toast)
+        self.assertIn('"max-width:22rem"', toast)
+        self.assertIn('"box-sizing:border-box"', toast)
         self.assertIn('container.setAttribute("aria-relevant", "additions text")', toast)
         self.assertIn('toast.setAttribute("role", type === "error" ? "alert" : "status")', toast)
         self.assertIn('toast.setAttribute("aria-atomic", "true")', toast)
