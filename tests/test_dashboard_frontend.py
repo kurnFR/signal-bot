@@ -464,6 +464,20 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         for control in ("button", "a", "input", "select", "textarea", "[tabindex]"):
             self.assertIn(control, self.dashboard_css)
 
+    def test_modal_dialogs_have_accessible_names_and_modal_semantics(self):
+        for modal_id, title_id in (
+            ("login-modal", "login-modal-title"),
+            ("backfill-modal", "backfill-modal-title"),
+            ("deploy-modal", "deploy-modal-title"),
+            ("modal-run-ml", "modal-run-ml-title"),
+            ("modal-deploy-ml", "modal-deploy-ml-title"),
+            ("modal-inspect-ml", "inspect-ml-title"),
+        ):
+            self.assertIn(f'id="{modal_id}"', self.index_html)
+            self.assertIn(f'aria-labelledby="{title_id}"', self.index_html)
+            self.assertIn(f'id="{title_id}"', self.index_html)
+        self.assertEqual(self.index_html.count('role="dialog" aria-modal="true"'), 6)
+
     def test_icon_only_dashboard_buttons_have_accessible_names(self):
         self.assertIn('aria-label="Search cryptocurrency"', self.index_html)
         self.assertIn('aria-label="Close backfill dialog"', self.index_html)
