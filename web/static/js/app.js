@@ -669,9 +669,13 @@ const App = {
             const validObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
             if (!validObject(status) ||
                 !validObject(pos) || !Array.isArray(pos.positions) ||
+                pos.positions.some(item => !item || typeof item !== "object" || Array.isArray(item)) ||
                 !validObject(flow) || !Array.isArray(flow.flows) ||
+                flow.flows.some(item => !item || typeof item !== "object" || Array.isArray(item)) ||
                 !validObject(ev) || !Array.isArray(ev.events) ||
-                !validObject(tracked) || !Array.isArray(tracked.tracked)) {
+                ev.events.some(item => !item || typeof item !== "object" || Array.isArray(item)) ||
+                !validObject(tracked) || !Array.isArray(tracked.tracked) ||
+                tracked.tracked.some(item => !item || typeof item !== "object" || Array.isArray(item))) {
                 throw new Error("Invalid Wallet Tracker response");
             }
             this._wtRenderStatus(status, tracked.tracked.length);
@@ -715,6 +719,10 @@ const App = {
         if (feedSide) evQs.set("side", feedSide);
         try {
             const ev = await this._wtGet(`/api/wallets/events?${evQs}`);
+            if (!ev || typeof ev !== "object" || Array.isArray(ev) || !Array.isArray(ev.events) ||
+                ev.events.some(item => !item || typeof item !== "object" || Array.isArray(item))) {
+                throw new Error("Invalid Wallet Tracker events response");
+            }
             this._wtRenderFeed(ev.events);
         } catch (e) {
             const message = e && e.message ? e.message : String(e || "Unknown error");
