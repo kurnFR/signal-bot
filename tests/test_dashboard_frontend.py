@@ -619,6 +619,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('modal.classList.remove("hidden")', show_modal)
         self.assertIn('document.getElementById("login-username")?.focus()', show_modal)
 
+    def test_login_modal_remembers_and_restores_invoking_control_focus(self):
+        start = self.app_js.index("    showLoginModal()")
+        end = self.app_js.index("    async handleLogin()", start)
+        modal_methods = self.app_js[start:end]
+        self.assertIn("this.loginModalReturnFocus = activeElement", modal_methods)
+        self.assertIn("activeElement !== document.body", modal_methods)
+        self.assertIn("const returnFocus = this.loginModalReturnFocus", modal_methods)
+        self.assertIn("returnFocus.isConnected && !returnFocus.disabled", modal_methods)
+        self.assertIn("returnFocus.focus()", modal_methods)
+        self.assertIn("this.loginModalReturnFocus = null", modal_methods)
+
     def test_login_modal_traps_keyboard_focus_until_closed(self):
         start = self.app_js.index("    showLoginModal()")
         end = self.app_js.index("    hideLoginModal()", start)
