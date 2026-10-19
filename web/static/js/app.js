@@ -1302,6 +1302,8 @@ const App = {
         if (modal) {
             modal.classList.remove("hidden");
             modal.classList.add("flex");
+            // Place keyboard focus at the start of the sign-in flow when it opens.
+            document.getElementById("login-username")?.focus();
         }
     },
 
