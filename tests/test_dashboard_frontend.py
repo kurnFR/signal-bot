@@ -461,7 +461,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("body > aside nav .nav-btn {", self.dashboard_css)
         self.assertIn("min-height: 2.75rem;", self.dashboard_css)
         self.assertIn("body > aside > div:last-child {", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-9", self.index_html)
+        self.assertIn("dashboard_enhancements.css?v=20261019-10", self.index_html)
 
     def test_theme_defaults_to_system_preference_without_overriding_saved_choice(self):
         theme_start = self.dashboard_enhancements_js.index("    function systemPreference()")
@@ -508,7 +508,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("overscroll-behavior-x: contain;", self.dashboard_css)
         self.assertIn("min-height: 2.5rem;", self.dashboard_css)
         self.assertIn("flex: 1 1 100%;", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-9", self.index_html)
+        self.assertIn("dashboard_enhancements.css?v=20261019-10", self.index_html)
 
     def test_reduced_motion_preference_disables_dashboard_css_motion(self):
         self.assertIn("@media (prefers-reduced-motion: reduce)", self.dashboard_css)
@@ -596,7 +596,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('<main id="main-content" tabindex="-1"', self.index_html)
         self.assertIn(".dashboard-skip-link:focus", self.dashboard_css)
         self.assertIn("transform: translateY(0);", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-9", self.index_html)
+        self.assertIn("dashboard_enhancements.css?v=20261019-10", self.index_html)
 
     def test_dashboard_navigation_has_accessible_landmark_name(self):
         self.assertIn('<nav aria-label="Dashboard sections"', self.index_html)
