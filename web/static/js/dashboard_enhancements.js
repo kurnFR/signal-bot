@@ -317,6 +317,36 @@
     function initTheme() {
         applyTheme(readPreference());
         mountToggle();
+
+        // Follow OS theme changes only while the user has not chosen a theme.
+        let userOverride = false;
+        let mediaQuery;
+        try {
+            mediaQuery = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)");
+        } catch (_) {
+            mediaQuery = null;
+        }
+        if (mediaQuery) {
+            const onSystemThemeChange = () => {
+                if (userOverride) return;
+                try {
+                    const saved = window.localStorage.getItem(STORAGE_KEY);
+                    if (saved === "light" || saved === "dark") return;
+                } catch (_) {
+                    // If storage is unavailable, an in-session toggle still takes precedence.
+                }
+                applyTheme(systemPreference());
+            };
+            if (typeof mediaQuery.addEventListener === "function") {
+                mediaQuery.addEventListener("change", onSystemThemeChange);
+            } else if (typeof mediaQuery.addListener === "function") {
+                mediaQuery.addListener(onSystemThemeChange);
+            }
+            const button = document.getElementById("dashboard-theme-toggle");
+            if (button) {
+                button.addEventListener("click", () => { userOverride = true; });
+            }
+        }
     }
 
     if (document.readyState === "loading") {
