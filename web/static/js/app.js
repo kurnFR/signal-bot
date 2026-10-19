@@ -2346,8 +2346,8 @@ const App = {
         this.rememberModalReturnFocus(modal);
         modal.classList.remove("hidden");
         modal.classList.add("flex");
-            this.initializeModalFocusTrap(modal);
-            this.focusModalInitialControl(modal);
+        this.initializeModalFocusTrap(modal);
+        this.focusModalInitialControl(modal);
     },
 
     closeBackfillModal() {
@@ -3848,8 +3848,8 @@ const App = {
         this.rememberModalReturnFocus(modal);
         modal.classList.remove("hidden");
         modal.classList.add("flex");
-            this.initializeModalFocusTrap(modal);
-            this.focusModalInitialControl(modal);
+        this.initializeModalFocusTrap(modal);
+        this.focusModalInitialControl(modal);
         if (window.lucide) window.lucide.createIcons();
     },
 
@@ -4141,8 +4141,8 @@ const App = {
             this.rememberModalReturnFocus(modal);
             modal.classList.remove("hidden");
             modal.classList.add("flex");
-            this.initializeModalFocusTrap(modal);
-            this.focusModalInitialControl(modal);
+        this.initializeModalFocusTrap(modal);
+        this.focusModalInitialControl(modal);
         }
     },
 
@@ -4213,8 +4213,8 @@ const App = {
             this.rememberModalReturnFocus(modal);
             modal.classList.remove("hidden");
             modal.classList.add("flex");
-            this.initializeModalFocusTrap(modal);
-            this.focusModalInitialControl(modal);
+        this.initializeModalFocusTrap(modal);
+        this.focusModalInitialControl(modal);
         }
     },
 
@@ -4371,7 +4371,7 @@ const App = {
             const modal = document.getElementById("modal-inspect-ml");
             if (modal) {
                 this.rememberModalReturnFocus(modal);
-        modal.classList.remove("hidden");
+                modal.classList.remove("hidden");
                 modal.classList.add("flex");
                 this.initializeModalFocusTrap(modal);
                 this.focusModalInitialControl(modal);
