@@ -642,5 +642,15 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('last.focus();', show_modal)
         self.assertIn('first.focus();', show_modal)
 
+    def test_theme_toggle_is_remounted_if_dashboard_sidebar_is_rebuilt(self):
+        init_start = self.dashboard_enhancements_js.index("    function initTheme()")
+        init_end = self.dashboard_enhancements_js.index("\n    if (document.readyState === \"loading\")", init_start)
+        init_theme = self.dashboard_enhancements_js[init_start:init_end]
+        self.assertIn("new MutationObserver(() => {", init_theme)
+        self.assertIn('if (!document.getElementById("dashboard-theme-toggle")) mountToggle();', init_theme)
+        self.assertIn('sidebarObserver.observe(document.body, { childList: true, subtree: true });', init_theme)
+        self.assertIn("function mountToggle()", self.dashboard_enhancements_js)
+        self.assertIn("applyTheme(root.dataset.theme || readPreference());", self.dashboard_enhancements_js)
+
 if __name__ == "__main__":
     unittest.main()
