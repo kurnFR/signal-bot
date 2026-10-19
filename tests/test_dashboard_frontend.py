@@ -27,11 +27,12 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("this.autoRefreshInProgress = true;", polling)
         self.assertIn("finally {", polling)
         self.assertIn("this.autoRefreshInProgress = false;", polling)
+        self.assertIn("Promise.allSettled(refreshTasks)", polling)
+        self.assertIn('result.status === "rejected"', polling)
+        self.assertIn("Dashboard panel auto-refresh failed", polling)
         for method in ("fetchSystemStatus", "fetchPaperData", "fetchScreenerData", "fetchWalletData"):
-            if method == "fetchSystemStatus":
-                self.assertIn("await this.fetchSystemStatus()", polling)
-            else:
-                self.assertIn(f"await this.{method}(", polling)
+            self.assertIn(f"this.{method}(", polling)
+        self.assertIn("this.autoRefreshInProgress = false;", polling)
 
     def test_dynamic_dashboard_handlers_are_not_inline(self):
         # Dynamic templates must bind handlers through addEventListener/data attributes.

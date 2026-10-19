@@ -45,12 +45,17 @@ const App = {
             if (!this.authToken || this.autoRefreshInProgress) return;
             this.autoRefreshInProgress = true;
             try {
-                await this.fetchSystemStatus();
-                if (this.currentTab === "paper") await this.fetchPaperData();
-                if (this.currentTab === "market-screener") await this.fetchScreenerData();
-                if (this.currentTab === "wallet-tracking") await this.fetchWalletData({ silent: true });
-            } catch (error) {
-                console.error("Dashboard auto-refresh failed", error);
+                // A failure in one panel must not prevent other visible panels from refreshing.
+                const refreshTasks = [this.fetchSystemStatus()];
+                if (this.currentTab === "paper") refreshTasks.push(this.fetchPaperData());
+                if (this.currentTab === "market-screener") refreshTasks.push(this.fetchScreenerData());
+                if (this.currentTab === "wallet-tracking") refreshTasks.push(this.fetchWalletData({ silent: true }));
+                const results = await Promise.allSettled(refreshTasks);
+                results.forEach((result) => {
+                    if (result.status === "rejected") {
+                        console.error("Dashboard panel auto-refresh failed", result.reason);
+                    }
+                });
             } finally {
                 this.autoRefreshInProgress = false;
             }
