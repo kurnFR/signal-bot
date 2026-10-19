@@ -1927,7 +1927,9 @@ const App = {
             const res = await fetch(`${API_BASE}/api/master-data/coverage`, { headers: this.getAuthHeaders() });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            if (!data || !Array.isArray(data.coverage) || !data.summary || typeof data.summary !== "object") {
+            if (!data || typeof data !== "object" || Array.isArray(data) || !Array.isArray(data.coverage) ||
+                data.coverage.some(item => !item || typeof item !== "object" || Array.isArray(item)) ||
+                !data.summary || typeof data.summary !== "object" || Array.isArray(data.summary)) {
                 throw new Error("Invalid coverage response");
             }
             this.coverageData = data.coverage;
