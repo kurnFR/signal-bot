@@ -318,6 +318,14 @@
         applyTheme(readPreference());
         mountToggle();
 
+        // The app can rebuild sidebar DOM during navigation; restore the toggle if removed.
+        const sidebarObserver = new MutationObserver(() => {
+            if (!document.getElementById("dashboard-theme-toggle")) mountToggle();
+        });
+        if (document.body) {
+            sidebarObserver.observe(document.body, { childList: true, subtree: true });
+        }
+
         // Follow OS theme changes only while the user has not chosen a theme.
         let userOverride = false;
         let mediaQuery;
