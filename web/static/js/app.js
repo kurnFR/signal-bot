@@ -1401,7 +1401,8 @@ const App = {
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            if (!data || !Array.isArray(data.users)) {
+            if (!data || typeof data !== "object" || Array.isArray(data) || !Array.isArray(data.users) ||
+                data.users.some(user => !user || typeof user !== "object" || Array.isArray(user))) {
                 throw new Error("Invalid users response");
             }
             this.usersList = data.users;
