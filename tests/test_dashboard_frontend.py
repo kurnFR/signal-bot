@@ -435,6 +435,13 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('if (reduceMotion) {\n                toast.remove();\n                return;\n            }', toast)
 
 
+    def test_toast_dismiss_button_has_visible_keyboard_focus(self):
+        self.assertIn("#toast-container button:focus-visible", self.dashboard_css)
+        self.assertIn("outline: 2px solid var(--dashboard-focus, #38bdf8);", self.dashboard_css)
+        self.assertIn("outline-offset: 2px;", self.dashboard_css)
+        self.assertIn("border-radius: 0.25rem;", self.dashboard_css)
+
+
     def test_mobile_navigation_keeps_sections_reachable_without_sidebar(self):
         self.assertIn("@media (max-width: 767px)", self.dashboard_css)
         self.assertIn("body > aside nav {", self.dashboard_css)
@@ -442,7 +449,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("body > aside nav .nav-btn {", self.dashboard_css)
         self.assertIn("min-height: 2.75rem;", self.dashboard_css)
         self.assertIn("body > aside > div:last-child {", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-4", self.index_html)
+        self.assertIn("dashboard_enhancements.css?v=20261019-5", self.index_html)
 
 
 
@@ -453,7 +460,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("overscroll-behavior-x: contain;", self.dashboard_css)
         self.assertIn("min-height: 2.5rem;", self.dashboard_css)
         self.assertIn("flex: 1 1 100%;", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-4", self.index_html)
+        self.assertIn("dashboard_enhancements.css?v=20261019-5", self.index_html)
 
 
 
