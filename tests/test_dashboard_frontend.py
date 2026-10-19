@@ -18,6 +18,21 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         cls.index_html = INDEX_HTML.read_text(encoding="utf-8")
         cls.dashboard_css = DASHBOARD_CSS.read_text(encoding="utf-8")
 
+    def test_auto_refresh_prevents_overlapping_poll_cycles(self):
+        self.assertIn("autoRefreshInProgress: false", self.app_js)
+        start = self.app_js.index("// Keep slow API responses from spawning overlapping polling cycles.")
+        end = self.app_js.index("}, 15000);", start)
+        polling = self.app_js[start:end]
+        self.assertIn("if (!this.authToken || this.autoRefreshInProgress) return;", polling)
+        self.assertIn("this.autoRefreshInProgress = true;", polling)
+        self.assertIn("finally {", polling)
+        self.assertIn("this.autoRefreshInProgress = false;", polling)
+        for method in ("fetchSystemStatus", "fetchPaperData", "fetchScreenerData", "fetchWalletData"):
+            if method == "fetchSystemStatus":
+                self.assertIn("await this.fetchSystemStatus()", polling)
+            else:
+                self.assertIn(f"await this.{method}(", polling)
+
     def test_dynamic_dashboard_handlers_are_not_inline(self):
         # Dynamic templates must bind handlers through addEventListener/data attributes.
         self.assertNotRegex(self.app_js, re.compile(r"\bonclick\s*=", re.IGNORECASE))
