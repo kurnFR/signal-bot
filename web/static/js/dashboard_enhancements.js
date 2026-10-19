@@ -142,7 +142,11 @@
             bar.className = "dashboard-horizontal-scroll";
             bar.setAttribute("role", "region");
             bar.setAttribute("tabindex", "0");
-            bar.setAttribute("aria-label", "Horizontal table scroll");
+            const tableLabel = table.getAttribute("aria-label")
+                || (table.caption && table.caption.textContent.trim())
+                || table.dataset.label
+                || "table";
+            bar.setAttribute("aria-label", "Horizontal scroll for " + tableLabel);
             const spacer = document.createElement("div");
             spacer.className = "dashboard-horizontal-spacer";
             bar.appendChild(spacer);
