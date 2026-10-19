@@ -73,6 +73,19 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("Unable to refresh Market Screener data", fetcher)
 
 
+    def test_wallet_settings_validates_optional_array_fields_before_mutating_controls(self):
+        fetch_start = self.app_js.index("    async _wtLoadSettings() {")
+        fetch_end = self.app_js.index("    async saveWalletSettings() {", fetch_start)
+        loader = self.app_js[fetch_start:fetch_end]
+        self.assertIn('throw new Error("Invalid Wallet Tracker settings response")', loader)
+        self.assertIn('(s.networks !== undefined && !Array.isArray(s.networks))', loader)
+        self.assertIn('(s.token_addresses !== undefined && !Array.isArray(s.token_addresses))', loader)
+        validation_end = loader.index('throw new Error("Invalid Wallet Tracker settings response")')
+        mutation_start = loader.index('set("wt-setting-enabled", s.enabled)')
+        self.assertLess(validation_end, mutation_start)
+        self.assertIn('this._wtSettingsLoaded = true', loader)
+
+
     def test_news_refresh_validates_all_payload_shapes_before_rendering(self):
         fetch_start = self.app_js.index("    async fetchNewsData() {")
         fetch_end = self.app_js.index("    _renderNewsKpis(stats) {", fetch_start)

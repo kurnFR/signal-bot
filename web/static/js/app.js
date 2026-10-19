@@ -563,6 +563,12 @@ const App = {
 
     async _wtLoadSettings() {
         const s = await this._wtGet("/api/wallets/settings");
+        // Treat malformed settings as unavailable before mutating any form controls.
+        if (!s || typeof s !== "object" || Array.isArray(s) ||
+            (s.networks !== undefined && !Array.isArray(s.networks)) ||
+            (s.token_addresses !== undefined && !Array.isArray(s.token_addresses))) {
+            throw new Error("Invalid Wallet Tracker settings response");
+        }
         const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = String(value); };
         set("wt-setting-enabled", s.enabled);
         set("wt-setting-pools", s.pools_per_network);
