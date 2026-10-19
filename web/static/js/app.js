@@ -1300,6 +1300,13 @@ const App = {
     showLoginModal() {
         const modal = document.getElementById("login-modal");
         if (modal) {
+            // Remember the invoking control so keyboard users can return to it after sign-in.
+            if (modal.classList.contains("hidden")) {
+                const activeElement = document.activeElement;
+                this.loginModalReturnFocus = activeElement && activeElement !== document.body && !modal.contains(activeElement)
+                    ? activeElement
+                    : null;
+            }
             modal.classList.remove("hidden");
             modal.classList.add("flex");
 
@@ -1337,6 +1344,11 @@ const App = {
         if (modal) {
             modal.classList.add("hidden");
             modal.classList.remove("flex");
+        }
+        const returnFocus = this.loginModalReturnFocus;
+        this.loginModalReturnFocus = null;
+        if (returnFocus && returnFocus.isConnected && !returnFocus.disabled) {
+            returnFocus.focus();
         }
     },
 
