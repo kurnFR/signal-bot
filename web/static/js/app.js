@@ -636,6 +636,16 @@ const App = {
                 this._wtGet(`/api/wallets/events?${evQs}`),
                 this._wtGet("/api/wallets/tracked"),
             ]);
+            // Validate every endpoint before rendering so a partial/malformed API
+            // response cannot crash halfway through the panel refresh.
+            const validObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
+            if (!validObject(status) ||
+                !validObject(pos) || !Array.isArray(pos.positions) ||
+                !validObject(flow) || !Array.isArray(flow.flows) ||
+                !validObject(ev) || !Array.isArray(ev.events) ||
+                !validObject(tracked) || !Array.isArray(tracked.tracked)) {
+                throw new Error("Invalid Wallet Tracker response");
+            }
             this._wtRenderStatus(status, tracked.tracked.length);
             this._wtRenderFlow(flow.flows);
             this._wtRenderCandidates(pos.positions);
