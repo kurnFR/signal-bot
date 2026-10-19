@@ -163,10 +163,10 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('detailEl.innerText = `Refresh failed: ${message}`', fetcher)
         self.assertIn("const safeMessage = this._escapeHtml(message)", fetcher)
         for expression in (
-            "pos.positions.some(item => !item || typeof item !== \\\"object\\\" || Array.isArray(item))",
-            "flow.flows.some(item => !item || typeof item !== \\\"object\\\" || Array.isArray(item))",
-            "ev.events.some(item => !item || typeof item !== \\\"object\\\" || Array.isArray(item))",
-            "tracked.tracked.some(item => !item || typeof item !== \\\"object\\\" || Array.isArray(item))",
+            'pos.positions.some(item => !item || typeof item !== "object" || Array.isArray(item))',
+            'flow.flows.some(item => !item || typeof item !== "object" || Array.isArray(item))',
+            'ev.events.some(item => !item || typeof item !== "object" || Array.isArray(item))',
+            'tracked.tracked.some(item => !item || typeof item !== "object" || Array.isArray(item))',
         ):
             self.assertIn(expression, fetcher)
         events_start = self.app_js.index("    async fetchWalletEvents(opts = {}) {")
