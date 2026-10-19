@@ -475,6 +475,22 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('modal && !modal.classList.contains("hidden")', escape_handler)
         self.assertNotIn('"login-modal"', escape_handler)
 
+    def test_workflow_modal_wrappers_support_small_screens_and_safe_areas(self):
+        for modal_id in (
+            "login-modal",
+            "backfill-modal",
+            "deploy-modal",
+            "modal-run-ml",
+            "modal-deploy-ml",
+            "modal-inspect-ml",
+        ):
+            modal_start = self.index_html.index(f'id="{modal_id}"')
+            wrapper_end = self.index_html.index(">", modal_start)
+            wrapper = self.index_html[modal_start:wrapper_end + 1]
+            self.assertIn("overflow-y-auto", wrapper, modal_id)
+            self.assertIn("env(safe-area-inset-top)", wrapper, modal_id)
+            self.assertIn("env(safe-area-inset-bottom)", wrapper, modal_id)
+
     def test_modal_dialogs_have_accessible_names_and_modal_semantics(self):
         for modal_id, title_id in (
             ("login-modal", "login-modal-title"),
