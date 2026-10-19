@@ -187,7 +187,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         fetcher = self.app_js[fetch_start:fetch_end]
         self.assertIn('if (!res.ok) throw new Error(`HTTP ${res.status}`)', fetcher)
         self.assertIn('!Array.isArray(data.users)', fetcher)
-        self.assertIn('data.users.some(user => !user || typeof user !== "object" || Array.isArray(user)', fetcher)
+        self.assertIn('data.users.some(user => !user || typeof user !== "object" || Array.isArray(user))', fetcher)
         self.assertIn('this.usersList = []', fetcher)
         self.assertIn('getElementById("users-table-body")', fetcher)
         self.assertIn('role="status"', fetcher)
