@@ -350,10 +350,12 @@
             } else if (typeof mediaQuery.addListener === "function") {
                 mediaQuery.addListener(onSystemThemeChange);
             }
-            const button = document.getElementById("dashboard-theme-toggle");
-            if (button) {
-                button.addEventListener("click", () => { userOverride = true; });
-            }
+            // Delegate so a newly mounted toggle still records an in-session choice.
+            document.addEventListener("click", event => {
+                if (event.target && event.target.closest("#dashboard-theme-toggle")) {
+                    userOverride = true;
+                }
+            });
         }
     }
 
