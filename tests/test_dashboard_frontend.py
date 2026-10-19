@@ -619,5 +619,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('modal.classList.remove("hidden")', show_modal)
         self.assertIn('document.getElementById("login-username")?.focus()', show_modal)
 
+    def test_login_modal_traps_keyboard_focus_until_closed(self):
+        start = self.app_js.index("    showLoginModal()")
+        end = self.app_js.index("    hideLoginModal()", start)
+        show_modal = self.app_js[start:end]
+        self.assertIn('modal.dataset.focusTrapInitialized !== "true"', show_modal)
+        self.assertIn('modal.addEventListener("keydown", (event) => {', show_modal)
+        self.assertIn('if (event.key !== "Tab") return;', show_modal)
+        self.assertIn('event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))', show_modal)
+        self.assertIn('!event.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))', show_modal)
+        self.assertIn('last.focus();', show_modal)
+        self.assertIn('first.focus();', show_modal)
+
 if __name__ == "__main__":
     unittest.main()
