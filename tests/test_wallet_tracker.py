@@ -773,6 +773,36 @@ class TestBirdeyeFallbackProvider(unittest.TestCase):
         self.assertEqual(kwargs["params"]["address"], POOL)
         self.assertEqual(kwargs["params"]["tx_type"], "swap")
 
+    def test_provider_ignores_malformed_items_container(self):
+        from unittest.mock import MagicMock
+
+        pool = {"address": POOL, "name": "PEPE / WETH", "base_token_address": W1}
+        for malformed_items in ({"unexpected": self._trade_row()}, "not-a-list", 42):
+            with self.subTest(items=malformed_items):
+                session = MagicMock()
+                response = MagicMock()
+                response.json.return_value = {
+                    "success": True, "data": {"items": malformed_items}
+                }
+                session.get.return_value = response
+                provider = BirdeyeProvider(api_key="test-key", session=session)
+                with patch("wallet_tracker.providers.time.sleep"):
+                    self.assertEqual(provider.pool_trades("eth", pool, 10000), [])
+
+    def test_provider_ignores_malformed_data_envelope(self):
+        from unittest.mock import MagicMock
+
+        pool = {"address": POOL, "name": "PEPE / WETH", "base_token_address": W1}
+        for malformed_data in (None, [], "unexpected"):
+            with self.subTest(data=malformed_data):
+                session = MagicMock()
+                response = MagicMock()
+                response.json.return_value = {"success": True, "data": malformed_data}
+                session.get.return_value = response
+                provider = BirdeyeProvider(api_key="test-key", session=session)
+                with patch("wallet_tracker.providers.time.sleep"):
+                    self.assertEqual(provider.pool_trades("eth", pool, 10000), [])
+
     def test_provider_requires_explicit_api_key(self):
         with patch.dict("os.environ", {"BIRDEYE_API_KEY": ""}):
             with self.assertRaises(ValueError):
