@@ -459,7 +459,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("body > aside nav .nav-btn {", self.dashboard_css)
         self.assertIn("min-height: 2.75rem;", self.dashboard_css)
         self.assertIn("body > aside > div:last-child {", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-6", self.index_html)
+        self.assertIn("dashboard_enhancements.css?v=20261019-7", self.index_html)
 
 
 
@@ -487,7 +487,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("overscroll-behavior-x: contain;", self.dashboard_css)
         self.assertIn("min-height: 2.5rem;", self.dashboard_css)
         self.assertIn("flex: 1 1 100%;", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-6", self.index_html)
+        self.assertIn("dashboard_enhancements.css?v=20261019-7", self.index_html)
 
 
 
