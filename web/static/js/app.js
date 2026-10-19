@@ -106,6 +106,7 @@ const App = {
         };
         const style = palette[type] || palette.info;
 
+        const reduceMotion = Boolean(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
         const toast = document.createElement("div");
         toast.setAttribute("role", type === "error" ? "alert" : "status");
         toast.setAttribute("aria-atomic", "true");
@@ -119,17 +120,25 @@ const App = {
         toast.innerHTML = `
             <i data-lucide="${style.icon}" style="width:16px;height:16px;flex-shrink:0;margin-top:1px;color:${style.iconColor}"></i>
             <span style="flex:1;line-height:1.35;word-break:break-word;">${this._escapeHtml(message)}</span>
-            <button style="background:none;border:none;color:#64748b;cursor:pointer;line-height:1;font-size:0.9rem;padding:0 0 0 0.25rem;" aria-label="Dismiss">&times;</button>
+            <button type="button" style="background:none;border:none;color:#64748b;cursor:pointer;line-height:1;font-size:0.9rem;padding:0 0 0 0.25rem;" aria-label="Dismiss">&times;</button>
         `;
+        if (reduceMotion) {
+            toast.style.transition = "none";
+            toast.style.transform = "none";
+        }
         container.appendChild(toast);
         if (window.lucide) window.lucide.createIcons();
 
         requestAnimationFrame(() => {
             toast.style.opacity = "1";
-            toast.style.transform = "translateX(0)";
+            if (!reduceMotion) toast.style.transform = "translateX(0)";
         });
 
         const remove = () => {
+            if (reduceMotion) {
+                toast.remove();
+                return;
+            }
             toast.style.opacity = "0";
             toast.style.transform = "translateX(1rem)";
             setTimeout(() => toast.remove(), 200);

@@ -422,6 +422,9 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('toast.setAttribute("role", type === "error" ? "alert" : "status")', toast)
         self.assertIn('toast.setAttribute("aria-atomic", "true")', toast)
         self.assertIn('aria-label="Dismiss"', toast)
+        self.assertIn('type="button"', toast)
+        self.assertIn('window.matchMedia("(prefers-reduced-motion: reduce)").matches', toast)
+        self.assertIn('if (reduceMotion) {\n                toast.remove();\n                return;\n            }', toast)
 
 
     def test_mobile_navigation_keeps_sections_reachable_without_sidebar(self):
