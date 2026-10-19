@@ -650,7 +650,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             start = self.app_js.index(f"    {close_method} {{")
             end = self.app_js.index("\n    },", start)
             self.assertIn("this.restoreModalReturnFocus(modal)", self.app_js[start:end])
-        self.assertIn("app.js?v=20261019-22", self.index_html)
+        self.assertIn("app.js?v=20261019-23", self.index_html)
 
     def test_workflow_modals_trap_tab_and_focus_an_initial_control(self):
         self.assertIn("getModalFocusableElements(modal)", self.app_js)
