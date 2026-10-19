@@ -9,6 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 APP_JS = REPO_ROOT / "web" / "static" / "js" / "app.js"
 INDEX_HTML = REPO_ROOT / "web" / "static" / "index.html"
 DASHBOARD_CSS = REPO_ROOT / "web" / "static" / "css" / "dashboard_enhancements.css"
+DASHBOARD_ENHANCEMENTS_JS = REPO_ROOT / "web" / "static" / "js" / "dashboard_enhancements.js"
 
 
 class TestDashboardFrontendRegressions(unittest.TestCase):
@@ -17,6 +18,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         cls.app_js = APP_JS.read_text(encoding="utf-8")
         cls.index_html = INDEX_HTML.read_text(encoding="utf-8")
         cls.dashboard_css = DASHBOARD_CSS.read_text(encoding="utf-8")
+        cls.dashboard_enhancements_js = DASHBOARD_ENHANCEMENTS_JS.read_text(encoding="utf-8")
 
     def test_auto_refresh_prevents_overlapping_poll_cycles(self):
         self.assertIn("autoRefreshInProgress: false", self.app_js)
@@ -460,6 +462,12 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("dashboard_enhancements.css?v=20261019-5", self.index_html)
 
 
+
+    def test_horizontal_table_scroll_region_is_keyboard_accessible(self):
+        self.assertIn('bar.setAttribute("role", "region")', self.dashboard_enhancements_js)
+        self.assertIn('bar.setAttribute("tabindex", "0")', self.dashboard_enhancements_js)
+        self.assertIn('bar.setAttribute("aria-label", "Horizontal table scroll")', self.dashboard_enhancements_js)
+        self.assertIn("dashboard_enhancements.js?v=20261019-2", self.index_html)
 
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
