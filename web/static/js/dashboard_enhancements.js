@@ -113,6 +113,16 @@
                     }
                 });
                 sortTable(table, index, direction);
+                let statusRegion = table.parentElement.querySelector(".dashboard-sort-status");
+                if (!statusRegion) {
+                    statusRegion = document.createElement("div");
+                    statusRegion.className = "dashboard-sort-status";
+                    statusRegion.setAttribute("role", "status");
+                    statusRegion.setAttribute("aria-live", "polite");
+                    statusRegion.setAttribute("aria-atomic", "true");
+                    table.parentElement.appendChild(statusRegion);
+                }
+                statusRegion.textContent = `Sorted by ${label} ${direction === 1 ? "ascending" : "descending"}.`;
             });
             th.addEventListener("keydown", event => {
                 if (event.key === "Enter" || event.key === " ") {

@@ -459,7 +459,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("body > aside nav .nav-btn {", self.dashboard_css)
         self.assertIn("min-height: 2.75rem;", self.dashboard_css)
         self.assertIn("body > aside > div:last-child {", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-8", self.index_html)
+        self.assertIn("dashboard_enhancements.css?v=20261019-9", self.index_html)
 
     def test_theme_defaults_to_system_preference_without_overriding_saved_choice(self):
         theme_start = self.dashboard_enhancements_js.index("    function systemPreference()")
@@ -469,6 +469,14 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('saved === "light" || saved === "dark" ? saved : systemPreference()', theme_logic)
         self.assertIn("catch (_) {\n            return systemPreference();\n        }", theme_logic)
 
+    def test_sortable_tables_announce_sort_changes_to_screen_readers(self):
+        self.assertIn('statusRegion.setAttribute("role", "status")', self.dashboard_enhancements_js)
+        self.assertIn('statusRegion.setAttribute("aria-live", "polite")', self.dashboard_enhancements_js)
+        self.assertIn('statusRegion.setAttribute("aria-atomic", "true")', self.dashboard_enhancements_js)
+        self.assertIn('statusRegion.textContent = `Sorted by ${label} ${direction === 1 ? "ascending" : "descending"}.`;', self.dashboard_enhancements_js)
+        self.assertIn(".dashboard-sort-status {", self.dashboard_css)
+        self.assertIn("clip: rect(0, 0, 0, 0);", self.dashboard_css)
+
     def test_horizontal_table_scroll_region_is_keyboard_accessible(self):
         self.assertIn('bar.setAttribute("role", "region")', self.dashboard_enhancements_js)
         self.assertIn('bar.setAttribute("tabindex", "0")', self.dashboard_enhancements_js)
@@ -476,7 +484,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('table.caption.textContent.trim()', self.dashboard_enhancements_js)
         self.assertIn('table.dataset.label', self.dashboard_enhancements_js)
         self.assertIn('bar.setAttribute("aria-label", "Horizontal scroll for " + tableLabel)', self.dashboard_enhancements_js)
-        self.assertIn("dashboard_enhancements.js?v=20261019-5", self.index_html)
+        self.assertIn("dashboard_enhancements.js?v=20261019-6", self.index_html)
 
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
@@ -485,7 +493,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("overscroll-behavior-x: contain;", self.dashboard_css)
         self.assertIn("min-height: 2.5rem;", self.dashboard_css)
         self.assertIn("flex: 1 1 100%;", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-8", self.index_html)
+        self.assertIn("dashboard_enhancements.css?v=20261019-9", self.index_html)
 
     def test_reduced_motion_preference_disables_dashboard_css_motion(self):
         self.assertIn("@media (prefers-reduced-motion: reduce)", self.dashboard_css)
@@ -566,14 +574,14 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('document.addEventListener("click", event => {', theme_init)
         self.assertIn('event.target.closest("#dashboard-theme-toggle")', theme_init)
         self.assertNotIn('button.addEventListener("click", () => { userOverride = true; });', theme_init)
-        self.assertIn("dashboard_enhancements.js?v=20261019-5", self.index_html)
+        self.assertIn("dashboard_enhancements.js?v=20261019-6", self.index_html)
 
     def test_skip_link_bypasses_sidebar_navigation(self):
         self.assertIn('<a class="dashboard-skip-link" href="#main-content">Skip to main content</a>', self.index_html)
         self.assertIn('<main id="main-content" tabindex="-1"', self.index_html)
         self.assertIn(".dashboard-skip-link:focus", self.dashboard_css)
         self.assertIn("transform: translateY(0);", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-8", self.index_html)
+        self.assertIn("dashboard_enhancements.css?v=20261019-9", self.index_html)
 
     def test_dashboard_navigation_has_accessible_landmark_name(self):
         self.assertIn('<nav aria-label="Dashboard sections"', self.index_html)
