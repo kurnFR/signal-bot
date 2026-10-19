@@ -420,6 +420,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('container.setAttribute("aria-live", "polite")', toast)
         self.assertIn('"width:calc(100vw - 2rem)"', toast)
         self.assertIn('"max-width:22rem"', toast)
+        self.assertIn('"flex:1;min-width:0;line-height:1.35;overflow-wrap:anywhere;word-break:break-word;"', toast)
         self.assertIn('"box-sizing:border-box"', toast)
         self.assertIn('"max-height:calc(100vh - 2rem)"', toast)
         self.assertIn('"max-height:calc(100dvh - 2rem)"', toast)
