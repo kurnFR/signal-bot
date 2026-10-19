@@ -43,6 +43,17 @@
                 outline-color: Highlight !important;
             }
         }
+
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                scroll-behavior: auto !important;
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
     </style>
 </head>
 <body class="bg-[#080d1a] text-slate-200 min-h-screen flex antialiased select-none">
