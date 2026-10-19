@@ -606,10 +606,26 @@ const App = {
         const status = document.getElementById("wt-settings-status");
         try {
             const saved = await this._wtSend("PUT", "/api/wallets/settings", payload);
-            this._wtSettingsLoaded = true;
+            if (!saved || typeof saved !== "object" || Array.isArray(saved)) {
+                throw new Error("Invalid Wallet Tracker settings save response");
+            }
+            this._wtSettingsLoaded = false;
             if (status) status.innerText = "Settings saved. The worker will apply them on its next cycle.";
             this.showToast("Wallet scanner settings saved", "success");
-            this._wtRenderStatus(await this._wtGet("/api/wallets/status"), (await this._wtGet("/api/wallets/tracked")).tracked.length);
+            // Settings are saved even if a subsequent status refresh fails; report
+            // that refresh separately rather than incorrectly reporting save failure.
+            try {
+                const [scannerStatus, tracked] = await Promise.all([
+                    this._wtGet("/api/wallets/status"),
+                    this._wtGet("/api/wallets/tracked"),
+                ]);
+                if (!tracked || typeof tracked !== "object" || !Array.isArray(tracked.tracked)) {
+                    throw new Error("Invalid Wallet Tracker tracked-wallet response");
+                }
+                this._wtRenderStatus(scannerStatus, tracked.tracked.length);
+            } catch (refreshError) {
+                if (status) status.innerText = `Settings saved, but status refresh failed: ${refreshError.message || refreshError}`;
+            }
         } catch (e) {
             if (status) status.innerText = `Could not save settings: ${e.message || e}`;
             this.showToast(`Could not save wallet settings: ${e.message || e}`, "error");
