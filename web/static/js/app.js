@@ -194,8 +194,11 @@ const App = {
             if (
                 !validObject(stats) ||
                 (stats.heartbeats !== undefined && !Array.isArray(stats.heartbeats)) ||
+                (Array.isArray(stats.heartbeats) && stats.heartbeats.some(item => !item || typeof item !== "object" || Array.isArray(item))) ||
                 !validObject(signalsData) || !Array.isArray(signalsData.signals) ||
-                !validObject(eventsData) || !Array.isArray(eventsData.events)
+                signalsData.signals.some(item => !item || typeof item !== "object" || Array.isArray(item)) ||
+                !validObject(eventsData) || !Array.isArray(eventsData.events) ||
+                eventsData.events.some(item => !item || typeof item !== "object" || Array.isArray(item))
             ) {
                 throw new Error("Invalid News AI response");
             }
