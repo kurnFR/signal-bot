@@ -1951,7 +1951,8 @@ const App = {
             const res = await fetch(`${API_BASE}/api/backtest/strategies`, { headers: this.getAuthHeaders() });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            if (!data || !Array.isArray(data.strategies)) {
+            if (!data || typeof data !== "object" || Array.isArray(data) || !Array.isArray(data.strategies) ||
+                data.strategies.some(strategy => !strategy || typeof strategy !== "object" || Array.isArray(strategy))) {
                 throw new Error("Invalid strategies response");
             }
             this.strategiesList = data.strategies;
