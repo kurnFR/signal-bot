@@ -140,6 +140,8 @@
         if (!viewport.querySelector(":scope > .dashboard-horizontal-scroll")) {
             const bar = document.createElement("div");
             bar.className = "dashboard-horizontal-scroll";
+            bar.setAttribute("role", "region");
+            bar.setAttribute("tabindex", "0");
             bar.setAttribute("aria-label", "Horizontal table scroll");
             const spacer = document.createElement("div");
             spacer.className = "dashboard-horizontal-spacer";
