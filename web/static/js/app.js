@@ -1550,8 +1550,11 @@ const App = {
             const validObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
             if (
                 !validObject(positionsData) || !Array.isArray(positionsData.positions) ||
+                positionsData.positions.some(item => !item || typeof item !== "object" || Array.isArray(item)) ||
                 !validObject(tradesData) || !Array.isArray(tradesData.trades) ||
+                tradesData.trades.some(item => !item || typeof item !== "object" || Array.isArray(item)) ||
                 !validObject(configsData) || !Array.isArray(configsData.configs) ||
+                configsData.configs.some(item => !item || typeof item !== "object" || Array.isArray(item)) ||
                 !validObject(metricsData) || !validObject(metricsData.metrics)
             ) {
                 throw new Error("Invalid paper trading response");
