@@ -199,6 +199,8 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         fetcher = self.app_js[fetch_start:fetch_end]
         self.assertIn('if (!res.ok) throw new Error(`HTTP ${res.status}`)', fetcher)
         self.assertIn('!Array.isArray(data.coverage)', fetcher)
+        self.assertIn('data.coverage.some(item => !item || typeof item !== "object" || Array.isArray(item))', fetcher)
+        self.assertIn('Array.isArray(data.summary)', fetcher)
         self.assertIn('this.coverageData = []', fetcher)
         self.assertIn('this.coverageSummary = {}', fetcher)
         self.assertIn('getElementById("coverage-table-body")', fetcher)
