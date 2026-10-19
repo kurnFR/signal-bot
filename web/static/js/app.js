@@ -2298,6 +2298,46 @@ const App = {
         }
     },
 
+    getModalFocusableElements(modal) {
+        if (!modal) return [];
+        return Array.from(modal.querySelectorAll(
+            'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )).filter(element => {
+            return !element.disabled &&
+                !element.closest("[hidden], .hidden") &&
+                element.getAttribute("aria-hidden") !== "true" &&
+                element.getClientRects().length > 0;
+        });
+    },
+
+    initializeModalFocusTrap(modal) {
+        if (!modal || modal.dataset.focusTrapInitialized === "1") return;
+        modal.dataset.focusTrapInitialized = "1";
+        modal.addEventListener("keydown", event => {
+            if (event.key !== "Tab") return;
+            const focusable = this.getModalFocusableElements(modal);
+            if (!focusable.length) {
+                event.preventDefault();
+                return;
+            }
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))) {
+                event.preventDefault();
+                first.focus();
+            }
+        });
+    },
+
+    focusModalInitialControl(modal) {
+        const focusable = this.getModalFocusableElements(modal);
+        const initial = focusable.find(element => /^(INPUT|SELECT|TEXTAREA)$/.test(element.tagName)) || focusable[0];
+        if (initial) initial.focus();
+    },
+
     openBackfillModal(symbol, market) {
         const modal = document.getElementById("backfill-modal");
         if (!modal) return;
@@ -2306,6 +2346,8 @@ const App = {
         this.rememberModalReturnFocus(modal);
         modal.classList.remove("hidden");
         modal.classList.add("flex");
+        this.initializeModalFocusTrap(modal);
+        this.focusModalInitialControl(modal);
     },
 
     closeBackfillModal() {
@@ -3806,6 +3848,8 @@ const App = {
         this.rememberModalReturnFocus(modal);
         modal.classList.remove("hidden");
         modal.classList.add("flex");
+        this.initializeModalFocusTrap(modal);
+        this.focusModalInitialControl(modal);
         if (window.lucide) window.lucide.createIcons();
     },
 
@@ -4095,8 +4139,10 @@ const App = {
         const modal = document.getElementById("modal-run-ml");
         if (modal) {
             this.rememberModalReturnFocus(modal);
-        modal.classList.remove("hidden");
+            modal.classList.remove("hidden");
             modal.classList.add("flex");
+        this.initializeModalFocusTrap(modal);
+        this.focusModalInitialControl(modal);
         }
     },
 
@@ -4165,8 +4211,10 @@ const App = {
         const modal = document.getElementById("modal-deploy-ml");
         if (modal) {
             this.rememberModalReturnFocus(modal);
-        modal.classList.remove("hidden");
+            modal.classList.remove("hidden");
             modal.classList.add("flex");
+        this.initializeModalFocusTrap(modal);
+        this.focusModalInitialControl(modal);
         }
     },
 
@@ -4323,8 +4371,10 @@ const App = {
             const modal = document.getElementById("modal-inspect-ml");
             if (modal) {
                 this.rememberModalReturnFocus(modal);
-        modal.classList.remove("hidden");
+                modal.classList.remove("hidden");
                 modal.classList.add("flex");
+                this.initializeModalFocusTrap(modal);
+                this.focusModalInitialControl(modal);
             }
         } catch (e) {
             alert("Error inspecting experiment: " + e.message);
