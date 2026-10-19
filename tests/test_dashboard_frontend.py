@@ -584,3 +584,21 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+    def test_login_fields_have_accessible_labels_and_password_manager_hints(self):
+        self.assertRegex(
+            self.index_html,
+            r'<label for="login-username"[^>]*>Username</label>',
+        )
+        self.assertRegex(
+            self.index_html,
+            r'<input type="text" id="login-username"[^>]*name="username"[^>]*autocomplete="username"[^>]*required',
+        )
+        self.assertRegex(
+            self.index_html,
+            r'<label for="login-password"[^>]*>Password</label>',
+        )
+        self.assertRegex(
+            self.index_html,
+            r'<input type="password" id="login-password"[^>]*name="password"[^>]*autocomplete="current-password"[^>]*required',
+        )
