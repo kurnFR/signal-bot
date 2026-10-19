@@ -250,12 +250,22 @@
     const STORAGE_KEY = "signal-bot-theme";
     const root = document.documentElement;
 
+    function systemPreference() {
+        try {
+            return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark";
+        } catch (_) {
+            return "dark";
+        }
+    }
+
     function readPreference() {
         try {
             const saved = window.localStorage.getItem(STORAGE_KEY);
-            return saved === "light" || saved === "dark" ? saved : "dark";
+            return saved === "light" || saved === "dark" ? saved : systemPreference();
         } catch (_) {
-            return "dark";
+            return systemPreference();
         }
     }
 
