@@ -419,8 +419,10 @@ const App = {
             const validObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
             if (
                 !validObject(positionsData) || !Array.isArray(positionsData.positions) ||
+                positionsData.positions.some(item => !item || typeof item !== "object" || Array.isArray(item)) ||
                 !validObject(rb2Stats) ||
-                (rb2Stats.by_strategy !== undefined && !Array.isArray(rb2Stats.by_strategy))
+                (rb2Stats.by_strategy !== undefined && !Array.isArray(rb2Stats.by_strategy)) ||
+                (Array.isArray(rb2Stats.by_strategy) && rb2Stats.by_strategy.some(item => !item || typeof item !== "object" || Array.isArray(item)))
             ) {
                 throw new Error("Invalid Research Bots response");
             }
