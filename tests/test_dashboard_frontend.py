@@ -434,7 +434,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("body > aside nav .nav-btn {", self.dashboard_css)
         self.assertIn("min-height: 2.75rem;", self.dashboard_css)
         self.assertIn("body > aside > div:last-child {", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-3", self.index_html)
+        self.assertIn("dashboard_enhancements.css?v=20261019-4", self.index_html)
 
 
 
@@ -445,9 +445,15 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("overscroll-behavior-x: contain;", self.dashboard_css)
         self.assertIn("min-height: 2.5rem;", self.dashboard_css)
         self.assertIn("flex: 1 1 100%;", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-3", self.index_html)
+        self.assertIn("dashboard_enhancements.css?v=20261019-4", self.index_html)
 
 
+
+    def test_reduced_motion_preference_disables_dashboard_css_motion(self):
+        self.assertIn("@media (prefers-reduced-motion: reduce)", self.dashboard_css)
+        self.assertIn("animation-duration: 0.01ms !important;", self.dashboard_css)
+        self.assertIn("transition-duration: 0.01ms !important;", self.dashboard_css)
+        self.assertIn("scroll-behavior: auto !important;", self.dashboard_css)
 
     def test_keyboard_focus_indicators_cover_interactive_controls(self):
         self.assertIn(":focus-visible", self.dashboard_css)
