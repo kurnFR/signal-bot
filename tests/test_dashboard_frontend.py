@@ -466,8 +466,11 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
     def test_horizontal_table_scroll_region_is_keyboard_accessible(self):
         self.assertIn('bar.setAttribute("role", "region")', self.dashboard_enhancements_js)
         self.assertIn('bar.setAttribute("tabindex", "0")', self.dashboard_enhancements_js)
-        self.assertIn('bar.setAttribute("aria-label", "Horizontal table scroll")', self.dashboard_enhancements_js)
-        self.assertIn("dashboard_enhancements.js?v=20261019-2", self.index_html)
+        self.assertIn('table.getAttribute("aria-label")', self.dashboard_enhancements_js)
+        self.assertIn('table.caption.textContent.trim()', self.dashboard_enhancements_js)
+        self.assertIn('table.dataset.label', self.dashboard_enhancements_js)
+        self.assertIn('bar.setAttribute("aria-label", "Horizontal scroll for " + tableLabel)', self.dashboard_enhancements_js)
+        self.assertIn("dashboard_enhancements.js?v=20261019-3", self.index_html)
 
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
