@@ -761,3 +761,18 @@ class TestWorkflowDialogEscapeStacking(unittest.TestCase):
         self.assertIn("App[topmostModal.closeMethod]();", handler)
         self.assertNotIn('App[closeMethod]();\n            event.preventDefault();\n            return;', handler)
         self.assertNotIn('"login-modal"', handler)
+
+
+class TestDashboardEnhancementObserver(unittest.TestCase):
+    def test_mutation_observer_enhances_only_added_table_subtrees(self):
+        enhancements = DASHBOARD_ENHANCEMENTS_JS.read_text(encoding="utf-8")
+        init_start = enhancements.index("    function init() {")
+        init_end = enhancements.index("\n    if (document.readyState === \"loading\")", init_start)
+        init = enhancements[init_start:init_end]
+        self.assertIn("new MutationObserver(mutations => {", init)
+        self.assertIn("for (const mutation of mutations)", init)
+        self.assertIn("for (const node of mutation.addedNodes)", init)
+        self.assertIn("node.matches(SORTABLE_TABLE_SELECTOR)", init)
+        self.assertIn("node.querySelectorAll(SORTABLE_TABLE_SELECTOR).forEach(enhanceTable)", init)
+        self.assertNotIn("enhanceAllTables();\n            installTelegramPing();", init)
+        self.assertIn("installTelegramPing();", init)
