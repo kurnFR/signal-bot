@@ -607,6 +607,11 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("flex: 1 1 100%;", self.dashboard_css)
         self.assertRegex(self.index_html, r"dashboard_enhancements\.css\?v=[^\"]+")
 
+    def test_mobile_dashboard_header_actions_meet_minimum_touch_target_height(self):
+        self.assertIn("body > div.flex-1.flex.flex-col.min-w-0 > header > div:last-child > button {", self.dashboard_css)
+        self.assertIn("min-height: 2.75rem;", self.dashboard_css)
+        self.assertIn("@media (max-width: 767px)", self.dashboard_css)
+
     def test_reduced_motion_preference_disables_dashboard_css_motion(self):
         self.assertIn("@media (prefers-reduced-motion: reduce)", self.dashboard_css)
         self.assertIn("animation-duration: 0.01ms !important;", self.dashboard_css)
