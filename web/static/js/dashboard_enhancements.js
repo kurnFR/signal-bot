@@ -203,8 +203,13 @@
         document.querySelectorAll(SORTABLE_TABLE_SELECTOR).forEach(enhanceTable);
     }
 
-    function syncHorizontalScrollbars() {
-        document.querySelectorAll(".dashboard-horizontal-scroll").forEach(bar => {
+    function syncHorizontalScrollbars(tables) {
+        const bars = tables
+            ? Array.from(tables, table => table && table.parentElement
+                ? table.parentElement.querySelector(":scope > .dashboard-horizontal-scroll")
+                : null).filter(Boolean)
+            : Array.from(document.querySelectorAll(".dashboard-horizontal-scroll"));
+        bars.forEach(bar => {
             const viewport = bar.parentElement;
             const table = viewport && viewport.querySelector(":scope > table");
             const spacer = bar.firstElementChild;
@@ -266,7 +271,15 @@
             // Collect candidates first so nested/overlapping inserted subtrees do
             // not cause the same table to be inspected repeatedly in one batch.
             const tablesToEnhance = new Set();
+            const tablesToSync = new Set();
             for (const mutation of mutations) {
+                const target = mutation.target.nodeType === Node.ELEMENT_NODE
+                    ? mutation.target
+                    : mutation.target.parentElement;
+                const changedTable = target && target.closest(SORTABLE_TABLE_SELECTOR);
+                if (changedTable && changedTable.dataset.dashboardEnhanced === "1") {
+                    tablesToSync.add(changedTable);
+                }
                 for (const node of mutation.removedNodes) {
                     if (node.nodeType !== Node.ELEMENT_NODE) continue;
                     const removedTables = [];
@@ -287,6 +300,9 @@
                 }
             }
             tablesToEnhance.forEach(enhanceTable);
+            // Older browsers without ResizeObserver still need their scrollbar
+            // width refreshed when API-driven table content changes.
+            if (tablesToSync.size) syncHorizontalScrollbars(tablesToSync);
             // App may be initialized after this enhancement script loads.
             installTelegramPing();
         });
