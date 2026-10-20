@@ -44,6 +44,12 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('b.removeAttribute("aria-current")', switch_tab)
         self.assertIn('b.classList.toggle("active", isCurrent)', switch_tab)
 
+    def test_dashboard_view_title_changes_are_announced_to_assistive_technology(self):
+        title = re.search(r'<h1 id="view-header-title"([^>]*)>', self.index_html)
+        self.assertIsNotNone(title)
+        self.assertRegex(title.group(1), r'aria-live="polite"')
+        self.assertRegex(title.group(1), r'aria-atomic="true"')
+
     def test_dashboard_navigation_controls_reference_matching_sections(self):
         nav = re.findall(r'<button data-tab="([^"]+)" aria-controls="([^"]+)"', self.index_html)
         sections = set(re.findall(r'<section id="(view-[^"]+)"', self.index_html))
