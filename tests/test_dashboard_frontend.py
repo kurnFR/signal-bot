@@ -499,7 +499,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('table.caption.textContent.trim()', self.dashboard_enhancements_js)
         self.assertIn('table.dataset.label', self.dashboard_enhancements_js)
         self.assertIn('bar.setAttribute("aria-label", "Horizontal scroll for " + tableLabel)', self.dashboard_enhancements_js)
-        self.assertIn("dashboard_enhancements.js?v=20261020-3", self.index_html)
+        self.assertIn("dashboard_enhancements.js?v=20261020-4", self.index_html)
 
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
@@ -589,7 +589,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('document.addEventListener("click", event => {', theme_init)
         self.assertIn('event.target.closest("#dashboard-theme-toggle")', theme_init)
         self.assertNotIn('button.addEventListener("click", () => { userOverride = true; });', theme_init)
-        self.assertIn("dashboard_enhancements.js?v=20261020-3", self.index_html)
+        self.assertIn("dashboard_enhancements.js?v=20261020-4", self.index_html)
 
     def test_skip_link_bypasses_sidebar_navigation(self):
         self.assertIn('<a class="dashboard-skip-link" href="#main-content">Skip to main content</a>', self.index_html)
@@ -803,3 +803,16 @@ class TestDashboardMutationBatchDeduplication(unittest.TestCase):
         self.assertIn("tablesToEnhance.add(node)", init)
         self.assertIn("tablesToEnhance.add(table)", init)
         self.assertIn("tablesToEnhance.forEach(enhanceTable);", init)
+
+
+class TestDashboardHorizontalScrollResizeFallback(unittest.TestCase):
+    def test_resize_refreshes_existing_horizontal_scrollbars_without_reenhancing_tables(self):
+        enhancements = DASHBOARD_ENHANCEMENTS_JS.read_text(encoding="utf-8")
+        self.assertIn('function syncHorizontalScrollbars() {', enhancements)
+        self.assertIn('document.querySelectorAll(".dashboard-horizontal-scroll").forEach(bar => {', enhancements)
+        self.assertIn('viewport.querySelector(":scope > table")', enhancements)
+        init_start = enhancements.index("    function init() {")
+        init_end = enhancements.index("\n    if (document.readyState === \"loading\")", init_start)
+        init = enhancements[init_start:init_end]
+        self.assertIn("syncHorizontalScrollbars();", init)
+        self.assertIn("enhanceAllTables();\n                // ResizeObserver is not available", init)
