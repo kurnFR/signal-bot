@@ -45,7 +45,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('b.classList.toggle("active", isCurrent)', switch_tab)
 
     def test_initial_dashboard_navigation_state_matches_visible_home_view(self):
-        nav = re.findall(r'<button data-tab="([^"]+)"([^>]*)>', self.index_html)
+        nav = re.findall(r'<button\b[^>]*data-tab="([^"]+)"([^>]*)>', self.index_html)
         current = [(tab, attrs) for tab, attrs in nav if re.search(r'\baria-current="page"', attrs)]
         active = [(tab, attrs) for tab, attrs in nav if re.search(r'\bactive\b', attrs)]
         self.assertEqual([tab for tab, _ in current], ["home"])
@@ -74,7 +74,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertRegex(self.index_html, r'<p id="view-header-desc"[^>]*>')
 
     def test_dashboard_navigation_controls_reference_matching_sections(self):
-        nav = re.findall(r'<button data-tab="([^"]+)" aria-controls="([^"]+)"', self.index_html)
+        nav = re.findall(r'<button\b[^>]*data-tab="([^"]+)"[^>]*aria-controls="([^"]+)"', self.index_html)
         sections = set(re.findall(r'<section id="(view-[^"]+)"', self.index_html))
         self.assertGreater(len(nav), 0)
         self.assertEqual(len(nav), len(set(tab for tab, _ in nav)))
@@ -692,6 +692,12 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             '<button type="button" id="btn-confirm-deploy-ml" onclick="App.confirmDeployML()"',
         ):
             self.assertIn(button, self.index_html)
+
+    def test_all_static_dashboard_buttons_have_explicit_types(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        for match in re.finditer(r"<button\b[^>]*>", html, re.IGNORECASE | re.DOTALL):
+            with self.subTest(button=match.group(0)[:120]):
+                self.assertRegex(match.group(0), r"\btype\s*=\s*[\"'](?:button|submit|reset)[\"']", "Every button should declare its intended type")
 
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
