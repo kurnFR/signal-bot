@@ -44,6 +44,16 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('b.removeAttribute("aria-current")', switch_tab)
         self.assertIn('b.classList.toggle("active", isCurrent)', switch_tab)
 
+    def test_dashboard_navigation_controls_reference_matching_sections(self):
+        nav = re.findall(r'<button data-tab="([^"]+)" aria-controls="([^"]+)"', self.index_html)
+        sections = set(re.findall(r'<section id="(view-[^"]+)"', self.index_html))
+        self.assertGreater(len(nav), 0)
+        self.assertEqual(len(nav), len(set(tab for tab, _ in nav)))
+        for tab, controls in nav:
+            with self.subTest(tab=tab):
+                self.assertEqual(controls, f"view-{tab}")
+                self.assertIn(controls, sections)
+
     def test_dynamic_dashboard_handlers_are_not_inline(self):
         # Dynamic templates must bind handlers through addEventListener/data attributes.
         self.assertNotRegex(self.app_js, re.compile(r"\bonclick\s*=", re.IGNORECASE))

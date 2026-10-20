@@ -114,65 +114,65 @@
 
             <!-- Navigation Links -->
             <nav aria-label="Dashboard sections" class="p-3 space-y-1.5 mt-2">
-                <button data-tab="home" class="nav-btn active w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                <button data-tab="home" aria-controls="view-home" class="nav-btn active w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
                     <span>Home & Overview</span>
                 </button>
-                <button data-tab="master-data" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                <button data-tab="master-data" aria-controls="view-master-data" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="database" class="w-4 h-4"></i>
                     <span>Master Data</span>
                 </button>
-                <button data-tab="backtest" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                <button data-tab="backtest" aria-controls="view-backtest" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="play-circle" class="w-4 h-4"></i>
                     <span>Backtest Studio</span>
                 </button>
-                <button data-tab="paper" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-emerald-400 hover:text-white hover:bg-slate-800/50 transition-all">
+                <button data-tab="paper" aria-controls="view-paper" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-emerald-400 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="briefcase" class="w-4 h-4 text-emerald-400"></i>
                     <div class="flex items-center justify-between w-full">
                         <span>Paper Trading</span>
                         <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-emerald-950 text-emerald-300 border border-emerald-800">PHASE B</span>
                     </div>
                 </button>
-                <button data-tab="ml-studio" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-purple-400 hover:text-white hover:bg-slate-800/50 transition-all">
+                <button data-tab="ml-studio" aria-controls="view-ml-studio" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-purple-400 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="brain-circuit" class="w-4 h-4 text-purple-400"></i>
                     <div class="flex items-center justify-between w-full">
                         <span>ML Forecast Studio</span>
                         <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-purple-950 text-purple-300 border border-purple-800">AI</span>
                     </div>
                 </button>
-                <button data-tab="strategies" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                <button data-tab="strategies" aria-controls="view-strategies" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="layers" class="w-4 h-4"></i>
                     <span>Strategy Library</span>
                 </button>
-                <button data-tab="news-ai" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-amber-400 hover:text-white hover:bg-slate-800/50 transition-all">
+                <button data-tab="news-ai" aria-controls="view-news-ai" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-amber-400 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="newspaper" class="w-4 h-4 text-amber-400"></i>
                     <div class="flex items-center justify-between w-full">
                         <span>News AI Signals</span>
                         <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-amber-950 text-amber-300 border border-amber-800">NEW</span>
                     </div>
                 </button>
-                <button data-tab="research" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-purple-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                <button data-tab="research" aria-controls="view-research" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-purple-300 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="flask-conical" class="w-4 h-4 text-purple-400"></i>
                     <div class="flex items-center justify-between w-full">
                         <span>Research Bots</span>
                         <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-purple-950 text-purple-300 border border-purple-800">NEW</span>
                     </div>
                 </button>
-                <button data-tab="market-screener" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-amber-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                <button data-tab="market-screener" aria-controls="view-market-screener" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-amber-300 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="scan-search" class="w-4 h-4 text-amber-400"></i>
                     <div class="flex items-center justify-between w-full">
                         <span>Market Screener</span>
                         <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-amber-950 text-amber-300 border border-amber-800">V2</span>
                     </div>
                 </button>
-                <button data-tab="wallet-tracking" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-cyan-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                <button data-tab="wallet-tracking" aria-controls="view-wallet-tracking" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-cyan-300 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="wallet" class="w-4 h-4 text-cyan-400"></i>
                     <div class="flex items-center justify-between w-full">
                         <span>Wallet Tracking</span>
                         <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-cyan-950 text-cyan-300 border border-cyan-800">NEW</span>
                     </div>
                 </button>
-                <button data-tab="settings" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                <button data-tab="settings" aria-controls="view-settings" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
                     <i data-lucide="settings" class="w-4 h-4"></i>
                     <span>Settings & Users</span>
                 </button>
