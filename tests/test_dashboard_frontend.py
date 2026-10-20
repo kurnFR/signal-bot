@@ -539,7 +539,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('"max-height:calc(100dvh - 2rem)"', toast)
         self.assertIn('"overflow-y:auto"', toast)
         self.assertNotIn('container.setAttribute("aria-relevant"', toast)
-        self.assertIn('toast.setAttribute("role", type === "error" ? "alert" : "status")', toast)
+        self.assertIn('toast.setAttribute("role", notificationType === "error" ? "alert" : "status")', toast)
         self.assertIn('"alert" : "status")', toast)
         self.assertIn('toast.setAttribute("aria-atomic", "true")', toast)
         self.assertIn('toast.setAttribute("aria-atomic", "true")', toast)
