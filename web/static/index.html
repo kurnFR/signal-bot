@@ -202,7 +202,7 @@
                 <p id="view-header-desc" class="text-xs text-slate-400">System health, database metrics, and backtest leaderboard</p>
             </div>
             <div class="flex items-center gap-4">
-                <button onclick="App.openBackfillModal()" class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white text-xs font-semibold shadow-md shadow-sky-500/20 flex items-center gap-2 transition-all">
+                <button type="button" aria-label="New Backfill" onclick="App.openBackfillModal()" class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white text-xs font-semibold shadow-md shadow-sky-500/20 flex items-center gap-2 transition-all">
                     <i data-lucide="plus" class="w-3.5 h-3.5"></i>
                     <span>New Backfill</span>
                 </button>
@@ -214,7 +214,7 @@
                         <span id="top-user-badge" class="font-mono font-bold text-slate-200">admin</span>
                         <span id="top-user-role" class="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800">ADMIN</span>
                     </div>
-                    <button onclick="App.handleLogout()" title="Sign Out" class="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors">
+                    <button type="button" aria-label="Sign Out" title="Sign Out" onclick="App.handleLogout()" class="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors">
                         <i data-lucide="log-out" class="w-4 h-4"></i>
                     </button>
                 </div>

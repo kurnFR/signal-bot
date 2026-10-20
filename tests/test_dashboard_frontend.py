@@ -1050,3 +1050,22 @@ class TestDashboardScrollbarContentUpdates(unittest.TestCase):
         self.assertIn("if (scrollbarSyncFrame !== null) return;", enhancements)
         self.assertIn("window.requestAnimationFrame(() => {", enhancements)
         self.assertIn("pendingScrollbarTables.clear();", enhancements)
+
+class TestMobileHeaderIconButtonAccessibility(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.index_html = INDEX_HTML.read_text(encoding="utf-8")
+        cls.dashboard_css = DASHBOARD_CSS.read_text(encoding="utf-8")
+
+    def test_mobile_header_actions_keep_accessible_names_when_labels_are_hidden(self):
+        new_backfill = re.search(r'<button([^>]*)onclick="App\.openBackfillModal\(\)"([^>]*)>(.*?)</button>', self.index_html, re.DOTALL)
+        self.assertIsNotNone(new_backfill)
+        self.assertRegex(new_backfill.group(1) + new_backfill.group(2), r'aria-label="New Backfill"')
+
+        sign_out = re.search(r'<button([^>]*)onclick="App\.handleLogout\(\)"([^>]*)>', self.index_html)
+        self.assertIsNotNone(sign_out)
+        self.assertRegex(sign_out.group(1) + sign_out.group(2), r'aria-label="Sign Out"')
+
+        mobile_icon_only = self.dashboard_css[self.dashboard_css.index("@media (max-width: 420px)"):]
+        self.assertIn("header > div:last-child > button span", mobile_icon_only)
+        self.assertIn("display: none;", mobile_icon_only)
