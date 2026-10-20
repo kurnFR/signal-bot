@@ -436,7 +436,8 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         header_start = mobile_rules.index("body > div.flex-1.flex.flex-col.min-w-0 > header {")
         header_end = mobile_rules.index("\n    }", header_start)
         header = mobile_rules[header_start:header_end]
-        self.assertIn("padding-top: max(0.75rem, env(safe-area-inset-top));", header)
+        self.assertIn("padding: max(0.75rem, env(safe-area-inset-top)) 1rem 0.75rem;", header)
+        self.assertNotIn("padding: 0.75rem 1rem;", header)
         main_start = mobile_rules.index("body > div.flex-1.flex.flex-col.min-w-0 > main {")
         main_end = mobile_rules.index("\n    }", main_start)
         main = mobile_rules[main_start:main_end]
