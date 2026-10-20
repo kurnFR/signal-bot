@@ -1470,7 +1470,7 @@ class TestStrategyLibraryActionAccessibleNames(unittest.TestCase):
     def test_custom_strategy_icon_actions_have_contextual_accessible_names(self):
         app_js = APP_JS.read_text(encoding="utf-8")
         start = app_js.index("    renderStrategyLibrary() {")
-        end = app_js.index("\\n    selectStrategyForBacktest(stratId) {", start)
+        end = app_js.index("\n    selectStrategyForBacktest(stratId) {", start)
         method = app_js[start:end]
         self.assertIn('aria-label="Edit ${safeDisp} strategy"', method)
         self.assertIn('aria-label="Delete ${safeDisp} strategy"', method)
