@@ -931,7 +931,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('App[closeMethod]();', backdrop_handler)
         for modal_id in ("modal-inspect-ml", "modal-deploy-ml", "modal-run-ml", "deploy-modal", "backfill-modal"):
             self.assertIn(f'["{modal_id}",', backdrop_handler)
-        self.assertIn("app.js?v=20261020-27", self.index_html)
+        self.assertIn("app.js?v=20261020-28", self.index_html)
 
     def test_workflow_modals_restore_focus_to_the_opening_control(self):
         self.assertIn("rememberModalReturnFocus(modal)", self.app_js)
@@ -946,7 +946,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             start = self.app_js.index(f"    {close_method} {{")
             end = self.app_js.index("\n    },", start)
             self.assertIn("this.restoreModalReturnFocus(modal)", self.app_js[start:end])
-        self.assertIn("app.js?v=20261020-27", self.index_html)
+        self.assertIn("app.js?v=20261020-28", self.index_html)
 
     def test_workflow_modals_trap_tab_and_focus_an_initial_control(self):
         self.assertIn("getModalFocusableElements(modal)", self.app_js)
@@ -957,7 +957,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("first.focus()", self.app_js)
         self.assertIn("this.focusModalInitialControl(modal)", self.app_js)
         self.assertIn('modal.dataset.focusTrapInitialized = "1"', self.app_js)
-        self.assertIn("app.js?v=20261020-27", self.index_html)
+        self.assertIn("app.js?v=20261020-28", self.index_html)
 
     def test_login_modal_places_focus_on_username_when_opened(self):
         start = self.app_js.index("    showLoginModal()")
@@ -1413,3 +1413,17 @@ class TestDashboardTableColumnHeaderScopes(unittest.TestCase):
         for index, attrs in enumerate(headers):
             with self.subTest(header_index=index):
                 self.assertRegex(attrs, r'\bscope="col"')
+
+
+class TestDynamicDashboardTableColumnHeaderScopes(unittest.TestCase):
+    def test_dynamic_table_headers_declare_column_scope(self):
+        app_js = APP_JS.read_text(encoding="utf-8")
+        headers = re.findall(r'<th\b([^>]*)>', app_js, flags=re.IGNORECASE)
+        self.assertEqual(len(headers), 9)
+        for index, attrs in enumerate(headers):
+            with self.subTest(header_index=index):
+                self.assertRegex(attrs, r'\bscope="col"')
+
+    def test_app_script_cache_token_tracks_dynamic_header_markup(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        self.assertIn('app.js?v=20261020-28', html)
