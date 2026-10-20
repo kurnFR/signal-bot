@@ -42,7 +42,7 @@ const App = {
         
         // Keep slow API responses from spawning overlapping polling cycles.
         setInterval(async () => {
-            if (!this.authToken || this.autoRefreshInProgress) return;
+            if (!this.authToken || this.autoRefreshInProgress || document.hidden) return;
             this.autoRefreshInProgress = true;
             try {
                 // A failure in one panel must not prevent other visible panels from refreshing.
