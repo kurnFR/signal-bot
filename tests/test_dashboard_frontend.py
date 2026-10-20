@@ -1452,7 +1452,7 @@ class TestDynamicStrategyRuleAccessibleNames(unittest.TestCase):
     def test_rule_controls_have_distinct_contextual_accessible_names(self):
         app_js = APP_JS.read_text(encoding="utf-8")
         start = app_js.index('    addRuleRow(direction, indicator = "rsi", operator = "<", value = 30) {')
-        end = app_js.index("\\n    getRulesFromContainer(direction) {", start)
+        end = app_js.index("    getRulesFromContainer(direction) {", start)
         method = app_js[start:end]
         self.assertIn('const directionLabel = direction === "short" ? "Short entry" : "Long entry";', method)
         self.assertIn('row.dataset.ruleNumber = String(ruleNumber);', method)
