@@ -129,7 +129,8 @@
     gap: 0.35rem;
     flex: 0 0 auto;
     margin-left: auto;
-    min-height: 2rem;
+    min-height: 2.75rem;
+    min-width: 2.75rem;
     padding: 0.35rem 0.5rem;
     border: 1px solid var(--dashboard-border);
     border-radius: 0.5rem;
