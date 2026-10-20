@@ -86,7 +86,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
 
     def test_sort_announcement_includes_table_row_count(self):
         self.assertIn("${tbodyRows(table).length} rows.", self.dashboard_enhancements_js)
-        self.assertIn("statusRegion.setAttribute(\\"aria-live\\", \\"polite\\")", self.dashboard_enhancements_js)
+        self.assertIn('statusRegion.setAttribute("aria-live", "polite")', self.dashboard_enhancements_js)
 
     def test_dashboard_auto_refresh_pauses_while_document_is_hidden(self):
         start = self.app_js.index("// Keep slow API responses from spawning overlapping polling cycles.")
