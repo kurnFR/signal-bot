@@ -372,6 +372,7 @@
     body > div.flex-1.flex.flex-col.min-w-0 > header {
         position: sticky;
         top: 0;
+        padding-top: max(0.75rem, env(safe-area-inset-top));
         min-height: 4rem;
         height: auto;
         gap: 0.75rem;
@@ -402,7 +403,10 @@
     }
 
     body > div.flex-1.flex.flex-col.min-w-0 > main {
-        padding: 1rem;
+        padding-top: 1rem;
+        padding-right: max(1rem, env(safe-area-inset-right));
+        padding-bottom: max(1rem, env(safe-area-inset-bottom));
+        padding-left: max(1rem, env(safe-area-inset-left));
         gap: 1.25rem;
     }
 }

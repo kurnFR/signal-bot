@@ -415,6 +415,24 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertLess(validation_end, render_start)
 
 
+    def test_mobile_viewport_uses_safe_areas_for_sticky_header_and_content(self):
+        html = self.index_html
+        self.assertIn('content="width=device-width, initial-scale=1.0, viewport-fit=cover"', html)
+        css = self.dashboard_css
+        mobile_start = css.index("@media (max-width: 767px)")
+        mobile_end = css.index("@media (max-width: 420px)", mobile_start)
+        mobile_rules = css[mobile_start:mobile_end]
+        header_start = mobile_rules.index("body > div.flex-1.flex.flex-col.min-w-0 > header {")
+        header_end = mobile_rules.index("\n    }", header_start)
+        header = mobile_rules[header_start:header_end]
+        self.assertIn("padding-top: max(0.75rem, env(safe-area-inset-top));", header)
+        main_start = mobile_rules.index("body > div.flex-1.flex.flex-col.min-w-0 > main {")
+        main_end = mobile_rules.index("\n    }", main_start)
+        main = mobile_rules[main_start:main_end]
+        self.assertIn("padding-right: max(1rem, env(safe-area-inset-right));", main)
+        self.assertIn("padding-bottom: max(1rem, env(safe-area-inset-bottom));", main)
+        self.assertIn("padding-left: max(1rem, env(safe-area-inset-left));", main)
+
     def test_mobile_toast_container_respects_safe_areas(self):
         css = self.dashboard_css
         mobile_start = css.index("@media (max-width: 767px)")
