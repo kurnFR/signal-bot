@@ -306,7 +306,7 @@
             // App may be initialized after this enhancement script loads.
             installTelegramPing();
         });
-        observer.observe(document.body, { childList: true, subtree: true });
+        observer.observe(document.body, { childList: true, characterData: true, subtree: true });
         // Coalesce resize bursts into one layout pass per animation frame.
         // Window resize can fire many times while a user drags the browser edge.
         let resizeFrame = null;
