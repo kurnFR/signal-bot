@@ -465,10 +465,10 @@
                     </div>
 
                     <div class="border-t border-slate-800 pt-4 flex flex-wrap items-center justify-end gap-3">
-                        <button id="btn-run-battle-royale" onclick="App.runBattleRoyale()" class="px-5 py-2.5 rounded-lg bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-500 text-white font-bold text-xs tracking-wide shadow-lg shadow-orange-500/25 flex items-center gap-2 transition-all">
+                        <button type="button" aria-label="Run all models in battle royale" id="btn-run-battle-royale" onclick="App.runBattleRoyale()" class="px-5 py-2.5 rounded-lg bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-500 text-white font-bold text-xs tracking-wide shadow-lg shadow-orange-500/25 flex items-center gap-2 transition-all">
                             <i data-lucide="trophy" class="w-4 h-4 text-yellow-200"></i> ⚔️ Run All Models (Find Top 3)
                         </button>
-                        <button id="btn-run-backtest" onclick="App.runBacktest()" class="px-6 py-2.5 rounded-lg bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-bold text-xs tracking-wide shadow-lg shadow-sky-500/25 flex items-center gap-2 transition-all">
+                        <button type="button" aria-label="Run selected strategy backtest" id="btn-run-backtest" onclick="App.runBacktest()" class="px-6 py-2.5 rounded-lg bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-bold text-xs tracking-wide shadow-lg shadow-sky-500/25 flex items-center gap-2 transition-all">
                             <i data-lucide="play" class="w-4 h-4"></i> Run Selected Strategy
                         </button>
                     </div>
@@ -2184,7 +2184,7 @@
          this file has no explicit Cache-Control header. See the
          "still seeing the old bug after a fix was pushed" class of report. -->
     <script src="/static/js/app.js?v=20261020-26"></script>
-    <script src="/static/js/dashboard_enhancements.js?v=20261020-24"></script>
+    <script src="/static/js/dashboard_enhancements.js?v=20261020-25"></script>
     <script>
         if (window.lucide) window.lucide.createIcons();
     </script>
