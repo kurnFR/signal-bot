@@ -1087,8 +1087,6 @@ class TestMobileDynamicViewportHeight(unittest.TestCase):
         mobile_start = dashboard_css.index("@media (max-width: 767px)")
         mobile_end = dashboard_css.index("@media (max-width: 420px)", mobile_start)
         mobile_rules = dashboard_css[mobile_start:mobile_end]
-        shell_start = mobile_rules.index("body > div.flex-1.flex.flex-col.min-w-0 {")
-        shell_end = mobile_rules.index("\\n    }", shell_start)
-        shell = mobile_rules[shell_start:shell_end]
+        shell = mobile_rules.split("body > div.flex-1.flex.flex-col.min-w-0 {", 1)[1].split("overflow: visible;", 1)[0]
         self.assertIn("min-height: calc(100vh - 7rem);", shell)
         self.assertIn("min-height: calc(100dvh - 7rem);", shell)
