@@ -302,6 +302,16 @@
         white-space: nowrap;
     }
 
+    /* Keep fixed toast notifications clear of notches and rounded-screen safe areas. */
+    #toast-container {
+        top: max(1rem, env(safe-area-inset-top)) !important;
+        right: max(1rem, env(safe-area-inset-right)) !important;
+        bottom: auto !important;
+        left: max(1rem, env(safe-area-inset-left)) !important;
+        width: auto !important;
+        max-width: 22rem !important;
+    }
+
     /* Toast dismiss buttons should remain easy to tap despite their inline defaults. */
     #toast-container button {
         min-width: 2.75rem !important;
