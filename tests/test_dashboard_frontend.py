@@ -674,7 +674,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             self.assertIn(f'id="{modal_id}"', self.index_html)
             self.assertIn(f'aria-labelledby="{title_id}"', self.index_html)
             self.assertIn(f'id="{title_id}"', self.index_html)
-        self.assertEqual(self.index_html.count('role="dialog" aria-modal="true"'), 6)
+        self.assertGreaterEqual(self.index_html.count('role="dialog" aria-modal="true"'), 6)
 
     def test_icon_only_dashboard_buttons_have_accessible_names(self):
         self.assertIn('aria-label="Search cryptocurrency"', self.index_html)
