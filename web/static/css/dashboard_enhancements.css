@@ -388,7 +388,7 @@
     .view-section input:not([type="checkbox"]):not([type="radio"]),
     .view-section select,
     .view-section textarea {
-        min-height: 2.5rem;
+        min-height: 2.75rem;
         font-size: 0.8125rem;
     }
 
