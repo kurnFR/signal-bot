@@ -131,7 +131,9 @@
                     table.parentElement.appendChild(statusRegion);
                 }
                 const tableLabel = table.getAttribute("aria-label") || (table.caption && table.caption.textContent.trim()) || table.dataset.label;
-                statusRegion.textContent = `Sorted${tableLabel ? ` ${tableLabel}` : ""} by ${label} ${direction === 1 ? "ascending" : "descending"}. ${tbodyRows(table).length} rows.`;
+                const rowCount = tbodyRows(table).length;
+                const rowLabel = rowCount === 1 ? "row" : "rows";
+                statusRegion.textContent = `Sorted${tableLabel ? ` ${tableLabel}` : ""} by ${label} ${direction === 1 ? "ascending" : "descending"}. ${rowCount} ${rowLabel}.`;
             });
             th.addEventListener("keydown", event => {
                 if (event.key === "Enter" || event.key === " ") {
