@@ -94,7 +94,8 @@
 
 @media (max-width: 768px) {
     .dashboard-table-scroll {
-        max-height: 440px;
+        max-height: min(440px, 55vh);
+        max-height: min(440px, 55dvh);
     }
 }
 
