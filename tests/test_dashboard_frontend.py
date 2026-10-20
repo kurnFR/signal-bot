@@ -1315,3 +1315,44 @@ class TestStrategySearchAndSymbolInputLabels(unittest.TestCase):
                     r'<label\s+for="' + re.escape(input_id) + r'"[^>]*>' + re.escape(label) + r'</label>',
                 )
                 self.assertRegex(html, r'<input\b[^>]*id="' + re.escape(input_id) + r'"')
+
+
+class TestRemainingDashboardInputLabelAssociations(unittest.TestCase):
+    def test_wallet_tracker_api_key_and_wallet_inputs_have_accessible_names(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        self.assertRegex(html, r'<label\s+for="wt-setting-birdeye-key"[^>]*>[\s\S]*?Birdeye API Key \(Trade Fallback\)')
+        self.assertIn('id="wt-add-wallet" aria-label="Wallet address"', html)
+        self.assertIn('id="wt-add-label" aria-label="Wallet label (optional)"', html)
+
+    def test_user_account_and_password_inputs_have_associated_labels(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        fields = {
+            "new-user-username": "Username",
+            "new-user-email": "Email",
+            "new-user-password": "Password (min 6)",
+            "chg-old-pwd": "Current Password",
+            "chg-new-pwd": "New Password",
+            "chg-conf-pwd": "Confirm New Password",
+        }
+        for input_id, label in fields.items():
+            with self.subTest(input_id=input_id):
+                self.assertRegex(
+                    html,
+                    r'<label\s+for="' + re.escape(input_id) + r'"[^>]*>' + re.escape(label) + r'</label>',
+                )
+
+    def test_deployment_and_ml_numeric_inputs_have_associated_labels(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        fields = {
+            "deploy-modal-capital": "Allocated Virtual Capital ($)",
+            "deploy-modal-risk": "Risk per Trade (%)",
+            "ml-run-min-trades": "Min Validation Trades",
+            "deploy-ml-capital": "Allocated Virtual Capital ($)",
+            "deploy-ml-risk": "Risk per Trade (%)",
+        }
+        for input_id, label in fields.items():
+            with self.subTest(input_id=input_id):
+                self.assertRegex(
+                    html,
+                    r'<label\s+for="' + re.escape(input_id) + r'"[^>]*>' + re.escape(label) + r'</label>',
+                )
