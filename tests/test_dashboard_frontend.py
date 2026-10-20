@@ -621,6 +621,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("#login-modal button {", mobile_rules)
         self.assertIn("min-height: 2.75rem;", mobile_rules)
 
+    def test_mobile_dialogs_fit_short_viewports_and_scroll_internally(self):
+        css = self.dashboard_css
+        mobile_start = css.index("@media (max-width: 767px)")
+        mobile_end = css.index("@media (max-width: 420px)", mobile_start)
+        mobile_rules = css[mobile_start:mobile_end]
+        self.assertIn('.fixed.inset-0 [role="dialog"] {', mobile_rules)
+        self.assertIn("max-height: calc(100vh - 2rem);", mobile_rules)
+        self.assertIn("overflow-y: auto;", mobile_rules)
+        self.assertIn("@supports (height: 100dvh)", mobile_rules)
+        self.assertIn("max-height: calc(100dvh - 2rem);", mobile_rules)
+
     def test_mobile_modal_actions_have_44px_touch_targets(self):
         css = self.dashboard_css
         mobile_start = css.index("@media (max-width: 767px)")
