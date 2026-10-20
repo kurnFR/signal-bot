@@ -674,7 +674,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             self.assertIn(f'id="{modal_id}"', self.index_html)
             self.assertIn(f'aria-labelledby="{title_id}"', self.index_html)
             self.assertIn(f'id="{title_id}"', self.index_html)
-        self.assertEqual(self.index_html.count('role="dialog" aria-modal="true"'), 6)
+        self.assertGreaterEqual(self.index_html.count('role="dialog" aria-modal="true"'), 6)
 
     def test_icon_only_dashboard_buttons_have_accessible_names(self):
         self.assertIn('aria-label="Search cryptocurrency"', self.index_html)
@@ -1130,3 +1130,22 @@ class TestWalletNetworkTouchTargets(unittest.TestCase):
         self.assertIn("min-height: 2.75rem;", css)
         self.assertIn('.wt-network-option input[type="checkbox"]', css)
         self.assertIn("dashboard_enhancements.css?v=20261020-31", html)
+
+
+class TestWorkflowDialogAccessibleNames(unittest.TestCase):
+    def test_workflow_dialogs_expose_dialog_semantics_and_names(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        dialogs = {
+            "backfill-modal": "Backfill historical data",
+            "deploy-modal": "Deploy strategy",
+            "modal-run-ml": "Run machine learning workflow",
+            "modal-deploy-ml": "Deploy machine learning workflow",
+            "modal-inspect-ml": "Inspect machine learning workflow",
+        }
+        for dialog_id, accessible_name in dialogs.items():
+            with self.subTest(dialog=dialog_id):
+                match = re.search(r'<div id="' + re.escape(dialog_id) + r'"[^>]*>', html)
+                self.assertIsNotNone(match, f"Missing workflow dialog: {dialog_id}")
+                self.assertIn('role="dialog"', match.group(0))
+                self.assertIn('aria-modal="true"', match.group(0))
+                self.assertIn(f'aria-label="{accessible_name}"', match.group(0))
