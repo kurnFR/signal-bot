@@ -812,10 +812,10 @@
                             <div id="ml-breaker-details" class="text-[11px] text-slate-400 mt-1">Max daily loss: $500 • Max pos: 5</div>
                         </div>
                         <div class="flex items-center gap-2 mt-2 pt-2 border-t border-slate-800/80">
-                            <button onclick="App.tripCircuitBreaker()" class="flex-1 px-2 py-1 text-[11px] font-bold rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800 transition-colors">
+                            <button type="button" aria-label="Activate emergency stop" onclick="App.tripCircuitBreaker()" class="flex-1 px-2 py-1 text-[11px] font-bold rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800 transition-colors">
                                 Emergency Stop
                             </button>
-                            <button onclick="App.resetCircuitBreaker()" class="flex-1 px-2 py-1 text-[11px] font-bold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors">
+                            <button type="button" aria-label="Reset circuit breaker" onclick="App.resetCircuitBreaker()" class="flex-1 px-2 py-1 text-[11px] font-bold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors">
                                 Reset
                             </button>
                         </div>
@@ -2184,7 +2184,7 @@
          this file has no explicit Cache-Control header. See the
          "still seeing the old bug after a fix was pushed" class of report. -->
     <script src="/static/js/app.js?v=20261020-26"></script>
-    <script src="/static/js/dashboard_enhancements.js?v=20261020-22"></script>
+    <script src="/static/js/dashboard_enhancements.js?v=20261020-23"></script>
     <script>
         if (window.lucide) window.lucide.createIcons();
     </script>
