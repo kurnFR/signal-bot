@@ -1053,11 +1053,11 @@ class TestDashboardScrollbarContentUpdates(unittest.TestCase):
 
 class TestMobileHeaderIconButtonAccessibility(unittest.TestCase):
     def test_mobile_header_actions_keep_accessible_names_when_labels_are_hidden(self):
-        new_backfill = re.search(r'<button([^>]*)onclick="App\\.openBackfillModal\\(\\)"([^>]*)>(.*?)</button>', self.index_html, re.DOTALL)
+        new_backfill = re.search(r'<button([^>]*)onclick="App\.openBackfillModal\(\)"([^>]*)>(.*?)</button>', self.index_html, re.DOTALL)
         self.assertIsNotNone(new_backfill)
         self.assertRegex(new_backfill.group(1) + new_backfill.group(2), r'aria-label="New Backfill"')
 
-        sign_out = re.search(r'<button([^>]*)onclick="App\\.handleLogout\\(\\)"([^>]*)>', self.index_html)
+        sign_out = re.search(r'<button([^>]*)onclick="App\.handleLogout\(\)"([^>]*)>', self.index_html)
         self.assertIsNotNone(sign_out)
         self.assertRegex(sign_out.group(1) + sign_out.group(2), r'aria-label="Sign Out"')
 
