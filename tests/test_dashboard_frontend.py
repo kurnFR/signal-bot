@@ -1229,19 +1229,24 @@ class TestWalletNetworkTouchTargets(unittest.TestCase):
 
 
 class TestWorkflowDialogAccessibleNames(unittest.TestCase):
-    def test_workflow_dialogs_expose_dialog_semantics_and_names(self):
+    def test_workflow_dialogs_expose_one_named_dialog_without_nested_dialogs(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
         dialogs = {
-            "backfill-modal": "Backfill historical data",
-            "deploy-modal": "Deploy strategy",
-            "modal-run-ml": "Run machine learning workflow",
-            "modal-deploy-ml": "Deploy machine learning workflow",
-            "modal-inspect-ml": "Inspect machine learning workflow",
+            "backfill-modal": "backfill-modal-title",
+            "deploy-modal": "deploy-modal-title",
+            "modal-run-ml": "modal-run-ml-title",
+            "modal-deploy-ml": "modal-deploy-ml-title",
+            "modal-inspect-ml": "inspect-ml-title",
         }
-        for dialog_id, accessible_name in dialogs.items():
+        for dialog_id, title_id in dialogs.items():
             with self.subTest(dialog=dialog_id):
                 match = re.search(r'<div id="' + re.escape(dialog_id) + r'"[^>]*>', html)
-                self.assertIsNotNone(match, f"Missing workflow dialog: {dialog_id}")
-                self.assertIn('role="dialog"', match.group(0))
-                self.assertIn('aria-modal="true"', match.group(0))
-                self.assertIn(f'aria-label="{accessible_name}"', match.group(0))
+                self.assertIsNotNone(match, f"Missing workflow dialog wrapper: {dialog_id}")
+                self.assertNotIn('role="dialog"', match.group(0))
+                inner = re.search(
+                    r'<div role="dialog" aria-modal="true" aria-labelledby="' + re.escape(title_id) + r'"[^>]*>',
+                    html[match.end():],
+                )
+                self.assertIsNotNone(inner, f"Missing named dialog panel: {dialog_id}")
+                title = re.search(r'<h3 id="' + re.escape(title_id) + r'"[^>]*>', html[match.end():match.end() + 1800])
+                self.assertIsNotNone(title, f"Missing visible title for dialog: {dialog_id}")
