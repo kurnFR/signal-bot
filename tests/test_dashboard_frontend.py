@@ -45,7 +45,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('b.classList.toggle("active", isCurrent)', switch_tab)
 
     def test_initial_dashboard_navigation_state_matches_visible_home_view(self):
-        nav = re.findall(r'<button\\b[^>]*data-tab="([^"]+)"([^>]*)>', self.index_html)
+        nav = re.findall(r'<button\b[^>]*data-tab="([^"]+)"([^>]*)>', self.index_html)
         current = [(tab, attrs) for tab, attrs in nav if re.search(r'\baria-current="page"', attrs)]
         active = [(tab, attrs) for tab, attrs in nav if re.search(r'\bactive\b', attrs)]
         self.assertEqual([tab for tab, _ in current], ["home"])
@@ -74,7 +74,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertRegex(self.index_html, r'<p id="view-header-desc"[^>]*>')
 
     def test_dashboard_navigation_controls_reference_matching_sections(self):
-        nav = re.findall(r'<button\\b[^>]*data-tab="([^"]+)"[^>]*aria-controls="([^"]+)"', self.index_html)
+        nav = re.findall(r'<button\b[^>]*data-tab="([^"]+)"[^>]*aria-controls="([^"]+)"', self.index_html)
         sections = set(re.findall(r'<section id="(view-[^"]+)"', self.index_html))
         self.assertGreater(len(nav), 0)
         self.assertEqual(len(nav), len(set(tab for tab, _ in nav)))
