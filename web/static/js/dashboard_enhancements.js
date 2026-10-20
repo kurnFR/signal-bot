@@ -203,6 +203,22 @@
         document.querySelectorAll(SORTABLE_TABLE_SELECTOR).forEach(enhanceTable);
     }
 
+    // Coalesce DOM-driven scrollbar measurements so a burst of text/row mutations
+    // performs at most one layout pass per animation frame.
+    const pendingScrollbarTables = new Set();
+    let scrollbarSyncFrame = null;
+
+    function scheduleHorizontalScrollbarSync(tables) {
+        tables.forEach(table => pendingScrollbarTables.add(table));
+        if (scrollbarSyncFrame !== null) return;
+        scrollbarSyncFrame = window.requestAnimationFrame(() => {
+            scrollbarSyncFrame = null;
+            const changedTables = Array.from(pendingScrollbarTables);
+            pendingScrollbarTables.clear();
+            syncHorizontalScrollbars(changedTables);
+        });
+    }
+
     function syncHorizontalScrollbars(tables) {
         const bars = tables
             ? Array.from(tables, table => table && table.parentElement
@@ -302,7 +318,7 @@
             tablesToEnhance.forEach(enhanceTable);
             // Older browsers without ResizeObserver still need their scrollbar
             // width refreshed when API-driven table content changes.
-            if (tablesToSync.size) syncHorizontalScrollbars(tablesToSync);
+            if (tablesToSync.size) scheduleHorizontalScrollbarSync(tablesToSync);
             // App may be initialized after this enhancement script loads.
             installTelegramPing();
         });
