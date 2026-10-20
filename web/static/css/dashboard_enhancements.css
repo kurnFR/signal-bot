@@ -366,6 +366,7 @@
         width: 100%;
         height: auto !important;
         min-height: calc(100vh - 7rem);
+        min-height: calc(100dvh - 7rem);
         overflow: visible;
     }
 
