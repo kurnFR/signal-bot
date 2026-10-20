@@ -506,7 +506,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("max-width: 100%;", self.dashboard_css)
         self.assertIn(".view-section .overflow-x-auto", self.dashboard_css)
         self.assertIn("overscroll-behavior-x: contain;", self.dashboard_css)
-        self.assertIn("min-height: 2.5rem;", self.dashboard_css)
+        self.assertIn("min-height: 2.75rem;", self.dashboard_css)
         self.assertIn("flex: 1 1 100%;", self.dashboard_css)
         self.assertRegex(self.index_html, r"dashboard_enhancements\.css\?v=[^\"]+")
 
