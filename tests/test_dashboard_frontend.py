@@ -612,6 +612,15 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("animation-iteration-count: 1 !important;", self.index_html)
         self.assertIn("transition-duration: 0.01ms !important;", self.index_html)
 
+    def test_mobile_login_controls_meet_44px_touch_target(self):
+        css = self.dashboard_css
+        mobile_start = css.index("/* Mobile-first navigation:")
+        mobile_end = css.index("@media (max-width: 420px)", mobile_start)
+        mobile_rules = css[mobile_start:mobile_end]
+        self.assertIn("#login-modal input,", mobile_rules)
+        self.assertIn("#login-modal button {", mobile_rules)
+        self.assertIn("min-height: 2.75rem;", mobile_rules)
+
     def test_mobile_dashboard_header_can_shrink_for_long_titles(self):
         css = self.dashboard_css
         mobile_start = css.index("@media (max-width: 768px)")

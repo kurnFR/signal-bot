@@ -302,6 +302,12 @@
         white-space: nowrap;
     }
 
+    /* Keep the sign-in form comfortable to tap on narrow screens too. */
+    #login-modal input,
+    #login-modal button {
+        min-height: 2.75rem;
+    }
+
     body > aside nav .nav-btn.active {
         border-left: 0;
         border-bottom: 2px solid var(--dashboard-focus, #38bdf8);
