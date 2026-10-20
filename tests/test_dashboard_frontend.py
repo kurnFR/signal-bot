@@ -757,6 +757,17 @@ class TestDashboardForcedColorsAccessibility(unittest.TestCase):
         self.assertIn("border: 1px solid CanvasText;", forced_colors)
 
 
+
+class TestDashboardThemeToggleTouchTarget(unittest.TestCase):
+    def test_theme_toggle_meets_minimum_touch_target_dimensions(self):
+        css = DASHBOARD_CSS.read_text(encoding="utf-8")
+        toggle_start = css.index(".dashboard-theme-toggle {")
+        toggle_end = css.index("\n}", toggle_start)
+        toggle_rules = css[toggle_start:toggle_end]
+        self.assertIn("min-height: 2.75rem;", toggle_rules)
+        self.assertIn("min-width: 2.75rem;", toggle_rules)
+
+
 if __name__ == "__main__":
     unittest.main()
 
