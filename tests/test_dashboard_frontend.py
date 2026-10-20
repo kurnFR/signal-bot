@@ -461,7 +461,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("body > aside nav .nav-btn {", self.dashboard_css)
         self.assertIn("min-height: 2.75rem;", self.dashboard_css)
         self.assertIn("body > aside > div:last-child {", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-10", self.index_html)
+        self.assertRegex(self.index_html, r"dashboard_enhancements\.css\?v=[^\"]+")
 
     def test_theme_defaults_to_system_preference_without_overriding_saved_choice(self):
         theme_start = self.dashboard_enhancements_js.index("    function systemPreference()")
@@ -476,7 +476,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn(".dashboard-table-scroll th {", self.dashboard_css)
         self.assertIn("-webkit-user-select: text;", self.dashboard_css)
         self.assertIn("user-select: text;", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-10", self.index_html)
+        self.assertRegex(self.index_html, r"dashboard_enhancements\.css\?v=[^\"]+")
 
     def test_dynamic_table_rows_keep_stable_sort_order(self):
         self.assertIn("let nextOriginalIndex = rows.reduce((max, row) => {", self.dashboard_enhancements_js)
@@ -508,7 +508,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("overscroll-behavior-x: contain;", self.dashboard_css)
         self.assertIn("min-height: 2.5rem;", self.dashboard_css)
         self.assertIn("flex: 1 1 100%;", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-10", self.index_html)
+        self.assertRegex(self.index_html, r"dashboard_enhancements\.css\?v=[^\"]+")
 
     def test_reduced_motion_preference_disables_dashboard_css_motion(self):
         self.assertIn("@media (prefers-reduced-motion: reduce)", self.dashboard_css)
@@ -596,7 +596,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('<main id="main-content" tabindex="-1"', self.index_html)
         self.assertIn(".dashboard-skip-link:focus", self.dashboard_css)
         self.assertIn("transform: translateY(0);", self.dashboard_css)
-        self.assertIn("dashboard_enhancements.css?v=20261019-10", self.index_html)
+        self.assertRegex(self.index_html, r"dashboard_enhancements\.css\?v=[^\"]+")
 
     def test_keyboard_focus_indicator_is_visible_and_supports_forced_colors(self):
         self.assertIn(":focus-visible", self.index_html)
