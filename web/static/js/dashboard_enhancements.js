@@ -100,6 +100,7 @@
             // Keep the native column-header role; tabindex + keyboard handling provide activation.
             th.setAttribute("tabindex", "0");
             th.setAttribute("aria-label", `${label}, sortable`);
+            th.setAttribute("aria-description", "Press Enter or Space to sort this column.");
             th.removeAttribute("aria-sort");
             th.addEventListener("click", () => {
                 const current = table.dataset.sortColumn === String(index) ? Number(table.dataset.sortDirection || 0) : 0;
