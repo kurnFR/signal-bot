@@ -302,6 +302,12 @@
         white-space: nowrap;
     }
 
+    /* Toast dismiss buttons should remain easy to tap despite their inline defaults. */
+    #toast-container button {
+        min-width: 2.75rem !important;
+        min-height: 2.75rem !important;
+    }
+
     /* Keep long dialogs within the visible viewport on short mobile screens. */
     .fixed.inset-0 [role="dialog"] {
         max-height: calc(100vh - 2rem);
