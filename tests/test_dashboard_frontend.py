@@ -700,6 +700,14 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('aria-label="Close ML inspection dialog"', self.index_html)
 
 
+    def test_theme_toggle_is_named_for_its_action_not_exposed_as_a_pressed_toggle(self):
+        theme_start = self.dashboard_enhancements_js.index("    function applyTheme(theme)")
+        theme_end = self.dashboard_enhancements_js.index("    function mountToggle()", theme_start)
+        apply_theme = self.dashboard_enhancements_js[theme_start:theme_end]
+        self.assertIn('button.setAttribute("aria-label", "Switch to " + nextTheme + " theme");', apply_theme)
+        self.assertIn('button.setAttribute("title", "Switch to " + nextTheme + " theme");', apply_theme)
+        self.assertNotIn("aria-pressed", apply_theme)
+
     def test_theme_tracks_system_changes_until_user_selects_a_theme(self):
         theme_start = self.dashboard_enhancements_js.index("    function initTheme()")
         theme_end = self.dashboard_enhancements_js.index("\n    if (document.readyState", theme_start)
