@@ -1436,7 +1436,7 @@ class TestToastDismissFocusRestoration(unittest.TestCase):
 
     def test_manual_toast_dismissal_restores_focus_to_the_previous_control(self):
         start = self.app_js.index('    showToast(message, type = "info") {')
-        end = self.app_js.index("    // ----------------------------------------------------\\n    // NEWS AI OVERLAY SIGNALS", start)
+        end = self.app_js.index("    _safeNumber(value, fallback = 0) {", start)
         toast = self.app_js[start:end]
         self.assertIn("const previouslyFocusedElement = document.activeElement;", toast)
         self.assertIn("const remove = (restoreFocus = false) => {", toast)
