@@ -1029,6 +1029,12 @@ class TestDashboardForcedColorsAccessibility(unittest.TestCase):
 
 
 class TestDashboardThemeToggleTouchTarget(unittest.TestCase):
+    def test_mobile_theme_toggle_overrides_legacy_40px_minimum_height(self):
+        css = DASHBOARD_CSS.read_text(encoding="utf-8")
+        self.assertIn("#dashboard-theme-toggle {\\n        min-height: 2.75rem;", css)
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        self.assertIn("dashboard_enhancements.css?v=20261020-32", html)
+
     def test_theme_toggle_meets_minimum_touch_target_dimensions(self):
         css = DASHBOARD_CSS.read_text(encoding="utf-8")
         toggle_start = css.index(".dashboard-theme-toggle {")
@@ -1233,7 +1239,7 @@ class TestWalletNetworkTouchTargets(unittest.TestCase):
         self.assertIn(".wt-network-option {", css)
         self.assertIn("min-height: 2.75rem;", css)
         self.assertIn('.wt-network-option input[type="checkbox"]', css)
-        self.assertIn("dashboard_enhancements.css?v=20261020-31", html)
+        self.assertIn("dashboard_enhancements.css?v=20261020-32", html)
 
 
 class TestWorkflowDialogAccessibleNames(unittest.TestCase):
