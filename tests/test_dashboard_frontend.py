@@ -1293,3 +1293,25 @@ class TestCustomStrategyInputLabelAssociations(unittest.TestCase):
                     r'<label\s+for="' + re.escape(input_id) + r'"[^>]*>' + re.escape(label) + r'</label>',
                 )
                 self.assertRegex(html, r'<input\b[^>]*id="' + re.escape(input_id) + r'"')
+
+
+class TestStrategySearchAndSymbolInputLabels(unittest.TestCase):
+    def test_strategy_catalog_search_has_an_explicit_accessible_name(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        match = re.search(r'<input\b[^>]*id="strat-catalog-search"[^>]*>', html)
+        self.assertIsNotNone(match)
+        self.assertIn('aria-label="Search strategy catalog"', match.group(0))
+
+    def test_symbol_fields_in_backfill_and_ml_workflows_have_associated_labels(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        expected = {
+            "modal-backfill-symbol": "Cryptocurrency Symbol",
+            "ml-run-symbol": "Symbol",
+        }
+        for input_id, label in expected.items():
+            with self.subTest(input_id=input_id):
+                self.assertRegex(
+                    html,
+                    r'<label\s+for="' + re.escape(input_id) + r'"[^>]*>' + re.escape(label) + r'</label>',
+                )
+                self.assertRegex(html, r'<input\b[^>]*id="' + re.escape(input_id) + r'"')
