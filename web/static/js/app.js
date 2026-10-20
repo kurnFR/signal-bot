@@ -83,6 +83,7 @@ const App = {
     // TOAST NOTIFICATIONS
     // ----------------------------------------------------
     showToast(message, type = "info") {
+        const previouslyFocusedElement = document.activeElement;
         let container = document.getElementById("toast-container");
         if (!container) {
             container = document.createElement("div");
@@ -158,13 +159,17 @@ const App = {
             if (document.hidden) pauseDismissTimer();
             else resumeDismissTimer();
         };
-        const remove = () => {
+        const remove = (restoreFocus = false) => {
             if (removing) return;
             removing = true;
             if (dismissTimer !== null) clearTimeout(dismissTimer);
             if (removalTimer !== null) clearTimeout(removalTimer);
             document.removeEventListener("visibilitychange", handleVisibilityChange);
             dismissTimer = null;
+            if (restoreFocus && toast.contains(document.activeElement) && previouslyFocusedElement &&
+                previouslyFocusedElement.isConnected && typeof previouslyFocusedElement.focus === "function") {
+                previouslyFocusedElement.focus();
+            }
             if (reduceMotion) {
                 toast.remove();
                 return;
@@ -174,7 +179,7 @@ const App = {
             removalTimer = setTimeout(() => toast.remove(), 200);
         };
 
-        toast.querySelector("button").addEventListener("click", remove);
+        toast.querySelector("button").addEventListener("click", () => remove(true));
         toast.addEventListener("mouseenter", pauseDismissTimer);
         toast.addEventListener("mouseleave", resumeDismissTimer);
         toast.addEventListener("focusin", pauseDismissTimer);
