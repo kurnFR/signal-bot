@@ -3508,10 +3508,10 @@ const App = {
                         <span class="font-mono text-[11px] text-slate-500">${paramCount} params</span>
                         <div class="flex items-center gap-1.5">
                             ${isCustom ? `
-                                <button type="button" data-strategy-library-action="edit" data-strategy-id="${safeId}" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors" title="Edit in Architect">
+                                <button type="button" data-strategy-library-action="edit" data-strategy-id="${safeId}" aria-label="Edit ${safeDisp} strategy" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors" title="Edit in Architect">
                                     <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
                                 </button>
-                                <button type="button" data-strategy-library-action="delete" data-strategy-id="${safeId}" class="p-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900 text-rose-400 hover:text-white border border-rose-900/40 transition-colors" title="Delete Strategy">
+                                <button type="button" data-strategy-library-action="delete" data-strategy-id="${safeId}" aria-label="Delete ${safeDisp} strategy" class="p-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900 text-rose-400 hover:text-white border border-rose-900/40 transition-colors" title="Delete Strategy">
                                     <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
                                 </button>
                             ` : ""}
