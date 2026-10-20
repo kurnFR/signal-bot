@@ -1031,7 +1031,9 @@ class TestDashboardForcedColorsAccessibility(unittest.TestCase):
 class TestDashboardThemeToggleTouchTarget(unittest.TestCase):
     def test_mobile_theme_toggle_overrides_legacy_40px_minimum_height(self):
         css = DASHBOARD_CSS.read_text(encoding="utf-8")
-        self.assertRegex(css, r"#dashboard-theme-toggle \\{\\s*min-height: 2\\.75rem;")
+        toggle_start = css.index("#dashboard-theme-toggle {")
+        toggle_end = css.index("\\n}", toggle_start)
+        self.assertIn("min-height: 2.75rem;", css[toggle_start:toggle_end])
         html = INDEX_HTML.read_text(encoding="utf-8")
         self.assertIn("dashboard_enhancements.css?v=20261020-32", html)
 
