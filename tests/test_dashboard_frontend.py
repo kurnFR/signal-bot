@@ -1052,6 +1052,11 @@ class TestDashboardScrollbarContentUpdates(unittest.TestCase):
         self.assertIn("pendingScrollbarTables.clear();", enhancements)
 
 class TestMobileHeaderIconButtonAccessibility(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.index_html = INDEX_HTML.read_text(encoding="utf-8")
+        cls.dashboard_css = DASHBOARD_CSS.read_text(encoding="utf-8")
+
     def test_mobile_header_actions_keep_accessible_names_when_labels_are_hidden(self):
         new_backfill = re.search(r'<button([^>]*)onclick="App\.openBackfillModal\(\)"([^>]*)>(.*?)</button>', self.index_html, re.DOTALL)
         self.assertIsNotNone(new_backfill)
