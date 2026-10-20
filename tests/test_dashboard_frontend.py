@@ -1488,3 +1488,15 @@ class TestStrategyLibraryActionAccessibleNames(unittest.TestCase):
     def test_strategy_library_accessible_names_bump_app_script_cache_token(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
         self.assertIn('app.js?v=20261020-31', html)
+
+
+class TestDatabaseConnectionStatusAnnouncements(unittest.TestCase):
+    def test_database_connection_badge_announces_dynamic_status_changes(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        match = re.search(r'<div\\b(?=[^>]*\\bid="status-db-badge")[^>]*>', html)
+        self.assertIsNotNone(match)
+        attrs = match.group(0)
+        self.assertIn('role="status"', attrs)
+        self.assertIn('aria-live="polite"', attrs)
+        self.assertIn('aria-atomic="true"', attrs)
+
