@@ -4429,14 +4429,27 @@ document.addEventListener("keydown", (event) => {
         ["deploy-modal", "closeDeployModal"],
         ["backfill-modal", "closeBackfillModal"],
     ];
-    for (const [modalId, closeMethod] of dismissibleModals) {
-        const modal = document.getElementById(modalId);
-        if (modal && !modal.classList.contains("hidden")) {
-            App[closeMethod]();
-            event.preventDefault();
-            return;
-        }
-    }
+    const visibleModals = dismissibleModals
+        .map(([modalId, closeMethod]) => ({
+            modal: document.getElementById(modalId),
+            closeMethod,
+        }))
+        .filter(({ modal }) => modal && !modal.classList.contains("hidden"));
+    if (visibleModals.length === 0) return;
+
+    // Prefer the highest stacking layer; for equal z-index values, the later
+    // DOM element is painted on top. Close only that dialog on Escape.
+    visibleModals.sort((a, b) => {
+        const aZIndex = Number.parseInt(window.getComputedStyle(a.modal).zIndex, 10) || 0;
+        const bZIndex = Number.parseInt(window.getComputedStyle(b.modal).zIndex, 10) || 0;
+        if (aZIndex !== bZIndex) return aZIndex - bZIndex;
+        if (a.modal === b.modal) return 0;
+        return a.modal.compareDocumentPosition(b.modal) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+    });
+
+    const topmostModal = visibleModals[visibleModals.length - 1];
+    App[topmostModal.closeMethod]();
+    event.preventDefault();
 });
 document.addEventListener("DOMContentLoaded", () => App.init());
 
