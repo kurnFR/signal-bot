@@ -144,19 +144,25 @@ const App = {
             remainingMs = Math.max(0, remainingMs - (Date.now() - timerStartedAt));
         };
         const scheduleDismiss = () => {
-            if (removing || dismissTimer !== null) return;
+            if (removing || dismissTimer !== null || document.hidden) return;
             timerStartedAt = Date.now();
             dismissTimer = setTimeout(remove, remainingMs);
         };
         const resumeDismissTimer = () => {
+            if (document.hidden) return;
             if (toast.matches(":hover") || toast.contains(document.activeElement)) return;
             scheduleDismiss();
+        };
+        const handleVisibilityChange = () => {
+            if (document.hidden) pauseDismissTimer();
+            else resumeDismissTimer();
         };
         const remove = () => {
             if (removing) return;
             removing = true;
             if (dismissTimer !== null) clearTimeout(dismissTimer);
             if (removalTimer !== null) clearTimeout(removalTimer);
+            document.removeEventListener("visibilitychange", handleVisibilityChange);
             dismissTimer = null;
             if (reduceMotion) {
                 toast.remove();
@@ -172,6 +178,7 @@ const App = {
         toast.addEventListener("mouseleave", resumeDismissTimer);
         toast.addEventListener("focusin", pauseDismissTimer);
         toast.addEventListener("focusout", resumeDismissTimer);
+        document.addEventListener("visibilitychange", handleVisibilityChange);
         scheduleDismiss();
     },
 

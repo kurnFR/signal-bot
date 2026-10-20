@@ -733,3 +733,16 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestToastVisibilityAccessibility(unittest.TestCase):
+    def test_toast_auto_dismiss_pauses_while_document_is_hidden(self):
+        app_js = APP_JS.read_text(encoding="utf-8")
+        toast_start = app_js.index("    showToast(message, type = \"info\") {")
+        toast_end = app_js.index("\n    // ----------------------------------------------------\n    // NEWS AI OVERLAY SIGNALS", toast_start)
+        toast = app_js[toast_start:toast_end]
+        self.assertIn("dismissTimer !== null || document.hidden", toast)
+        self.assertIn("if (document.hidden) pauseDismissTimer();", toast)
+        self.assertIn("document.addEventListener(\"visibilitychange\", handleVisibilityChange)", toast)
+        self.assertIn("document.removeEventListener(\"visibilitychange\", handleVisibilityChange)", toast)
+        self.assertIn("remainingMs = Math.max(0, remainingMs - (Date.now() - timerStartedAt));", toast)
