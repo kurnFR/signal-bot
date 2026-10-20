@@ -199,6 +199,20 @@
         document.querySelectorAll(SORTABLE_TABLE_SELECTOR).forEach(enhanceTable);
     }
 
+    function syncHorizontalScrollbars() {
+        document.querySelectorAll(".dashboard-horizontal-scroll").forEach(bar => {
+            const viewport = bar.parentElement;
+            const table = viewport && viewport.querySelector(":scope > table");
+            const spacer = bar.firstElementChild;
+            if (!viewport || !table || !spacer) return;
+            spacer.style.width = `${table.scrollWidth}px`;
+            bar.style.display = table.scrollWidth > viewport.clientWidth ? "block" : "none";
+            if (Math.abs(bar.scrollLeft - viewport.scrollLeft) > 1) {
+                bar.scrollLeft = viewport.scrollLeft;
+            }
+        });
+    }
+
     function installTelegramPing() {
         if (!window.App || window.App._enhancedTelegramPingInstalled) return;
         window.App._enhancedTelegramPingInstalled = true;
@@ -268,6 +282,9 @@
             resizeFrame = window.requestAnimationFrame(() => {
                 resizeFrame = null;
                 enhanceAllTables();
+                // ResizeObserver is not available in some older browsers; refresh
+                // existing scrollbars explicitly as a fallback after viewport changes.
+                syncHorizontalScrollbars();
             });
         });
     }
