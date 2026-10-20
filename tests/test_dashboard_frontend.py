@@ -632,6 +632,15 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('<button type="button" aria-label="Refresh news data" onclick="App.fetchNewsData()"', self.index_html)
         self.assertIn('fetchNewsData()', self.index_html)
 
+    def test_research_refresh_button_has_contextual_accessible_name(self):
+        self.assertIn('<button type="button" aria-label="Refresh research data" onclick="App.fetchResearchData()"', self.index_html)
+
+    def test_screener_refresh_button_has_contextual_accessible_name(self):
+        self.assertIn('<button type="button" aria-label="Refresh screener data" onclick="App.fetchScreenerData()"', self.index_html)
+
+    def test_wallet_refresh_button_has_contextual_accessible_name(self):
+        self.assertIn('<button type="button" aria-label="Refresh wallet data" onclick="App.fetchWalletData()"', self.index_html)
+
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
         self.assertIn("max-width: 100%;", self.dashboard_css)

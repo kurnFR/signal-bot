@@ -1254,7 +1254,7 @@
                     <i data-lucide="skull" class="w-4 h-4 text-purple-400"></i>
                     <h2 class="text-sm font-bold text-slate-100">Retail Death Trap Bot v2</h2>
                     <span class="text-[10px] text-slate-500">7-strategy shadow/inverse confluence bot &middot; separate database</span>
-                    <button onclick="App.fetchResearchData()" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
+                    <button type="button" aria-label="Refresh research data" onclick="App.fetchResearchData()" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
                         <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
                     </button>
                 </div>
@@ -1368,7 +1368,7 @@
                         </h2>
                         <p class="text-[11px] text-slate-500 mt-0.5">Smart-money volume detection across the liquid Binance USDT universe</p>
                     </div>
-                    <button onclick="App.fetchScreenerData()" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
+                    <button type="button" aria-label="Refresh screener data" onclick="App.fetchScreenerData()" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
                         <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
                     </button>
                 </div>
@@ -1509,7 +1509,7 @@
                         </h2>
                         <p class="text-[11px] text-slate-500 mt-0.5">Large on-chain flows from the DEX pools scanned by this service. Activity is polled, not a real-time feed.</p>
                     </div>
-                    <button onclick="App.fetchWalletData()" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
+                    <button type="button" aria-label="Refresh wallet data" onclick="App.fetchWalletData()" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
                         <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
                     </button>
                 </div>
@@ -2184,7 +2184,7 @@
          this file has no explicit Cache-Control header. See the
          "still seeing the old bug after a fix was pushed" class of report. -->
     <script src="/static/js/app.js?v=20261020-26"></script>
-    <script src="/static/js/dashboard_enhancements.js?v=20261020-21"></script>
+    <script src="/static/js/dashboard_enhancements.js?v=20261020-22"></script>
     <script>
         if (window.lucide) window.lucide.createIcons();
     </script>
