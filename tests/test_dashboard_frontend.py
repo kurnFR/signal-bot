@@ -38,7 +38,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
 
     def test_current_dashboard_navigation_item_is_announced_to_assistive_technology(self):
         switch_start = self.app_js.index("    switchTab(tabId) {")
-        switch_end = self.app_js.index("\\n    },", switch_start)
+        switch_end = self.app_js.index("\n    },", switch_start)
         switch_tab = self.app_js[switch_start:switch_end]
         self.assertIn('b.setAttribute("aria-current", "page")', switch_tab)
         self.assertIn('b.removeAttribute("aria-current")', switch_tab)
