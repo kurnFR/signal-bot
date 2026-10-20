@@ -2214,12 +2214,12 @@ const App = {
                 <table class="w-full text-left custom-table">
                     <thead>
                         <tr>
-                            <th>Symbol</th>
-                            <th>Market</th>
-                            <th>Last Price</th>
-                            <th>24h Change</th>
-                            <th>24h Volume (USDT)</th>
-                            <th class="text-right">Action</th>
+                            <th scope="col">Symbol</th>
+                            <th scope="col">Market</th>
+                            <th scope="col">Last Price</th>
+                            <th scope="col">24h Change</th>
+                            <th scope="col">24h Volume (USDT)</th>
+                            <th scope="col" class="text-right">Action</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -4339,9 +4339,9 @@ const App = {
                     <table class="w-full text-left custom-table text-xs">
                         <thead>
                             <tr>
-                                <th>Metric</th>
-                                <th>Rule-Based Baseline</th>
-                                <th>ML Filter (${(threshold * 100).toFixed(0)}% Gate)</th>
+                                <th scope="col">Metric</th>
+                                <th scope="col">Rule-Based Baseline</th>
+                                <th scope="col">ML Filter (${(threshold * 100).toFixed(0)}% Gate)</th>
                             </tr>
                         </thead>
                         <tbody>
