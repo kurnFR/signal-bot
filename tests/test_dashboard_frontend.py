@@ -624,6 +624,10 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('<button type="button" aria-label="Refresh ML data" onclick="App.fetchMLData()"', self.index_html)
         self.assertIn('title="Refresh ML Data"', self.index_html)
 
+    def test_database_coverage_refresh_button_has_contextual_accessible_name(self):
+        self.assertIn('<button type="button" aria-label="Refresh database coverage" onclick="App.fetchCoverage(); App.renderCoverageTable();"', self.index_html)
+        self.assertIn('Database Coverage & Feature Status', self.index_html)
+
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
         self.assertIn("max-width: 100%;", self.dashboard_css)
