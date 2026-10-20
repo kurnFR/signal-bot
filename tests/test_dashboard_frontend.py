@@ -1413,3 +1413,17 @@ class TestDashboardTableColumnHeaderScopes(unittest.TestCase):
         for index, attrs in enumerate(headers):
             with self.subTest(header_index=index):
                 self.assertRegex(attrs, r'\bscope="col"')
+
+
+class TestDynamicDashboardTableColumnHeaderScopes(unittest.TestCase):
+    def test_dynamic_table_headers_declare_column_scope(self):
+        app_js = APP_JS.read_text(encoding="utf-8")
+        headers = re.findall(r'<th\b([^>]*)>', app_js, flags=re.IGNORECASE)
+        self.assertEqual(len(headers), 9)
+        for index, attrs in enumerate(headers):
+            with self.subTest(header_index=index):
+                self.assertRegex(attrs, r'\bscope="col"')
+
+    def test_app_script_cache_token_tracks_dynamic_header_markup(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        self.assertIn('app.js?v=20261020-28', html)
