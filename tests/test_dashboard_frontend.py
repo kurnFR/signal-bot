@@ -415,6 +415,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertLess(validation_end, render_start)
 
 
+    def test_mobile_skip_link_target_clears_sticky_header(self):
+        css = self.dashboard_css
+        mobile_start = css.index("@media (max-width: 767px)")
+        mobile_end = css.index("@media (max-width: 420px)", mobile_start)
+        mobile_rules = css[mobile_start:mobile_end]
+        self.assertIn("#main-content {", mobile_rules)
+        self.assertIn("scroll-margin-top: 5rem;", mobile_rules)
+        html = self.index_html
+        self.assertIn('class="dashboard-skip-link" href="#main-content"', html)
+        self.assertIn('id="main-content"', html)
+
     def test_mobile_viewport_uses_safe_areas_for_sticky_header_and_content(self):
         html = self.index_html
         self.assertIn('content="width=device-width, initial-scale=1.0, viewport-fit=cover"', html)
