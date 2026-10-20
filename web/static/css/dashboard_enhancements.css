@@ -458,3 +458,28 @@
 #main-content:focus {
     outline: none;
 }
+
+/* Preserve visible keyboard focus and control affordances in Windows High Contrast mode. */
+@media (forced-colors: active) {
+    :where(button, a, input, select, textarea, [tabindex]):focus-visible {
+        outline-color: Highlight;
+    }
+
+    .table-sortable-header:hover,
+    .table-sortable-header:focus-visible {
+        color: HighlightText;
+        background-color: Highlight;
+    }
+
+    .dashboard-skip-link {
+        border-color: Highlight;
+        background: Canvas;
+        color: CanvasText;
+        box-shadow: none;
+    }
+
+    .dashboard-horizontal-scroll {
+        border: 1px solid CanvasText;
+    }
+}
+
