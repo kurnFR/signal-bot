@@ -258,7 +258,16 @@
             installTelegramPing();
         });
         observer.observe(document.body, { childList: true, subtree: true });
-        window.addEventListener("resize", enhanceAllTables);
+        // Coalesce resize bursts into one layout pass per animation frame.
+        // Window resize can fire many times while a user drags the browser edge.
+        let resizeFrame = null;
+        window.addEventListener("resize", () => {
+            if (resizeFrame !== null) return;
+            resizeFrame = window.requestAnimationFrame(() => {
+                resizeFrame = null;
+                enhanceAllTables();
+            });
+        });
     }
 
     if (document.readyState === "loading") {
