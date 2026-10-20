@@ -746,3 +746,18 @@ class TestToastVisibilityAccessibility(unittest.TestCase):
         self.assertIn("document.addEventListener(\"visibilitychange\", handleVisibilityChange)", toast)
         self.assertIn("document.removeEventListener(\"visibilitychange\", handleVisibilityChange)", toast)
         self.assertIn("remainingMs = Math.max(0, remainingMs - (Date.now() - timerStartedAt));", toast)
+
+
+class TestWorkflowDialogEscapeStacking(unittest.TestCase):
+    def test_escape_closes_only_the_topmost_visible_workflow_dialog(self):
+        app_js = APP_JS.read_text(encoding="utf-8")
+        handler_start = app_js.index('document.addEventListener("keydown", (event) => {', app_js.index("window.App = App;"))
+        handler = app_js[handler_start:]
+        self.assertIn(".filter(({ modal }) => modal && !modal.classList.contains(\"hidden\"))", handler)
+        self.assertIn("window.getComputedStyle(a.modal).zIndex", handler)
+        self.assertIn("window.getComputedStyle(b.modal).zIndex", handler)
+        self.assertIn("a.modal.compareDocumentPosition(b.modal) & Node.DOCUMENT_POSITION_FOLLOWING", handler)
+        self.assertIn("const topmostModal = visibleModals[visibleModals.length - 1];", handler)
+        self.assertIn("App[topmostModal.closeMethod]();", handler)
+        self.assertNotIn('App[closeMethod]();\n            event.preventDefault();\n            return;', handler)
+        self.assertNotIn('"login-modal"', handler)
