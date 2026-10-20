@@ -844,6 +844,7 @@ class TestDashboardScrollbarContentUpdates(unittest.TestCase):
         enhancements = DASHBOARD_ENHANCEMENTS_JS.read_text(encoding="utf-8")
         self.assertIn("function syncHorizontalScrollbars(tables) {", enhancements)
         self.assertIn("const tablesToSync = new Set();", enhancements)
+        self.assertIn("observer.observe(document.body, { childList: true, characterData: true, subtree: true });", enhancements)
         self.assertIn("const changedTable = target && target.closest(SORTABLE_TABLE_SELECTOR);", enhancements)
         self.assertIn('changedTable.dataset.dashboardEnhanced === "1"', enhancements)
         self.assertIn("tablesToSync.add(changedTable);", enhancements)
