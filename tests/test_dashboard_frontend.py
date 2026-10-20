@@ -596,6 +596,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('table.caption.textContent.trim()', self.dashboard_enhancements_js)
         self.assertIn('table.dataset.label', self.dashboard_enhancements_js)
         self.assertIn('bar.setAttribute("aria-label", "Horizontal scroll for " + tableLabel)', self.dashboard_enhancements_js)
+        self.assertIn('bar.setAttribute("aria-description", "Use the left and right arrow keys to scroll horizontally.")', self.dashboard_enhancements_js)
         self.assertRegex(self.index_html, r"dashboard_enhancements\.js\?v=[^\"]+")
 
     def test_mobile_filters_and_data_tables_remain_usable(self):
