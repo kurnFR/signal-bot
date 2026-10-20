@@ -558,7 +558,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("body > aside nav .nav-btn {", self.dashboard_css)
         self.assertIn("min-height: 2.75rem;", self.dashboard_css)
         self.assertIn("body > aside > div:last-child {", self.dashboard_css)
-        self.assertRegex(self.index_html, r"dashboard_enhancements\.js\?v=[^\"]+")
+        self.assertRegex(self.index_html, r"dashboard_enhancements\.css\?v=[^\"]+")
 
     def test_theme_defaults_to_system_preference_without_overriding_saved_choice(self):
         theme_start = self.dashboard_enhancements_js.index("    function systemPreference()")
@@ -592,7 +592,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
     def test_sortable_table_headers_describe_keyboard_activation(self):
         self.assertIn('th.setAttribute("aria-description", "Press Enter or Space to sort this column.")', self.dashboard_enhancements_js)
         self.assertIn('if (event.key === "Enter" || event.key === " ")', self.dashboard_enhancements_js)
-        self.assertRegex(self.index_html, r"dashboard_enhancements\\.js\\?v=[^\\\"]+")
+        self.assertRegex(self.index_html, r"dashboard_enhancements\.js\?v=[^\"]+")
 
     def test_horizontal_table_scroll_region_is_keyboard_accessible(self):
         self.assertIn('bar.setAttribute("role", "region")', self.dashboard_enhancements_js)
