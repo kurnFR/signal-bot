@@ -44,6 +44,13 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('b.removeAttribute("aria-current")', switch_tab)
         self.assertIn('b.classList.toggle("active", isCurrent)', switch_tab)
 
+    def test_initial_dashboard_navigation_state_matches_visible_home_view(self):
+        nav = re.findall(r'<button data-tab="([^"]+)"([^>]*)>', self.index_html)
+        current = [(tab, attrs) for tab, attrs in nav if re.search(r'\baria-current="page"', attrs)]
+        active = [(tab, attrs) for tab, attrs in nav if re.search(r'\bactive\b', attrs)]
+        self.assertEqual([tab for tab, _ in current], ["home"])
+        self.assertEqual([tab for tab, _ in active], ["home"])
+
     def test_dashboard_view_title_changes_are_announced_to_assistive_technology(self):
         title = re.search(r'<h1 id="view-header-title"([^>]*)>', self.index_html)
         self.assertIsNotNone(title)
