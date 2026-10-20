@@ -663,6 +663,16 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
     def test_telegram_test_ping_button_has_contextual_accessible_name(self):
         self.assertIn('<button type="button" aria-label="Send Telegram bot test ping" onclick="App.sendTelegramTestPing()" id="btn-tg-test"', self.index_html)
 
+    def test_workflow_dialog_cancel_and_close_buttons_do_not_submit_forms(self):
+        for handler in (
+            "closeBackfillModal",
+            "closeDeployModal",
+            "closeRunMLModal",
+            "closeDeployMLModal",
+            "closeInspectMLModal",
+        ):
+            self.assertIn(f'<button type="button" onclick="App.{handler}()"', self.index_html)
+
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
         self.assertIn("max-width: 100%;", self.dashboard_css)
