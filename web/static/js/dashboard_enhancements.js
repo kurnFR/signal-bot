@@ -95,9 +95,10 @@
 
         Array.from(thead.rows[0].cells).forEach((th, index) => {
             const label = (th.textContent || "").replace(/[↑↓]/g, "").trim();
+            // All cells in the first header row describe columns, including non-sortable Action headers.
+            if (!th.hasAttribute("scope")) th.setAttribute("scope", "col");
             if (!label || SORTABLE_EXCLUDES.has(label) || th.querySelector("button")) return;
             th.classList.add("table-sortable-header");
-            if (!th.hasAttribute("scope")) th.setAttribute("scope", "col");
             // Keep the native column-header role; tabindex + keyboard handling provide activation.
             th.setAttribute("tabindex", "0");
             th.setAttribute("aria-label", `${label}, sortable`);
