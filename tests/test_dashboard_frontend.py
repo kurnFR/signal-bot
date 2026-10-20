@@ -1090,3 +1090,13 @@ class TestMobileDynamicViewportHeight(unittest.TestCase):
         shell = mobile_rules.split("body > div.flex-1.flex.flex-col.min-w-0 {", 1)[1].split("overflow: visible;", 1)[0]
         self.assertIn("min-height: calc(100vh - 7rem);", shell)
         self.assertIn("min-height: calc(100dvh - 7rem);", shell)
+
+
+class TestResponsiveMobileTableScrollHeight(unittest.TestCase):
+    def test_mobile_table_scroll_region_respects_visible_viewport_height(self):
+        dashboard_css = DASHBOARD_CSS.read_text(encoding="utf-8")
+        mobile_start = dashboard_css.index("@media (max-width: 768px)")
+        mobile_end = dashboard_css.index("\\n}", mobile_start) + 2
+        mobile_rules = dashboard_css[mobile_start:mobile_end]
+        self.assertIn("max-height: min(440px, 55vh);", mobile_rules)
+        self.assertIn("max-height: min(440px, 55dvh);", mobile_rules)
