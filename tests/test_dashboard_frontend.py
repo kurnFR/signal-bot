@@ -809,7 +809,7 @@ class TestDashboardHorizontalScrollResizeFallback(unittest.TestCase):
     def test_resize_refreshes_existing_horizontal_scrollbars_without_reenhancing_tables(self):
         enhancements = DASHBOARD_ENHANCEMENTS_JS.read_text(encoding="utf-8")
         self.assertIn('function syncHorizontalScrollbars(tables) {', enhancements)
-        self.assertIn('document.querySelectorAll(".dashboard-horizontal-scroll").forEach(bar => {', enhancements)
+        self.assertIn('Array.from(document.querySelectorAll(".dashboard-horizontal-scroll"))', enhancements)
         self.assertIn('viewport.querySelector(":scope > table")', enhancements)
         init_start = enhancements.index("    function init() {")
         init_end = enhancements.index("\n    if (document.readyState === \"loading\")", init_start)
