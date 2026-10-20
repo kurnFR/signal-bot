@@ -308,6 +308,12 @@
         min-height: 2.75rem;
     }
 
+    /* Backtest actions are primary controls and should meet mobile touch-target guidance. */
+    #btn-run-battle-royale,
+    #btn-run-backtest {
+        min-height: 2.75rem;
+    }
+
     body > aside nav .nav-btn.active {
         border-left: 0;
         border-bottom: 2px solid var(--dashboard-focus, #38bdf8);

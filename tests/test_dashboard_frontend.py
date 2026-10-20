@@ -621,6 +621,15 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("#login-modal button {", mobile_rules)
         self.assertIn("min-height: 2.75rem;", mobile_rules)
 
+    def test_mobile_backtest_actions_meet_44px_touch_target(self):
+        css = self.dashboard_css
+        mobile_start = css.index("/* Mobile-first navigation:")
+        mobile_end = css.index("@media (max-width: 420px)", mobile_start)
+        mobile_rules = css[mobile_start:mobile_end]
+        self.assertIn("#btn-run-battle-royale,", mobile_rules)
+        self.assertIn("#btn-run-backtest {", mobile_rules)
+        self.assertIn("min-height: 2.75rem;", mobile_rules)
+
     def test_mobile_dashboard_header_can_shrink_for_long_titles(self):
         css = self.dashboard_css
         mobile_start = css.index("@media (max-width: 768px)")
