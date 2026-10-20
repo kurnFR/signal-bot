@@ -133,7 +133,7 @@ const App = {
 
         let dismissTimer = null;
         let removalTimer = null;
-        let remainingMs = 4500;
+        let remainingMs = type === "error" ? 8000 : type === "warning" ? 6000 : 4500;
         let timerStartedAt = 0;
         let removing = false;
 
