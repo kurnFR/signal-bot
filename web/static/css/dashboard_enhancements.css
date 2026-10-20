@@ -302,6 +302,19 @@
         white-space: nowrap;
     }
 
+    /* Keep long dialogs within the visible viewport on short mobile screens. */
+    .fixed.inset-0 [role="dialog"] {
+        max-height: calc(100vh - 2rem);
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+    }
+
+    @supports (height: 100dvh) {
+        .fixed.inset-0 [role="dialog"] {
+            max-height: calc(100dvh - 2rem);
+        }
+    }
+
     /* Keep modal actions and icon-only close controls easy to tap on phones. */
     .fixed.inset-0 [role="dialog"] button {
         min-height: 2.75rem;
