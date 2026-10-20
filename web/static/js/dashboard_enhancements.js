@@ -421,12 +421,29 @@
         applyTheme(readPreference());
         mountToggle();
 
-        // The app can rebuild sidebar DOM during navigation; restore the toggle if removed.
-        const sidebarObserver = new MutationObserver(() => {
+        // Watch only sidebar internals for toggle removal; unrelated dashboard mutations
+        // should not trigger this observer. A lightweight body observer handles sidebar replacement.
+        let observedSidebar = null;
+        let sidebarObserver = null;
+        const observeCurrentSidebar = () => {
+            const sidebar = document.querySelector("body > aside");
+            if (sidebar !== observedSidebar) {
+                if (sidebarObserver) sidebarObserver.disconnect();
+                observedSidebar = sidebar;
+                sidebarObserver = null;
+                if (sidebar) {
+                    sidebarObserver = new MutationObserver(() => {
+                        if (!document.getElementById("dashboard-theme-toggle")) mountToggle();
+                    });
+                    sidebarObserver.observe(sidebar, { childList: true, subtree: true });
+                }
+            }
             if (!document.getElementById("dashboard-theme-toggle")) mountToggle();
-        });
+        };
+        observeCurrentSidebar();
         if (document.body) {
-            sidebarObserver.observe(document.body, { childList: true, subtree: true });
+            const sidebarRootObserver = new MutationObserver(observeCurrentSidebar);
+            sidebarRootObserver.observe(document.body, { childList: true });
         }
 
         // Follow OS theme changes only while the user has not chosen a theme.
