@@ -542,8 +542,9 @@
     transform: translateY(0);
 }
 
-#main-content:focus {
-    outline: none;
+#main-content:focus-visible {
+    outline: 2px solid var(--dashboard-focus, #38bdf8);
+    outline-offset: -2px;
 }
 
 /* Preserve visible keyboard focus and control affordances in Windows High Contrast mode. */
