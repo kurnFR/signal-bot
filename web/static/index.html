@@ -1583,7 +1583,7 @@
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 bg-slate-950/60 rounded-lg border border-slate-800">
                         <div>
-                            <label class="text-[11px] text-slate-300 font-semibold flex items-center gap-1.5">
+                            <label for="wt-setting-birdeye-key" class="text-[11px] text-slate-300 font-semibold flex items-center gap-1.5">
                                 <i data-lucide="key" class="w-3.5 h-3.5 text-cyan-400"></i> Birdeye API Key (Trade Fallback)
                             </label>
                             <input id="wt-setting-birdeye-key" type="password" placeholder="Optional: enter Birdeye API key for trade failover" class="cfg-input mt-1 w-full font-mono text-xs">
@@ -1671,10 +1671,10 @@
                         <div class="space-y-2">
                             <div class="flex gap-2">
                                 <select id="wt-add-chain" class="cfg-input"><option value="eth">ETH</option><option value="base">Base</option><option value="bsc">BSC</option><option value="arbitrum">ARB</option><option value="polygon_pos">POLY</option><option value="solana">SOL</option></select>
-                                <input type="text" id="wt-add-wallet" placeholder="Wallet address" class="cfg-input" maxlength="64">
+                                <input type="text" id="wt-add-wallet" aria-label="Wallet address" placeholder="Wallet address" class="cfg-input" maxlength="64">
                             </div>
                             <div class="flex gap-2">
-                                <input type="text" id="wt-add-label" placeholder="Label (optional)" class="cfg-input" maxlength="80">
+                                <input type="text" id="wt-add-label" aria-label="Wallet label (optional)" placeholder="Label (optional)" class="cfg-input" maxlength="80">
                                 <button type="button" onclick="App.walletAdd()" class="px-3 py-1.5 text-xs font-semibold bg-cyan-700 hover:bg-cyan-600 text-white rounded-lg whitespace-nowrap">+ Add to Checklist</button>
                             </div>
                         </div>
@@ -1726,15 +1726,15 @@
                         </h4>
                         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                             <div>
-                                <label class="block text-[11px] text-slate-400 mb-1 font-medium">Username</label>
+                                <label for="new-user-username" class="block text-[11px] text-slate-400 mb-1 font-medium">Username</label>
                                 <input type="text" id="new-user-username" placeholder="trader_john" class="w-full text-xs font-mono bg-slate-800 text-slate-100 px-3 py-2 rounded-lg border border-slate-700">
                             </div>
                             <div>
-                                <label class="block text-[11px] text-slate-400 mb-1 font-medium">Email</label>
+                                <label for="new-user-email" class="block text-[11px] text-slate-400 mb-1 font-medium">Email</label>
                                 <input type="email" id="new-user-email" placeholder="john@domain.com" class="w-full text-xs bg-slate-800 text-slate-100 px-3 py-2 rounded-lg border border-slate-700">
                             </div>
                             <div>
-                                <label class="block text-[11px] text-slate-400 mb-1 font-medium">Password (min 6)</label>
+                                <label for="new-user-password" class="block text-[11px] text-slate-400 mb-1 font-medium">Password (min 6)</label>
                                 <input type="password" id="new-user-password" placeholder="••••••••" class="w-full text-xs font-mono bg-slate-800 text-slate-100 px-3 py-2 rounded-lg border border-slate-700">
                             </div>
                             <div>
@@ -1762,15 +1762,15 @@
                     </h3>
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
-                            <label class="block text-[11px] text-slate-400 mb-1 font-medium">Current Password</label>
+                            <label for="chg-old-pwd" class="block text-[11px] text-slate-400 mb-1 font-medium">Current Password</label>
                             <input type="password" id="chg-old-pwd" placeholder="Current password" class="w-full text-xs font-mono bg-slate-800 text-slate-100 px-3 py-2 rounded-lg border border-slate-700">
                         </div>
                         <div>
-                            <label class="block text-[11px] text-slate-400 mb-1 font-medium">New Password</label>
+                            <label for="chg-new-pwd" class="block text-[11px] text-slate-400 mb-1 font-medium">New Password</label>
                             <input type="password" id="chg-new-pwd" placeholder="New password" class="w-full text-xs font-mono bg-slate-800 text-slate-100 px-3 py-2 rounded-lg border border-slate-700">
                         </div>
                         <div>
-                            <label class="block text-[11px] text-slate-400 mb-1 font-medium">Confirm New Password</label>
+                            <label for="chg-conf-pwd" class="block text-[11px] text-slate-400 mb-1 font-medium">Confirm New Password</label>
                             <input type="password" id="chg-conf-pwd" placeholder="Repeat new password" class="w-full text-xs font-mono bg-slate-800 text-slate-100 px-3 py-2 rounded-lg border border-slate-700">
                         </div>
                     </div>
@@ -1970,11 +1970,11 @@
 
             <div class="space-y-3">
                 <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1">Allocated Virtual Capital ($)</label>
+                    <label for="deploy-modal-capital" class="block text-xs font-semibold text-slate-400 mb-1">Allocated Virtual Capital ($)</label>
                     <input type="number" id="deploy-modal-capital" value="5000" min="100" step="500" class="w-full text-xs font-mono font-bold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
                 </div>
                 <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1">Risk per Trade (%)</label>
+                    <label for="deploy-modal-risk" class="block text-xs font-semibold text-slate-400 mb-1">Risk per Trade (%)</label>
                     <input type="number" id="deploy-modal-risk" value="1.0" min="0.1" max="5.0" step="0.25" class="w-full text-xs font-mono font-bold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
                 </div>
                 <div class="p-3 rounded-lg bg-sky-950/40 border border-sky-800/40 flex items-start gap-2.5">
@@ -2071,7 +2071,7 @@
                         </select>
                     </div>
                     <div>
-                        <label class="block text-xs font-semibold text-slate-400 mb-1">Min Validation Trades</label>
+                        <label for="ml-run-min-trades" class="block text-xs font-semibold text-slate-400 mb-1">Min Validation Trades</label>
                         <input type="number" id="ml-run-min-trades" value="5" min="1" max="50" class="w-full text-xs font-mono font-bold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
                     </div>
                 </div>
@@ -2124,11 +2124,11 @@
 
             <div class="space-y-3">
                 <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1">Allocated Virtual Capital ($)</label>
+                    <label for="deploy-ml-capital" class="block text-xs font-semibold text-slate-400 mb-1">Allocated Virtual Capital ($)</label>
                     <input type="number" id="deploy-ml-capital" value="5000" min="100" step="500" class="w-full text-xs font-mono font-bold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
                 </div>
                 <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1">Risk per Trade (%)</label>
+                    <label for="deploy-ml-risk" class="block text-xs font-semibold text-slate-400 mb-1">Risk per Trade (%)</label>
                     <input type="number" id="deploy-ml-risk" value="1.0" min="0.1" max="5.0" step="0.25" class="w-full text-xs font-mono font-bold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
                 </div>
                 <div class="p-3 rounded-lg bg-purple-950/40 border border-purple-800/40 flex items-start gap-2.5">
