@@ -831,7 +831,7 @@ class TestDashboardResizeObserverLifecycle(unittest.TestCase):
         self.assertEqual(observer_setup.count("new ResizeObserver("), 1)
 
         init_start = enhancements.index("    function init() {")
-        init_end = enhancements.index("\\n    if (document.readyState === \\"loading\\")", init_start)
+        init_end = enhancements.index("\n    if (document.readyState === \"loading\")", init_start)
         init = enhancements[init_start:init_end]
         self.assertIn("for (const node of mutation.removedNodes)", init)
         self.assertIn("if (table.isConnected || !table._dashboardResizeObserver) return;", init)
