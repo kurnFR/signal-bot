@@ -1069,3 +1069,13 @@ class TestMobileHeaderIconButtonAccessibility(unittest.TestCase):
         mobile_icon_only = self.dashboard_css[self.dashboard_css.index("@media (max-width: 420px)"):]
         self.assertIn("header > div:last-child > button span", mobile_icon_only)
         self.assertIn("display: none;", mobile_icon_only)
+
+
+    def test_mobile_dashboard_header_actions_meet_minimum_touch_target_width(self):
+        mobile_start = self.dashboard_css.index("@media (max-width: 767px)")
+        mobile_end = self.dashboard_css.index("@media (max-width: 420px)", mobile_start)
+        mobile_rules = self.dashboard_css[mobile_start:mobile_end]
+        self.assertIn("body > div.flex-1.flex.flex-col.min-w-0 > header > div:last-child > button {", mobile_rules)
+        self.assertIn("min-width: 2.75rem;", mobile_rules)
+        self.assertIn("min-height: 2.75rem;", mobile_rules)
+        self.assertIn("justify-content: center;", mobile_rules)
