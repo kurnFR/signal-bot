@@ -499,7 +499,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('table.caption.textContent.trim()', self.dashboard_enhancements_js)
         self.assertIn('table.dataset.label', self.dashboard_enhancements_js)
         self.assertIn('bar.setAttribute("aria-label", "Horizontal scroll for " + tableLabel)', self.dashboard_enhancements_js)
-        self.assertIn("dashboard_enhancements.js?v=20261020-2", self.index_html)
+        self.assertIn("dashboard_enhancements.js?v=20261020-3", self.index_html)
 
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
@@ -589,7 +589,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('document.addEventListener("click", event => {', theme_init)
         self.assertIn('event.target.closest("#dashboard-theme-toggle")', theme_init)
         self.assertNotIn('button.addEventListener("click", () => { userOverride = true; });', theme_init)
-        self.assertIn("dashboard_enhancements.js?v=20261020-2", self.index_html)
+        self.assertIn("dashboard_enhancements.js?v=20261020-3", self.index_html)
 
     def test_skip_link_bypasses_sidebar_navigation(self):
         self.assertIn('<a class="dashboard-skip-link" href="#main-content">Skip to main content</a>', self.index_html)
@@ -773,7 +773,9 @@ class TestDashboardEnhancementObserver(unittest.TestCase):
         self.assertIn("for (const mutation of mutations)", init)
         self.assertIn("for (const node of mutation.addedNodes)", init)
         self.assertIn("node.matches(SORTABLE_TABLE_SELECTOR)", init)
-        self.assertIn("node.querySelectorAll(SORTABLE_TABLE_SELECTOR).forEach(enhanceTable)", init)
+        self.assertIn("node.querySelectorAll(SORTABLE_TABLE_SELECTOR).forEach(table => tablesToEnhance.add(table))", init)
+        self.assertIn("const tablesToEnhance = new Set();", init)
+        self.assertIn("tablesToEnhance.forEach(enhanceTable);", init)
         self.assertNotIn("enhanceAllTables();\n            installTelegramPing();", init)
         self.assertIn("installTelegramPing();", init)
 
@@ -789,3 +791,15 @@ class TestDashboardResizeScheduling(unittest.TestCase):
         self.assertIn("if (resizeFrame !== null) return;", init)
         self.assertIn("window.requestAnimationFrame(() => {", init)
         self.assertIn("resizeFrame = null;\n                enhanceAllTables();", init)
+
+
+class TestDashboardMutationBatchDeduplication(unittest.TestCase):
+    def test_added_table_subtrees_are_deduplicated_per_observer_batch(self):
+        enhancements = DASHBOARD_ENHANCEMENTS_JS.read_text(encoding="utf-8")
+        init_start = enhancements.index("    function init() {")
+        init_end = enhancements.index("\n    if (document.readyState === \"loading\")", init_start)
+        init = enhancements[init_start:init_end]
+        self.assertIn("const tablesToEnhance = new Set();", init)
+        self.assertIn("tablesToEnhance.add(node)", init)
+        self.assertIn("tablesToEnhance.add(table)", init)
+        self.assertIn("tablesToEnhance.forEach(enhanceTable);", init)
