@@ -97,6 +97,7 @@
             const label = (th.textContent || "").replace(/[↑↓]/g, "").trim();
             if (!label || SORTABLE_EXCLUDES.has(label) || th.querySelector("button")) return;
             th.classList.add("table-sortable-header");
+            if (!th.hasAttribute("scope")) th.setAttribute("scope", "col");
             // Keep the native column-header role; tabindex + keyboard handling provide activation.
             th.setAttribute("tabindex", "0");
             th.setAttribute("aria-label", `${label}, sortable`);
