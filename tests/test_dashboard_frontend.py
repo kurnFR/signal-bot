@@ -1403,3 +1403,13 @@ class TestDashboardSelectAndPromptAccessibleNames(unittest.TestCase):
                     html,
                     r'<label\s+for="' + re.escape(control_id) + r'"[^>]*>' + re.escape(label) + r'</label>',
                 )
+
+
+class TestDashboardTableColumnHeaderScopes(unittest.TestCase):
+    def test_every_static_table_header_declares_column_scope(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        headers = re.findall(r'<th\b([^>]*)>', html, flags=re.IGNORECASE)
+        self.assertEqual(len(headers), 130)
+        for index, attrs in enumerate(headers):
+            with self.subTest(header_index=index):
+                self.assertRegex(attrs, r'\bscope="col"')
