@@ -25,7 +25,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         start = self.app_js.index("// Keep slow API responses from spawning overlapping polling cycles.")
         end = self.app_js.index("}, 15000);", start)
         polling = self.app_js[start:end]
-        self.assertIn("if (!this.authToken || this.autoRefreshInProgress) return;", polling)
+        self.assertIn("if (!this.authToken || this.autoRefreshInProgress || document.hidden) return;", polling)
         self.assertIn("this.autoRefreshInProgress = true;", polling)
         self.assertIn("finally {", polling)
         self.assertIn("this.autoRefreshInProgress = false;", polling)
@@ -82,6 +82,14 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             with self.subTest(tab=tab):
                 self.assertEqual(controls, f"view-{tab}")
                 self.assertIn(controls, sections)
+
+
+    def test_dashboard_auto_refresh_pauses_while_document_is_hidden(self):
+        start = self.app_js.index("// Keep slow API responses from spawning overlapping polling cycles.")
+        end = self.app_js.index("}, 15000);", start)
+        polling = self.app_js[start:end]
+        self.assertIn("document.hidden", polling)
+        self.assertIn("if (!this.authToken || this.autoRefreshInProgress || document.hidden) return;", polling)
 
     def test_dynamic_dashboard_handlers_are_not_inline(self):
         # Dynamic templates must bind handlers through addEventListener/data attributes.
@@ -827,7 +835,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('App[closeMethod]();', backdrop_handler)
         for modal_id in ("modal-inspect-ml", "modal-deploy-ml", "modal-run-ml", "deploy-modal", "backfill-modal"):
             self.assertIn(f'["{modal_id}",', backdrop_handler)
-        self.assertIn("app.js?v=20261020-25", self.index_html)
+        self.assertIn("app.js?v=20261020-26", self.index_html)
 
     def test_workflow_modals_restore_focus_to_the_opening_control(self):
         self.assertIn("rememberModalReturnFocus(modal)", self.app_js)
@@ -842,7 +850,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             start = self.app_js.index(f"    {close_method} {{")
             end = self.app_js.index("\n    },", start)
             self.assertIn("this.restoreModalReturnFocus(modal)", self.app_js[start:end])
-        self.assertIn("app.js?v=20261020-25", self.index_html)
+        self.assertIn("app.js?v=20261020-26", self.index_html)
 
     def test_workflow_modals_trap_tab_and_focus_an_initial_control(self):
         self.assertIn("getModalFocusableElements(modal)", self.app_js)
@@ -853,7 +861,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("first.focus()", self.app_js)
         self.assertIn("this.focusModalInitialControl(modal)", self.app_js)
         self.assertIn('modal.dataset.focusTrapInitialized = "1"', self.app_js)
-        self.assertIn("app.js?v=20261020-25", self.index_html)
+        self.assertIn("app.js?v=20261020-26", self.index_html)
 
     def test_login_modal_places_focus_on_username_when_opened(self):
         start = self.app_js.index("    showLoginModal()")
