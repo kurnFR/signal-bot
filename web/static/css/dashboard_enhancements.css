@@ -572,6 +572,14 @@
 
 
 
+/* Keep the sidebar theme toggle at the 44px touch target despite the legacy mobile override. */
+@media (max-width: 767px) {
+    #dashboard-theme-toggle {
+        min-height: 2.75rem;
+    }
+}
+
+
 /* Make each Wallet Tracker network option comfortable to tap on touch devices. */
 @media (max-width: 767px) {
     .wt-network-option {
