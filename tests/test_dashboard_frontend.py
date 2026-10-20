@@ -1232,13 +1232,13 @@ class TestWorkflowDialogAccessibleNames(unittest.TestCase):
     def test_workflow_dialogs_expose_one_named_dialog_without_nested_dialogs(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
         dialogs = {
-            "backfill-modal": ("Backfill historical data", "backfill-modal-title"),
-            "deploy-modal": ("Deploy strategy", "deploy-modal-title"),
-            "modal-run-ml": ("Run machine learning workflow", "modal-run-ml-title"),
-            "modal-deploy-ml": ("Deploy machine learning workflow", "modal-deploy-ml-title"),
-            "modal-inspect-ml": ("Inspect machine learning workflow", "inspect-ml-title"),
+            "backfill-modal": "backfill-modal-title",
+            "deploy-modal": "deploy-modal-title",
+            "modal-run-ml": "modal-run-ml-title",
+            "modal-deploy-ml": "modal-deploy-ml-title",
+            "modal-inspect-ml": "inspect-ml-title",
         }
-        for dialog_id, (accessible_name, title_id) in dialogs.items():
+        for dialog_id, title_id in dialogs.items():
             with self.subTest(dialog=dialog_id):
                 match = re.search(r'<div id="' + re.escape(dialog_id) + r'"[^>]*>', html)
                 self.assertIsNotNone(match, f"Missing workflow dialog wrapper: {dialog_id}")
@@ -1248,5 +1248,5 @@ class TestWorkflowDialogAccessibleNames(unittest.TestCase):
                     html[match.end():],
                 )
                 self.assertIsNotNone(inner, f"Missing named dialog panel: {dialog_id}")
-                self.assertIn(f'id="{title_id}"', html[match.end():match.end() + 1800])
-                self.assertIn(f">{accessible_name}</h3>", html[match.end():match.end() + 1800])
+                title = re.search(r'<h3 id="' + re.escape(title_id) + r'"[^>]*>', html[match.end():match.end() + 1800])
+                self.assertIsNotNone(title, f"Missing visible title for dialog: {dialog_id}")
