@@ -499,7 +499,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('table.caption.textContent.trim()', self.dashboard_enhancements_js)
         self.assertIn('table.dataset.label', self.dashboard_enhancements_js)
         self.assertIn('bar.setAttribute("aria-label", "Horizontal scroll for " + tableLabel)', self.dashboard_enhancements_js)
-        self.assertIn("dashboard_enhancements.js?v=20261020-4", self.index_html)
+        self.assertIn("dashboard_enhancements.js?v=20261020-5", self.index_html)
 
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
@@ -816,3 +816,24 @@ class TestDashboardHorizontalScrollResizeFallback(unittest.TestCase):
         init = enhancements[init_start:init_end]
         self.assertIn("syncHorizontalScrollbars();", init)
         self.assertIn("enhanceAllTables();\n                // ResizeObserver is not available", init)
+
+
+class TestDashboardResizeObserverLifecycle(unittest.TestCase):
+    def test_table_resize_observer_is_shared_and_released_when_table_is_removed(self):
+        enhancements = DASHBOARD_ENHANCEMENTS_JS.read_text(encoding="utf-8")
+        observer_start = enhancements.index("if (window.ResizeObserver) {")
+        observer_end = enhancements.index("            syncWidth();", observer_start)
+        observer_setup = enhancements[observer_start:observer_end]
+        self.assertIn("const resizeObserver = new ResizeObserver(syncWidth);", observer_setup)
+        self.assertIn("resizeObserver.observe(viewport);", observer_setup)
+        self.assertIn("resizeObserver.observe(table);", observer_setup)
+        self.assertIn("table._dashboardResizeObserver = resizeObserver;", observer_setup)
+        self.assertEqual(observer_setup.count("new ResizeObserver("), 1)
+
+        init_start = enhancements.index("    function init() {")
+        init_end = enhancements.index("\\n    if (document.readyState === \\"loading\\")", init_start)
+        init = enhancements[init_start:init_end]
+        self.assertIn("for (const node of mutation.removedNodes)", init)
+        self.assertIn("if (table.isConnected || !table._dashboardResizeObserver) return;", init)
+        self.assertIn("table._dashboardResizeObserver.disconnect();", init)
+        self.assertIn("delete table._dashboardResizeObserver;", init)
