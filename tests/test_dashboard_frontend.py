@@ -1256,3 +1256,19 @@ class TestWorkflowDialogAccessibleNames(unittest.TestCase):
                 self.assertIsNotNone(inner, f"Missing named dialog panel: {dialog_id}")
                 title = re.search(r'<h3 id="' + re.escape(title_id) + r'"[^>]*>', html[match.end():match.end() + 1800])
                 self.assertIsNotNone(title, f"Missing visible title for dialog: {dialog_id}")
+
+
+class TestDashboardSearchAndBacktestInputLabels(unittest.TestCase):
+    def test_market_symbol_search_has_an_explicit_accessible_name(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        match = re.search(r'<input\\b[^>]*id="search-crypto-input"[^>]*>', html)
+        self.assertIsNotNone(match)
+        self.assertIn('aria-label="Search cryptocurrency symbols"', match.group(0))
+
+    def test_backtest_sizing_labels_are_programmatically_associated(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        self.assertRegex(html, r'<label\\s+for="bt-capital-input">Capital:</label>')
+        self.assertRegex(html, r'<label\\s+for="bt-risk-input">Risk %:</label>')
+        for input_id in ("bt-capital-input", "bt-risk-input"):
+            with self.subTest(input_id=input_id):
+                self.assertRegex(html, r'<input\\b[^>]*id="' + re.escape(input_id) + r'"')
