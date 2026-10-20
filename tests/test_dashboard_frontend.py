@@ -809,6 +809,9 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('<main id="main-content" tabindex="-1"', self.index_html)
         self.assertIn(".dashboard-skip-link:focus", self.dashboard_css)
         self.assertIn("transform: translateY(0);", self.dashboard_css)
+        self.assertIn("#main-content:focus-visible", self.dashboard_css)
+        self.assertIn("outline: 2px solid var(--dashboard-focus, #38bdf8);", self.dashboard_css)
+        self.assertNotIn("#main-content:focus {\n    outline: none;\n}", self.dashboard_css)
         self.assertRegex(self.index_html, r"dashboard_enhancements\.css\?v=[^\"]+")
 
     def test_keyboard_focus_indicator_is_visible_and_supports_forced_colors(self):
