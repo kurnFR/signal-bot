@@ -673,6 +673,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         ):
             self.assertIn(f'<button type="button" onclick="App.{handler}()"', self.index_html)
 
+    def test_strategy_builder_helper_buttons_do_not_submit_forms(self):
+        for button in (
+            '<button type="button" onclick="App.useStrategyPromptChip(\'Create an aggressive momentum strategy',
+            '<button type="button" onclick="App.useStrategyPromptChip(\'Create an oversold mean reversion strategy',
+            '<button type="button" onclick="App.useStrategyPromptChip(\'Create a support bounce strategy',
+            '<button type="button" onclick="App.addRuleRow(\'long\')"',
+            '<button type="button" onclick="App.addRuleRow(\'short\')"',
+            '<button type="button" onclick="App.runQuickTestCustomStrategy()"',
+        ):
+            self.assertIn(button, self.index_html)
+
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
         self.assertIn("max-width: 100%;", self.dashboard_css)
