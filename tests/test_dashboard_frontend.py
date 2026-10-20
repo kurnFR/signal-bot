@@ -630,6 +630,14 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("#btn-run-backtest {", mobile_rules)
         self.assertIn("min-height: 2.75rem;", mobile_rules)
 
+    def test_mobile_sortable_headers_have_larger_touch_area(self):
+        css = self.dashboard_css
+        mobile_start = css.index("/* Consistent control sizing")
+        mobile_rules = css[mobile_start:]
+        self.assertIn(".table-sortable-header {", mobile_rules)
+        self.assertIn("padding-top: 0.75rem;", mobile_rules)
+        self.assertIn("padding-bottom: 0.75rem;", mobile_rules)
+
     def test_mobile_dashboard_header_can_shrink_for_long_titles(self):
         css = self.dashboard_css
         mobile_start = css.index("@media (max-width: 768px)")
