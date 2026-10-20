@@ -302,6 +302,16 @@
         white-space: nowrap;
     }
 
+    /* Keep modal actions and icon-only close controls easy to tap on phones. */
+    .fixed.inset-0 [role="dialog"] button {
+        min-height: 2.75rem;
+    }
+
+    .fixed.inset-0 [role="dialog"] button[aria-label*="Close"],
+    .fixed.inset-0 [role="dialog"] button[title*="Close"] {
+        min-width: 2.75rem;
+    }
+
     /* Keep the sign-in form comfortable to tap on narrow screens too. */
     #login-modal input,
     #login-modal button {
