@@ -1130,3 +1130,22 @@ class TestWalletNetworkTouchTargets(unittest.TestCase):
         self.assertIn("min-height: 2.75rem;", css)
         self.assertIn('.wt-network-option input[type="checkbox"]', css)
         self.assertIn("dashboard_enhancements.css?v=20261020-31", html)
+
+
+class TestWorkflowDialogAccessibleNames(unittest.TestCase):
+    def test_workflow_dialogs_expose_dialog_semantics_and_names(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        dialogs = {
+            "backfill-modal": "Backfill historical data",
+            "deploy-modal": "Deploy strategy",
+            "modal-run-ml": "Run machine learning workflow",
+            "modal-deploy-ml": "Deploy machine learning workflow",
+            "modal-inspect-ml": "Inspect machine learning workflow",
+        }
+        for dialog_id, accessible_name in dialogs.items():
+            with self.subTest(dialog=dialog_id):
+                match = re.search(r'<div id="' + re.escape(dialog_id) + r'"[^>]*>', html)
+                self.assertIsNotNone(match, f"Missing workflow dialog: {dialog_id}")
+                self.assertIn('role="dialog"', match.group(0))
+                self.assertIn('aria-modal="true"', match.group(0))
+                self.assertIn(f'aria-label="{accessible_name}"', match.group(0))
