@@ -1117,3 +1117,16 @@ class TestHorizontalScrollbarKeyboardFocus(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWalletNetworkTouchTargets(unittest.TestCase):
+    def test_wallet_network_options_have_mobile_touch_target_styles(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        css = DASHBOARD_CSS.read_text(encoding="utf-8")
+        for network in ("eth", "solana", "base", "bsc", "arbitrum", "polygon_pos"):
+            with self.subTest(network=network):
+                self.assertRegex(html, r'<label class="wt-network-option"><input type="checkbox" class="wt-setting-network" value="' + re.escape(network) + r'">')
+        self.assertIn(".wt-network-option {", css)
+        self.assertIn("min-height: 2.75rem;", css)
+        self.assertIn('.wt-network-option input[type="checkbox"]', css)
+        self.assertIn("dashboard_enhancements.css?v=20261020-31", html)
