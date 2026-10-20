@@ -607,7 +607,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
     def test_sortable_table_headers_describe_keyboard_activation(self):
         self.assertIn('th.setAttribute("aria-description", "Press Enter or Space to sort this column.")', self.dashboard_enhancements_js)
         self.assertIn('if (!th.hasAttribute("scope")) th.setAttribute("scope", "col");', self.dashboard_enhancements_js)
-        self.assertIn('if (event.key === "Enter" || event.key === " ")', self.dashboard_enhancements_js)
+        self.assertIn('if ((event.key === "Enter" || event.key === " ") && !event.repeat)', self.dashboard_enhancements_js)
         self.assertRegex(self.index_html, r"dashboard_enhancements\.js\?v=[^\"]+")
 
     def test_horizontal_table_scroll_region_is_keyboard_accessible(self):
