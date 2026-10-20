@@ -2007,14 +2007,25 @@ const App = {
         const dbBadge = document.getElementById("status-db-badge");
         if (!dbBadge) return;
         const databaseStatus = this.systemStatus?.database?.status;
+        let badgeClass;
+        let statusText;
+        let dotClass;
         if (databaseStatus !== "ok" && !this.systemStatus) {
-            dbBadge.className = "px-2 py-0.5 text-xs rounded font-medium flex items-center gap-1.5 bg-slate-900 border border-slate-700 text-slate-400";
-            dbBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-slate-500"></span> MariaDB: Unavailable';
-            return;
+            badgeClass = "px-2 py-0.5 text-xs rounded font-medium flex items-center gap-1.5 bg-slate-900 border border-slate-700 text-slate-400";
+            statusText = "MariaDB: Unavailable";
+            dotClass = "bg-slate-500";
+        } else {
+            const isOk = databaseStatus === "ok";
+            badgeClass = `px-2 py-0.5 text-xs rounded font-medium flex items-center gap-1.5 ${isOk ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-red-950 text-red-400 border border-red-800"}`;
+            statusText = `MariaDB: ${isOk ? "Connected" : "Error"}`;
+            dotClass = isOk ? "bg-emerald-400 animate-pulse" : "bg-red-400";
         }
-        const isOk = databaseStatus === "ok";
-        dbBadge.className = `px-2 py-0.5 text-xs rounded font-medium flex items-center gap-1.5 ${isOk ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-red-950 text-red-400 border border-red-800"}`;
-        dbBadge.innerHTML = `<span class="w-2 h-2 rounded-full ${isOk ? "bg-emerald-400 animate-pulse" : "bg-red-400"}"></span> MariaDB: ${isOk ? "Connected" : "Error"}`;
+
+        // The badge is a live region. Avoid re-announcing the same state on every poll.
+        if (dbBadge.className !== badgeClass) dbBadge.className = badgeClass;
+        if (dbBadge.textContent.trim() !== statusText) {
+            dbBadge.innerHTML = `<span class="w-2 h-2 rounded-full ${dotClass}"></span> ${statusText}`;
+        }
     },
 
     async fetchCoverage() {
