@@ -612,6 +612,16 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("animation-iteration-count: 1 !important;", self.index_html)
         self.assertIn("transition-duration: 0.01ms !important;", self.index_html)
 
+    def test_mobile_dashboard_header_can_shrink_for_long_titles(self):
+        css = self.dashboard_css
+        mobile_start = css.index("@media (max-width: 768px)")
+        mobile_end = css.index("@media (max-width: 420px)", mobile_start)
+        mobile_rules = css[mobile_start:mobile_end]
+        self.assertIn("header > div:first-child {", mobile_rules)
+        self.assertIn("flex: 1 1 auto;", mobile_rules)
+        self.assertIn("min-width: 0;", mobile_rules)
+        self.assertIn("overflow-wrap: anywhere;", mobile_rules)
+
     def test_dashboard_navigation_has_accessible_landmark_name(self):
         self.assertIn('<nav aria-label="Dashboard sections"', self.index_html)
 
