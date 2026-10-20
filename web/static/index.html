@@ -969,17 +969,17 @@
                             <!-- Basic Identifiers -->
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                                 <div>
-                                    <label class="block text-[11px] font-semibold text-slate-400 mb-1">Display Title</label>
+                                    <label for="cust-strat-disp" class="block text-[11px] font-semibold text-slate-400 mb-1">Display Title</label>
                                     <input type="text" id="cust-strat-disp" placeholder="RSI + Volume Surge Momentum" class="w-full text-xs bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700 focus:outline-none focus:border-sky-500">
                                 </div>
                                 <div>
-                                    <label class="block text-[11px] font-semibold text-slate-400 mb-1">Strategy ID (Unique machine identifier)</label>
+                                    <label for="cust-strat-name" class="block text-[11px] font-semibold text-slate-400 mb-1">Strategy ID (Unique machine identifier)</label>
                                     <input type="text" id="cust-strat-name" placeholder="rsi_vol_surge_v1" class="w-full text-xs font-mono bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700 focus:outline-none focus:border-sky-500">
                                 </div>
                             </div>
 
                             <div>
-                                <label class="block text-[11px] font-semibold text-slate-400 mb-1">Summary Description</label>
+                                <label for="cust-strat-desc" class="block text-[11px] font-semibold text-slate-400 mb-1">Summary Description</label>
                                 <input type="text" id="cust-strat-desc" placeholder="Enters on momentum confirmation with volume expansion" class="w-full text-xs bg-slate-800 text-slate-200 rounded-lg p-2.5 border border-slate-700 focus:outline-none focus:border-sky-500">
                             </div>
 
@@ -1030,19 +1030,19 @@
                                 </h5>
                                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                     <div>
-                                        <label class="block text-[11px] text-slate-400 mb-1">Stop-Loss (x ATR)</label>
+                                        <label for="cust-sl-atr" class="block text-[11px] text-slate-400 mb-1">Stop-Loss (x ATR)</label>
                                         <input type="number" id="cust-sl-atr" value="1.5" step="0.25" min="0.5" max="5.0" class="w-full text-xs font-mono bg-slate-800 text-slate-100 rounded-lg p-2 border border-slate-700">
                                     </div>
                                     <div>
-                                        <label class="block text-[11px] text-slate-400 mb-1">Risk:Reward Ratio</label>
+                                        <label for="cust-rr-ratio" class="block text-[11px] text-slate-400 mb-1">Risk:Reward Ratio</label>
                                         <input type="number" id="cust-rr-ratio" value="2.5" step="0.5" min="1.0" max="6.0" class="w-full text-xs font-mono bg-slate-100 text-slate-900 font-bold rounded-lg p-2 border border-slate-700">
                                     </div>
                                     <div>
-                                        <label class="block text-[11px] text-slate-400 mb-1">Trail Activation (R)</label>
+                                        <label for="cust-trail-act" class="block text-[11px] text-slate-400 mb-1">Trail Activation (R)</label>
                                         <input type="number" id="cust-trail-act" value="1.0" step="0.25" min="0.5" max="5.0" class="w-full text-xs font-mono bg-slate-800 text-slate-100 rounded-lg p-2 border border-slate-700">
                                     </div>
                                     <div>
-                                        <label class="block text-[11px] text-slate-400 mb-1">Trail Distance (x ATR)</label>
+                                        <label for="cust-trail-dist" class="block text-[11px] text-slate-400 mb-1">Trail Distance (x ATR)</label>
                                         <input type="number" id="cust-trail-dist" value="1.5" step="0.25" min="0.5" max="5.0" class="w-full text-xs font-mono bg-slate-800 text-slate-100 rounded-lg p-2 border border-slate-700">
                                     </div>
                                 </div>
