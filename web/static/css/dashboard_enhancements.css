@@ -570,3 +570,22 @@
     }
 }
 
+
+
+/* Make each Wallet Tracker network option comfortable to tap on touch devices. */
+@media (max-width: 767px) {
+    .wt-network-option {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        min-height: 2.75rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.375rem;
+    }
+
+    .wt-network-option input[type="checkbox"] {
+        width: 1.125rem;
+        height: 1.125rem;
+        flex-shrink: 0;
+    }
+}
