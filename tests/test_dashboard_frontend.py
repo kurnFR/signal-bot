@@ -620,6 +620,10 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('bar.setAttribute("aria-description", "Use the left and right arrow keys to scroll horizontally.")', self.dashboard_enhancements_js)
         self.assertRegex(self.index_html, r"dashboard_enhancements\.js\?v=[^\"]+")
 
+    def test_ml_data_refresh_button_has_explicit_accessible_name(self):
+        self.assertIn('<button type="button" aria-label="Refresh ML data" onclick="App.fetchMLData()"', self.index_html)
+        self.assertIn('title="Refresh ML Data"', self.index_html)
+
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
         self.assertIn("max-width: 100%;", self.dashboard_css)
