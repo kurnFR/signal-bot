@@ -327,7 +327,7 @@
                             <p class="text-xs text-slate-400 mt-0.5">Search any cryptocurrency pair live from Binance, select timeframe, and backfill into MariaDB</p>
                         </div>
                         <div class="flex items-center gap-2">
-                            <select id="search-market-select" class="text-xs bg-slate-800 text-slate-200 rounded-lg px-3 py-2 border border-slate-700">
+                            <select id="search-market-select" aria-label="Market to backfill" class="text-xs bg-slate-800 text-slate-200 rounded-lg px-3 py-2 border border-slate-700">
                                 <option value="all">All Markets</option>
                                 <option value="spot">Spot Only</option>
                                 <option value="futures">Futures Only</option>
@@ -406,20 +406,20 @@
                 <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-5">
                     <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                         <div>
-                            <label class="block text-xs font-semibold text-slate-400 mb-1.5">Symbol</label>
+                            <label for="bt-symbol-select" class="block text-xs font-semibold text-slate-400 mb-1.5">Symbol</label>
                             <select id="bt-symbol-select" class="w-full text-xs font-mono font-bold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700 focus:outline-none focus:border-sky-500">
                                 <option value="BTCUSDT">BTCUSDT</option>
                             </select>
                         </div>
                         <div>
-                            <label class="block text-xs font-semibold text-slate-400 mb-1.5">Market</label>
+                            <label for="bt-market-select" class="block text-xs font-semibold text-slate-400 mb-1.5">Market</label>
                             <select id="bt-market-select" class="w-full text-xs font-semibold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
                                 <option value="spot">Spot</option>
                                 <option value="futures">Futures</option>
                             </select>
                         </div>
                         <div>
-                            <label class="block text-xs font-semibold text-slate-400 mb-1.5">Timeframe</label>
+                            <label for="bt-timeframe-select" class="block text-xs font-semibold text-slate-400 mb-1.5">Timeframe</label>
                             <select id="bt-timeframe-select" class="w-full text-xs font-mono font-bold text-amber-400 bg-slate-800 rounded-lg p-2.5 border border-slate-700">
                                 <option value="1d">1d (Recommended)</option>
                                 <option value="4h">4h</option>
@@ -428,12 +428,12 @@
                             </select>
                         </div>
                         <div class="col-span-2">
-                            <label class="block text-xs font-semibold text-slate-400 mb-1.5">Strategy</label>
+                            <label for="bt-strategy-select" class="block text-xs font-semibold text-slate-400 mb-1.5">Strategy</label>
                             <select id="bt-strategy-select" onchange="App.onStrategyChanged()" class="w-full text-xs font-semibold bg-slate-800 text-sky-400 rounded-lg p-2.5 border border-slate-700">
                             </select>
                         </div>
                         <div>
-                            <label class="block text-xs font-semibold text-slate-400 mb-1.5">Data Segment</label>
+                            <label for="bt-segment-select" class="block text-xs font-semibold text-slate-400 mb-1.5">Data Segment</label>
                             <select id="bt-segment-select" class="w-full text-xs font-semibold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
                                 <option value="full">Full (100%)</option>
                                 <option value="train">Train (Oldest 80%)</option>
@@ -939,7 +939,7 @@
                         <!-- Prompt Input Area -->
                         <div class="p-3.5 border-t border-slate-800 bg-slate-950/60">
                             <div class="flex gap-2">
-                                <textarea id="strat-ai-prompt" rows="2" placeholder="Describe your strategy or instructions (e.g., 'Make the stop loss tighter to 1.2 ATR and add MACD histogram > 0')..." class="w-full text-xs bg-slate-900 text-slate-100 rounded-xl p-3 border border-slate-700 focus:outline-none focus:border-indigo-500 resize-none font-sans leading-relaxed"></textarea>
+                                <textarea id="strat-ai-prompt" aria-label="Strategy builder prompt" rows="2" placeholder="Describe your strategy or instructions (e.g., 'Make the stop loss tighter to 1.2 ATR and add MACD histogram > 0')..." class="w-full text-xs bg-slate-900 text-slate-100 rounded-xl p-3 border border-slate-700 focus:outline-none focus:border-indigo-500 resize-none font-sans leading-relaxed"></textarea>
                                 <button type="button" id="strat-ai-generate-btn" onclick="App.generateStrategyWithAI()" class="px-4 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 hover:from-indigo-400 hover:to-blue-500 text-white font-bold text-xs flex flex-col items-center justify-center gap-1 shadow-lg shadow-indigo-500/20 transition-all flex-shrink-0">
                                     <i data-lucide="sparkles" class="w-4 h-4"></i>
                                     <span>Generate</span>
@@ -1115,7 +1115,7 @@
                         </div>
                         <div class="flex items-center gap-2">
                             <input type="text" id="strat-catalog-search" aria-label="Search strategy catalog" oninput="App.filterStrategyCatalog()" placeholder="Search strategies..." class="text-xs bg-slate-800 text-slate-200 rounded-lg px-3 py-1.5 border border-slate-700 focus:outline-none focus:border-sky-500 w-48">
-                            <select id="strat-catalog-filter" onchange="App.filterStrategyCatalog()" class="text-xs bg-slate-800 text-slate-200 rounded-lg px-3 py-1.5 border border-slate-700 focus:outline-none focus:border-sky-500">
+                            <select id="strat-catalog-filter" aria-label="Filter strategy catalog" onchange="App.filterStrategyCatalog()" class="text-xs bg-slate-800 text-slate-200 rounded-lg px-3 py-1.5 border border-slate-700 focus:outline-none focus:border-sky-500">
                                 <option value="all">All Strategies</option>
                                 <option value="custom">Custom AI Strategies Only</option>
                                 <option value="builtin">Built-In Strategies Only</option>
@@ -1670,7 +1670,7 @@
                         </div>
                         <div class="space-y-2">
                             <div class="flex gap-2">
-                                <select id="wt-add-chain" class="cfg-input"><option value="eth">ETH</option><option value="base">Base</option><option value="bsc">BSC</option><option value="arbitrum">ARB</option><option value="polygon_pos">POLY</option><option value="solana">SOL</option></select>
+                                <select id="wt-add-chain" aria-label="Blockchain network" class="cfg-input"><option value="eth">ETH</option><option value="base">Base</option><option value="bsc">BSC</option><option value="arbitrum">ARB</option><option value="polygon_pos">POLY</option><option value="solana">SOL</option></select>
                                 <input type="text" id="wt-add-wallet" aria-label="Wallet address" placeholder="Wallet address" class="cfg-input" maxlength="64">
                             </div>
                             <div class="flex gap-2">
@@ -1738,7 +1738,7 @@
                                 <input type="password" id="new-user-password" placeholder="••••••••" class="w-full text-xs font-mono bg-slate-800 text-slate-100 px-3 py-2 rounded-lg border border-slate-700">
                             </div>
                             <div>
-                                <label class="block text-[11px] text-slate-400 mb-1 font-medium">Role</label>
+                                <label for="new-user-role" class="block text-[11px] text-slate-400 mb-1 font-medium">Role</label>
                                 <select id="new-user-role" class="w-full text-xs bg-slate-800 text-slate-100 px-3 py-2 rounded-lg border border-slate-700 font-semibold">
                                     <option value="trader">Trader (Full Access)</option>
                                     <option value="admin">Administrator</option>
@@ -1888,14 +1888,14 @@
 
                 <div class="grid grid-cols-2 gap-3">
                     <div>
-                        <label class="block text-xs font-semibold text-slate-400 mb-1">Market</label>
+                        <label for="modal-backfill-market" class="block text-xs font-semibold text-slate-400 mb-1">Market</label>
                         <select id="modal-backfill-market" class="w-full text-xs font-semibold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
                             <option value="spot">Spot</option>
                             <option value="futures">Futures</option>
                         </select>
                     </div>
                     <div>
-                        <label class="block text-xs font-semibold text-slate-400 mb-1">Timeframe</label>
+                        <label for="modal-backfill-timeframe" class="block text-xs font-semibold text-slate-400 mb-1">Timeframe</label>
                         <select id="modal-backfill-timeframe" class="w-full text-xs font-mono font-bold text-amber-400 bg-slate-800 rounded-lg p-2.5 border border-slate-700">
                             <option value="1d">1d</option>
                             <option value="4h">4h</option>
@@ -1908,7 +1908,7 @@
                 </div>
 
                 <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1">Historical Duration</label>
+                    <label for="modal-backfill-years" class="block text-xs font-semibold text-slate-400 mb-1">Historical Duration</label>
                     <select id="modal-backfill-years" class="w-full text-xs font-semibold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
                         <option value="1.0">1 Year (~365 daily bars or ~8,760 hourly bars)</option>
                         <option value="0.25">3 Months</option>
@@ -2022,7 +2022,7 @@
                         <input type="text" id="ml-run-symbol" value="BTCUSDT" class="w-full text-xs font-mono font-bold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700 uppercase">
                     </div>
                     <div>
-                        <label class="block text-xs font-semibold text-slate-400 mb-1">Market</label>
+                        <label for="ml-run-market" class="block text-xs font-semibold text-slate-400 mb-1">Market</label>
                         <select id="ml-run-market" class="w-full text-xs font-semibold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
                             <option value="spot">Spot</option>
                             <option value="futures">Futures</option>
@@ -2032,7 +2032,7 @@
 
                 <div class="grid grid-cols-2 gap-3">
                     <div>
-                        <label class="block text-xs font-semibold text-slate-400 mb-1">Timeframe</label>
+                        <label for="ml-run-timeframe" class="block text-xs font-semibold text-slate-400 mb-1">Timeframe</label>
                         <select id="ml-run-timeframe" class="w-full text-xs font-mono font-bold text-amber-400 bg-slate-800 rounded-lg p-2.5 border border-slate-700">
                             <option value="1h">1h</option>
                             <option value="4h">4h</option>
@@ -2041,7 +2041,7 @@
                         </select>
                     </div>
                     <div>
-                        <label class="block text-xs font-semibold text-slate-400 mb-1">Base Strategy</label>
+                        <label for="ml-run-strategy" class="block text-xs font-semibold text-slate-400 mb-1">Base Strategy</label>
                         <select id="ml-run-strategy" class="w-full text-xs font-semibold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
                             <option value="trend_ema_v1">trend_ema_v1</option>
                             <option value="confluence_ensemble_v1">confluence_ensemble_v1</option>
@@ -2053,7 +2053,7 @@
                 </div>
 
                 <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1">Candidate Model Grid</label>
+                    <label for="ml-run-model" class="block text-xs font-semibold text-slate-400 mb-1">Candidate Model Grid</label>
                     <select id="ml-run-model" class="w-full text-xs font-semibold bg-slate-800 text-purple-300 rounded-lg p-2.5 border border-slate-700">
                         <option value="all">⚡ All Models Tournament (LR + Random Forest + Gradient Boosting)</option>
                         <option value="logistic_regression">Logistic Regression (Linear Regularization Grid)</option>
@@ -2064,7 +2064,7 @@
 
                 <div class="grid grid-cols-2 gap-3">
                     <div>
-                        <label class="block text-xs font-semibold text-slate-400 mb-1">Target Definition</label>
+                        <label for="ml-run-target" class="block text-xs font-semibold text-slate-400 mb-1">Target Definition</label>
                         <select id="ml-run-target" class="w-full text-xs font-semibold bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700">
                             <option value="binary_positive_r">binary_positive_r (Trade R &gt; 0)</option>
                             <option value="binary_r_above_half">binary_r_above_half (Trade R &gt; 0.5)</option>
