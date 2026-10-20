@@ -837,3 +837,15 @@ class TestDashboardResizeObserverLifecycle(unittest.TestCase):
         self.assertIn("if (table.isConnected || !table._dashboardResizeObserver) return;", init)
         self.assertIn("table._dashboardResizeObserver.disconnect();", init)
         self.assertIn("delete table._dashboardResizeObserver;", init)
+
+
+class TestDashboardScrollbarContentUpdates(unittest.TestCase):
+    def test_mutation_observer_resyncs_scrollbars_for_changed_enhanced_tables(self):
+        enhancements = DASHBOARD_ENHANCEMENTS_JS.read_text(encoding="utf-8")
+        self.assertIn("function syncHorizontalScrollbars(tables) {", enhancements)
+        self.assertIn("const tablesToSync = new Set();", enhancements)
+        self.assertIn("const changedTable = target && target.closest(SORTABLE_TABLE_SELECTOR);", enhancements)
+        self.assertIn('changedTable.dataset.dashboardEnhanced === "1"', enhancements)
+        self.assertIn("tablesToSync.add(changedTable);", enhancements)
+        self.assertIn("if (tablesToSync.size) syncHorizontalScrollbars(tablesToSync);", enhancements)
+        self.assertIn('table.parentElement.querySelector(":scope > .dashboard-horizontal-scroll")', enhancements)
