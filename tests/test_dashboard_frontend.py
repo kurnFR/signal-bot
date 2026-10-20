@@ -539,11 +539,13 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('"max-height:calc(100dvh - 2rem)"', toast)
         self.assertIn('"overflow-y:auto"', toast)
         self.assertNotIn('container.setAttribute("aria-relevant"', toast)
-        self.assertIn('toast.setAttribute("role", type === "error" ? "alert" : "status")', toast)
+        self.assertIn('toast.setAttribute("role", notificationType === "error" ? "alert" : "status")', toast)
         self.assertIn('"alert" : "status")', toast)
         self.assertIn('toast.setAttribute("aria-atomic", "true")', toast)
         self.assertIn('toast.setAttribute("aria-atomic", "true")', toast)
-        self.assertIn('aria-label="Dismiss"', toast)
+        self.assertIn('aria-label="Dismiss ${notificationType} notification"', toast)
+        self.assertIn('const notificationType = Object.prototype.hasOwnProperty.call(palette, type) ? type : "info";', toast)
+        self.assertIn('toast.setAttribute("role", notificationType === "error" ? "alert" : "status")', toast)
         self.assertIn("min-width:24px;min-height:24px;", toast)
         self.assertIn("display:flex;align-items:center;justify-content:center;", toast)
         self.assertIn('type="button"', toast)
@@ -929,7 +931,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('App[closeMethod]();', backdrop_handler)
         for modal_id in ("modal-inspect-ml", "modal-deploy-ml", "modal-run-ml", "deploy-modal", "backfill-modal"):
             self.assertIn(f'["{modal_id}",', backdrop_handler)
-        self.assertIn("app.js?v=20261020-26", self.index_html)
+        self.assertIn("app.js?v=20261020-27", self.index_html)
 
     def test_workflow_modals_restore_focus_to_the_opening_control(self):
         self.assertIn("rememberModalReturnFocus(modal)", self.app_js)
@@ -944,7 +946,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             start = self.app_js.index(f"    {close_method} {{")
             end = self.app_js.index("\n    },", start)
             self.assertIn("this.restoreModalReturnFocus(modal)", self.app_js[start:end])
-        self.assertIn("app.js?v=20261020-26", self.index_html)
+        self.assertIn("app.js?v=20261020-27", self.index_html)
 
     def test_workflow_modals_trap_tab_and_focus_an_initial_control(self):
         self.assertIn("getModalFocusableElements(modal)", self.app_js)
@@ -955,7 +957,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("first.focus()", self.app_js)
         self.assertIn("this.focusModalInitialControl(modal)", self.app_js)
         self.assertIn('modal.dataset.focusTrapInitialized = "1"', self.app_js)
-        self.assertIn("app.js?v=20261020-26", self.index_html)
+        self.assertIn("app.js?v=20261020-27", self.index_html)
 
     def test_login_modal_places_focus_on_username_when_opened(self):
         start = self.app_js.index("    showLoginModal()")
