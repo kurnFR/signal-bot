@@ -585,7 +585,8 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('statusRegion.setAttribute("role", "status")', self.dashboard_enhancements_js)
         self.assertIn('statusRegion.setAttribute("aria-live", "polite")', self.dashboard_enhancements_js)
         self.assertIn('statusRegion.setAttribute("aria-atomic", "true")', self.dashboard_enhancements_js)
-        self.assertIn('statusRegion.textContent = `Sorted by ${label} ${direction === 1 ? "ascending" : "descending"}.`;', self.dashboard_enhancements_js)
+        self.assertIn('const tableLabel = table.getAttribute("aria-label") || (table.caption && table.caption.textContent.trim()) || table.dataset.label;', self.dashboard_enhancements_js)
+        self.assertIn('statusRegion.textContent = `Sorted${tableLabel ? ` ${tableLabel}` : ""} by ${label} ${direction === 1 ? "ascending" : "descending"}.`;', self.dashboard_enhancements_js)
         self.assertIn(".dashboard-sort-status {", self.dashboard_css)
         self.assertIn("clip: rect(0, 0, 0, 0);", self.dashboard_css)
 

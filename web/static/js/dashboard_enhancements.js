@@ -130,7 +130,8 @@
                     statusRegion.setAttribute("aria-atomic", "true");
                     table.parentElement.appendChild(statusRegion);
                 }
-                statusRegion.textContent = `Sorted by ${label} ${direction === 1 ? "ascending" : "descending"}.`;
+                const tableLabel = table.getAttribute("aria-label") || (table.caption && table.caption.textContent.trim()) || table.dataset.label;
+                statusRegion.textContent = `Sorted${tableLabel ? ` ${tableLabel}` : ""} by ${label} ${direction === 1 ? "ascending" : "descending"}.`;
             });
             th.addEventListener("keydown", event => {
                 if (event.key === "Enter" || event.key === " ") {
