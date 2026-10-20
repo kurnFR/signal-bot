@@ -65,6 +65,14 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
                 self.assertRegex(attrs, r'aria-labelledby="view-header-title"')
         self.assertRegex(self.index_html, r'<h1 id="view-header-title"[^>]*>')
 
+    def test_dashboard_view_sections_reference_the_current_header_description(self):
+        sections = re.findall(r'<section id="(view-[^"]+)"([^>]*)>', self.index_html)
+        self.assertEqual(len(sections), 11)
+        for section_id, attrs in sections:
+            with self.subTest(section=section_id):
+                self.assertRegex(attrs, r'aria-describedby="view-header-desc"')
+        self.assertRegex(self.index_html, r'<p id="view-header-desc"[^>]*>')
+
     def test_dashboard_navigation_controls_reference_matching_sections(self):
         nav = re.findall(r'<button data-tab="([^"]+)" aria-controls="([^"]+)"', self.index_html)
         sections = set(re.findall(r'<section id="(view-[^"]+)"', self.index_html))
