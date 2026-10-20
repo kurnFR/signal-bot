@@ -641,6 +641,10 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
     def test_wallet_refresh_button_has_contextual_accessible_name(self):
         self.assertIn('<button type="button" aria-label="Refresh wallet data" onclick="App.fetchWalletData()"', self.index_html)
 
+    def test_circuit_breaker_controls_have_contextual_accessible_names(self):
+        self.assertIn('<button type="button" aria-label="Activate emergency stop" onclick="App.tripCircuitBreaker()"', self.index_html)
+        self.assertIn('<button type="button" aria-label="Reset circuit breaker" onclick="App.resetCircuitBreaker()"', self.index_html)
+
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
         self.assertIn("max-width: 100%;", self.dashboard_css)
