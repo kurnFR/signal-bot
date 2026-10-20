@@ -85,7 +85,9 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
 
 
     def test_sort_announcement_includes_table_row_count(self):
-        self.assertIn("${tbodyRows(table).length} rows.", self.dashboard_enhancements_js)
+        self.assertIn("const rowCount = tbodyRows(table).length;", self.dashboard_enhancements_js)
+        self.assertIn('const rowLabel = rowCount === 1 ? "row" : "rows";', self.dashboard_enhancements_js)
+        self.assertIn("${rowCount} ${rowLabel}.", self.dashboard_enhancements_js)
         self.assertIn('statusRegion.setAttribute("aria-live", "polite")', self.dashboard_enhancements_js)
 
     def test_dashboard_auto_refresh_pauses_while_document_is_hidden(self):
@@ -598,7 +600,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('statusRegion.setAttribute("aria-live", "polite")', self.dashboard_enhancements_js)
         self.assertIn('statusRegion.setAttribute("aria-atomic", "true")', self.dashboard_enhancements_js)
         self.assertIn('const tableLabel = table.getAttribute("aria-label") || (table.caption && table.caption.textContent.trim()) || table.dataset.label;', self.dashboard_enhancements_js)
-        self.assertIn('statusRegion.textContent = `Sorted${tableLabel ? ` ${tableLabel}` : ""} by ${label} ${direction === 1 ? "ascending" : "descending"}. ${tbodyRows(table).length} rows.`;', self.dashboard_enhancements_js)
+        self.assertIn('statusRegion.textContent = `Sorted${tableLabel ? ` ${tableLabel}` : ""} by ${label} ${direction === 1 ? "ascending" : "descending"}. ${rowCount} ${rowLabel}.`;', self.dashboard_enhancements_js)
         self.assertIn(".dashboard-sort-status {", self.dashboard_css)
         self.assertIn("clip: rect(0, 0, 0, 0);", self.dashboard_css)
 
