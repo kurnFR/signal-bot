@@ -675,7 +675,7 @@
                             </h3>
                             <p class="text-xs text-slate-400 mt-0.5">Real-time unrealized PnL, dynamic trailing stops, and SL/TP triggers</p>
                         </div>
-                        <button id="btn-sync-paper" onclick="App.syncPaperMarketTick()" class="px-3.5 py-1.5 text-xs rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold flex items-center gap-1.5 shadow-md shadow-sky-500/20 transition-all">
+                        <button type="button" aria-label="Evaluate paper trading market tick" id="btn-sync-paper" onclick="App.syncPaperMarketTick()" class="px-3.5 py-1.5 text-xs rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold flex items-center gap-1.5 shadow-md shadow-sky-500/20 transition-all">
                             <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Evaluate Market Tick
                         </button>
                     </div>
@@ -2184,7 +2184,7 @@
          this file has no explicit Cache-Control header. See the
          "still seeing the old bug after a fix was pushed" class of report. -->
     <script src="/static/js/app.js?v=20261020-26"></script>
-    <script src="/static/js/dashboard_enhancements.js?v=20261020-25"></script>
+    <script src="/static/js/dashboard_enhancements.js?v=20261020-26"></script>
     <script>
         if (window.lucide) window.lucide.createIcons();
     </script>

@@ -657,6 +657,9 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
     def test_selected_strategy_backtest_button_has_contextual_accessible_name(self):
         self.assertIn('<button type="button" aria-label="Run selected strategy backtest" id="btn-run-backtest" onclick="App.runBacktest()"', self.index_html)
 
+    def test_paper_market_tick_button_has_contextual_accessible_name(self):
+        self.assertIn('<button type="button" aria-label="Evaluate paper trading market tick" id="btn-sync-paper" onclick="App.syncPaperMarketTick()"', self.index_html)
+
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
         self.assertIn("max-width: 100%;", self.dashboard_css)
