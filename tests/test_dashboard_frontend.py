@@ -36,6 +36,14 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             self.assertIn(f"this.{method}(", polling)
         self.assertIn("this.autoRefreshInProgress = false;", polling)
 
+    def test_current_dashboard_navigation_item_is_announced_to_assistive_technology(self):
+        switch_start = self.app_js.index("    switchTab(tabId) {")
+        switch_end = self.app_js.index("\\n    },", switch_start)
+        switch_tab = self.app_js[switch_start:switch_end]
+        self.assertIn('b.setAttribute("aria-current", "page")', switch_tab)
+        self.assertIn('b.removeAttribute("aria-current")', switch_tab)
+        self.assertIn('b.classList.toggle("active", isCurrent)', switch_tab)
+
     def test_dynamic_dashboard_handlers_are_not_inline(self):
         # Dynamic templates must bind handlers through addEventListener/data attributes.
         self.assertNotRegex(self.app_js, re.compile(r"\bonclick\s*=", re.IGNORECASE))
