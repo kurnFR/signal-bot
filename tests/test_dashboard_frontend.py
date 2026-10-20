@@ -1427,3 +1427,17 @@ class TestDynamicDashboardTableColumnHeaderScopes(unittest.TestCase):
     def test_app_script_cache_token_tracks_dynamic_header_markup(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
         self.assertIn('app.js?v=20261020-28', html)
+
+class TestToastDismissFocusRestoration(unittest.TestCase):
+    def test_manual_toast_dismissal_restores_focus_to_the_previous_control(self):
+        start = self.app_js.index('    showToast(message, type = "info") {')
+        end = self.app_js.index("    // ----------------------------------------------------\\n    // NEWS AI OVERLAY SIGNALS", start)
+        toast = self.app_js[start:end]
+        self.assertIn("const previouslyFocusedElement = document.activeElement;", toast)
+        self.assertIn("const remove = (restoreFocus = false) => {", toast)
+        self.assertIn("restoreFocus && toast.contains(document.activeElement)", toast)
+        self.assertIn("previouslyFocusedElement.isConnected", toast)
+        self.assertIn('toast.querySelector("button").addEventListener("click", () => remove(true));', toast)
+
+    def test_toast_focus_restoration_updates_app_script_cache_token(self):
+        self.assertIn('app.js?v=20261020-29', self.index_html)
