@@ -1272,3 +1272,24 @@ class TestDashboardSearchAndBacktestInputLabels(unittest.TestCase):
         for input_id in ("bt-capital-input", "bt-risk-input"):
             with self.subTest(input_id=input_id):
                 self.assertRegex(html, r'<input\b[^>]*id="' + re.escape(input_id) + r'"')
+
+
+class TestCustomStrategyInputLabelAssociations(unittest.TestCase):
+    def test_custom_strategy_fields_have_associated_visible_labels(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        fields = {
+            "cust-strat-disp": "Display Title",
+            "cust-strat-name": "Strategy ID (Unique machine identifier)",
+            "cust-strat-desc": "Summary Description",
+            "cust-sl-atr": "Stop-Loss (x ATR)",
+            "cust-rr-ratio": "Risk:Reward Ratio",
+            "cust-trail-act": "Trail Activation (R)",
+            "cust-trail-dist": "Trail Distance (x ATR)",
+        }
+        for input_id, label in fields.items():
+            with self.subTest(input_id=input_id):
+                self.assertRegex(
+                    html,
+                    r'<label\s+for="' + re.escape(input_id) + r'"[^>]*>' + re.escape(label) + r'</label>',
+                )
+                self.assertRegex(html, r'<input\b[^>]*id="' + re.escape(input_id) + r'"')
