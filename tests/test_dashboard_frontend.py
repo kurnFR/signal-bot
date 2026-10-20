@@ -695,9 +695,9 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
 
     def test_all_static_dashboard_buttons_have_explicit_types(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
-        for match in re.finditer(r"<button\\b[^>]*>", html, re.IGNORECASE | re.DOTALL):
+        for match in re.finditer(r"<button\b[^>]*>", html, re.IGNORECASE | re.DOTALL):
             with self.subTest(button=match.group(0)[:120]):
-                self.assertRegex(match.group(0), r"\\btype\\s*=\\s*[\"'](?:button|submit|reset)[\"']", "Every button should declare its intended type")
+                self.assertRegex(match.group(0), r"\btype\s*=\s*[\"'](?:button|submit|reset)[\"']", "Every button should declare its intended type")
 
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
