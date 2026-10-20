@@ -742,6 +742,21 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("function mountToggle()", self.dashboard_enhancements_js)
         self.assertIn("applyTheme(root.dataset.theme || readPreference());", self.dashboard_enhancements_js)
 
+
+class TestDashboardForcedColorsAccessibility(unittest.TestCase):
+    def test_forced_colors_preserves_focus_and_scroll_region_affordances(self):
+        css = DASHBOARD_CSS.read_text(encoding="utf-8")
+        forced_start = css.index("@media (forced-colors: active)")
+        forced_colors = css[forced_start:]
+        self.assertIn("outline-color: Highlight;", forced_colors)
+        self.assertIn("color: HighlightText;", forced_colors)
+        self.assertIn("background-color: Highlight;", forced_colors)
+        self.assertIn("background: Canvas;", forced_colors)
+        self.assertIn("color: CanvasText;", forced_colors)
+        self.assertIn(".dashboard-horizontal-scroll", forced_colors)
+        self.assertIn("border: 1px solid CanvasText;", forced_colors)
+
+
 if __name__ == "__main__":
     unittest.main()
 
