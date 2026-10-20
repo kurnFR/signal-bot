@@ -138,7 +138,7 @@
                 statusRegion.textContent = `Sorted${tableLabel ? ` ${tableLabel}` : ""} by ${label} ${direction === 1 ? "ascending" : "descending"}. ${rowCount} ${rowLabel}.`;
             });
             th.addEventListener("keydown", event => {
-                if (event.key === "Enter" || event.key === " ") {
+                if ((event.key === "Enter" || event.key === " ") && !event.repeat) {
                     event.preventDefault();
                     th.click();
                 }
