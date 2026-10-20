@@ -1429,6 +1429,11 @@ class TestDynamicDashboardTableColumnHeaderScopes(unittest.TestCase):
         self.assertIn('app.js?v=20261020-28', html)
 
 class TestToastDismissFocusRestoration(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app_js = APP_JS.read_text(encoding="utf-8")
+        cls.index_html = INDEX_HTML.read_text(encoding="utf-8")
+
     def test_manual_toast_dismissal_restores_focus_to_the_previous_control(self):
         start = self.app_js.index('    showToast(message, type = "info") {')
         end = self.app_js.index("    // ----------------------------------------------------\\n    // NEWS AI OVERLAY SIGNALS", start)
