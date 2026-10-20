@@ -84,6 +84,12 @@
     scrollbar-width: thin;
 }
 
+/* Keep keyboard focus visible inside the scroll container's overflow clipping. */
+.dashboard-horizontal-scroll:focus-visible {
+    outline: 2px solid var(--dashboard-focus, #38bdf8);
+    outline-offset: -2px;
+}
+
 .dashboard-horizontal-scroll::-webkit-scrollbar {
     height: 8px;
 }

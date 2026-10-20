@@ -927,9 +927,6 @@ class TestDashboardThemeToggleTouchTarget(unittest.TestCase):
         self.assertIn("min-width: 2.75rem;", toggle_rules)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class TestToastVisibilityAccessibility(unittest.TestCase):
     def test_toast_auto_dismiss_pauses_while_document_is_hidden(self):
@@ -1099,3 +1096,17 @@ class TestResponsiveMobileTableScrollHeight(unittest.TestCase):
         mobile_rules = dashboard_css[mobile_start:mobile_start + 180]
         self.assertIn("max-height: min(440px, 55vh);", mobile_rules)
         self.assertIn("max-height: min(440px, 55dvh);", mobile_rules)
+
+
+class TestHorizontalScrollbarKeyboardFocus(unittest.TestCase):
+    def test_horizontal_scroll_region_keeps_focus_ring_inside_overflow_clip(self):
+        dashboard_css = DASHBOARD_CSS.read_text(encoding="utf-8")
+        focus_start = dashboard_css.index(".dashboard-horizontal-scroll:focus-visible {")
+        focus_end = dashboard_css.index("\n}", focus_start)
+        focus_rules = dashboard_css[focus_start:focus_end]
+        self.assertIn("outline: 2px solid var(--dashboard-focus, #38bdf8);", focus_rules)
+        self.assertIn("outline-offset: -2px;", focus_rules)
+
+
+if __name__ == "__main__":
+    unittest.main()
