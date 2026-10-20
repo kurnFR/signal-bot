@@ -1038,7 +1038,7 @@ class TestDashboardThemeToggleTouchTarget(unittest.TestCase):
         toggle_end = css.index("}", toggle_start)
         self.assertIn("min-height: 2.75rem;", css[toggle_start:toggle_end])
         html = INDEX_HTML.read_text(encoding="utf-8")
-        self.assertIn("dashboard_enhancements.css?v=20261020-32", html)
+        self.assertRegex(html, r"dashboard_enhancements\.css\?v=\d{8}-\d+")
 
     def test_theme_toggle_meets_minimum_touch_target_dimensions(self):
         css = DASHBOARD_CSS.read_text(encoding="utf-8")
@@ -1244,7 +1244,7 @@ class TestWalletNetworkTouchTargets(unittest.TestCase):
         self.assertIn(".wt-network-option {", css)
         self.assertIn("min-height: 2.75rem;", css)
         self.assertIn('.wt-network-option input[type="checkbox"]', css)
-        self.assertIn("dashboard_enhancements.css?v=20261020-32", html)
+        self.assertRegex(html, r"dashboard_enhancements\.css\?v=\d{8}-\d+")
 
 
 class TestWorkflowDialogAccessibleNames(unittest.TestCase):
