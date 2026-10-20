@@ -493,7 +493,7 @@
                                 </p>
                             </div>
                             <div class="flex items-center gap-2">
-                                <button onclick="App.runBattleRoyale()" class="px-3.5 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
+                                <button type="button" aria-label="Re-run battle royale simulation" onclick="App.runBattleRoyale()" class="px-3.5 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
                                     <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Re-Run
                                 </button>
                             </div>
@@ -881,7 +881,7 @@
                         </p>
                     </div>
                     <div class="flex items-center gap-2.5 self-start md:self-auto">
-                        <button onclick="App.newStrategyDraft()" class="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 transition-colors">
+                        <button type="button" aria-label="Create new strategy draft" onclick="App.newStrategyDraft()" class="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 transition-colors">
                             <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Clear / New Draft
                         </button>
                     </div>
@@ -2184,7 +2184,7 @@
          this file has no explicit Cache-Control header. See the
          "still seeing the old bug after a fix was pushed" class of report. -->
     <script src="/static/js/app.js?v=20261020-26"></script>
-    <script src="/static/js/dashboard_enhancements.js?v=20261020-23"></script>
+    <script src="/static/js/dashboard_enhancements.js?v=20261020-24"></script>
     <script>
         if (window.lucide) window.lucide.createIcons();
     </script>
