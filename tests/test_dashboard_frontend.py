@@ -589,7 +589,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('document.addEventListener("click", event => {', theme_init)
         self.assertIn('event.target.closest("#dashboard-theme-toggle")', theme_init)
         self.assertNotIn('button.addEventListener("click", () => { userOverride = true; });', theme_init)
-        self.assertIn("dashboard_enhancements.js?v=20261020-4", self.index_html)
+        self.assertIn("dashboard_enhancements.js?v=20261020-5", self.index_html)
 
     def test_skip_link_bypasses_sidebar_navigation(self):
         self.assertIn('<a class="dashboard-skip-link" href="#main-content">Skip to main content</a>', self.index_html)
