@@ -245,15 +245,17 @@
         enhanceAllTables();
         installTelegramPing();
         const observer = new MutationObserver(mutations => {
-            // Dashboard views are frequently rebuilt; inspect only newly inserted
-            // subtrees instead of rescanning every table after every DOM mutation.
+            // Collect candidates first so nested/overlapping inserted subtrees do
+            // not cause the same table to be inspected repeatedly in one batch.
+            const tablesToEnhance = new Set();
             for (const mutation of mutations) {
                 for (const node of mutation.addedNodes) {
                     if (node.nodeType !== Node.ELEMENT_NODE) continue;
-                    if (node.matches(SORTABLE_TABLE_SELECTOR)) enhanceTable(node);
-                    node.querySelectorAll(SORTABLE_TABLE_SELECTOR).forEach(enhanceTable);
+                    if (node.matches(SORTABLE_TABLE_SELECTOR)) tablesToEnhance.add(node);
+                    node.querySelectorAll(SORTABLE_TABLE_SELECTOR).forEach(table => tablesToEnhance.add(table));
                 }
             }
+            tablesToEnhance.forEach(enhanceTable);
             // App may be initialized after this enhancement script loads.
             installTelegramPing();
         });
