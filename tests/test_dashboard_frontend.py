@@ -415,6 +415,17 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertLess(validation_end, render_start)
 
 
+    def test_mobile_toast_container_respects_safe_areas(self):
+        css = self.dashboard_css
+        mobile_start = css.index("@media (max-width: 767px)")
+        mobile_end = css.index("@media (max-width: 420px)", mobile_start)
+        mobile_rules = css[mobile_start:mobile_end]
+        self.assertIn("#toast-container {", mobile_rules)
+        self.assertIn("top: max(1rem, env(safe-area-inset-top)) !important;", mobile_rules)
+        self.assertIn("right: max(1rem, env(safe-area-inset-right)) !important;", mobile_rules)
+        self.assertIn("left: max(1rem, env(safe-area-inset-left)) !important;", mobile_rules)
+        self.assertIn("width: auto !important;", mobile_rules)
+
     def test_mobile_toast_dismiss_button_has_44px_touch_target(self):
         css = self.dashboard_css
         mobile_start = css.index("@media (max-width: 767px)")
