@@ -188,8 +188,12 @@
                 requestAnimationFrame(() => { syncing = false; });
             });
             if (window.ResizeObserver) {
-                new ResizeObserver(syncWidth).observe(viewport);
-                new ResizeObserver(syncWidth).observe(table);
+                // One observer per table is sufficient; retain it so removed tables
+                // can release their observed elements instead of leaking observers.
+                const resizeObserver = new ResizeObserver(syncWidth);
+                resizeObserver.observe(viewport);
+                resizeObserver.observe(table);
+                table._dashboardResizeObserver = resizeObserver;
             }
             syncWidth();
         }
@@ -263,6 +267,19 @@
             // not cause the same table to be inspected repeatedly in one batch.
             const tablesToEnhance = new Set();
             for (const mutation of mutations) {
+                for (const node of mutation.removedNodes) {
+                    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+                    const removedTables = [];
+                    if (node.matches(SORTABLE_TABLE_SELECTOR)) removedTables.push(node);
+                    node.querySelectorAll(SORTABLE_TABLE_SELECTOR).forEach(table => removedTables.push(table));
+                    removedTables.forEach(table => {
+                        // A table may be moved rather than removed; only release observers
+                        // after the DOM mutation batch has left it disconnected.
+                        if (table.isConnected || !table._dashboardResizeObserver) return;
+                        table._dashboardResizeObserver.disconnect();
+                        delete table._dashboardResizeObserver;
+                    });
+                }
                 for (const node of mutation.addedNodes) {
                     if (node.nodeType !== Node.ELEMENT_NODE) continue;
                     if (node.matches(SORTABLE_TABLE_SELECTOR)) tablesToEnhance.add(node);
