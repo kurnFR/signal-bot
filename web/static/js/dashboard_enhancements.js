@@ -389,7 +389,6 @@
             const nextTheme = normalized === "dark" ? "light" : "dark";
             button.setAttribute("aria-label", "Switch to " + nextTheme + " theme");
             button.setAttribute("title", "Switch to " + nextTheme + " theme");
-            button.setAttribute("aria-pressed", String(normalized === "light"));
             const icon = button.querySelector("[data-lucide]");
             if (icon) icon.setAttribute("data-lucide", normalized === "dark" ? "sun" : "moon");
             const label = button.querySelector(".dashboard-theme-label");
