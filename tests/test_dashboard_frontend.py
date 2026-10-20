@@ -535,7 +535,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('type="button"', toast)
         self.assertIn('window.matchMedia("(prefers-reduced-motion: reduce)").matches', toast)
         self.assertIn('if (reduceMotion) {\n                toast.remove();\n                return;\n            }', toast)
-        self.assertIn('let remainingMs = 4500;', toast)
+        self.assertIn('let remainingMs = type === "error" ? 8000 : type === "warning" ? 6000 : 4500;', toast)
         self.assertIn('toast.addEventListener("mouseenter", pauseDismissTimer)', toast)
         self.assertIn('toast.addEventListener("mouseleave", resumeDismissTimer)', toast)
         self.assertIn('toast.addEventListener("focusin", pauseDismissTimer)', toast)
