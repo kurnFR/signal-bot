@@ -1356,3 +1356,48 @@ class TestRemainingDashboardInputLabelAssociations(unittest.TestCase):
                     html,
                     r'<label\s+for="' + re.escape(input_id) + r'"[^>]*>' + re.escape(label) + r'</label>',
                 )
+
+
+class TestDashboardSelectAndPromptAccessibleNames(unittest.TestCase):
+    def test_search_and_filter_controls_have_accessible_names(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        self.assertIn('id="search-market-select" aria-label="Market to backfill"', html)
+        self.assertIn('id="strat-catalog-filter" aria-label="Filter strategy catalog"', html)
+        self.assertIn('id="wt-add-chain" aria-label="Blockchain network"', html)
+        self.assertIn('id="strat-ai-prompt" aria-label="Strategy builder prompt"', html)
+
+    def test_backtest_selects_have_associated_labels(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        fields = {
+            "bt-symbol-select": "Symbol",
+            "bt-market-select": "Market",
+            "bt-timeframe-select": "Timeframe",
+            "bt-strategy-select": "Strategy",
+            "bt-segment-select": "Data Segment",
+        }
+        for control_id, label in fields.items():
+            with self.subTest(control_id=control_id):
+                self.assertRegex(
+                    html,
+                    r'<label\s+for="' + re.escape(control_id) + r'"[^>]*>' + re.escape(label) + r'</label>',
+                )
+
+    def test_user_role_backfill_and_ml_selects_have_associated_labels(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        fields = {
+            "new-user-role": "Role",
+            "modal-backfill-market": "Market",
+            "modal-backfill-timeframe": "Timeframe",
+            "modal-backfill-years": "Historical Duration",
+            "ml-run-market": "Market",
+            "ml-run-timeframe": "Timeframe",
+            "ml-run-strategy": "Base Strategy",
+            "ml-run-model": "Candidate Model Grid",
+            "ml-run-target": "Target Definition",
+        }
+        for control_id, label in fields.items():
+            with self.subTest(control_id=control_id):
+                self.assertRegex(
+                    html,
+                    r'<label\s+for="' + re.escape(control_id) + r'"[^>]*>' + re.escape(label) + r'</label>',
+                )
