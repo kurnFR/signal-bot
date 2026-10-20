@@ -237,7 +237,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .dashboard-theme-toggle {
+    .dashboard-theme-toggle,
+    .table-sortable-header {
         transition: none;
     }
 }

@@ -719,6 +719,14 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('last.focus();', show_modal)
         self.assertIn('first.focus();', show_modal)
 
+    def test_reduced_motion_disables_dashboard_sort_header_transition(self):
+        css = self.dashboard_css
+        reduced_motion_start = css.index("@media (prefers-reduced-motion: reduce)")
+        reduced_motion_end = css.index("\n}", reduced_motion_start) + 2
+        reduced_motion = css[reduced_motion_start:reduced_motion_end]
+        self.assertIn(".table-sortable-header", reduced_motion)
+        self.assertIn("transition: none;", reduced_motion)
+
     def test_theme_toggle_is_remounted_if_dashboard_sidebar_is_rebuilt(self):
         init_start = self.dashboard_enhancements_js.index("    function initTheme()")
         init_end = self.dashboard_enhancements_js.index("\n    if (document.readyState === \"loading\")", init_start)
