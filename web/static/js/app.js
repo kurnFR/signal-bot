@@ -2922,6 +2922,15 @@ const App = {
         const row = document.createElement("div");
         row.className = "rule-condition-row flex items-center gap-2 p-2 rounded-xl bg-slate-900 border border-slate-800 text-xs";
 
+        // Give each condition row stable, distinct labels for assistive technology.
+        const existingRuleNumbers = [...container.querySelectorAll(".rule-condition-row")]
+            .map(existingRow => Number(existingRow.dataset.ruleNumber))
+            .filter(Number.isInteger);
+        let ruleNumber = 1;
+        while (existingRuleNumbers.includes(ruleNumber)) ruleNumber += 1;
+        const directionLabel = direction === "short" ? "Short entry" : "Long entry";
+        row.dataset.ruleNumber = String(ruleNumber);
+
         // Build indicator options
         const baseIndicators = (this.availableIndicators && this.availableIndicators.length > 0)
             ? [...this.availableIndicators]
@@ -2952,14 +2961,14 @@ const App = {
         `).join("");
 
         row.innerHTML = `
-            <select class="rule-ind-select flex-1 bg-slate-800 text-slate-100 rounded-lg p-2 border border-slate-700 text-xs font-semibold focus:outline-none">
+            <select aria-label="${directionLabel} condition ${ruleNumber} indicator" class="rule-ind-select flex-1 bg-slate-800 text-slate-100 rounded-lg p-2 border border-slate-700 text-xs font-semibold focus:outline-none">
                 ${indOptions}
             </select>
-            <select class="rule-op-select w-16 bg-slate-800 text-amber-300 rounded-lg p-2 border border-slate-700 text-xs font-mono font-bold text-center focus:outline-none">
+            <select aria-label="${directionLabel} condition ${ruleNumber} operator" class="rule-op-select w-16 bg-slate-800 text-amber-300 rounded-lg p-2 border border-slate-700 text-xs font-mono font-bold text-center focus:outline-none">
                 ${opOptions}
             </select>
-            <input type="text" class="rule-val-input w-28 bg-slate-800 text-slate-100 rounded-lg p-2 border border-slate-700 text-xs font-mono font-semibold focus:outline-none" value="${this._escapeHtml(value)}" placeholder="Value / col">
-            <button type="button" data-remove-rule="true" class="p-2 rounded-lg bg-rose-950/40 hover:bg-rose-900 text-rose-400 hover:text-rose-200 border border-rose-900/50 transition-colors" title="Remove rule">
+            <input type="text" aria-label="${directionLabel} condition ${ruleNumber} value" class="rule-val-input w-28 bg-slate-800 text-slate-100 rounded-lg p-2 border border-slate-700 text-xs font-mono font-semibold focus:outline-none" value="${this._escapeHtml(value)}" placeholder="Value / col">
+            <button type="button" aria-label="${directionLabel} condition ${ruleNumber} remove rule" data-remove-rule="true" class="p-2 rounded-lg bg-rose-950/40 hover:bg-rose-900 text-rose-400 hover:text-rose-200 border border-rose-900/50 transition-colors" title="Remove rule">
                 <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
             </button>
         `;
