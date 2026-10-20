@@ -499,7 +499,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('table.caption.textContent.trim()', self.dashboard_enhancements_js)
         self.assertIn('table.dataset.label', self.dashboard_enhancements_js)
         self.assertIn('bar.setAttribute("aria-label", "Horizontal scroll for " + tableLabel)', self.dashboard_enhancements_js)
-        self.assertIn("dashboard_enhancements.js?v=20261020-5", self.index_html)
+        self.assertIn("dashboard_enhancements.js?v=20261020-6", self.index_html)
 
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
@@ -589,7 +589,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('document.addEventListener("click", event => {', theme_init)
         self.assertIn('event.target.closest("#dashboard-theme-toggle")', theme_init)
         self.assertNotIn('button.addEventListener("click", () => { userOverride = true; });', theme_init)
-        self.assertIn("dashboard_enhancements.js?v=20261020-5", self.index_html)
+        self.assertIn("dashboard_enhancements.js?v=20261020-6", self.index_html)
 
     def test_skip_link_bypasses_sidebar_navigation(self):
         self.assertIn('<a class="dashboard-skip-link" href="#main-content">Skip to main content</a>', self.index_html)
@@ -808,8 +808,8 @@ class TestDashboardMutationBatchDeduplication(unittest.TestCase):
 class TestDashboardHorizontalScrollResizeFallback(unittest.TestCase):
     def test_resize_refreshes_existing_horizontal_scrollbars_without_reenhancing_tables(self):
         enhancements = DASHBOARD_ENHANCEMENTS_JS.read_text(encoding="utf-8")
-        self.assertIn('function syncHorizontalScrollbars() {', enhancements)
-        self.assertIn('document.querySelectorAll(".dashboard-horizontal-scroll").forEach(bar => {', enhancements)
+        self.assertIn('function syncHorizontalScrollbars(tables) {', enhancements)
+        self.assertIn('Array.from(document.querySelectorAll(".dashboard-horizontal-scroll"))', enhancements)
         self.assertIn('viewport.querySelector(":scope > table")', enhancements)
         init_start = enhancements.index("    function init() {")
         init_end = enhancements.index("\n    if (document.readyState === \"loading\")", init_start)
@@ -837,3 +837,15 @@ class TestDashboardResizeObserverLifecycle(unittest.TestCase):
         self.assertIn("if (table.isConnected || !table._dashboardResizeObserver) return;", init)
         self.assertIn("table._dashboardResizeObserver.disconnect();", init)
         self.assertIn("delete table._dashboardResizeObserver;", init)
+
+
+class TestDashboardScrollbarContentUpdates(unittest.TestCase):
+    def test_mutation_observer_resyncs_scrollbars_for_changed_enhanced_tables(self):
+        enhancements = DASHBOARD_ENHANCEMENTS_JS.read_text(encoding="utf-8")
+        self.assertIn("function syncHorizontalScrollbars(tables) {", enhancements)
+        self.assertIn("const tablesToSync = new Set();", enhancements)
+        self.assertIn("const changedTable = target && target.closest(SORTABLE_TABLE_SELECTOR);", enhancements)
+        self.assertIn('changedTable.dataset.dashboardEnhanced === "1"', enhancements)
+        self.assertIn("tablesToSync.add(changedTable);", enhancements)
+        self.assertIn("if (tablesToSync.size) syncHorizontalScrollbars(tablesToSync);", enhancements)
+        self.assertIn('table.parentElement.querySelector(":scope > .dashboard-horizontal-scroll")', enhancements)
