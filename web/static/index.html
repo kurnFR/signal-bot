@@ -360,7 +360,7 @@
                             </h3>
                             <p class="text-xs text-slate-400 mt-0.5">Historical candle counts and computed technical indicators stored in MariaDB</p>
                         </div>
-                        <button onclick="App.fetchCoverage(); App.renderCoverageTable();" class="px-3 py-1.5 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1.5 transition-colors">
+                        <button type="button" aria-label="Refresh database coverage" onclick="App.fetchCoverage(); App.renderCoverageTable();" class="px-3 py-1.5 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1.5 transition-colors">
                             <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
                         </button>
                     </div>
@@ -2184,7 +2184,7 @@
          this file has no explicit Cache-Control header. See the
          "still seeing the old bug after a fix was pushed" class of report. -->
     <script src="/static/js/app.js?v=20261020-26"></script>
-    <script src="/static/js/dashboard_enhancements.js?v=20261020-19"></script>
+    <script src="/static/js/dashboard_enhancements.js?v=20261020-20"></script>
     <script>
         if (window.lucide) window.lucide.createIcons();
     </script>
