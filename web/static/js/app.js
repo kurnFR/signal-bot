@@ -1913,7 +1913,13 @@ const App = {
     switchTab(tabId) {
         this.currentTab = tabId;
         document.querySelectorAll(".nav-btn").forEach(b => {
-            b.classList.toggle("active", b.dataset.tab === tabId);
+            const isCurrent = b.dataset.tab === tabId;
+            b.classList.toggle("active", isCurrent);
+            if (isCurrent) {
+                b.setAttribute("aria-current", "page");
+            } else {
+                b.removeAttribute("aria-current");
+            }
         });
         document.querySelectorAll(".view-section").forEach(sec => {
             sec.classList.toggle("hidden", sec.id !== `view-${tabId}`);
