@@ -1079,3 +1079,16 @@ class TestMobileHeaderIconButtonAccessibility(unittest.TestCase):
         self.assertIn("min-width: 2.75rem;", mobile_rules)
         self.assertIn("min-height: 2.75rem;", mobile_rules)
         self.assertIn("justify-content: center;", mobile_rules)
+
+
+class TestMobileDynamicViewportHeight(unittest.TestCase):
+    def test_mobile_dashboard_shell_uses_dynamic_viewport_height_with_legacy_fallback(self):
+        dashboard_css = DASHBOARD_CSS.read_text(encoding="utf-8")
+        mobile_start = dashboard_css.index("@media (max-width: 767px)")
+        mobile_end = dashboard_css.index("@media (max-width: 420px)", mobile_start)
+        mobile_rules = dashboard_css[mobile_start:mobile_end]
+        shell_start = mobile_rules.index("body > div.flex-1.flex.flex-col.min-w-0 {")
+        shell_end = mobile_rules.index("\\n    }", shell_start)
+        shell = mobile_rules[shell_start:shell_end]
+        self.assertIn("min-height: calc(100vh - 7rem);", shell)
+        self.assertIn("min-height: calc(100dvh - 7rem);", shell)
