@@ -931,7 +931,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('App[closeMethod]();', backdrop_handler)
         for modal_id in ("modal-inspect-ml", "modal-deploy-ml", "modal-run-ml", "deploy-modal", "backfill-modal"):
             self.assertIn(f'["{modal_id}",', backdrop_handler)
-        self.assertIn("app.js?v=20261020-31", self.index_html)
+        self.assertIn("app.js?v=20261020-32", self.index_html)
 
     def test_workflow_modals_restore_focus_to_the_opening_control(self):
         self.assertIn("rememberModalReturnFocus(modal)", self.app_js)
@@ -946,7 +946,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
             start = self.app_js.index(f"    {close_method} {{")
             end = self.app_js.index("\n    },", start)
             self.assertIn("this.restoreModalReturnFocus(modal)", self.app_js[start:end])
-        self.assertIn("app.js?v=20261020-31", self.index_html)
+        self.assertIn("app.js?v=20261020-32", self.index_html)
 
     def test_workflow_modals_trap_tab_and_focus_an_initial_control(self):
         self.assertIn("getModalFocusableElements(modal)", self.app_js)
@@ -957,7 +957,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("first.focus()", self.app_js)
         self.assertIn("this.focusModalInitialControl(modal)", self.app_js)
         self.assertIn('modal.dataset.focusTrapInitialized = "1"', self.app_js)
-        self.assertIn("app.js?v=20261020-31", self.index_html)
+        self.assertIn("app.js?v=20261020-32", self.index_html)
 
     def test_login_modal_places_focus_on_username_when_opened(self):
         start = self.app_js.index("    showLoginModal()")
@@ -1434,7 +1434,7 @@ class TestDynamicDashboardTableColumnHeaderScopes(unittest.TestCase):
 
     def test_app_script_cache_token_tracks_dynamic_header_markup(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
-        self.assertIn('app.js?v=20261020-31', html)
+        self.assertIn('app.js?v=20261020-32', html)
 
 class TestToastDismissFocusRestoration(unittest.TestCase):
     @classmethod
@@ -1453,7 +1453,7 @@ class TestToastDismissFocusRestoration(unittest.TestCase):
         self.assertIn('toast.querySelector("button").addEventListener("click", () => remove(true));', toast)
 
     def test_toast_focus_restoration_updates_app_script_cache_token(self):
-        self.assertIn('app.js?v=20261020-31', self.index_html)
+        self.assertIn('app.js?v=20261020-32', self.index_html)
 
 
 class TestDynamicStrategyRuleAccessibleNames(unittest.TestCase):
@@ -1471,7 +1471,7 @@ class TestDynamicStrategyRuleAccessibleNames(unittest.TestCase):
 
     def test_strategy_rule_accessible_names_bump_app_script_cache_token(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
-        self.assertIn('app.js?v=20261020-31', html)
+        self.assertIn('app.js?v=20261020-32', html)
 
 
 class TestStrategyLibraryActionAccessibleNames(unittest.TestCase):
@@ -1487,7 +1487,7 @@ class TestStrategyLibraryActionAccessibleNames(unittest.TestCase):
 
     def test_strategy_library_accessible_names_bump_app_script_cache_token(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
-        self.assertIn('app.js?v=20261020-31', html)
+        self.assertIn('app.js?v=20261020-32', html)
 
 
 class TestDatabaseConnectionStatusAnnouncements(unittest.TestCase):
@@ -1500,3 +1500,18 @@ class TestDatabaseConnectionStatusAnnouncements(unittest.TestCase):
         self.assertIn('aria-live="polite"', attrs)
         self.assertIn('aria-atomic="true"', attrs)
 
+
+
+class TestDatabaseStatusLiveRegionUpdates(unittest.TestCase):
+    def test_status_badge_only_rewrites_live_region_when_state_changes(self):
+        app_js = APP_JS.read_text(encoding="utf-8")
+        start = app_js.index("    updateStatusBar() {")
+        end = app_js.index("\n    async fetchCoverage()", start)
+        method = app_js[start:end]
+        self.assertIn('dbBadge.textContent.trim() !== statusText', method)
+        self.assertIn('if (dbBadge.textContent.trim() !== statusText)', method)
+        self.assertIn('// The badge is a live region. Avoid re-announcing the same state on every poll.', method)
+
+    def test_database_status_update_bumps_app_cache_token(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        self.assertIn('app.js?v=20261020-32', html)
