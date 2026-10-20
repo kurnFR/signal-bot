@@ -164,6 +164,7 @@
                 || table.dataset.label
                 || "table";
             bar.setAttribute("aria-label", "Horizontal scroll for " + tableLabel);
+            bar.setAttribute("aria-description", "Use the left and right arrow keys to scroll horizontally.");
             const spacer = document.createElement("div");
             spacer.className = "dashboard-horizontal-spacer";
             bar.appendChild(spacer);
