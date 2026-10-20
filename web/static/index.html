@@ -333,7 +333,7 @@
                                 <option value="futures">Futures Only</option>
                             </select>
                             <div class="relative">
-                                <input type="text" id="search-crypto-input" placeholder="Search symbol (e.g. SOL, PEPE, SUI)..." 
+                                <input type="text" id="search-crypto-input" aria-label="Search cryptocurrency symbols" placeholder="Search symbol (e.g. SOL, PEPE, SUI)..." 
                                     onkeydown="if(event.key === 'Enter') App.handleSearchCrypto()"
                                     class="w-64 text-xs bg-slate-800 text-slate-100 placeholder-slate-500 rounded-lg pl-3 pr-8 py-2 border border-slate-700 font-mono focus:outline-none focus:border-sky-500">
                                 <button type="button" aria-label="Search cryptocurrency" onclick="App.handleSearchCrypto()" class="absolute right-2.5 top-2.5 text-slate-400 hover:text-white">
@@ -451,11 +451,11 @@
                             </span>
                             <div class="flex items-center gap-4 text-xs text-slate-400">
                                 <div class="flex items-center gap-1.5">
-                                    <span>Capital:</span>
+                                    <label for="bt-capital-input">Capital:</label>
                                     <input type="number" id="bt-capital-input" value="5000" class="w-20 bg-slate-800 text-slate-200 px-2 py-1 rounded border border-slate-700 font-mono text-xs">
                                 </div>
                                 <div class="flex items-center gap-1.5">
-                                    <span>Risk %:</span>
+                                    <label for="bt-risk-input">Risk %:</label>
                                     <input type="number" id="bt-risk-input" value="1.0" step="0.5" class="w-14 bg-slate-800 text-slate-200 px-2 py-1 rounded border border-slate-700 font-mono text-xs">
                                 </div>
                             </div>
