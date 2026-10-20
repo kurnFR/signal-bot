@@ -684,6 +684,15 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         ):
             self.assertIn(button, self.index_html)
 
+    def test_workflow_dialog_primary_actions_do_not_submit_forms(self):
+        for button in (
+            '<button type="button" onclick="App.submitBackfill()"',
+            '<button type="button" id="btn-confirm-deploy" onclick="App.confirmDeploy()"',
+            '<button type="button" id="btn-submit-ml-run" onclick="App.submitMLRun()"',
+            '<button type="button" id="btn-confirm-deploy-ml" onclick="App.confirmDeployML()"',
+        ):
+            self.assertIn(button, self.index_html)
+
     def test_mobile_filters_and_data_tables_remain_usable(self):
         self.assertIn(".view-section .cfg-input", self.dashboard_css)
         self.assertIn("max-width: 100%;", self.dashboard_css)
