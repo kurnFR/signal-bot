@@ -9,16 +9,20 @@ def compute_metrics(trades: list) -> dict:
     """
     trades: list of dicts as produced by backtest/strategies/*.py's run() functions
 
-    Returns a dict with total_trades, win_rate_pct, expectancy_r,
+    Returns a dict with total_trades, scored_trades, win_rate_pct, expectancy_r,
     profit_factor, max_drawdown_r. All None if there are no trades.
+
+    ``total_trades`` counts every trade. ``scored_trades`` counts only trades with a
+    recorded R multiple: that is the population win rate, expectancy, profit factor
+    and drawdown are computed on (they differ only when a trade had zero risk).
     """
     if not trades:
         return {
-            "total_trades": 0, "win_rate_pct": None, "expectancy_r": None,
+            "total_trades": 0, "scored_trades": 0, "win_rate_pct": None, "expectancy_r": None,
             "profit_factor": None, "max_drawdown_r": None,
         }
 
-    r_multiples = [t["r_multiple"] for t in trades if t["r_multiple"] is not None]
+    r_multiples = [t["r_multiple"] for t in trades if t.get("r_multiple") is not None]
     wins = [r for r in r_multiples if r > 0]
     losses = [r for r in r_multiples if r <= 0]
 
@@ -42,6 +46,7 @@ def compute_metrics(trades: list) -> dict:
 
     return {
         "total_trades": total_trades,
+        "scored_trades": len(r_multiples),
         "win_rate_pct": round(win_rate_pct, 3) if win_rate_pct is not None else None,
         "expectancy_r": round(expectancy_r, 4) if expectancy_r is not None else None,
         "profit_factor": round(profit_factor, 4) if profit_factor not in (None, float("inf")) else profit_factor,
