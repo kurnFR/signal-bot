@@ -14,7 +14,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-from web.auth import seed_default_admin, authenticate_request
+from web.auth import seed_default_admin, authenticate_request, enable_durable_rate_limit
 from web.routes.auth_routes import router as auth_router
 from web.routes.paper_routes import router as paper_router
 from web.routes.search import router as search_router
@@ -31,6 +31,14 @@ from web.routes.wallet_routes import router as wallet_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     seed_default_admin()
+    enable_durable_rate_limit()
+    try:
+        from web.job_store import mark_interrupted
+        stale = mark_interrupted()
+        if stale:
+            logger.info("Marked %d background job(s) from a previous process as interrupted", stale)
+    except Exception as e:
+        logger.warning(f"Could not reconcile background jobs on startup: {e}")
     try:
         from Screen.screening import ensure_signal_table
         ensure_signal_table()
@@ -69,6 +77,8 @@ app.add_middleware(
 )
 
 PUBLIC_API_PATHS = {"/api/auth/login"}
+# A user flagged must_change_password may only do what is needed to fix that.
+PASSWORD_CHANGE_ALLOWED_PATHS = {"/api/auth/me", "/api/auth/logout", "/api/auth/change-password"}
 ADMIN_ONLY_PREFIXES = ("/api/settings",)
 ADMIN_OR_TRADER_PREFIXES = (
     "/api/master-data/backfill",
@@ -128,6 +138,11 @@ async def api_security_boundary(request: Request, call_next):
         user = authenticate_request(request)
         request.state.user = user
         role = str(user.get("role", "")).lower()
+        if user.get("must_change_password") and path not in PASSWORD_CHANGE_ALLOWED_PATHS:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Password change required before continuing", "code": "password_change_required"},
+            )
         if not _role_allowed(request.method, path, role):
             return JSONResponse(
                 status_code=403,
@@ -179,4 +194,4 @@ def serve_index():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("web.app:app", host="0.0.0.0", port=8050, reload=True)
+    uvicorn.run("web.app:app", host=os.getenv("SIGNAL_BOT_HOST", "127.0.0.1"), port=8050, reload=True)

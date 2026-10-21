@@ -23,6 +23,25 @@ logger = logging.getLogger("web.auth_routes")
 USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]{3,30}$")
 
 
+MIN_PASSWORD_LENGTH = 10
+_COMMON_PASSWORDS = {
+    "password", "password1", "password123", "admin", "admin123", "admin1234", "administrator",
+    "123456", "1234567", "12345678", "123456789", "1234567890", "qwerty", "qwerty123",
+    "letmein", "welcome", "welcome1", "changeme", "signalbot", "iloveyou",
+}
+
+
+def _validate_new_password(password: str, username: str) -> None:
+    """Reject weak passwords chosen by a user changing their own password."""
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise HTTPException(status_code=400, detail=f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
+    lowered = password.lower()
+    if lowered in _COMMON_PASSWORDS or (username and lowered == username.lower()):
+        raise HTTPException(status_code=400, detail="Password is too common or matches the username")
+    if len(set(password)) < 5:
+        raise HTTPException(status_code=400, detail="Password needs more variety of characters")
+
+
 # ============================================================================
 # Request / Response Schemas
 # ============================================================================
@@ -33,18 +52,18 @@ class LoginRequest(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     old_password: str = Field(...)
-    new_password: str = Field(..., min_length=6)
+    new_password: str = Field(..., min_length=10)
 
 
 class CreateUserRequest(BaseModel):
     username: str = Field(...)
     email: Optional[str] = Field(None)
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=10)
     role: str = Field("trader")  # admin, trader, viewer
 
 
 class ResetPasswordRequest(BaseModel):
-    new_password: str = Field(..., min_length=6)
+    new_password: str = Field(..., min_length=10)
 
 
 class UpdateUserRequest(BaseModel):
@@ -144,6 +163,10 @@ def change_password(req: ChangePasswordRequest, request: Request, current_user: 
         row = cur.fetchone()
         if not row or not verify_password(req.old_password, row["password_hash"]):
             raise HTTPException(status_code=400, detail="Current password does not match")
+
+        if verify_password(req.new_password, row["password_hash"]):
+            raise HTTPException(status_code=400, detail="New password must be different from the current password")
+        _validate_new_password(req.new_password, current_user["username"])
 
         new_hash = hash_password(req.new_password)
         cur.execute(
