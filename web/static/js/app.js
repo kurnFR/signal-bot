@@ -30,16 +30,15 @@ const App = {
         this.startClock();
         
         // 1. Verify Authentication
-        await this.checkAuth();
+        const sessionUsable = await this.checkAuth();
 
-        // 2. Fetch Initial System & Platform Data
-        await this.fetchSystemStatus();
-        await this.fetchCoverage();
-        await this.fetchStrategies();
-        
-        // 3. Switch to default view
-        this.switchTab("home");
-        
+        // 2. Load data only for a usable session (anonymous visitors and accounts that must
+        //    change their password would just get 401/403s). The home view is already visible
+        //    in the markup, so nothing needs switching before sign-in.
+        if (sessionUsable) {
+            await this.loadSessionData();
+        }
+
         // Keep slow API responses from spawning overlapping polling cycles.
         setInterval(async () => {
             if (!this.authToken || this.autoRefreshInProgress || document.hidden) return;
@@ -1283,10 +1282,21 @@ const App = {
     // ----------------------------------------------------
     // AUTHENTICATION & SESSIONS
     // ----------------------------------------------------
+    // Platform state, coverage, strategies, user admin (admins only) and the active tab's data.
+    async loadSessionData() {
+        const tasks = [this.fetchSystemStatus(), this.fetchCoverage(), this.fetchStrategies()];
+        if (this.currentUser && String(this.currentUser.role).toLowerCase() === "admin") {
+            tasks.push(this.fetchUsers());
+        }
+        await Promise.allSettled(tasks);
+        this.switchTab(this.currentTab || "home");
+    },
+
+    // Resolves true only when there is a signed-in session that may use the app now.
     async checkAuth() {
         if (!this.authToken) {
             this.showLoginModal();
-            return;
+            return false;
         }
         try {
             const res = await fetch(`${API_BASE}/api/auth/me`, {
@@ -1296,15 +1306,16 @@ const App = {
                 this.currentUser = await res.json();
                 this.updateUserUI();
                 this.hideLoginModal();
-                this.enforcePasswordChangeIfRequired();
-            } else {
-                this.authToken = null;
-                localStorage.removeItem("token");
-                this.showLoginModal();
+                return !this.enforcePasswordChangeIfRequired();
             }
+            this.authToken = null;
+            localStorage.removeItem("token");
+            this.showLoginModal();
+            return false;
         } catch (e) {
             console.error("Auth check failed:", e);
             this.showLoginModal();
+            return false;
         }
     },
 
@@ -1401,13 +1412,7 @@ const App = {
             if (this.enforcePasswordChangeIfRequired()) return;
             this.showToast(`Welcome back, ${this.currentUser.username}!`, "success");
 
-            // Refresh platform state, coverage, strategies & user administration
-            await Promise.allSettled([
-                this.fetchSystemStatus(),
-                this.fetchCoverage(),
-                this.fetchStrategies(),
-                this.fetchUsers()
-            ]);
+            await this.loadSessionData();
         } catch (err) {
             if (errEl) {
                 errEl.innerText = err.message;
@@ -1532,12 +1537,7 @@ const App = {
             if (this.currentUser) this.currentUser.must_change_password = false;
             this.hideForcedPasswordModal();
             this.showToast("Password updated. Welcome!", "success");
-            await Promise.allSettled([
-                this.fetchSystemStatus(),
-                this.fetchCoverage(),
-                this.fetchStrategies(),
-                this.fetchUsers()
-            ]);
+            await this.loadSessionData();
         } catch (e) {
             showError(e.message);
         } finally {
