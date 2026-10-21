@@ -17,7 +17,7 @@ class TestDashboardFocusIndicators(unittest.TestCase):
     def test_global_focus_indicator_uses_theme_focus_color(self):
         style = re.search(r"<style>(.*?)</style>", self.index_html, re.DOTALL)
         self.assertIsNotNone(style)
-        focus_rule = re.search(r":focus-visible\s*\{([^}]*)\}", style.group(1))
+        focus_rule = re.search(r":focus-visible:not\(#main-content\)\s*\{([^}]*)\}", style.group(1))
         self.assertIsNotNone(focus_rule)
         self.assertRegex(
             focus_rule.group(1),
@@ -27,7 +27,7 @@ class TestDashboardFocusIndicators(unittest.TestCase):
     def test_forced_colors_mode_keeps_system_focus_color(self):
         self.assertRegex(
             self.index_html,
-            r"@media\s*\(forced-colors:\s*active\)\s*\{\s*:focus-visible\s*\{\s*outline-color:\s*Highlight\s*!important;",
+            r"@media\s*\(forced-colors:\s*active\)\s*\{\s*:focus-visible:not\(#main-content\)\s*\{\s*outline-color:\s*Highlight\s*!important;",
         )
 
 

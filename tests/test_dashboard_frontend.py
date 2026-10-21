@@ -815,10 +815,11 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertRegex(self.index_html, r"dashboard_enhancements\.css\?v=[^\"]+")
 
     def test_keyboard_focus_indicator_is_visible_and_supports_forced_colors(self):
-        self.assertIn(":focus-visible", self.index_html)
+        self.assertIn(":focus-visible:not(#main-content)", self.index_html)
         self.assertIn("outline: 2px solid var(--dashboard-focus, #38bdf8) !important;", self.index_html)
         self.assertIn("outline-offset: 3px;", self.index_html)
         self.assertIn("@media (forced-colors: active)", self.index_html)
+        self.assertIn(":focus-visible:not(#main-content)", self.index_html)
         self.assertIn("outline-color: Highlight !important;", self.index_html)
 
     def test_reduced_motion_preference_disables_nonessential_css_motion(self):

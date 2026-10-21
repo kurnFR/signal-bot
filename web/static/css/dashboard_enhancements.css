@@ -547,6 +547,12 @@
     outline-offset: -2px;
 }
 
+@media (forced-colors: active) {
+    #main-content:focus-visible {
+        outline-color: Highlight;
+    }
+}
+
 /* Preserve visible keyboard focus and control affordances in Windows High Contrast mode. */
 @media (forced-colors: active) {
     :where(button, a, input, select, textarea, [tabindex]):focus-visible {
