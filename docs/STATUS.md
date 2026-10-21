@@ -19,27 +19,28 @@ What exists and works today, and the known gaps. Every item below was checked ag
 
 Verified this session: a fresh database built from the README steps boots the app and the admin login works; all 74 API operations reject unauthenticated calls except login; the viewer role can call 0 of 29 mutating operations; the paper circuit breaker allows entries on an empty database (now covered by tests).
 
-## 2. Known gaps (verified open)
+## 2. Known gaps
 
-**Trading and analytics**
+**Fixed on branch `production-hardening` (each has regression tests)**
 
-1. **No execution lifecycle (P0.5).** The paper engine finds signals by re-running the strategy on closed candles and enters at the next open. It has no order state machine (pending, filled, expired), as its own module docstring says. It is a shadow engine, not live execution.
-2. **ML eligibility gate is not enforced.** `ml/artifacts.py: paper_eligibility` defines the gate (at least 30 test trades, profit factor at least 1.0, drawdown at most 25%, net PnL at least 0), but `ml/run_real_experiment.py` instead marks a model eligible whenever total test R is above zero, and `POST /api/ml/deploy-to-paper` never checks `eligible_for_paper`. A model with a handful of lucky test trades can be deployed.
-3. **AI insight inputs.** The Kelly suggestion has a floor (`max(0.2, …)`), so a negative-edge result can still recommend a positive risk. The regime detector reads `ema_20`, `ema_50` and `adx`, which the feature tables do not contain, so the trend/range label can only fall back to "Neutral / Sideways Range" (from code reading; not observed in the UI).
-4. **Flat cost model.** Fees (0.1%) and slippage (0.05%) per side are constants; there is no spread, volume or liquidity model.
-5. **No portfolio-level exposure limit.** Circuit breakers cap position count and daily loss, not notional exposure across symbols.
-6. **Metric nit.** `total_trades` counts all trades while win rate uses only those with a recorded R multiple (`backtest/metrics.py`).
+- **ML eligibility gate is now enforced.** `ml.artifacts.paper_eligibility_report` is the single gate (at least 30 untouched test trades, profit factor at least 1.0, drawdown at most 25%, net PnL at least 0; missing or NaN metrics fail closed). The experiment runner and `POST /api/ml/deploy-to-paper` both use it, and the deploy API re-evaluates the stored test metrics instead of trusting the manifest flag. `model_id` is validated against path traversal.
+- **AI insight.** Kelly is computed from realized win rate and profit factor with no floor; a non-positive edge gets the `NO_EDGE` verdict and 0% risk. The regime label uses EMA20/EMA50 computed from `close`.
+- **Portfolio exposure limit.** `PAPER_MAX_TOTAL_NOTIONAL_USD` (default 25000) caps the summed notional of open paper positions. It is checked in `_insert_position`, so it covers both the strategy path and the news-AI path, and it fails closed when exposure cannot be verified.
+- **ML filter fails closed.** If a model is attached to a paper config but its files are missing or prediction raises, the entry is skipped (it previously traded without the filter).
+- **Metric population.** `compute_metrics` now reports `scored_trades` (the population used for win rate, expectancy and profit factor) next to `total_trades`.
+- **First-login password change is enforced** by the API (every route except `/api/auth/me`, `/logout`, `/change-password` returns 403 `password_change_required`) and by a blocking dashboard dialog. New passwords must be at least 10 characters and not trivially weak.
+- **Login rate limit is durable** (`login_attempts` table, shared by all workers, survives restarts); it falls back to in-memory if the database is unavailable.
+- **Bind address is explicit.** `run_web.py` / `web/app.py` default to `127.0.0.1`; set `SIGNAL_BOT_HOST=0.0.0.0` (or `--host`) deliberately, behind TLS and a firewall.
+- **Master-data job state is persisted** (`background_jobs` table). Jobs a previous process left `queued`/`running` are shown as `interrupted` after a restart.
+- **Migration runner.** `python -m db.migrate` (also run automatically by `run_all.py`) applies versioned, checksummed migrations under an advisory lock, distinguishes fresh installs from upgrades, and adopts hand-migrated databases.
+- **Route authorization sweep.** `tests/test_route_authorization_sweep.py` is generated from the live route table.
 
-**Security and operations**
+**Still open**
 
-7. **First-login password change is not enforced** (flag returned, never checked by API or dashboard).
-8. **Login rate limit is in memory** (per process; resets on restart).
-9. **`run_web.py` listens on `0.0.0.0` by default** and prints a hard-coded LAN address.
-10. **Master-data job state is in memory** (`JOBS` in `web/routes/master_data.py`); jobs are lost on restart.
-11. **No migration runner.** Eight migrations are applied by hand in the README order; three more are upgrade-only (two of them fail with `Duplicate column` on a fresh install).
-12. **Runtime data in git:** `custom_strategies.json` and `Screen/signals.jsonl` are tracked.
-13. **No test sweeps every route for authentication and role rules.**
-14. **Repo hygiene:** over 30 branches, many merged or abandoned (including `do-not-use`, `ignore2`, `tmp-ignore`, `x`).
+1. **No execution lifecycle (P0.5).** The paper engine finds signals by re-running the strategy on closed candles and enters at the next open. It has no order state machine (pending, filled, expired). It is a shadow engine, not live execution, and must not be treated as one.
+2. **Flat cost model.** Fees (0.1%) and slippage (0.05%) per side are constants; there is no spread, volume or liquidity model.
+3. **Runtime data in git:** `custom_strategies.json` and `Screen/signals.jsonl` are still tracked. Untrack them on the machine that holds your real data, after merging (see README, "Runtime data").
+4. **Repo hygiene:** over 30 branches, many merged or abandoned (including `do-not-use`, `ignore2`, `tmp-ignore`, `x`).
 
 **Wallet tracking** has its own list of verified limitations in [WALLET_TRACKER.md](WALLET_TRACKER.md#6-known-limitations-verified-open) (alert digest, per-pool grouping, stablecoin metadata, bot filtering, no skill scoring, Birdeye fallback unvalidated, startup ALTER privilege).
 

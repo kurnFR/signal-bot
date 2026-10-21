@@ -9,7 +9,7 @@ How access to the dashboard and API is controlled, and what to do when deploying
 - **Logout and revocation:** logout stores the token's SHA-256 hash in `revoked_tokens` until it would have expired, so a revoked token is rejected even after a restart.
 - **Brute-force limit:** 5 failed logins per 5 minutes per key, then `429`. The counter is held in memory, so it is per process and resets on restart.
 - **Audit log:** these events are written to `audit_logs` and are admin-readable at `GET /api/auth/audit-logs`: `LOGIN_FAILED`, `LOGIN_RATE_LIMITED`, `LOGIN_SUCCESS`, `LOGOUT`, `PASSWORD_CHANGED`, `USER_CREATED`, `USER_PASSWORD_RESET`, `USER_UPDATED`.
-- **First admin:** created on the first start when no admin exists. The password is `ADMIN_DEFAULT_PASSWORD` if set, otherwise a random one-time password written to `.initial_admin_credential` with mode 0600 (gitignored). The account is flagged `must_change_password`, and the flag is returned by login and `/api/auth/me` and cleared when the password is changed, **but nothing enforces it**: the API keeps working and the dashboard does not prompt. Change the password yourself right after first login, and delete `.initial_admin_credential`.
+- **First admin:** created on the first start when no admin exists. The password is `ADMIN_DEFAULT_PASSWORD` if set, otherwise a random one-time password written to `.initial_admin_credential` with mode 0600 (gitignored). The account is flagged `must_change_password`. Until the password is changed, the API rejects every request except `/api/auth/me`, `/api/auth/logout` and `/api/auth/change-password` (403, code `password_change_required`), and the dashboard shows a blocking dialog. New passwords must be at least 10 characters, differ from the old one, and not be a common password or the username. Delete `.initial_admin_credential` after first login.
 
 ## 2. Authorization
 
@@ -27,7 +27,7 @@ Rules live in `ADMIN_ONLY_PREFIXES`, `ADMIN_OR_TRADER_PREFIXES`, `TRADER_OR_ADMI
 
 - **CORS** is limited to `SIGNAL_BOT_ALLOWED_ORIGINS` (default `http://localhost:8050,http://127.0.0.1:8050`), with credentials allowed.
 - The app serves plain HTTP. For anything beyond localhost, put it behind a TLS-terminating reverse proxy.
-- `run_web.py` listens on `0.0.0.0` by default. On a shared network, bind to `127.0.0.1` or firewall port 8050.
+- The web server binds to `127.0.0.1` by default. Set `SIGNAL_BOT_HOST=0.0.0.0` (or `--host`) only behind a firewall and a TLS-terminating reverse proxy; the app has no TLS of its own.
 - The dashboard builds HTML from API data with an escape helper; wallet and token values are validated server-side before they are stored.
 
 ## 4. Secrets and data
@@ -43,4 +43,4 @@ This is paper trading only, so there is no exchange API key or order endpoint in
 
 ## 6. Tests
 
-`tests/test_auth_security.py` covers login rate limiting and the token revocation lifecycle, and the wallet route tests assert that a viewer cannot mutate. There is no test that sweeps every route for authentication and role rules; the sweeps quoted in sections 2 were run manually against the route table.
+`tests/test_auth_security.py` covers login rate limiting and the token revocation lifecycle, and the wallet route tests assert that a viewer cannot mutate. `tests/test_route_authorization_sweep.py` sweeps every `/api` route from the live route table: anonymous requests get 401, a viewer cannot reach any mutating route, only admins reach admin prefixes, and a flagged account is blocked everywhere except the password-change endpoints. Login attempts are stored in the `login_attempts` table (shared across workers, survives restarts) with an in-memory fallback.
