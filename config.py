@@ -356,7 +356,7 @@ VOL_BREAKOUT_RISK_REWARD_RATIO = 3
 # aliases for connection details, but database selection is intentionally
 # centralized: every component uses MYSQL_DATABASE (default crypto_signals).
 MYSQL_CONFIG = {
-    "host": os.getenv("MYSQL_HOST", os.getenv("DB_HOST", "192.168.1.30")),
+    "host": os.getenv("MYSQL_HOST", os.getenv("DB_HOST", "127.0.0.1")),
     "port": int(os.getenv("MYSQL_PORT", os.getenv("DB_PORT", "3306"))),
     "user": os.getenv("MYSQL_USER", os.getenv("DB_USER", "cms")),
     "password": os.getenv("MYSQL_PASSWORD", os.getenv("DB_PASS", "")),

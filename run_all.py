@@ -105,6 +105,24 @@ def _shutdown_all():
     logger.info("All processes stopped.")
 
 
+def apply_migrations(runner=subprocess.run) -> bool:
+    """Bring the database schema up to date before any process starts.
+
+    Returns False when migration fails (callers must not start the stack on a
+    half-migrated schema). Set SKIP_DB_MIGRATE=1 to skip, e.g. when a DBA owns the schema.
+    """
+    if os.getenv("SKIP_DB_MIGRATE", "").strip().lower() in ("1", "true", "yes"):
+        logger.info("SKIP_DB_MIGRATE set: not running database migrations")
+        return True
+    logger.info("Applying database migrations (python -m db.migrate)...")
+    result = runner([sys.executable, "-m", "db.migrate"])
+    if result.returncode != 0:
+        logger.error("Database migration failed (exit %s). Fix the error above, or set "
+                     "SKIP_DB_MIGRATE=1 to start anyway.", result.returncode)
+        return False
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description="Start and supervise every process the dashboard needs.")
     parser.add_argument("--skip", action="append", default=[], choices=PROCESSES.keys(),
@@ -122,6 +140,9 @@ def main():
     if not to_run:
         logger.error("Nothing selected to run (check --skip/--only). Exiting.")
         return
+
+    if not apply_migrations():
+        sys.exit(1)
 
     logger.info("==================================================================")
     logger.info("  Starting Signal Bot -- all processes")
