@@ -214,10 +214,56 @@ _login_attempts: Dict[str, list[float]] = {}
 RATE_LIMIT_MAX_ATTEMPTS = 5
 RATE_LIMIT_WINDOW_SECONDS = 300  # 5 minutes
 
+# Durable backend (table `login_attempts`, migration 013). It is shared by every web
+# worker and survives restarts. Enabled by the app at startup; unit tests and tools
+# that never call enable_durable_rate_limit() keep the in-memory behaviour.
+_durable_rate_limit = False
+
+
+def enable_durable_rate_limit() -> bool:
+    """Switch the limiter to the database if the table exists. Returns True if enabled."""
+    global _durable_rate_limit
+    try:
+        conn = get_pool().get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1 FROM login_attempts LIMIT 1")
+            cur.fetchall()
+            cur.close()
+        finally:
+            conn.close()
+        _durable_rate_limit = True
+    except Exception as exc:
+        _durable_rate_limit = False
+        logger.warning("Durable login rate limiting unavailable, using in-memory limiter: %s", exc)
+    return _durable_rate_limit
+
+
+def _db_count_attempts(key: str, now: float) -> int:
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM login_attempts WHERE attempted_at < %s", (now - RATE_LIMIT_WINDOW_SECONDS,))
+        cur.execute(
+            "SELECT COUNT(*) FROM login_attempts WHERE rate_key = %s AND attempted_at >= %s",
+            (key, now - RATE_LIMIT_WINDOW_SECONDS),
+        )
+        count = int(cur.fetchone()[0])
+        conn.commit()
+        cur.close()
+        return count
+    finally:
+        conn.close()
+
 
 def check_login_rate_limit(key: str) -> bool:
     """Returns True if within rate limit, False if locked out."""
     now = time.time()
+    if _durable_rate_limit:
+        try:
+            return _db_count_attempts(key, now) < RATE_LIMIT_MAX_ATTEMPTS
+        except Exception as exc:
+            logger.warning("Login rate-limit store error, falling back to memory: %s", exc)
     attempts = [t for t in _login_attempts.get(key, []) if now - t < RATE_LIMIT_WINDOW_SECONDS]
     _login_attempts[key] = attempts
     return len(attempts) < RATE_LIMIT_MAX_ATTEMPTS
@@ -226,6 +272,19 @@ def check_login_rate_limit(key: str) -> bool:
 def record_failed_login(key: str) -> int:
     """Records a failed login attempt and returns the current count within the window."""
     now = time.time()
+    if _durable_rate_limit:
+        try:
+            conn = get_pool().get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("INSERT INTO login_attempts (rate_key, attempted_at) VALUES (%s, %s)", (key, now))
+                conn.commit()
+                cur.close()
+            finally:
+                conn.close()
+            return _db_count_attempts(key, now)
+        except Exception as exc:
+            logger.warning("Login rate-limit store error, falling back to memory: %s", exc)
     attempts = [t for t in _login_attempts.get(key, []) if now - t < RATE_LIMIT_WINDOW_SECONDS]
     attempts.append(now)
     _login_attempts[key] = attempts
@@ -234,6 +293,18 @@ def record_failed_login(key: str) -> int:
 
 def reset_login_attempts(key: str) -> None:
     _login_attempts.pop(key, None)
+    if _durable_rate_limit:
+        try:
+            conn = get_pool().get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("DELETE FROM login_attempts WHERE rate_key = %s", (key,))
+                conn.commit()
+                cur.close()
+            finally:
+                conn.close()
+        except Exception as exc:
+            logger.warning("Login rate-limit reset error: %s", exc)
 
 
 # ============================================================================

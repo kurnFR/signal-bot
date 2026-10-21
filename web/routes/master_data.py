@@ -11,13 +11,20 @@ from db.db import get_pool, upsert_ohlcv, fetch_ohlcv_df
 from collectors.backfill_klines import fetch_klines, klines_to_rows, KLINE_FETCH_LIMIT
 from config import SPOT_KLINE_URL, FUTURES_KLINE_URL
 from features.build_features import build_one
+from web import job_store
 
 router = APIRouter(prefix="/api/master-data", tags=["master-data"])
 logger = logging.getLogger("web.master_data")
 
-# In-memory jobs tracking
+# Live job state (this process) mirrored to the database by web.job_store.
 JOBS = {}
-JOBS_LOCK = threading.Lock()
+JOBS_LOCK = threading.RLock()
+
+
+def _persist(job_id: str) -> None:
+    job = JOBS.get(job_id)
+    if job:
+        job_store.save_job(dict(job))
 
 
 class BackfillRequest(BaseModel):
@@ -40,6 +47,7 @@ def _run_backfill_job(job_id: str, symbol: str, market: str, timeframe: str, yea
             JOBS[job_id]["status"] = "running"
             JOBS[job_id]["message"] = f"Initializing backfill for {symbol} {market} {timeframe} ({years} years)..."
             JOBS[job_id]["updated_at"] = time.time()
+            _persist(job_id)
 
         url = SPOT_KLINE_URL if market == "spot" else FUTURES_KLINE_URL
         end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -70,6 +78,7 @@ def _run_backfill_job(job_id: str, symbol: str, market: str, timeframe: str, yea
                 JOBS[job_id]["candles_fetched"] = total_rows
                 JOBS[job_id]["message"] = f"Fetched & upserted {total_rows:,} candles..."
                 JOBS[job_id]["updated_at"] = time.time()
+                _persist(job_id)
 
             if len(raw) < KLINE_FETCH_LIMIT:
                 break
@@ -81,6 +90,7 @@ def _run_backfill_job(job_id: str, symbol: str, market: str, timeframe: str, yea
                 JOBS[job_id]["progress"] = 96.0
                 JOBS[job_id]["message"] = f"Backfill complete ({total_rows:,} candles). Computing indicators (RSI, MACD, ATR, S/R, Fib)..."
                 JOBS[job_id]["updated_at"] = time.time()
+                _persist(job_id)
 
             try:
                 feat_count = build_one(symbol, market, timeframe)
@@ -97,6 +107,7 @@ def _run_backfill_job(job_id: str, symbol: str, market: str, timeframe: str, yea
             JOBS[job_id]["candles_fetched"] = total_rows
             JOBS[job_id]["message"] = msg
             JOBS[job_id]["updated_at"] = time.time()
+            _persist(job_id)
 
     except Exception as e:
         logger.exception(f"Backfill job {job_id} failed: {e}")
@@ -104,6 +115,7 @@ def _run_backfill_job(job_id: str, symbol: str, market: str, timeframe: str, yea
             JOBS[job_id]["status"] = "failed"
             JOBS[job_id]["message"] = f"Job failed: {str(e)}"
             JOBS[job_id]["updated_at"] = time.time()
+            _persist(job_id)
 
 
 def _run_features_job(job_id: str, symbol: str, market: str, timeframe: str):
@@ -112,6 +124,7 @@ def _run_features_job(job_id: str, symbol: str, market: str, timeframe: str):
             JOBS[job_id]["status"] = "running"
             JOBS[job_id]["message"] = f"Computing indicators for {symbol} {market} {timeframe}..."
             JOBS[job_id]["updated_at"] = time.time()
+            _persist(job_id)
 
         count = build_one(symbol, market, timeframe)
         with JOBS_LOCK:
@@ -119,12 +132,14 @@ def _run_features_job(job_id: str, symbol: str, market: str, timeframe: str):
             JOBS[job_id]["progress"] = 100.0
             JOBS[job_id]["message"] = f"Successfully computed {count:,} feature rows for {symbol} {market} {timeframe}."
             JOBS[job_id]["updated_at"] = time.time()
+            _persist(job_id)
     except Exception as e:
         logger.exception(f"Feature job {job_id} failed: {e}")
         with JOBS_LOCK:
             JOBS[job_id]["status"] = "failed"
             JOBS[job_id]["message"] = f"Failed to compute features: {str(e)}"
             JOBS[job_id]["updated_at"] = time.time()
+            _persist(job_id)
 
 
 @router.get("/coverage")
@@ -214,6 +229,7 @@ def trigger_backfill(req: BackfillRequest, background_tasks: BackgroundTasks):
 
     with JOBS_LOCK:
         JOBS[job_id] = job_info
+        _persist(job_id)
 
     # Launch background thread
     thread = threading.Thread(
@@ -249,6 +265,7 @@ def trigger_build_features(req: FeatureBuildRequest):
 
     with JOBS_LOCK:
         JOBS[job_id] = job_info
+        _persist(job_id)
 
     thread = threading.Thread(
         target=_run_features_job,
@@ -263,15 +280,17 @@ def trigger_build_features(req: FeatureBuildRequest):
 @router.get("/jobs")
 def list_jobs():
     with JOBS_LOCK:
-        job_list = list(JOBS.values())
-    job_list.sort(key=lambda x: x["created_at"], reverse=True)
-    return {"jobs": job_list[:30]}
+        live = [dict(j) for j in JOBS.values()]
+    return {"jobs": job_store.merge_jobs(live, job_store.list_jobs(30), 30)}
 
 
 @router.get("/jobs/{job_id}")
 def get_job(job_id: str):
     with JOBS_LOCK:
         job = JOBS.get(job_id)
+        job = dict(job) if job else None
+    if not job:
+        job = job_store.load_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
