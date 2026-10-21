@@ -47,6 +47,58 @@ class ModelArtifact:
         return path
 
 
+def _num(metrics: dict[str, Any], *keys: str) -> float | None:
+    """First usable numeric value among ``keys``; ``None`` when absent or invalid."""
+    for key in keys:
+        value = metrics.get(key)
+        if value is None or isinstance(value, bool):
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if number != number:  # NaN
+            continue
+        return number
+    return None
+
+
+def paper_eligibility_report(
+    *,
+    test_metrics: dict[str, Any],
+    min_test_trades: int = 30,
+    min_profit_factor: float = 1.0,
+    max_drawdown_pct: float = 25.0,
+    min_net_pnl: float = 0.0,
+) -> dict[str, Any]:
+    """Evaluate the promotion gate and explain every failure.
+
+    Fails closed: a metric that is missing, ``None`` or NaN fails its check.
+    Accepts both the gate's own key names and the names produced by
+    ``backtest.metrics.compute_metrics`` (``total_trades``).
+    """
+    metrics = test_metrics or {}
+    reasons: list[str] = []
+
+    trades = _num(metrics, "trade_count", "total_trades")
+    if trades is None or trades < min_test_trades:
+        reasons.append(f"needs at least {min_test_trades} untouched test trades (got {'n/a' if trades is None else int(trades)})")
+
+    profit_factor = _num(metrics, "profit_factor")
+    if profit_factor is None or profit_factor < min_profit_factor:
+        reasons.append(f"profit factor must be >= {min_profit_factor:g} (got {'n/a' if profit_factor is None else round(profit_factor, 3)})")
+
+    drawdown = _num(metrics, "max_drawdown_pct")
+    if drawdown is None or drawdown > max_drawdown_pct:
+        reasons.append(f"max drawdown must be <= {max_drawdown_pct:g}% (got {'n/a' if drawdown is None else round(drawdown, 2)})")
+
+    net_pnl = _num(metrics, "net_pnl")
+    if net_pnl is None or net_pnl < min_net_pnl:
+        reasons.append(f"net PnL must be >= {min_net_pnl:g} (got {'n/a' if net_pnl is None else round(net_pnl, 4)})")
+
+    return {"eligible": not reasons, "reasons": reasons}
+
+
 def paper_eligibility(
     *,
     test_metrics: dict[str, Any],
@@ -56,13 +108,8 @@ def paper_eligibility(
     min_net_pnl: float = 0.0,
 ) -> bool:
     """Apply conservative promotion gates to an untouched OOS result."""
-    trades = int(test_metrics.get("trade_count", 0))
-    profit_factor = float(test_metrics.get("profit_factor", 0.0))
-    drawdown = float(test_metrics.get("max_drawdown_pct", float("inf")))
-    net_pnl = float(test_metrics.get("net_pnl", float("-inf")))
-    return (
-        trades >= min_test_trades
-        and profit_factor >= min_profit_factor
-        and drawdown <= max_drawdown_pct
-        and net_pnl >= min_net_pnl
-    )
+    return paper_eligibility_report(
+        test_metrics=test_metrics, min_test_trades=min_test_trades,
+        min_profit_factor=min_profit_factor, max_drawdown_pct=max_drawdown_pct,
+        min_net_pnl=min_net_pnl,
+    )["eligible"]

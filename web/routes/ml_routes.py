@@ -6,11 +6,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 
+from ml.artifacts import paper_eligibility_report
 from ml.run_real_experiment import run_real_experiment
 from ml.dataset import TARGET_TYPES
 from paper.engine import set_paper_config, sync_and_evaluate_paper_trading
@@ -33,8 +35,12 @@ class RunExperimentRequest(BaseModel):
     min_validation_trades: int = Field(5, ge=1, le=100)
 
 
+_MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
+
+
 class DeployMLToPaperRequest(BaseModel):
-    model_id: str = Field(...)
+    # Restricted charset: the id is used to build a filesystem path.
+    model_id: str = Field(..., pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
     allocated_capital: float = Field(5000.0, ge=100.0)
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
     send_telegram: bool = Field(True)
@@ -105,6 +111,7 @@ def list_saved_models() -> Dict[str, Any]:
             data = json.loads(manifest_file.read_text(encoding="utf-8"))
             joblib_file = ML_MODELS_DIR / f"{manifest_file.stem}.joblib"
             data["has_weights"] = joblib_file.exists()
+            data["eligibility"] = paper_eligibility_report(test_metrics=data.get("test_metrics") or {})
             models.append(data)
         except Exception as exc:
             logger.warning("Failed to parse model manifest %s: %s", manifest_file, exc)
@@ -139,12 +146,30 @@ def trigger_experiment(req: RunExperimentRequest):
 @router.post("/deploy-to-paper")
 def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
     """Deploys a trained ML Model as an active filter in Live Paper Trading."""
+    if not _MODEL_ID_RE.match(req.model_id) or ".." in req.model_id:
+        raise HTTPException(status_code=422, detail="Invalid model_id")
     manifest_path = ML_MODELS_DIR / f"{req.model_id}.json"
     if not manifest_path.exists():
         raise HTTPException(status_code=404, detail=f"ML model manifest '{req.model_id}' not found in ml_models/")
 
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to parse model manifest: {exc}")
+
+    # Promotion gate: re-evaluate from the stored untouched-test metrics instead of
+    # trusting the manifest flag alone (manifests are plain, editable JSON files).
+    report = paper_eligibility_report(test_metrics=manifest.get("test_metrics") or {})
+    if not manifest.get("eligible_for_paper") or not report["eligible"]:
+        reasons = report["reasons"] or ["manifest is not flagged eligible_for_paper"]
+        raise HTTPException(
+            status_code=409,
+            detail="Model is not eligible for paper trading: " + "; ".join(reasons),
+        )
+    if not (ML_MODELS_DIR / f"{req.model_id}.joblib").exists():
+        raise HTTPException(status_code=409, detail="Model weights (.joblib) are missing; retrain before deploying")
+
+    try:
         strategy_params = manifest.get("strategy_params", {})
         symbol = strategy_params.get("symbol") or manifest.get("model_id").split("-")[1].upper()
         market = strategy_params.get("market") or manifest.get("model_id").split("-")[2].lower()

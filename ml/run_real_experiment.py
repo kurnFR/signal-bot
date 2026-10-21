@@ -135,7 +135,9 @@ def run_real_experiment(*, symbol: str = DEFAULT_SYMBOL, market: str = DEFAULT_M
         from ml.model_store import ModelStore
         models_dir = Path("ml_models")
         models_dir.mkdir(parents=True, exist_ok=True)
-        is_eligible = bool(result.experiment.ml_test_metrics.get("total_outcome_r", 0) > 0)
+        from ml.artifacts import paper_eligibility
+        # Same gate the deploy API enforces: >=30 test trades, PF>=1, DD<=25%, net PnL>=0.
+        is_eligible = paper_eligibility(test_metrics=dict(result.experiment.ml_test_metrics))
         artifact = ModelArtifact(
             model_id=experiment_id,
             experiment_id=experiment_id,
