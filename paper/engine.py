@@ -424,6 +424,12 @@ def _insert_position(
         entry_price=raw_entry,
         stop_price=stop_loss,
     )
+    # Portfolio-level cap: applies to every entry path (strategies and news overlay).
+    from paper.circuit_breaker import check_exposure_limit
+    exposure_ok, exposure_msg = check_exposure_limit(size.notional)
+    if not exposure_ok:
+        logger.warning("Paper entry for %s/%s blocked: %s", cfg["symbol"], cfg["strategy_name"], exposure_msg)
+        return None
     entry_fee = raw_entry * size.quantity * BACKTEST_FEE_PCT
     atr = float(trade.get("atr_at_signal", 0.0) or 0.0)
 
@@ -725,9 +731,12 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                                     symbol, latest_trade["direction"], ml_model_id, ml_probability, ml_threshold
                                 )
                             else:
-                                logger.warning("ML model files for %s not found in ml_models/; executing without ML filter", ml_model_id)
+                                # Fail closed: a configured safety filter that cannot run must not be skipped.
+                                logger.error("ML model files for %s not found in ml_models/; skipping entry (fail closed)", ml_model_id)
+                                continue
                         except Exception as ml_err:
-                            logger.error("Error evaluating ML signal filter %s: %s; executing without filter", ml_model_id, ml_err)
+                            logger.error("Error evaluating ML signal filter %s: %s; skipping entry (fail closed)", ml_model_id, ml_err)
+                            continue
 
                     if _insert_position(cfg, latest_trade, current_close, candle_open_time,
                                         ml_model_id=ml_model_id, ml_probability=ml_probability):

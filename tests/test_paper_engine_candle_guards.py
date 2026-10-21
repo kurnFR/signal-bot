@@ -151,7 +151,8 @@ class TestInsertPositionLastUpdateTime(unittest.TestCase):
             "direction": "LONG", "entry_price": 64000.0, "stop_loss": 63000.0,
             "take_profit": 66000.0, "atr_at_signal": 500.0,
         }
-        with patch("paper.engine.get_pool", return_value=CapturingPool()):
+        with patch("paper.engine.get_pool", return_value=CapturingPool()), \
+             patch("paper.circuit_breaker.get_open_notional_usd", return_value=0.0):
             pe._insert_position(cfg, trade, 64010.0, CANDLE_A)
 
         # The VALUES tuple mixes literal SQL values (trailing_active=0,
@@ -260,3 +261,15 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestInsertPositionExposureCap(unittest.TestCase):
+    def test_entry_is_refused_before_any_insert_when_cap_would_be_exceeded(self):
+        class Pool:
+            def get_connection(self):
+                raise AssertionError("must not touch the DB when blocked")
+        trade = {"direction": "LONG", "entry_price": 64000.0, "stop_loss": 63000.0,
+                 "take_profit": 66000.0, "atr_at_signal": 500.0}
+        with patch("paper.engine.get_pool", return_value=Pool()), \
+             patch("paper.circuit_breaker.get_open_notional_usd", return_value=24999.0):
+            self.assertIsNone(pe._insert_position(_make_cfg(), trade, 64010.0, CANDLE_A))
