@@ -226,6 +226,11 @@
     box-shadow: 0 1px 0 var(--dashboard-border);
 }
 
+:root[data-theme="light"] .table-sort-indicator {
+    /* Keep the sort direction glyph legible against light table surfaces. */
+    color: #075985;
+}
+
 :root[data-theme="light"] .custom-table td {
     border-bottom-color: #e6ebf2;
 }

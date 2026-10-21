@@ -1519,3 +1519,18 @@ class TestDatabaseStatusLiveRegionUpdates(unittest.TestCase):
     def test_database_status_update_bumps_app_cache_token(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
         self.assertIn('app.js?v=20261020-32', html)
+
+
+class TestLightThemeSortIndicatorContrast(unittest.TestCase):
+    def test_sort_direction_indicator_uses_a_contrasting_color_in_light_theme(self):
+        css = DASHBOARD_CSS.read_text(encoding="utf-8")
+        rule = re.search(
+            r':root\[data-theme="light"\] \.table-sort-indicator\s*\{([^}]*)\}',
+            css,
+        )
+        self.assertIsNotNone(rule)
+        self.assertRegex(rule.group(1), r'color:\s*#075985\s*;')
+
+    def test_light_theme_sort_indicator_change_bumps_stylesheet_cache_token(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        self.assertIn('dashboard_enhancements.css?v=20261020-35', html)
