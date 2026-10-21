@@ -30,16 +30,16 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Custom Style -->
     <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="stylesheet" href="/static/css/dashboard_enhancements.css?v=20261020-33">
+    <link rel="stylesheet" href="/static/css/dashboard_enhancements.css?v=20261020-34">
     <style>
         /* Keep keyboard navigation visible against the dashboard's dark surfaces. */
-        :focus-visible {
+        :focus-visible:not(#main-content) {
             outline: 2px solid var(--dashboard-focus, #38bdf8) !important;
             outline-offset: 3px;
         }
 
         @media (forced-colors: active) {
-            :focus-visible {
+            :focus-visible:not(#main-content) {
                 outline-color: Highlight !important;
             }
         }
