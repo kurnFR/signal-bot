@@ -9,6 +9,42 @@ from typing import Dict, Any, List, Optional
 import pandas as pd
 
 
+MAX_HALF_KELLY_PCT = 3.0
+
+
+def kelly_fraction_from_edge(win_rate_pct: float, profit_factor: float) -> float:
+    """Kelly fraction (0..1) from realized win rate and profit factor.
+
+    PF = (w * avgWin) / ((1 - w) * avgLoss), so the payoff ratio b = avgWin/avgLoss
+    is PF * (1 - w) / w and Kelly = w - (1 - w) / b = w * (1 - 1/PF).
+    Returns 0.0 for any non-positive, undefined or non-finite edge: never a floor.
+    """
+    try:
+        w = float(win_rate_pct) / 100.0
+        pf = float(profit_factor)
+    except (TypeError, ValueError):
+        return 0.0
+    if not (math.isfinite(w) and math.isfinite(pf)) or not 0.0 < w < 1.0 or pf <= 1.0:
+        return 0.0
+    return max(0.0, w * (1.0 - 1.0 / pf))
+
+
+def _ema_last(df: pd.DataFrame, span: int) -> Optional[float]:
+    """Latest EMA(span) of close: use a stored ema_<span> column if present, else compute it."""
+    column = f"ema_{span}"
+    if column in df.columns:
+        value = pd.to_numeric(df[column], errors="coerce").iloc[-1]
+        if pd.notna(value) and float(value) > 0:
+            return float(value)
+    if "close" not in df.columns:
+        return None
+    close = pd.to_numeric(df["close"], errors="coerce").dropna()
+    if len(close) < span:
+        return None
+    value = close.ewm(span=span, adjust=False).mean().iloc[-1]
+    return float(value) if pd.notna(value) and value > 0 else None
+
+
 def generate_ai_insight(
     symbol: str,
     market: str,
@@ -71,18 +107,22 @@ def generate_ai_insight(
     prob_4_losses = round((loss_rate ** 4) * 100, 1)
     prob_6_losses = round((loss_rate ** 6) * 100, 1)
 
-    # Kelly Criterion fraction estimate: K = W - (1-W)/R
-    # Assume target R:R ratio ~ 2.0
-    rr_est = 2.0
-    kelly_fraction = (wr / 100.0) - ((1.0 - (wr / 100.0)) / rr_est)
-    half_kelly = max(0.2, min(round((kelly_fraction / 2.0) * 100, 1), 3.0))
+    # Kelly from realized edge (win rate + profit factor). No floor: no edge, no risk.
+    kelly_fraction = kelly_fraction_from_edge(wr, pf)
+    has_edge = ev > 0 and pf > 1.0 and kelly_fraction > 0
+    half_kelly = min(round((kelly_fraction / 2.0) * 100, 1), MAX_HALF_KELLY_PCT) if has_edge else 0.0
 
-    if max_dd > 4.5 or ev < 0.15:
+    if not has_edge:
+        recommended_risk = 0.0
+    elif max_dd > 4.5 or ev < 0.15:
         recommended_risk = 0.5
     elif max_dd > 3.0 or sample_level == "low":
         recommended_risk = 0.75
     else:
         recommended_risk = 1.0
+    if has_edge and half_kelly > 0:
+        # Never recommend more than half-Kelly of the measured edge.
+        recommended_risk = min(recommended_risk, half_kelly)
 
     # 3. Market Regime Diagnostics
     regime_state = "Neutral / Sideways Range"
@@ -91,19 +131,21 @@ def generate_ai_insight(
 
     if df is not None and len(df) >= 50:
         last_bar = df.iloc[-1]
-        close = float(last_bar.get("close", 0))
-        ema20 = float(last_bar.get("ema_20", 0))
-        ema50 = float(last_bar.get("ema_50", 0))
-        atr = float(last_bar.get("atr", 0))
-        adx = float(last_bar.get("adx", 0)) if "adx" in last_bar else None
+        close = float(pd.to_numeric(last_bar.get("close"), errors="coerce") or 0)
+        atr_raw = pd.to_numeric(last_bar.get("atr"), errors="coerce")
+        atr = float(atr_raw) if pd.notna(atr_raw) else 0.0
+        ema20 = _ema_last(df, 20)
+        ema50 = _ema_last(df, 50)
 
-        if ema20 > 0 and ema50 > 0:
+        if close > 0 and ema20 and ema50:
             if close > ema20 > ema50:
-                regime_state = "Strong Bullish Trend (EMA20 > EMA50)"
+                regime_state = "Bullish Trend (Close > EMA20 > EMA50)"
             elif close < ema20 < ema50:
-                regime_state = "Strong Bearish Downtrend (EMA20 < EMA50)"
+                regime_state = "Bearish Downtrend (Close < EMA20 < EMA50)"
             else:
-                regime_state = "Ranging / Consolidation Channel"
+                regime_state = "Ranging / Mixed (EMAs not aligned)"
+        else:
+            regime_state = "Indeterminate (insufficient price history)"
 
         if atr > 0 and close > 0:
             atr_pct = (atr / close) * 100
@@ -122,7 +164,13 @@ def generate_ai_insight(
             regime_fit_note = f"Multi-indicator confluence filters noise and optimizes risk:reward distribution."
 
     # 4. Verdict Determination
-    if ev >= 0.25 and pf >= 1.35 and trades >= 15:
+    if not has_edge:
+        verdict = "NO_EDGE"
+        verdict_label = "🔴 No Positive Edge: Do Not Deploy"
+        badge_color = "red"
+        headline = f"Strategy <b>{display_name}</b> has no positive edge on this sample (expectancy {ev:+.2f}R, Profit Factor {pf:.2f})."
+        telegram_ready = False
+    elif ev >= 0.25 and pf >= 1.35 and trades >= 15:
         verdict = "STRONG_DEPLOY"
         verdict_label = "🟢 Highly Recommended for Live Paper Trading"
         badge_color = "emerald"
@@ -143,14 +191,18 @@ def generate_ai_insight(
 
     # Actionable Prescriptions
     prescriptions = []
-    prescriptions.append(f"Position Sizing: Cap risk at <b>{recommended_risk}%</b> per trade to cushion against potential drawdowns.")
+    if not has_edge:
+        prescriptions.append("Position Sizing: <b>0%</b>. Do not risk capital without a measured positive edge; re-test on more data or a different timeframe.")
+    else:
+        prescriptions.append(f"Position Sizing: Cap risk at <b>{recommended_risk}%</b> per trade to cushion against potential drawdowns.")
     if "trend" in strategy_name or "breakout" in strategy_name:
         prescriptions.append("Exit Strategy: Enable <b>Trailing Stop</b> (activation at 1.0R, distance 1.5x ATR) to capture extended runs.")
     else:
         prescriptions.append("Exit Strategy: Use <b>Strict 1:2 Take Profit</b> to lock in gains at structural resistance levels.")
 
     prescriptions.append(f"Streak Warning: Expect a {prob_4_losses}% chance of experiencing 4 consecutive losses during regular market chop.")
-    prescriptions.append(f"Telegram Forwarding: Automatically stream live entry and exit alerts to <b>@SignBTBot</b>.")
+    if telegram_ready:
+        prescriptions.append("Telegram Forwarding: Stream paper entry and exit alerts to your configured Telegram chat.")
 
     return {
         "verdict": verdict,
@@ -182,6 +234,7 @@ def generate_ai_insight(
             "prob4Losses": prob_4_losses,
             "prob6Losses": prob_6_losses,
             "maxDrawdownR": max_dd,
+            "hasEdge": has_edge,
         },
         "prescriptions": prescriptions,
         "telegramReady": telegram_ready,

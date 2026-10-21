@@ -52,3 +52,17 @@ class TestAccounting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMetricsPopulation(unittest.TestCase):
+    def test_scored_trades_matches_win_rate_population(self):
+        from backtest.metrics import compute_metrics
+        trades = [{"r_multiple": 1.0}, {"r_multiple": -1.0}, {"r_multiple": None}, {}]
+        m = compute_metrics(trades)
+        self.assertEqual(m["total_trades"], 4)
+        self.assertEqual(m["scored_trades"], 2)
+        self.assertEqual(m["win_rate_pct"], 50.0)
+
+    def test_empty_has_scored_trades_zero(self):
+        from backtest.metrics import compute_metrics
+        self.assertEqual(compute_metrics([])["scored_trades"], 0)

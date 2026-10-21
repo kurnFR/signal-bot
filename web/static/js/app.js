@@ -1296,6 +1296,7 @@ const App = {
                 this.currentUser = await res.json();
                 this.updateUserUI();
                 this.hideLoginModal();
+                this.enforcePasswordChangeIfRequired();
             } else {
                 this.authToken = null;
                 localStorage.removeItem("token");
@@ -1397,6 +1398,7 @@ const App = {
             if (errEl) errEl.classList.add("hidden");
             this.hideLoginModal();
             this.updateUserUI();
+            if (this.enforcePasswordChangeIfRequired()) return;
             this.showToast(`Welcome back, ${this.currentUser.username}!`, "success");
 
             // Refresh platform state, coverage, strategies & user administration
@@ -1431,6 +1433,7 @@ const App = {
             this.authToken = null;
             this.currentUser = null;
             localStorage.removeItem("token");
+            this.hideForcedPasswordModal();
             this.updateUserUI();
             this.showLoginModal();
             this.showToast("Logged out successfully.", "info");
@@ -1448,6 +1451,97 @@ const App = {
             if (userRole) userRole.innerText = this.currentUser.role.toUpperCase();
         } else if (userContainer) {
             userContainer.classList.add("hidden");
+        }
+    },
+
+    // Returns true when the blocking password-change dialog was shown.
+    enforcePasswordChangeIfRequired() {
+        if (!this.currentUser || !this.currentUser.must_change_password) return false;
+        const modal = document.getElementById("force-password-modal");
+        if (!modal) return false;
+        modal.classList.remove("hidden");
+        modal.classList.add("flex");
+        if (modal.dataset.focusTrapInitialized !== "true") {
+            modal.addEventListener("keydown", (event) => {
+                if (event.key !== "Tab") return;
+                const focusable = Array.from(modal.querySelectorAll("button:not([disabled]), input:not([disabled])"))
+                    .filter((element) => element.getClientRects().length > 0);
+                if (focusable.length === 0) return;
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+                if (event.shiftKey && document.activeElement === first) {
+                    event.preventDefault();
+                    last.focus();
+                } else if (!event.shiftKey && document.activeElement === last) {
+                    event.preventDefault();
+                    first.focus();
+                }
+            });
+            modal.dataset.focusTrapInitialized = "true";
+        }
+        const first = document.getElementById("force-old-pwd");
+        if (first) first.focus();
+        return true;
+    },
+
+    cancelForcedPasswordChange() {
+        return this.handleLogout();
+    },
+
+    hideForcedPasswordModal() {
+        const modal = document.getElementById("force-password-modal");
+        if (modal) {
+            modal.classList.add("hidden");
+            modal.classList.remove("flex");
+        }
+        ["force-old-pwd", "force-new-pwd", "force-conf-pwd"].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.value = "";
+        });
+    },
+
+    async handleForcedPasswordChange() {
+        const errEl = document.getElementById("force-password-error");
+        const showError = (message) => {
+            if (!errEl) return;
+            errEl.innerText = message;
+            errEl.classList.remove("hidden");
+        };
+        const oldP = document.getElementById("force-old-pwd").value;
+        const newP = document.getElementById("force-new-pwd").value;
+        const confP = document.getElementById("force-conf-pwd").value;
+        if (!oldP || !newP) return showError("Enter your current and new password.");
+        if (newP.length < 10) return showError("New password must be at least 10 characters.");
+        if (newP !== confP) return showError("New passwords do not match.");
+
+        const submit = document.getElementById("force-password-submit");
+        if (submit) submit.disabled = true;
+        try {
+            const res = await fetch(`${API_BASE}/api/auth/change-password`, {
+                method: "POST",
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify({ old_password: oldP, new_password: newP })
+            });
+            let data = {};
+            try { data = await res.json(); } catch (_) {}
+            if (!res.ok) {
+                const detail = Array.isArray(data.detail) ? data.detail.map(d => d.msg).join("; ") : data.detail;
+                throw new Error(detail || "Password change failed");
+            }
+            if (errEl) errEl.classList.add("hidden");
+            if (this.currentUser) this.currentUser.must_change_password = false;
+            this.hideForcedPasswordModal();
+            this.showToast("Password updated. Welcome!", "success");
+            await Promise.allSettled([
+                this.fetchSystemStatus(),
+                this.fetchCoverage(),
+                this.fetchStrategies(),
+                this.fetchUsers()
+            ]);
+        } catch (e) {
+            showError(e.message);
+        } finally {
+            if (submit) submit.disabled = false;
         }
     },
 

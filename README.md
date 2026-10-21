@@ -44,19 +44,15 @@ pip install -r requirements.txt
 cp .env.example .env        # set MYSQL_* credentials; the rest is optional
 ```
 
-**1. Create the database.** `schema.sql` creates `crypto_signals` and the core tables. Then run the migrations the dashboard needs (all are safe to run once, in this order):
+**1. Create / upgrade the database.** One command does it, for fresh installs and upgrades alike. It creates the database if missing, applies `schema.sql` plus every migration in order, records each in `schema_migrations`, and is safe to re-run:
 
 ```bash
-mysql -u USER -p < db/schema.sql
-for f in migrate_add_users_and_paper migrate_p0_paper_accounting \
-         migrate_add_trail_exit_reason migrate_nullable_mark_price \
-         migrate_pro_trader_and_ml migrate_news_events \
-         migrate_news_execution migrate_smart_money; do
-  mysql -u USER -p < db/$f.sql
-done
+python -m db.migrate            # apply everything pending
+python -m db.migrate --status   # applied / pending / changed
+python -m db.migrate --dry-run  # show what would run
 ```
 
-`migrate_add_wib_columns`, `migrate_add_data_segment` and `migrate_fix_wib_timezone` only upgrade databases created before those columns were part of `schema.sql`; on a fresh install the first two fail with `Duplicate column`, which is expected. Wallet-tracker tables are created automatically at startup.
+`run_all.py` runs this automatically before starting any process (set `SKIP_DB_MIGRATE=1` if a DBA owns the schema). An existing hand-migrated database is adopted: already-present columns are tolerated and recorded as `applied-idempotent`. Wallet-tracker tables are also created by this runner.
 
 **2. Load history** (default 5 years for BTC/ETH/BNB on 15m, 1h, 4h, 1d; safe to re-run, it upserts):
 
@@ -119,3 +115,15 @@ python -m pytest -q        # CI runs this on Python 3.11
 ```
 
 MariaDB integration tests are opt-in: `WALLET_TRACKER_MARIADB_TESTS=1` with a disposable database.
+
+## Runtime data
+
+`custom_strategies.json` (your saved custom strategies) and `Screen/signals.jsonl` (screener output) are runtime data, not source. They are still tracked by an older commit. On the machine that holds your real data, after merging, stop tracking them without deleting your copies:
+
+```bash
+git rm --cached custom_strategies.json Screen/signals.jsonl
+printf 'custom_strategies.json\nScreen/signals.jsonl\n' >> .gitignore
+git commit -m "Stop tracking runtime data"
+```
+
+Back both files up first if they matter to you.

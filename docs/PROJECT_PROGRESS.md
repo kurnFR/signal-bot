@@ -114,21 +114,21 @@ The issues below were recorded in `docs/STATUS.md` during a review dated 2026-10
 
 ### P0 — Safety and correctness
 
-- [ ] **Enforce ML eligibility consistently.** Ensure experiment evaluation and the deploy-to-paper API use the same gate: at least 30 untouched test trades, profit factor ≥ 1.0, maximum drawdown ≤ 25%, and net PnL ≥ 0, as documented in [ML.md](ML.md). Add negative tests proving ineligible models cannot be deployed.
+- [x] **Enforce ML eligibility consistently.** Ensure experiment evaluation and the deploy-to-paper API use the same gate: at least 30 untouched test trades, profit factor ≥ 1.0, maximum drawdown ≤ 25%, and net PnL ≥ 0, as documented in [ML.md](ML.md). Add negative tests proving ineligible models cannot be deployed.
 - [ ] **Close the paper-execution lifecycle gap.** Document and test pending, filled, expired, and cancelled signal/order states where appropriate. Keep the system explicitly paper-only unless a separate, reviewed scope authorizes anything else.
-- [ ] **Add portfolio-level exposure controls.** Existing per-position-count and daily-loss circuit breakers do not replace a notional exposure limit across symbols. Fail closed if the exposure state cannot be verified.
-- [ ] **Correct AI insight risk suggestions.** Ensure a negative or unproven edge cannot produce a positive Kelly-based risk recommendation; ensure regime detection uses features that actually exist, with tests for fallback behavior.
+- [x] **Add portfolio-level exposure controls.** Existing per-position-count and daily-loss circuit breakers do not replace a notional exposure limit across symbols. Fail closed if the exposure state cannot be verified.
+- [x] **Correct AI insight risk suggestions.** Ensure a negative or unproven edge cannot produce a positive Kelly-based risk recommendation; ensure regime detection uses features that actually exist, with tests for fallback behavior.
 - [ ] **Improve cost and metric consistency.** Review flat fee/slippage assumptions, consider spread/liquidity effects where data supports them, and reconcile total-trade counts with the population used for win-rate calculations.
 
 ### P1 — Security and reliability
 
-- [ ] **Enforce first-login password change.** Check the `must_change_password` state in the API and UI, and test bypass attempts.
-- [ ] **Strengthen login rate limiting.** Consider shared/durable limits if the app runs across multiple workers or restarts.
-- [ ] **Make bind-address configuration explicit.** Review the default `0.0.0.0` listener and startup logging so exposure is intentional.
-- [ ] **Persist master-data job state.** Avoid losing job status on process restart; test restart/recovery behavior.
-- [ ] **Introduce a migration runner.** Replace manual migration ordering with a versioned, repeatable migration process; distinguish fresh installs from upgrades.
+- [x] **Enforce first-login password change.** Check the `must_change_password` state in the API and UI, and test bypass attempts.
+- [x] **Strengthen login rate limiting.** Consider shared/durable limits if the app runs across multiple workers or restarts.
+- [x] **Make bind-address configuration explicit.** Review the default `0.0.0.0` listener and startup logging so exposure is intentional.
+- [x] **Persist master-data job state.** Avoid losing job status on process restart; test restart/recovery behavior.
+- [x] **Introduce a migration runner.** Replace manual migration ordering with a versioned, repeatable migration process; distinguish fresh installs from upgrades.
 - [ ] **Remove generated runtime state from version control.** Review tracked `custom_strategies.json` and `Screen/signals.jsonl`, preserving any intentional sample/fixture data.
-- [ ] **Expand route authorization coverage.** Test authentication and role rules across all API routes, including read/write boundaries.
+- [x] **Expand route authorization coverage.** Test authentication and role rules across all API routes, including read/write boundaries.
 
 ### P1 — Wallet Tracker limitations
 
@@ -176,4 +176,4 @@ The project should not be marked finished just because the latest PRs are merged
 ---
 
 **Last update:** 2026-10-21.  
-**Next suggested engineering step:** revalidate the high-priority ML paper-eligibility gap against current code, then add a regression test before changing it.
+**Next suggested engineering step:** design the paper order lifecycle (pending, filled, expired, cancelled), then untrack runtime data on the production machine.

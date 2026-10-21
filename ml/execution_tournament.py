@@ -12,6 +12,7 @@ from ml.experiment import ExperimentConfig
 from ml.metrics import probability_diagnostics
 from ml.result import ExperimentResult
 from ml.split import split_by_fractions
+from backtest.equity import simulate_equity_curve
 from ml.strategy import MLSignalFilter
 from ml.tournament import Candidate, CandidateScore, rank_candidates
 from ml.trainer import fit_candidate_model
@@ -29,7 +30,12 @@ class ExecutionTournamentResult:
 def _trade_metrics(trades: list[dict]) -> dict[str, Any]:
     metrics = compute_metrics(trades)
     total_r = float(sum(float(t["r_multiple"]) for t in trades if t.get("r_multiple") is not None))
+    # Percent drawdown on a compounding equity curve at a fixed reference risk
+    # (1% of equity per trade), so the promotion gate has a real percentage.
+    drawdown_pct = simulate_equity_curve(trades, 10_000.0, 1.0)["max_drawdown_pct"] if trades else None
     return {**metrics, "total_outcome_r": round(total_r, 8),
+            "trade_count": metrics.get("total_trades", 0),
+            "max_drawdown_pct": drawdown_pct,
             "net_pnl": round(float(sum(float(t.get("net_pnl", 0.0)) for t in trades)), 8)}
 
 

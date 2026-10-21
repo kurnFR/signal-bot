@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock
 from paper.circuit_breaker import (
     trip_emergency_stop, reset_emergency_stop, check_circuit_breakers,
     get_circuit_breaker_status, get_daily_realized_loss_usd,
-    DEFAULT_MAX_CONCURRENT_POSITIONS,
+    DEFAULT_MAX_CONCURRENT_POSITIONS, check_exposure_limit, get_open_notional_usd,
 )
 
 # The breaker opens a direct connection through paper.circuit_breaker._get_conn()
@@ -82,14 +82,14 @@ class TestCircuitBreaker(unittest.TestCase):
 
     def test_empty_tables_allow_entries(self):
         # COUNT(*) -> 0 and COALESCE(SUM(...), 0.0) -> 0.0 on a brand-new database.
-        conn, _cur = _mock_conn({"active_count": 0}, {"total_net_pnl": 0.0})
+        conn, _cur = _mock_conn({"active_count": 0}, {"total_net_pnl": 0.0}, {"total": 0.0})
         with patch(GET_CONN, return_value=conn):
             allowed, reason = check_circuit_breakers()
         self.assertTrue(allowed, reason)
         self.assertEqual(reason, "All circuit breakers nominal")
 
     def test_missing_rows_are_treated_as_zero_on_fresh_start(self):
-        conn, _cur = _mock_conn(None, None)  # driver returned no row at all
+        conn, _cur = _mock_conn(None, None, None)  # driver returned no row at all
         with patch(GET_CONN, return_value=conn):
             allowed, reason = check_circuit_breakers()
         self.assertTrue(allowed, reason)
@@ -100,11 +100,56 @@ class TestCircuitBreaker(unittest.TestCase):
             self.assertEqual(get_daily_realized_loss_usd(), -42.5)
 
     def test_connections_are_closed_after_each_check(self):
-        conn, cur = _mock_conn({"active_count": 0}, {"total_net_pnl": 0.0})
+        conn, cur = _mock_conn({"active_count": 0}, {"total_net_pnl": 0.0}, {"total": 0.0})
         with patch(GET_CONN, return_value=conn):
             check_circuit_breakers()
-        self.assertGreaterEqual(conn.close.call_count, 2)  # position query + PnL query
-        self.assertGreaterEqual(cur.close.call_count, 2)
+        self.assertGreaterEqual(conn.close.call_count, 3)  # positions + PnL + exposure queries
+        self.assertGreaterEqual(cur.close.call_count, 3)
+
+
+class TestExposureLimit(unittest.TestCase):
+    def setUp(self):
+        reset_emergency_stop()
+
+    def test_within_limit_allows(self):
+        conn, _ = _mock_conn({"total": 10000.0})
+        with patch(GET_CONN, return_value=conn):
+            ok, _msg = check_exposure_limit(5000.0, max_total_notional=25000.0)
+        self.assertTrue(ok)
+
+    def test_new_position_that_would_exceed_the_cap_is_blocked(self):
+        conn, _ = _mock_conn({"total": 22000.0})
+        with patch(GET_CONN, return_value=conn):
+            ok, msg = check_exposure_limit(5000.0, max_total_notional=25000.0)
+        self.assertFalse(ok)
+        self.assertIn("exposure limit", msg)
+
+    def test_exactly_at_cap_is_allowed_one_cent_over_is_not(self):
+        conn, _ = _mock_conn({"total": 20000.0})
+        with patch(GET_CONN, return_value=conn):
+            self.assertTrue(check_exposure_limit(5000.0, max_total_notional=25000.0)[0])
+        conn, _ = _mock_conn({"total": 20000.0})
+        with patch(GET_CONN, return_value=conn):
+            self.assertFalse(check_exposure_limit(5000.01, max_total_notional=25000.0)[0])
+
+    def test_unverifiable_exposure_fails_closed(self):
+        with patch(GET_CONN, side_effect=RuntimeError("db down")):
+            self.assertIsNone(get_open_notional_usd())
+            ok, msg = check_exposure_limit(1.0)
+        self.assertFalse(ok)
+        self.assertIn("cannot verify", msg)
+
+    def test_invalid_sizes_fail_closed(self):
+        for bad in (-1.0, float("nan"), "abc", None):
+            ok, _ = check_exposure_limit(bad)
+            self.assertFalse(ok, bad)
+
+    def test_already_over_cap_trips_the_general_breaker(self):
+        conn, _ = _mock_conn({"active_count": 1}, {"total_net_pnl": 0.0}, {"total": 99999999.0})
+        with patch(GET_CONN, return_value=conn):
+            ok, msg = check_circuit_breakers()
+        self.assertFalse(ok)
+        self.assertIn("exposure", msg)
 
 
 if __name__ == "__main__":
