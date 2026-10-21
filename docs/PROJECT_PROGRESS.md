@@ -150,22 +150,7 @@ Revisit the known limitations in [WALLET_TRACKER.md](WALLET_TRACKER.md), includi
 - [ ] Reconcile documentation with current implementation after each meaningful change.
 - [ ] Perform a separate, explicitly approved staging/production verification when a deployment is requested. No deployment is implied by a merge.
 
-## 6. GCAO — tracking entry awaiting verified project context
-
-The term **GCAO** was not found in the accessible `signal-bot` documentation/code search, and the available prior context does not establish its expansion, purpose, repository, architecture, or current milestone. This section is intentionally marked **unverified** instead of inventing a project definition.
-
-To finish this section accurately, link the canonical GCAO repository or provide the full project name and its existing plan. Then record:
-
-- [ ] Confirm canonical name, repository, and project goal.
-- [ ] Inventory implemented features and cite commits/PRs.
-- [ ] List open defects and incomplete milestones with acceptance criteria.
-- [ ] Identify dependencies, tests, deployment state, and operational risks.
-- [ ] Rank the next steps by severity and user impact.
-- [ ] Keep GCAO's status separate from Signal Bot unless repository evidence confirms they are the same project.
-
-Do not infer that GCAO is `signal-bot`, `ai_insight`, or `forecast_engine`; the available evidence treats `signal-bot` and `forecast_engine` as separate repositories.
-
-## 7. Definition of “project finished”
+## 6. Definition of “project finished”
 
 The project should not be marked finished just because the latest PRs are merged. A reasonable completion gate is:
 
@@ -175,10 +160,9 @@ The project should not be marked finished just because the latest PRs are merged
 - [ ] Key user flows are verified in a browser, including accessibility and responsive behavior.
 - [ ] Docs and migration/setup instructions match the code.
 - [ ] Deployment and runtime health are verified separately when deployment is in scope.
-- [ ] The GCAO project has been identified and documented from its canonical source.
 - [ ] Remaining risks and intentionally unsupported behavior are documented.
 
-## 8. Working rules for the next iterations
+## 7. Working rules for the next iterations
 
 1. Start from current `master` and inspect the actual code before proposing a change.
 2. Fix one concrete, reproducible issue per small PR where practical.
@@ -192,5 +176,4 @@ The project should not be marked finished just because the latest PRs are merged
 ---
 
 **Last update:** 2026-10-21.  
-**Next suggested engineering step:** revalidate the high-priority ML paper-eligibility gap against current code, then add a regression test before changing it.  
-**Next documentation dependency:** identify the canonical GCAO project source so its actual progress can be recorded without guessing.
+**Next suggested engineering step:** revalidate the high-priority ML paper-eligibility gap against current code, then add a regression test before changing it.
