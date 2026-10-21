@@ -110,6 +110,7 @@ See [docs/STRATEGIES.md](docs/STRATEGIES.md) for the validation workflow (the ho
 | [docs/WALLET_TRACKER.md](docs/WALLET_TRACKER.md) | On-chain wallet tracking: how it works, settings, limits |
 | [docs/SECURITY.md](docs/SECURITY.md) | Authentication, roles, hardening notes |
 | [docs/STATUS.md](docs/STATUS.md) | What is implemented, and the verified open gaps |
+| [docs/PROJECT_PROGRESS.md](docs/PROJECT_PROGRESS.md) | Progress summary, completion status, and prioritized roadmap |
 
 ## Tests
 
