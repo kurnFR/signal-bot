@@ -226,8 +226,8 @@ class TestMariaDBIntegration(unittest.TestCase):
         conn = None
         try:
             cur.execute(f"CREATE DATABASE {name}")
-            admin.commit()
             created = True
+            admin.commit()
             conn = mysql.connector.connect(**dict(cfg, database=name))
             first = migrate.apply_pending(conn, log=lambda _: None)
             self.assertEqual(first, [m.version for m in MIGRATIONS])
@@ -262,8 +262,8 @@ class TestMariaDBIntegration(unittest.TestCase):
         conn = None
         try:
             cur.execute(f"CREATE DATABASE {name}")
-            admin.commit()
             created = True
+            admin.commit()
             conn = mysql.connector.connect(**dict(cfg, database=name))
             # Install the current baseline without recording migration versions.
             cur2 = conn.cursor()
@@ -325,8 +325,8 @@ class TestMariaDBIntegration(unittest.TestCase):
         conn = None
         try:
             cur.execute(f"CREATE DATABASE {name}")
-            admin.commit()
             created = True
+            admin.commit()
             conn = mysql.connector.connect(**dict(cfg, database=name))
             cur2 = conn.cursor()
             baseline = next(m for m in MIGRATIONS if m.version == "000_baseline")
