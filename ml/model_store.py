@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
 try:
@@ -26,14 +28,44 @@ class ModelStore:
             raise RuntimeError("joblib is required for ML model persistence")
 
     def save(self, artifact: ModelArtifact, model: Any) -> tuple[Path, Path]:
+        """Persist a new artifact without following links or exposing partial weights."""
         self._require_joblib()
-        model_path = self.root / f"{artifact.model_id}.joblib"
-        manifest_path = self.root / f"{artifact.model_id}.json"
-        if model_path.exists() or manifest_path.exists():
+        root = self.root.resolve()
+        model_path = root / f"{artifact.model_id}.joblib"
+        manifest_path = root / f"{artifact.model_id}.json"
+        if any(path.exists() or path.is_symlink() for path in (model_path, manifest_path)):
             raise FileExistsError(f"model artifact already exists: {artifact.model_id}")
-        joblib.dump(model, model_path)
-        artifact.save_manifest(self.root)
-        return model_path, manifest_path
+
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", dir=root, prefix=".model-weights-", suffix=".tmp", delete=False
+            ) as handle:
+                temp_path = handle.name
+            joblib.dump(model, temp_path)
+            with open(temp_path, "rb") as handle:
+                os.fsync(handle.fileno())
+            # Atomic replacement replaces a destination symlink itself instead
+            # of writing through it if another process creates one after the check.
+            os.replace(temp_path, model_path)
+            temp_path = None
+            try:
+                artifact.save_manifest(root)
+            except Exception:
+                # The weight file was created by this call and has no manifest;
+                # remove it so a failed save does not leave a misleading artifact.
+                try:
+                    model_path.unlink()
+                except OSError:
+                    pass
+                raise
+            return model_path, manifest_path
+        finally:
+            if temp_path is not None:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
 
     def load(self, artifact: ModelArtifact, expected_features: list[str] | tuple[str, ...]):
         self._require_joblib()
