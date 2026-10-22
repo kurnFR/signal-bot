@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -50,15 +51,21 @@ class ModelArtifact:
 def _num(metrics: dict[str, Any], *keys: str) -> float | None:
     """First usable numeric value among ``keys``; ``None`` when absent or invalid."""
     for key in keys:
-        value = metrics.get(key)
-        if value is None or isinstance(value, bool):
+        if key not in metrics:
             continue
+        value = metrics[key]
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            return None
         try:
             number = float(value)
-        except (TypeError, ValueError):
-            continue
-        if number != number:  # NaN
-            continue
+        except (TypeError, ValueError, OverflowError):
+            return None
+        # Promotion metrics are untrusted JSON metadata; NaN and +/-infinity
+        # must never satisfy a gate through comparisons that treat them oddly.
+        if not math.isfinite(number):
+            return None
         return number
     return None
 
@@ -77,20 +84,23 @@ def paper_eligibility_report(
     Accepts both the gate's own key names and the names produced by
     ``backtest.metrics.compute_metrics`` (``total_trades``).
     """
-    metrics = test_metrics or {}
+    metrics_are_object = isinstance(test_metrics, dict)
+    metrics = test_metrics if metrics_are_object else {}
     reasons: list[str] = []
+    if not metrics_are_object:
+        reasons.append("test metrics must be a JSON object")
 
     trades = _num(metrics, "trade_count", "total_trades")
-    if trades is None or trades < min_test_trades:
-        reasons.append(f"needs at least {min_test_trades} untouched test trades (got {'n/a' if trades is None else int(trades)})")
+    if trades is None or not trades.is_integer() or trades < min_test_trades:
+        reasons.append(f"needs at least {min_test_trades} untouched test trades as an integer count (got {'n/a' if trades is None else f'{trades:g}'})")
 
     profit_factor = _num(metrics, "profit_factor")
     if profit_factor is None or profit_factor < min_profit_factor:
         reasons.append(f"profit factor must be >= {min_profit_factor:g} (got {'n/a' if profit_factor is None else round(profit_factor, 3)})")
 
     drawdown = _num(metrics, "max_drawdown_pct")
-    if drawdown is None or drawdown > max_drawdown_pct:
-        reasons.append(f"max drawdown must be <= {max_drawdown_pct:g}% (got {'n/a' if drawdown is None else round(drawdown, 2)})")
+    if drawdown is None or drawdown < 0 or drawdown > max_drawdown_pct:
+        reasons.append(f"max drawdown must be between 0 and {max_drawdown_pct:g}% (got {'n/a' if drawdown is None else round(drawdown, 2)})")
 
     net_pnl = _num(metrics, "net_pnl")
     if net_pnl is None or net_pnl < min_net_pnl:
