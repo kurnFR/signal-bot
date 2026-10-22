@@ -6,6 +6,7 @@ from paper.orders import (
     OrderValidationError,
     cancel_pending_order,
     create_pending_order,
+    fill_pending_order,
     transition_order,
     validate_order,
 )
@@ -111,6 +112,41 @@ class TestPendingOrderPersistence(unittest.TestCase):
         self.assertEqual(row["status"], "FILLED")
         self.assertTrue(any("SELECT id FROM paper_orders" in sql for sql, _ in cur.executed))
         self.assertTrue(any("SELECT * FROM paper_orders" in sql for sql, _ in cur.executed))
+
+
+class TestAtomicOrderFill(unittest.TestCase):
+    def test_position_and_order_fill_share_one_transaction(self):
+        cur = _Cursor(rowcount=1, row={"id": 17, "status": "PENDING", "entry_time": 1_760_000_000_000, "timeframe": "1h"})
+        conn = _Conn(cur)
+        with patch("paper.orders.time.time", return_value=1_760_000_010), \
+             patch("paper.orders.get_pool", return_value=type("Pool", (), {"get_connection": lambda self: conn})()):
+            result = fill_pending_order(17, 100.0, lambda transaction: 23)
+        self.assertEqual(result, {"status": "filled", "position_id": 23})
+        self.assertEqual(conn.commits, 1)
+        self.assertEqual(conn.rollbacks, 0)
+        self.assertTrue(any("FOR UPDATE" in sql for sql, _ in cur.executed))
+        self.assertTrue(any("SET status='FILLED'" in sql for sql, _ in cur.executed))
+
+    def test_fill_rechecks_entry_window_under_lock(self):
+        cur = _Cursor(rowcount=1, row={"id": 17, "status": "PENDING", "entry_time": 1_700_000_000_000, "timeframe": "1h"})
+        conn = _Conn(cur)
+        writer_called = []
+        with patch("paper.orders.time.time", return_value=1_800_000_000), \
+             patch("paper.orders.get_pool", return_value=type("Pool", (), {"get_connection": lambda self: conn})()):
+            result = fill_pending_order(17, 100.0, lambda transaction: writer_called.append(True) or 23)
+        self.assertEqual(result["status"], "expired")
+        self.assertEqual(writer_called, [])
+        self.assertEqual(conn.commits, 1)
+
+    def test_terminal_or_concurrently_changed_order_is_not_filled(self):
+        cur = _Cursor(rowcount=1, row={"id": 17, "status": "CANCELLED", "entry_time": 1_760_000_000_000, "timeframe": "1h"})
+        conn = _Conn(cur)
+        writer_called = []
+        with patch("paper.orders.get_pool", return_value=type("Pool", (), {"get_connection": lambda self: conn})()):
+            result = fill_pending_order(17, 100.0, lambda transaction: writer_called.append(True) or 23)
+        self.assertEqual(result["status"], "conflict")
+        self.assertEqual(writer_called, [])
+        self.assertEqual(conn.rollbacks, 1)
 
 
 class TestOrderTransitions(unittest.TestCase):
