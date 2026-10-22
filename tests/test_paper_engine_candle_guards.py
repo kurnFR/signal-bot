@@ -347,6 +347,22 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
         insert_position.assert_not_called()
         self.assertEqual(result["new_positions_opened"], 0)
 
+    def test_recovered_order_alert_uses_persisted_order_values(self):
+        order = {
+            "id": 17, "symbol": "BTCUSDT", "market": "spot", "timeframe": "1h",
+            "strategy_name": "trend_ema_v1", "direction": "LONG",
+            "requested_entry_price": 100.0, "stop_loss": 95.0, "take_profit": 110.0,
+            "atr_at_signal": 5.0, "ml_probability": 0.82, "ml_model_id": "model-7",
+        }
+        with patch("notifications.telegram_notifier.send_signal_alert") as send_alert:
+            pe._send_paper_entry_alert(order, ml_threshold=0.75)
+        send_alert.assert_called_once_with(
+            symbol="BTCUSDT", market="spot", timeframe="1h", strategy_name="trend_ema_v1",
+            direction="LONG", entry_price=100.0, stop_loss=95.0, take_profit=110.0,
+            initial_risk=5.0, atr=5.0, ml_probability=0.82, ml_threshold=0.75,
+            ml_model_id="model-7",
+        )
+
     def test_entry_is_not_backfilled_when_open_candle_is_not_the_next_interval(self):
         cfg = _make_cfg()
         df = _ohlcv_df(close=64000.0, high=64100.0, low=63900.0, atr=500.0, open_time=CANDLE_A)
