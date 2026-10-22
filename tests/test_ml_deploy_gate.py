@@ -240,6 +240,38 @@ class TestDeployEndpoint(unittest.TestCase):
                 self.assertEqual(response.status_code, 409, response.text)
         self.mocks[2].assert_not_called()
 
+    def test_manifest_symlink_outside_model_directory_is_rejected(self):
+        outside = Path(self.tmp.name).parent / f"outside-{Path(self.tmp.name).name}.json"
+        outside.write_text(json.dumps({
+            "model_id": "linked-model", "base_strategy": "trend_ema_v1",
+            "threshold": 0.6, "eligible_for_paper": True, "test_metrics": GOOD,
+            "strategy_params": {"symbol": "BTCUSDT", "market": "spot", "timeframe": "1h"},
+        }))
+        (self.models / "linked-model.json").symlink_to(outside)
+        response = self._deploy("linked-model")
+        self.assertEqual(response.status_code, 409)
+        self.mocks[2].assert_not_called()
+        outside.unlink()
+
+    def test_weights_symlink_outside_model_directory_is_rejected(self):
+        self._write("linked-weights", weights=False)
+        outside = Path(self.tmp.name).parent / f"outside-{Path(self.tmp.name).name}.joblib"
+        outside.write_bytes(b"external weights")
+        (self.models / "linked-weights.joblib").symlink_to(outside)
+        response = self._deploy("linked-weights")
+        self.assertEqual(response.status_code, 409)
+        self.mocks[2].assert_not_called()
+        outside.unlink()
+
+    def test_model_listing_skips_manifest_symlinks_outside_model_directory(self):
+        outside = Path(self.tmp.name).parent / f"outside-{Path(self.tmp.name).name}.json"
+        outside.write_text(json.dumps({"model_id": "external-manifest", "eligible_for_paper": True}))
+        (self.models / "external-manifest.json").symlink_to(outside)
+        response = self.client.get("/api/ml/models", headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertNotIn("external-manifest", {item.get("model_id") for item in response.json()["models"]})
+        outside.unlink()
+
     def test_path_traversal_model_id_rejected(self):
         for bad in ("../secret", "a/b", "..", "x\\y", ""):
             res = self._deploy(bad)
