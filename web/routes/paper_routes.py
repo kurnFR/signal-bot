@@ -54,8 +54,8 @@ def list_paper_orders(
 
 
 @router.post("/orders/{order_id}/cancel")
-def cancel_paper_order(order_id: int = Path(..., gt=0), request: Request = None):
-    user = getattr(request.state, "user", {}) if request is not None else {}
+def cancel_paper_order(request: Request, order_id: int = Path(..., gt=0)):
+    user = getattr(request.state, "user", {})
     try:
         actor_user_id = int(user["id"])
     except (KeyError, TypeError, ValueError):
