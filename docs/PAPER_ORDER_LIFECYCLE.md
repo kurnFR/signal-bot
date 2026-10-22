@@ -1,6 +1,6 @@
 # Paper Order Lifecycle — Design and Acceptance Criteria
 
-**Status:** Ledger, engine integration, authenticated API, and dashboard order history are merged in PRs #243, #245, #247, and #248. Manual MariaDB crash/concurrency and browser/accessibility validation remain.  
+**Status:** Ledger, engine integration, authenticated API, dashboard order history, and disposable-MariaDB concurrency/crash tests are merged in PRs #243, #245, #247, #248, and #250. Manual browser/accessibility checks and populated-database upgrade verification remain.  
 **Scope:** Paper/shadow execution only. This document does not authorize exchange orders or live trading.
 
 ## 1. Why this phase exists
@@ -89,4 +89,4 @@ Use compare-and-set transitions (`UPDATE ... WHERE id=? AND status='PENDING'`) s
 4. **API and dashboard (merged PRs #247 and #248):** authenticated order history, trader/admin pending-only cancellation, status filter, and a separate dashboard ledger with safely escaped values.
 5. **Release verification (still open):** validate migrations, concurrent workers and crash windows against MariaDB; run browser, keyboard, screen-reader, responsive, and forced-colors checks; verify deployed documentation only if deployment is explicitly requested.
 
-The execution-lifecycle phase is implemented in code but is not release-verified until phase 5 is complete. No live exchange execution is included.
+The execution-lifecycle phase is implemented in code and has automated disposable-MariaDB concurrency/crash coverage, but it is not release-verified until phase 5 is complete. CI does not replace manual browser/accessibility checks or validation against a representative populated database. No live exchange execution is included.
