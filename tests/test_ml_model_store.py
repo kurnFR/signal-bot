@@ -53,6 +53,28 @@ class TestMLModelStore(unittest.TestCase):
                 store.save(self.artifact(), {"dummy": True})
             self.assertEqual(target.read_text(encoding="utf-8"), '{"protected": true}')
 
+    def test_load_rejects_weight_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as outside:
+            store = ModelStore(d)
+            artifact = self.artifact()
+            store.save(artifact, {"dummy": True})
+            weight_path = Path(d) / "store-test-v1.joblib"
+            weight_path.unlink()
+            target = Path(outside) / "external.joblib"
+            target.write_bytes(b"not a model")
+            weight_path.symlink_to(target)
+            with self.assertRaises(ValueError):
+                store.load(artifact, ["rsi", "atr"])
+
+    def test_load_manifest_rejects_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as outside:
+            store = ModelStore(d)
+            target = Path(outside) / "external.json"
+            target.write_text('{"model_id": "external"}', encoding="utf-8")
+            (Path(d) / "store-test-v1.json").symlink_to(target)
+            with self.assertRaises(ValueError):
+                store.load_manifest("store-test-v1")
+
     def test_duplicate_save_is_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             store = ModelStore(d)
