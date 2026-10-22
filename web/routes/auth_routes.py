@@ -24,11 +24,36 @@ USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]{3,30}$")
 
 
 MIN_PASSWORD_LENGTH = 10
-_COMMON_PASSWORDS = {
-    "password", "password1", "password123", "admin", "admin123", "admin1234", "administrator",
-    "123456", "1234567", "12345678", "123456789", "1234567890", "qwerty", "qwerty123",
-    "letmein", "welcome", "welcome1", "changeme", "signalbot", "iloveyou",
+# Bases that stay weak with digits/symbols appended or simple leetspeak (password1234, P@ssw0rd!).
+_COMMON_BASES = {
+    "password", "passw0rd", "pass", "admin", "administrator", "root", "user", "login", "welcome",
+    "letmein", "changeme", "qwerty", "qwertyuiop", "asdfgh", "asdfghjkl", "zxcvbn", "iloveyou",
+    "monkey", "dragon", "master", "sunshine", "princess", "football", "baseball", "secret",
+    "signalbot", "signal", "trader", "trading", "bitcoin", "crypto", "binance", "ethereum",
+    "abc", "abcdef", "abcdefgh", "temp", "temporary", "default", "test", "guest", "demo",
 }
+_LEET = str.maketrans({"0": "o", "@": "a", "$": "s", "3": "e", "1": "l", "!": "i", "5": "s", "7": "t"})
+
+
+_TRAILING = "0123456789!@#$%^&*()-_=+.,?"
+
+
+def _password_base(password: str) -> str:
+    """Lowercase, strip trailing digits/symbols, then undo simple leetspeak.
+
+    Order matters: stripping first keeps "password1234" -> "password" (translating
+    first would turn the digit 1 into "l" and hide the word).
+    """
+    stripped = password.lower().rstrip(_TRAILING)
+    return stripped.translate(_LEET)
+
+
+def _is_sequence(password: str) -> bool:
+    """True for pure runs like 1234567890 or abcdefghij."""
+    if len(password) < 4:
+        return False
+    steps = {ord(b) - ord(a) for a, b in zip(password, password[1:])}
+    return steps in ({1}, {-1}, {0})
 
 
 def _validate_new_password(password: str, username: str) -> None:
@@ -36,8 +61,11 @@ def _validate_new_password(password: str, username: str) -> None:
     if len(password) < MIN_PASSWORD_LENGTH:
         raise HTTPException(status_code=400, detail=f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
     lowered = password.lower()
-    if lowered in _COMMON_PASSWORDS or (username and lowered == username.lower()):
-        raise HTTPException(status_code=400, detail="Password is too common or matches the username")
+    base = _password_base(password)
+    user = (username or "").lower()
+    if (lowered == user or (user and base == _password_base(user)) or base == ""
+            or base in _COMMON_BASES or _is_sequence(lowered)):
+        raise HTTPException(status_code=400, detail="Password is too common or easy to guess. Choose something less predictable")
     if len(set(password)) < 5:
         raise HTTPException(status_code=400, detail="Password needs more variety of characters")
 

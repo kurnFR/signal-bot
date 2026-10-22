@@ -21,6 +21,7 @@ from web.routes.search import router as search_router
 from web.routes.master_data import router as master_data_router
 from web.routes.backtest import router as backtest_router
 from web.routes.settings import router as settings_router
+from web.routes.system_status import router as system_status_router
 from web.routes.custom_strategy import router as custom_strat_router
 from web.routes.telegram_routes import router as telegram_router
 from web.routes.ml_routes import router as ml_router
@@ -162,6 +163,7 @@ app.include_router(search_router)
 app.include_router(master_data_router)
 app.include_router(backtest_router)
 app.include_router(settings_router)
+app.include_router(system_status_router)
 app.include_router(custom_strat_router)
 app.include_router(telegram_router)
 app.include_router(ml_router)

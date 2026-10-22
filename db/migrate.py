@@ -73,6 +73,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("012_fix_wib_timezone", "migrate_fix_wib_timezone.sql", "WIB timezone fix", upgrade_only=True),
     Migration("013_login_attempts", "migrate_login_attempts.sql", "Durable login rate limiting"),
     Migration("014_background_jobs", "migrate_background_jobs.sql", "Durable background job state"),
+    Migration("015_system_flags", "migrate_system_flags.sql", "Cross-process emergency-stop flag"),
 )
 
 

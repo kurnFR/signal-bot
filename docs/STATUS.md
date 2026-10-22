@@ -33,6 +33,9 @@ Verified this session: a fresh database built from the README steps boots the ap
 - **Bind address is explicit.** `run_web.py` / `web/app.py` default to `127.0.0.1`; set `SIGNAL_BOT_HOST=0.0.0.0` (or `--host`) deliberately, behind TLS and a firewall.
 - **Master-data job state is persisted** (`background_jobs` table). Jobs a previous process left `queued`/`running` are shown as `interrupted` after a restart.
 - **Migration runner.** `python -m db.migrate` (also run automatically by `run_all.py`) applies versioned, checksummed migrations under an advisory lock, distinguishes fresh installs from upgrades, and adopts hand-migrated databases.
+- **Emergency stop is now shared across processes.** It was a Python global in the web process, so the dashboard's Emergency Stop never reached the separate paper-engine process. It is now stored in `system_flags` (migration 015) and read by the engine's circuit breaker; it survives restarts. Verified live with a second process.
+- **Status bar for every role.** `/api/system/status` (any signed-in user, no connection details) feeds the status bar; the detailed `/api/settings/status` stays admin-only and no longer returns the DB username. Viewers and traders previously saw a false "database unavailable".
+- **Dashboard fixes found by live browser testing:** data loads only after a usable sign-in (no more 401 storms for anonymous visitors); the active tab loads right after login; Settings no longer crashes on a removed element; admin user-management errors are readable toasts instead of `[object Object]` alerts; weak-password variants such as `password1234` are rejected.
 - **Route authorization sweep.** `tests/test_route_authorization_sweep.py` is generated from the live route table.
 
 **Still open**
