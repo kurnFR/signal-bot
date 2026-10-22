@@ -8,6 +8,8 @@ tested and reviewed before they control position creation.
 from __future__ import annotations
 
 import math
+import os
+import time
 from typing import Any
 
 from db.db import get_pool
@@ -244,6 +246,28 @@ def fill_pending_order(order_id: int, fill_price: float, position_writer) -> dic
         if not order or order["status"] != "PENDING":
             conn.rollback()
             return {"status": "conflict", "position_id": None}
+        timeframe_ms = {"15m": 900_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000}
+        interval_ms = timeframe_ms.get(str(order["timeframe"]))
+        entry_time = int(order["entry_time"])
+        now_ms = int(time.time() * 1000)
+        max_delay_ms = max(1, int(os.getenv("PAPER_ENTRY_MAX_DELAY_SECONDS", "120"))) * 1000
+        if interval_ms is None:
+            cur.execute(
+                "UPDATE paper_orders SET status='REJECTED', state_reason=%s, terminal_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=%s AND status='PENDING'",
+                ("Unsupported timeframe", int(order_id)),
+            )
+            conn.commit()
+            return {"status": "rejected", "position_id": None}
+        if now_ms < entry_time:
+            conn.rollback()
+            return {"status": "pending", "position_id": None}
+        if now_ms - entry_time > min(max_delay_ms, interval_ms) or now_ms >= entry_time + interval_ms:
+            cur.execute(
+                "UPDATE paper_orders SET status='EXPIRED', state_reason=%s, terminal_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=%s AND status='PENDING'",
+                ("Entry window elapsed before atomic fill", int(order_id)),
+            )
+            conn.commit()
+            return {"status": "expired", "position_id": None}
         position_id = position_writer(conn)
         if position_id is None:
             cur.execute(
