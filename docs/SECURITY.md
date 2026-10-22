@@ -29,6 +29,7 @@ Rules live in `ADMIN_ONLY_PREFIXES`, `ADMIN_OR_TRADER_PREFIXES`, `TRADER_OR_ADMI
 - The app serves plain HTTP. For anything beyond localhost, put it behind a TLS-terminating reverse proxy.
 - The web server binds to `127.0.0.1` by default. Set `SIGNAL_BOT_HOST=0.0.0.0` (or `--host`) only behind a firewall and a TLS-terminating reverse proxy; the app has no TLS of its own.
 - The dashboard builds HTML from API data with an escape helper; wallet and token values are validated server-side before they are stored.
+- ML experiment detail IDs are filename-validated, resolved under the configured results directory, and required to point to a regular file inside that directory; symlink/path escapes are rejected.
 
 ## 4. Secrets and data
 
