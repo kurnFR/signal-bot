@@ -41,8 +41,8 @@ Terminal states are immutable. Retrying a poll must never resurrect a terminal o
 1. Build signal conditions from fully closed candles only.
 2. Identify the signal candle by `signal_open_time`; identify the intended entry candle by `entry_time`.
 3. Persist a `PENDING` order with a stable idempotency key derived from strategy configuration and signal time.
-4. Fill only when the current raw candle has `is_closed=0`, its open time exactly equals the order's intended entry time, and the current time is inside that candle's interval.
-5. If the intended candle is already closed, a later candle is active, or the data is missing/gapped/stale, transition to `EXPIRED`. Never backfill at a past candle open.
+4. Fill only when the current raw candle has `is_closed=0`, its open time exactly equals the order's intended entry time, and the engine observes it within `PAPER_ENTRY_MAX_DELAY_SECONDS` (default 120 seconds) of the candle open. The delay window is capped at the timeframe interval.
+5. If the intended candle is already closed, the configured entry-delay window is missed, a later candle is active, or the data is missing/gapped/stale/future-dated, transition to `EXPIRED`. Never backfill at a past candle open.
 6. Evaluate ML and risk gates fail-closed before the fill. An active or unverifiable emergency stop, unknown exposure, or failed required ML filter must never produce a fill.
 7. Do not use the forming candle's incomplete indicators to make a signal. Its raw open is execution data only; signal features remain from the prior closed candle.
 
