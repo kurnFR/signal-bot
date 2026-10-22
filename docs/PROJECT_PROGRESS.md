@@ -2,8 +2,8 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-22  
-**Master commit at review:** `5b0b02b48507edef0a6dc4edfa31442309ea0725`  
-**Overall status:** Active / not finished. PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, #257 contains ML experiment paths, and #259 validates deployment manifests before activation. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
+**Master commit at review:** `d870263f8fbdda37e97637052543d366a3212c53`  
+**Overall status:** Active / not finished. PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, #257 contains ML experiment paths, #259 validates deployment manifests before activation, and #263 contains model artifact paths. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
 
@@ -124,6 +124,10 @@ PR #253 checks passed:
 - [pytest](https://github.com/kurnFR/signal-bot/actions/runs/39744257095)
 - [Project tests / MariaDB integration](https://github.com/kurnFR/signal-bot/actions/runs/39744257159)
 - [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39744257086)
+
+### ML model artifact containment — PR #263
+
+[PR #263](https://github.com/kurnFR/signal-bot/pull/263) closes the remaining symlink-containment gap in ML model handling. Model listing skips manifests that resolve outside `ml_models/`, external weight symlinks are not considered deployable, and deployment rejects both cases. All three PR checks passed; the post-merge master workflows are still running at the time of this review.
 
 ### ML experiment path and deployment-manifest hardening — PRs #257 and #259
 
