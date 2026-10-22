@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,6 +21,28 @@ class TestMLArtifacts(unittest.TestCase):
             path = artifact.save_manifest(d)
             self.assertTrue(Path(path).exists())
 
+
+    def test_save_manifest_replaces_symlink_without_modifying_target(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as outside:
+            root = Path(d) / "ml_models"
+            root.mkdir()
+            target = Path(outside) / "protected.json"
+            target.write_text('{"protected": true}', encoding="utf-8")
+            link = root / "model-v1.json"
+            link.symlink_to(target)
+            artifact = ModelArtifact(
+                model_id="model-v1", experiment_id="exp-1",
+                model_type="random_forest", base_strategy="trend_ema",
+                feature_columns=("rsi",), strategy_params={}, model_params={},
+                threshold=0.5, train_metrics={}, validation_metrics={},
+                test_metrics={}, eligible_for_paper=False,
+            )
+            saved = artifact.save_manifest(root)
+            self.assertEqual(saved, link)
+            self.assertFalse(link.is_symlink())
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"protected": True})
+            self.assertEqual(json.loads(link.read_text(encoding="utf-8"))["model_id"], "model-v1")
+            self.assertEqual(list(root.glob(".model-manifest-*.tmp")), [])
 
     def test_runtime_manifest_must_still_pass_eligibility_gate(self):
         manifest = ModelArtifact(
