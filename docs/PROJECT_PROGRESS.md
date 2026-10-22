@@ -2,8 +2,8 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-22  
-**Master commit at review:** `4178bd9bf6602893c3be79e7b0e45e88b90ac700`  
-**Overall status:** Active / not finished. Dashboard accessibility fixes and production-hardening PRs #235–#238 are merged. PR #239 addresses retroactive paper-entry timing; durable order states, cost-model realism, runtime-data hygiene, manual accessibility verification, and trading-edge validation remain incomplete.
+**Master commit at review:** `8c7a2a55167426702944fc142796204045d921df`  
+**Overall status:** Active / not finished. Dashboard accessibility fixes and production-hardening PRs #235–#238 are merged. PRs #239 and #241 restrict paper entries to the next-open window; durable order states, cost-model realism, runtime-data hygiene, manual accessibility verification, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
 
@@ -38,7 +38,7 @@ Primary project references:
 | Full project correctness and bug-free guarantee | **Not complete / cannot be guaranteed** | Continue risk-based review, regression tests, integration tests, and manual verification. |
 | ML paper-promotion safety | **Implemented for the documented eligibility gate** | PR #235 routes experiment and deploy-to-paper eligibility through the shared fail-closed gate; keep negative tests and artifact checks. |
 | Authentication and first-login hardening | **Implemented for identified controls** | First-login password change, stronger password policy, durable login throttling, and route authorization sweep are merged; continue periodic security review. |
-| Paper execution lifecycle and portfolio-level risk | **Partially complete** | Portfolio notional cap is implemented. PR #239 targets retroactive entry timing; durable pending/filled/expired/cancelled order states and cancellation controls remain open. Keep the system paper-only. |
+| Paper execution lifecycle and portfolio-level risk | **Partially complete** | Portfolio notional cap is implemented; PRs #239/#241 restrict simulated entries to the immediate next-open window. Durable pending/filled/expired/cancelled order states and cancellation controls remain open. Keep the system paper-only. |
 | Database migrations, durable jobs, and runtime-file hygiene | **Partially complete** | Versioned migrations and durable job state are merged. `custom_strategies.json` and `Screen/signals.jsonl` are still tracked and must be untracked without deleting real runtime data. |
 | Strategy and ML evidence of trading edge | **Not complete** | Use leakage-safe chronological evaluation and untouched holdout data; passing software tests is not proof of profitability. |
 | GCAO project documentation and status | **Needs identification / blocked** | The accessible `signal-bot` repository and retrieved project context did not identify what “GCAO” stands for, its canonical repository, or its scope. Do not assume it is the same as Signal Bot or the separate `ai_insight` / `forecast_engine` work. Add verified details after its identity and source are confirmed. |
@@ -76,6 +76,15 @@ Relevant merged PRs:
 - [PR #231](https://github.com/kurnFR/signal-bot/pull/231)
 - [PR #232](https://github.com/kurnFR/signal-bot/pull/232)
 - [PR #233](https://github.com/kurnFR/signal-bot/pull/233)
+
+### Paper-execution timing review — PRs #239 and #241
+
+The fresh audit found that the paper engine could only discover an entry after its intended candle had closed, yet record the historical open as the fill. That could make simulated results misleading.
+
+- [PR #239](https://github.com/kurnFR/signal-bot/pull/239) — signal only on closed candles; use the immediately following in-progress candle for next-open execution; skip missing, stale, future-dated, and gapped candles.
+- [PR #241](https://github.com/kurnFR/signal-bot/pull/241) — add `PAPER_ENTRY_MAX_DELAY_SECONDS` (default 120) so an engine that observes the candle late cannot silently backfill the opening price.
+
+The order lifecycle is still incomplete: no durable pending/filled/expired/cancelled/rejected order ledger, cancellation API, or dashboard order history yet. See [PAPER_ORDER_LIFECYCLE.md](PAPER_ORDER_LIFECYCLE.md) for the design and acceptance criteria.
 
 ### PR #233 final verification
 
