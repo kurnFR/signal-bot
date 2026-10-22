@@ -588,6 +588,27 @@ def _signal_already_traded(cfg: Dict[str, Any], entry_candle: int) -> bool:
 
 
 
+def _send_paper_entry_alert(order: Dict[str, Any], ml_threshold: Optional[float] = None) -> None:
+    """Send the same entry alert for immediate fills and restart-recovered fills."""
+    try:
+        from notifications.telegram_notifier import send_signal_alert
+        entry_price = float(order["requested_entry_price"])
+        stop_loss = float(order["stop_loss"])
+        send_signal_alert(
+            symbol=order["symbol"], market=order["market"], timeframe=order["timeframe"],
+            strategy_name=order["strategy_name"], direction=order["direction"],
+            entry_price=entry_price, stop_loss=stop_loss,
+            take_profit=float(order["take_profit"]),
+            initial_risk=abs(entry_price - stop_loss),
+            atr=float(order.get("atr_at_signal", 0) or 0),
+            ml_probability=order.get("ml_probability"),
+            ml_threshold=ml_threshold,
+            ml_model_id=order.get("ml_model_id"),
+        )
+    except Exception as tel_err:
+        logger.warning("Telegram entry alert failed for paper order #%s: %s", order.get("id"), tel_err)
+
+
 def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, int]:
     """Recover pending orders and fill only during their intended next-open window."""
     config_by_id = {int(cfg["id"]): cfg for cfg in configs if cfg.get("id") is not None}
@@ -677,6 +698,7 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
             )
             if fill["status"] == "filled":
                 result["filled"] += 1
+                _send_paper_entry_alert(order)
             elif fill["status"] == "rejected":
                 result["rejected"] += 1
             elif fill["status"] == "expired":
@@ -966,22 +988,7 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                         result["new_positions_opened"] += 1
                         result["orders_filled"] += 1
                         logger.info("Filled paper order #%s for %s (%s) via %s", order["id"], symbol, latest_trade["direction"], strategy_name)
-                        try:
-                            from notifications.telegram_notifier import send_signal_alert
-                            send_signal_alert(
-                                symbol=symbol, market=market, timeframe=timeframe,
-                                strategy_name=strategy_name, direction=latest_trade["direction"],
-                                entry_price=float(durable_trade["entry_price"]),
-                                stop_loss=float(durable_trade["stop_loss"]),
-                                take_profit=float(durable_trade["take_profit"]),
-                                initial_risk=abs(float(durable_trade["entry_price"]) - float(durable_trade["stop_loss"])),
-                                atr=float(durable_trade.get("atr_at_signal", 0) or 0),
-                                ml_probability=durable_ml_probability,
-                                ml_threshold=ml_threshold,
-                                ml_model_id=durable_ml_model_id,
-                            )
-                        except Exception as tel_err:
-                            logger.warning("Telegram entry signal alert failed: %s", tel_err)
+                        _send_paper_entry_alert(order, ml_threshold=ml_threshold)
 
 
     return result
