@@ -60,7 +60,12 @@ def _append_next_open_candle(closed_df, open_candle, timeframe):
         return None
     signal_time = int(closed_df.iloc[-1]["open_time"])
     entry_time = int(open_candle["open_time"])
-    if entry_time != signal_time + _TIMEFRAME_MS[timeframe]:
+    interval_ms = _TIMEFRAME_MS[timeframe]
+    if entry_time != signal_time + interval_ms:
+        return None
+    # A collector can leave an old row marked is_closed=0 after it stops.
+    # Never treat that stale row as a current next-open execution opportunity.
+    if int(time.time() * 1000) >= entry_time + interval_ms:
         return None
 
     import pandas as pd
