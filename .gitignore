@@ -16,3 +16,7 @@ ml_models/
 venv/
 */*.so
 */*.pyd
+
+# Runtime-generated data (tracked historical files need a separate safe untracking step)
+custom_strategies.json
+Screen/signals.jsonl

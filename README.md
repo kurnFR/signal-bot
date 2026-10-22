@@ -119,12 +119,14 @@ MariaDB integration tests are opt-in: `WALLET_TRACKER_MARIADB_TESTS=1` with a di
 
 ## Runtime data
 
-`custom_strategies.json` (your saved custom strategies) and `Screen/signals.jsonl` (screener output) are runtime data, not source. They are still tracked by an older commit. On the machine that holds your real data, after merging, stop tracking them without deleting your copies:
+`custom_strategies.json` (saved custom strategies) and `Screen/signals.jsonl` (screener output) are runtime data, not source. Ignore rules are now present, but these paths remain tracked in Git until a separate untracking change is made.
+
+**Do not pull or merge a commit that removes these tracked paths on a machine with valuable local data until you have backed up both files.** The safest local procedure is to stop the application, make and verify a backup outside the repository, then run:
 
 ```bash
 git rm --cached custom_strategies.json Screen/signals.jsonl
-printf 'custom_strategies.json\nScreen/signals.jsonl\n' >> .gitignore
+git add .gitignore
 git commit -m "Stop tracking runtime data"
 ```
 
-Back both files up first if they matter to you.
+`git rm --cached` removes the index entries while keeping the working files in place. The ignore rules prevent them from being re-added accidentally. Verify both files still exist and contain the expected data before restarting the application. This repository change only adds ignore rules and documentation; it does not delete or untrack either file.
