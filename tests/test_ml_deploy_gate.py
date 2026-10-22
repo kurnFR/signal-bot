@@ -194,6 +194,52 @@ class TestDeployEndpoint(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.mocks[2].assert_not_called()
 
+    def test_invalid_threshold_is_rejected_before_paper_config_changes(self):
+        self._write("bad-threshold")
+        path = self.models / "bad-threshold.json"
+        manifest = json.loads(path.read_text())
+        manifest["threshold"] = "not-a-number"
+        path.write_text(json.dumps(manifest))
+        response = self._deploy("bad-threshold")
+        self.assertEqual(response.status_code, 409)
+        self.mocks[2].assert_not_called()
+
+    def test_unsupported_strategy_is_rejected_before_paper_config_changes(self):
+        self._write("bad-strategy")
+        path = self.models / "bad-strategy.json"
+        manifest = json.loads(path.read_text())
+        manifest["base_strategy"] = "does_not_exist"
+        path.write_text(json.dumps(manifest))
+        response = self._deploy("bad-strategy")
+        self.assertEqual(response.status_code, 409)
+        self.mocks[2].assert_not_called()
+
+    def test_missing_strategy_params_are_rejected_before_paper_config_changes(self):
+        self._write("missing-params")
+        path = self.models / "missing-params.json"
+        manifest = json.loads(path.read_text())
+        manifest["strategy_params"] = None
+        path.write_text(json.dumps(manifest))
+        response = self._deploy("missing-params")
+        self.assertEqual(response.status_code, 409)
+        self.mocks[2].assert_not_called()
+
+    def test_non_string_market_and_timeframe_are_rejected_cleanly(self):
+        cases = (
+            ("bad-market-type", "market", []),
+            ("bad-timeframe-type", "timeframe", {"unexpected": "object"}),
+        )
+        for model_id, field, value in cases:
+            with self.subTest(field=field):
+                self._write(model_id)
+                path = self.models / f"{model_id}.json"
+                manifest = json.loads(path.read_text())
+                manifest["strategy_params"][field] = value
+                path.write_text(json.dumps(manifest))
+                response = self._deploy(model_id)
+                self.assertEqual(response.status_code, 409, response.text)
+        self.mocks[2].assert_not_called()
+
     def test_path_traversal_model_id_rejected(self):
         for bad in ("../secret", "a/b", "..", "x\\y", ""):
             res = self._deploy(bad)
