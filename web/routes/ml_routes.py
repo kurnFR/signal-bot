@@ -114,11 +114,16 @@ def list_saved_models() -> Dict[str, Any]:
     ML_MODELS_DIR.mkdir(parents=True, exist_ok=True)
     models: List[Dict[str, Any]] = []
 
+    models_root = ML_MODELS_DIR.resolve()
     for manifest_file in sorted(ML_MODELS_DIR.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True):
         try:
-            data = json.loads(manifest_file.read_text(encoding="utf-8"))
-            joblib_file = ML_MODELS_DIR / f"{manifest_file.stem}.joblib"
-            data["has_weights"] = joblib_file.is_file()
+            safe_manifest = manifest_file.resolve()
+            if safe_manifest.parent != models_root or not safe_manifest.is_file():
+                logger.warning("Skipping model manifest outside model directory: %s", manifest_file.name)
+                continue
+            data = json.loads(safe_manifest.read_text(encoding="utf-8"))
+            joblib_file = (models_root / f"{manifest_file.stem}.joblib").resolve()
+            data["has_weights"] = joblib_file.parent == models_root and joblib_file.is_file()
             report = paper_eligibility_report(test_metrics=data.get("test_metrics") or {})
             reasons = list(report["reasons"])
             if not data.get("eligible_for_paper"):
@@ -162,8 +167,11 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
     """Deploys a trained ML Model as an active filter in Live Paper Trading."""
     if not _MODEL_ID_RE.match(req.model_id) or ".." in req.model_id:
         raise HTTPException(status_code=422, detail="Invalid model_id")
-    manifest_path = ML_MODELS_DIR / f"{req.model_id}.json"
-    if not manifest_path.exists():
+    models_root = ML_MODELS_DIR.resolve()
+    manifest_path = (models_root / f"{req.model_id}.json").resolve()
+    if manifest_path.parent != models_root:
+        raise HTTPException(status_code=409, detail="Model manifest must resolve inside ml_models/")
+    if not manifest_path.is_file():
         raise HTTPException(status_code=404, detail=f"ML model manifest '{req.model_id}' not found in ml_models/")
 
     try:
@@ -183,8 +191,9 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
             status_code=409,
             detail="Model is not eligible for paper trading: " + "; ".join(reasons),
         )
-    if not (ML_MODELS_DIR / f"{req.model_id}.joblib").is_file():
-        raise HTTPException(status_code=409, detail="Model weights (.joblib) are missing or not a regular file; retrain before deploying")
+    weights_path = (models_root / f"{req.model_id}.joblib").resolve()
+    if weights_path.parent != models_root or not weights_path.is_file():
+        raise HTTPException(status_code=409, detail="Model weights (.joblib) must be a regular file inside ml_models/; retrain before deploying")
 
     # Validate all manifest fields used by the activation and notification paths
     # before mutating paper configuration. Manifests are editable JSON files.
