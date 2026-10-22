@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 
 from db.migrate import (MIGRATIONS, Migration, MigrationError, apply_pending, checksum,
@@ -218,10 +219,9 @@ class TestMariaDBIntegration(unittest.TestCase):
         from config import MYSQL_CONFIG
 
         cfg = dict(MYSQL_CONFIG)
-        name = "sb_migrate_it"
+        name = f"sb_migrate_it_{uuid.uuid4().hex[:12]}"
         admin = mysql.connector.connect(**{k: v for k, v in cfg.items() if k != "database"})
         cur = admin.cursor()
-        cur.execute(f"DROP DATABASE IF EXISTS {name}")
         cur.execute(f"CREATE DATABASE {name}")
         admin.commit()
         conn = mysql.connector.connect(**dict(cfg, database=name))
@@ -250,10 +250,9 @@ class TestMariaDBIntegration(unittest.TestCase):
         from config import MYSQL_CONFIG
 
         cfg = dict(MYSQL_CONFIG)
-        name = "sb_migrate_populated_it"
+        name = f"sb_migrate_populated_it_{uuid.uuid4().hex[:12]}"
         admin = mysql.connector.connect(**{k: v for k, v in cfg.items() if k != "database"})
         cur = admin.cursor()
-        cur.execute(f"DROP DATABASE IF EXISTS {name}")
         cur.execute(f"CREATE DATABASE {name}")
         admin.commit()
         conn = mysql.connector.connect(**dict(cfg, database=name))
@@ -309,10 +308,9 @@ class TestMariaDBIntegration(unittest.TestCase):
         from config import MYSQL_CONFIG
 
         cfg = dict(MYSQL_CONFIG)
-        name = "sb_migrate_partial_wib_it"
+        name = f"sb_migrate_partial_wib_it_{uuid.uuid4().hex[:12]}"
         admin = mysql.connector.connect(**{k: v for k, v in cfg.items() if k != "database"})
         cur = admin.cursor()
-        cur.execute(f"DROP DATABASE IF EXISTS {name}")
         cur.execute(f"CREATE DATABASE {name}")
         admin.commit()
         conn = mysql.connector.connect(**dict(cfg, database=name))
