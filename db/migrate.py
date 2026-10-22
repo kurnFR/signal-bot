@@ -326,6 +326,32 @@ def _connect(create_database: bool = True):
     return conn
 
 
+def migration_status(
+    cursor,
+    *,
+    directory: Path = HERE,
+    migrations: Sequence[Migration] = MIGRATIONS,
+) -> list[dict]:
+    """Report migration state without creating or changing database objects.
+
+    A database without the tracking table has no recorded migrations, so all
+    registered migrations are reported as pending until the normal migration
+    command initializes tracking.
+    """
+    if _table_exists(cursor, "schema_migrations"):
+        return plan(cursor, directory=directory, migrations=migrations)
+    return [
+        {
+            "version": migration.version,
+            "filename": migration.filename,
+            "description": migration.description,
+            "state": "pending",
+            "upgrade_only": migration.upgrade_only,
+        }
+        for migration in migrations
+    ]
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Apply database migrations")
     parser.add_argument("--status", action="store_true", help="show migration state and exit")
@@ -341,11 +367,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.status:
             cur = conn.cursor()
-            ensure_tracking_table(cur)
-            conn.commit()
-            for row in plan(cur):
-                print(f"{row['state']:<8} {row['version']:<28} {row['description']}")
-            cur.close()
+            try:
+                for row in migration_status(cur):
+                    print(f"{row['state']:<8} {row['version']:<28} {row['description']}")
+            finally:
+                cur.close()
             return 0
         applied = apply_pending(conn, dry_run=args.dry_run)
         print(f"{'Would apply' if args.dry_run else 'Applied'} {len(applied)} migration(s)." if applied
