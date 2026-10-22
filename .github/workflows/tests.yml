@@ -53,6 +53,7 @@ jobs:
       MYSQL_PASSWORD: wallet_tracker_test_root
       MYSQL_DATABASE: wallet_tracker_test
       WALLET_TRACKER_MARIADB_TESTS: '1'
+      PAPER_ORDERS_MARIADB_TESTS: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -67,5 +68,5 @@ jobs:
           python -m pip install --upgrade pip
           pip install mysql-connector-python==9.1.0 python-dotenv==1.0.1 pytest==8.3.5
 
-      - name: Run Wallet Tracker MariaDB concurrency tests
-        run: python -m pytest -q tests/test_wallet_tracker_mariadb.py
+      - name: Run MariaDB concurrency and paper-order recovery tests
+        run: python -m pytest -q tests/test_wallet_tracker_mariadb.py tests/test_paper_orders_mariadb.py
