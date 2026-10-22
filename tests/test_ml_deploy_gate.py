@@ -126,6 +126,34 @@ class TestDeployEndpoint(unittest.TestCase):
         self._write("noweights", weights=False)
         self.assertEqual(self._deploy("noweights").status_code, 409)
 
+    def test_model_listing_combines_flag_metrics_and_weight_file(self):
+        self._write("flagged-off", eligible=False)
+        self._write("missing-weights", weights=False)
+        response = self.client.get("/api/ml/models", headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        by_id = {item["model_id"]: item for item in response.json()["models"]}
+        self.assertFalse(by_id["flagged-off"]["eligibility"]["eligible"])
+        self.assertIn("manifest is not flagged eligible_for_paper", by_id["flagged-off"]["eligibility"]["reasons"])
+        self.assertFalse(by_id["missing-weights"]["eligibility"]["eligible"])
+        self.assertIn("model weights (.joblib) are missing", by_id["missing-weights"]["eligibility"]["reasons"])
+
+    def test_weight_path_that_is_a_directory_is_not_deployable(self):
+        self._write("weights-directory", weights=False)
+        (self.models / "weights-directory.joblib").mkdir()
+        response = self._deploy("weights-directory")
+        self.assertEqual(response.status_code, 409)
+        self.mocks[2].assert_not_called()
+
+    def test_manifest_id_must_match_requested_id(self):
+        self._write("requested-model")
+        path = self.models / "requested-model.json"
+        manifest = json.loads(path.read_text())
+        manifest["model_id"] = "different-model"
+        path.write_text(json.dumps(manifest))
+        response = self._deploy("requested-model")
+        self.assertEqual(response.status_code, 409)
+        self.mocks[2].assert_not_called()
+
     def test_path_traversal_model_id_rejected(self):
         for bad in ("../secret", "a/b", "..", "x\\y", ""):
             res = self._deploy(bad)
