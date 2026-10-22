@@ -45,11 +45,13 @@ def calculate_position_size(
 
     risk_amount = equity * (risk_pct / 100.0)
     quantity = risk_amount / stop_distance
+    notional = quantity * entry_price
+    _require_finite(risk_amount=risk_amount, quantity=quantity, notional=notional)
     return PositionSize(
         risk_amount=risk_amount,
         stop_distance=stop_distance,
         quantity=quantity,
-        notional=quantity * entry_price,
+        notional=notional,
     )
 
 
@@ -96,6 +98,7 @@ def calculate_funding_cost(
         if mark_price <= 0:
             raise ValueError("funding mark price must be positive")
         total += mark_price * quantity * funding_rate
+        _require_finite(total=total)
     return total
 
 
@@ -128,7 +131,7 @@ def calculate_trade_accounting(
         exit_slippage_pct = entry_slippage_pct
     _require_finite(exit_slippage_pct=exit_slippage_pct)
     if exit_slippage_pct < 0 or exit_slippage_pct >= 1:
-        raise ValueError("exit slippage cannot be negative")
+        raise ValueError("exit slippage must be in [0, 1)")
 
     entry_exec = apply_entry_slippage(entry_price, direction, entry_slippage_pct)
     exit_exec = apply_exit_slippage(exit_price, direction, exit_slippage_pct)
