@@ -194,6 +194,36 @@ class TestDeployEndpoint(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.mocks[2].assert_not_called()
 
+    def test_invalid_threshold_is_rejected_before_paper_config_changes(self):
+        self._write("bad-threshold")
+        path = self.models / "bad-threshold.json"
+        manifest = json.loads(path.read_text())
+        manifest["threshold"] = "not-a-number"
+        path.write_text(json.dumps(manifest))
+        response = self._deploy("bad-threshold")
+        self.assertEqual(response.status_code, 409)
+        self.mocks[2].assert_not_called()
+
+    def test_unsupported_strategy_is_rejected_before_paper_config_changes(self):
+        self._write("bad-strategy")
+        path = self.models / "bad-strategy.json"
+        manifest = json.loads(path.read_text())
+        manifest["base_strategy"] = "does_not_exist"
+        path.write_text(json.dumps(manifest))
+        response = self._deploy("bad-strategy")
+        self.assertEqual(response.status_code, 409)
+        self.mocks[2].assert_not_called()
+
+    def test_missing_strategy_params_are_rejected_before_paper_config_changes(self):
+        self._write("missing-params")
+        path = self.models / "missing-params.json"
+        manifest = json.loads(path.read_text())
+        manifest["strategy_params"] = None
+        path.write_text(json.dumps(manifest))
+        response = self._deploy("missing-params")
+        self.assertEqual(response.status_code, 409)
+        self.mocks[2].assert_not_called()
+
     def test_path_traversal_model_id_rejected(self):
         for bad in ("../secret", "a/b", "..", "x\\y", ""):
             res = self._deploy(bad)
