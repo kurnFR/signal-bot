@@ -27,6 +27,7 @@ Verified this session: a fresh database built from the README steps boots the ap
 - **AI insight.** Kelly is computed from realized win rate and profit factor with no floor; a non-positive edge gets the `NO_EDGE` verdict and 0% risk. The regime label uses EMA20/EMA50 computed from `close`.
 - **Portfolio exposure limit.** `PAPER_MAX_TOTAL_NOTIONAL_USD` (default 25000) caps the summed notional of open paper positions. It is checked in `_insert_position`, so it covers both the strategy path and the news-AI path, and it fails closed when exposure cannot be verified.
 - **ML filter fails closed.** If a model is attached to a paper config but its files are missing or prediction raises, the entry is skipped (it previously traded without the filter).
+- **ML runtime rechecks promotion eligibility.** PR #267 revalidates the manifest ID, `eligible_for_paper` flag, and stored test metrics immediately before loading model weights; PR #266 resolves artifact paths and rejects traversal/symlink escapes.
 - **Metric population.** `compute_metrics` now reports `scored_trades` (the population used for win rate, expectancy and profit factor) next to `total_trades`.
 - **First-login password change is enforced** by the API (every route except `/api/auth/me`, `/logout`, `/change-password` returns 403 `password_change_required`) and by a blocking dashboard dialog. New passwords must be at least 10 characters and not trivially weak.
 - **Login rate limit is durable** (`login_attempts` table, shared by all workers, survives restarts); it falls back to in-memory if the database is unavailable.
@@ -42,8 +43,9 @@ Verified this session: a fresh database built from the README steps boots the ap
 
 1. **Execution lifecycle code is implemented; release verification remains open (P0.5).** PRs #239/#241 add timing guards, #243 adds the ledger, #245 integrates atomic fills/recovery, #247 adds authenticated history/cancellation, #248 adds dashboard state/filter/cancel controls, and #250 adds passing disposable-MariaDB tests for concurrent fills, cancel-vs-fill races, and rollback/retry after a simulated crash. Still validate upgrades against a representative populated database and perform manual browser/accessibility checks. Paper/shadow only. See [PAPER_ORDER_LIFECYCLE.md](PAPER_ORDER_LIFECYCLE.md).
 2. **Flat cost model.** Fees (0.1%) and slippage (0.05%) per side are constants; there is no spread, volume or liquidity model.
-3. **Runtime data in git:** `custom_strategies.json` and `Screen/signals.jsonl` are still tracked. Untrack them on the machine that holds your real data, after merging (see README, "Runtime data").
-4. **Repo hygiene:** over 30 branches, many merged or abandoned (including `do-not-use`, `ignore2`, `tmp-ignore`, `x`).
+3. **Artifact provenance:** runtime eligibility checks still trust editable manifest metrics and local model files; add a signed or otherwise trusted content-hash/provenance mechanism if the threat model includes an attacker who can modify both files.
+4. **Runtime data in git:** `custom_strategies.json` and `Screen/signals.jsonl` are still tracked. Untrack them on the machine that holds your real data, after merging (see README, "Runtime data").
+5. **Repo hygiene:** over 30 branches, many merged or abandoned (including `do-not-use`, `ignore2`, `tmp-ignore`, `x`).
 
 **Wallet tracking** has its own list of verified limitations in [WALLET_TRACKER.md](WALLET_TRACKER.md#6-known-limitations-verified-open) (alert digest, per-pool grouping, stablecoin metadata, bot filtering, no skill scoring, Birdeye fallback unvalidated, startup ALTER privilege).
 
