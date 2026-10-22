@@ -254,8 +254,12 @@ def apply_pending(
         raise MigrationError("could not acquire the migration lock (another migration is running?)")
     handled: list[str] = []
     try:
-        ensure_tracking_table(cursor)
-        done = applied_versions(cursor)
+        if dry_run:
+            # A dry-run must not initialize migration bookkeeping as a side effect.
+            done = applied_versions(cursor) if _table_exists(cursor, "schema_migrations") else {}
+        else:
+            ensure_tracking_table(cursor)
+            done = applied_versions(cursor)
         # A missing OHLCV table alone does not make a partially initialized database fresh.
         # Exclude schema_migrations, which was just created above, from this check.
         fresh_install = not _has_application_tables(cursor)
@@ -360,7 +364,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     try:
-        conn = _connect(create_database=not args.status)
+        # Inspection modes must not create the configured database as a side effect.
+        conn = _connect(create_database=not (args.status or args.dry_run))
     except Exception as exc:
         print(f"Cannot connect to the database: {exc}", file=sys.stderr)
         return 2
