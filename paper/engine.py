@@ -971,14 +971,14 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                             send_signal_alert(
                                 symbol=symbol, market=market, timeframe=timeframe,
                                 strategy_name=strategy_name, direction=latest_trade["direction"],
-                                entry_price=float(latest_trade["entry_price"]),
-                                stop_loss=float(latest_trade["stop_loss"]),
-                                take_profit=float(latest_trade["take_profit"]),
-                                initial_risk=abs(float(latest_trade["entry_price"]) - float(latest_trade["stop_loss"])),
-                                atr=float(latest_bar.get("atr", 0) or 0),
-                                ml_probability=ml_probability,
+                                entry_price=float(durable_trade["entry_price"]),
+                                stop_loss=float(durable_trade["stop_loss"]),
+                                take_profit=float(durable_trade["take_profit"]),
+                                initial_risk=abs(float(durable_trade["entry_price"]) - float(durable_trade["stop_loss"])),
+                                atr=float(durable_trade.get("atr_at_signal", 0) or 0),
+                                ml_probability=durable_ml_probability,
                                 ml_threshold=ml_threshold,
-                                ml_model_id=ml_model_id,
+                                ml_model_id=durable_ml_model_id,
                             )
                         except Exception as tel_err:
                             logger.warning("Telegram entry signal alert failed: %s", tel_err)
