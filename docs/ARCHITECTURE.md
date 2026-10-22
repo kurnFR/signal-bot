@@ -48,7 +48,7 @@ Defined in `config.py`: symbols `BTCUSDT`, `ETHUSDT`, `BNBUSDT`; timeframes `15m
 | Backtests | `backtest_runs`, `backtest_trades` | `db/schema.sql` |
 | Users | `users` | `migrate_add_users_and_paper.sql` |
 | Security | `audit_logs`, `revoked_tokens` | `migrate_pro_trader_and_ml.sql` |
-| Paper trading | `paper_configs`, `paper_positions`, `paper_trades` | `migrate_add_users_and_paper.sql`, `migrate_p0_paper_accounting.sql` and follow-ups |
+| Paper trading | `paper_configs`, `paper_positions`, `paper_trades`, `paper_orders` | `migrate_add_users_and_paper.sql`, `migrate_p0_paper_accounting.sql`, `migrate_paper_orders.sql` and follow-ups |
 | News AI | `news_events`, `news_ai_signals` | `migrate_news_events.sql`, `migrate_news_execution.sql` |
 | Screener | `smart_money_signals`, `screener_control`, `screener_heartbeat` | `migrate_smart_money.sql` / the screener itself |
 | Research bot | `rdt_trades`, `rdt_strategy_stats`, `bot_control` | `retailbot2` at start |
@@ -79,7 +79,7 @@ FastAPI app in `web/app.py` with one router per area (66 paths):
 |---|---|---|
 | `/api/auth`, `/api/users` | `auth_routes.py` | Login, logout, password change, audit log, user admin |
 | `/api/backtest` | `backtest.py` | Strategies, run, run-all, AI insight, history |
-| `/api/paper` | `paper_routes.py` | Positions, trades, metrics, configs, deploy, circuit breakers |
+| `/api/paper` | `paper_routes.py` | Positions, trades, metrics, configs, order history/cancellation, deploy, circuit breakers |
 | `/api/master-data`, `/api/crypto` | `master_data.py`, `search.py` | Coverage, backfill and feature jobs, Binance search |
 | `/api/custom-strategy` | `custom_strategy.py` | Custom JSON strategies, AI generation, quick test |
 | `/api/ml` | `ml_routes.py` | Experiments, models, deploy-to-paper |

@@ -94,6 +94,7 @@ RESEARCH_CONTROL_PREFIXES = (
 TRADER_OR_ADMIN_PREFIXES = (
     "/api/paper/configs",
     "/api/paper/positions",
+    "/api/paper/orders",
     "/api/paper/sync",
     "/api/paper/deploy",
     "/api/paper/circuit-breakers",
