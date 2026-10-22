@@ -40,7 +40,7 @@ class FakeCursor:
             self.conn.recorded[params[0]] = params[2]
             self.conn.statuses[params[0]] = params[3]
         elif text.startswith("CREATE TABLE IF NOT EXISTS schema_migrations"):
-            pass
+            self.conn.has_schema_migrations = True
         else:
             self.conn.executed.append(text)
             for needle, exc in self.conn.fail_on.items():
@@ -239,6 +239,20 @@ class TestApply(unittest.TestCase):
         self.assertEqual(out, [migs[0].version])
         self.assertEqual(conn.executed, [])
         self.assertEqual(conn.recorded, {})
+        self.assertEqual(conn.commit_count, 0)
+
+    def test_dry_run_does_not_create_missing_tracking_table(self):
+        migs = write_set(self.dir, [("a.sql", "CREATE TABLE a (i INT);", False)])
+        conn = FakeConn()
+        conn.has_schema_migrations = False
+
+        out = apply_pending(conn, directory=self.dir, migrations=migs, dry_run=True, log=lambda _: None)
+
+        self.assertEqual(out, [migs[0].version])
+        self.assertFalse(conn.has_schema_migrations)
+        self.assertEqual(conn.executed, [])
+        self.assertEqual(conn.recorded, {})
+        self.assertEqual(conn.commit_count, 0)
 
     def test_changed_file_after_apply_is_not_rerun(self):
         migs = write_set(self.dir, [("a.sql", "CREATE TABLE a (i INT);", False)])
