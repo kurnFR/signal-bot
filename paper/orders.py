@@ -227,3 +227,50 @@ def cancel_pending_order(order_id: int, *, actor_user_id: int) -> bool:
         order_id, "CANCELLED", reason="Cancelled by user",
         actor_user_id=actor_user_id,
     )
+
+
+def fill_pending_order(order_id: int, fill_price: float, position_writer) -> dict[str, Any]:
+    """Atomically create/link a paper position and mark its order FILLED.
+
+    position_writer(connection) must use the caller's transaction and return
+    a position ID, or None when a risk/duplicate guard blocks the insert.
+    """
+    fill_price = _finite_positive(fill_price, "fill_price")
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM paper_orders WHERE id=%s FOR UPDATE", (int(order_id),))
+        order = cur.fetchone()
+        if not order or order["status"] != "PENDING":
+            conn.rollback()
+            return {"status": "conflict", "position_id": None}
+        position_id = position_writer(conn)
+        if position_id is None:
+            cur.execute(
+                """UPDATE paper_orders SET status='REJECTED', state_reason=%s,
+                   terminal_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+                   WHERE id=%s AND status='PENDING'""",
+                ("Position insert blocked by exposure or duplicate-position guard", int(order_id)),
+            )
+            if cur.rowcount != 1:
+                conn.rollback()
+                return {"status": "conflict", "position_id": None}
+            conn.commit()
+            return {"status": "rejected", "position_id": None}
+        cur.execute(
+            """UPDATE paper_orders SET status='FILLED', state_reason=NULL,
+               fill_price=%s, position_id=%s, filled_at=CURRENT_TIMESTAMP,
+               terminal_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+               WHERE id=%s AND status='PENDING'""",
+            (fill_price, int(position_id), int(order_id)),
+        )
+        if cur.rowcount != 1:
+            conn.rollback()
+            return {"status": "conflict", "position_id": None}
+        conn.commit()
+        return {"status": "filled", "position_id": int(position_id)}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
