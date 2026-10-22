@@ -1,11 +1,11 @@
 # Paper Order Lifecycle — Design and Acceptance Criteria
 
-**Status:** Ledger and guarded transitions merged in PR #243; engine integration merged in PR #245; authenticated API and dashboard history remain unfinished.  
+**Status:** Ledger, engine integration, authenticated API, and dashboard order history are merged in PRs #243, #245, #247, and #248. Manual MariaDB crash/concurrency and browser/accessibility validation remain.  
 **Scope:** Paper/shadow execution only. This document does not authorize exchange orders or live trading.
 
 ## 1. Why this phase exists
 
-The position engine now records durable order intent before a simulated fill. PR #245 connects the signal loop to `paper_orders`, recovers pending orders after restarts, and atomically creates a paper position with the `PENDING -> FILLED` transition. Authenticated order-history/cancellation routes and dashboard visibility are still missing.
+The position engine records durable order intent before a simulated fill. PR #245 connects the signal loop to `paper_orders`, recovers pending orders after restarts, and atomically creates a paper position with the `PENDING -> FILLED` transition. PR #247 adds authenticated order history and pending-only cancellation; PR #248 exposes the state and cancellation action in the dashboard. End-to-end crash/concurrency and manual accessibility validation remain.
 
 PR #239 also corrected a timing defect: a signal is evaluated on a fully closed candle, and a simulated entry is only permitted on the immediately following, currently forming candle. Missing, stale, future-dated, or gapped candle data must not cause an entry to be backfilled at a historical open.
 
@@ -63,10 +63,10 @@ Use compare-and-set transitions (`UPDATE ... WHERE id=? AND status='PENDING'`) s
 
 ## 5. API and dashboard behavior
 
-- A signed-in trader/admin can list recent orders, optionally filtered by state.
-- A trader/admin can cancel only a `PENDING` order. Attempts to cancel a terminal order return a conflict and leave it unchanged.
+- `GET /api/paper/orders` lists recent orders with an optional state filter; authenticated viewers may read history.
+- `POST /api/paper/orders/{order_id}/cancel` is limited to trader/admin roles and can cancel only a `PENDING` order. Terminal/missing orders return a conflict and remain unchanged.
 - Order responses expose state and reason but never database credentials, tokens, or secrets.
-- The dashboard should eventually show order state separately from open positions and closed trades. Do not present a pending order as an open position or a fill as confirmed before persistence succeeds.
+- The dashboard shows order state separately from open positions and closed trades, with status filtering and pending-only cancellation controls. A pending order is never presented as an open position.
 - Every path remains paper-only. No exchange order endpoint or exchange credentials are added.
 
 ## 6. Required regression and integration tests
@@ -85,7 +85,8 @@ Use compare-and-set transitions (`UPDATE ... WHERE id=? AND status='PENDING'`) s
 
 1. **Timing guard (merged PRs #239 and #241):** use the immediate next open candle and skip stale/missing/late data.
 2. **Durable ledger and transition service (merged PR #243):** migration `016_paper_orders`, validated/idempotent order creation, bounded listing, and guarded terminal transitions.
-3. **Engine integration (merged PR #245):** eligible signals persist as pending orders; pending orders are recovered after restart; valid fills atomically create a position and transition to `FILLED`; missed windows expire; the emergency stop and entry deadline are rechecked. Authenticated order-list/cancel routes remain open.
-4. **Dashboard and release verification:** show pending/filled/expired/cancelled/rejected states, add browser/accessibility checks, exercise concurrent/crash recovery against MariaDB, and verify docs against the deployed version if deployment is explicitly requested.
+3. **Engine integration (merged PR #245):** eligible signals persist as pending orders; pending orders recover after restart; valid fills atomically create a position and transition to `FILLED`; missed windows expire; the entry deadline and shared emergency stop are rechecked.
+4. **API and dashboard (merged PRs #247 and #248):** authenticated order history, trader/admin pending-only cancellation, status filter, and a separate dashboard ledger with safely escaped values.
+5. **Release verification (still open):** validate migrations, concurrent workers and crash windows against MariaDB; run browser, keyboard, screen-reader, responsive, and forced-colors checks; verify deployed documentation only if deployment is explicitly requested.
 
-The execution-lifecycle phase remains incomplete until API, dashboard, and integration/release verification are complete. No live exchange execution is included.
+The execution-lifecycle phase is implemented in code but is not release-verified until phase 5 is complete. No live exchange execution is included.
