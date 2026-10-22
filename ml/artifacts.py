@@ -142,6 +142,29 @@ def paper_eligibility_report(
     return {"eligible": not reasons, "reasons": reasons}
 
 
+
+def load_eligible_paper_artifact(
+    manifest: Any, expected_model_id: str
+) -> ModelArtifact:
+    """Validate mutable manifest metadata again at paper-runtime load time.
+
+    Deployment-time checks are not sufficient because the JSON manifest can be
+    edited or replaced while a paper config remains active. Fail closed before
+    deserializing model weights unless both the explicit eligibility flag and
+    the current untouched-test metrics satisfy the promotion gate.
+    """
+    if not isinstance(manifest, dict):
+        raise ValueError("Model manifest must be a JSON object")
+    if manifest.get("model_id") != expected_model_id:
+        raise ValueError("Model manifest ID does not match configured model ID")
+    if manifest.get("eligible_for_paper") is not True:
+        raise ValueError("Model manifest is not marked eligible for paper trading")
+    report = paper_eligibility_report(test_metrics=manifest.get("test_metrics"))
+    if not report["eligible"]:
+        raise ValueError("Model no longer passes paper eligibility: " + "; ".join(report["reasons"]))
+    return ModelArtifact(**manifest)
+
+
 def paper_eligibility(
     *,
     test_metrics: dict[str, Any],
