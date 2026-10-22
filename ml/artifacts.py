@@ -21,6 +21,29 @@ from typing import Any
 _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
 
 
+def _validate_model_id(model_id: str) -> None:
+    if (
+        not isinstance(model_id, str)
+        or not _MODEL_ID_RE.fullmatch(model_id)
+        or ".." in model_id
+    ):
+        raise ValueError("Invalid model_id")
+
+
+def resolve_model_manifest_path(
+    model_id: str, directory: str | Path = "ml_models"
+) -> Path:
+    """Resolve a manifest only when it is a regular file inside the artifact root."""
+    _validate_model_id(model_id)
+    root = Path(directory).resolve()
+    manifest_path = (root / f"{model_id}.json").resolve()
+    if manifest_path.parent != root:
+        raise ValueError("Model manifest must resolve inside the artifact directory")
+    if not manifest_path.is_file():
+        raise FileNotFoundError("Model manifest must be a regular file inside the artifact directory")
+    return manifest_path
+
+
 def resolve_model_artifact_paths(
     model_id: str, directory: str | Path = "ml_models"
 ) -> tuple[Path, Path]:
@@ -31,20 +54,13 @@ def resolve_model_artifact_paths(
     so a later filesystem change cannot redirect joblib loading outside the
     configured artifact directory.
     """
-    if (
-        not isinstance(model_id, str)
-        or not _MODEL_ID_RE.fullmatch(model_id)
-        or ".." in model_id
-    ):
-        raise ValueError("Invalid model_id")
-
+    manifest_path = resolve_model_manifest_path(model_id, directory)
     root = Path(directory).resolve()
-    manifest_path = (root / f"{model_id}.json").resolve()
     model_path = (root / f"{model_id}.joblib").resolve()
-    if manifest_path.parent != root or model_path.parent != root:
-        raise ValueError("Model artifacts must resolve inside the artifact directory")
-    if not manifest_path.is_file() or not model_path.is_file():
-        raise FileNotFoundError("Model manifest and weights must be regular files inside the artifact directory")
+    if model_path.parent != root:
+        raise ValueError("Model weights must resolve inside the artifact directory")
+    if not model_path.is_file():
+        raise FileNotFoundError("Model weights must be a regular file inside the artifact directory")
     return manifest_path, model_path
 
 
