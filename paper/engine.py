@@ -931,12 +931,31 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                     if not fill_allowed:
                         logger.warning("Paper order #%s remains pending: %s", order["id"], fill_block_reason)
                         continue
+                    # Use the durable row as the source of truth if this is an
+                    # idempotent retry, rather than recalculated strategy output.
+                    if (order.get("status") != "PENDING"
+                            or int(order.get("entry_time") or 0) != entry_candle_time
+                            or order.get("symbol") != symbol
+                            or order.get("market") != market
+                            or order.get("timeframe") != timeframe
+                            or order.get("strategy_name") != strategy_name):
+                        continue
+                    durable_trade = {
+                        "direction": order["direction"],
+                        "entry_price": float(order["requested_entry_price"]),
+                        "stop_loss": float(order["stop_loss"]),
+                        "take_profit": float(order["take_profit"]),
+                        "atr_at_signal": float(order["atr_at_signal"]),
+                    }
+                    durable_ml_model_id = order.get("ml_model_id")
+                    durable_ml_probability = order.get("ml_probability")
                     order_result = fill_pending_order(
                         int(order["id"]),
                         float(order["requested_entry_price"]),
                         lambda conn: _insert_position(
-                            cfg, latest_trade, float(open_candle["close"]), entry_candle_time,
-                            ml_model_id=ml_model_id, ml_probability=ml_probability, connection=conn,
+                            cfg, durable_trade, float(open_candle["close"]), entry_candle_time,
+                            ml_model_id=durable_ml_model_id, ml_probability=durable_ml_probability,
+                            connection=conn,
                         ),
                     )
                     if order_result["status"] == "expired":
