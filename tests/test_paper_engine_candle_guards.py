@@ -258,6 +258,7 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
              patch("paper.engine.get_active_positions", return_value=[]), \
              patch("paper.engine.fetch_ohlcv_with_features_df", return_value=df), \
              patch("paper.engine.fetch_latest_open_candle", return_value=open_candle), \
+             patch("paper.engine.time.time", return_value=(CANDLE_B + 60_000) / 1000), \
              patch("paper.engine.STRATEGIES", {"trend_ema_v1": fake_strategy}), \
              patch("paper.engine._signal_already_traded", return_value=False), \
              patch("paper.circuit_breaker.check_circuit_breakers", return_value=(True, "")), \
@@ -301,6 +302,7 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
              patch("paper.engine.get_active_positions", return_value=[]), \
              patch("paper.engine.fetch_ohlcv_with_features_df", return_value=df), \
              patch("paper.engine.fetch_latest_open_candle", return_value=stale_open), \
+             patch("paper.engine.time.time", return_value=(CANDLE_A + 3_600_000 + 60_000) / 1000), \
              patch("paper.engine.STRATEGIES", {"trend_ema_v1": fake_strategy}), \
              patch("paper.engine._insert_position") as insert_position:
             result = pe.sync_and_evaluate_paper_trading()
