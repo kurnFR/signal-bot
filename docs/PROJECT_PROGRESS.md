@@ -273,3 +273,7 @@ The project should not be marked finished just because the latest PRs are merged
 
 **Last update:** 2026-10-22.  
 **Next suggested engineering step:** run a migration rehearsal against a representative populated database, then perform manual keyboard/screen-reader/mobile/forced-colors checks. Separately untrack runtime data only after preserving the real files on the machine that owns them.
+
+### MariaDB migration-test isolation — PR #280
+
+[PR #280](https://github.com/kurnFR/signal-bot/pull/280) replaces fixed MariaDB integration-test database names with unique per-run names. Setup no longer drops a database before creating it; cleanup drops only the unique database created for that test. This reduces the risk of destructive collisions when opt-in integration tests are run against a shared or developer-managed MariaDB server. CI passing does not replace a rehearsal against a representative deployed schema.

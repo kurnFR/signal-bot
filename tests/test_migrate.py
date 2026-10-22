@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 
 from db.migrate import (MIGRATIONS, Migration, MigrationError, apply_pending, checksum,
@@ -218,21 +219,25 @@ class TestMariaDBIntegration(unittest.TestCase):
         from config import MYSQL_CONFIG
 
         cfg = dict(MYSQL_CONFIG)
-        name = "sb_migrate_it"
+        name = f"sb_migrate_it_{uuid.uuid4().hex[:12]}"
         admin = mysql.connector.connect(**{k: v for k, v in cfg.items() if k != "database"})
         cur = admin.cursor()
-        cur.execute(f"DROP DATABASE IF EXISTS {name}")
-        cur.execute(f"CREATE DATABASE {name}")
-        admin.commit()
-        conn = mysql.connector.connect(**dict(cfg, database=name))
+        created = False
+        conn = None
         try:
+            cur.execute(f"CREATE DATABASE {name}")
+            created = True
+            admin.commit()
+            conn = mysql.connector.connect(**dict(cfg, database=name))
             first = migrate.apply_pending(conn, log=lambda _: None)
             self.assertEqual(first, [m.version for m in MIGRATIONS])
             self.assertEqual(migrate.apply_pending(conn, log=lambda _: None), [])
         finally:
-            conn.close()
-            cur.execute(f"DROP DATABASE IF EXISTS {name}")
-            admin.commit()
+            if conn is not None:
+                conn.close()
+            if created:
+                cur.execute(f"DROP DATABASE IF EXISTS {name}")
+                admin.commit()
             admin.close()
 
 
@@ -250,14 +255,16 @@ class TestMariaDBIntegration(unittest.TestCase):
         from config import MYSQL_CONFIG
 
         cfg = dict(MYSQL_CONFIG)
-        name = "sb_migrate_populated_it"
+        name = f"sb_migrate_populated_it_{uuid.uuid4().hex[:12]}"
         admin = mysql.connector.connect(**{k: v for k, v in cfg.items() if k != "database"})
         cur = admin.cursor()
-        cur.execute(f"DROP DATABASE IF EXISTS {name}")
-        cur.execute(f"CREATE DATABASE {name}")
-        admin.commit()
-        conn = mysql.connector.connect(**dict(cfg, database=name))
+        created = False
+        conn = None
         try:
+            cur.execute(f"CREATE DATABASE {name}")
+            created = True
+            admin.commit()
+            conn = mysql.connector.connect(**dict(cfg, database=name))
             # Install the current baseline without recording migration versions.
             cur2 = conn.cursor()
             baseline = next(m for m in MIGRATIONS if m.version == "000_baseline")
@@ -296,9 +303,11 @@ class TestMariaDBIntegration(unittest.TestCase):
             cur3.close()
             self.assertEqual(migrate.apply_pending(conn, log=lambda _: None), [])
         finally:
-            conn.close()
-            cur.execute(f"DROP DATABASE IF EXISTS {name}")
-            admin.commit()
+            if conn is not None:
+                conn.close()
+            if created:
+                cur.execute(f"DROP DATABASE IF EXISTS {name}")
+                admin.commit()
             admin.close()
 
 
@@ -309,14 +318,16 @@ class TestMariaDBIntegration(unittest.TestCase):
         from config import MYSQL_CONFIG
 
         cfg = dict(MYSQL_CONFIG)
-        name = "sb_migrate_partial_wib_it"
+        name = f"sb_migrate_partial_wib_it_{uuid.uuid4().hex[:12]}"
         admin = mysql.connector.connect(**{k: v for k, v in cfg.items() if k != "database"})
         cur = admin.cursor()
-        cur.execute(f"DROP DATABASE IF EXISTS {name}")
-        cur.execute(f"CREATE DATABASE {name}")
-        admin.commit()
-        conn = mysql.connector.connect(**dict(cfg, database=name))
+        created = False
+        conn = None
         try:
+            cur.execute(f"CREATE DATABASE {name}")
+            created = True
+            admin.commit()
+            conn = mysql.connector.connect(**dict(cfg, database=name))
             cur2 = conn.cursor()
             baseline = next(m for m in MIGRATIONS if m.version == "000_baseline")
             migrate.run_statements(
@@ -349,9 +360,11 @@ class TestMariaDBIntegration(unittest.TestCase):
             cur3.close()
             self.assertEqual(migrate.apply_pending(conn, log=lambda _: None), [])
         finally:
-            conn.close()
-            cur.execute(f"DROP DATABASE IF EXISTS {name}")
-            admin.commit()
+            if conn is not None:
+                conn.close()
+            if created:
+                cur.execute(f"DROP DATABASE IF EXISTS {name}")
+                admin.commit()
             admin.close()
 
 
