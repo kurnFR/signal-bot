@@ -2,8 +2,8 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-22  
-**Master commit at review:** `b453138810909c4ece0bab107034101591317a7f`  
-**Overall status:** Active / not finished. Dashboard accessibility fixes and production-hardening PRs #235–#237 are merged; execution lifecycle, cost-model realism, runtime-data hygiene, manual accessibility verification, and trading-edge validation remain incomplete.
+**Master commit at review:** `4178bd9bf6602893c3be79e7b0e45e88b90ac700`  
+**Overall status:** Active / not finished. Dashboard accessibility fixes and production-hardening PRs #235–#238 are merged. PR #239 addresses retroactive paper-entry timing; durable order states, cost-model realism, runtime-data hygiene, manual accessibility verification, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
 
@@ -38,7 +38,7 @@ Primary project references:
 | Full project correctness and bug-free guarantee | **Not complete / cannot be guaranteed** | Continue risk-based review, regression tests, integration tests, and manual verification. |
 | ML paper-promotion safety | **Implemented for the documented eligibility gate** | PR #235 routes experiment and deploy-to-paper eligibility through the shared fail-closed gate; keep negative tests and artifact checks. |
 | Authentication and first-login hardening | **Implemented for identified controls** | First-login password change, stronger password policy, durable login throttling, and route authorization sweep are merged; continue periodic security review. |
-| Paper execution lifecycle and portfolio-level risk | **Partially complete** | Portfolio notional cap is implemented; explicit pending/filled/expired/cancelled order lifecycle remains open. Keep the system paper-only. |
+| Paper execution lifecycle and portfolio-level risk | **Partially complete** | Portfolio notional cap is implemented. PR #239 targets retroactive entry timing; durable pending/filled/expired/cancelled order states and cancellation controls remain open. Keep the system paper-only. |
 | Database migrations, durable jobs, and runtime-file hygiene | **Partially complete** | Versioned migrations and durable job state are merged. `custom_strategies.json` and `Screen/signals.jsonl` are still tracked and must be untracked without deleting real runtime data. |
 | Strategy and ML evidence of trading edge | **Not complete** | Use leakage-safe chronological evaluation and untouched holdout data; passing software tests is not proof of profitability. |
 | GCAO project documentation and status | **Needs identification / blocked** | The accessible `signal-bot` repository and retrieved project context did not identify what “GCAO” stands for, its canonical repository, or its scope. Do not assume it is the same as Signal Bot or the separate `ai_insight` / `forecast_engine` work. Add verified details after its identity and source are confirmed. |
@@ -175,5 +175,5 @@ The project should not be marked finished just because the latest PRs are merged
 
 ---
 
-**Last update:** 2026-10-21.  
-**Next suggested engineering step:** design the paper order lifecycle (pending, filled, expired, cancelled), then untrack runtime data on the production machine.
+**Last update:** 2026-10-22.  
+**Next suggested engineering step:** implement a durable paper-order state machine and cancellation/audit flow after the next-open timing fix, then untrack runtime data only after preserving the real files on the machine that owns them.
