@@ -822,6 +822,16 @@ def create_custom_strategy(req: CustomStrategyRequest):
     long_list = [c.model_dump() if hasattr(c, "model_dump") else c.dict() for c in req.longConditions]
     short_list = [c.model_dump() if hasattr(c, "model_dump") else c.dict() for c in req.shortConditions]
 
+    # Persist first. If disk I/O fails, leave the in-memory registry unchanged.
+    saved = _read_saved_strategies()
+    saved = [s for s in saved if s.get("name") != clean_name]
+    saved.append(def_dict)
+    _write_saved_strategies(saved)
+
+    run_fn, run_inv_fn = _create_strategy_runner(def_dict)
+    STRATEGIES[clean_name] = run_fn
+    STRATEGIES[f"inverse_{clean_name}"] = run_inv_fn
+
     STRATEGY_METADATA[clean_name] = {
         "displayName": req.displayName or clean_name,
         "category": "Custom AI Strategy",
@@ -837,15 +847,6 @@ def create_custom_strategy(req: CustomStrategyRequest):
         ]
     }
 
-    # Persist first. If disk I/O fails, leave the in-memory registry unchanged.
-    saved = _read_saved_strategies()
-    saved = [s for s in saved if s.get("name") != clean_name]
-    saved.append(def_dict)
-    _write_saved_strategies(saved)
-
-    run_fn, run_inv_fn = _create_strategy_runner(def_dict)
-    STRATEGIES[clean_name] = run_fn
-    STRATEGIES[f"inverse_{clean_name}"] = run_inv_fn
 
     return {
         "status": "success",
