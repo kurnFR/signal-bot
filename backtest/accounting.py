@@ -147,13 +147,21 @@ def calculate_trade_accounting(
     exit_notional = exit_exec * quantity
     fees = (entry_notional + exit_notional) * fee_pct
     net_pnl = gross_pnl - fees - funding_cost
+    _require_finite(gross_pnl=gross_pnl, entry_notional=entry_notional,
+                    exit_notional=exit_notional, fees=fees, net_pnl=net_pnl)
 
     risk_amount = None
     r_multiple = None
     if stop_price is not None:
         risk_amount = abs(entry_price - stop_price) * quantity
+        _require_finite(risk_amount=risk_amount)
         if risk_amount > 0:
             r_multiple = net_pnl / risk_amount
+            _require_finite(r_multiple=r_multiple)
+
+    return_pct = (net_pnl / entry_notional * 100.0) if entry_notional else None
+    if return_pct is not None:
+        _require_finite(return_pct=return_pct)
 
     return {
         "entry_exec_price": entry_exec,
@@ -164,5 +172,5 @@ def calculate_trade_accounting(
         "net_pnl": net_pnl,
         "risk_amount": risk_amount,
         "r_multiple": r_multiple,
-        "return_pct_on_entry_notional": (net_pnl / entry_notional * 100.0) if entry_notional else None,
+        "return_pct_on_entry_notional": return_pct,
     }
