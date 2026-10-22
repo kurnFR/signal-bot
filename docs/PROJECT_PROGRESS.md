@@ -2,8 +2,8 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-22  
-**Master commit at review:** `933a9dd96324f8764b2555ce1f6ddd8607f75d0b`  
-**Overall status:** Active / not finished. PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, and #257 adds ML experiment path containment. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
+**Master commit at review:** `518455671a91dae8759c68781741aab05efb2fd5`  
+**Overall status:** Active / not finished. PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, #257 contains ML experiment paths, and #259 validates deployment manifests before activation. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
 
@@ -142,6 +142,15 @@ All PR checks passed:
 - [pytest](https://github.com/kurnFR/signal-bot/actions/runs/39745244099)
 - [Project tests / MariaDB integration](https://github.com/kurnFR/signal-bot/actions/runs/39745244146)
 - [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39745244131)
+
+### ML activation manifest validation — PR #259
+
+[PR #259](https://github.com/kurnFR/signal-bot/pull/259) validates all manifest values used before the deploy-to-paper side effect. A threshold must be finite and strictly between 0 and 1; strategy parameters must be an object; the base strategy must be registered; and symbol, market, and timeframe must be supported. This prevents malformed editable JSON from activating a paper config and then failing while formatting the Telegram notification.
+
+All PR checks passed:
+- [pytest](https://github.com/kurnFR/signal-bot/actions/runs/39745729753)
+- [Project tests / MariaDB integration](https://github.com/kurnFR/signal-bot/actions/runs/39745729829)
+- [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39745729700)
 
 ### PR #233 final verification
 
