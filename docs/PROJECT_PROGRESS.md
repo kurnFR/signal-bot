@@ -2,8 +2,8 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-22  
-**Master commit at review:** `961d29cca8ad8a8ccf29703837b196410b6443e3`  
-**Overall status:** Active / not finished. PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, #257 contains ML experiment paths, #259 validates deployment manifests before activation, and #263 contains model artifact paths; #265 hardens custom-strategy persistence, #266 validates runtime ML artifact paths, #267 rechecks ML eligibility immediately before model loading, and #269 makes model-weight/manifest writes atomic and prevents duplicate experiment runs from overwriting existing artifacts; #271 prevents the reusable model store from following external symlinks when reading weights or manifests. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
+**Master commit at review:** `333dcce9529e815d8f3fb5fb8fd01540fa47f4ac`  
+**Overall status:** Active / not finished. PR #282 makes migration status inspection read-only; PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, #257 contains ML experiment paths, #259 validates deployment manifests before activation, and #263 contains model artifact paths; #265 hardens custom-strategy persistence, #266 validates runtime ML artifact paths, #267 rechecks ML eligibility immediately before model loading, and #269 makes model-weight/manifest writes atomic and prevents duplicate experiment runs from overwriting existing artifacts; #271 prevents the reusable model store from following external symlinks when reading weights or manifests. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
 
@@ -46,7 +46,7 @@ Primary project references:
 
 ## 3. Recent merged work
 
-### Database migration and accounting hardening — PRs #274–#280
+### Database migration and accounting hardening — PRs #274–#282
 
 - [PR #274](https://github.com/kurnFR/signal-bot/pull/274) adds regression coverage that migration adoption preserves existing OHLCV rows.
 - [PR #275](https://github.com/kurnFR/signal-bot/pull/275) rejects non-finite financial-accounting inputs and derived results.
@@ -56,9 +56,15 @@ Primary project references:
 - [PR #279](https://github.com/kurnFR/signal-bot/pull/279) detects fresh installs by checking for existing application tables, including partial databases without `ohlcv`.
 - [PR #280](https://github.com/kurnFR/signal-bot/pull/280) isolates opt-in MariaDB migration tests with unique per-run database names and cleanup limited to the database created by each test.
 
-The latest migration tests improve regression coverage and reduce the risk of integration tests damaging a developer/shared database. They do **not** replace a rehearsal against a representative populated deployed-schema snapshot. PR #280's pre-merge workflows passed; post-merge workflows for master commit `961d29cca8ad8a8ccf29703837b196410b6443e3` were still running when this documentation update began.
+The latest migration tests improve regression coverage and reduce the risk of integration tests damaging a developer/shared database. PR #282 also removes the write/commit side effect from `python -m db.migrate --status`; its tests cover both missing and existing migration-tracking tables. The PR #282 pre-merge and post-merge workflow types all passed on merge commit `333dcce9529e815d8f3fb5fb8fd01540fa47f4ac`. These tests do **not** replace a rehearsal against a representative populated deployed-schema snapshot.
 
 All entries below are merged pull requests in `kurnFR/signal-bot`. The listed scope describes the identified fix, not a claim that the entire category is now perfect.
+
+### Read-only migration status — PR #282
+
+- [PR #282](https://github.com/kurnFR/signal-bot/pull/282) makes `python -m db.migrate --status` inspection-only: it no longer creates `schema_migrations` or commits changes. Regression tests verify that both missing and existing tracking-table cases perform no writes or commits.
+- Pre-merge and post-merge CI passed for all three workflow types on merge commit [`333dcce`](https://github.com/kurnFR/signal-bot/commit/333dcce9529e815d8f3fb5fb8fd01540fa47f4ac).
+- No production database was modified and no deployment was performed.
 
 ### Dashboard accessibility and behavior — PRs #195–#233
 
