@@ -2,8 +2,8 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-22  
-**Master commit at review:** `36ae2c1b49e060a93f2a27389a5e05603ee75418`  
-**Overall status:** Active / not finished. Dashboard accessibility and production-hardening PRs #235–#238 are merged; PRs #239 and #241 tighten paper-entry timing, and PR #243 adds the order-ledger foundation. Engine integration, cancellation/audit UI, cost-model realism, runtime-data hygiene, manual accessibility verification, and trading-edge validation remain incomplete.
+**Master commit at review:** `90a1f9de8526c5efb79a8f5a2ca13135e4989ff5`  
+**Overall status:** Active / not finished. PRs #239/#241 improve paper-entry timing, #243 adds the order ledger, and #245 wires engine fills/recovery to that ledger. Authenticated order routes, dashboard history, MariaDB crash/concurrency validation, cost-model realism, runtime-data hygiene, manual accessibility verification, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
 
@@ -38,7 +38,7 @@ Primary project references:
 | Full project correctness and bug-free guarantee | **Not complete / cannot be guaranteed** | Continue risk-based review, regression tests, integration tests, and manual verification. |
 | ML paper-promotion safety | **Implemented for the documented eligibility gate** | PR #235 routes experiment and deploy-to-paper eligibility through the shared fail-closed gate; keep negative tests and artifact checks. |
 | Authentication and first-login hardening | **Implemented for identified controls** | First-login password change, stronger password policy, durable login throttling, and route authorization sweep are merged; continue periodic security review. |
-| Paper execution lifecycle and portfolio-level risk | **Partially complete** | Portfolio notional cap is implemented; PRs #239/#241 restrict simulated entries to the next-open window, and PR #243 adds the ledger schema/transition service. Engine integration, crash recovery, API cancellation, and dashboard order history remain open. Keep the system paper-only. |
+| Paper execution lifecycle and portfolio-level risk | **Partially complete** | PR #245 wires durable pending orders, expiry/recovery, and atomic position/order fills into the engine. Authenticated list/cancel API, dashboard order history, and MariaDB concurrency/crash recovery validation remain open. Keep the system paper-only. |
 | Database migrations, durable jobs, and runtime-file hygiene | **Partially complete** | Versioned migrations and durable job state are merged. `custom_strategies.json` and `Screen/signals.jsonl` are still tracked and must be untracked without deleting real runtime data. |
 | Strategy and ML evidence of trading edge | **Not complete** | Use leakage-safe chronological evaluation and untouched holdout data; passing software tests is not proof of profitability. |
 | GCAO project documentation and status | **Needs identification / blocked** | The accessible `signal-bot` repository and retrieved project context did not identify what “GCAO” stands for, its canonical repository, or its scope. Do not assume it is the same as Signal Bot or the separate `ai_insight` / `forecast_engine` work. Add verified details after its identity and source are confirmed. |
@@ -84,7 +84,18 @@ The fresh audit found that the paper engine could only discover an entry after i
 - [PR #239](https://github.com/kurnFR/signal-bot/pull/239) — signal only on closed candles; use the immediately following in-progress candle for next-open execution; skip missing, stale, future-dated, and gapped candles.
 - [PR #241](https://github.com/kurnFR/signal-bot/pull/241) — add `PAPER_ENTRY_MAX_DELAY_SECONDS` (default 120) so an engine that observes the candle late cannot silently backfill the opening price.
 
-PR #243 adds the durable `paper_orders` schema and guarded transition service, but the engine does not create or process these records yet; cancellation API and dashboard order history are still open. See [PAPER_ORDER_LIFECYCLE.md](PAPER_ORDER_LIFECYCLE.md) for the design and acceptance criteria.
+PR #243 adds the durable `paper_orders` schema and guarded transition service. PR #245 now creates orders after the ML gate, recovers pending orders after restart, expires missed windows, and atomically links a fill to its position. Authenticated cancellation/history routes and dashboard order history are still open. See [PAPER_ORDER_LIFECYCLE.md](PAPER_ORDER_LIFECYCLE.md).
+
+### Paper-order engine integration — PR #245
+
+[PR #245](https://github.com/kurnFR/signal-bot/pull/245) merged on 2026-10-22. The engine now writes eligible signals to `paper_orders`, processes pending orders after restart, and atomically creates a paper position with the `FILLED` transition. It rechecks the configured entry window and shared emergency stop before fill, rejects blocked/duplicate position inserts, and uses persisted order values on idempotent retries. The ML-filter path also no longer relies on a branch-local pandas import.
+
+All PR checks passed on head `6971d3d92490ff545c8b72d6ff6c9b1ba019c8a5`:
+- [pytest](https://github.com/kurnFR/signal-bot/actions/runs/39741047779)
+- [Project tests / MariaDB integration](https://github.com/kurnFR/signal-bot/actions/runs/39741047801)
+- [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39741047718)
+
+Remaining: authenticated order list/cancel API, dashboard order history, and direct MariaDB validation of concurrent workers and crash windows. No production deployment was performed.
 
 ### PR #233 final verification
 

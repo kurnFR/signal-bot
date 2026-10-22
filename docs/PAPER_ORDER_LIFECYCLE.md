@@ -1,11 +1,11 @@
 # Paper Order Lifecycle — Design and Acceptance Criteria
 
-**Status:** Ledger schema and guarded transition service merged in PR #243; engine/API/dashboard integration is not implemented end-to-end yet.  
+**Status:** Ledger and guarded transitions merged in PR #243; engine integration merged in PR #245; authenticated API and dashboard history remain unfinished.  
 **Scope:** Paper/shadow execution only. This document does not authorize exchange orders or live trading.
 
 ## 1. Why this phase exists
 
-The current position engine stores only `OPEN` and `CLOSED` positions. It does not have a durable order record for a strategy signal before a simulated fill. That makes it difficult to distinguish a signal waiting for its intended next-bar open from an order that filled, expired because the engine was late, was cancelled, or was rejected by a risk gate.
+The position engine now records durable order intent before a simulated fill. PR #245 connects the signal loop to `paper_orders`, recovers pending orders after restarts, and atomically creates a paper position with the `PENDING -> FILLED` transition. Authenticated order-history/cancellation routes and dashboard visibility are still missing.
 
 PR #239 also corrected a timing defect: a signal is evaluated on a fully closed candle, and a simulated entry is only permitted on the immediately following, currently forming candle. Missing, stale, future-dated, or gapped candle data must not cause an entry to be backfilled at a historical open.
 
@@ -48,7 +48,7 @@ Terminal states are immutable. Retrying a poll must never resurrect a terminal o
 
 ## 4. Persistence and concurrency invariants
 
-PR #243 adds migration `016_paper_orders` and the initial `paper.orders` service. The schema includes, at minimum:
+PR #243 adds migration `016_paper_orders` and the initial `paper.orders` service; PR #245 wires order filling to the engine using a row lock and a single transaction for position insertion plus the `FILLED` transition. The schema includes, at minimum:
 
 - order ID and strategy identity: symbol, market, timeframe, strategy name;
 - signal candle time and intended entry candle time;
@@ -59,7 +59,7 @@ PR #243 adds migration `016_paper_orders` and the initial `paper.orders` service
 - a unique idempotency key for the same strategy configuration and signal candle;
 - indexes for pending-order lookup and recent order history.
 
-Use compare-and-set transitions (`UPDATE ... WHERE id=? AND status='PENDING'`) so concurrent pollers cannot fill or cancel the same order twice. Prefer a single transaction for the order transition and position insert. If the existing position-insert helper must be refactored to accept a caller-owned connection, preserve its shared accounting, exposure cap, and unique-open-position constraints. Do not implement a non-atomic two-write path without crash-recovery reconciliation.
+Use compare-and-set transitions (`UPDATE ... WHERE id=? AND status='PENDING'`) so concurrent pollers cannot fill or cancel the same order twice. PR #245 locks the pending order and performs the position insert plus the `FILLED` transition on the same connection/transaction. The entry window and shared emergency stop are rechecked before filling. Automated tests cover the transaction boundary; concurrent-worker and crash-recovery behavior still require MariaDB integration validation.
 
 ## 5. API and dashboard behavior
 
@@ -83,9 +83,9 @@ Use compare-and-set transitions (`UPDATE ... WHERE id=? AND status='PENDING'`) s
 
 ## 7. Implementation phases
 
-1. **Timing guard (merged PR #239):** only use the immediate next open candle; skip stale/missing data.
-2. **Durable ledger and transition service (merged PR #243):** migration `016_paper_orders`, validated/idempotent order creation, bounded listing, and compare-and-set terminal transitions have unit coverage. The service is not yet called by the engine.
-3. **Engine integration and API:** wire signal discovery and fills to the ledger, expire missed orders, add list/cancel endpoints, and reconcile crash windows atomically.
-4. **Dashboard and release verification:** show pending/filled/expired/cancelled/rejected states, run browser/accessibility checks, run the MariaDB integration suite, and verify docs against the deployed version if deployment is explicitly requested.
+1. **Timing guard (merged PRs #239 and #241):** use the immediate next open candle and skip stale/missing/late data.
+2. **Durable ledger and transition service (merged PR #243):** migration `016_paper_orders`, validated/idempotent order creation, bounded listing, and guarded terminal transitions.
+3. **Engine integration (merged PR #245):** eligible signals persist as pending orders; pending orders are recovered after restart; valid fills atomically create a position and transition to `FILLED`; missed windows expire; the emergency stop and entry deadline are rechecked. Authenticated order-list/cancel routes remain open.
+4. **Dashboard and release verification:** show pending/filled/expired/cancelled/rejected states, add browser/accessibility checks, exercise concurrent/crash recovery against MariaDB, and verify docs against the deployed version if deployment is explicitly requested.
 
-The execution-lifecycle phase is complete only after phases 2–4 are implemented and verified. PR #239 alone fixes timing but does not satisfy that completion gate.
+The execution-lifecycle phase remains incomplete until API, dashboard, and integration/release verification are complete. No live exchange execution is included.
