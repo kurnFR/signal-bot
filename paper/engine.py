@@ -13,6 +13,7 @@ as live execution.
 """
 import time
 import logging
+import pandas as pd
 import os
 from typing import List, Dict, Any, Optional
 
@@ -27,6 +28,7 @@ from backtest.strategies.trend_alignment import HTF_TIMEFRAME
 from backtest.params import BASE_PARAMS
 from backtest.accounting import calculate_position_size, calculate_trade_accounting
 from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT, PAIRS_BASE_SYMBOL
+from paper.orders import create_pending_order, fill_pending_order, list_orders, transition_order
 
 logger = logging.getLogger("paper.engine")
 
@@ -453,6 +455,7 @@ def _insert_position(
     candle_open_time: int,
     ml_model_id: Optional[str] = None,
     ml_probability: Optional[float] = None,
+    connection=None,
 ) -> Optional[int]:
     """Returns the new paper_positions row id on success, or None if the
     insert was skipped as a duplicate (the unique open-position key already
@@ -489,7 +492,8 @@ def _insert_position(
     # read the column; the per-candle guard below now depends on it.)
     last_applied_candle = int(candle_open_time) - 1
 
-    conn = get_pool().get_connection()
+    owns_connection = connection is None
+    conn = connection or get_pool().get_connection()
     try:
         cur = conn.cursor()
         cur.execute(
@@ -516,12 +520,14 @@ def _insert_position(
                 size.quantity, size.notional, entry_fee, ml_model_id, ml_probability,
             ),
         )
-        conn.commit()
+        if owns_connection:
+            conn.commit()
         new_id = cur.lastrowid
         cur.close()
         return new_id
     except Exception as exc:
-        conn.rollback()
+        if owns_connection:
+            conn.rollback()
         # The P0 migration adds a unique active-position key. A duplicate is
         # expected when concurrent schedulers observe the same signal.
         if "uq_paper_open_position" in str(exc) or "Duplicate entry" in str(exc):
@@ -529,7 +535,8 @@ def _insert_position(
             return None
         raise
     finally:
-        conn.close()
+        if owns_connection:
+            conn.close()
 
 
 # Public alias -- ai/news_execution.py (and any other overlay-strategy
@@ -579,13 +586,107 @@ def _signal_already_traded(cfg: Dict[str, Any], entry_candle: int) -> bool:
         conn.close()
 
 
+
+
+def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, int]:
+    """Recover pending orders and fill only during their intended next-open window."""
+    config_by_id = {int(cfg["id"]): cfg for cfg in configs}
+    result = {"filled": 0, "expired": 0, "rejected": 0}
+    try:
+        pending = list_orders(status="PENDING", limit=200)
+    except Exception:
+        logger.exception("Unable to load pending paper orders; skipping entry recovery")
+        return result
+
+    now_ms = int(time.time() * 1000)
+    for order in pending:
+        cfg = config_by_id.get(int(order["config_id"]))
+        if not cfg or not cfg.get("is_active"):
+            try:
+                transition_order(int(order["id"]), "CANCELLED", reason="Paper config inactive or missing")
+            except Exception:
+                logger.exception("Unable to cancel pending paper order #%s", order.get("id"))
+            continue
+        if (cfg["symbol"] != order["symbol"] or cfg["market"] != order["market"]
+                or cfg["timeframe"] != order["timeframe"]
+                or cfg["strategy_name"] != order["strategy_name"]
+                or (cfg.get("ml_model_id") or None) != (order.get("ml_model_id") or None)):
+            try:
+                transition_order(int(order["id"]), "CANCELLED", reason="Paper config changed after signal")
+            except Exception:
+                logger.exception("Unable to cancel changed-config order #%s", order.get("id"))
+            continue
+
+        entry_time = int(order["entry_time"])
+        interval_ms = _TIMEFRAME_MS.get(order["timeframe"])
+        if not interval_ms:
+            transition_order(int(order["id"]), "REJECTED", reason="Unsupported timeframe")
+            result["rejected"] += 1
+            continue
+        max_delay_ms = min(PAPER_ENTRY_MAX_DELAY_MS, interval_ms)
+        try:
+            open_candle = fetch_latest_open_candle(order["symbol"], order["market"], order["timeframe"])
+        except Exception:
+            logger.exception("Unable to fetch entry candle for pending order #%s", order.get("id"))
+            open_candle = None
+
+        candle_time = int(open_candle["open_time"]) if open_candle and open_candle.get("open_time") is not None else None
+        if candle_time is not None and candle_time > entry_time:
+            try:
+                transition_order(int(order["id"]), "EXPIRED", reason="Intended entry candle was missed")
+                result["expired"] += 1
+            except Exception:
+                logger.exception("Unable to expire pending paper order #%s", order.get("id"))
+            continue
+        if now_ms < entry_time:
+            continue
+        if now_ms - entry_time > max_delay_ms or now_ms >= entry_time + interval_ms:
+            try:
+                transition_order(int(order["id"]), "EXPIRED", reason="Entry window elapsed")
+                result["expired"] += 1
+            except Exception:
+                logger.exception("Unable to expire pending paper order #%s", order.get("id"))
+            continue
+        if candle_time != entry_time or not open_candle:
+            continue
+
+        trade = {
+            "direction": order["direction"],
+            "entry_price": float(order["requested_entry_price"]),
+            "stop_loss": float(order["stop_loss"]),
+            "take_profit": float(order["take_profit"]),
+            "atr_at_signal": float(order["atr_at_signal"]),
+        }
+        try:
+            fill = fill_pending_order(
+                int(order["id"]),
+                float(order["requested_entry_price"]),
+                lambda conn: _insert_position(
+                    cfg, trade, float(open_candle["close"]), entry_time,
+                    ml_model_id=order.get("ml_model_id"),
+                    ml_probability=order.get("ml_probability"),
+                    connection=conn,
+                ),
+            )
+            if fill["status"] == "filled":
+                result["filled"] += 1
+            elif fill["status"] == "rejected":
+                result["rejected"] += 1
+        except Exception:
+            logger.exception("Unable to recover/fill pending paper order #%s", order.get("id"))
+    return result
+
 def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
     """Evaluate active configs and open positions with canonical accounting."""
     configs = get_paper_configs()
+    order_recovery = _process_pending_paper_orders(configs)
     active_cfgs = [c for c in configs if c["is_active"]]
     positions = get_active_positions()
     open_pos_map = {(p["symbol"], p["market"], p["timeframe"], p["strategy_name"]): p for p in positions}
-    result = {"evaluated_configs": len(active_cfgs), "positions_updated": 0, "new_positions_opened": 0, "positions_closed": 0}
+    result = {"evaluated_configs": len(active_cfgs), "positions_updated": 0,
+              "new_positions_opened": order_recovery["filled"], "positions_closed": 0,
+              "orders_filled": order_recovery["filled"], "orders_expired": order_recovery["expired"],
+              "orders_rejected": order_recovery["rejected"]}
 
     for cfg in active_cfgs:
         symbol, market, timeframe, strategy_name = cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"]
@@ -640,7 +741,6 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
             # warning log below (this ordering bug previously caused a
             # NameError -> uncaught 500 on every /api/paper/sync call that
             # touched a position with invalid/NaN ATR on its latest bar).
-            import pandas as pd
             raw_atr = latest_bar.get("atr")
             if pd.isna(raw_atr) or float(raw_atr or 0.0) <= 0:
                 atr = 0.0
@@ -797,10 +897,36 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                             logger.error("Error evaluating ML signal filter %s: %s; skipping entry (fail closed)", ml_model_id, ml_err)
                             continue
 
-                    if _insert_position(cfg, latest_trade, float(open_candle["close"]), entry_candle_time,
-                                        ml_model_id=ml_model_id, ml_probability=ml_probability):
+                    # Persist only after the ML gate succeeds. If the process stops
+                    # after persistence, the next sync recovers this pending order.
+                    try:
+                        order = create_pending_order({
+                            "config_id": cfg["id"], "symbol": symbol, "market": market,
+                            "timeframe": timeframe, "strategy_name": strategy_name,
+                            "signal_open_time": candle_open_time, "entry_time": entry_candle_time,
+                            "direction": latest_trade["direction"],
+                            "requested_entry_price": float(latest_trade["entry_price"]),
+                            "stop_loss": float(latest_trade["stop_loss"]),
+                            "take_profit": float(latest_trade["take_profit"]),
+                            "atr_at_signal": float(latest_trade.get("atr_at_signal", latest_bar.get("atr", 0)) or 0),
+                            "ml_model_id": ml_model_id, "ml_probability": ml_probability,
+                        })
+                    except Exception:
+                        logger.exception("Unable to persist paper order for %s/%s", symbol, strategy_name)
+                        continue
+
+                    order_result = fill_pending_order(
+                        int(order["id"]),
+                        float(order["requested_entry_price"]),
+                        lambda conn: _insert_position(
+                            cfg, latest_trade, float(open_candle["close"]), entry_candle_time,
+                            ml_model_id=ml_model_id, ml_probability=ml_probability, connection=conn,
+                        ),
+                    )
+                    if order_result["status"] == "filled":
                         result["new_positions_opened"] += 1
-                        logger.info("Opened paper position for %s (%s) via %s", symbol, latest_trade["direction"], strategy_name)
+                        result["orders_filled"] += 1
+                        logger.info("Filled paper order #%s for %s (%s) via %s", order["id"], symbol, latest_trade["direction"], strategy_name)
                         try:
                             from notifications.telegram_notifier import send_signal_alert
                             send_signal_alert(
@@ -817,5 +943,6 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                             )
                         except Exception as tel_err:
                             logger.warning("Telegram entry signal alert failed: %s", tel_err)
+
 
     return result
