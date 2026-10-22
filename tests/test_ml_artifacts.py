@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ml.artifacts import ModelArtifact, paper_eligibility, resolve_model_artifact_paths
+from ml.artifacts import ModelArtifact, load_eligible_paper_artifact, paper_eligibility, resolve_model_artifact_paths
 
 
 class TestMLArtifacts(unittest.TestCase):
@@ -19,6 +19,33 @@ class TestMLArtifacts(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path = artifact.save_manifest(d)
             self.assertTrue(Path(path).exists())
+
+
+    def test_runtime_manifest_must_still_pass_eligibility_gate(self):
+        manifest = ModelArtifact(
+            model_id="model-v1", experiment_id="exp-1",
+            model_type="random_forest", base_strategy="trend_ema",
+            feature_columns=("rsi",), strategy_params={}, model_params={},
+            threshold=0.5, train_metrics={}, validation_metrics={},
+            test_metrics={"trade_count": 40, "profit_factor": 1.2,
+                          "max_drawdown_pct": 10, "net_pnl": 10},
+            eligible_for_paper=True,
+        ).manifest()
+        self.assertEqual(load_eligible_paper_artifact(manifest, "model-v1").model_id, "model-v1")
+
+        bad_metrics = dict(manifest, test_metrics={"trade_count": 4, "profit_factor": 2,
+                                                  "max_drawdown_pct": 2, "net_pnl": 100})
+        with self.assertRaisesRegex(ValueError, "eligibility"):
+            load_eligible_paper_artifact(bad_metrics, "model-v1")
+
+        flagged_off = dict(manifest, eligible_for_paper=False)
+        with self.assertRaisesRegex(ValueError, "not marked eligible"):
+            load_eligible_paper_artifact(flagged_off, "model-v1")
+
+        mismatched_id = dict(manifest, model_id="other-model")
+        with self.assertRaisesRegex(ValueError, "ID does not match"):
+            load_eligible_paper_artifact(mismatched_id, "model-v1")
+
 
     def test_model_artifact_rejects_unsafe_model_ids(self):
         for model_id in ("../outside", "..", "nested/model", ""):
