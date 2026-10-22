@@ -1,6 +1,8 @@
 import unittest
 
 from backtest.accounting import (
+    apply_entry_slippage,
+    apply_exit_slippage,
     calculate_funding_cost,
     calculate_position_size,
     calculate_trade_accounting,
@@ -48,6 +50,38 @@ class TestAccounting(unittest.TestCase):
     def test_invalid_position_size_is_rejected(self):
         with self.assertRaises(ValueError):
             calculate_position_size(5000, 1.0, 100.0, 100.0)
+
+    def test_non_finite_position_inputs_are_rejected(self):
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                calculate_position_size(value, 1.0, 100.0, 95.0)
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                calculate_position_size(5000.0, value, 100.0, 95.0)
+
+    def test_non_finite_slippage_and_prices_are_rejected(self):
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                apply_entry_slippage(value, "LONG", 0.001)
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                apply_exit_slippage(100.0, "LONG", value)
+        with self.assertRaises(ValueError):
+            apply_entry_slippage(100.0, "SHORT", 1.0)
+
+    def test_non_finite_funding_and_trade_inputs_are_rejected(self):
+        with self.assertRaises(ValueError):
+            calculate_funding_cost(1.0, [(100.0, float("nan"))])
+        with self.assertRaises(ValueError):
+            calculate_trade_accounting("LONG", 1.0, float("inf"), 100.0, 0.001)
+        with self.assertRaises(ValueError):
+            calculate_trade_accounting("LONG", 1.0, 100.0, 100.0, float("nan"))
+        with self.assertRaises(ValueError):
+            calculate_trade_accounting("LONG", 1.0, 100.0, 100.0, 0.001, funding_cost=float("inf"))
+
+    def test_overflowing_derived_values_are_rejected(self):
+        with self.assertRaises(ValueError):
+            calculate_position_size(1e308, 100.0, 100.0, 95.0)
+        with self.assertRaises(ValueError):
+            calculate_trade_accounting("LONG", 1e308, 100.0, 110.0, 0.001)
 
 
 if __name__ == "__main__":

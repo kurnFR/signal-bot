@@ -5,7 +5,15 @@ units. The module intentionally contains no database or strategy logic so it
 can be reused by the paper engine.
 """
 from dataclasses import dataclass
+import math
 from typing import Iterable, Optional
+
+
+def _require_finite(**values: float) -> None:
+    """Reject NaN/inf before they can contaminate financial results."""
+    for name, value in values.items():
+        if not math.isfinite(value):
+            raise ValueError(f"{name} must be finite")
 
 
 @dataclass(frozen=True)
@@ -23,6 +31,7 @@ def calculate_position_size(
     stop_price: float,
 ) -> PositionSize:
     """Size a position so the modeled stop loss risks exactly risk_pct of equity."""
+    _require_finite(equity=equity, risk_pct=risk_pct, entry_price=entry_price, stop_price=stop_price)
     if equity <= 0:
         raise ValueError("equity must be positive")
     if risk_pct <= 0:
@@ -36,16 +45,19 @@ def calculate_position_size(
 
     risk_amount = equity * (risk_pct / 100.0)
     quantity = risk_amount / stop_distance
+    notional = quantity * entry_price
+    _require_finite(risk_amount=risk_amount, quantity=quantity, notional=notional)
     return PositionSize(
         risk_amount=risk_amount,
         stop_distance=stop_distance,
         quantity=quantity,
-        notional=quantity * entry_price,
+        notional=notional,
     )
 
 
 def apply_entry_slippage(price: float, direction: str, slippage_pct: float) -> float:
-    if price <= 0 or slippage_pct < 0:
+    _require_finite(price=price, slippage_pct=slippage_pct)
+    if price <= 0 or slippage_pct < 0 or slippage_pct >= 1:
         raise ValueError("invalid price/slippage")
     if direction == "LONG":
         return price * (1 + slippage_pct)
@@ -55,7 +67,8 @@ def apply_entry_slippage(price: float, direction: str, slippage_pct: float) -> f
 
 
 def apply_exit_slippage(price: float, direction: str, slippage_pct: float) -> float:
-    if price <= 0 or slippage_pct < 0:
+    _require_finite(price=price, slippage_pct=slippage_pct)
+    if price <= 0 or slippage_pct < 0 or slippage_pct >= 1:
         raise ValueError("invalid price/slippage")
     if direction == "LONG":
         return price * (1 - slippage_pct)
@@ -75,14 +88,17 @@ def calculate_funding_cost(
     the cost from the perspective of a LONG position; callers invert the sign
     for SHORT positions.
     """
+    _require_finite(quantity=quantity)
     if quantity <= 0:
         raise ValueError("quantity must be positive")
 
     total = 0.0
     for mark_price, funding_rate in funding_events:
+        _require_finite(mark_price=mark_price, funding_rate=funding_rate)
         if mark_price <= 0:
             raise ValueError("funding mark price must be positive")
         total += mark_price * quantity * funding_rate
+        _require_finite(total=total)
     return total
 
 
@@ -102,14 +118,20 @@ def calculate_trade_accounting(
     `funding_cost` is an absolute quote-currency amount. Positive means a cost
     paid by the position; negative means funding received.
     """
+    _require_finite(quantity=quantity, entry_price=entry_price, exit_price=exit_price,
+                    fee_pct=fee_pct, entry_slippage_pct=entry_slippage_pct,
+                    funding_cost=funding_cost)
+    if stop_price is not None:
+        _require_finite(stop_price=stop_price)
     if quantity <= 0:
         raise ValueError("quantity must be positive")
     if fee_pct < 0 or entry_slippage_pct < 0:
         raise ValueError("cost rates cannot be negative")
     if exit_slippage_pct is None:
         exit_slippage_pct = entry_slippage_pct
-    if exit_slippage_pct < 0:
-        raise ValueError("exit slippage cannot be negative")
+    _require_finite(exit_slippage_pct=exit_slippage_pct)
+    if exit_slippage_pct < 0 or exit_slippage_pct >= 1:
+        raise ValueError("exit slippage must be in [0, 1)")
 
     entry_exec = apply_entry_slippage(entry_price, direction, entry_slippage_pct)
     exit_exec = apply_exit_slippage(exit_price, direction, exit_slippage_pct)
@@ -125,13 +147,21 @@ def calculate_trade_accounting(
     exit_notional = exit_exec * quantity
     fees = (entry_notional + exit_notional) * fee_pct
     net_pnl = gross_pnl - fees - funding_cost
+    _require_finite(gross_pnl=gross_pnl, entry_notional=entry_notional,
+                    exit_notional=exit_notional, fees=fees, net_pnl=net_pnl)
 
     risk_amount = None
     r_multiple = None
     if stop_price is not None:
         risk_amount = abs(entry_price - stop_price) * quantity
+        _require_finite(risk_amount=risk_amount)
         if risk_amount > 0:
             r_multiple = net_pnl / risk_amount
+            _require_finite(r_multiple=r_multiple)
+
+    return_pct = (net_pnl / entry_notional * 100.0) if entry_notional else None
+    if return_pct is not None:
+        _require_finite(return_pct=return_pct)
 
     return {
         "entry_exec_price": entry_exec,
@@ -142,5 +172,5 @@ def calculate_trade_accounting(
         "net_pnl": net_pnl,
         "risk_amount": risk_amount,
         "r_multiple": r_multiple,
-        "return_pct_on_entry_notional": (net_pnl / entry_notional * 100.0) if entry_notional else None,
+        "return_pct_on_entry_notional": return_pct,
     }
