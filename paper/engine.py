@@ -922,6 +922,13 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                         logger.exception("Unable to persist paper order for %s/%s", symbol, strategy_name)
                         continue
 
+                    # Recheck the shared emergency stop immediately before the
+                    # transactional fill; it may have changed after signal evaluation.
+                    from paper.circuit_breaker import check_circuit_breakers
+                    fill_allowed, fill_block_reason = check_circuit_breakers()
+                    if not fill_allowed:
+                        logger.warning("Paper order #%s remains pending: %s", order["id"], fill_block_reason)
+                        continue
                     order_result = fill_pending_order(
                         int(order["id"]),
                         float(order["requested_entry_price"]),
