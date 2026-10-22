@@ -592,6 +592,8 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
     """Recover pending orders and fill only during their intended next-open window."""
     config_by_id = {int(cfg["id"]): cfg for cfg in configs if cfg.get("id") is not None}
     result = {"filled": 0, "expired": 0, "rejected": 0}
+    if not config_by_id:
+        return result
     try:
         pending = list_orders(status="PENDING", limit=200)
     except Exception:
