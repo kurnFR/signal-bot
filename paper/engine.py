@@ -889,7 +889,6 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                     if ml_model_id:
                         try:
                             import json
-                            from pathlib import Path
                             import joblib
                             from ml.artifacts import ModelArtifact, resolve_model_artifact_paths
                             from ml.strategy import MLSignalFilter
@@ -901,29 +900,25 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                             if artifact.model_id != ml_model_id:
                                 raise ValueError("Model manifest ID does not match configured model ID")
                             model = joblib.load(model_path)
-                                ml_filter = MLSignalFilter(artifact=artifact, model=model, threshold=artifact.threshold)
+                            ml_filter = MLSignalFilter(artifact=artifact, model=model, threshold=artifact.threshold)
 
-                                # Evaluate features on current candle
-                                feature_row = pd.DataFrame([latest_bar.to_dict()])
-                                probs = ml_filter.predict_probability(feature_row)
-                                ml_probability = float(probs[0])
-                                ml_threshold = float(ml_filter.threshold)
+                            # Evaluate features on current candle
+                            feature_row = pd.DataFrame([latest_bar.to_dict()])
+                            probs = ml_filter.predict_probability(feature_row)
+                            ml_probability = float(probs[0])
+                            ml_threshold = float(ml_filter.threshold)
 
-                                if ml_probability < ml_threshold:
-                                    _ML_REJECTED_CANDLE[key] = candle_open_time
-                                    logger.info(
-                                        "Paper trading signal %s (%s) REJECTED by ML model %s: prob=%.4f < threshold=%.4f",
-                                        symbol, latest_trade["direction"], ml_model_id, ml_probability, ml_threshold
-                                    )
-                                    continue
+                            if ml_probability < ml_threshold:
+                                _ML_REJECTED_CANDLE[key] = candle_open_time
                                 logger.info(
-                                    "Paper trading signal %s (%s) ACCEPTED by ML model %s: prob=%.4f >= threshold=%.4f",
+                                    "Paper trading signal %s (%s) REJECTED by ML model %s: prob=%.4f < threshold=%.4f",
                                     symbol, latest_trade["direction"], ml_model_id, ml_probability, ml_threshold
                                 )
-                            else:
-                                # Fail closed: a configured safety filter that cannot run must not be skipped.
-                                logger.error("ML model files for %s not found in ml_models/; skipping entry (fail closed)", ml_model_id)
                                 continue
+                            logger.info(
+                                "Paper trading signal %s (%s) ACCEPTED by ML model %s: prob=%.4f >= threshold=%.4f",
+                                symbol, latest_trade["direction"], ml_model_id, ml_probability, ml_threshold
+                            )
                         except Exception as ml_err:
                             logger.error("Error evaluating ML signal filter %s: %s; skipping entry (fail closed)", ml_model_id, ml_err)
                             continue
