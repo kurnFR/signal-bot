@@ -1949,7 +1949,7 @@ const App = {
         const ordersBody = document.getElementById("paper-orders-body");
         if (ordersBody) {
             if (!this.paperOrders.length) {
-                ordersBody.innerHTML = \`<tr><td colspan="9" class="text-center py-6 text-slate-500 text-xs">No paper orders match this filter.</td></tr>\`;
+                ordersBody.innerHTML = `<tr><td colspan="9" class="text-center py-6 text-slate-500 text-xs">No paper orders match this filter.</td></tr>`;
             } else {
                 const canCancelOrders = ["trader", "admin"].includes(String(this.currentUser?.role || "").toLowerCase());
                 const statusClasses = {
@@ -1962,24 +1962,24 @@ const App = {
                 ordersBody.innerHTML = this.paperOrders.map(order => {
                     const status = String(order.status || "UNKNOWN").toUpperCase();
                     const price = Number(order.requested_entry_price);
-                    const entryPrice = Number.isFinite(price) ? \`$\${price.toLocaleString()}\` : "—";
+                    const entryPrice = Number.isFinite(price) ? `$${price.toLocaleString()}` : "—";
                     const createdAt = order.created_at || order.updated_at || "—";
                     const action = status === "PENDING" && canCancelOrders
-                        ? \`<button type="button" data-paper-order-cancel-id="\${this._escapeHtml(String(order.id))}" aria-label="Cancel pending paper order #\${this._escapeHtml(String(order.id))}" class="px-2.5 py-1 text-xs rounded bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 font-medium">Cancel</button>\`
-                        : \`<span class="text-xs text-slate-500">—</span>\`;
-                    return \`
+                        ? `<button type="button" data-paper-order-cancel-id="${this._escapeHtml(String(order.id))}" aria-label="Cancel pending paper order #${this._escapeHtml(String(order.id))}" class="px-2.5 py-1 text-xs rounded bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 font-medium">Cancel</button>`
+                        : `<span class="text-xs text-slate-500">—</span>`;
+                    return `
                         <tr>
-                            <td class="font-bold font-mono text-slate-100">\${this._escapeHtml(order.symbol || "—")}</td>
-                            <td class="text-xs uppercase">\${this._escapeHtml(order.market || "—")} / \${this._escapeHtml(order.timeframe || "—")}</td>
-                            <td class="font-mono text-xs text-sky-400">\${this._escapeHtml(order.strategy_name || "—")}</td>
-                            <td>\${this._escapeHtml(order.direction || "—")}</td>
-                            <td class="font-mono text-xs">\${this._escapeHtml(entryPrice)}</td>
-                            <td><span class="px-2 py-0.5 rounded border text-[10px] font-bold \${statusClasses[status] || "bg-slate-800 text-slate-300 border-slate-700"}">\${this._escapeHtml(status)}</span></td>
-                            <td class="text-xs text-slate-400 max-w-xs">\${this._escapeHtml(order.state_reason || "—")}</td>
-                            <td class="text-xs text-slate-400 font-mono">\${this._escapeHtml(String(createdAt))}</td>
-                            <td class="text-right">\${action}</td>
+                            <td class="font-bold font-mono text-slate-100">${this._escapeHtml(order.symbol || "—")}</td>
+                            <td class="text-xs uppercase">${this._escapeHtml(order.market || "—")} / ${this._escapeHtml(order.timeframe || "—")}</td>
+                            <td class="font-mono text-xs text-sky-400">${this._escapeHtml(order.strategy_name || "—")}</td>
+                            <td>${this._escapeHtml(order.direction || "—")}</td>
+                            <td class="font-mono text-xs">${this._escapeHtml(entryPrice)}</td>
+                            <td><span class="px-2 py-0.5 rounded border text-[10px] font-bold ${statusClasses[status] || "bg-slate-800 text-slate-300 border-slate-700"}">${this._escapeHtml(status)}</span></td>
+                            <td class="text-xs text-slate-400 max-w-xs">${this._escapeHtml(order.state_reason || "—")}</td>
+                            <td class="text-xs text-slate-400 font-mono">${this._escapeHtml(String(createdAt))}</td>
+                            <td class="text-right">${action}</td>
                         </tr>
-                    \`;
+                    `;
                 }).join("");
                 ordersBody.querySelectorAll("[data-paper-order-cancel-id]").forEach(button => {
                     button.addEventListener("click", () => {
@@ -1994,18 +1994,18 @@ const App = {
     async cancelPaperOrder(orderId) {
         if (!Number.isSafeInteger(orderId) || orderId <= 0) return;
         try {
-            const response = await fetch(\`\${API_BASE}/api/paper/orders/\${orderId}/cancel\`, {
+            const response = await fetch(`${API_BASE}/api/paper/orders/${orderId}/cancel`, {
                 method: "POST",
                 headers: this.getAuthHeaders(),
             });
             let payload = {};
             try { payload = await response.json(); } catch (_) {}
-            if (!response.ok) throw new Error(payload.detail || \`HTTP \${response.status}\`);
-            this.showToast(\`Paper order #\${orderId} cancelled\`, "success");
+            if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+            this.showToast(`Paper order #${orderId} cancelled`, "success");
             await this.fetchPaperData();
         } catch (error) {
             const message = error && error.message ? error.message : String(error || "Unknown error");
-            this.showToast(\`Unable to cancel paper order #\${orderId}: \${message}\`, "error");
+            this.showToast(`Unable to cancel paper order #${orderId}: ${message}`, "error");
         }
     },
 
