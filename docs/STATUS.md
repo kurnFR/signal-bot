@@ -40,7 +40,7 @@ Verified this session: a fresh database built from the README steps boots the ap
 
 **Still open**
 
-1. **No durable execution lifecycle (P0.5).** The paper engine evaluates signals on closed candles and only permits simulated entry on the immediately following in-progress candle; missing or stale next-candle data blocks entry instead of backfilling a historical open. A persisted order state machine (`PENDING`, `FILLED`, `EXPIRED`, `CANCELLED`, `REJECTED`) and cancellation/audit flow are still missing. This remains paper/shadow execution, not live execution.
+1. **No durable execution lifecycle (P0.5).** PR #239 fixes next-open timing and blocks historical backfills, but the engine still lacks a persisted order state machine (`PENDING`, `FILLED`, `EXPIRED`, `CANCELLED`, `REJECTED`) and cancellation/audit flow. See [PAPER_ORDER_LIFECYCLE.md](PAPER_ORDER_LIFECYCLE.md) for the design and acceptance criteria. This remains paper/shadow execution, not live execution.
 2. **Flat cost model.** Fees (0.1%) and slippage (0.05%) per side are constants; there is no spread, volume or liquidity model.
 3. **Runtime data in git:** `custom_strategies.json` and `Screen/signals.jsonl` are still tracked. Untrack them on the machine that holds your real data, after merging (see README, "Runtime data").
 4. **Repo hygiene:** over 30 branches, many merged or abandoned (including `do-not-use`, `ignore2`, `tmp-ignore`, `x`).
