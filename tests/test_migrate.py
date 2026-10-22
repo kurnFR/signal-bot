@@ -221,5 +221,71 @@ class TestMariaDBIntegration(unittest.TestCase):
             admin.close()
 
 
+    def test_existing_populated_database_adoption_preserves_ohlcv_rows(self):
+        """Adopt an existing schema without rewriting historical candle data.
+
+        The baseline SQL represents a pre-tracking database snapshot for this
+        rehearsal. The tracking table is deliberately removed before the
+        runner is invoked, simulating a legacy install that predates migration
+        bookkeeping. This does not replace a rehearsal against a production
+        schema snapshot.
+        """
+        import mysql.connector
+        from db import migrate
+        from config import MYSQL_CONFIG
+
+        cfg = dict(MYSQL_CONFIG)
+        name = "sb_migrate_populated_it"
+        admin = mysql.connector.connect(**{k: v for k, v in cfg.items() if k != "database"})
+        cur = admin.cursor()
+        cur.execute(f"DROP DATABASE IF EXISTS {name}")
+        cur.execute(f"CREATE DATABASE {name}")
+        admin.commit()
+        conn = mysql.connector.connect(**dict(cfg, database=name))
+        try:
+            # Install the current baseline without recording migration versions.
+            cur2 = conn.cursor()
+            baseline = next(m for m in MIGRATIONS if m.version == "000_baseline")
+            migrate.run_statements(
+                cur2,
+                migrate.split_statements((DB_DIR / baseline.filename).read_text(encoding="utf-8")),
+                label="integration-baseline",
+                log=lambda _: None,
+            )
+            cur2.execute(
+                """INSERT INTO ohlcv
+                   (symbol, market, timeframe, open_time, close_time, open, high, low,
+                    close, volume, quote_volume, num_trades, taker_buy_base_vol,
+                    taker_buy_quote_vol, is_closed)
+                   VALUES (%s, 'spot', '1m', %s, %s, 100, 102, 99, 101, 12, 1212, 7, 6, 606, 1)""",
+                ("MIGRATION_REHEARSAL", 1_790_000_000_000, 1_790_000_059_999),
+            )
+            conn.commit()
+            cur2.execute("SELECT symbol, open_time, close, volume FROM ohlcv WHERE symbol = %s",
+                         ("MIGRATION_REHEARSAL",))
+            before = cur2.fetchall()
+            self.assertEqual(before, [("MIGRATION_REHEARSAL", 1_790_000_000_000, 101, 12)])
+            cur2.execute("DROP TABLE schema_migrations")
+            conn.commit()
+            cur2.close()
+
+            # Existing ohlcv means this is an upgrade/adoption, not a fresh install.
+            migrate.apply_pending(conn, log=lambda _: None)
+            cur3 = conn.cursor()
+            cur3.execute("SELECT symbol, open_time, close, volume FROM ohlcv WHERE symbol = %s",
+                         ("MIGRATION_REHEARSAL",))
+            after = cur3.fetchall()
+            self.assertEqual(after, before)
+            cur3.execute("SELECT COUNT(*) FROM schema_migrations")
+            self.assertEqual(cur3.fetchone()[0], len(MIGRATIONS))
+            cur3.close()
+            self.assertEqual(migrate.apply_pending(conn, log=lambda _: None), [])
+        finally:
+            conn.close()
+            cur.execute(f"DROP DATABASE IF EXISTS {name}")
+            admin.commit()
+            admin.close()
+
+
 if __name__ == "__main__":
     unittest.main()
