@@ -40,7 +40,7 @@ Verified this session: a fresh database built from the README steps boots the ap
 
 **Still open**
 
-1. **Execution lifecycle still incomplete (P0.5).** PRs #239 and #241 restrict entries to the immediate next open and a configurable 120-second default delay window. PR #243 adds the `paper_orders` schema and guarded transition service, but the engine does not yet create/process orders; cancellation API, crash reconciliation, and dashboard history remain open. See [PAPER_ORDER_LIFECYCLE.md](PAPER_ORDER_LIFECYCLE.md) for the design and acceptance criteria. This remains paper/shadow execution, not live execution.
+1. **Execution lifecycle still incomplete (P0.5).** PRs #239/#241 restrict entries to the next-open window; PR #243 adds the ledger; PR #245 connects signal discovery, pending-order recovery/expiry, and atomic position/order fills. Authenticated list/cancel routes, dashboard history, and concurrent/crash recovery validation against MariaDB remain open. This remains paper/shadow execution, not live execution. See [PAPER_ORDER_LIFECYCLE.md](PAPER_ORDER_LIFECYCLE.md).
 2. **Flat cost model.** Fees (0.1%) and slippage (0.05%) per side are constants; there is no spread, volume or liquidity model.
 3. **Runtime data in git:** `custom_strategies.json` and `Screen/signals.jsonl` are still tracked. Untrack them on the machine that holds your real data, after merging (see README, "Runtime data").
 4. **Repo hygiene:** over 30 branches, many merged or abandoned (including `do-not-use`, `ignore2`, `tmp-ignore`, `x`).
