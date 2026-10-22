@@ -31,8 +31,10 @@ class TestPaperOrdersMariaDB(unittest.TestCase):
 
         # The CI job supplies MYSQL_* before Python starts. Reset the shared
         # pool singleton so these tests use the isolated database configuration.
-        db_module._pool = None
-        cls.pool = db_module.get_pool()
+        # Reuse the isolated pool if the Wallet Tracker integration class
+        # already initialized it in this same pytest process; creating a second
+        # pool with the same connector pool_name raises PoolError.
+        cls.pool = db_module._pool or db_module.get_pool()
         cls.migration_sql = (ROOT / "db" / "migrate_paper_orders.sql").read_text(encoding="utf-8")
         cls._apply_migration()
         conn = cls.pool.get_connection()
