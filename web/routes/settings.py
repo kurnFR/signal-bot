@@ -8,8 +8,8 @@ from config import MYSQL_CONFIG, ENABLE_FUTURES, SPOT_KLINE_URL, FUTURES_KLINE_U
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
-@router.get("/status")
-def get_system_status():
+def collect_system_status() -> dict:
+    """Full status (includes connection details). Callers decide what to expose."""
     # MariaDB check
     db_status = "ok"
     db_error = None
@@ -63,7 +63,6 @@ def get_system_status():
             "host": MYSQL_CONFIG["host"],
             "port": MYSQL_CONFIG["port"],
             "database": MYSQL_CONFIG["database"],
-            "user": MYSQL_CONFIG["user"],
             "tables": table_counts,
             "error": db_error,
         },
@@ -77,3 +76,9 @@ def get_system_status():
             "timezone": "Asia/Jakarta (WIB UTC+7)",
         }
     }
+
+
+@router.get("/status")
+def get_system_status():
+    """Admin-only (see ADMIN_ONLY_PREFIXES): full status including connection details."""
+    return collect_system_status()

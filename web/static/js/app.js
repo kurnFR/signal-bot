@@ -1657,6 +1657,19 @@ const App = {
         });
     },
 
+    // Turns FastAPI error bodies (string, or an array of {loc, msg}) into readable text.
+    apiErrorMessage(data, fallback) {
+        const detail = data && data.detail;
+        if (typeof detail === "string" && detail) return detail;
+        if (Array.isArray(detail) && detail.length) {
+            return detail.map(d => {
+                const field = Array.isArray(d.loc) ? d.loc.filter(p => p !== "body").join(".") : "";
+                return field ? `${field}: ${d.msg}` : String(d.msg || "Invalid value");
+            }).join("; ");
+        }
+        return fallback;
+    },
+
     async handleCreateUser() {
         const username = document.getElementById("new-user-username").value.trim();
         const email = document.getElementById("new-user-email").value.trim();
@@ -1669,8 +1682,8 @@ const App = {
                 headers: this.getAuthHeaders(),
                 body: JSON.stringify({ username, email, password, role })
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || "User creation failed");
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(this.apiErrorMessage(data, "User creation failed"));
 
             this.showToast(`User '${username}' created successfully!`, "success");
             document.getElementById("new-user-username").value = "";
@@ -1678,12 +1691,12 @@ const App = {
             document.getElementById("new-user-password").value = "";
             await this.fetchUsers();
         } catch (e) {
-            alert("Error: " + e.message);
+            this.showToast("Could not create user: " + e.message, "error");
         }
     },
 
     openResetPasswordModal(userId, username) {
-        const newPass = prompt(`Enter new password for user '${username}' (min 6 characters):`);
+        const newPass = prompt(`Enter new password for user '${username}' (min 10 characters):`);
         if (!newPass) return;
         this.submitResetPassword(userId, newPass);
     },
@@ -1695,11 +1708,11 @@ const App = {
                 headers: this.getAuthHeaders(),
                 body: JSON.stringify({ new_password: newPassword })
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || "Reset failed");
-            this.showToast(data.message, "success");
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(this.apiErrorMessage(data, "Reset failed"));
+            this.showToast(data.message || "Password reset", "success");
         } catch (e) {
-            alert("Error: " + e.message);
+            this.showToast("Could not reset password: " + e.message, "error");
         }
     },
 
@@ -1713,9 +1726,12 @@ const App = {
             if (res.ok) {
                 this.showToast("User status updated", "info");
                 await this.fetchUsers();
+            } else {
+                const data = await res.json().catch(() => ({}));
+                this.showToast("Could not update user: " + this.apiErrorMessage(data, `HTTP ${res.status}`), "error");
             }
         } catch (e) {
-            alert("Error: " + e);
+            this.showToast("Could not update user: " + e.message, "error");
         }
     },
 
@@ -2082,7 +2098,10 @@ const App = {
 
     async fetchSystemStatus() {
         try {
-            const res = await fetch(`${API_BASE}/api/settings/status`, { headers: this.getAuthHeaders() });
+            // Admins get the full status; everyone else a read-only version without connection details.
+            const isAdmin = this.currentUser && String(this.currentUser.role).toLowerCase() === "admin";
+            const statusUrl = isAdmin ? "/api/settings/status" : "/api/system/status";
+            const res = await fetch(`${API_BASE}${statusUrl}`, { headers: this.getAuthHeaders() });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             if (!data || !data.database || typeof data.database.status !== "string") {
@@ -3657,12 +3676,15 @@ const App = {
         if (!this.systemStatus) return;
         const db = this.systemStatus.database || {};
         const bin = this.systemStatus.binance || {};
-
-        document.getElementById("settings-db-host").innerText = `${db.host}:${db.port}`;
-        document.getElementById("settings-db-name").innerText = db.database;
-        document.getElementById("settings-db-user").innerText = db.user;
-        document.getElementById("settings-bin-spot").innerText = bin.spotApi;
-        document.getElementById("settings-bin-futures").innerText = bin.futuresApi;
+        // Null-safe: a missing element must never abort the rest of the render.
+        const setText = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.innerText = value === undefined || value === null ? "-" : value;
+        };
+        setText("settings-db-host", `${db.host}:${db.port}`);
+        setText("settings-db-name", db.database);
+        setText("settings-bin-spot", bin.spotApi);
+        setText("settings-bin-futures", bin.futuresApi);
     },
 
     // ==========================================

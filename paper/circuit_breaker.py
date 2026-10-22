@@ -32,19 +32,85 @@ _emergency_stop_active = False
 _emergency_stop_reason = ""
 
 
+EMERGENCY_FLAG = "emergency_stop"
+
+
+def _persist_emergency_flag(active: bool, reason: str) -> bool:
+    """Write the kill switch to the database so the paper-engine process sees it."""
+    conn = None
+    cur = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO system_flags (flag_name, is_active, reason) VALUES (%s, %s, %s) "
+            "ON DUPLICATE KEY UPDATE is_active = VALUES(is_active), reason = VALUES(reason)",
+            (EMERGENCY_FLAG, 1 if active else 0, reason[:500]),
+        )
+        conn.commit()
+        return True
+    except Exception as exc:
+        logger.error("Could not persist emergency-stop flag: %s", exc)
+        return False
+    finally:
+        for closer in (cur, conn):
+            if closer is not None:
+                try:
+                    closer.close()
+                except Exception:
+                    logger.debug("Failed to close flag resource", exc_info=True)
+
+
+def _read_emergency_flag() -> Optional[Tuple[bool, str]]:
+    """Return (active, reason) from the database, or None when it cannot be read."""
+    conn = None
+    cur = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT is_active, reason FROM system_flags WHERE flag_name = %s", (EMERGENCY_FLAG,))
+        row = cur.fetchone()
+        if row is None:
+            return False, ""
+        return bool(row.get("is_active")), str(row.get("reason") or "")
+    except Exception as exc:
+        logger.warning("Could not read emergency-stop flag: %s", exc)
+        return None
+    finally:
+        for closer in (cur, conn):
+            if closer is not None:
+                try:
+                    closer.close()
+                except Exception:
+                    logger.debug("Failed to close flag resource", exc_info=True)
+
+
+def is_emergency_stop_active() -> Tuple[bool, str]:
+    """Active if tripped in this process OR recorded in the shared database."""
+    if _emergency_stop_active:
+        return True, _emergency_stop_reason
+    shared = _read_emergency_flag()
+    if shared and shared[0]:
+        return True, shared[1] or "Emergency stop active"
+    return False, ""
+
+
 def trip_emergency_stop(reason: str = "Manual emergency stop triggered") -> None:
-    """Activate the global emergency stop circuit breaker."""
+    """Activate the global emergency stop in this process and in the shared database."""
     global _emergency_stop_active, _emergency_stop_reason
     _emergency_stop_active = True
     _emergency_stop_reason = reason
+    if not _persist_emergency_flag(True, reason):
+        logger.error("Emergency stop is active in THIS process only; other processes cannot see it")
     logger.warning("CIRCUIT BREAKER TRIPPED: %s", reason)
 
 
 def reset_emergency_stop() -> None:
-    """Clear the in-memory emergency stop circuit breaker."""
+    """Clear the emergency stop everywhere."""
     global _emergency_stop_active, _emergency_stop_reason
     _emergency_stop_active = False
     _emergency_stop_reason = ""
+    _persist_emergency_flag(False, "")
     logger.info("Circuit breaker reset: new trade entries re-enabled")
 
 
@@ -148,8 +214,9 @@ def check_circuit_breakers(
     max_daily_loss: float = DEFAULT_MAX_DAILY_LOSS_USD,
 ) -> Tuple[bool, str]:
     """Return whether a new paper position is allowed; uncertainty blocks entry."""
-    if _emergency_stop_active:
-        return False, f"Emergency kill-switch is ACTIVE: {_emergency_stop_reason}"
+    stop_active, stop_reason = is_emergency_stop_active()
+    if stop_active:
+        return False, f"Emergency kill-switch is ACTIVE: {stop_reason}"
 
     conn = None
     cur = None
@@ -207,6 +274,7 @@ def get_circuit_breaker_status() -> Dict[str, Any]:
     """Return diagnostics without reporting unknown database values as zero."""
     today_net_pnl = get_daily_realized_loss_usd()
     open_notional = get_open_notional_usd()
+    stop_state = is_emergency_stop_active()
     conn = None
     cur = None
     active_count = 0
@@ -242,8 +310,8 @@ def get_circuit_breaker_status() -> Dict[str, Any]:
 
     return {
         "status": "NORMAL" if allowed else "TRIPPED",
-        "emergency_stop_active": _emergency_stop_active,
-        "emergency_stop_reason": _emergency_stop_reason,
+        "emergency_stop_active": stop_state[0],
+        "emergency_stop_reason": stop_state[1],
         "active_positions": active_count,
         "max_concurrent_positions": DEFAULT_MAX_CONCURRENT_POSITIONS,
         "today_realized_pnl_usd": round(today_net_pnl, 2) if today_net_pnl is not None else None,
