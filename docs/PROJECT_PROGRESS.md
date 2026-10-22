@@ -2,8 +2,8 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-22  
-**Master commit at review:** `286067e11970e609e08da5f24d7db7bd53623372`  
-**Overall status:** Active / not finished. PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves Telegram alerts after recovered fills, and #253 hardens ML promotion metrics. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
+**Master commit at review:** `acc7d17bc6872eb4f821245580fa86076aabf852`  
+**Overall status:** Active / not finished. PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253 hardens promotion metrics, and #255 aligns ML listing with deployability. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
 
@@ -36,7 +36,7 @@ Primary project references:
 | Database-status announcements and toast behavior | **Completed for identified issues** | PRs #222, #225, #229–#230 merged; broader live-region behavior still merits manual verification. |
 | Theme-specific sortable-indicator contrast | **Completed** | PR #233 merged and CI passed. |
 | Full project correctness and bug-free guarantee | **Not complete / cannot be guaranteed** | Continue risk-based review, regression tests, integration tests, and manual verification. |
-| ML paper-promotion safety | **Implemented with strengthened validation** | PR #235 shares the gate; PR #253 rejects non-finite/malformed metrics and fractional trade counts, validates drawdown bounds, and makes the registry recheck stored metrics. Keep negative tests and artifact provenance under review. |
+| ML paper-promotion safety | **Implemented with strengthened validation** | PR #253 rejects non-finite/malformed metrics and fractional trade counts, validates drawdown bounds, and makes the registry recheck stored metrics. PR #255 aligns model-list eligibility with deploy requirements and checks manifest ID/regular weight files. Keep negative tests and artifact provenance under review. |
 | Authentication and first-login hardening | **Implemented for identified controls** | First-login password change, stronger password policy, durable login throttling, and route authorization sweep are merged; continue periodic security review. |
 | Paper execution lifecycle and portfolio-level risk | **Code implemented; release validation open** | PRs #245, #247, and #248 integrate durable pending orders, atomic fills/recovery, authenticated history/cancellation, and dashboard state/filter controls. PR #250 adds passing MariaDB tests for fill concurrency, cancel-vs-fill, and crash rollback/retry. Populated-database upgrades and manual browser/accessibility checks remain open. Keep the system paper-only. |
 | Database migrations, durable jobs, and runtime-file hygiene | **Partially complete** | Versioned migrations and durable job state are merged. `custom_strategies.json` and `Screen/signals.jsonl` are still tracked and must be untracked without deleting real runtime data. |
@@ -124,6 +124,15 @@ PR #253 checks passed:
 - [pytest](https://github.com/kurnFR/signal-bot/actions/runs/39744257095)
 - [Project tests / MariaDB integration](https://github.com/kurnFR/signal-bot/actions/runs/39744257159)
 - [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39744257086)
+
+### ML model-list consistency — PR #255
+
+[PR #255](https://github.com/kurnFR/signal-bot/pull/255) fixes a UI/API consistency gap. The model list now reports a model as eligible only when the manifest flag is enabled, the shared test-metric gate passes, and the .joblib weights path is a regular file. Deployment rejects manifest IDs that do not match the requested ID and rejects a .joblib directory instead of a file.
+
+All PR checks passed:
+- [pytest](https://github.com/kurnFR/signal-bot/actions/runs/39744708891)
+- [Project tests / MariaDB integration](https://github.com/kurnFR/signal-bot/actions/runs/39744708777)
+- [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39744708869)
 
 ### PR #233 final verification
 
