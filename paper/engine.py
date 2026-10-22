@@ -891,16 +891,16 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                             import json
                             from pathlib import Path
                             import joblib
-                            from ml.artifacts import ModelArtifact
+                            from ml.artifacts import ModelArtifact, resolve_model_artifact_paths
                             from ml.strategy import MLSignalFilter
 
-                            manifest_path = Path("ml_models") / f"{ml_model_id}.json"
-                            model_path = Path("ml_models") / f"{ml_model_id}.joblib"
-                            if manifest_path.exists() and model_path.exists():
-                                with open(manifest_path, "r", encoding="utf-8") as mf:
-                                    manifest = json.load(mf)
-                                artifact = ModelArtifact(**manifest)
-                                model = joblib.load(model_path)
+                            manifest_path, model_path = resolve_model_artifact_paths(ml_model_id)
+                            with open(manifest_path, "r", encoding="utf-8") as mf:
+                                manifest = json.load(mf)
+                            artifact = ModelArtifact(**manifest)
+                            if artifact.model_id != ml_model_id:
+                                raise ValueError("Model manifest ID does not match configured model ID")
+                            model = joblib.load(model_path)
                                 ml_filter = MLSignalFilter(artifact=artifact, model=model, threshold=artifact.threshold)
 
                                 # Evaluate features on current candle
