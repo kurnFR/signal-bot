@@ -36,6 +36,7 @@ class RunExperimentRequest(BaseModel):
 
 
 _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
+_EXPERIMENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
 
 
 class DeployMLToPaperRequest(BaseModel):
@@ -89,8 +90,13 @@ def list_experiments() -> Dict[str, Any]:
 @router.get("/experiments/{experiment_id}")
 def get_experiment_details(experiment_id: str) -> Dict[str, Any]:
     """Retrieve the full JSON result for an ML tournament."""
-    file_path = ML_RESULTS_DIR / f"{experiment_id}.json"
-    if not file_path.exists():
+    if not _EXPERIMENT_ID_RE.fullmatch(experiment_id) or ".." in experiment_id:
+        raise HTTPException(status_code=422, detail="Invalid experiment_id")
+    results_root = ML_RESULTS_DIR.resolve()
+    file_path = (results_root / f"{experiment_id}.json").resolve()
+    if file_path.parent != results_root:
+        raise HTTPException(status_code=422, detail="Invalid experiment_id path")
+    if not file_path.is_file():
         raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
 
     try:

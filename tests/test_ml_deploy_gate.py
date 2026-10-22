@@ -64,6 +64,46 @@ class TestEligibilityReport(unittest.TestCase):
         self.assertFalse(paper_eligibility(test_metrics=lucky))
 
 
+class TestExperimentDetailsPathSafety(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(app)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.results = self.root / "ml_results"
+        self.results.mkdir()
+        self.auth_patcher = patch(
+            "web.app.authenticate_request",
+            return_value={"id": 1, "username": "admin", "role": "admin", "is_active": 1},
+        )
+        self.results_patcher = patch("web.routes.ml_routes.ML_RESULTS_DIR", self.results)
+        self.auth_patcher.start()
+        self.results_patcher.start()
+
+    def tearDown(self):
+        self.auth_patcher.stop()
+        self.results_patcher.stop()
+        self.tmp.cleanup()
+
+    def test_valid_experiment_id_reads_only_json_inside_results_root(self):
+        (self.results / "run-123.json").write_text(json.dumps({"experiment_id": "run-123"}))
+        response = self.client.get("/api/ml/experiments/run-123")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["experiment_id"], "run-123")
+
+    def test_invalid_experiment_ids_are_rejected(self):
+        for experiment_id in ("..", "bad..id", "contains space", "a/b"):
+            with self.subTest(experiment_id=experiment_id):
+                response = self.client.get(f"/api/ml/experiments/{experiment_id}")
+                self.assertIn(response.status_code, (404, 422))
+
+    def test_symlink_cannot_escape_results_directory(self):
+        outside = self.root / "outside.json"
+        outside.write_text(json.dumps({"secret": "not for the API"}))
+        (self.results / "linked.json").symlink_to(outside)
+        response = self.client.get("/api/ml/experiments/linked")
+        self.assertEqual(response.status_code, 422)
+
+
 class TestDeployEndpoint(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
