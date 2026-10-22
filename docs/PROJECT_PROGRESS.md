@@ -176,4 +176,4 @@ The project should not be marked finished just because the latest PRs are merged
 ---
 
 **Last update:** 2026-10-22.  
-**Next suggested engineering step:** implement a durable paper-order state machine and cancellation/audit flow after the next-open timing fix, then untrack runtime data only after preserving the real files on the machine that owns them.
+**Next suggested engineering step:** implement [the durable paper-order lifecycle](PAPER_ORDER_LIFECYCLE.md) in its ledger/service, engine/API, and dashboard phases; untrack runtime data only after preserving the real files on the machine that owns them.
