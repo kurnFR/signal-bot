@@ -13,6 +13,7 @@ as live execution.
 """
 import time
 import logging
+import os
 from typing import List, Dict, Any, Optional
 
 from db.db import get_pool, fetch_ohlcv_with_features_df, fetch_latest_open_candle
@@ -40,6 +41,8 @@ logger = logging.getLogger("paper.engine")
 
 OVERLAY_STRATEGIES = {"news_ai_overlay"}
 
+PAPER_ENTRY_MAX_DELAY_MS = max(1, int(os.getenv("PAPER_ENTRY_MAX_DELAY_SECONDS", "120"))) * 1000
+
 _TIMEFRAME_MS = {
     "15m": 15 * 60 * 1000,
     "1h": 60 * 60 * 1000,
@@ -66,7 +69,10 @@ def _append_next_open_candle(closed_df, open_candle, timeframe):
     # A collector can leave an old row marked is_closed=0 after it stops.
     # Never treat that stale row as a current next-open execution opportunity.
     now_ms = int(time.time() * 1000)
-    if now_ms < entry_time or now_ms >= entry_time + interval_ms:
+    max_delay_ms = min(PAPER_ENTRY_MAX_DELAY_MS, interval_ms)
+    if (now_ms < entry_time
+            or now_ms - entry_time > max_delay_ms
+            or now_ms >= entry_time + interval_ms):
         return None
 
     import pandas as pd
