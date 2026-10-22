@@ -43,9 +43,13 @@ def _ohlcv_df(close, high, low, atr, open_time):
     closed candle") is what the exit/entry logic actually reads."""
     rows = [{
         "open_time": open_time - (50 - i) * 3_600_000,
-        "close": close, "high": high, "low": low, "atr": atr,
+        "open": close, "close": close, "high": high, "low": low,
+        "volume": 1.0, "is_closed": 1, "atr": atr,
     } for i in range(49)]
-    rows.append({"open_time": open_time, "close": close, "high": high, "low": low, "atr": atr})
+    rows.append({
+        "open_time": open_time, "open": close, "close": close,
+        "high": high, "low": low, "volume": 1.0, "is_closed": 1, "atr": atr,
+    })
     return pd.DataFrame(rows)
 
 
