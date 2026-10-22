@@ -7,9 +7,9 @@ How access to the dashboard and API is controlled, and what to do when deploying
 - **Passwords:** PBKDF2-HMAC-SHA256, 200,000 iterations, 16-byte random salt (`pbkdf2:sha256:<iterations>$<salt>$<hash>`), compared in constant time.
 - **Tokens:** HMAC-SHA256-signed bearer tokens carrying user, role and expiry; **24-hour lifetime**. The signing key is `SECRET_KEY`, generated randomly and stored in `.app_secret` (gitignored). Deleting that file invalidates every session.
 - **Logout and revocation:** logout stores the token's SHA-256 hash in `revoked_tokens` until it would have expired, so a revoked token is rejected even after a restart.
-- **Brute-force limit:** 5 failed logins per 5 minutes per key, then `429`. The counter is held in memory, so it is per process and resets on restart.
+- **Brute-force limit:** 5 failed logins per 5 minutes per key, then `429`. Attempts are stored in the `login_attempts` table, shared across workers and retained across restarts; an in-memory fallback is used if the database is unavailable.
 - **Audit log:** these events are written to `audit_logs` and are admin-readable at `GET /api/auth/audit-logs`: `LOGIN_FAILED`, `LOGIN_RATE_LIMITED`, `LOGIN_SUCCESS`, `LOGOUT`, `PASSWORD_CHANGED`, `USER_CREATED`, `USER_PASSWORD_RESET`, `USER_UPDATED`.
-- **First admin:** created on the first start when no admin exists. The password is `ADMIN_DEFAULT_PASSWORD` if set, otherwise a random one-time password written to `.initial_admin_credential` with mode 0600 (gitignored). The account is flagged `must_change_password`. Until the password is changed, the API rejects every request except `/api/auth/me`, `/api/auth/logout` and `/api/auth/change-password` (403, code `password_change_required`), and the dashboard shows a blocking dialog. New passwords must be at least 10 characters, differ from the old one, and not be a common password or the username. Delete `.initial_admin_credential` after first login.
+- **First admin:** created on the first start when no admin exists. The password is `ADMIN_DEFAULT_PASSWORD` if set, otherwise a random one-time password written to `.initial_admin_credential` with mode 0600 (gitignored). The account is flagged `must_change_password`. Until the password is changed, the API rejects every request except `/api/auth/me`, `/api/auth/logout` and `/api/auth/change-password` (403, code `password_change_required`), and the dashboard shows a blocking dialog. New passwords must be at least 10 characters, differ from the old one, and reject common/weak variants and the username. Delete `.initial_admin_credential` after first login.
 
 ## 2. Authorization
 
@@ -39,7 +39,7 @@ Rules live in `ADMIN_ONLY_PREFIXES`, `ADMIN_OR_TRADER_PREFIXES`, `TRADER_OR_ADMI
 
 ## 5. Safety limits on trading
 
-This is paper trading only, so there is no exchange API key or order endpoint in the codebase. The paper engine additionally blocks new entries when risk cannot be verified (see `paper/circuit_breaker.py`: max concurrent positions, max daily loss, manual emergency stop).
+This is paper trading only, so there is no exchange API key or order endpoint in the codebase. The paper engine additionally blocks new entries when risk cannot be verified (see `paper/circuit_breaker.py`: max concurrent positions, max daily loss, portfolio notional exposure, and a shared emergency stop persisted in `system_flags`). If the shared stop state cannot be read, new entries fail closed.
 
 ## 6. Tests
 
