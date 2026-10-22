@@ -1,6 +1,6 @@
 # Status
 
-What exists and works today, and the known gaps. Every item below was checked against the code (and, where noted, by running it) on `master` (after PR #24), 2026-10-15. Keep this file short: when a gap is fixed, delete the line; when you add a capability, add one row. Do not add dated reviews or history here (use pull-request descriptions).
+What exists and works today, and the known gaps. Reconciled against current `master` on 2026-10-22; historical verification claims should still be checked against the latest CI and runtime evidence. Keep this file short: when a gap is fixed, delete the line; when you add a capability, add one row. Do not add dated reviews or history here (use pull-request descriptions).
 
 ## 1. Implemented
 
@@ -21,7 +21,7 @@ Verified this session: a fresh database built from the README steps boots the ap
 
 ## 2. Known gaps
 
-**Fixed on branch `production-hardening` (each has regression tests)**
+**Resolved on `master` by PRs #235–#237 (regression tests included; CI passed for the PR heads; production deployment is not implied)**
 
 - **ML eligibility gate is now enforced.** `ml.artifacts.paper_eligibility_report` is the single gate (at least 30 untouched test trades, profit factor at least 1.0, drawdown at most 25%, net PnL at least 0; missing or NaN metrics fail closed). The experiment runner and `POST /api/ml/deploy-to-paper` both use it, and the deploy API re-evaluates the stored test metrics instead of trusting the manifest flag. `model_id` is validated against path traversal.
 - **AI insight.** Kelly is computed from realized win rate and profit factor with no floor; a non-positive edge gets the `NO_EDGE` verdict and 0% risk. The regime label uses EMA20/EMA50 computed from `close`.
@@ -49,7 +49,7 @@ Verified this session: a fresh database built from the README steps boots the ap
 
 ## 3. Tests
 
-Full suite as CI runs it (`python -m pytest`, pinned `requirements.txt`): **225 passed, 0 failed, 3 skipped**; the 3 skipped are the opt-in MariaDB tests, which pass when run with `WALLET_TRACKER_MARIADB_TESTS=1`. Passing tests show the code does what the tests say; they are not evidence of trading edge. Only the two strategies in [STRATEGIES.md](STRATEGIES.md#4-results-that-passed-holdout) have passed holdout.
+CI runs the pytest suite, project tests, RetailBot accounting regression, and an opt-in MariaDB integration job. Consult the latest workflow results for the current counts and conclusions; test success is not evidence of trading edge. Only the strategies documented in [STRATEGIES.md](STRATEGIES.md#4-results-that-passed-holdout) have passed the stated holdout process.
 
 ## 4. Documentation map
 
