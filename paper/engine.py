@@ -15,7 +15,7 @@ import time
 import logging
 from typing import List, Dict, Any, Optional
 
-from db.db import get_pool, fetch_ohlcv_with_features_df
+from db.db import get_pool, fetch_ohlcv_with_features_df, fetch_latest_open_candle
 from backtest.strategies import (
     STRATEGIES,
     FUNDING_STRATEGIES,
@@ -37,7 +37,40 @@ logger = logging.getLogger("paper.engine")
 # management (SL/TP/trailing/circuit-breakers) from the loop in
 # sync_and_evaluate_paper_trading() -- it just never auto-opens a position
 # from price action alone. See docs/NEWS_AI.md §2.
+
 OVERLAY_STRATEGIES = {"news_ai_overlay"}
+
+_TIMEFRAME_MS = {
+    "15m": 15 * 60 * 1000,
+    "1h": 60 * 60 * 1000,
+    "4h": 4 * 60 * 60 * 1000,
+    "1d": 24 * 60 * 60 * 1000,
+}
+
+
+def _append_next_open_candle(closed_df, open_candle, timeframe):
+    """Append the current candle only as an execution bar, never as a signal bar.
+
+    Indicators on the last closed row remain unchanged. The forming candle's
+    feature values are copied from the previous closed row because the
+    simulator only uses its OHLCV/open_time for the next-open entry; signal
+    conditions still run only on closed rows.
+    """
+    if not open_candle or timeframe not in _TIMEFRAME_MS or closed_df.empty:
+        return None
+    signal_time = int(closed_df.iloc[-1]["open_time"])
+    entry_time = int(open_candle["open_time"])
+    if entry_time != signal_time + _TIMEFRAME_MS[timeframe]:
+        return None
+
+    import pandas as pd
+    row = closed_df.iloc[-1].copy()
+    row["open_time"] = entry_time
+    for column in ("open", "high", "low", "close", "volume"):
+        row[column] = float(open_candle[column])
+    if "is_closed" in row.index:
+        row["is_closed"] = 0
+    return pd.concat([closed_df, pd.DataFrame([row])], ignore_index=True)
 
 
 def seed_validated_paper_configs():
@@ -664,11 +697,22 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                 # which already ran. Deliberately NOT in STRATEGIES / not
                 # backtestable the normal way -- see docs/NEWS_AI.md §2.
                 continue
-            # Cheap guards first (no strategy run needed): this candle's
-            # signal was already traded, or already rejected by the ML gate.
+            # Signal decisions use only the latest CLOSED candle. A paper
+            # entry is allowed only on the immediately following, still-open
+            # candle; never backfill an entry at the open of a candle that has
+            # already closed while this process was waiting/polling.
             if _ML_REJECTED_CANDLE.get(key) == candle_open_time:
                 continue
-            if _signal_already_traded(cfg, candle_open_time):
+            open_candle = fetch_latest_open_candle(symbol, market, timeframe)
+            signal_df = _append_next_open_candle(df, open_candle, timeframe)
+            if signal_df is None:
+                logger.debug(
+                    "Skipping entry evaluation for %s/%s: no immediately following open candle",
+                    symbol, strategy_name,
+                )
+                continue
+            entry_candle_time = int(open_candle["open_time"])
+            if _signal_already_traded(cfg, entry_candle_time):
                 continue
 
             # Check risk circuit breakers before discovering / opening new trades
@@ -685,12 +729,15 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                 run_params["pair_df"] = fetch_ohlcv_with_features_df(PAIRS_BASE_SYMBOL, market, timeframe, closed_only=True, limit=300)
                 run_params["pair_symbol"] = PAIRS_BASE_SYMBOL
 
-            sim_trades = STRATEGIES[strategy_name](df, run_params)
+            sim_trades = STRATEGIES[strategy_name](signal_df, run_params)
             if sim_trades:
                 latest_trade = sim_trades[-1]
-                # Current behavior is intentionally limited to trades whose
-                # entry is represented by the latest closed candle.
-                if latest_trade.get("entry_time") == candle_open_time:
+                # Accept only a trade signaled on the latest closed candle
+                # and entered at the current candle's open. This prevents the
+                # previous retroactive fill at a candle open after its range
+                # was already known.
+                if (latest_trade.get("signal_open_time") == candle_open_time
+                        and latest_trade.get("entry_time") == entry_candle_time):
                     # ML Signal Filtering Gate (if model attached to this paper config)
                     ml_model_id = cfg.get("ml_model_id")
                     ml_probability = None
@@ -738,7 +785,7 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                             logger.error("Error evaluating ML signal filter %s: %s; skipping entry (fail closed)", ml_model_id, ml_err)
                             continue
 
-                    if _insert_position(cfg, latest_trade, current_close, candle_open_time,
+                    if _insert_position(cfg, latest_trade, float(open_candle["close"]), entry_candle_time,
                                         ml_model_id=ml_model_id, ml_probability=ml_probability):
                         result["new_positions_opened"] += 1
                         logger.info("Opened paper position for %s (%s) via %s", symbol, latest_trade["direction"], strategy_name)
