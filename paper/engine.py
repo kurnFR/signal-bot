@@ -658,6 +658,11 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
             "atr_at_signal": float(order["atr_at_signal"]),
         }
         try:
+            from paper.circuit_breaker import check_circuit_breakers
+            allowed, breaker_msg = check_circuit_breakers()
+            if not allowed:
+                logger.info("Pending paper order #%s waiting: %s", order.get("id"), breaker_msg)
+                continue
             fill = fill_pending_order(
                 int(order["id"]),
                 float(order["requested_entry_price"]),
@@ -672,6 +677,8 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
                 result["filled"] += 1
             elif fill["status"] == "rejected":
                 result["rejected"] += 1
+            elif fill["status"] == "expired":
+                result["expired"] += 1
         except Exception:
             logger.exception("Unable to recover/fill pending paper order #%s", order.get("id"))
     return result
@@ -923,6 +930,10 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                             ml_model_id=ml_model_id, ml_probability=ml_probability, connection=conn,
                         ),
                     )
+                    if order_result["status"] == "expired":
+                        result["orders_expired"] += 1
+                    if order_result["status"] == "rejected":
+                        result["orders_rejected"] += 1
                     if order_result["status"] == "filled":
                         result["new_positions_opened"] += 1
                         result["orders_filled"] += 1
