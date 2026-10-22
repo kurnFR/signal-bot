@@ -228,7 +228,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('data-paper-order-cancel-id=', self.app_js)
         self.assertIn('["trader", "admin"].includes(String(this.currentUser?.role || "").toLowerCase())', self.app_js)
         self.assertIn('this._escapeHtml(order.state_reason || "—")', self.app_js)
-        self.assertIn('/api/paper/orders/\${orderId}/cancel', self.app_js)
+        self.assertIn('/api/paper/orders/${orderId}/cancel', self.app_js)
         self.assertIn('method: "POST"', self.app_js[self.app_js.index("    async cancelPaperOrder(orderId) {"):self.app_js.index("    async togglePaperStrategy", self.app_js.index("    async cancelPaperOrder(orderId) {"))])
         self.assertIn('app.js?v=20261022-39', self.index_html)
 
