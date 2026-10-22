@@ -268,7 +268,13 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
              patch("paper.engine.STRATEGIES", {"trend_ema_v1": fake_strategy}), \
              patch("paper.engine._signal_already_traded", return_value=False), \
              patch("paper.circuit_breaker.check_circuit_breakers", return_value=(True, "")), \
-             patch("paper.engine.create_pending_order", return_value={"id": 17, "status": "PENDING", "requested_entry_price": 64000.0}), \
+             patch("paper.engine.create_pending_order", return_value={
+                 "id": 17, "status": "PENDING", "requested_entry_price": 64000.0,
+                 "entry_time": CANDLE_B, "symbol": "BTCUSDT", "market": "spot",
+                 "timeframe": "1h", "strategy_name": "trend_ema_v1",
+                 "direction": "LONG", "stop_loss": 63000.0, "take_profit": 66000.0,
+                 "atr_at_signal": 500.0, "ml_model_id": None, "ml_probability": None,
+             }), \
              patch("paper.engine.fill_pending_order", side_effect=lambda order_id, price, writer: {"status": "filled", "position_id": writer(object())}), \
              patch("paper.engine._insert_position", return_value=555) as insert_position:
             result = pe.sync_and_evaluate_paper_trading()
@@ -278,7 +284,10 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
         self.assertEqual(float(signal_df.iloc[-1]["open"]), 64000.0)
         self.assertEqual(int(signal_df.iloc[-1]["is_closed"]), 0)
         insert_position.assert_called_once_with(
-            cfg, fake_strategy.return_value[0], 64010.0, CANDLE_B,
+            cfg, {
+                "direction": "LONG", "entry_price": 64000.0, "stop_loss": 63000.0,
+                "take_profit": 66000.0, "atr_at_signal": 500.0,
+            }, 64010.0, CANDLE_B,
             ml_model_id=None, ml_probability=None, connection=ANY,
         )
         self.assertEqual(result["new_positions_opened"], 1)
