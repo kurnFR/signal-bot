@@ -77,6 +77,12 @@ class TestAccounting(unittest.TestCase):
         with self.assertRaises(ValueError):
             calculate_trade_accounting("LONG", 1.0, 100.0, 100.0, 0.001, funding_cost=float("inf"))
 
+    def test_overflowing_derived_values_are_rejected(self):
+        with self.assertRaises(ValueError):
+            calculate_position_size(1e308, 100.0, 100.0, 95.0)
+        with self.assertRaises(ValueError):
+            calculate_trade_accounting("LONG", 1e308, 100.0, 110.0, 0.001)
+
 
 if __name__ == "__main__":
     unittest.main()
