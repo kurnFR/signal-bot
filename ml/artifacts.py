@@ -89,7 +89,7 @@ class ModelArtifact:
             ) as handle:
                 temp_path = handle.name
                 json.dump(self.manifest(), handle, sort_keys=True, indent=2, allow_nan=False)
-                handle.write("\\n")
+                handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
             # Replacing a symlink replaces the link itself; it does not write
