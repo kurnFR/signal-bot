@@ -205,9 +205,9 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
     timeframe = strategy_params.get("timeframe")
     if not isinstance(symbol, str) or not re.fullmatch(r"[A-Za-z0-9]{2,30}", symbol):
         raise HTTPException(status_code=409, detail="Model symbol is missing or invalid")
-    if market not in {"spot", "futures"}:
+    if not isinstance(market, str) or market not in {"spot", "futures"}:
         raise HTTPException(status_code=409, detail="Model market must be spot or futures")
-    if timeframe not in {"15m", "1h", "4h", "1d"}:
+    if not isinstance(timeframe, str) or timeframe not in {"15m", "1h", "4h", "1d"}:
         raise HTTPException(status_code=409, detail="Model timeframe is unsupported")
 
     try:
