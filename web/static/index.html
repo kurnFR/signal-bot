@@ -737,6 +737,50 @@
                     </div>
                 </div>
 
+                <!-- Durable Paper Order Ledger -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                                <i data-lucide="clipboard-list" class="w-4 h-4 text-amber-400"></i>
+                                Paper Order Ledger
+                            </h3>
+                            <p class="text-xs text-slate-400 mt-0.5">Durable signal intent and execution state. Pending orders are not open positions.</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <label for="paper-orders-status-filter" class="text-xs text-slate-400">Status</label>
+                            <select id="paper-orders-status-filter" class="rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-200 px-2 py-1.5">
+                                <option value="">All orders</option>
+                                <option value="PENDING">Pending</option>
+                                <option value="FILLED">Filled</option>
+                                <option value="EXPIRED">Expired</option>
+                                <option value="CANCELLED">Cancelled</option>
+                                <option value="REJECTED">Rejected</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="dashboard-table-scroll rounded-lg">
+                        <table class="w-full text-left custom-table">
+                            <thead class="dashboard-sticky-head">
+                                <tr>
+                                    <th scope="col">Symbol</th>
+                                    <th scope="col">Market / TF</th>
+                                    <th scope="col">Strategy</th>
+                                    <th scope="col">Side</th>
+                                    <th scope="col">Requested Entry</th>
+                                    <th scope="col">Status</th>
+                                    <th scope="col">Reason</th>
+                                    <th scope="col">Created</th>
+                                    <th scope="col" class="text-right">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="paper-orders-body">
+                                <tr><td colspan="9" class="text-center py-6 text-slate-500 text-xs">Loading paper orders...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <!-- Strategy Activation Matrix -->
                 <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
                     <div class="flex items-center justify-between">
@@ -2218,7 +2262,7 @@
          browsers can keep serving a stale cached copy indefinitely since
          this file has no explicit Cache-Control header. See the
          "still seeing the old bug after a fix was pushed" class of report. -->
-    <script src="/static/js/app.js?v=20261021-38"></script>
+    <script src="/static/js/app.js?v=20261022-39"></script>
     <script src="/static/js/dashboard_enhancements.js?v=20261020-32"></script>
     <script>
         if (window.lucide) window.lucide.createIcons();

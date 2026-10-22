@@ -17,6 +17,7 @@ const App = {
     candleSeries: null,
     usersList: [],
     paperPositions: [],
+    paperOrders: [],
     paperTrades: [],
     paperConfigs: [],
     paperMetrics: {},
@@ -68,6 +69,10 @@ const App = {
                 this.switchTab(tab);
             });
         });
+        const paperOrderFilter = document.getElementById("paper-orders-status-filter");
+        if (paperOrderFilter) {
+            paperOrderFilter.addEventListener("change", () => this.fetchPaperData());
+        }
     },
 
     getAuthHeaders() {
@@ -1745,6 +1750,11 @@ const App = {
                 fetch(`${API_BASE}/api/paper/trades`, { headers: this.getAuthHeaders() }),
                 fetch(`${API_BASE}/api/paper/configs`, { headers: this.getAuthHeaders() }),
                 fetch(`${API_BASE}/api/paper/metrics`, { headers: this.getAuthHeaders() }),
+                (() => {
+                    const filter = document.getElementById("paper-orders-status-filter");
+                    const statusQuery = filter && filter.value ? `&status=${encodeURIComponent(filter.value)}` : "";
+                    return fetch(`${API_BASE}/api/paper/orders?limit=100${statusQuery}`, { headers: this.getAuthHeaders() });
+                })(),
             ]);
             const failed = responses.find(response => !response.ok);
             if (failed) {
@@ -1754,7 +1764,7 @@ const App = {
             }
 
             // Parse every response before mutating the displayed snapshot.
-            const [positionsData, tradesData, configsData, metricsData] = await Promise.all(
+            const [positionsData, tradesData, configsData, metricsData, ordersData] = await Promise.all(
                 responses.map(response => response.json())
             );
             const validObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -1765,7 +1775,9 @@ const App = {
                 tradesData.trades.some(item => !item || typeof item !== "object" || Array.isArray(item)) ||
                 !validObject(configsData) || !Array.isArray(configsData.configs) ||
                 configsData.configs.some(item => !item || typeof item !== "object" || Array.isArray(item)) ||
-                !validObject(metricsData) || !validObject(metricsData.metrics)
+                !validObject(metricsData) || !validObject(metricsData.metrics) ||
+                !validObject(ordersData) || !Array.isArray(ordersData.orders) ||
+                ordersData.orders.some(item => !item || typeof item !== "object" || Array.isArray(item))
             ) {
                 throw new Error("Invalid paper trading response");
             }
@@ -1776,6 +1788,7 @@ const App = {
             this.paperTrades = tradesData.trades;
             this.paperConfigs = configsData.configs;
             this.paperMetrics = metricsData.metrics;
+            this.paperOrders = ordersData.orders;
             this.renderPaperView();
         } catch (e) {
             const message = e && e.message ? e.message : String(e || "Unknown error");
@@ -1790,6 +1803,8 @@ const App = {
             if (cfgContainer) cfgContainer.innerHTML = `<div class="text-xs text-rose-300">Unable to refresh paper strategy configurations. ${safeMessage}</div>`;
             const tradesBody = document.getElementById("paper-trades-body");
             if (tradesBody) tradesBody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-rose-300 text-xs">Unable to refresh paper trade history. ${safeMessage}</td></tr>`;
+            const ordersBody = document.getElementById("paper-orders-body");
+            if (ordersBody) ordersBody.innerHTML = `<tr><td colspan="9" class="text-center py-6 text-rose-300 text-xs">Unable to refresh paper order history. ${safeMessage}</td></tr>`;
             this.showToast(`Failed to load paper trading data: ${message}`, "error");
         } finally {
             if (window.lucide) window.lucide.createIcons();
@@ -1928,6 +1943,69 @@ const App = {
                     `;
                 }).join("");
             }
+        }
+
+        // 5. Render durable paper-order history. A pending order is not an open position.
+        const ordersBody = document.getElementById("paper-orders-body");
+        if (ordersBody) {
+            if (!this.paperOrders.length) {
+                ordersBody.innerHTML = `<tr><td colspan="9" class="text-center py-6 text-slate-500 text-xs">No paper orders match this filter.</td></tr>`;
+            } else {
+                const canCancelOrders = ["trader", "admin"].includes(String(this.currentUser?.role || "").toLowerCase());
+                const statusClasses = {
+                    PENDING: "bg-amber-950 text-amber-300 border-amber-800",
+                    FILLED: "bg-emerald-950 text-emerald-300 border-emerald-800",
+                    EXPIRED: "bg-slate-800 text-slate-300 border-slate-700",
+                    CANCELLED: "bg-slate-800 text-slate-400 border-slate-700",
+                    REJECTED: "bg-rose-950 text-rose-300 border-rose-800",
+                };
+                ordersBody.innerHTML = this.paperOrders.map(order => {
+                    const status = String(order.status || "UNKNOWN").toUpperCase();
+                    const price = Number(order.requested_entry_price);
+                    const entryPrice = Number.isFinite(price) ? `$${price.toLocaleString()}` : "—";
+                    const createdAt = order.created_at || order.updated_at || "—";
+                    const action = status === "PENDING" && canCancelOrders
+                        ? `<button type="button" data-paper-order-cancel-id="${this._escapeHtml(String(order.id))}" aria-label="Cancel pending paper order #${this._escapeHtml(String(order.id))}" class="px-2.5 py-1 text-xs rounded bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 font-medium">Cancel</button>`
+                        : `<span class="text-xs text-slate-500">—</span>`;
+                    return `
+                        <tr>
+                            <td class="font-bold font-mono text-slate-100">${this._escapeHtml(order.symbol || "—")}</td>
+                            <td class="text-xs uppercase">${this._escapeHtml(order.market || "—")} / ${this._escapeHtml(order.timeframe || "—")}</td>
+                            <td class="font-mono text-xs text-sky-400">${this._escapeHtml(order.strategy_name || "—")}</td>
+                            <td>${this._escapeHtml(order.direction || "—")}</td>
+                            <td class="font-mono text-xs">${this._escapeHtml(entryPrice)}</td>
+                            <td><span class="px-2 py-0.5 rounded border text-[10px] font-bold ${statusClasses[status] || "bg-slate-800 text-slate-300 border-slate-700"}">${this._escapeHtml(status)}</span></td>
+                            <td class="text-xs text-slate-400 max-w-xs">${this._escapeHtml(order.state_reason || "—")}</td>
+                            <td class="text-xs text-slate-400 font-mono">${this._escapeHtml(String(createdAt))}</td>
+                            <td class="text-right">${action}</td>
+                        </tr>
+                    `;
+                }).join("");
+                ordersBody.querySelectorAll("[data-paper-order-cancel-id]").forEach(button => {
+                    button.addEventListener("click", () => {
+                        const orderId = Number(button.dataset.paperOrderCancelId);
+                        if (Number.isSafeInteger(orderId) && orderId > 0) this.cancelPaperOrder(orderId);
+                    });
+                });
+            }
+        }
+    },
+
+    async cancelPaperOrder(orderId) {
+        if (!Number.isSafeInteger(orderId) || orderId <= 0) return;
+        try {
+            const response = await fetch(`${API_BASE}/api/paper/orders/${orderId}/cancel`, {
+                method: "POST",
+                headers: this.getAuthHeaders(),
+            });
+            let payload = {};
+            try { payload = await response.json(); } catch (_) {}
+            if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+            this.showToast(`Paper order #${orderId} cancelled`, "success");
+            await this.fetchPaperData();
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error || "Unknown error");
+            this.showToast(`Unable to cancel paper order #${orderId}: ${message}`, "error");
         }
     },
 
