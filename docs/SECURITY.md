@@ -17,8 +17,8 @@ Enforced centrally in `web/app.py` for every `/api/*` route (fail-closed): no va
 
 | Role | Can do |
 |---|---|
-| `viewer` | Read dashboards, results and data. **Cannot call any mutating endpoint** (0 of 29) |
-| `trader` | Everything a viewer can, plus backtests, paper configs/deploys/sync/circuit breakers, ML runs, custom strategies, master-data backfill and feature builds, research-bot control, wallet tracking changes |
+| `viewer` | Read dashboards, results, paper order history, and data. **Cannot call any mutating endpoint** |
+| `trader` | Everything a viewer can, plus backtests, paper configs/deploys/sync/circuit breakers, paper-order cancellation, ML runs, custom strategies, master-data backfill and feature builds, research-bot control, wallet tracking changes |
 | `admin` | Everything, plus user management (`/api/users`), `GET /api/settings/status`, the Telegram test message, and the audit log |
 
 Rules live in `ADMIN_ONLY_PREFIXES`, `ADMIN_OR_TRADER_PREFIXES`, `TRADER_OR_ADMIN_PREFIXES` and `RESEARCH_CONTROL_PREFIXES` in `web/app.py`. A new router that is not covered by a prefix list is readable by any authenticated user for all methods, so add its prefix when you add mutating routes.
