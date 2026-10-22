@@ -104,7 +104,7 @@ Remaining: authenticated order list/cancel API, dashboard order history, and dir
 - Latest PR-head checks passed: [pytest](https://github.com/kurnFR/signal-bot/actions/runs/39742628179), [project tests/MariaDB integration](https://github.com/kurnFR/signal-bot/actions/runs/39742628146), and [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39742628249).
 - The post-merge master checks for PR #247 also passed: [pytest](https://github.com/kurnFR/signal-bot/actions/runs/39741807178), [project tests](https://github.com/kurnFR/signal-bot/actions/runs/39741807160), and [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39741807146).
 
-The next gate is not another UI feature: validate the migration against a representative populated database and perform manual keyboard/screen-reader/reflow/forced-colors checks. PR #250 now exercises simultaneous fill/cancel attempts, a simulated crash between position insert and order-state update, retry after rollback, and migration/idempotency behavior against disposable MariaDB. No deployment was performed.
+The next gate is not another UI feature: validate the migration against a representative snapshot of the actual deployed schema and perform manual keyboard/screen-reader/reflow/forced-colors checks. An opt-in MariaDB integration test now covers legacy-style adoption and historical OHLCV preservation. PR #250 now exercises simultaneous fill/cancel attempts, a simulated crash between position insert and order-state update, retry after rollback, and migration/idempotency behavior against disposable MariaDB. No deployment was performed.
 
 ### MariaDB order-lifecycle integration — PR #250
 
