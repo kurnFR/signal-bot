@@ -61,9 +61,18 @@ class TestSharedEmergencyStop(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertIn("kill-switch", reason)
 
-    def test_unreadable_flag_table_does_not_crash_and_memory_flag_still_works(self):
+    def test_unreadable_flag_table_fails_closed_and_memory_flag_still_works(self):
         with patch(GET_CONN, side_effect=RuntimeError("db down")):
-            self.assertEqual(cb.is_emergency_stop_active(), (False, ""))
+            active, reason = cb.is_emergency_stop_active()
+            self.assertTrue(active)
+            self.assertIn("Unable to verify shared emergency-stop state", reason)
+
+            # The paper engine must not open a position when it cannot verify
+            # whether another process has activated the shared kill switch.
+            allowed, entry_reason = cb.check_circuit_breakers()
+            self.assertFalse(allowed)
+            self.assertIn("new entries blocked", entry_reason)
+
             cb.trip_emergency_stop("local only")   # persist fails, must not raise
             self.assertEqual(cb.is_emergency_stop_active(), (True, "local only"))
 
