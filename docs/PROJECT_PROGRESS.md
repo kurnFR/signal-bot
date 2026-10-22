@@ -2,7 +2,7 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-22  
-**Master commit at review:** `518455671a91dae8759c68781741aab05efb2fd5`  
+**Master commit at review:** `5b0b02b48507edef0a6dc4edfa31442309ea0725`  
 **Overall status:** Active / not finished. PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, #257 contains ML experiment paths, and #259 validates deployment manifests before activation. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
@@ -124,6 +124,13 @@ PR #253 checks passed:
 - [pytest](https://github.com/kurnFR/signal-bot/actions/runs/39744257095)
 - [Project tests / MariaDB integration](https://github.com/kurnFR/signal-bot/actions/runs/39744257159)
 - [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39744257086)
+
+### ML experiment path and deployment-manifest hardening — PRs #257 and #259
+
+- [PR #257](https://github.com/kurnFR/signal-bot/pull/257) validates experiment IDs and resolves the requested result path, rejecting symlinks that escape the ml_results directory. Its three PR workflows passed.
+- [PR #259](https://github.com/kurnFR/signal-bot/pull/259) validates threshold, base strategy, symbol, market, timeframe, and strategy-parameter shape before changing paper configuration. This prevents malformed manifest metadata from causing an error after the activation side effect. Its pytest, project tests, and RetailBot accounting regression workflows passed.
+
+These changes improve API correctness and filesystem safety. They do not prove model profitability or complete the remaining manual and release validation.
 
 ### ML model-list consistency — PR #255
 
