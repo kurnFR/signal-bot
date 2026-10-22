@@ -1,9 +1,9 @@
 # Project Progress, Completion Status, and Roadmap
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
-**Status reviewed:** 2026-10-21  
-**Master commit at review:** `c72896a501717e4b69492f292429499f496ad809`  
-**Overall status:** Active / not finished. The dashboard accessibility batch is merged and CI-verified; the broader product, trading-safety, security, operations, and validation roadmap still has open work.
+**Status reviewed:** 2026-10-22  
+**Master commit at review:** `b453138810909c4ece0bab107034101591317a7f`  
+**Overall status:** Active / not finished. Dashboard accessibility fixes and production-hardening PRs #235–#237 are merged; execution lifecycle, cost-model realism, runtime-data hygiene, manual accessibility verification, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
 
@@ -36,10 +36,10 @@ Primary project references:
 | Database-status announcements and toast behavior | **Completed for identified issues** | PRs #222, #225, #229–#230 merged; broader live-region behavior still merits manual verification. |
 | Theme-specific sortable-indicator contrast | **Completed** | PR #233 merged and CI passed. |
 | Full project correctness and bug-free guarantee | **Not complete / cannot be guaranteed** | Continue risk-based review, regression tests, integration tests, and manual verification. |
-| ML paper-promotion safety | **Open; high priority in prior status review** | Revalidate the gate in `ml/run_real_experiment.py` and `POST /api/ml/deploy-to-paper`; see roadmap. |
-| Authentication and first-login hardening | **Open in prior status review; revalidate current code** | Enforce required password change and broaden route/role tests. |
-| Paper execution lifecycle and portfolio-level risk | **Open in prior status review; revalidate current code** | Define order states and exposure limits before considering any real execution capability. |
-| Database migrations, durable jobs, and runtime-file hygiene | **Open in prior status review; revalidate current code** | Migration runner, persisted job state, and removal of generated runtime data from source control. |
+| ML paper-promotion safety | **Implemented for the documented eligibility gate** | PR #235 routes experiment and deploy-to-paper eligibility through the shared fail-closed gate; keep negative tests and artifact checks. |
+| Authentication and first-login hardening | **Implemented for identified controls** | First-login password change, stronger password policy, durable login throttling, and route authorization sweep are merged; continue periodic security review. |
+| Paper execution lifecycle and portfolio-level risk | **Partially complete** | Portfolio notional cap is implemented; explicit pending/filled/expired/cancelled order lifecycle remains open. Keep the system paper-only. |
+| Database migrations, durable jobs, and runtime-file hygiene | **Partially complete** | Versioned migrations and durable job state are merged. `custom_strategies.json` and `Screen/signals.jsonl` are still tracked and must be untracked without deleting real runtime data. |
 | Strategy and ML evidence of trading edge | **Not complete** | Use leakage-safe chronological evaluation and untouched holdout data; passing software tests is not proof of profitability. |
 | GCAO project documentation and status | **Needs identification / blocked** | The accessible `signal-bot` repository and retrieved project context did not identify what “GCAO” stands for, its canonical repository, or its scope. Do not assume it is the same as Signal Bot or the separate `ai_insight` / `forecast_engine` work. Add verified details after its identity and source are confirmed. |
 | Production deployment and live-environment verification | **Not done by this work** | No deployment was performed as part of the PR batch summarized here. Confirm the target environment and follow its release procedure separately. |
@@ -91,7 +91,7 @@ Post-merge `master` checks also passed:
 - [Master project tests](https://github.com/kurnFR/signal-bot/actions/runs/39531305725)
 - [Master RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39531305784)
 
-At the time of the repository check on 2026-10-21, there were no open pull requests. That is a snapshot, not a promise that no new work will be needed.
+PR #237 added a fail-closed guard for an unreadable shared emergency-stop state and merged on 2026-10-22. Master CI is being checked separately; no production deployment is implied.
 
 ## 4. Existing product capabilities
 
