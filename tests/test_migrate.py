@@ -265,7 +265,7 @@ class TestMariaDBIntegration(unittest.TestCase):
                          ("MIGRATION_REHEARSAL",))
             before = cur2.fetchall()
             self.assertEqual(before, [("MIGRATION_REHEARSAL", 1_790_000_000_000, 101, 12)])
-            cur2.execute("DROP TABLE schema_migrations")
+            cur2.execute("DROP TABLE IF EXISTS schema_migrations")
             conn.commit()
             cur2.close()
 
