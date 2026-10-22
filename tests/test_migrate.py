@@ -27,7 +27,10 @@ class FakeCursor:
         elif text.startswith("SELECT version, checksum"):
             self._rows = list(self.conn.recorded.items())
         elif "information_schema.tables" in text:
-            self._rows = [(1 if self.conn.has_ohlcv else 0,)]
+            if "table_name = %s" in text:
+                self._rows = [(1 if self.conn.has_ohlcv else 0,)]
+            else:
+                self._rows = [(1 if self.conn.has_application_tables else 0,)]
         elif text.startswith("INSERT INTO schema_migrations"):
             self.conn.recorded[params[0]] = params[2]
             self.conn.statuses[params[0]] = params[3]
@@ -50,8 +53,11 @@ class FakeCursor:
 
 
 class FakeConn:
-    def __init__(self, has_ohlcv=False, lock_ok=True, fail_on=None):
+    def __init__(self, has_ohlcv=False, has_application_tables=None, lock_ok=True, fail_on=None):
         self.has_ohlcv, self.lock_ok = has_ohlcv, lock_ok
+        self.has_application_tables = (
+            has_ohlcv if has_application_tables is None else has_application_tables
+        )
         self.fail_on = fail_on or {}
         self.recorded, self.statuses, self.executed, self.released = {}, {}, [], False
 
@@ -150,6 +156,15 @@ class TestApply(unittest.TestCase):
         conn = FakeConn(has_ohlcv=True)
         apply_pending(conn, directory=self.dir, migrations=migs, log=lambda _: None)
         self.assertIn("ALTER TABLE t ADD COLUMN c INT", conn.executed)
+
+    def test_partial_database_without_ohlcv_runs_upgrade_only_migrations(self):
+        """Other existing app tables mean this is an upgrade, even if ohlcv is absent."""
+        migs = write_set(self.dir, [("base.sql", "CREATE TABLE t (i INT);", False),
+                                    ("upg.sql", "ALTER TABLE t ADD COLUMN c INT;", True)])
+        conn = FakeConn(has_ohlcv=False, has_application_tables=True)
+        apply_pending(conn, directory=self.dir, migrations=migs, log=lambda _: None)
+        self.assertIn("ALTER TABLE t ADD COLUMN c INT", conn.executed)
+        self.assertEqual(conn.statuses[migs[1].version], "applied")
 
     def test_already_applied_errors_are_tolerated_and_flagged(self):
         migs = write_set(self.dir, [("upg.sql", "ALTER TABLE t ADD COLUMN c INT;", True)])

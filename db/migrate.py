@@ -192,6 +192,16 @@ def _table_exists(cursor, name: str) -> bool:
     return int(cursor.fetchone()[0]) > 0
 
 
+def _has_application_tables(cursor) -> bool:
+    """Return whether this database already has tables beyond migration bookkeeping."""
+    cursor.execute(
+        "SELECT COUNT(*) FROM information_schema.tables "
+        "WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE' "
+        "AND table_name <> 'schema_migrations'"
+    )
+    return int(cursor.fetchone()[0]) > 0
+
+
 def plan(cursor, directory: Path = HERE, migrations: Sequence[Migration] = MIGRATIONS) -> list[dict]:
     """Return one entry per migration: state is applied | pending | changed."""
     done = applied_versions(cursor)
@@ -246,7 +256,9 @@ def apply_pending(
     try:
         ensure_tracking_table(cursor)
         done = applied_versions(cursor)
-        fresh_install = not _table_exists(cursor, "ohlcv")
+        # A missing OHLCV table alone does not make a partially initialized database fresh.
+        # Exclude schema_migrations, which was just created above, from this check.
+        fresh_install = not _has_application_tables(cursor)
 
         for m in migrations:
             text = _read(m, directory)
