@@ -3,6 +3,7 @@ import os
 import re
 import time
 import logging
+import tempfile
 from typing import List, Dict, Any, Optional, Union
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -26,6 +27,43 @@ logger = logging.getLogger("web.custom_strategy")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CUSTOM_FILE = os.path.join(BASE_DIR, "custom_strategies.json")
+
+
+def _read_saved_strategies() -> list:
+    """Read persisted strategies without silently discarding corrupt state."""
+    if not os.path.exists(CUSTOM_FILE):
+        return []
+    try:
+        with open(CUSTOM_FILE, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail="Saved custom strategies could not be read safely") from exc
+    if not isinstance(saved, list) or any(not isinstance(item, dict) for item in saved):
+        raise HTTPException(status_code=500, detail="Saved custom strategies have an invalid format")
+    return saved
+
+
+def _write_saved_strategies(saved: list) -> None:
+    """Atomically replace the strategy file so interrupted writes preserve old data."""
+    directory = os.path.dirname(CUSTOM_FILE) or "."
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory, prefix=".custom-strategies-", suffix=".tmp", delete=False) as f:
+            temp_path = f.name
+            json.dump(saved, f, indent=2, allow_nan=False)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, CUSTOM_FILE)
+        temp_path = None
+    except (OSError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail="Saved custom strategies could not be written safely") from exc
+    finally:
+        if temp_path is not None:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
 # Metadata dictionary of all indicators available in the features dataset
 INDICATOR_DEFINITIONS = {
@@ -781,12 +819,18 @@ def create_custom_strategy(req: CustomStrategyRequest):
     def_dict = req.model_dump() if hasattr(req, "model_dump") else req.dict()
     def_dict["name"] = clean_name
 
+    long_list = [c.model_dump() if hasattr(c, "model_dump") else c.dict() for c in req.longConditions]
+    short_list = [c.model_dump() if hasattr(c, "model_dump") else c.dict() for c in req.shortConditions]
+
+    # Persist first. If disk I/O fails, leave the in-memory registry unchanged.
+    saved = _read_saved_strategies()
+    saved = [s for s in saved if s.get("name") != clean_name]
+    saved.append(def_dict)
+    _write_saved_strategies(saved)
+
     run_fn, run_inv_fn = _create_strategy_runner(def_dict)
     STRATEGIES[clean_name] = run_fn
     STRATEGIES[f"inverse_{clean_name}"] = run_inv_fn
-
-    long_list = [c.model_dump() if hasattr(c, "model_dump") else c.dict() for c in req.longConditions]
-    short_list = [c.model_dump() if hasattr(c, "model_dump") else c.dict() for c in req.shortConditions]
 
     STRATEGY_METADATA[clean_name] = {
         "displayName": req.displayName or clean_name,
@@ -803,20 +847,6 @@ def create_custom_strategy(req: CustomStrategyRequest):
         ]
     }
 
-    # Persist to JSON file
-    saved = []
-    if os.path.exists(CUSTOM_FILE):
-        try:
-            with open(CUSTOM_FILE, "r") as f:
-                saved = json.load(f)
-        except Exception:
-            saved = []
-
-    # Update or append
-    saved = [s for s in saved if s.get("name") != clean_name]
-    saved.append(def_dict)
-    with open(CUSTOM_FILE, "w") as f:
-        json.dump(saved, f, indent=2)
 
     return {
         "status": "success",
@@ -829,21 +859,13 @@ def create_custom_strategy(req: CustomStrategyRequest):
 @router.delete("/{name}")
 def delete_custom_strategy(name: str):
     clean_name = name.strip().lower()
+    saved = _read_saved_strategies()
+    saved = [s for s in saved if s.get("name") != clean_name]
+    _write_saved_strategies(saved)
+
     STRATEGIES.pop(clean_name, None)
     STRATEGIES.pop(f"inverse_{clean_name}", None)
     STRATEGY_METADATA.pop(clean_name, None)
-
-    saved = []
-    if os.path.exists(CUSTOM_FILE):
-        try:
-            with open(CUSTOM_FILE, "r") as f:
-                saved = json.load(f)
-        except Exception:
-            saved = []
-
-    saved = [s for s in saved if s.get("name") != clean_name]
-    with open(CUSTOM_FILE, "w") as f:
-        json.dump(saved, f, indent=2)
 
     return {"status": "success", "message": f"Strategy {clean_name} deleted."}
 
