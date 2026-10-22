@@ -13,7 +13,7 @@ def _require_finite(**values: float) -> None:
     """Reject NaN/inf before they can contaminate financial results."""
     for name, value in values.items():
         if not math.isfinite(value):
-            raise ValueError(f\"{name} must be finite\")
+            raise ValueError(f"{name} must be finite")
 
 
 @dataclass(frozen=True)
