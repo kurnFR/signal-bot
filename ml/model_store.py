@@ -12,7 +12,7 @@ try:
 except ImportError:  # dependency is optional until ML runtime is installed
     joblib = None
 
-from ml.artifacts import ModelArtifact
+from ml.artifacts import ModelArtifact, resolve_model_artifact_paths, resolve_model_manifest_path
 
 
 class ModelStore:
@@ -74,13 +74,9 @@ class ModelStore:
         expected = tuple(expected_features)
         if tuple(artifact.feature_columns) != expected:
             raise ValueError("ML artifact feature schema does not match requested features")
-        path = self.root / f"{artifact.model_id}.joblib"
-        if not path.is_file():
-            raise FileNotFoundError(f"model file not found: {artifact.model_id}")
+        _, path = resolve_model_artifact_paths(artifact.model_id, self.root)
         return joblib.load(path)
 
     def load_manifest(self, model_id: str) -> dict[str, Any]:
-        path = self.root / f"{model_id}.json"
-        if not path.is_file():
-            raise FileNotFoundError(f"model manifest not found: {model_id}")
+        path = resolve_model_manifest_path(model_id, self.root)
         return json.loads(path.read_text(encoding="utf-8"))

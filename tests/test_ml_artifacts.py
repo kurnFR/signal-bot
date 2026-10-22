@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ml.artifacts import ModelArtifact, load_eligible_paper_artifact, paper_eligibility, resolve_model_artifact_paths
+from ml.artifacts import ModelArtifact, load_eligible_paper_artifact, paper_eligibility, resolve_model_artifact_paths, resolve_model_manifest_path
 
 
 class TestMLArtifacts(unittest.TestCase):
@@ -89,6 +89,15 @@ class TestMLArtifacts(unittest.TestCase):
         bad = dict(good, trade_count=29)
         self.assertFalse(paper_eligibility(test_metrics=bad))
 
+
+    def test_manifest_only_resolver_rejects_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as outside:
+            root = Path(d)
+            target = Path(outside) / "external.json"
+            target.write_text("{}", encoding="utf-8")
+            (root / "model-v1.json").symlink_to(target)
+            with self.assertRaises(ValueError):
+                resolve_model_manifest_path("model-v1", root)
 
     def test_runtime_paths_require_files_inside_artifact_root(self):
         with tempfile.TemporaryDirectory() as d:
