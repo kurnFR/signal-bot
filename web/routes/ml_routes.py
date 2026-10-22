@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -15,6 +16,7 @@ from pydantic import BaseModel, Field
 from ml.artifacts import paper_eligibility_report
 from ml.run_real_experiment import run_real_experiment
 from ml.dataset import TARGET_TYPES
+from backtest.strategies import STRATEGIES
 from paper.engine import set_paper_config, sync_and_evaluate_paper_trading
 from notifications.telegram_notifier import send_telegram_message
 
@@ -184,13 +186,31 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
     if not (ML_MODELS_DIR / f"{req.model_id}.joblib").is_file():
         raise HTTPException(status_code=409, detail="Model weights (.joblib) are missing or not a regular file; retrain before deploying")
 
+    # Validate all manifest fields used by the activation and notification paths
+    # before mutating paper configuration. Manifests are editable JSON files.
+    strategy_params = manifest.get("strategy_params")
+    strategy_name = manifest.get("base_strategy")
     try:
-        strategy_params = manifest.get("strategy_params", {})
-        symbol = strategy_params.get("symbol") or manifest.get("model_id").split("-")[1].upper()
-        market = strategy_params.get("market") or manifest.get("model_id").split("-")[2].lower()
-        timeframe = strategy_params.get("timeframe") or manifest.get("model_id").split("-")[3]
-        strategy_name = manifest.get("base_strategy")
+        threshold = float(manifest.get("threshold"))
+    except (TypeError, ValueError, OverflowError):
+        threshold = float("nan")
+    if not math.isfinite(threshold) or not 0 < threshold < 1:
+        raise HTTPException(status_code=409, detail="Model threshold must be a finite number strictly between 0 and 1")
+    if not isinstance(strategy_params, dict):
+        raise HTTPException(status_code=409, detail="Model strategy_params must be an object")
+    if not isinstance(strategy_name, str) or strategy_name not in STRATEGIES:
+        raise HTTPException(status_code=409, detail="Model base_strategy is missing or unsupported")
+    symbol = strategy_params.get("symbol")
+    market = strategy_params.get("market")
+    timeframe = strategy_params.get("timeframe")
+    if not isinstance(symbol, str) or not re.fullmatch(r"[A-Za-z0-9]{2,30}", symbol):
+        raise HTTPException(status_code=409, detail="Model symbol is missing or invalid")
+    if market not in {"spot", "futures"}:
+        raise HTTPException(status_code=409, detail="Model market must be spot or futures")
+    if timeframe not in {"15m", "1h", "4h", "1d"}:
+        raise HTTPException(status_code=409, detail="Model timeframe is unsupported")
 
+    try:
         # Update paper config with ml_model_id
         res = set_paper_config(
             symbol=symbol,
@@ -212,7 +232,7 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
                 f"⏱ <b>Timeframe:</b> <code>{timeframe}</code>\n"
                 f"📈 <b>Base Strategy:</b> <code>{strategy_name}</code>\n"
                 f"🤖 <b>ML Filter Model:</b> <code>{manifest.get('model_type')}</code>\n"
-                f"🎯 <b>Probability Threshold:</b> <code>{manifest.get('threshold') * 100:.1f}%</code>\n"
+                f"🎯 <b>Probability Threshold:</b> <code>{threshold * 100:.1f}%</code>\n"
                 f"💼 <b>Capital:</b> ${req.allocated_capital:,.2f} | <b>Risk:</b> {req.risk_per_trade_pct:.1f}%\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
                 f"<i>Signals will only be executed if AI confidence exceeds threshold.</i>"
