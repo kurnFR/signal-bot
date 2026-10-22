@@ -78,7 +78,7 @@ Use compare-and-set transitions (`UPDATE ... WHERE id=? AND status='PENDING'`) s
 - Cancel succeeds only from `PENDING`; repeated cancel/fill attempts cannot mutate terminal states.
 - Circuit-breaker, exposure, and required ML failures reject/block fills.
 - A crash between order creation and fill is recoverable; a crash after position creation cannot leave an indefinitely pending order.
-- Migration succeeds on a fresh database and upgrades an existing database without rewriting historical positions/trades.
+- Migration succeeds on a fresh database and adopts a populated legacy-style database without changing historical OHLCV rows; verify separately against a representative deployed schema without rewriting historical positions/trades.
 - Route authorization tests verify anonymous users cannot list/cancel and viewers cannot mutate.
 
 ## 7. Implementation phases
