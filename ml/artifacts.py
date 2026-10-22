@@ -12,7 +12,38 @@ from datetime import datetime, timezone
 import json
 import math
 from pathlib import Path
+import re
 from typing import Any
+
+
+_MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
+
+
+def resolve_model_artifact_paths(
+    model_id: str, directory: str | Path = "ml_models"
+) -> tuple[Path, Path]:
+    """Return manifest/weight paths only when both resolve inside the artifact root.
+
+    Model IDs can come from persisted paper configuration, not just the
+    deployment endpoint. Validate them again at load time and resolve symlinks
+    so a later filesystem change cannot redirect joblib loading outside the
+    configured artifact directory.
+    """
+    if (
+        not isinstance(model_id, str)
+        or not _MODEL_ID_RE.fullmatch(model_id)
+        or ".." in model_id
+    ):
+        raise ValueError("Invalid model_id")
+
+    root = Path(directory).resolve()
+    manifest_path = (root / f"{model_id}.json").resolve()
+    model_path = (root / f"{model_id}.joblib").resolve()
+    if manifest_path.parent != root or model_path.parent != root:
+        raise ValueError("Model artifacts must resolve inside the artifact directory")
+    if not manifest_path.is_file() or not model_path.is_file():
+        raise FileNotFoundError("Model manifest and weights must be regular files inside the artifact directory")
+    return manifest_path, model_path
 
 
 @dataclass(frozen=True)
