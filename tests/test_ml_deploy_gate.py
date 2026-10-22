@@ -224,6 +224,22 @@ class TestDeployEndpoint(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.mocks[2].assert_not_called()
 
+    def test_non_string_market_and_timeframe_are_rejected_cleanly(self):
+        cases = (
+            ("bad-market-type", "market", []),
+            ("bad-timeframe-type", "timeframe", {"unexpected": "object"}),
+        )
+        for model_id, field, value in cases:
+            with self.subTest(field=field):
+                self._write(model_id)
+                path = self.models / f"{model_id}.json"
+                manifest = json.loads(path.read_text())
+                manifest["strategy_params"][field] = value
+                path.write_text(json.dumps(manifest))
+                response = self._deploy(model_id)
+                self.assertEqual(response.status_code, 409, response.text)
+        self.mocks[2].assert_not_called()
+
     def test_path_traversal_model_id_rejected(self):
         for bad in ("../secret", "a/b", "..", "x\\y", ""):
             res = self._deploy(bad)
