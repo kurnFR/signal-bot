@@ -74,6 +74,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("013_login_attempts", "migrate_login_attempts.sql", "Durable login rate limiting"),
     Migration("014_background_jobs", "migrate_background_jobs.sql", "Durable background job state"),
     Migration("015_system_flags", "migrate_system_flags.sql", "Cross-process emergency-stop flag"),
+    Migration("016_paper_orders", "migrate_paper_orders.sql", "Durable paper order lifecycle ledger"),
 )
 
 
