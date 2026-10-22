@@ -69,6 +69,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("008_smart_money", "migrate_smart_money.sql", "Smart-money screener signals"),
     Migration("009_wallet_tracking", "migrate_wallet_tracking.sql", "Wallet tracker tables"),
     Migration("010_wib_columns", "migrate_add_wib_columns.sql", "WIB generated columns", upgrade_only=True),
+    Migration("010a_repair_wib_columns", "migrate_repair_wib_columns.sql", "Repair partially applied WIB generated columns", upgrade_only=True),
     Migration("011_data_segment", "migrate_add_data_segment.sql", "Backtest data_segment column", upgrade_only=True),
     Migration("012_fix_wib_timezone", "migrate_fix_wib_timezone.sql", "WIB timezone fix", upgrade_only=True),
     Migration("013_login_attempts", "migrate_login_attempts.sql", "Durable login rate limiting"),
