@@ -2,7 +2,7 @@
 API Router for Phase B: Live Paper Trading.
 """
 import logging
-from fastapi import APIRouter, HTTPException, Depends, Query, Path
+from fastapi import APIRouter, HTTPException, Depends, Query, Path, Request
 from pydantic import BaseModel, Field
 from typing import Optional
 import math
@@ -11,6 +11,9 @@ from paper.engine import (
     get_active_positions, get_paper_trades, get_paper_configs,
     set_paper_config, manual_close_position, sync_and_evaluate_paper_trading,
     get_paper_metrics
+)
+from paper.orders import (
+    OrderTransitionConflict, OrderValidationError, cancel_pending_order, list_orders,
 )
 
 router = APIRouter(prefix="/api/paper", tags=["paper-trading"])
@@ -37,6 +40,33 @@ def list_positions():
 def list_trades(limit: int = Query(50, ge=1, le=200)):
     trades = get_paper_trades(limit)
     return {"trades": trades}
+
+
+@router.get("/orders")
+def list_paper_orders(
+    status: Optional[str] = Query(None, max_length=12),
+    limit: int = Query(50, ge=1, le=200),
+):
+    try:
+        return {"orders": list_orders(status=status, limit=limit)}
+    except OrderValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/orders/{order_id}/cancel")
+def cancel_paper_order(order_id: int = Path(..., gt=0), request: Request = None):
+    user = getattr(request.state, "user", {}) if request is not None else {}
+    try:
+        actor_user_id = int(user["id"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Authenticated user identity is unavailable")
+    try:
+        cancel_pending_order(order_id, actor_user_id=actor_user_id)
+        return {"status": "cancelled", "order_id": order_id}
+    except OrderTransitionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except OrderValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/metrics")
