@@ -157,9 +157,9 @@ def run_real_experiment(*, symbol: str = DEFAULT_SYMBOL, market: str = DEFAULT_M
             store.save(artifact, result.model)
             logger.info("Persisted model artifact %s for paper trading", experiment_id)
         except FileExistsError:
-            import joblib
-            joblib.dump(result.model, models_dir / f"{experiment_id}.joblib")
-            artifact.save_manifest(models_dir)
+            # Deterministic experiment IDs may already have an artifact. Never
+            # overwrite existing model weights or manifests as an implicit retry.
+            logger.warning("Model artifact %s already exists; preserving the existing files", experiment_id)
     except Exception as exc:
         logger.warning("Could not persist model artifact: %s", exc)
 
