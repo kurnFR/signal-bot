@@ -228,12 +228,18 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
         df = _ohlcv_df(close=64000.0, high=64100.0, low=63900.0, atr=500.0, open_time=CANDLE_A)
         fake_strategy = MagicMock(return_value=[{
             "direction": "LONG", "entry_price": 64000.0, "stop_loss": 63000.0,
-            "take_profit": 66000.0, "entry_time": CANDLE_A,
+            "take_profit": 66000.0, "signal_open_time": CANDLE_A, "entry_time": CANDLE_B,
         }])
+        open_candle = {
+            "open_time": CANDLE_B, "open": 64000.0, "high": 64020.0,
+            "low": 63990.0, "close": 64010.0, "volume": 123.0,
+        }
 
         with patch("paper.engine.get_paper_configs", return_value=[cfg]), \
              patch("paper.engine.get_active_positions", return_value=[]), \
              patch("paper.engine.fetch_ohlcv_with_features_df", return_value=df), \
+             patch("paper.engine.fetch_latest_open_candle", return_value=open_candle), \
+             patch("paper.engine.time.time", return_value=(CANDLE_B + 60_000) / 1000), \
              patch("paper.engine.STRATEGIES", {"trend_ema_v1": fake_strategy}), \
              patch("paper.engine._signal_already_traded", return_value=True) as already_traded, \
              patch("paper.engine._insert_position") as insert_position:
