@@ -26,7 +26,7 @@ _insert_position() directly, with all DB access mocked -- no live
 database required.
 """
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, ANY
 import pandas as pd
 
 import paper.engine as pe
@@ -224,7 +224,7 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
     closed) on this same candle."""
 
     def test_entry_skipped_when_already_traded_on_this_candle(self):
-        cfg = _make_cfg()
+        cfg = _make_cfg(id=3)
         df = _ohlcv_df(close=64000.0, high=64100.0, low=63900.0, atr=500.0, open_time=CANDLE_A)
         fake_strategy = MagicMock(return_value=[{
             "direction": "LONG", "entry_price": 64000.0, "stop_loss": 63000.0,
@@ -268,6 +268,8 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
              patch("paper.engine.STRATEGIES", {"trend_ema_v1": fake_strategy}), \
              patch("paper.engine._signal_already_traded", return_value=False), \
              patch("paper.circuit_breaker.check_circuit_breakers", return_value=(True, "")), \
+             patch("paper.engine.create_pending_order", return_value={"id": 17, "status": "PENDING", "requested_entry_price": 64000.0}), \
+             patch("paper.engine.fill_pending_order", side_effect=lambda order_id, price, writer: {"status": "filled", "position_id": writer(object())}), \
              patch("paper.engine._insert_position", return_value=555) as insert_position:
             result = pe.sync_and_evaluate_paper_trading()
 
@@ -277,7 +279,7 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
         self.assertEqual(int(signal_df.iloc[-1]["is_closed"]), 0)
         insert_position.assert_called_once_with(
             cfg, fake_strategy.return_value[0], 64010.0, CANDLE_B,
-            ml_model_id=None, ml_probability=None,
+            ml_model_id=None, ml_probability=None, connection=ANY,
         )
         self.assertEqual(result["new_positions_opened"], 1)
 
