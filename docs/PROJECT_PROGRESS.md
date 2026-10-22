@@ -2,8 +2,8 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-22  
-**Master commit at review:** `c2b3e3ff388967e06d5e3222374a1b19e0c5099a`  
-**Overall status:** Active / not finished. PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247 adds authenticated order APIs, #248 adds dashboard controls, and #250 adds passing disposable-MariaDB concurrency/crash-recovery tests. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
+**Master commit at review:** `286067e11970e609e08da5f24d7db7bd53623372`  
+**Overall status:** Active / not finished. PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves Telegram alerts after recovered fills, and #253 hardens ML promotion metrics. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
 
@@ -36,7 +36,7 @@ Primary project references:
 | Database-status announcements and toast behavior | **Completed for identified issues** | PRs #222, #225, #229–#230 merged; broader live-region behavior still merits manual verification. |
 | Theme-specific sortable-indicator contrast | **Completed** | PR #233 merged and CI passed. |
 | Full project correctness and bug-free guarantee | **Not complete / cannot be guaranteed** | Continue risk-based review, regression tests, integration tests, and manual verification. |
-| ML paper-promotion safety | **Implemented for the documented eligibility gate** | PR #235 routes experiment and deploy-to-paper eligibility through the shared fail-closed gate; keep negative tests and artifact checks. |
+| ML paper-promotion safety | **Implemented with strengthened validation** | PR #235 shares the gate; PR #253 rejects non-finite/malformed metrics and fractional trade counts, validates drawdown bounds, and makes the registry recheck stored metrics. Keep negative tests and artifact provenance under review. |
 | Authentication and first-login hardening | **Implemented for identified controls** | First-login password change, stronger password policy, durable login throttling, and route authorization sweep are merged; continue periodic security review. |
 | Paper execution lifecycle and portfolio-level risk | **Code implemented; release validation open** | PRs #245, #247, and #248 integrate durable pending orders, atomic fills/recovery, authenticated history/cancellation, and dashboard state/filter controls. PR #250 adds passing MariaDB tests for fill concurrency, cancel-vs-fill, and crash rollback/retry. Populated-database upgrades and manual browser/accessibility checks remain open. Keep the system paper-only. |
 | Database migrations, durable jobs, and runtime-file hygiene | **Partially complete** | Versioned migrations and durable job state are merged. `custom_strategies.json` and `Screen/signals.jsonl` are still tracked and must be untracked without deleting real runtime data. |
@@ -114,6 +114,16 @@ The next gate is not another UI feature: validate the migration against a repres
 - [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39743385996)
 
 Coverage includes migration reapplication and idempotent signal creation, two concurrent fills yielding exactly one position, rollback/retry after an exception between position insert and order transition, and a race between cancellation and fill with one terminal winner. These tests use a dedicated test-position table and a disposable CI database; they do not prove a production deployment or replace populated-database upgrade and browser/accessibility validation.
+
+### Follow-up reliability fixes — PRs #252 and #253
+
+- [PR #252](https://github.com/kurnFR/signal-bot/pull/252) fixes a recovery-path alert gap: when a pending order fills after an engine restart, the same Telegram entry alert is now sent after the fill transaction commits. The alert uses the persisted order values and remains non-fatal if Telegram delivery fails.
+- [PR #253](https://github.com/kurnFR/signal-bot/pull/253) closes an ML promotion-gate edge case: NaN was rejected, but infinity, fractional trade counts, negative drawdown, and malformed metric containers were not all rejected. The gate now checks finiteness and ranges, and the in-memory registry re-evaluates metrics instead of trusting only the eligibility flag.
+
+PR #253 checks passed:
+- [pytest](https://github.com/kurnFR/signal-bot/actions/runs/39744257095)
+- [Project tests / MariaDB integration](https://github.com/kurnFR/signal-bot/actions/runs/39744257159)
+- [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39744257086)
 
 ### PR #233 final verification
 
