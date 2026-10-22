@@ -239,6 +239,46 @@ def get_sqlalchemy_engine():
     return _sqlalchemy_engine
 
 
+
+def fetch_latest_open_candle(symbol, market, timeframe):
+    """Return the current, still-forming candle's raw OHLCV, or None.
+
+    Strategy signals must use fully closed candles, but a paper entry is
+    simulated at the *next* candle's open. The forming candle's feature row
+    may not exist yet, so query raw OHLCV rather than joining the features
+    table. The caller must validate that this candle immediately follows the
+    latest closed candle before using it for an entry.
+    """
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT open_time, open, high, low, close, volume
+            FROM ohlcv
+            WHERE symbol=%s AND market=%s AND timeframe=%s AND is_closed=0
+            ORDER BY open_time DESC
+            LIMIT 1
+            """,
+            (symbol, market, timeframe),
+        )
+        row = cur.fetchone()
+        cur.close()
+        if row is None:
+            return None
+        return {
+            "open_time": int(row["open_time"]),
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row["volume"]),
+        }
+    finally:
+        conn.close()
+
+
+
 def fetch_ohlcv_df(symbol, market, timeframe):
     """
     Returns the full OHLCV history for one symbol/market/timeframe as a
