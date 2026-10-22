@@ -20,6 +20,18 @@ class TestMLArtifacts(unittest.TestCase):
             path = artifact.save_manifest(d)
             self.assertTrue(Path(path).exists())
 
+    def test_model_artifact_rejects_unsafe_model_ids(self):
+        for model_id in ("../outside", "..", "nested/model", ""):
+            with self.subTest(model_id=model_id):
+                with self.assertRaises(ValueError):
+                    ModelArtifact(
+                        model_id=model_id, experiment_id="exp-1",
+                        model_type="random_forest", base_strategy="trend_ema",
+                        feature_columns=("rsi",), strategy_params={},
+                        model_params={}, threshold=0.5, train_metrics={},
+                        validation_metrics={}, test_metrics={},
+                    )
+
     def test_eligibility_is_conservative(self):
         good = {"trade_count": 30, "profit_factor": 1.0,
                 "max_drawdown_pct": 25, "net_pnl": 0}
