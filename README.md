@@ -70,7 +70,7 @@ python3 run_all.py --skip retailbot2 --skip screener # skip the experimental bot
 
 Open `http://localhost:8050`. `run_all.py --help` lists `--skip` / `--only`. To run one piece by hand: `run_web.py`, `run_collectors.py`, `run_paper_engine.py` (required for paper trading to act on signals), `run_news_ai.py`, `run_wallet_tracker.py`.
 
-**4. Log in.** On first start an admin account is created. Use `ADMIN_DEFAULT_PASSWORD` if you set it; otherwise a random one-time password is written to `.initial_admin_credential` (mode 0600). Change it right after the first login (the account is flagged `must_change_password`, but the app does not yet force the change). See [docs/SECURITY.md](docs/SECURITY.md).
+**4. Log in.** On first start an admin account is created. Use `ADMIN_DEFAULT_PASSWORD` if you set it; otherwise a random one-time password is written to `.initial_admin_credential` (mode 0600). Accounts flagged `must_change_password` are blocked from other API actions until the password is changed, and the dashboard shows a blocking dialog. See [docs/SECURITY.md](docs/SECURITY.md).
 
 ### Command-line research tools
 
