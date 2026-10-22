@@ -11,8 +11,10 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
 import math
+import os
 from pathlib import Path
 import re
+import tempfile
 from typing import Any
 
 
@@ -74,11 +76,35 @@ class ModelArtifact:
         return asdict(self)
 
     def save_manifest(self, directory: str | Path) -> Path:
+        """Persist a manifest atomically without following a destination symlink."""
         root = Path(directory)
         root.mkdir(parents=True, exist_ok=True)
+        root = root.resolve()
         path = root / f"{self.model_id}.json"
-        path.write_text(json.dumps(self.manifest(), sort_keys=True, indent=2), encoding="utf-8")
-        return path
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=root,
+                prefix=".model-manifest-", suffix=".tmp", delete=False,
+            ) as handle:
+                temp_path = handle.name
+                json.dump(self.manifest(), handle, sort_keys=True, indent=2, allow_nan=False)
+                handle.write("\\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            # Replacing a symlink replaces the link itself; it does not write
+            # through it to the external target.
+            os.replace(temp_path, path)
+            temp_path = None
+            return path
+        except (OSError, TypeError, ValueError) as exc:
+            raise ValueError("Model manifest could not be written safely") from exc
+        finally:
+            if temp_path is not None:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
 
 
 def _num(metrics: dict[str, Any], *keys: str) -> float | None:
