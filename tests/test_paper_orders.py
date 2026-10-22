@@ -91,6 +91,28 @@ class TestValidateOrder(unittest.TestCase):
             validate_order(_valid_order(ml_probability=1.1))
 
 
+class TestPendingOrderPersistence(unittest.TestCase):
+    def test_create_pending_order_persists_and_returns_canonical_row(self):
+        cur = _Cursor(lastrowid=17, row={"id": 17, "status": "PENDING"})
+        conn = _Conn(cur)
+        with patch("paper.orders.get_pool", return_value=type("Pool", (), {"get_connection": lambda self: conn})()):
+            row = create_pending_order(_valid_order())
+        self.assertEqual(row["id"], 17)
+        self.assertEqual(row["status"], "PENDING")
+        self.assertEqual(conn.commits, 1)
+        self.assertTrue(any("INSERT IGNORE INTO paper_orders" in sql for sql, _ in cur.executed))
+
+    def test_duplicate_signal_returns_existing_order_without_overwriting(self):
+        cur = _Cursor(lastrowid=0, row={"id": 17, "status": "FILLED"})
+        conn = _Conn(cur)
+        with patch("paper.orders.get_pool", return_value=type("Pool", (), {"get_connection": lambda self: conn})()):
+            row = create_pending_order(_valid_order(requested_entry_price=101.0))
+        self.assertEqual(row["id"], 17)
+        self.assertEqual(row["status"], "FILLED")
+        self.assertTrue(any("SELECT id FROM paper_orders" in sql for sql, _ in cur.executed))
+        self.assertTrue(any("SELECT * FROM paper_orders" in sql for sql, _ in cur.executed))
+
+
 class TestOrderTransitions(unittest.TestCase):
     def test_fill_requires_price_and_position_link(self):
         with self.assertRaises(OrderValidationError):
