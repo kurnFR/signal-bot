@@ -208,6 +208,9 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn("!Array.isArray(tradesData.trades)", fetcher)
         self.assertIn("!Array.isArray(configsData.configs)", fetcher)
         self.assertIn("!validObject(metricsData.metrics)", fetcher)
+        self.assertIn("!Array.isArray(ordersData.orders)", fetcher)
+        self.assertIn('ordersData.orders.some(item => !item || typeof item !== "object" || Array.isArray(item))', fetcher)
+        self.assertIn("this.paperOrders = ordersData.orders", fetcher)
         self.assertIn('positionsData.positions.some(item => !item || typeof item !== "object" || Array.isArray(item))', fetcher)
         self.assertIn('tradesData.trades.some(item => !item || typeof item !== "object" || Array.isArray(item))', fetcher)
         self.assertIn('configsData.configs.some(item => !item || typeof item !== "object" || Array.isArray(item))', fetcher)
@@ -216,6 +219,18 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertLess(validation_end, assignments_start)
         self.assertIn('if (posBody) posBody.innerHTML =', fetcher)
         self.assertIn('this.showToast(`Failed to load paper trading data:', fetcher)
+
+
+    def test_paper_order_ledger_escapes_values_and_limits_cancel_to_pending_trader_admin(self):
+        self.assertIn('id="paper-orders-status-filter"', self.index_html)
+        self.assertIn('id="paper-orders-body"', self.index_html)
+        self.assertIn('scope="col">Status</th>', self.index_html)
+        self.assertIn('data-paper-order-cancel-id=', self.app_js)
+        self.assertIn('["trader", "admin"].includes(String(this.currentUser?.role || "").toLowerCase())', self.app_js)
+        self.assertIn('this._escapeHtml(order.state_reason || "—")', self.app_js)
+        self.assertIn('/api/paper/orders/\${orderId}/cancel', self.app_js)
+        self.assertIn('method: "POST"', self.app_js[self.app_js.index("    async cancelPaperOrder(orderId) {"):self.app_js.index("    async togglePaperStrategy", self.app_js.index("    async cancelPaperOrder(orderId) {"))])
+        self.assertIn('app.js?v=20261022-39', self.index_html)
 
 
     def test_wallet_refresh_failure_is_visible_and_escapes_api_error(self):
