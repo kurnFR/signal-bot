@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from ml.artifacts import ModelArtifact
+from ml.artifacts import ModelArtifact, paper_eligibility
 
 
 @dataclass(frozen=True)
@@ -20,8 +20,11 @@ class RegistryEntry:
         allowed = {"research", "paper", "retired"}
         if self.status not in allowed:
             raise ValueError(f"invalid registry status: {self.status}")
-        if self.status == "paper" and not self.artifact.eligible_for_paper:
-            raise ValueError("only paper-eligible artifacts may be promoted")
+        if self.status == "paper" and (
+            not self.artifact.eligible_for_paper
+            or not paper_eligibility(test_metrics=self.artifact.test_metrics)
+        ):
+            raise ValueError("only artifacts that pass the current paper eligibility gate may be promoted")
 
 
 class ModelRegistry:
@@ -37,8 +40,11 @@ class ModelRegistry:
 
     def promote_to_paper(self, model_id: str) -> RegistryEntry:
         entry = self.get(model_id)
-        if not entry.artifact.eligible_for_paper:
-            raise ValueError("artifact has not passed paper eligibility gates")
+        if (
+            not entry.artifact.eligible_for_paper
+            or not paper_eligibility(test_metrics=entry.artifact.test_metrics)
+        ):
+            raise ValueError("artifact has not passed current paper eligibility gates")
         updated = RegistryEntry(entry.artifact, "paper")
         self._entries[model_id] = updated
         return updated
