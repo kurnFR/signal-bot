@@ -6,6 +6,7 @@ from paper.orders import (
     OrderValidationError,
     cancel_pending_order,
     create_pending_order,
+    fill_pending_order,
     transition_order,
     validate_order,
 )
@@ -115,9 +116,9 @@ class TestPendingOrderPersistence(unittest.TestCase):
 
 class TestAtomicOrderFill(unittest.TestCase):
     def test_position_and_order_fill_share_one_transaction(self):
-        cur = _Cursor(rowcount=1, row={"id": 17, "status": "PENDING", "entry_time": 1, "timeframe": "1h"})
+        cur = _Cursor(rowcount=1, row={"id": 17, "status": "PENDING", "entry_time": 1_760_000_000_000, "timeframe": "1h"})
         conn = _Conn(cur)
-        with patch("paper.orders.time.time", return_value=1_760_000_000), \
+        with patch("paper.orders.time.time", return_value=1_760_000_010), \
              patch("paper.orders.get_pool", return_value=type("Pool", (), {"get_connection": lambda self: conn})()):
             result = fill_pending_order(17, 100.0, lambda transaction: 23)
         self.assertEqual(result, {"status": "filled", "position_id": 23})
