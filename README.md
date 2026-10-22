@@ -94,6 +94,7 @@ See [docs/STRATEGIES.md](docs/STRATEGIES.md) for the validation workflow (the ho
 | Futures data | `ENABLE_FUTURES=true` (default `false`; Binance futures WebSockets are geo-restricted in some countries) |
 | News AI | `CRYPTOPANIC_API_KEY`, `FINNHUB_API_KEY`, and one LLM provider (`LLM_PROVIDER`, plus its key) |
 | Web origins | `SIGNAL_BOT_ALLOWED_ORIGINS` (defaults to localhost:8050) |
+| Paper entry timing | `PAPER_ENTRY_MAX_DELAY_SECONDS` (default 120; late/missed candle opens are skipped) |
 
 ## Documentation
 
