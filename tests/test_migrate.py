@@ -287,5 +287,58 @@ class TestMariaDBIntegration(unittest.TestCase):
             admin.close()
 
 
+    def test_partial_wib_column_migration_repairs_missing_sibling(self):
+        """A duplicate WIB column must not prevent its missing sibling being added."""
+        import mysql.connector
+        from db import migrate
+        from config import MYSQL_CONFIG
+
+        cfg = dict(MYSQL_CONFIG)
+        name = "sb_migrate_partial_wib_it"
+        admin = mysql.connector.connect(**{k: v for k, v in cfg.items() if k != "database"})
+        cur = admin.cursor()
+        cur.execute(f"DROP DATABASE IF EXISTS {name}")
+        cur.execute(f"CREATE DATABASE {name}")
+        admin.commit()
+        conn = mysql.connector.connect(**dict(cfg, database=name))
+        try:
+            cur2 = conn.cursor()
+            baseline = next(m for m in MIGRATIONS if m.version == "000_baseline")
+            migrate.run_statements(
+                cur2,
+                migrate.split_statements((DB_DIR / baseline.filename).read_text(encoding="utf-8")),
+                label="integration-baseline",
+                log=lambda _: None,
+            )
+            # Simulate a legacy DB where the first generated column exists but
+            # the second was never created by the old multi-column ALTER.
+            cur2.execute("ALTER TABLE ohlcv DROP COLUMN close_time_wib")
+            cur2.execute(
+                """INSERT INTO ohlcv
+                   (symbol, market, timeframe, open_time, close_time, open, high, low,
+                    close, volume, quote_volume, num_trades, taker_buy_base_vol,
+                    taker_buy_quote_vol, is_closed)
+                   VALUES (%s, 'spot', '1m', %s, %s, 100, 102, 99, 101, 12, 1212, 7, 6, 606, 1)""",
+                ("PARTIAL_WIB_REPAIR", 1_790_000_000_000, 1_790_000_059_999),
+            )
+            conn.commit()
+            cur2.close()
+
+            migrate.apply_pending(conn, log=lambda _: None)
+            cur3 = conn.cursor()
+            cur3.execute(
+                "SELECT close_time_wib > open_time_wib FROM ohlcv WHERE symbol = %s",
+                ("PARTIAL_WIB_REPAIR",),
+            )
+            self.assertEqual(cur3.fetchone()[0], 1)
+            cur3.close()
+            self.assertEqual(migrate.apply_pending(conn, log=lambda _: None), [])
+        finally:
+            conn.close()
+            cur.execute(f"DROP DATABASE IF EXISTS {name}")
+            admin.commit()
+            admin.close()
+
+
 if __name__ == "__main__":
     unittest.main()
