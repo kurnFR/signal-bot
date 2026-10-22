@@ -86,11 +86,13 @@ def _read_emergency_flag() -> Optional[Tuple[bool, str]]:
 
 
 def is_emergency_stop_active() -> Tuple[bool, str]:
-    """Active if tripped in this process OR recorded in the shared database."""
+    """Fail closed if the shared emergency-stop state cannot be verified."""
     if _emergency_stop_active:
         return True, _emergency_stop_reason
     shared = _read_emergency_flag()
-    if shared and shared[0]:
+    if shared is None:
+        return True, "Unable to verify shared emergency-stop state; new entries blocked"
+    if shared[0]:
         return True, shared[1] or "Emergency stop active"
     return False, ""
 
