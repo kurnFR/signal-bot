@@ -110,8 +110,14 @@ def list_saved_models() -> Dict[str, Any]:
         try:
             data = json.loads(manifest_file.read_text(encoding="utf-8"))
             joblib_file = ML_MODELS_DIR / f"{manifest_file.stem}.joblib"
-            data["has_weights"] = joblib_file.exists()
-            data["eligibility"] = paper_eligibility_report(test_metrics=data.get("test_metrics") or {})
+            data["has_weights"] = joblib_file.is_file()
+            report = paper_eligibility_report(test_metrics=data.get("test_metrics") or {})
+            reasons = list(report["reasons"])
+            if not data.get("eligible_for_paper"):
+                reasons.append("manifest is not flagged eligible_for_paper")
+            if not data["has_weights"]:
+                reasons.append("model weights (.joblib) are missing")
+            data["eligibility"] = {"eligible": not reasons, "reasons": reasons}
             models.append(data)
         except Exception as exc:
             logger.warning("Failed to parse model manifest %s: %s", manifest_file, exc)
@@ -157,6 +163,9 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to parse model manifest: {exc}")
 
+    if manifest.get("model_id") != req.model_id:
+        raise HTTPException(status_code=409, detail="Model manifest ID does not match the requested model ID")
+
     # Promotion gate: re-evaluate from the stored untouched-test metrics instead of
     # trusting the manifest flag alone (manifests are plain, editable JSON files).
     report = paper_eligibility_report(test_metrics=manifest.get("test_metrics") or {})
@@ -166,8 +175,8 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
             status_code=409,
             detail="Model is not eligible for paper trading: " + "; ".join(reasons),
         )
-    if not (ML_MODELS_DIR / f"{req.model_id}.joblib").exists():
-        raise HTTPException(status_code=409, detail="Model weights (.joblib) are missing; retrain before deploying")
+    if not (ML_MODELS_DIR / f"{req.model_id}.joblib").is_file():
+        raise HTTPException(status_code=409, detail="Model weights (.joblib) are missing or not a regular file; retrain before deploying")
 
     try:
         strategy_params = manifest.get("strategy_params", {})
