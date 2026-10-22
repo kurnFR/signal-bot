@@ -27,6 +27,31 @@ class TestEligibilityReport(unittest.TestCase):
         no_dd = {k: v for k, v in GOOD.items() if k != "max_drawdown_pct"}
         self.assertFalse(paper_eligibility(test_metrics=no_dd))
 
+    def test_nonfinite_metrics_fail_closed(self):
+        cases = (
+            ("trade_count", float("inf")),
+            ("profit_factor", float("inf")),
+            ("max_drawdown_pct", float("-inf")),
+            ("net_pnl", float("inf")),
+        )
+        for key, value in cases:
+            with self.subTest(metric=key, value=value):
+                self.assertFalse(paper_eligibility(test_metrics=dict(GOOD, **{key: value})))
+
+    def test_fractional_trade_count_and_negative_drawdown_fail_closed(self):
+        self.assertFalse(paper_eligibility(test_metrics=dict(GOOD, trade_count=30.5)))
+        self.assertFalse(paper_eligibility(test_metrics=dict(GOOD, max_drawdown_pct=-1)))
+
+    def test_non_object_metrics_fail_closed(self):
+        for value in ([], "not-a-metrics-object", 7):
+            with self.subTest(value=value):
+                self.assertFalse(paper_eligibility(test_metrics=value))
+
+    def test_invalid_primary_metric_cannot_fall_back_to_conflicting_alias(self):
+        metrics = dict(GOOD, trade_count=float("inf"), total_trades=40)
+        self.assertFalse(paper_eligibility(test_metrics=metrics))
+
+
     def test_each_gate_reports_a_reason(self):
         report = paper_eligibility_report(test_metrics={
             "trade_count": 3, "profit_factor": 0.8, "max_drawdown_pct": 40, "net_pnl": -1})
