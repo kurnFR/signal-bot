@@ -63,8 +63,10 @@ class ModelArtifact:
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def __post_init__(self) -> None:
-        if not self.model_id.strip() or not self.experiment_id.strip():
-            raise ValueError("model_id and experiment_id are required")
+        if not isinstance(self.model_id, str) or not _MODEL_ID_RE.fullmatch(self.model_id) or ".." in self.model_id:
+            raise ValueError("model_id must be a safe filesystem identifier")
+        if not isinstance(self.experiment_id, str) or not self.experiment_id.strip():
+            raise ValueError("experiment_id is required")
         if not 0 < self.threshold < 1:
             raise ValueError("threshold must be between 0 and 1")
 
