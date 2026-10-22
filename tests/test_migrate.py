@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 
 from db.migrate import (MIGRATIONS, Migration, MigrationError, apply_pending, checksum,
-                        split_statements, run_statements)
+                        migration_status, split_statements, run_statements)
 
 DB_DIR = Path(__file__).resolve().parents[1] / "db"
 
@@ -29,7 +29,11 @@ class FakeCursor:
             self._rows = list(self.conn.recorded.items())
         elif "information_schema.tables" in text:
             if "table_name = %s" in text:
-                self._rows = [(1 if self.conn.has_ohlcv else 0,)]
+                table_name = params[0] if params else ""
+                if table_name == "schema_migrations":
+                    self._rows = [(1 if self.conn.has_schema_migrations else 0,)]
+                else:
+                    self._rows = [(1 if self.conn.has_ohlcv else 0,)]
             else:
                 self._rows = [(1 if self.conn.has_application_tables else 0,)]
         elif text.startswith("INSERT INTO schema_migrations"):
@@ -60,13 +64,15 @@ class FakeConn:
             has_ohlcv if has_application_tables is None else has_application_tables
         )
         self.fail_on = fail_on or {}
+        self.has_schema_migrations = True
         self.recorded, self.statuses, self.executed, self.released = {}, {}, [], False
+        self.commit_count = 0
 
     def cursor(self):
         return FakeCursor(self)
 
     def commit(self):
-        pass
+        self.commit_count += 1
 
 
 def write_set(directory, files):
@@ -121,6 +127,40 @@ class TestRegistry(unittest.TestCase):
 
     def test_baseline_is_first(self):
         self.assertEqual(MIGRATIONS[0].version, "000_baseline")
+
+
+class TestMigrationStatus(unittest.TestCase):
+    def test_status_does_not_create_tracking_table_when_absent(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        directory = Path(tmp.name)
+        migrations = write_set(directory, [
+            ("base.sql", "CREATE TABLE t (i INT);", False),
+            ("upgrade.sql", "ALTER TABLE t ADD COLUMN c INT;", True),
+        ])
+        conn = FakeConn(has_ohlcv=False)
+        conn.has_schema_migrations = False
+
+        rows = migration_status(conn.cursor(), directory=directory, migrations=migrations)
+
+        self.assertEqual([row["state"] for row in rows], ["pending", "pending"])
+        self.assertEqual(conn.executed, [])
+        self.assertEqual(conn.recorded, {})
+        self.assertEqual(conn.commit_count, 0)
+
+    def test_status_reads_existing_tracking_table_without_writes(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        directory = Path(tmp.name)
+        migrations = write_set(directory, [("base.sql", "CREATE TABLE t (i INT);", False)])
+        conn = FakeConn(has_ohlcv=True)
+        conn.recorded[migrations[0].version] = checksum("CREATE TABLE t (i INT);")
+
+        rows = migration_status(conn.cursor(), directory=directory, migrations=migrations)
+
+        self.assertEqual([row["state"] for row in rows], ["applied"])
+        self.assertEqual(conn.executed, [])
+        self.assertEqual(conn.commit_count, 0)
 
 
 class TestApply(unittest.TestCase):
