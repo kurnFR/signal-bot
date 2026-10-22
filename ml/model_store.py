@@ -42,7 +42,9 @@ class ModelStore:
                 mode="wb", dir=root, prefix=".model-weights-", suffix=".tmp", delete=False
             ) as handle:
                 temp_path = handle.name
-            joblib.dump(model, temp_path)
+            # Compression keeps joblib output in one file so the atomic replace
+            # cannot leave required sidecar arrays behind.
+            joblib.dump(model, temp_path, compress=3)
             with open(temp_path, "rb") as handle:
                 os.fsync(handle.fileno())
             # Atomic replacement replaces a destination symlink itself instead
