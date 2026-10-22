@@ -2,8 +2,8 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-22  
-**Master commit at review:** `acc7d17bc6872eb4f821245580fa86076aabf852`  
-**Overall status:** Active / not finished. PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253 hardens promotion metrics, and #255 aligns ML listing with deployability. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
+**Master commit at review:** `933a9dd96324f8764b2555ce1f6ddd8607f75d0b`  
+**Overall status:** Active / not finished. PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, and #257 adds ML experiment path containment. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
 
@@ -133,6 +133,15 @@ All PR checks passed:
 - [pytest](https://github.com/kurnFR/signal-bot/actions/runs/39744708891)
 - [Project tests / MariaDB integration](https://github.com/kurnFR/signal-bot/actions/runs/39744708777)
 - [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39744708869)
+
+### ML experiment path containment — PR #257
+
+[PR #257](https://github.com/kurnFR/signal-bot/pull/257) hardens `GET /api/ml/experiments/{experiment_id}`. IDs are restricted to filename-safe characters, `..` sequences are rejected, resolved paths must remain directly inside the results directory, and the target must be a regular file. Regression tests cover valid IDs, malformed IDs, and a symlink that points outside the results root.
+
+All PR checks passed:
+- [pytest](https://github.com/kurnFR/signal-bot/actions/runs/39745244099)
+- [Project tests / MariaDB integration](https://github.com/kurnFR/signal-bot/actions/runs/39745244146)
+- [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39745244131)
 
 ### PR #233 final verification
 
