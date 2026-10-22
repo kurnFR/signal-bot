@@ -2,8 +2,8 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-22  
-**Master commit at review:** `8d6ad30759df63f2b5088047d63dcde006f91cc4`  
-**Overall status:** Active / not finished. PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247 adds authenticated order APIs, and #248 adds dashboard order history/cancellation controls. MariaDB crash/concurrency validation, manual accessibility checks, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
+**Master commit at review:** `c2b3e3ff388967e06d5e3222374a1b19e0c5099a`  
+**Overall status:** Active / not finished. PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247 adds authenticated order APIs, #248 adds dashboard controls, and #250 adds passing disposable-MariaDB concurrency/crash-recovery tests. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
 
@@ -38,7 +38,7 @@ Primary project references:
 | Full project correctness and bug-free guarantee | **Not complete / cannot be guaranteed** | Continue risk-based review, regression tests, integration tests, and manual verification. |
 | ML paper-promotion safety | **Implemented for the documented eligibility gate** | PR #235 routes experiment and deploy-to-paper eligibility through the shared fail-closed gate; keep negative tests and artifact checks. |
 | Authentication and first-login hardening | **Implemented for identified controls** | First-login password change, stronger password policy, durable login throttling, and route authorization sweep are merged; continue periodic security review. |
-| Paper execution lifecycle and portfolio-level risk | **Code implemented; release validation open** | PRs #245, #247, and #248 integrate durable pending orders, atomic fills/recovery, authenticated history/cancellation, and dashboard state/filter controls. MariaDB concurrency/crash recovery and manual browser/accessibility checks remain open. Keep the system paper-only. |
+| Paper execution lifecycle and portfolio-level risk | **Code implemented; release validation open** | PRs #245, #247, and #248 integrate durable pending orders, atomic fills/recovery, authenticated history/cancellation, and dashboard state/filter controls. PR #250 adds passing MariaDB tests for fill concurrency, cancel-vs-fill, and crash rollback/retry. Populated-database upgrades and manual browser/accessibility checks remain open. Keep the system paper-only. |
 | Database migrations, durable jobs, and runtime-file hygiene | **Partially complete** | Versioned migrations and durable job state are merged. `custom_strategies.json` and `Screen/signals.jsonl` are still tracked and must be untracked without deleting real runtime data. |
 | Strategy and ML evidence of trading edge | **Not complete** | Use leakage-safe chronological evaluation and untouched holdout data; passing software tests is not proof of profitability. |
 | GCAO project documentation and status | **Needs identification / blocked** | The accessible `signal-bot` repository and retrieved project context did not identify what “GCAO” stands for, its canonical repository, or its scope. Do not assume it is the same as Signal Bot or the separate `ai_insight` / `forecast_engine` work. Add verified details after its identity and source are confirmed. |
@@ -104,7 +104,16 @@ Remaining: authenticated order list/cancel API, dashboard order history, and dir
 - Latest PR-head checks passed: [pytest](https://github.com/kurnFR/signal-bot/actions/runs/39742628179), [project tests/MariaDB integration](https://github.com/kurnFR/signal-bot/actions/runs/39742628146), and [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39742628249).
 - The post-merge master checks for PR #247 also passed: [pytest](https://github.com/kurnFR/signal-bot/actions/runs/39741807178), [project tests](https://github.com/kurnFR/signal-bot/actions/runs/39741807160), and [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39741807146).
 
-The next gate is not another UI feature: run direct MariaDB tests for simultaneous fill/cancel attempts, process crashes around the position/order transaction, migration upgrade from a populated database, and manual keyboard/screen-reader/reflow/forced-colors checks. No deployment was performed.
+The next gate is not another UI feature: validate the migration against a representative populated database and perform manual keyboard/screen-reader/reflow/forced-colors checks. PR #250 now exercises simultaneous fill/cancel attempts, a simulated crash between position insert and order-state update, retry after rollback, and migration/idempotency behavior against disposable MariaDB. No deployment was performed.
+
+### MariaDB order-lifecycle integration — PR #250
+
+[PR #250](https://github.com/kurnFR/signal-bot/pull/250) adds real InnoDB tests and wires them into the disposable MariaDB CI job. The latest PR checks passed:
+- [pytest](https://github.com/kurnFR/signal-bot/actions/runs/39743379753)
+- [Project tests including MariaDB integration](https://github.com/kurnFR/signal-bot/actions/runs/39743385846)
+- [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/39743385996)
+
+Coverage includes migration reapplication and idempotent signal creation, two concurrent fills yielding exactly one position, rollback/retry after an exception between position insert and order transition, and a race between cancellation and fill with one terminal winner. These tests use a dedicated test-position table and a disposable CI database; they do not prove a production deployment or replace populated-database upgrade and browser/accessibility validation.
 
 ### PR #233 final verification
 
@@ -205,4 +214,4 @@ The project should not be marked finished just because the latest PRs are merged
 ---
 
 **Last update:** 2026-10-22.  
-**Next suggested engineering step:** validate paper-order concurrency/crash recovery and migration upgrades against MariaDB, then perform manual keyboard/screen-reader/mobile/forced-colors checks. Separately untrack runtime data only after preserving the real files on the machine that owns them.
+**Next suggested engineering step:** run a migration rehearsal against a representative populated database, then perform manual keyboard/screen-reader/mobile/forced-colors checks. Separately untrack runtime data only after preserving the real files on the machine that owns them.
