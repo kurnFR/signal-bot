@@ -1,6 +1,6 @@
 # Paper Order Lifecycle — Design and Acceptance Criteria
 
-**Status:** Design approved for implementation planning; not implemented end-to-end yet.  
+**Status:** Ledger schema and guarded transition service merged in PR #243; engine/API/dashboard integration is not implemented end-to-end yet.  
 **Scope:** Paper/shadow execution only. This document does not authorize exchange orders or live trading.
 
 ## 1. Why this phase exists
@@ -48,7 +48,7 @@ Terminal states are immutable. Retrying a poll must never resurrect a terminal o
 
 ## 4. Persistence and concurrency invariants
 
-The implementation should add a versioned migration (next migration after `015_system_flags`) creating `paper_orders` with, at minimum:
+PR #243 adds migration `016_paper_orders` and the initial `paper.orders` service. The schema includes, at minimum:
 
 - order ID and strategy identity: symbol, market, timeframe, strategy name;
 - signal candle time and intended entry candle time;
@@ -84,8 +84,8 @@ Use compare-and-set transitions (`UPDATE ... WHERE id=? AND status='PENDING'`) s
 ## 7. Implementation phases
 
 1. **Timing guard (merged PR #239):** only use the immediate next open candle; skip stale/missing data.
-2. **Durable ledger and transition service:** migration, idempotent creation, guarded state changes, concurrency/recovery tests.
-3. **Engine integration and API:** persist pending orders, fill/expire/reject deterministically, add list/cancel endpoints, and reconcile crash windows.
+2. **Durable ledger and transition service (merged PR #243):** migration `016_paper_orders`, validated/idempotent order creation, bounded listing, and compare-and-set terminal transitions have unit coverage. The service is not yet called by the engine.
+3. **Engine integration and API:** wire signal discovery and fills to the ledger, expire missed orders, add list/cancel endpoints, and reconcile crash windows atomically.
 4. **Dashboard and release verification:** show pending/filled/expired/cancelled/rejected states, run browser/accessibility checks, run the MariaDB integration suite, and verify docs against the deployed version if deployment is explicitly requested.
 
 The execution-lifecycle phase is complete only after phases 2–4 are implemented and verified. PR #239 alone fixes timing but does not satisfy that completion gate.
