@@ -249,7 +249,7 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
         insert_position.assert_not_called()
 
     def test_entry_proceeds_when_not_already_traded(self):
-        cfg = _make_cfg()
+        cfg = _make_cfg(id=3)
         df = _ohlcv_df(close=64000.0, high=64100.0, low=63900.0, atr=500.0, open_time=CANDLE_A)
         fake_strategy = MagicMock(return_value=[{
             "direction": "LONG", "entry_price": 64000.0, "stop_loss": 63000.0,
