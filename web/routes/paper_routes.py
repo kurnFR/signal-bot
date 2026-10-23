@@ -29,6 +29,7 @@ class PaperConfigRequest(BaseModel):
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
     ml_model_id: Optional[str] = Field(None, json_schema_extra={"example": "real-btcusdt-spot-1h-trend_ema_v1-logistic_regression-binary_positive_r"})
     telegram_enabled: Optional[bool] = Field(None, description="Whether paper entry alerts should be sent to Telegram; omitted updates preserve the current preference")
+    report_enabled: Optional[bool] = Field(None, description="Whether this strategy appears in per-strategy performance summaries; omitted updates preserve the current preference")
 
 
 @router.get("/positions")
@@ -98,6 +99,7 @@ def update_config(req: PaperConfigRequest):
         req.risk_per_trade_pct,
         req.ml_model_id.strip() if req.ml_model_id else None,
         telegram_enabled=req.telegram_enabled,
+        report_enabled=req.report_enabled,
     )
     return res
 
