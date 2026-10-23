@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ml.artifacts import ModelArtifact
 from ml.model_store import ModelStore
@@ -44,6 +45,30 @@ class TestMLModelStore(unittest.TestCase):
             store.save(artifact, {"dummy": True})
             with self.assertRaises(ValueError):
                 store.load(artifact, ["atr", "rsi"])
+
+    def test_load_hashes_and_deserializes_the_same_open_file(self):
+        import json
+        import joblib
+
+        with tempfile.TemporaryDirectory() as d:
+            store = ModelStore(d)
+            artifact = self.artifact()
+            store.save(artifact, {"source": "verified"})
+            weight_path = Path(d) / f"{artifact.model_id}.joblib"
+            original_load = joblib.load
+
+            def replace_path_then_load(handle):
+                # Simulate a writer replacing the pathname after hashing. The
+                # already-open handle must still refer to the verified inode.
+                weight_path.unlink()
+                weight_path.write_bytes(b"unverified replacement")
+                return original_load(handle)
+
+            with patch("ml.model_store.joblib.load", side_effect=replace_path_then_load):
+                loaded = store.load(artifact, ["rsi", "atr"])
+            self.assertEqual(loaded, {"source": "verified"})
+            manifest = json.loads((Path(d) / f"{artifact.model_id}.json").read_text())
+            self.assertRegex(manifest["weights_sha256"], r"^[a-f0-9]{64}$")
 
     def test_save_rejects_weight_symlink_without_touching_target(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as outside:
