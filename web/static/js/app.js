@@ -1200,13 +1200,16 @@ const App = {
             const safeId = this._escapeHtml(strategy);
             const safeMode = this._escapeHtml(mode);
             const key = `rlc-${strategy.replace(/[^a-zA-Z0-9_-]/g, "_")}-${mode}`;
-            const checkbox = (field, label) => `
+            const checkbox = (field, label) => {
+                const disabled = row.historical_only && field !== "report_enabled" ? "disabled" : "";
+                return `
                 <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-300">
-                    <input type="checkbox" id="${key}-${field}" ${row[field] ? "checked" : ""}
+                    <input type="checkbox" id="${key}-${field}" ${row[field] ? "checked" : ""} ${disabled}
                         aria-label="${label} for ${safeId} (${safeMode})"
                         class="rounded border-slate-600 bg-slate-800 text-sky-500 focus:ring-sky-500">
                     <span class="sr-only">${label}</span>
                 </label>`;
+            };
             return `
                 <tr>
                     <td class="font-semibold text-slate-100 whitespace-nowrap">
