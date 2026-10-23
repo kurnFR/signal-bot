@@ -713,7 +713,7 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
             )
             if fill["status"] == "filled":
                 result["filled"] += 1
-                if cfg.get("telegram_enabled", False):
+                if order.get("telegram_enabled", cfg.get("telegram_enabled", False)):
                     _send_paper_entry_alert(order)
             elif fill["status"] == "rejected":
                 result["rejected"] += 1
@@ -951,6 +951,7 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                             "take_profit": float(latest_trade["take_profit"]),
                             "atr_at_signal": float(latest_trade.get("atr_at_signal", latest_bar.get("atr", 0)) or 0),
                             "ml_model_id": ml_model_id, "ml_probability": ml_probability,
+                            "telegram_enabled": bool(cfg.get("telegram_enabled", False)),
                         })
                     except Exception:
                         logger.exception("Unable to persist paper order for %s/%s", symbol, strategy_name)
@@ -998,7 +999,7 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                         result["new_positions_opened"] += 1
                         result["orders_filled"] += 1
                         logger.info("Filled paper order #%s for %s (%s) via %s", order["id"], symbol, latest_trade["direction"], strategy_name)
-                        if cfg.get("telegram_enabled", False):
+                        if order.get("telegram_enabled", cfg.get("telegram_enabled", False)):
                             _send_paper_entry_alert(order, ml_threshold=ml_threshold)
 
 
