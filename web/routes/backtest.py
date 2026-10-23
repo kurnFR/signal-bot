@@ -1,12 +1,17 @@
 import json
 import logging
+import hashlib
+import math
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 
 from db.db import (
-    fetch_ohlcv_with_features_df, insert_backtest_run, insert_backtest_trades, get_pool
+    fetch_ohlcv_with_features_df, insert_backtest_run, insert_backtest_trades, get_pool,
+    get_strategy_auto_promotion_policy, set_strategy_auto_promotion_policy,
+    get_strategy_promotion_audit, get_strategy_promotion_decision,
+    record_strategy_promotion_decision, update_strategy_promotion_decision,
 )
 from backtest.strategies import (
     STRATEGIES, FUNDING_STRATEGIES, TREND_ALIGNMENT_STRATEGIES, PAIRS_STRATEGIES
@@ -173,6 +178,49 @@ SHARED_EXECUTION_PARAMS = [
     {"key": "TRAIL_ACTIVATION_R", "label": "Trail Activation (R)", "type": "float", "default": 1.0, "min": 0.5, "max": 3.0, "step": 0.25},
     {"key": "TRAIL_DISTANCE_ATR_MULT", "label": "Trail Distance (x ATR)", "type": "float", "default": 1.5, "min": 0.5, "max": 4.0, "step": 0.25},
 ]
+
+
+class StrategyAutoPromotionPolicyRequest(BaseModel):
+    enabled: bool = False
+    min_test_trades: int = Field(30, ge=30, le=10000)
+    min_profit_factor: float = Field(1.2, ge=1.0, le=10.0)
+    min_expectancy_r: float = Field(0.05, ge=0.0, le=10.0)
+    max_drawdown_r: float = Field(8.0, gt=0.0, le=100.0)
+    min_rank_score: float = Field(0.1, ge=0.01, le=1.0)
+    require_holdout: bool = True
+    send_telegram: bool = True
+
+
+@router.get("/promotion-policy")
+def get_promotion_policy():
+    try:
+        return {"policy": get_strategy_auto_promotion_policy()}
+    except Exception as exc:
+        logger.exception("Failed to load auto-promotion policy")
+        raise HTTPException(status_code=500, detail=f"Unable to load promotion policy: {exc}")
+
+
+@router.put("/promotion-policy")
+def update_promotion_policy(req: StrategyAutoPromotionPolicyRequest):
+    values = req.dict()
+    for key in ("min_profit_factor", "min_expectancy_r", "max_drawdown_r", "min_rank_score"):
+        if not math.isfinite(values[key]):
+            raise HTTPException(status_code=400, detail=f"{key} must be finite")
+    try:
+        set_strategy_auto_promotion_policy(values)
+        return {"status": "ok", "policy": get_strategy_auto_promotion_policy()}
+    except Exception as exc:
+        logger.exception("Failed to save auto-promotion policy")
+        raise HTTPException(status_code=500, detail=f"Unable to save promotion policy: {exc}")
+
+
+@router.get("/promotion-audit")
+def list_promotion_audit(limit: int = Query(25, ge=1, le=100)):
+    try:
+        return {"events": get_strategy_promotion_audit(limit)}
+    except Exception as exc:
+        logger.exception("Failed to load promotion audit")
+        raise HTTPException(status_code=500, detail=f"Unable to load promotion audit: {exc}")
 
 
 class BacktestRunRequest(BaseModel):
