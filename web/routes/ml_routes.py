@@ -231,6 +231,7 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
             risk_per_trade_pct=req.risk_per_trade_pct,
             ml_model_id=req.model_id,
             telegram_enabled=req.send_telegram,
+            report_enabled=True,
         )
 
         telegram_status = None
