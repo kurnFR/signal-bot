@@ -207,6 +207,17 @@ def retailbot2_strategies_set(req: StrategyLifecycleRequest):
         raise HTTPException(status_code=400, detail="Unknown strategy identity or mode")
     if req.mode not in {"shadow", "inverse"}:
         raise HTTPException(status_code=400, detail="Mode must be shadow or inverse")
+    registry_entry = next(
+        row for row in _strategy_lifecycle_registry()
+        if (row["strategy_id"], row["mode"]) == (req.strategy_id, req.mode)
+    )
+    if registry_entry.get("historical_only") and (
+        req.evaluation_enabled or req.paper_enabled or req.telegram_enabled
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Historical composite rows can only be shown or hidden in reports",
+        )
     settings = {
         "evaluation_enabled": req.evaluation_enabled,
         "paper_enabled": req.paper_enabled,
