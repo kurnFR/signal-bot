@@ -30,7 +30,7 @@ RetailBot2 has its separate lifecycle controls in the Research tab. Smart Money 
 
 ## Database migration
 
-Before deploying this code, apply `db/migrate_strategy_auto_promotion.sql` using the repository's established migration procedure. It adds `paper_configs.telegram_enabled` (default off for existing configs), the editable policy row, and the promotion audit table. Do not enable auto-promotion until the migration has succeeded.
+Before deploying this code, apply `db/migrate_strategy_auto_promotion.sql` using the repository's established migration procedure. It adds `paper_configs.telegram_enabled` and `paper_orders.telegram_enabled` (both default off for existing configs/orders), the editable policy row, and the promotion audit table. Do not enable auto-promotion until the migration has succeeded.
 
 ## Audit states
 
