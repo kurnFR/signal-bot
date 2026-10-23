@@ -66,6 +66,8 @@ python -m ml.audit_artifacts --directory ml_models --json
 
 The command only reads root-level JSON manifests and weight bytes. It reports missing/invalid digests, digest mismatches, missing or orphan files, malformed manifests, ID mismatches, and symlinks. It does not edit or repair artifacts, and a `digest_matches` result proves byte consistency with the adjacent manifest only—not trusted provenance. Run it against the actual artifact directory on the owning machine; model artifacts are gitignored and are not expected to exist in a repository checkout. Regenerate untrusted legacy artifacts from a trusted experiment instead of adding a digest to an unverified file.
 
+For the proposed signature-based authenticity boundary, key-management options, threat model, and rollout gates, see [ML artifact provenance design](ML_ARTIFACT_PROVENANCE_DESIGN.md). This is a design proposal only; signing and signature enforcement are not implemented.
+
 ## 5. Package map
 
 | Module | Role |
