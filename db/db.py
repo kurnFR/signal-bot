@@ -1047,7 +1047,23 @@ def get_retailbot2_stats():
     conn = get_retailbot2_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM rdt_strategy_stats ORDER BY mode, strategy")
+        _ensure_retailbot2_strategy_lifecycle_table(cur)
+        conn.commit()
+        cur.execute("""
+            SELECT t.strategy, t.mode,
+                   COUNT(*) AS total_trades,
+                   SUM(CASE WHEN t.net_pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                   SUM(CASE WHEN t.net_pnl <= 0 THEN 1 ELSE 0 END) AS losses,
+                   COALESCE(SUM(t.net_pnl), 0) AS total_pnl,
+                   MAX(t.exit_time) AS last_updated
+            FROM rdt_trades t
+            LEFT JOIN rdt_strategy_lifecycle l
+              ON l.strategy_id = t.strategy AND l.mode = t.mode
+            WHERE t.status='CLOSED'
+              AND COALESCE(l.report_enabled, TRUE) = TRUE
+            GROUP BY t.strategy, t.mode
+            ORDER BY t.mode, t.strategy
+        """)
         stats_rows = cur.fetchall()
         for r in stats_rows:
             if isinstance(r.get("total_pnl"), Decimal):
