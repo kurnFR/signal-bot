@@ -42,6 +42,8 @@ class TestResearchRoutes(unittest.TestCase):
                 "enabled": True, "overrides": {}, "updated_at": None
             }),
             patch("web.routes.research_routes.set_retailbot2_control"),
+            patch("web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings", return_value=[]),
+            patch("web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting"),
             patch("web.routes.research_routes.get_screener_control", return_value={
                 "enabled": True, "overrides": {}, "updated_at": None
             }),
@@ -72,11 +74,46 @@ class TestResearchRoutes(unittest.TestCase):
             "/api/research/screener/signals",
             "/api/research/screener/stats",
             "/api/research/retailbot2/control",
+            "/api/research/retailbot2/strategies",
             "/api/research/screener/control",
         ]
         for ep in endpoints:
             res = self.client.get(ep)
             self.assertEqual(res.status_code, 401, f"Endpoint {ep} should require auth")
+
+    def test_strategy_lifecycle_endpoint_defaults_fail_closed_for_telegram(self):
+        res = self.client.get("/api/research/retailbot2/strategies", headers=self.headers)
+        self.assertEqual(res.status_code, 200)
+        strategies = res.json()["strategies"]
+        bb_inverse = next(
+            row for row in strategies
+            if row["strategy_id"] == "BB_REV_INV" and row["mode"] == "inverse"
+        )
+        self.assertTrue(bb_inverse["paper_enabled"])
+        self.assertTrue(bb_inverse["report_enabled"])
+        self.assertFalse(bb_inverse["telegram_enabled"])
+        self.assertFalse(bb_inverse["auto_promote_enabled"])
+
+    def test_strategy_lifecycle_rejects_unknown_strategy(self):
+        res = self.client.post("/api/research/retailbot2/strategies", headers=self.headers, json={
+            "strategy_id": "NOT_A_STRATEGY", "mode": "shadow",
+            "evaluation_enabled": True, "paper_enabled": True,
+            "telegram_enabled": True, "report_enabled": True,
+        })
+        self.assertEqual(res.status_code, 400)
+
+    def test_strategy_lifecycle_saves_user_selected_telegram_promotion(self):
+        with patch("web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting") as save:
+            res = self.client.post("/api/research/retailbot2/strategies", headers=self.headers, json={
+                "strategy_id": "BB_REV_INV", "mode": "inverse",
+                "evaluation_enabled": True, "paper_enabled": True,
+                "telegram_enabled": True, "report_enabled": True,
+            })
+        self.assertEqual(res.status_code, 200)
+        args = save.call_args.args
+        self.assertEqual(args[0:2], ("BB_REV_INV", "inverse"))
+        self.assertTrue(args[2]["telegram_enabled"])
+        self.assertFalse(args[2]["auto_promote_enabled"])
 
     def test_retailbot2_positions_endpoint(self):
         res = self.client.get("/api/research/retailbot2/positions", headers=self.headers)
