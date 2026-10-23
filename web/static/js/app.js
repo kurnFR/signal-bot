@@ -1965,10 +1965,14 @@ const App = {
                         <div class="text-xs font-mono text-sky-400 mt-1">${this._escapeHtml(c.strategy_name)}</div>
                         <div class="text-[10px] text-slate-500 mt-0.5">$${this._escapeHtml(Number(c.allocated_capital).toLocaleString())} capital &middot; ${this._escapeHtml(String(c.risk_per_trade_pct))}% risk/trade</div>
                     </div>
-                    <div>
-                        <button type="button" data-paper-config-toggle data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-next-active="${!c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}" 
+                    <div class="flex flex-col gap-2 items-end">
+                        <button type="button" data-paper-config-toggle data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-next-active="${!c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
                             class="px-3 py-1.5 rounded text-xs font-semibold ${c.is_active ? "bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30" : "bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30"}">
                             ${c.is_active ? "Pause" : "Activate"}
+                        </button>
+                        <button type="button" data-paper-config-telegram data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-next-telegram="${!c.telegram_enabled}" data-active="${c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
+                            class="px-3 py-1.5 rounded text-xs font-semibold ${c.telegram_enabled ? "bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30" : "bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700"}">
+                            Telegram ${c.telegram_enabled ? "On" : "Off"}
                         </button>
                     </div>
                 </div>
@@ -1984,6 +1988,23 @@ const App = {
                         button.dataset.timeframe || "",
                         button.dataset.strategy || "",
                         button.dataset.nextActive === "true",
+                        capital,
+                        risk
+                    );
+                });
+            });
+            cfgContainer.querySelectorAll("[data-paper-config-telegram]").forEach(button => {
+                button.addEventListener("click", () => {
+                    const capital = Number(button.dataset.capital);
+                    const risk = Number(button.dataset.risk);
+                    if (!Number.isFinite(capital) || !Number.isFinite(risk)) return;
+                    this.togglePaperTelegram(
+                        button.dataset.symbol || "",
+                        button.dataset.market || "",
+                        button.dataset.timeframe || "",
+                        button.dataset.strategy || "",
+                        button.dataset.active === "true",
+                        button.dataset.nextTelegram === "true",
                         capital,
                         risk
                     );
@@ -2086,6 +2107,26 @@ const App = {
         } catch (error) {
             const message = error && error.message ? error.message : String(error || "Unknown error");
             this.showToast(`Unable to cancel paper order #${orderId}: ${message}`, "error");
+        }
+    },
+
+    async togglePaperTelegram(symbol, market, timeframe, strategy, isActive, nextTelegram, allocatedCapital, riskPerTradePct) {
+        try {
+            const res = await fetch(`${API_BASE}/api/paper/configs`, {
+                method: "POST",
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify({
+                    symbol, market, timeframe, strategy_name: strategy,
+                    is_active: isActive, allocated_capital: allocatedCapital,
+                    risk_per_trade_pct: riskPerTradePct, telegram_enabled: nextTelegram
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+            this.showToast(`Telegram alerts ${nextTelegram ? "enabled" : "disabled"} for ${strategy} (${symbol}).`, "success");
+            await this.fetchPaperData();
+        } catch (e) {
+            this.showToast(`Failed to update Telegram preference: ${e.message || e}`, "error");
         }
     },
 
