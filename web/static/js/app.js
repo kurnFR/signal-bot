@@ -1219,10 +1219,15 @@ const App = {
                     <td>${checkbox("paper_enabled", "Paper track strategy")}</td>
                     <td>${checkbox("telegram_enabled", "Telegram alerts")}</td>
                     <td>${checkbox("report_enabled", "Include in performance report")}</td>
-                    <td><button type="button" onclick="App.saveStrategyLifecycle('${strategy}','${mode}')"
+                    <td><button type="button" data-strategy-lifecycle-save data-strategy-id="${safeId}" data-strategy-mode="${safeMode}"
                         class="px-3 py-1.5 text-[10px] font-semibold bg-sky-600 hover:bg-sky-500 text-white rounded-md">Save</button></td>
                 </tr>`;
         }).join("");
+        tbody.querySelectorAll("[data-strategy-lifecycle-save]").forEach(button => {
+            button.addEventListener("click", () => {
+                this.saveStrategyLifecycle(button.dataset.strategyId, button.dataset.strategyMode);
+            });
+        });
     },
 
     async saveStrategyLifecycle(strategyId, mode) {
