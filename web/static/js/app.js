@@ -3934,6 +3934,10 @@ const App = {
                 this.showToast(`Paper trading activated for ${promotion.strategy}, but Telegram delivery failed.`, "warning");
             } else if (promotion.status === "rejected") {
                 this.showToast(`No auto-promotion: ${promotion.reason || "winner did not pass policy"}.`, "warning");
+            } else if (promotion.status === "failed" || promotion.status === "error") {
+                this.showToast(`Auto-promotion did not complete: ${promotion.reason || "see promotion audit"}.`, "error");
+            } else if (promotion.status === "already_processed") {
+                this.showToast(`This exact winner/policy result was already processed (${promotion.previous_status || "recorded"}).`, "info");
             } else {
                 this.showToast(`Battle Royale complete: ${data.top3.length} qualifying models discovered.`, "success");
             }
