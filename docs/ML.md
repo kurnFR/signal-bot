@@ -55,6 +55,17 @@ Deploy from the dashboard (`POST /api/ml/deploy-to-paper`) with an allocated cap
 
 How strictly the eligibility gate is enforced on this path is listed in [STATUS.md](STATUS.md).
 
+### Read-only artifact compatibility audit
+
+Before promoting existing artifacts after digest enforcement, inventory the configured artifact directory without deserializing any `.joblib` file:
+
+```bash
+python -m ml.audit_artifacts --directory ml_models
+python -m ml.audit_artifacts --directory ml_models --json
+```
+
+The command only reads root-level JSON manifests and weight bytes. It reports missing/invalid digests, digest mismatches, missing or orphan files, malformed manifests, ID mismatches, and symlinks. It does not edit or repair artifacts, and a `digest_matches` result proves byte consistency with the adjacent manifest only—not trusted provenance. Run it against the actual artifact directory on the owning machine; model artifacts are gitignored and are not expected to exist in a repository checkout. Regenerate untrusted legacy artifacts from a trusted experiment instead of adding a digest to an unverified file.
+
 ## 5. Package map
 
 | Module | Role |
