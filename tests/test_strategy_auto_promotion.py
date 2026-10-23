@@ -1,6 +1,13 @@
 from unittest.mock import patch
 
-from web.routes.backtest import _auto_promote_top_candidate
+from fastapi import HTTPException
+
+from web.routes.backtest import (
+    _auto_promote_top_candidate,
+    StrategyAutoPromotionPolicyRequest,
+    get_promotion_policy,
+    update_promotion_policy,
+)
 
 
 def _candidate(**overrides):
@@ -108,3 +115,56 @@ def test_auto_promotion_rejects_unprofitable_metrics_even_if_candidate_is_top_ra
     assert result["status"] == "rejected"
     assert "profit factor" in result["reason"].lower()
     set_config.assert_not_called()
+
+
+def test_promotion_policy_get_returns_saved_ui_policy():
+    policy = _policy(enabled=True, min_profit_factor=1.35)
+    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=policy):
+        response = get_promotion_policy()
+    assert response["policy"]["enabled"] is True
+    assert response["policy"]["min_profit_factor"] == 1.35
+
+
+def test_promotion_policy_put_persists_user_configured_criteria():
+    request = StrategyAutoPromotionPolicyRequest(
+        enabled=True,
+        min_test_trades=45,
+        min_profit_factor=1.4,
+        min_expectancy_r=0.1,
+        max_drawdown_r=5.0,
+        min_rank_score=0.25,
+        require_holdout=True,
+        send_telegram=False,
+    )
+    with patch("web.routes.backtest.set_strategy_auto_promotion_policy") as save, \
+         patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy(
+             enabled=True, min_test_trades=45, min_profit_factor=1.4,
+             min_expectancy_r=0.1, max_drawdown_r=5.0,
+             min_rank_score=0.25, send_telegram=False,
+         )):
+        response = update_promotion_policy(request)
+    save.assert_called_once()
+    assert save.call_args.args[0]["min_test_trades"] == 45
+    assert save.call_args.args[0]["send_telegram"] is False
+    assert response["policy"]["enabled"] is True
+
+
+def test_promotion_policy_put_rejects_non_finite_thresholds():
+    request = StrategyAutoPromotionPolicyRequest(
+        enabled=True,
+        min_test_trades=30,
+        min_profit_factor=float("nan"),
+        min_expectancy_r=0.05,
+        max_drawdown_r=8.0,
+        min_rank_score=0.1,
+        require_holdout=True,
+        send_telegram=True,
+    )
+    with patch("web.routes.backtest.set_strategy_auto_promotion_policy") as save:
+        try:
+            update_promotion_policy(request)
+        except HTTPException as exc:
+            assert exc.status_code == 400
+        else:
+            raise AssertionError("non-finite policy threshold was accepted")
+    save.assert_not_called()
