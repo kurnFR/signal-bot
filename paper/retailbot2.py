@@ -989,24 +989,33 @@ class RetailStrategyEngine:
     # ──────────────────────────────────────────────────────────────
     # COMPOSITE SIGNAL BUILDER
     # ──────────────────────────────────────────────────────────────
-    def run_all(self, df: pd.DataFrame, symbol: str) -> List[Dict]:
-        """Run all 7 strategies, return all that fire."""
+    def run_all(
+        self, df: pd.DataFrame, symbol: str,
+        enabled_strategies: Optional[set] = None,
+    ) -> List[Dict]:
+        """Run enabled strategy functions and return the signals that fire.
+
+        None preserves the all-strategies behavior for existing callers.
+        An explicit empty set intentionally evaluates no strategy functions.
+        """
         runners = [
-            self.strat_rsi_counter_trend,
-            self.strat_ma_crossover,
-            self.strat_sr_bounce,
-            self.strat_macd_divergence,
-            self.strat_bband_reversion,
-            self.strat_double_pattern,
-            self.strat_spike_fade,
+            (StrategyID.RSI_COUNTER_TREND, self.strat_rsi_counter_trend),
+            (StrategyID.MA_CROSSOVER_WHIPSAW, self.strat_ma_crossover),
+            (StrategyID.SR_BOUNCE_TRAP, self.strat_sr_bounce),
+            (StrategyID.MACD_DIVERGENCE, self.strat_macd_divergence),
+            (StrategyID.BBAND_REVERT, self.strat_bband_reversion),
+            (StrategyID.DOUBLE_PATTERN, self.strat_double_pattern),
+            (StrategyID.SPIKE_FADE, self.strat_spike_fade),
         ]
         results = []
-        for fn in runners:
+        for strategy_id, fn in runners:
+            if enabled_strategies is not None and strategy_id.value not in enabled_strategies:
+                continue
             try:
                 sig = fn(df, symbol)
                 if sig is not None:
                     results.append(sig)
-            except Exception as e:
+            except Exception:
                 pass  # Silent per-strategy failures
         return results
 
@@ -2067,9 +2076,18 @@ class RetailDeathTrapBot:
 
                 df = self.engine.calculate_indicators(df)
 
-                # Track each strategy independently. Composite signals are
-                # intentionally not booked as a contributor's trade.
-                raw = self.engine.run_all(df, symbol)
+                # Only evaluate a strategy function when at least one of
+                # its mode-specific lifecycle settings allows evaluation.
+                enabled_strategies = set()
+                for strategy_id in StrategyID:
+                    shadow_settings = self._get_strategy_lifecycle(strategy_id.value, 'shadow')
+                    inverse_settings = self._get_strategy_lifecycle(f"{strategy_id.value}_INV", 'inverse')
+                    if shadow_settings['evaluation_enabled'] or inverse_settings['evaluation_enabled']:
+                        enabled_strategies.add(strategy_id.value)
+
+                # Track each enabled strategy independently. Composite signals
+                # are intentionally not booked as a contributor's trade.
+                raw = self.engine.run_all(df, symbol, enabled_strategies=enabled_strategies)
                 if not raw:
                     continue
 
