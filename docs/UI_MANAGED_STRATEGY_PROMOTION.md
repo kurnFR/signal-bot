@@ -1,6 +1,6 @@
 # UI-Managed Strategy Lifecycle and Telegram Promotion
 
-Status: lifecycle controls and independent RetailBot2 paper tracking implemented in PR #303; automatic backtest promotion remains incomplete
+Status: PRs #302–#304 implement composite attribution correction, UI-managed RetailBot2 lifecycle controls, and configurable Battle Royale backtest-winner promotion. Runtime migration/application and live behavior still require owner-environment verification.
 Owner-facing behavior: all lifecycle controls are persisted in the application database and editable in the authenticated dashboard. Strategy names and promotion decisions must not be embedded as backend allowlists.
 
 ## Goals
@@ -28,12 +28,14 @@ Each registered strategy has persisted controls:
 - **Paper tracking**: open and manage independent shadow/inverse research trades for this strategy.
 - **Telegram alerts**: send entry alerts only when enabled for this strategy; exit alerts inherit the same decision captured at entry so changing a toggle does not orphan an existing position's notification lifecycle.
 - **Performance report**: include/exclude this strategy from future report output without deleting trades or changing equity/accounting history.
-- **Auto-promote**: whether a qualifying backtest can automatically enable paper tracking and Telegram alerts.
+- **Auto-promote**: whether a qualifying Battle Royale backtest winner can automatically create/update a main paper-trading configuration under the saved policy. This is distinct from the RetailBot2 lifecycle panel.
 - **Promotion status/source**: research, manually promoted, auto-promoted, or paused, with timestamps and the backtest/run ID that caused a promotion.
 
 Controls must be editable in the UI and saved in the database. Missing configuration must fail safe: evaluation may continue, but Telegram promotion is off by default for strategies without an explicit promotion decision. Existing Smart Money Screener and wallet notification paths are not governed by this strategy allowlist.
 
 ## Auto-promotion contract
+
+Implemented in PR #304 for Battle Royale backtest winners. The policy is opt-in, saved in the database, editable in Backtest Studio, and recent decisions are auditable there. It is not a universal auto-promoter for every strategy family or for RetailBot2's seven built-in functions; strategy identity must map to a supported paper configuration.
 
 Auto-promotion is not equivalent to “highest score wins”. The UI must expose and persist the criteria used to evaluate a completed backtest, including at least:
 
@@ -83,12 +85,13 @@ The exact numerical criteria are product defaults and must be editable in the UI
 1. **Correct attribution and contract**: merged in PR #302. Composite history remains unchanged and new composite P&L is no longer attributed to the first contributor.
 2. **Persistent lifecycle API and UI**: implemented in PR #303. Settings are stored in the database and can be changed per strategy/mode without code edits.
 3. **Independent paper accounting**: implemented in PR #303 for new signals, with per-strategy/mode entries, capacity checks, cooldowns, and restart recovery. Composite is no longer booked as if it were an independent contributor.
-4. **Backtest-driven auto-promotion**: not implemented yet. The API rejects enabling auto-promotion; the dashboard labels this clearly. Next work must add configurable performance criteria, backtest identity mapping, audit history, and fail-closed promotion decisions.
+4. **Backtest-driven auto-promotion**: implemented for Battle Royale winners in PR #304. Policy is opt-in, configurable in Backtest Studio, requires the configured gates (including holdout evidence by default), and records deduplicated audit decisions. Verify migration 018 in the owner environment before enabling it. Broader automatic promotion for strategy families not mapped to supported paper configurations remains out of scope.
 5. **Verification**: automated tests and CI are required before merge. Then do read-only runtime inventory and user-authorized runtime validation. Do not deploy or mutate production runtime settings automatically.
 
 ## Acceptance criteria
 
-- A user can promote/demote any executable strategy in the dashboard without code edits or process restart.
+- A user can promote/demote supported RetailBot2 strategy/mode identities in the dashboard without code edits or process restart.
+- A user can configure the supported Battle Royale winner auto-promotion policy in Backtest Studio; policy is disabled by default and audit outcomes are visible.
 - Only explicitly promoted strategies send entry alerts; exit behavior is consistent with the persisted entry decision.
 - Every enabled strategy can continue collecting independent performance evidence without being promoted.
 - A user can hide a strategy from reports and stop its future research trades without deleting historical data.
