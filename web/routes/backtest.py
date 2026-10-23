@@ -347,6 +347,7 @@ def _auto_promote_top_candidate(
             allocated_capital=allocated_capital,
             risk_per_trade_pct=risk_per_trade_pct,
             telegram_enabled=bool(criteria["send_telegram"]),
+            report_enabled=True,
         )
         telegram_result = "disabled"
         final_status = "promoted"
