@@ -1,6 +1,6 @@
 # UI-Managed Strategy Lifecycle and Telegram Promotion
 
-Status: implementation contract / phased rollout
+Status: phased implementation in progress (PR #302)
 Owner-facing behavior: all lifecycle controls are persisted in the application database and editable in the authenticated dashboard. Strategy names and promotion decisions must not be embedded as backend allowlists.
 
 ## Goals
@@ -13,7 +13,7 @@ Owner-facing behavior: all lifecycle controls are persisted in the application d
 
 ## Current implementation findings
 
-- `paper/retailbot2.py` runs seven strategies through `RetailBotEngine.run_all()`, then combines same-direction signals in `build_composite()`. `_open_trade()` records the composite's first strategy as `strategy`, while the full contributor list is stored separately. The existing per-strategy report can therefore attribute composite P&L to one strategy rather than independently measuring each strategy.
+- `paper/retailbot2.py` runs seven strategies through `RetailStrategyEngine.run_all()`, then combines same-direction signals in `build_composite()`. The first implementation step now labels those combined trades `COMPOSITE` and retains `strategies_triggered` only as contributor metadata. This prevents future composite P&L from being misrepresented as independent P&L for the first contributor. Existing historical rows remain unchanged; independent per-strategy trading is a later phase.
 - RetailBot2 sends entry alerts from `_open_trade()`, exit alerts from `_close_trade()`, and a periodic report from `send_stats()`. These paths currently have no strategy-level promotion/report controls.
 - RetailBot2 already has a database-backed `bot_control` row polled by the running process. This is useful for process-level controls, but promotion/lifecycle configuration needs a distinct validated schema and API contract, not arbitrary tuning overrides.
 - The Strategy Library and main paper engine are separate from RetailBot2. A strategy in the library does not automatically become a RetailBot2 strategy or an active `paper_configs` row. Backtest winner promotion must explicitly map a backtest strategy identity to an executable strategy and reject unmapped strategies.
@@ -79,7 +79,7 @@ The exact numerical criteria are product defaults and must be editable in the UI
 
 ## Rollout phases
 
-1. **Correct attribution and define contract**: stop treating a composite trade as an independent result for the first contributor; retain legacy rows unchanged.
+1. **Correct attribution and define contract**: implemented in this PR by labeling new composite trades `COMPOSITE`, retaining contributors as metadata, and adding a regression test. Historical rows remain unchanged. Independent per-strategy trading remains incomplete.
 2. **Persistent lifecycle API and UI**: expose per-strategy evaluation, paper, Telegram, and report controls plus audit metadata.
 3. **Independent paper accounting**: open/close each strategy's own shadow/inverse paper trade, with per-strategy risk/cooldown and restart recovery.
 4. **Backtest-driven auto-promotion**: connect completed backtest results to configurable criteria, validate strategy identity mapping, and record auditable promotion decisions.
