@@ -499,6 +499,35 @@
                         <div id="bt-dynamic-params-container" class="pt-2"></div>
                     </div>
 
+                    <div class="border-t border-slate-800 pt-4 space-y-3">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <h3 class="text-xs font-bold text-slate-100">Automatic Winner Promotion</h3>
+                                <p class="text-[10px] text-slate-500 mt-1">Opt-in only. A ranked winner is promoted to paper trading only when every saved gate passes. Default requires the holdout segment.</p>
+                            </div>
+                            <label class="inline-flex items-center gap-2 text-xs text-slate-300">
+                                <input id="bt-auto-promote-enabled" type="checkbox" class="rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500">
+                                Enable auto-promotion
+                            </label>
+                        </div>
+                        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                            <div><label for="bt-promo-min-trades" class="block text-[10px] text-slate-400 mb-1">Minimum trades</label><input id="bt-promo-min-trades" type="number" min="30" max="10000" step="1" value="30" class="w-full bg-slate-800 text-slate-100 rounded p-2 border border-slate-700 text-xs"></div>
+                            <div><label for="bt-promo-min-pf" class="block text-[10px] text-slate-400 mb-1">Minimum profit factor</label><input id="bt-promo-min-pf" type="number" min="1" max="10" step="0.05" value="1.2" class="w-full bg-slate-800 text-slate-100 rounded p-2 border border-slate-700 text-xs"></div>
+                            <div><label for="bt-promo-min-expectancy" class="block text-[10px] text-slate-400 mb-1">Minimum expectancy (R)</label><input id="bt-promo-min-expectancy" type="number" min="0" max="10" step="0.01" value="0.05" class="w-full bg-slate-800 text-slate-100 rounded p-2 border border-slate-700 text-xs"></div>
+                            <div><label for="bt-promo-max-drawdown" class="block text-[10px] text-slate-400 mb-1">Maximum drawdown (R)</label><input id="bt-promo-max-drawdown" type="number" min="0.1" max="100" step="0.25" value="8" class="w-full bg-slate-800 text-slate-100 rounded p-2 border border-slate-700 text-xs"></div>
+                            <div><label for="bt-promo-min-rank" class="block text-[10px] text-slate-400 mb-1">Minimum rank score</label><input id="bt-promo-min-rank" type="number" min="0.01" max="1" step="0.01" value="0.1" class="w-full bg-slate-800 text-slate-100 rounded p-2 border border-slate-700 text-xs"></div>
+                            <div class="flex flex-col justify-center gap-2">
+                                <label class="inline-flex items-center gap-2 text-[10px] text-slate-300"><input id="bt-promo-require-holdout" type="checkbox" checked class="rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500"> Require holdout</label>
+                                <label class="inline-flex items-center gap-2 text-[10px] text-slate-300"><input id="bt-promo-send-telegram" type="checkbox" checked class="rounded border-slate-600 bg-slate-800 text-sky-500 focus:ring-sky-500"> Enable Telegram alerts</label>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap items-center justify-between gap-3">
+                            <button type="button" id="btn-save-promotion-policy" class="px-3 py-2 rounded bg-sky-700 hover:bg-sky-600 text-white text-xs font-semibold">Save promotion rules</button>
+                            <span id="bt-promotion-policy-status" class="text-[10px] text-slate-500">Loading saved policy...</span>
+                        </div>
+                        <div id="bt-promotion-audit" class="space-y-1 text-[10px] text-slate-500" aria-live="polite">Recent promotion decisions will appear here.</div>
+                    </div>
+
                     <div class="border-t border-slate-800 pt-4 flex flex-wrap items-center justify-end gap-3">
                         <button type="button" aria-label="Run all models in battle royale" id="btn-run-battle-royale" onclick="App.runBattleRoyale()" class="px-5 py-2.5 rounded-lg bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-500 text-white font-bold text-xs tracking-wide shadow-lg shadow-orange-500/25 flex items-center gap-2 transition-all">
                             <i data-lucide="trophy" class="w-4 h-4 text-yellow-200"></i> ⚔️ Run All Models (Find Top 3)
