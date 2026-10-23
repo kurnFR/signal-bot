@@ -150,7 +150,7 @@ def test_promotion_policy_put_persists_user_configured_criteria():
 
 
 def test_promotion_policy_put_rejects_non_finite_thresholds():
-    request = StrategyAutoPromotionPolicyRequest(
+    request = StrategyAutoPromotionPolicyRequest.construct(
         enabled=True,
         min_test_trades=30,
         min_profit_factor=float("nan"),
