@@ -36,7 +36,9 @@ class TestPaperOrdersMariaDB(unittest.TestCase):
         # pool with the same connector pool_name raises PoolError.
         cls.pool = db_module._pool or db_module.get_pool()
         cls.migration_sql = (ROOT / "db" / "migrate_paper_orders.sql").read_text(encoding="utf-8")
+        cls.telegram_migration_sql = (ROOT / "db" / "migrate_paper_order_telegram.sql").read_text(encoding="utf-8")
         cls._apply_migration()
+        cls._apply_telegram_migration()
         conn = cls.pool.get_connection()
         try:
             cur = conn.cursor()
@@ -60,6 +62,18 @@ class TestPaperOrdersMariaDB(unittest.TestCase):
         try:
             cur = conn.cursor()
             for statement in split_statements(cls.migration_sql):
+                cur.execute(statement)
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+
+    @classmethod
+    def _apply_telegram_migration(cls):
+        conn = cls.pool.get_connection()
+        try:
+            cur = conn.cursor()
+            for statement in split_statements(cls.telegram_migration_sql):
                 cur.execute(statement)
             conn.commit()
             cur.close()
