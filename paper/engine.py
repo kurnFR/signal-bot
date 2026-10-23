@@ -127,7 +127,8 @@ def get_paper_configs() -> List[Dict[str, Any]]:
         cur.execute(
             """
             SELECT id, symbol, market, timeframe, strategy_name, is_active,
-                   allocated_capital, risk_per_trade_pct, ml_model_id, created_at
+                   allocated_capital, risk_per_trade_pct, ml_model_id,
+                   telegram_enabled, created_at
             FROM paper_configs
             ORDER BY is_active DESC, symbol ASC
             """
@@ -139,6 +140,7 @@ def get_paper_configs() -> List[Dict[str, Any]]:
             r["allocated_capital"] = float(r["allocated_capital"])
             r["risk_per_trade_pct"] = float(r["risk_per_trade_pct"])
             r["ml_model_id"] = r.get("ml_model_id")
+            r["telegram_enabled"] = bool(r.get("telegram_enabled", False))
             r["created_at"] = str(r["created_at"])
         return rows
     finally:
@@ -154,6 +156,7 @@ def set_paper_config(
     allocated_capital: float = 5000.0,
     risk_per_trade_pct: float = 1.0,
     ml_model_id: Optional[str] = None,
+    telegram_enabled: Optional[bool] = None,
 ) -> Dict[str, Any]:
     if allocated_capital <= 0:
         raise ValueError("allocated_capital must be positive")
@@ -163,29 +166,41 @@ def set_paper_config(
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute(
-            """
-            INSERT INTO paper_configs
-                (symbol, market, timeframe, strategy_name, is_active,
-                 allocated_capital, risk_per_trade_pct, ml_model_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-                is_active = VALUES(is_active),
-                allocated_capital = VALUES(allocated_capital),
-                risk_per_trade_pct = VALUES(risk_per_trade_pct),
-                ml_model_id = VALUES(ml_model_id)
-            """,
-            (
-                symbol,
-                market,
-                timeframe,
-                strategy_name,
-                1 if is_active else 0,
-                allocated_capital,
-                risk_per_trade_pct,
-                ml_model_id,
-            ),
-        )
+        if telegram_enabled is None:
+            # Legacy callers may update activation/capital without changing the
+            # user's separately configured Telegram alert preference.
+            cur.execute(
+                """
+                INSERT INTO paper_configs
+                    (symbol, market, timeframe, strategy_name, is_active,
+                     allocated_capital, risk_per_trade_pct, ml_model_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    is_active = VALUES(is_active),
+                    allocated_capital = VALUES(allocated_capital),
+                    risk_per_trade_pct = VALUES(risk_per_trade_pct),
+                    ml_model_id = VALUES(ml_model_id)
+                """,
+                (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
+                 allocated_capital, risk_per_trade_pct, ml_model_id),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO paper_configs
+                    (symbol, market, timeframe, strategy_name, is_active,
+                     allocated_capital, risk_per_trade_pct, ml_model_id, telegram_enabled)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    is_active = VALUES(is_active),
+                    allocated_capital = VALUES(allocated_capital),
+                    risk_per_trade_pct = VALUES(risk_per_trade_pct),
+                    ml_model_id = VALUES(ml_model_id),
+                    telegram_enabled = VALUES(telegram_enabled)
+                """,
+                (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
+                 allocated_capital, risk_per_trade_pct, ml_model_id, bool(telegram_enabled)),
+            )
         conn.commit()
         cur.close()
         return {
@@ -698,7 +713,8 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
             )
             if fill["status"] == "filled":
                 result["filled"] += 1
-                _send_paper_entry_alert(order)
+                if cfg.get("telegram_enabled", False):
+                    _send_paper_entry_alert(order)
             elif fill["status"] == "rejected":
                 result["rejected"] += 1
             elif fill["status"] == "expired":
@@ -982,7 +998,8 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                         result["new_positions_opened"] += 1
                         result["orders_filled"] += 1
                         logger.info("Filled paper order #%s for %s (%s) via %s", order["id"], symbol, latest_trade["direction"], strategy_name)
-                        _send_paper_entry_alert(order, ml_threshold=ml_threshold)
+                        if cfg.get("telegram_enabled", False):
+                            _send_paper_entry_alert(order, ml_threshold=ml_threshold)
 
 
     return result
