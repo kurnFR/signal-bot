@@ -2,8 +2,8 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-23  
-**Master commit at review:** `2a06062845051e07abcc80072fdabed5e9ec1092`  
-**Overall status:** Active / not finished. PR #282 makes migration status inspection read-only, PR #283 and #285 refresh this progress document, PR #284 makes migration dry-runs read-only, and PR #286 adds a safety-gated populated-database migration rehearsal runbook; PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, #257 contains ML experiment paths, #259 validates deployment manifests before activation, and #263 contains model artifact paths; #265 hardens custom-strategy persistence, #266 validates runtime ML artifact paths, #267 rechecks ML eligibility immediately before model loading, and #269 makes model-weight/manifest writes atomic and prevents duplicate experiment runs from overwriting existing artifacts; #271 prevents the reusable model store from following external symlinks when reading weights or manifests. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
+**Master commit at review:** `c834837f4c190bf7719c8d9f6e203e3ec4424ac8`  
+**Overall status:** Active / not finished. PR #282 makes migration status inspection read-only, PR #283, #285, and #287 refresh this progress document, PR #284 makes migration dry-runs read-only, and PR #286 adds a safety-gated populated-database migration rehearsal runbook; PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, #257 contains ML experiment paths, #259 validates deployment manifests before activation, and #263 contains model artifact paths; #265 hardens custom-strategy persistence, #266 validates runtime ML artifact paths, #267 rechecks ML eligibility immediately before model loading, and #269 makes model-weight/manifest writes atomic and prevents duplicate experiment runs from overwriting existing artifacts; #271 prevents the reusable model store from following external symlinks when reading weights or manifests. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
 
@@ -304,6 +304,12 @@ The project should not be marked finished just because the latest PRs are merged
 
 **Last update:** 2026-10-23.  
 **Next suggested engineering step:** run a migration rehearsal against a representative populated database, then perform manual keyboard/screen-reader/mobile/forced-colors checks. Separately untrack runtime data only after preserving the real files on the machine that owns them.
+
+### Migration rehearsal documentation and post-merge verification — PR #287
+
+[PR #287](https://github.com/kurnFR/signal-bot/pull/287) updates this progress document to record the populated-database migration rehearsal runbook from PR #286, corrects the stale PR #284 verification wording, and explicitly preserves the status that the actual populated-schema rehearsal has **not been performed**.
+
+PR #287 merged as [`c834837`](https://github.com/kurnFR/signal-bot/commit/c834837f4c190bf7719c8d9f6e203e3ec4424ac8). All four observed post-merge workflow types passed on the merge commit: pytest, unit tests, MariaDB integration, and paper accounting. No database was modified and no deployment was performed.
 
 ### Populated-database migration rehearsal runbook — PR #286
 
