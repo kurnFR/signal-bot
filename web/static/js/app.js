@@ -73,6 +73,10 @@ const App = {
         if (paperOrderFilter) {
             paperOrderFilter.addEventListener("change", () => this.fetchPaperData());
         }
+        const savePromotionPolicyButton = document.getElementById("btn-save-promotion-policy");
+        if (savePromotionPolicyButton) {
+            savePromotionPolicyButton.addEventListener("click", () => this.saveStrategyPromotionPolicy());
+        }
     },
 
     getAuthHeaders() {
@@ -2255,6 +2259,7 @@ const App = {
             if (titleEl) titleEl.innerText = "Backtest Studio & Visual Simulator";
             if (descEl) descEl.innerText = "Simulate 24+ strategies against historical data with strict no-lookahead execution";
             this.renderBacktestStudio();
+            this.fetchStrategyPromotionPolicy();
         } else if (tabId === "paper") {
             if (titleEl) titleEl.innerText = "Phase B: Live Paper Trading";
             if (descEl) descEl.innerText = "Simulate forward order execution against real market data without risk";
@@ -3922,12 +3927,112 @@ const App = {
             const data = await res.json();
             this.lastBattleRoyaleData = data;
             this.renderBattleRoyaleResults(data);
-            this.showToast(`Battle Royale Complete! ${data.top3.length} profitable models discovered.`, "success");
+            const promotion = data.autoPromotion || { status: "disabled" };
+            if (promotion.status === "promoted") {
+                this.showToast(`Auto-promoted ${promotion.strategy} to paper trading.`, "success");
+            } else if (promotion.status === "promoted_alert_failed") {
+                this.showToast(`Paper trading activated for ${promotion.strategy}, but Telegram delivery failed.`, "warning");
+            } else if (promotion.status === "rejected") {
+                this.showToast(`No auto-promotion: ${promotion.reason || "winner did not pass policy"}.`, "warning");
+            } else {
+                this.showToast(`Battle Royale complete: ${data.top3.length} qualifying models discovered.`, "success");
+            }
+            await this.fetchStrategyPromotionPolicy();
         } catch (e) {
             alert("Battle Royale Error: " + e.message);
         } finally {
             btn.disabled = false;
             btn.innerHTML = originalText;
+        }
+    },
+
+    async fetchStrategyPromotionPolicy() {
+        const statusEl = document.getElementById("bt-promotion-policy-status");
+        try {
+            const [policyRes, auditRes] = await Promise.all([
+                fetch(`${API_BASE}/api/backtest/promotion-policy`, { headers: this.getAuthHeaders() }),
+                fetch(`${API_BASE}/api/backtest/promotion-audit?limit=5`, { headers: this.getAuthHeaders() }),
+            ]);
+            if (!policyRes.ok || !auditRes.ok) {
+                const failed = !policyRes.ok ? policyRes : auditRes;
+                let detail = `HTTP ${failed.status}`;
+                try { detail = (await failed.json()).detail || detail; } catch (_) {}
+                throw new Error(detail);
+            }
+            const policyData = await policyRes.json();
+            const auditData = await auditRes.json();
+            const policy = policyData.policy || {};
+            const fields = {
+                "bt-auto-promote-enabled": "enabled",
+                "bt-promo-min-trades": "min_test_trades",
+                "bt-promo-min-pf": "min_profit_factor",
+                "bt-promo-min-expectancy": "min_expectancy_r",
+                "bt-promo-max-drawdown": "max_drawdown_r",
+                "bt-promo-min-rank": "min_rank_score",
+                "bt-promo-require-holdout": "require_holdout",
+                "bt-promo-send-telegram": "send_telegram",
+            };
+            for (const [elementId, key] of Object.entries(fields)) {
+                const el = document.getElementById(elementId);
+                if (!el || policy[key] === undefined) continue;
+                if (el.type === "checkbox") el.checked = Boolean(policy[key]);
+                else el.value = String(policy[key]);
+            }
+            if (statusEl) {
+                statusEl.innerText = policy.enabled
+                    ? `Auto-promotion ENABLED · updated ${policy.updated_at || "saved"}`
+                    : `Auto-promotion disabled · updated ${policy.updated_at || "saved"}`;
+                statusEl.className = `text-[10px] ${policy.enabled ? "text-amber-300" : "text-slate-500"}`;
+            }
+            const auditEl = document.getElementById("bt-promotion-audit");
+            if (auditEl) {
+                const events = Array.isArray(auditData.events) ? auditData.events : [];
+                auditEl.innerHTML = events.length ? events.map(event => `
+                    <div class="flex flex-wrap gap-x-2 gap-y-1 border-t border-slate-800 pt-1">
+                        <span class="font-semibold ${event.status === "promoted" ? "text-emerald-300" : event.status === "rejected" ? "text-amber-300" : "text-slate-400"}">${this._escapeHtml(event.status)}</span>
+                        <span class="text-slate-300">${this._escapeHtml(event.strategy_name)}</span>
+                        <span>${this._escapeHtml(event.symbol)} ${this._escapeHtml(event.timeframe)} · ${this._escapeHtml(event.data_segment)}</span>
+                        <span class="flex-1">${this._escapeHtml(event.reason)}</span>
+                        <span>${this._escapeHtml(event.created_at || "")}</span>
+                    </div>`).join("") : "No promotion decisions recorded yet.";
+            }
+        } catch (e) {
+            if (statusEl) statusEl.innerText = `Promotion policy unavailable: ${e.message || e}`;
+            this.showToast(`Failed to load auto-promotion policy: ${e.message || e}`, "error");
+        }
+    },
+
+    async saveStrategyPromotionPolicy() {
+        const get = id => document.getElementById(id);
+        const numeric = (id, label) => {
+            const el = get(id);
+            const value = el ? Number(el.value) : NaN;
+            if (!Number.isFinite(value)) throw new Error(`${label} must be a finite number`);
+            return value;
+        };
+        let policy;
+        try {
+            policy = {
+                enabled: Boolean(get("bt-auto-promote-enabled")?.checked),
+                min_test_trades: numeric("bt-promo-min-trades", "Minimum trades"),
+                min_profit_factor: numeric("bt-promo-min-pf", "Minimum profit factor"),
+                min_expectancy_r: numeric("bt-promo-min-expectancy", "Minimum expectancy"),
+                max_drawdown_r: numeric("bt-promo-max-drawdown", "Maximum drawdown"),
+                min_rank_score: numeric("bt-promo-min-rank", "Minimum rank score"),
+                require_holdout: Boolean(get("bt-promo-require-holdout")?.checked),
+                send_telegram: Boolean(get("bt-promo-send-telegram")?.checked),
+            };
+            const res = await fetch(`${API_BASE}/api/backtest/promotion-policy`, {
+                method: "PUT",
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify(policy),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+            this.showToast("Auto-promotion policy saved.", "success");
+            await this.fetchStrategyPromotionPolicy();
+        } catch (e) {
+            this.showToast(`Could not save auto-promotion policy: ${e.message || e}`, "error");
         }
     },
 
