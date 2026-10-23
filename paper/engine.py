@@ -310,10 +310,39 @@ def get_paper_metrics() -> Dict[str, Any]:
             """
         )
         summary = cur.fetchone()
+        cur.execute(
+            """
+            SELECT strategy_name,
+                   COUNT(*) AS total_trades,
+                   SUM(CASE WHEN r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
+                   SUM(CASE WHEN r_multiple <= 0 THEN 1 ELSE 0 END) AS losses,
+                   SUM(r_multiple) AS sum_r,
+                   AVG(r_multiple) AS avg_r,
+                   SUM(net_pnl) AS net_pnl
+            FROM paper_trades
+            GROUP BY strategy_name
+            ORDER BY strategy_name
+            """
+        )
+        strategy_rows = cur.fetchall()
         cur.close()
         total = int(summary["total_trades"] or 0)
         wins = int(summary["wins"] or 0)
         losses = int(summary["losses"] or 0)
+        by_strategy = []
+        for row in strategy_rows:
+            strategy_total = int(row["total_trades"] or 0)
+            strategy_wins = int(row["wins"] or 0)
+            by_strategy.append({
+                "strategy": row["strategy_name"],
+                "totalTrades": strategy_total,
+                "wins": strategy_wins,
+                "losses": int(row["losses"] or 0),
+                "winRatePct": round(strategy_wins / strategy_total * 100, 2) if strategy_total else 0.0,
+                "cumulativeR": round(float(row["sum_r"] or 0.0), 4),
+                "expectancyR": round(float(row["avg_r"] or 0.0), 4),
+                "netPnl": round(float(row["net_pnl"] or 0.0), 8),
+            })
         return {
             "totalTrades": total,
             "wins": wins,
@@ -322,6 +351,7 @@ def get_paper_metrics() -> Dict[str, Any]:
             "cumulativeR": round(float(summary["sum_r"] or 0.0), 4),
             "expectancyR": round(float(summary["avg_r"] or 0.0), 4),
             "netPnl": round(float(summary["net_pnl"] or 0.0), 8),
+            "byStrategy": by_strategy,
         }
     finally:
         conn.close()
