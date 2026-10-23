@@ -22,6 +22,10 @@ A candidate must first qualify for the existing Battle Royale ranking, then pass
 
 The holdout is the most recent 20% of the historical dataset. Selecting a winner among many strategies on the same holdout still introduces multiple-comparison bias; it is not a guarantee of future profitability. Use walk-forward evaluation and reserve fresh data for later confirmation.
 
+## Performance report
+
+The Paper Trading dashboard groups closed paper trades by `strategy_name`, showing trade count, wins, win rate, expectancy in R, cumulative R, and net P&L. A strategy remains in this report regardless of whether Telegram alerts are enabled. Global KPI totals continue to include all paper trades.
+
 ## Telegram controls
 
 Each main paper-trading config now has its own Telegram alert toggle. Turning alerts off does not pause the config or stop paper performance collection. Manual deployment's Telegram option sets both the immediate deployment notification and the config's ongoing entry-alert preference. Auto-promotion uses the saved policy's Telegram setting.
