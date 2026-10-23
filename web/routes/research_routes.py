@@ -180,7 +180,15 @@ def retailbot2_strategies_get():
         }
         for row in registry:
             saved = by_key.get((row["strategy_id"], row["mode"]), {})
-            row.update(defaults)
+            row_defaults = dict(defaults)
+            if row.get("historical_only"):
+                row_defaults.update({
+                    "evaluation_enabled": False,
+                    "paper_enabled": False,
+                    "telegram_enabled": False,
+                    "report_enabled": True,
+                })
+            row.update(row_defaults)
             row.update({key: bool(saved[key]) for key in defaults if key in saved})
             row["updated_at"] = saved.get("updated_at")
         return {"strategies": registry}
