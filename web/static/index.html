@@ -729,6 +729,32 @@
                     </div>
                 </div>
 
+                <!-- Per-strategy paper performance report -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-100">Per-Strategy Paper Performance</h3>
+                        <p class="text-[11px] text-slate-500 mt-1">Closed paper trades are grouped by strategy. Telegram promotion is independent of tracking and reporting.</p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left custom-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Strategy</th>
+                                    <th scope="col">Trades</th>
+                                    <th scope="col">Wins</th>
+                                    <th scope="col">Win Rate</th>
+                                    <th scope="col">Expectancy (R)</th>
+                                    <th scope="col">Cumulative (R)</th>
+                                    <th scope="col" class="text-right">Net P&amp;L</th>
+                                </tr>
+                            </thead>
+                            <tbody id="paper-strategy-performance-body">
+                                <tr><td colspan="7" class="text-center py-6 text-slate-500 text-xs">Loading per-strategy performance...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <!-- Active Positions Card Board -->
                 <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
                     <div class="flex items-center justify-between">
