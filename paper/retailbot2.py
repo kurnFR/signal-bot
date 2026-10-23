@@ -1488,8 +1488,8 @@ class DatabaseManager:
             c = conn.cursor(dictionary=True)
             c.execute("""
                 SELECT
-                    strategy,
-                    mode,
+                    t.strategy,
+                    t.mode,
                     COUNT(*) AS total_trades,
                     SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END) AS wins,
                     SUM(CASE WHEN net_pnl <= 0 THEN 1 ELSE 0 END) AS losses,
