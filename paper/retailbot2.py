@@ -1179,6 +1179,25 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    def get_strategy_lifecycle_settings(self) -> List[Dict]:
+        """Return explicit user lifecycle settings. Missing rows use safe
+        defaults in the caller: background paper/report on, Telegram off."""
+        conn = self.get_conn()
+        if not conn:
+            raise RuntimeError("RetailBot2 database is unavailable")
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute("""
+                SELECT strategy_id, mode, evaluation_enabled, paper_enabled,
+                       telegram_enabled, report_enabled, auto_promote_enabled
+                FROM rdt_strategy_lifecycle
+            """)
+            rows = cur.fetchall()
+            cur.close()
+            return rows
+        finally:
+            conn.close()
+
     def get_bot_control(self) -> Dict:
         """Web-dashboard-controlled enable flag + BotConfig field overrides.
         Polled periodically by the run loop (see RetailDeathTrapBot._reload_control)
