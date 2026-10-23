@@ -63,6 +63,10 @@ def test_execution_tournament_selects_threshold_from_simulator_and_tests_once():
     assert all(end <= validation_end for _, end in calls[:3])
     assert all(start == test_start for start, _ in calls[3:])
     assert result.experiment.status == "research"
+    metrics = result.experiment.ml_validation_metrics
+    assert metrics["candidate_count"] == 1
+    assert metrics["validation_usable_candidate_count"] == 1
+    assert "eligible_candidate_count" not in metrics
     assert result.experiment.threshold in (0.50, 0.55)
     assert result.validation_by_candidate[0]["selected_metrics"]["net_pnl"] == result.validation_by_candidate[0]["selected_metrics"]["total_outcome_r"]
 
