@@ -172,7 +172,7 @@ def run_execution_aware_tournament(
                           "test_market_rows": int(len(split.test))},
         ml_validation_metrics={**dict(winner_detail["selected_metrics"]),
                                 "candidate_count": len(candidate_list),
-                                "eligible_candidate_count": len(validation_scores),
+                                "validation_usable_candidate_count": len(validation_scores),
                                 "threshold_selection": "execution_aware_validation",
                                 "probability_diagnostics": dict(winner_detail["probability_diagnostics"]),
                                 "target_type": target_type},
