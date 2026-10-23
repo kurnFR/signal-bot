@@ -215,8 +215,10 @@ SR_PROXIMITY_PCT = 0.5   # how close price must be to support/resistance to coun
 # Backtest execution assumptions -- these model real trading costs/limits
 # so backtested performance isn't unrealistically optimistic.
 # ---------------------------------------------------------------------------
-BACKTEST_FEE_PCT = 0.001        # 0.1% per side (Binance spot taker default)
-BACKTEST_SLIPPAGE_PCT = 0.0005  # 0.05% assumed slippage per side
+# Override per venue/account in .env; rates are decimal fractions per side.
+# Defaults are illustrative assumptions, not a claim about current exchange fees.
+BACKTEST_FEE_PCT = float(os.getenv("BACKTEST_FEE_PCT", "0.001"))
+BACKTEST_SLIPPAGE_PCT = float(os.getenv("BACKTEST_SLIPPAGE_PCT", "0.0005"))
 BACKTEST_MAX_HOLD_BARS = 200    # force-close a trade if neither SL nor TP hit within this many bars
 
 # ---------------------------------------------------------------------------
