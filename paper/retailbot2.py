@@ -1167,8 +1167,10 @@ class DatabaseManager:
                     PRIMARY KEY (strategy_id, mode)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+            # Legacy open positions have no persisted promotion decision;
+            # fail closed rather than emitting unapproved exit alerts.
             try:
-                c.execute("ALTER TABLE rdt_trades ADD COLUMN telegram_enabled BOOLEAN NOT NULL DEFAULT TRUE")
+                c.execute("ALTER TABLE rdt_trades ADD COLUMN telegram_enabled BOOLEAN NOT NULL DEFAULT FALSE")
             except Exception as migration_error:
                 if "Duplicate column" not in str(migration_error):
                     raise
