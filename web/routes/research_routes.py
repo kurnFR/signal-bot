@@ -25,6 +25,7 @@ from db.db import (
     get_retailbot2_open_trades, get_retailbot2_recent_trades, get_retailbot2_stats,
     get_recent_smart_money_signals, get_smart_money_stats,
     get_retailbot2_control, set_retailbot2_control, RETAILBOT2_TUNABLE_FIELDS,
+    get_retailbot2_strategy_lifecycle_settings, set_retailbot2_strategy_lifecycle_setting,
     get_screener_control, set_screener_control, get_screener_status, SCREENER_TUNABLE_FIELDS,
 )
 
@@ -35,6 +36,34 @@ logger = logging.getLogger("web.research_routes")
 class BotControlRequest(BaseModel):
     enabled: bool
     overrides: Dict[str, Any] = Field(default_factory=dict)
+
+
+class StrategyLifecycleRequest(BaseModel):
+    strategy_id: str = Field(min_length=1, max_length=64)
+    mode: str
+    evaluation_enabled: bool
+    paper_enabled: bool
+    telegram_enabled: bool
+    report_enabled: bool
+    auto_promote_enabled: bool = False
+
+
+def _strategy_lifecycle_registry():
+    """Build editable rows from executable strategy identities, not a
+    hardcoded list of strategies selected for Telegram promotion."""
+    from paper.retailbot2 import StrategyID
+
+    rows = []
+    for item in StrategyID:
+        rows.append({"strategy_id": item.value, "mode": "shadow"})
+        rows.append({"strategy_id": f"{item.value}_INV", "mode": "inverse"})
+    # Composite rows are retained only to let users hide historical aggregate
+    # records; new trades are attributed independently.
+    rows.extend([
+        {"strategy_id": "COMPOSITE", "mode": "shadow", "historical_only": True},
+        {"strategy_id": "COMPOSITE_INV", "mode": "inverse", "historical_only": True},
+    ])
+    return rows
 
 
 def _filter_overrides(overrides: Dict, allowed: set, bot_label: str) -> Dict:
@@ -134,6 +163,60 @@ def screener_stats():
     except Exception as e:
         logger.exception("screener_stats failed")
         raise HTTPException(status_code=500, detail=f"Failed to load screener stats: {e}")
+
+
+@router.get("/retailbot2/strategies")
+def retailbot2_strategies_get():
+    try:
+        registry = _strategy_lifecycle_registry()
+        persisted = get_retailbot2_strategy_lifecycle_settings()
+        by_key = {(row["strategy_id"], row["mode"]): row for row in persisted}
+        defaults = {
+            "evaluation_enabled": True,
+            "paper_enabled": True,
+            "telegram_enabled": False,
+            "report_enabled": True,
+            "auto_promote_enabled": False,
+        }
+        for row in registry:
+            saved = by_key.get((row["strategy_id"], row["mode"]), {})
+            row.update(defaults)
+            row.update({key: bool(saved[key]) for key in defaults if key in saved})
+            row["updated_at"] = saved.get("updated_at")
+        return {"strategies": registry}
+    except Exception as e:
+        logger.exception("retailbot2_strategies_get failed")
+        raise HTTPException(status_code=500, detail=f"Failed to load strategy lifecycle settings: {e}")
+
+
+@router.post("/retailbot2/strategies")
+def retailbot2_strategies_set(req: StrategyLifecycleRequest):
+    known = {
+        (row["strategy_id"], row["mode"])
+        for row in _strategy_lifecycle_registry()
+    }
+    if (req.strategy_id, req.mode) not in known:
+        raise HTTPException(status_code=400, detail="Unknown strategy identity or mode")
+    if req.mode not in {"shadow", "inverse"}:
+        raise HTTPException(status_code=400, detail="Mode must be shadow or inverse")
+    settings = {
+        "evaluation_enabled": req.evaluation_enabled,
+        "paper_enabled": req.paper_enabled,
+        "telegram_enabled": req.telegram_enabled,
+        "report_enabled": req.report_enabled,
+        # Auto-promotion remains fail-closed until its backtest validation
+        # workflow is implemented; this endpoint cannot enable it yet.
+        "auto_promote_enabled": False,
+    }
+    if req.auto_promote_enabled:
+        raise HTTPException(status_code=400, detail="Automatic promotion is not available yet")
+    try:
+        set_retailbot2_strategy_lifecycle_setting(req.strategy_id, req.mode, settings)
+        return {"status": "ok", "strategy_id": req.strategy_id, "mode": req.mode,
+                "settings": settings, "note": "Runtime worker applies settings on its next lifecycle refresh."}
+    except Exception as e:
+        logger.exception("retailbot2_strategies_set failed")
+        raise HTTPException(status_code=500, detail=f"Failed to save strategy lifecycle settings: {e}")
 
 
 @router.get("/retailbot2/control")
