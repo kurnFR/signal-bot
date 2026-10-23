@@ -2004,6 +2004,10 @@ const App = {
                             class="px-3 py-1.5 rounded text-xs font-semibold ${c.telegram_enabled ? "bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30" : "bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700"}">
                             Telegram ${c.telegram_enabled ? "On" : "Off"}
                         </button>
+                        <button type="button" data-paper-config-report data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-next-report="${!c.report_enabled}" data-active="${c.is_active}" data-telegram="${c.telegram_enabled}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
+                            class="px-3 py-1.5 rounded text-xs font-semibold ${c.report_enabled ? "bg-violet-600/20 hover:bg-violet-600 text-violet-300 hover:text-white border border-violet-500/30" : "bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700"}">
+                            Report ${c.report_enabled ? "On" : "Off"}
+                        </button>
                     </div>
                 </div>
             `).join("");
@@ -2035,6 +2039,24 @@ const App = {
                         button.dataset.strategy || "",
                         button.dataset.active === "true",
                         button.dataset.nextTelegram === "true",
+                        capital,
+                        risk
+                    );
+                });
+            });
+            cfgContainer.querySelectorAll("[data-paper-config-report]").forEach(button => {
+                button.addEventListener("click", () => {
+                    const capital = Number(button.dataset.capital);
+                    const risk = Number(button.dataset.risk);
+                    if (!Number.isFinite(capital) || !Number.isFinite(risk)) return;
+                    this.togglePaperReport(
+                        button.dataset.symbol || "",
+                        button.dataset.market || "",
+                        button.dataset.timeframe || "",
+                        button.dataset.strategy || "",
+                        button.dataset.active === "true",
+                        button.dataset.telegram === "true",
+                        button.dataset.nextReport === "true",
                         capital,
                         risk
                     );
@@ -2157,6 +2179,27 @@ const App = {
             await this.fetchPaperData();
         } catch (e) {
             this.showToast(`Failed to update Telegram preference: ${e.message || e}`, "error");
+        }
+    },
+
+    async togglePaperReport(symbol, market, timeframe, strategy, isActive, telegramEnabled, nextReport, allocatedCapital, riskPerTradePct) {
+        try {
+            const res = await fetch(`${API_BASE}/api/paper/configs`, {
+                method: "POST",
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify({
+                    symbol, market, timeframe, strategy_name: strategy,
+                    is_active: isActive, allocated_capital: allocatedCapital,
+                    risk_per_trade_pct: riskPerTradePct,
+                    telegram_enabled: telegramEnabled, report_enabled: nextReport
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+            this.showToast(`Performance report ${nextReport ? "enabled" : "hidden"} for ${strategy} (${symbol}).`, "success");
+            await this.fetchPaperData();
+        } catch (e) {
+            this.showToast(`Failed to update report visibility: ${e.message || e}`, "error");
         }
     },
 
