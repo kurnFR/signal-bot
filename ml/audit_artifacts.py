@@ -56,10 +56,8 @@ def audit_artifact_directory(directory: str | Path) -> dict[str, Any]:
             weights_by_id[path.stem] = path
 
     for model_id, manifest_path in manifests_by_id.items():
-        weight_path = weights_by_id.get(model_id)
-        if weight_path is None:
-            findings.append({"model_id": model_id, "status": "missing_weights"})
-            continue
+        # Validate the manifest independently of its weight file so malformed
+        # metadata is not misreported as merely a missing-weight condition.
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError):
@@ -70,6 +68,10 @@ def audit_artifact_directory(directory: str | Path) -> dict[str, Any]:
             continue
         if manifest.get("model_id") != model_id:
             findings.append({"model_id": model_id, "status": "manifest_id_mismatch"})
+            continue
+        weight_path = weights_by_id.get(model_id)
+        if weight_path is None:
+            findings.append({"model_id": model_id, "status": "missing_weights"})
             continue
         expected = manifest.get("weights_sha256")
         if not isinstance(expected, str) or not _SHA256_RE.fullmatch(expected):
