@@ -161,6 +161,7 @@ def deploy_strategy(req: DeployStrategyRequest):
         risk_per_trade_pct=req.risk_per_trade_pct,
         ml_model_id=req.ml_model_id.strip() if req.ml_model_id else None,
         telegram_enabled=req.send_telegram,
+        report_enabled=True,
     )
 
     # 2. Telegram deployment alert
