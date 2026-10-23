@@ -457,11 +457,12 @@ const App = {
     // ----------------------------------------------------
     async fetchResearchData() {
         try {
-            const [posRes, statsRes] = await Promise.all([
+            const [posRes, statsRes, lifecycleRes] = await Promise.all([
                 fetch(`${API_BASE}/api/research/retailbot2/positions?limit=100`, { headers: this.getAuthHeaders() }),
                 fetch(`${API_BASE}/api/research/retailbot2/stats`, { headers: this.getAuthHeaders() }),
+                fetch(`${API_BASE}/api/research/retailbot2/strategies`, { headers: this.getAuthHeaders() }),
             ]);
-            const results = [posRes, statsRes];
+            const results = [posRes, statsRes, lifecycleRes];
             const failed = results.find(r => !r.ok);
             if (failed) {
                 let detail = `HTTP ${failed.status}`;
@@ -470,11 +471,14 @@ const App = {
             }
             const positionsData = await posRes.json();
             const rb2Stats = await statsRes.json();
+            const lifecycleData = await lifecycleRes.json();
             const validObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
             if (
                 !validObject(positionsData) || !Array.isArray(positionsData.positions) ||
                 positionsData.positions.some(item => !item || typeof item !== "object" || Array.isArray(item)) ||
                 !validObject(rb2Stats) ||
+                !validObject(lifecycleData) || !Array.isArray(lifecycleData.strategies) ||
+                lifecycleData.strategies.some(item => !item || typeof item !== "object" || Array.isArray(item)) ||
                 (rb2Stats.by_strategy !== undefined && !Array.isArray(rb2Stats.by_strategy)) ||
                 (Array.isArray(rb2Stats.by_strategy) && rb2Stats.by_strategy.some(item => !item || typeof item !== "object" || Array.isArray(item)))
             ) {
@@ -485,6 +489,7 @@ const App = {
             this._renderRb2Kpis(rb2Stats);
             this._renderRb2Positions(positionsData.positions);
             this._renderRb2StrategyTable(rb2Stats.by_strategy || []);
+            this._renderRb2LifecycleTable(lifecycleData.strategies);
         } catch (e) {
             const message = e && e.message ? e.message : String(e || "Unknown error");
             const safeMessage = this._escapeHtml(message);
@@ -1180,6 +1185,73 @@ const App = {
                     <td class="whitespace-nowrap text-slate-500">${this._formatDateTime(p.entry_time)}</td>
                 </tr>`;
         }).join("");
+    },
+
+    _renderRb2LifecycleTable(rows) {
+        const tbody = document.getElementById("rb2-lifecycle-table-body");
+        if (!tbody) return;
+        if (!Array.isArray(rows) || rows.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-500 text-xs">No executable strategies were returned.</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = rows.map(row => {
+            const strategy = String(row.strategy_id || "");
+            const mode = String(row.mode || "");
+            const safeId = this._escapeHtml(strategy);
+            const safeMode = this._escapeHtml(mode);
+            const key = `rlc-${strategy.replace(/[^a-zA-Z0-9_-]/g, "_")}-${mode}`;
+            const checkbox = (field, label) => `
+                <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-300">
+                    <input type="checkbox" id="${key}-${field}" ${row[field] ? "checked" : ""}
+                        aria-label="${label} for ${safeId} (${safeMode})"
+                        class="rounded border-slate-600 bg-slate-800 text-sky-500 focus:ring-sky-500">
+                    <span class="sr-only">${label}</span>
+                </label>`;
+            return `
+                <tr>
+                    <td class="font-semibold text-slate-100 whitespace-nowrap">
+                        ${safeId}<div class="text-[10px] text-slate-500 font-normal">${safeMode}${row.historical_only ? " · historical only" : ""}</div>
+                    </td>
+                    <td>${checkbox("evaluation_enabled", "Evaluate strategy")}</td>
+                    <td>${checkbox("paper_enabled", "Paper track strategy")}</td>
+                    <td>${checkbox("telegram_enabled", "Telegram alerts")}</td>
+                    <td>${checkbox("report_enabled", "Include in performance report")}</td>
+                    <td><button type="button" onclick="App.saveStrategyLifecycle('${strategy}','${mode}')"
+                        class="px-3 py-1.5 text-[10px] font-semibold bg-sky-600 hover:bg-sky-500 text-white rounded-md">Save</button></td>
+                </tr>`;
+        }).join("");
+    },
+
+    async saveStrategyLifecycle(strategyId, mode) {
+        const safePart = String(strategyId).replace(/[^a-zA-Z0-9_-]/g, "_");
+        const prefix = `rlc-${safePart}-${mode}`;
+        const fields = ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled"];
+        const settings = {};
+        for (const field of fields) {
+            const el = document.getElementById(`${prefix}-${field}`);
+            if (!el) {
+                this.showToast("Strategy control is missing from the page. Refresh and try again.", "error");
+                return;
+            }
+            settings[field] = el.checked;
+        }
+        try {
+            const res = await fetch(`${API_BASE}/api/research/retailbot2/strategies`, {
+                method: "POST",
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify({ strategy_id: strategyId, mode, ...settings, auto_promote_enabled: false }),
+            });
+            if (!res.ok) {
+                let detail = `HTTP ${res.status}`;
+                try { detail = (await res.json()).detail || detail; } catch (_) {}
+                throw new Error(detail);
+            }
+            const data = await res.json();
+            this.showToast(`Saved ${strategyId} (${mode}). ${data.note || ""}`, "success");
+            await this.fetchResearchData();
+        } catch (e) {
+            this.showToast(`Failed to save strategy settings: ${e.message || e}`, "error");
+        }
     },
 
     _renderRb2StrategyTable(rows) {
