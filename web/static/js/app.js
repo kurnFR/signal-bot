@@ -73,6 +73,10 @@ const App = {
         if (paperOrderFilter) {
             paperOrderFilter.addEventListener("change", () => this.fetchPaperData());
         }
+        const savePromotionPolicyButton = document.getElementById("btn-save-promotion-policy");
+        if (savePromotionPolicyButton) {
+            savePromotionPolicyButton.addEventListener("click", () => this.saveStrategyPromotionPolicy());
+        }
     },
 
     getAuthHeaders() {
@@ -1908,7 +1912,33 @@ const App = {
             elCumR.className = `text-2xl font-bold font-mono ${isPos ? "text-emerald-400" : "text-rose-400"}`;
         }
 
-        // 2. Render Active Positions Table
+        // 2. Render independent per-strategy closed-trade performance.
+        const strategyPerformanceBody = document.getElementById("paper-strategy-performance-body");
+        if (strategyPerformanceBody) {
+            const rows = Array.isArray(m.byStrategy) ? m.byStrategy : [];
+            if (!rows.length) {
+                strategyPerformanceBody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-500 text-xs">No closed paper trades recorded per strategy yet.</td></tr>`;
+            } else {
+                strategyPerformanceBody.innerHTML = rows.map(row => {
+                    const expectancy = Number(row.expectancyR || 0);
+                    const cumulative = Number(row.cumulativeR || 0);
+                    const netPnl = Number(row.netPnl || 0);
+                    const winRate = Number(row.winRatePct || 0);
+                    return `
+                        <tr>
+                            <td class="font-mono text-xs text-sky-400">${this._escapeHtml(row.strategy || "Unknown")}</td>
+                            <td class="font-mono text-xs text-slate-200">${this._escapeHtml(String(row.totalTrades || 0))}</td>
+                            <td class="font-mono text-xs text-slate-200">${this._escapeHtml(String(row.wins || 0))}</td>
+                            <td class="font-mono text-xs text-slate-200">${Number.isFinite(winRate) ? winRate.toFixed(2) : "—"}%</td>
+                            <td class="font-mono text-xs ${expectancy >= 0 ? "text-emerald-400" : "text-rose-400"}">${Number.isFinite(expectancy) ? expectancy.toFixed(4) : "—"}R</td>
+                            <td class="font-mono text-xs ${cumulative >= 0 ? "text-emerald-400" : "text-rose-400"}">${Number.isFinite(cumulative) ? cumulative.toFixed(4) : "—"}R</td>
+                            <td class="text-right font-mono text-xs ${netPnl >= 0 ? "text-emerald-400" : "text-rose-400"}">${Number.isFinite(netPnl) ? netPnl.toFixed(2) : "—"}</td>
+                        </tr>`;
+                }).join("");
+            }
+        }
+
+        // 3. Render Active Positions Table
         const posBody = document.getElementById("paper-positions-body");
         if (posBody) {
             if (this.paperPositions.length === 0) {
@@ -1965,10 +1995,18 @@ const App = {
                         <div class="text-xs font-mono text-sky-400 mt-1">${this._escapeHtml(c.strategy_name)}</div>
                         <div class="text-[10px] text-slate-500 mt-0.5">$${this._escapeHtml(Number(c.allocated_capital).toLocaleString())} capital &middot; ${this._escapeHtml(String(c.risk_per_trade_pct))}% risk/trade</div>
                     </div>
-                    <div>
-                        <button type="button" data-paper-config-toggle data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-next-active="${!c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}" 
+                    <div class="flex flex-col gap-2 items-end">
+                        <button type="button" data-paper-config-toggle data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-next-active="${!c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
                             class="px-3 py-1.5 rounded text-xs font-semibold ${c.is_active ? "bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30" : "bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30"}">
                             ${c.is_active ? "Pause" : "Activate"}
+                        </button>
+                        <button type="button" data-paper-config-telegram data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-next-telegram="${!c.telegram_enabled}" data-active="${c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
+                            class="px-3 py-1.5 rounded text-xs font-semibold ${c.telegram_enabled ? "bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30" : "bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700"}">
+                            Telegram ${c.telegram_enabled ? "On" : "Off"}
+                        </button>
+                        <button type="button" data-paper-config-report data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-next-report="${!c.report_enabled}" data-active="${c.is_active}" data-telegram="${c.telegram_enabled}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
+                            class="px-3 py-1.5 rounded text-xs font-semibold ${c.report_enabled ? "bg-violet-600/20 hover:bg-violet-600 text-violet-300 hover:text-white border border-violet-500/30" : "bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700"}">
+                            Report ${c.report_enabled ? "On" : "Off"}
                         </button>
                     </div>
                 </div>
@@ -1984,6 +2022,41 @@ const App = {
                         button.dataset.timeframe || "",
                         button.dataset.strategy || "",
                         button.dataset.nextActive === "true",
+                        capital,
+                        risk
+                    );
+                });
+            });
+            cfgContainer.querySelectorAll("[data-paper-config-telegram]").forEach(button => {
+                button.addEventListener("click", () => {
+                    const capital = Number(button.dataset.capital);
+                    const risk = Number(button.dataset.risk);
+                    if (!Number.isFinite(capital) || !Number.isFinite(risk)) return;
+                    this.togglePaperTelegram(
+                        button.dataset.symbol || "",
+                        button.dataset.market || "",
+                        button.dataset.timeframe || "",
+                        button.dataset.strategy || "",
+                        button.dataset.active === "true",
+                        button.dataset.nextTelegram === "true",
+                        capital,
+                        risk
+                    );
+                });
+            });
+            cfgContainer.querySelectorAll("[data-paper-config-report]").forEach(button => {
+                button.addEventListener("click", () => {
+                    const capital = Number(button.dataset.capital);
+                    const risk = Number(button.dataset.risk);
+                    if (!Number.isFinite(capital) || !Number.isFinite(risk)) return;
+                    this.togglePaperReport(
+                        button.dataset.symbol || "",
+                        button.dataset.market || "",
+                        button.dataset.timeframe || "",
+                        button.dataset.strategy || "",
+                        button.dataset.active === "true",
+                        button.dataset.telegram === "true",
+                        button.dataset.nextReport === "true",
                         capital,
                         risk
                     );
@@ -2086,6 +2159,47 @@ const App = {
         } catch (error) {
             const message = error && error.message ? error.message : String(error || "Unknown error");
             this.showToast(`Unable to cancel paper order #${orderId}: ${message}`, "error");
+        }
+    },
+
+    async togglePaperTelegram(symbol, market, timeframe, strategy, isActive, nextTelegram, allocatedCapital, riskPerTradePct) {
+        try {
+            const res = await fetch(`${API_BASE}/api/paper/configs`, {
+                method: "POST",
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify({
+                    symbol, market, timeframe, strategy_name: strategy,
+                    is_active: isActive, allocated_capital: allocatedCapital,
+                    risk_per_trade_pct: riskPerTradePct, telegram_enabled: nextTelegram
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+            this.showToast(`Telegram alerts ${nextTelegram ? "enabled" : "disabled"} for ${strategy} (${symbol}).`, "success");
+            await this.fetchPaperData();
+        } catch (e) {
+            this.showToast(`Failed to update Telegram preference: ${e.message || e}`, "error");
+        }
+    },
+
+    async togglePaperReport(symbol, market, timeframe, strategy, isActive, telegramEnabled, nextReport, allocatedCapital, riskPerTradePct) {
+        try {
+            const res = await fetch(`${API_BASE}/api/paper/configs`, {
+                method: "POST",
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify({
+                    symbol, market, timeframe, strategy_name: strategy,
+                    is_active: isActive, allocated_capital: allocatedCapital,
+                    risk_per_trade_pct: riskPerTradePct,
+                    telegram_enabled: telegramEnabled, report_enabled: nextReport
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+            this.showToast(`Performance report ${nextReport ? "enabled" : "hidden"} for ${strategy} (${symbol}).`, "success");
+            await this.fetchPaperData();
+        } catch (e) {
+            this.showToast(`Failed to update report visibility: ${e.message || e}`, "error");
         }
     },
 
@@ -2214,6 +2328,7 @@ const App = {
             if (titleEl) titleEl.innerText = "Backtest Studio & Visual Simulator";
             if (descEl) descEl.innerText = "Simulate 24+ strategies against historical data with strict no-lookahead execution";
             this.renderBacktestStudio();
+            this.fetchStrategyPromotionPolicy();
         } else if (tabId === "paper") {
             if (titleEl) titleEl.innerText = "Phase B: Live Paper Trading";
             if (descEl) descEl.innerText = "Simulate forward order execution against real market data without risk";
@@ -3881,12 +3996,116 @@ const App = {
             const data = await res.json();
             this.lastBattleRoyaleData = data;
             this.renderBattleRoyaleResults(data);
-            this.showToast(`Battle Royale Complete! ${data.top3.length} profitable models discovered.`, "success");
+            const promotion = data.autoPromotion || { status: "disabled" };
+            if (promotion.status === "promoted") {
+                this.showToast(`Auto-promoted ${promotion.strategy} to paper trading.`, "success");
+            } else if (promotion.status === "promoted_alert_failed") {
+                this.showToast(`Paper trading activated for ${promotion.strategy}, but Telegram delivery failed.`, "warning");
+            } else if (promotion.status === "rejected") {
+                this.showToast(`No auto-promotion: ${promotion.reason || "winner did not pass policy"}.`, "warning");
+            } else if (promotion.status === "failed" || promotion.status === "error") {
+                this.showToast(`Auto-promotion did not complete: ${promotion.reason || "see promotion audit"}.`, "error");
+            } else if (promotion.status === "already_processed") {
+                this.showToast(`This exact winner/policy result was already processed (${promotion.previous_status || "recorded"}).`, "info");
+            } else {
+                this.showToast(`Battle Royale complete: ${data.top3.length} qualifying models discovered.`, "success");
+            }
+            await this.fetchStrategyPromotionPolicy();
         } catch (e) {
             alert("Battle Royale Error: " + e.message);
         } finally {
             btn.disabled = false;
             btn.innerHTML = originalText;
+        }
+    },
+
+    async fetchStrategyPromotionPolicy() {
+        const statusEl = document.getElementById("bt-promotion-policy-status");
+        try {
+            const [policyRes, auditRes] = await Promise.all([
+                fetch(`${API_BASE}/api/backtest/promotion-policy`, { headers: this.getAuthHeaders() }),
+                fetch(`${API_BASE}/api/backtest/promotion-audit?limit=5`, { headers: this.getAuthHeaders() }),
+            ]);
+            if (!policyRes.ok || !auditRes.ok) {
+                const failed = !policyRes.ok ? policyRes : auditRes;
+                let detail = `HTTP ${failed.status}`;
+                try { detail = (await failed.json()).detail || detail; } catch (_) {}
+                throw new Error(detail);
+            }
+            const policyData = await policyRes.json();
+            const auditData = await auditRes.json();
+            const policy = policyData.policy || {};
+            const fields = {
+                "bt-auto-promote-enabled": "enabled",
+                "bt-promo-min-trades": "min_test_trades",
+                "bt-promo-min-pf": "min_profit_factor",
+                "bt-promo-min-expectancy": "min_expectancy_r",
+                "bt-promo-max-drawdown": "max_drawdown_r",
+                "bt-promo-min-rank": "min_rank_score",
+                "bt-promo-require-holdout": "require_holdout",
+                "bt-promo-send-telegram": "send_telegram",
+            };
+            for (const [elementId, key] of Object.entries(fields)) {
+                const el = document.getElementById(elementId);
+                if (!el || policy[key] === undefined) continue;
+                if (el.type === "checkbox") el.checked = Boolean(policy[key]);
+                else el.value = String(policy[key]);
+            }
+            if (statusEl) {
+                statusEl.innerText = policy.enabled
+                    ? `Auto-promotion ENABLED · updated ${policy.updated_at || "saved"}`
+                    : `Auto-promotion disabled · updated ${policy.updated_at || "saved"}`;
+                statusEl.className = `text-[10px] ${policy.enabled ? "text-amber-300" : "text-slate-500"}`;
+            }
+            const auditEl = document.getElementById("bt-promotion-audit");
+            if (auditEl) {
+                const events = Array.isArray(auditData.events) ? auditData.events : [];
+                auditEl.innerHTML = events.length ? events.map(event => `
+                    <div class="flex flex-wrap gap-x-2 gap-y-1 border-t border-slate-800 pt-1">
+                        <span class="font-semibold ${event.status === "promoted" ? "text-emerald-300" : event.status === "rejected" ? "text-amber-300" : "text-slate-400"}">${this._escapeHtml(event.status)}</span>
+                        <span class="text-slate-300">${this._escapeHtml(event.strategy_name)}</span>
+                        <span>${this._escapeHtml(event.symbol)} ${this._escapeHtml(event.timeframe)} · ${this._escapeHtml(event.data_segment)}</span>
+                        <span class="flex-1">${this._escapeHtml(event.reason)}</span>
+                        <span>${this._escapeHtml(event.created_at || "")}</span>
+                    </div>`).join("") : "No promotion decisions recorded yet.";
+            }
+        } catch (e) {
+            if (statusEl) statusEl.innerText = `Promotion policy unavailable: ${e.message || e}`;
+            this.showToast(`Failed to load auto-promotion policy: ${e.message || e}`, "error");
+        }
+    },
+
+    async saveStrategyPromotionPolicy() {
+        const get = id => document.getElementById(id);
+        const numeric = (id, label) => {
+            const el = get(id);
+            const value = el ? Number(el.value) : NaN;
+            if (!Number.isFinite(value)) throw new Error(`${label} must be a finite number`);
+            return value;
+        };
+        let policy;
+        try {
+            policy = {
+                enabled: Boolean(get("bt-auto-promote-enabled")?.checked),
+                min_test_trades: numeric("bt-promo-min-trades", "Minimum trades"),
+                min_profit_factor: numeric("bt-promo-min-pf", "Minimum profit factor"),
+                min_expectancy_r: numeric("bt-promo-min-expectancy", "Minimum expectancy"),
+                max_drawdown_r: numeric("bt-promo-max-drawdown", "Maximum drawdown"),
+                min_rank_score: numeric("bt-promo-min-rank", "Minimum rank score"),
+                require_holdout: Boolean(get("bt-promo-require-holdout")?.checked),
+                send_telegram: Boolean(get("bt-promo-send-telegram")?.checked),
+            };
+            const res = await fetch(`${API_BASE}/api/backtest/promotion-policy`, {
+                method: "PUT",
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify(policy),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+            this.showToast("Auto-promotion policy saved.", "success");
+            await this.fetchStrategyPromotionPolicy();
+        } catch (e) {
+            this.showToast(`Could not save auto-promotion policy: ${e.message || e}`, "error");
         }
     },
 

@@ -1,12 +1,17 @@
 import json
 import logging
+import hashlib
+import math
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 
 from db.db import (
-    fetch_ohlcv_with_features_df, insert_backtest_run, insert_backtest_trades, get_pool
+    fetch_ohlcv_with_features_df, insert_backtest_run, insert_backtest_trades, get_pool,
+    get_strategy_auto_promotion_policy, set_strategy_auto_promotion_policy,
+    get_strategy_promotion_audit, get_strategy_promotion_decision,
+    record_strategy_promotion_decision, update_strategy_promotion_decision,
 )
 from backtest.strategies import (
     STRATEGIES, FUNDING_STRATEGIES, TREND_ALIGNMENT_STRATEGIES, PAIRS_STRATEGIES
@@ -175,6 +180,49 @@ SHARED_EXECUTION_PARAMS = [
 ]
 
 
+class StrategyAutoPromotionPolicyRequest(BaseModel):
+    enabled: bool = False
+    min_test_trades: int = Field(30, ge=30, le=10000)
+    min_profit_factor: float = Field(1.2, ge=1.0, le=10.0)
+    min_expectancy_r: float = Field(0.05, ge=0.0, le=10.0)
+    max_drawdown_r: float = Field(8.0, gt=0.0, le=100.0)
+    min_rank_score: float = Field(0.1, ge=0.01, le=1.0)
+    require_holdout: bool = True
+    send_telegram: bool = True
+
+
+@router.get("/promotion-policy")
+def get_promotion_policy():
+    try:
+        return {"policy": get_strategy_auto_promotion_policy()}
+    except Exception as exc:
+        logger.exception("Failed to load auto-promotion policy")
+        raise HTTPException(status_code=500, detail=f"Unable to load promotion policy: {exc}")
+
+
+@router.put("/promotion-policy")
+def update_promotion_policy(req: StrategyAutoPromotionPolicyRequest):
+    values = req.dict()
+    for key in ("min_profit_factor", "min_expectancy_r", "max_drawdown_r", "min_rank_score"):
+        if not math.isfinite(values[key]):
+            raise HTTPException(status_code=400, detail=f"{key} must be finite")
+    try:
+        set_strategy_auto_promotion_policy(values)
+        return {"status": "ok", "policy": get_strategy_auto_promotion_policy()}
+    except Exception as exc:
+        logger.exception("Failed to save auto-promotion policy")
+        raise HTTPException(status_code=500, detail=f"Unable to save promotion policy: {exc}")
+
+
+@router.get("/promotion-audit")
+def list_promotion_audit(limit: int = Query(25, ge=1, le=100)):
+    try:
+        return {"events": get_strategy_promotion_audit(limit)}
+    except Exception as exc:
+        logger.exception("Failed to load promotion audit")
+        raise HTTPException(status_code=500, detail=f"Unable to load promotion audit: {exc}")
+
+
 class BacktestRunRequest(BaseModel):
     symbol: str = Field(..., json_schema_extra={"example": "BTCUSDT"})
     market: str = Field("spot", json_schema_extra={"example": "spot"})
@@ -185,6 +233,165 @@ class BacktestRunRequest(BaseModel):
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
     save_to_db: bool = Field(True)
     params: Dict[str, Any] = Field(default_factory=dict)
+
+
+def _auto_promote_top_candidate(
+    candidate, *, symbol, market, timeframe, data_segment,
+    allocated_capital, risk_per_trade_pct,
+):
+    """Apply the saved policy to the single top-ranked candidate. Fail closed
+    on missing metrics, non-holdout data, unmapped strategies, or DB errors."""
+    try:
+        policy = get_strategy_auto_promotion_policy()
+    except Exception as exc:
+        logger.exception("Could not load auto-promotion policy")
+        return {"status": "error", "reason": f"Policy unavailable: {exc}"}
+
+    if not policy.get("enabled"):
+        return {"status": "disabled", "reason": "Automatic promotion is disabled in settings"}
+    if not candidate:
+        return {"status": "no_candidate", "reason": "No profitable ranked candidate was found"}
+
+    strategy_name = str(candidate.get("strategy") or "")
+    metrics = candidate.get("metrics") or {}
+    try:
+        total_trades_raw = metrics.get("total_trades")
+        total_trades = int(total_trades_raw)
+        if isinstance(total_trades_raw, bool) or float(total_trades_raw) != total_trades:
+            raise ValueError("total_trades is not an integer")
+        expectancy = float(metrics["expectancy_r"])
+        profit_factor = float(metrics["profit_factor"])
+        drawdown_r = abs(float(metrics["max_drawdown_r"]))
+        rank_score = float(candidate["rankScore"])
+        numeric_metrics = (expectancy, profit_factor, drawdown_r, rank_score)
+        if not all(math.isfinite(value) for value in numeric_metrics):
+            raise ValueError("metrics contain non-finite values")
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        return {"status": "rejected", "strategy": strategy_name,
+                "reason": f"Required metrics are missing or invalid: {exc}"}
+
+    criteria = {
+        key: policy[key] for key in (
+            "enabled", "min_test_trades", "min_profit_factor", "min_expectancy_r",
+            "max_drawdown_r", "min_rank_score", "require_holdout", "send_telegram",
+        )
+    }
+    metrics_snapshot = {
+        "total_trades": total_trades,
+        "expectancy_r": expectancy,
+        "profit_factor": profit_factor,
+        "max_drawdown_r": drawdown_r,
+        "rank_score": rank_score,
+    }
+    identity = {
+        "symbol": symbol, "market": market, "timeframe": timeframe,
+        "data_segment": data_segment, "strategy_name": strategy_name,
+        "metrics": metrics_snapshot, "criteria": criteria,
+    }
+    decision_hash = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    ).hexdigest()
+
+    failures = []
+    if strategy_name not in STRATEGIES:
+        failures.append("Strategy is not present in the executable paper-trading registry")
+    if criteria["require_holdout"] and data_segment != "holdout":
+        failures.append("Policy requires the recent holdout data segment")
+    if total_trades < int(criteria["min_test_trades"]):
+        failures.append(f"Trades {total_trades} < minimum {criteria['min_test_trades']}")
+    if profit_factor < float(criteria["min_profit_factor"]):
+        failures.append(f"Profit factor {profit_factor:.4f} < minimum {criteria['min_profit_factor']}")
+    if expectancy < float(criteria["min_expectancy_r"]):
+        failures.append(f"Expectancy {expectancy:.4f}R < minimum {criteria['min_expectancy_r']}R")
+    if drawdown_r > float(criteria["max_drawdown_r"]):
+        failures.append(f"Drawdown {drawdown_r:.4f}R > maximum {criteria['max_drawdown_r']}R")
+    if rank_score < float(criteria["min_rank_score"]):
+        failures.append(f"Rank score {rank_score:.4f} < minimum {criteria['min_rank_score']}")
+
+    status = "rejected" if failures else "processing"
+    reason = "; ".join(failures) if failures else "Candidate passed the configured promotion gates"
+    decision = {
+        "decision_hash": decision_hash,
+        "symbol": symbol, "market": market, "timeframe": timeframe,
+        "data_segment": data_segment, "strategy_name": strategy_name,
+        "status": status, "reason": reason,
+        "metrics_json": json.dumps(metrics_snapshot, sort_keys=True, allow_nan=False),
+        "criteria_json": json.dumps(criteria, sort_keys=True, allow_nan=False),
+    }
+    try:
+        claimed = record_strategy_promotion_decision(decision)
+        if not claimed:
+            prior = get_strategy_promotion_decision(decision_hash) or {}
+            return {
+                "status": "already_processed",
+                "strategy": strategy_name,
+                "previous_status": prior.get("status"),
+                "reason": prior.get("reason", "This identical metrics/policy decision was already recorded"),
+            }
+    except Exception as exc:
+        logger.exception("Could not claim promotion decision")
+        return {"status": "error", "strategy": strategy_name,
+                "reason": f"Could not persist promotion audit: {exc}"}
+
+    if failures:
+        return {"status": "rejected", "strategy": strategy_name, "reason": reason}
+
+    try:
+        from paper.engine import set_paper_config
+        config_result = set_paper_config(
+            symbol=symbol,
+            market=market,
+            timeframe=timeframe,
+            strategy_name=strategy_name,
+            is_active=True,
+            allocated_capital=allocated_capital,
+            risk_per_trade_pct=risk_per_trade_pct,
+            telegram_enabled=bool(criteria["send_telegram"]),
+            report_enabled=True,
+        )
+        telegram_result = "disabled"
+        final_status = "promoted"
+        final_reason = "Passed policy gates and activated in paper trading"
+        if criteria["send_telegram"]:
+            try:
+                from notifications.telegram_notifier import send_deployment_alert
+                alert = send_deployment_alert(
+                    symbol=symbol, market=market, timeframe=timeframe,
+                    strategy_name=strategy_name, allocated_capital=allocated_capital,
+                    risk_per_trade_pct=risk_per_trade_pct,
+                    rank=1, rank_score=rank_score,
+                )
+                telegram_ok = not isinstance(alert, dict) or alert.get("success", True)
+                telegram_result = "sent" if telegram_ok else "failed"
+                if not telegram_ok:
+                    final_status = "promoted_alert_failed"
+                    final_reason = "Paper config activated, but deployment alert delivery reported failure"
+            except Exception as alert_exc:
+                logger.exception("Auto-promotion Telegram alert failed")
+                telegram_result = "failed"
+                final_status = "promoted_alert_failed"
+                final_reason = f"Paper config activated; Telegram alert failed: {alert_exc}"
+
+        update_strategy_promotion_decision(
+            decision_hash, status=final_status, reason=final_reason,
+            paper_config_id=config_result.get("id"), telegram_result=telegram_result,
+        )
+        return {
+            "status": final_status, "strategy": strategy_name,
+            "reason": final_reason, "telegram_result": telegram_result,
+            "criteria": criteria,
+        }
+    except Exception as exc:
+        logger.exception("Auto-promotion failed while activating paper config")
+        try:
+            update_strategy_promotion_decision(
+                decision_hash, status="failed",
+                reason=f"Paper activation failed: {exc}",
+            )
+        except Exception:
+            logger.exception("Could not update failed promotion audit")
+        return {"status": "failed", "strategy": strategy_name,
+                "reason": f"Paper activation failed: {exc}"}
 
 
 @router.get("/strategies")
@@ -567,6 +774,15 @@ def run_all_strategies(
 
     top3 = eligible_for_top[:3]
 
+    # Promotion is opt-in and uses a persisted policy plus an audit claim to
+    # prevent repeated/concurrent runs from duplicating deployments or alerts.
+    auto_promotion = _auto_promote_top_candidate(
+        top3[0] if top3 else None,
+        symbol=symbol, market=market, timeframe=timeframe,
+        data_segment=data_segment, allocated_capital=initial_capital,
+        risk_per_trade_pct=risk_per_trade_pct,
+    )
+
     # Generate Institutional AI Insight & Recommendations
     ai_insight = generate_ai_insight(
         symbol=symbol,
@@ -588,6 +804,7 @@ def run_all_strategies(
         "totalEvaluated": len(results),
         "profitableCount": len(eligible_for_top),
         "top3": top3,
+        "autoPromotion": auto_promotion,
         "allResults": all_with_info,
         "aiInsight": ai_insight,
     }

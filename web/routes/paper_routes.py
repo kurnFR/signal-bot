@@ -28,6 +28,8 @@ class PaperConfigRequest(BaseModel):
     allocated_capital: float = Field(5000.0, ge=100.0)
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
     ml_model_id: Optional[str] = Field(None, json_schema_extra={"example": "real-btcusdt-spot-1h-trend_ema_v1-logistic_regression-binary_positive_r"})
+    telegram_enabled: Optional[bool] = Field(None, description="Whether paper entry alerts should be sent to Telegram; omitted updates preserve the current preference")
+    report_enabled: Optional[bool] = Field(None, description="Whether this strategy appears in per-strategy performance summaries; omitted updates preserve the current preference")
 
 
 @router.get("/positions")
@@ -96,6 +98,8 @@ def update_config(req: PaperConfigRequest):
         req.allocated_capital,
         req.risk_per_trade_pct,
         req.ml_model_id.strip() if req.ml_model_id else None,
+        telegram_enabled=req.telegram_enabled,
+        report_enabled=req.report_enabled,
     )
     return res
 
@@ -156,6 +160,8 @@ def deploy_strategy(req: DeployStrategyRequest):
         allocated_capital=req.allocated_capital,
         risk_per_trade_pct=req.risk_per_trade_pct,
         ml_model_id=req.ml_model_id.strip() if req.ml_model_id else None,
+        telegram_enabled=req.send_telegram,
+        report_enabled=True,
     )
 
     # 2. Telegram deployment alert

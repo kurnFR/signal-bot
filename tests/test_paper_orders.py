@@ -79,6 +79,10 @@ class TestValidateOrder(unittest.TestCase):
         self.assertEqual(order["direction"], "LONG")
         self.assertEqual(order["config_id"], 3)
 
+    def test_telegram_decision_is_normalized_and_defaults_off(self):
+        self.assertFalse(validate_order(_valid_order())["telegram_enabled"])
+        self.assertTrue(validate_order(_valid_order(telegram_enabled=True))["telegram_enabled"])
+
     def test_rejects_invalid_direction_and_wrong_stop_geometry(self):
         with self.assertRaises(OrderValidationError):
             validate_order(_valid_order(direction="SIDEWAYS"))
