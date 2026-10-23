@@ -890,13 +890,14 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                         try:
                             import json
                             import joblib
-                            from ml.artifacts import load_eligible_paper_artifact, resolve_model_artifact_paths
+                            from ml.artifacts import load_eligible_paper_artifact, resolve_model_artifact_paths, verify_model_weights_hash
                             from ml.strategy import MLSignalFilter
 
                             manifest_path, model_path = resolve_model_artifact_paths(ml_model_id)
                             with open(manifest_path, "r", encoding="utf-8") as mf:
                                 manifest = json.load(mf)
                             artifact = load_eligible_paper_artifact(manifest, ml_model_id)
+                            verify_model_weights_hash(manifest, model_path)
                             model = joblib.load(model_path)
                             ml_filter = MLSignalFilter(artifact=artifact, model=model, threshold=artifact.threshold)
 
