@@ -1,6 +1,6 @@
 # UI-Managed Strategy Lifecycle and Telegram Promotion
 
-Status: phased implementation in progress (PR #302)
+Status: lifecycle controls and independent RetailBot2 paper tracking implemented in PR #303; automatic backtest promotion remains incomplete
 Owner-facing behavior: all lifecycle controls are persisted in the application database and editable in the authenticated dashboard. Strategy names and promotion decisions must not be embedded as backend allowlists.
 
 ## Goals
@@ -14,7 +14,8 @@ Owner-facing behavior: all lifecycle controls are persisted in the application d
 ## Current implementation findings
 
 - `paper/retailbot2.py` runs seven strategies through `RetailStrategyEngine.run_all()`, then combines same-direction signals in `build_composite()`. The first implementation step now labels those combined trades `COMPOSITE` and retains `strategies_triggered` only as contributor metadata. This prevents future composite P&L from being misrepresented as independent P&L for the first contributor. Existing historical rows remain unchanged; independent per-strategy trading is a later phase.
-- RetailBot2 sends entry alerts from `_open_trade()`, exit alerts from `_close_trade()`, and a periodic report from `send_stats()`. These paths currently have no strategy-level promotion/report controls.
+- PR #303 adds persisted `rdt_strategy_lifecycle` controls for each executable strategy/mode, a dashboard editor, API validation, strategy-scoped paper slots/cooldowns, Telegram entry/exit gating, and report visibility filtering. New strategy alerts default off; paper tracking and report visibility default on. The exit alert decision is stored on each trade so a later toggle does not change that position's notification lifecycle.
+- RetailBot2 entry alerts still come from `_open_trade()`, exit alerts from `_close_trade()`, and the periodic performance report from `send_stats()`. The lifecycle gate applies only to strategy entry/exit alerts; the periodic report and unrelated screener/wallet notification paths remain separate.
 - RetailBot2 already has a database-backed `bot_control` row polled by the running process. This is useful for process-level controls, but promotion/lifecycle configuration needs a distinct validated schema and API contract, not arbitrary tuning overrides.
 - The Strategy Library and main paper engine are separate from RetailBot2. A strategy in the library does not automatically become a RetailBot2 strategy or an active `paper_configs` row. Backtest winner promotion must explicitly map a backtest strategy identity to an executable strategy and reject unmapped strategies.
 - Historical reports alone cannot prove that every library strategy is generating signals or has an active paper configuration. Runtime DB state and worker logs are required for live verification.
@@ -79,11 +80,11 @@ The exact numerical criteria are product defaults and must be editable in the UI
 
 ## Rollout phases
 
-1. **Correct attribution and define contract**: implemented in this PR by labeling new composite trades `COMPOSITE`, retaining contributors as metadata, and adding a regression test. Historical rows remain unchanged. Independent per-strategy trading remains incomplete.
-2. **Persistent lifecycle API and UI**: expose per-strategy evaluation, paper, Telegram, and report controls plus audit metadata.
-3. **Independent paper accounting**: open/close each strategy's own shadow/inverse paper trade, with per-strategy risk/cooldown and restart recovery.
-4. **Backtest-driven auto-promotion**: connect completed backtest results to configurable criteria, validate strategy identity mapping, and record auditable promotion decisions.
-5. **Verification**: automated tests, CI, read-only runtime inventory, then user-authorized runtime validation. Do not deploy or mutate production runtime settings automatically.
+1. **Correct attribution and contract**: merged in PR #302. Composite history remains unchanged and new composite P&L is no longer attributed to the first contributor.
+2. **Persistent lifecycle API and UI**: implemented in PR #303. Settings are stored in the database and can be changed per strategy/mode without code edits.
+3. **Independent paper accounting**: implemented in PR #303 for new signals, with per-strategy/mode entries, capacity checks, cooldowns, and restart recovery. Composite is no longer booked as if it were an independent contributor.
+4. **Backtest-driven auto-promotion**: not implemented yet. The API rejects enabling auto-promotion; the dashboard labels this clearly. Next work must add configurable performance criteria, backtest identity mapping, audit history, and fail-closed promotion decisions.
+5. **Verification**: automated tests and CI are required before merge. Then do read-only runtime inventory and user-authorized runtime validation. Do not deploy or mutate production runtime settings automatically.
 
 ## Acceptance criteria
 

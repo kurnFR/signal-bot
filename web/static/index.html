@@ -1432,6 +1432,31 @@
                     </div>
                 </div>
 
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-100">Strategy Lifecycle &amp; Telegram Promotion</h3>
+                        <p class="text-[11px] text-slate-500 mt-1">Each strategy/mode runs and reports independently. Telegram alerts default off until you enable them. Changes are saved to the database and applied by the running worker.</p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left custom-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Strategy / Mode</th>
+                                    <th scope="col">Evaluate</th>
+                                    <th scope="col">Paper Track</th>
+                                    <th scope="col">Telegram Alerts</th>
+                                    <th scope="col">Performance Report</th>
+                                    <th scope="col">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rb2-lifecycle-table-body">
+                                <tr><td colspan="6" class="text-center py-6 text-slate-500 text-xs">Loading strategy controls...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="text-[10px] text-amber-300">Auto-promotion from backtest results is not enabled yet. This panel only changes lifecycle controls; strategy promotion remains manual until validation gates and audit history are implemented.</p>
+                </div>
+
             </section>
 
             <!-- ============================================== -->

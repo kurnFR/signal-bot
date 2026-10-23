@@ -88,6 +88,7 @@ ADMIN_OR_TRADER_PREFIXES = (
 )
 RESEARCH_CONTROL_PREFIXES = (
     "/api/research/retailbot2/control",
+    "/api/research/retailbot2/strategies",
     "/api/research/screener/control",
 )
 

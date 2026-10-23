@@ -989,24 +989,33 @@ class RetailStrategyEngine:
     # ──────────────────────────────────────────────────────────────
     # COMPOSITE SIGNAL BUILDER
     # ──────────────────────────────────────────────────────────────
-    def run_all(self, df: pd.DataFrame, symbol: str) -> List[Dict]:
-        """Run all 7 strategies, return all that fire."""
+    def run_all(
+        self, df: pd.DataFrame, symbol: str,
+        enabled_strategies: Optional[set] = None,
+    ) -> List[Dict]:
+        """Run enabled strategy functions and return the signals that fire.
+
+        None preserves the all-strategies behavior for existing callers.
+        An explicit empty set intentionally evaluates no strategy functions.
+        """
         runners = [
-            self.strat_rsi_counter_trend,
-            self.strat_ma_crossover,
-            self.strat_sr_bounce,
-            self.strat_macd_divergence,
-            self.strat_bband_reversion,
-            self.strat_double_pattern,
-            self.strat_spike_fade,
+            (StrategyID.RSI_COUNTER_TREND, self.strat_rsi_counter_trend),
+            (StrategyID.MA_CROSSOVER_WHIPSAW, self.strat_ma_crossover),
+            (StrategyID.SR_BOUNCE_TRAP, self.strat_sr_bounce),
+            (StrategyID.MACD_DIVERGENCE, self.strat_macd_divergence),
+            (StrategyID.BBAND_REVERT, self.strat_bband_reversion),
+            (StrategyID.DOUBLE_PATTERN, self.strat_double_pattern),
+            (StrategyID.SPIKE_FADE, self.strat_spike_fade),
         ]
         results = []
-        for fn in runners:
+        for strategy_id, fn in runners:
+            if enabled_strategies is not None and strategy_id.value not in enabled_strategies:
+                continue
             try:
                 sig = fn(df, symbol)
                 if sig is not None:
                     results.append(sig)
-            except Exception as e:
+            except Exception:
                 pass  # Silent per-strategy failures
         return results
 
@@ -1110,6 +1119,7 @@ class DatabaseManager:
                     units DECIMAL(20,8) NOT NULL,
                     strategy VARCHAR(30) NOT NULL,
                     strategies_json TEXT NULL,
+                    telegram_enabled BOOLEAN NOT NULL DEFAULT FALSE,
                     confluence_score INT DEFAULT 1,
                     reason TEXT NULL,
                     status VARCHAR(10) DEFAULT 'OPEN',
@@ -1153,10 +1163,49 @@ class DatabaseManager:
                 INSERT IGNORE INTO bot_control (id, enabled, overrides_json)
                 VALUES (1, TRUE, NULL)
             """)
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS rdt_strategy_lifecycle (
+                    strategy_id VARCHAR(64) NOT NULL,
+                    mode VARCHAR(16) NOT NULL,
+                    evaluation_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    paper_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    telegram_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    report_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    auto_promote_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (strategy_id, mode)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            # Legacy open positions have no persisted promotion decision;
+            # fail closed rather than emitting unapproved exit alerts.
+            try:
+                c.execute("ALTER TABLE rdt_trades ADD COLUMN telegram_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+            except Exception as migration_error:
+                if "Duplicate column" not in str(migration_error):
+                    raise
             conn.commit()
             c.close()
         except Exception as e:
             self.logger.error(f"❌ Table create error: {e}")
+        finally:
+            conn.close()
+
+    def get_strategy_lifecycle_settings(self) -> List[Dict]:
+        """Return explicit user lifecycle settings. Missing rows use safe
+        defaults in the caller: background paper/report on, Telegram off."""
+        conn = self.get_conn()
+        if not conn:
+            raise RuntimeError("RetailBot2 database is unavailable")
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute("""
+                SELECT strategy_id, mode, evaluation_enabled, paper_enabled,
+                       telegram_enabled, report_enabled, auto_promote_enabled
+                FROM rdt_strategy_lifecycle
+            """)
+            rows = cur.fetchall()
+            cur.close()
+            return rows
         finally:
             conn.close()
 
@@ -1234,15 +1283,16 @@ class DatabaseManager:
             c.execute("""
                 INSERT INTO rdt_trades
                 (symbol, side, mode, entry_price, stop_price, target_price,
-                 atr, rr, units, strategy, strategies_json, confluence_score,
-                 reason, entry_time)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                 atr, rr, units, strategy, strategies_json, telegram_enabled,
+                 confluence_score, reason, entry_time)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """, (
                 signal['symbol'], signal['side'], mode,
                 signal['entry'], signal['stop'], signal['target'],
                 signal['atr'], signal['rr'], units,
                 signal.get('strategy', 'combined'),
                 json.dumps(signal.get('strategies_triggered', [])),
+                bool(signal.get('telegram_enabled', False)),
                 signal.get('confluence_score', 1),
                 str(signal.get('reason', ''))[:500],
                 signal.get('candle_close_time', datetime.now(timezone.utc).replace(tzinfo=None)),
@@ -1396,7 +1446,7 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    def count_open(self, mode: str = None, symbol: str = None) -> int:
+    def count_open(self, mode: str = None, symbol: str = None, strategy: str = None) -> int:
         conn = self.get_conn()
         if not conn:
             return 0
@@ -1410,6 +1460,9 @@ class DatabaseManager:
             if symbol:
                 sql += " AND symbol=%s"
                 params.append(symbol)
+            if strategy:
+                sql += " AND strategy=%s"
+                params.append(strategy)
             c.execute(sql, params)
             count = c.fetchone()[0]
             c.close()
@@ -1489,26 +1542,23 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    def get_last_trade_times(self) -> Dict[str, Dict[str, datetime]]:
-        """Most recent entry_time per (symbol, mode) across ALL trades
-        (open + closed). Used to rebuild the per-symbol cooldown on
-        restart -- without this, _load_state() resets every symbol's
-        cooldown to datetime.min, so a restart can immediately bypass
-        min_trade_interval_hours and re-enter a symbol with no cooldown."""
+    def get_last_trade_times(self) -> Dict[str, Dict[str, Dict[str, datetime]]]:
+        """Most recent entry per (symbol, mode, strategy), so strategies
+        maintain independent cooldowns across process restarts."""
         conn = self.get_conn()
         if not conn:
             return {}
         try:
             c = conn.cursor(dictionary=True)
             c.execute("""
-                SELECT symbol, mode, MAX(entry_time) AS last_entry
-                FROM rdt_trades GROUP BY symbol, mode
+                SELECT symbol, mode, strategy, MAX(entry_time) AS last_entry
+                FROM rdt_trades GROUP BY symbol, mode, strategy
             """)
             rows = c.fetchall()
             c.close()
-            result: Dict[str, Dict[str, datetime]] = {}
+            result: Dict[str, Dict[str, Dict[str, datetime]]] = {}
             for r in rows:
-                result.setdefault(r['symbol'], {})[r['mode']] = r['last_entry']
+                result.setdefault(r['symbol'], {}).setdefault(r['mode'], {})[r['strategy']] = r['last_entry']
             return result
         except Exception as e:
             self.logger.error(f"❌ get_last_trade_times: {e}")
@@ -1631,10 +1681,12 @@ class RetailDeathTrapBot:
 
         # Timing
         self.last_scan: Dict[str, float] = {s: 0.0 for s in self.symbols}
-        self.last_trade_time: Dict[str, Dict[str, datetime]] = {
-            s: {'shadow': datetime.min, 'inverse': datetime.min}
+        self.last_trade_time: Dict[str, Dict[str, Dict[str, datetime]]] = {
+            s: {'shadow': {}, 'inverse': {}}
             for s in self.symbols
         }
+        self.strategy_lifecycle: Dict[Tuple[str, str], Dict[str, bool]] = {}
+        self._strategy_lifecycle_reload_at = 0.0
 
         self._load_state()
         self._startup_msg()
@@ -1723,6 +1775,7 @@ class RetailDeathTrapBot:
                 'target': t['target_price'],
                 'units': t['units'],
                 'strategy': t.get('strategy', 'unknown'),
+                'telegram_enabled': bool(t.get('telegram_enabled', True)),
             }
             if record['mode'] == 'inverse':
                 self.active_inverse[t['id']] = record
@@ -1754,10 +1807,11 @@ class RetailDeathTrapBot:
         for symbol, by_mode in last_times.items():
             if symbol not in self.last_trade_time:
                 continue
-            for mode, last_entry in by_mode.items():
-                if last_entry is not None:
-                    self.last_trade_time[symbol][mode] = last_entry
-                    restored += 1
+            for mode, by_strategy in by_mode.items():
+                for strategy_id, last_entry in by_strategy.items():
+                    if last_entry is not None:
+                        self.last_trade_time[symbol][mode][strategy_id] = last_entry
+                        restored += 1
         if restored:
             self.logger.info(f"⏱️  Restored cooldown state for {restored} symbol/mode pairs")
 
@@ -1783,24 +1837,46 @@ class RetailDeathTrapBot:
     # TRADE CONTROL
     # ──────────────────────────────────────────────────────────────
 
-    def _can_open(self, symbol: str, mode: str) -> Tuple[bool, str]:
-        """[F10] Check per-mode limits separately."""
+    def _get_strategy_lifecycle(self, strategy_id: str, mode: str) -> Dict[str, bool]:
+        now = time.monotonic()
+        if now - self._strategy_lifecycle_reload_at >= 15:
+            try:
+                rows = self.db.get_strategy_lifecycle_settings()
+                self.strategy_lifecycle = {
+                    (row['strategy_id'], row['mode']): {
+                        key: bool(row[key]) for key in (
+                            'evaluation_enabled', 'paper_enabled', 'telegram_enabled',
+                            'report_enabled', 'auto_promote_enabled'
+                        )
+                    } for row in rows
+                }
+                self._strategy_lifecycle_reload_at = now
+            except Exception as e:
+                self.logger.error("Strategy lifecycle reload failed: %s", e)
+        return self.strategy_lifecycle.get((strategy_id, mode), {
+            'evaluation_enabled': True, 'paper_enabled': True,
+            'telegram_enabled': False, 'report_enabled': True,
+            'auto_promote_enabled': False,
+        })
+
+    def _can_open(self, symbol: str, mode: str, strategy: str) -> Tuple[bool, str]:
+        """Apply mode-wide capacity and strategy-scoped cooldowns."""
         active = self.active_inverse if mode == 'inverse' else self.active_shadow
 
         # Mode-level cap
         if len(active) >= self.config.max_open_trades_per_mode:
             return False, f"Max {mode} trades ({self.config.max_open_trades_per_mode}) reached"
 
-        # Per-symbol cap applies across both modes. Mode capacity remains
-        # separate, but a symbol must not consume one slot in each mode.
-        other_active = self.active_shadow if mode == 'inverse' else self.active_inverse
-        sym_count = sum(1 for t in active.values() if t['symbol'] == symbol)
-        sym_count += sum(1 for t in other_active.values() if t['symbol'] == symbol)
+        # Per-symbol caps are scoped to each strategy and mode so one
+        # strategy's research position does not suppress another's.
+        sym_count = sum(
+            1 for t in active.values()
+            if t['symbol'] == symbol and t.get('strategy') == strategy
+        )
         if sym_count >= self.config.max_trades_per_symbol:
-            return False, f"{symbol} already has {mode} trade open"
+            return False, f"{symbol} {strategy} already has an open {mode} trade"
 
-        # Cooldown
-        last = self.last_trade_time.get(symbol, {}).get(mode, datetime.min)
+        last = self.last_trade_time.get(symbol, {}).get(mode, {}).get(strategy, datetime.min)
         elapsed = (datetime.now(timezone.utc).replace(tzinfo=None) - last).total_seconds()
         cooldown = self.config.min_trade_interval_hours * 3600
         if elapsed < cooldown:
@@ -1808,14 +1884,20 @@ class RetailDeathTrapBot:
             return False, f"{symbol} {mode} cooldown: {remaining:.0f}m left"
 
         # DB check
-        db_count = self.db.count_open(mode=mode, symbol=symbol)
+        db_count = self.db.count_open(mode=mode, symbol=symbol, strategy=strategy)
         if db_count >= self.config.max_trades_per_symbol:
-            return False, f"{symbol} {mode} already open in DB"
+            return False, f"{symbol} {strategy} {mode} already open in DB"
 
         return True, "OK"
 
     def _open_trade(self, signal: Dict, mode: str) -> Optional[int]:
-        can, reason = self._can_open(signal['symbol'], mode)
+        strategy_id = signal.get('strategy', 'combined')
+        lifecycle = self._get_strategy_lifecycle(strategy_id, mode)
+        if not lifecycle['paper_enabled']:
+            return None
+        signal = signal.copy()
+        signal['telegram_enabled'] = lifecycle['telegram_enabled']
+        can, reason = self._can_open(signal['symbol'], mode, strategy_id)
         if not can:
             self.logger.debug(f"⏸️  [{mode}] Skip {signal['symbol']}: {reason}")
             return None
@@ -1842,8 +1924,9 @@ class RetailDeathTrapBot:
             'stop': signal['stop'],
             'target': signal['target'],
             'units': units,
-            'strategy': signal.get('strategy', 'combined'),
+            'strategy': strategy_id,
             'strategies_triggered': signal.get('strategies_triggered', []),
+            'telegram_enabled': lifecycle['telegram_enabled'],
         }
 
         if mode == 'inverse':
@@ -1853,11 +1936,12 @@ class RetailDeathTrapBot:
 
         # Update cooldown
         if signal['symbol'] not in self.last_trade_time:
-            self.last_trade_time[signal['symbol']] = {'shadow': datetime.min, 'inverse': datetime.min}
-        self.last_trade_time[signal['symbol']][mode] = datetime.now(timezone.utc).replace(tzinfo=None)
+            self.last_trade_time[signal['symbol']] = {'shadow': {}, 'inverse': {}}
+        self.last_trade_time[signal['symbol']][mode][strategy_id] = datetime.now(timezone.utc).replace(tzinfo=None)
 
         risk_pct = self.config.risk_per_trade * 100
-        self.tg.send_entry(signal, tid, units, risk_amt, risk_pct, mode)
+        if lifecycle['telegram_enabled']:
+            self.tg.send_entry(signal, tid, units, risk_amt, risk_pct, mode)
         self.logger.info(
             f"✅ [{mode.upper()}] #{tid} {signal['symbol']} {signal['side']} "
             f"| Entry: {signal['entry']:.4f} "
@@ -1904,7 +1988,8 @@ class RetailDeathTrapBot:
 
         del active[tid]
 
-        self.tg.send_exit(trade, exit_price, reason, pnl, pnl_pct)
+        if trade.get('telegram_enabled', True):
+            self.tg.send_exit(trade, exit_price, reason, pnl, pnl_pct)
         result_icon = "✅" if pnl > 0 else "❌"
         self.logger.info(
             f"🛑 [{mode.upper()}] #{tid} {trade['symbol']} closed: "
@@ -1991,31 +2076,39 @@ class RetailDeathTrapBot:
 
                 df = self.engine.calculate_indicators(df)
 
-                # Run all 7 strategies
-                raw = self.engine.run_all(df, symbol)
+                # Only evaluate a strategy function when at least one of
+                # its mode-specific lifecycle settings allows evaluation.
+                enabled_strategies = set()
+                for strategy_id in StrategyID:
+                    shadow_settings = self._get_strategy_lifecycle(strategy_id.value, 'shadow')
+                    inverse_settings = self._get_strategy_lifecycle(f"{strategy_id.value}_INV", 'inverse')
+                    if shadow_settings['evaluation_enabled'] or inverse_settings['evaluation_enabled']:
+                        enabled_strategies.add(strategy_id.value)
 
+                # Track each enabled strategy independently. Composite signals
+                # are intentionally not booked as a contributor's trade.
+                raw = self.engine.run_all(df, symbol, enabled_strategies=enabled_strategies)
                 if not raw:
                     continue
 
                 fired = [s['strategy'] for s in raw]
                 directions = [s['side'] for s in raw]
                 self.logger.info(
-                    f"📡 {symbol}: {len(raw)} signals → "
+                    f"📡 {symbol}: {len(raw)} independent signals → "
                     f"{list(zip(fired, directions))}"
                 )
 
-                # Build composite
-                composite = self.engine.build_composite(raw)
-                if not composite:
-                    continue
+                for signal in raw:
+                    if self.mode in (SignalMode.SHADOW, SignalMode.BOTH):
+                        settings = self._get_strategy_lifecycle(signal.get('strategy', ''), 'shadow')
+                        if settings['evaluation_enabled']:
+                            self._open_trade(signal, 'shadow')
 
-                # Open based on mode
-                if self.mode in (SignalMode.SHADOW, SignalMode.BOTH):
-                    self._open_trade(composite, 'shadow')
-
-                if self.mode in (SignalMode.INVERSE, SignalMode.BOTH):
-                    inv = self._invert(composite)
-                    self._open_trade(inv, 'inverse')
+                    if self.mode in (SignalMode.INVERSE, SignalMode.BOTH):
+                        inverse_signal = self._invert(signal)
+                        settings = self._get_strategy_lifecycle(inverse_signal.get('strategy', ''), 'inverse')
+                        if settings['evaluation_enabled']:
+                            self._open_trade(inverse_signal, 'inverse')
 
                 time.sleep(0.3)
 

@@ -1047,7 +1047,23 @@ def get_retailbot2_stats():
     conn = get_retailbot2_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM rdt_strategy_stats ORDER BY mode, strategy")
+        _ensure_retailbot2_strategy_lifecycle_table(cur)
+        conn.commit()
+        cur.execute("""
+            SELECT t.strategy, t.mode,
+                   COUNT(*) AS total_trades,
+                   SUM(CASE WHEN t.net_pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                   SUM(CASE WHEN t.net_pnl <= 0 THEN 1 ELSE 0 END) AS losses,
+                   COALESCE(SUM(t.net_pnl), 0) AS total_pnl,
+                   MAX(t.exit_time) AS last_updated
+            FROM rdt_trades t
+            LEFT JOIN rdt_strategy_lifecycle l
+              ON l.strategy_id = t.strategy AND l.mode = t.mode
+            WHERE t.status='CLOSED'
+              AND COALESCE(l.report_enabled, TRUE) = TRUE
+            GROUP BY t.strategy, t.mode
+            ORDER BY t.mode, t.strategy
+        """)
         stats_rows = cur.fetchall()
         for r in stats_rows:
             if isinstance(r.get("total_pnl"), Decimal):
@@ -1178,6 +1194,81 @@ SCREENER_TUNABLE_FIELDS = {
     "min_alert_quality_score", "max_signal_age_sec",
     "expired_signal_retention_days", "expired_signal_cleanup_interval_days",
 }
+
+
+def _ensure_retailbot2_strategy_lifecycle_table(cur):
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS rdt_strategy_lifecycle (
+            strategy_id VARCHAR(64) NOT NULL,
+            mode VARCHAR(16) NOT NULL,
+            evaluation_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            paper_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            telegram_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+            report_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            auto_promote_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (strategy_id, mode)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """)
+
+
+def get_retailbot2_strategy_lifecycle_settings():
+    """Read UI-managed strategy settings. An empty table is valid and means
+    worker defaults apply; no promotion is implicitly enabled."""
+    conn = get_retailbot2_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        _ensure_retailbot2_strategy_lifecycle_table(cur)
+        conn.commit()
+        cur.execute("""
+            SELECT strategy_id, mode, evaluation_enabled, paper_enabled,
+                   telegram_enabled, report_enabled, auto_promote_enabled,
+                   updated_at
+            FROM rdt_strategy_lifecycle
+            ORDER BY strategy_id, mode
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        for row in rows:
+            for key in ("evaluation_enabled", "paper_enabled", "telegram_enabled",
+                        "report_enabled", "auto_promote_enabled"):
+                row[key] = bool(row[key])
+            if row.get("updated_at") is not None:
+                row["updated_at"] = str(row["updated_at"])
+        return rows
+    finally:
+        conn.close()
+
+
+def set_retailbot2_strategy_lifecycle_setting(strategy_id, mode, settings):
+    """Atomically replace one strategy/mode lifecycle setting row."""
+    conn = get_retailbot2_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        _ensure_retailbot2_strategy_lifecycle_table(cur)
+        cur.execute("""
+            INSERT INTO rdt_strategy_lifecycle
+                (strategy_id, mode, evaluation_enabled, paper_enabled,
+                 telegram_enabled, report_enabled, auto_promote_enabled)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            ON DUPLICATE KEY UPDATE
+                evaluation_enabled=VALUES(evaluation_enabled),
+                paper_enabled=VALUES(paper_enabled),
+                telegram_enabled=VALUES(telegram_enabled),
+                report_enabled=VALUES(report_enabled),
+                auto_promote_enabled=VALUES(auto_promote_enabled)
+        """, (
+            strategy_id, mode, settings["evaluation_enabled"],
+            settings["paper_enabled"], settings["telegram_enabled"],
+            settings["report_enabled"], settings["auto_promote_enabled"]
+        ))
+        conn.commit()
+        cur.close()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def get_retailbot2_control():
