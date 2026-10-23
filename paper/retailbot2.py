@@ -1028,6 +1028,12 @@ class RetailStrategyEngine:
         direction = chosen[0]['side']
         base = chosen[0].copy()
 
+        # This trade is the result of a multi-strategy composite, not an
+        # independently executed trade for whichever contributor happened
+        # to appear first. Keep contributors for diagnostics, but attribute
+        # realized P&L to the explicit composite experiment.
+        base['strategy'] = 'COMPOSITE'
+
         # [F8] Correct confluence count = number of strategies agreeing
         base['confluence_score'] = len(chosen)      # FIXED
         base['strategies_triggered'] = [s['strategy'] for s in chosen]  # FIXED
