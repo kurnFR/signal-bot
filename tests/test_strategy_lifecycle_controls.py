@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import Mock
 
-from paper.retailbot2 import RetailDeathTrapBot
+from paper.retailbot2 import RetailDeathTrapBot, RetailStrategyEngine
 
 
 class FakeLifecycleDB:
@@ -97,3 +98,52 @@ def test_same_strategy_symbol_trade_is_limited_independently():
     assert allowed is False
     assert "already has an open" in reason
     assert bot.db.count_queries == []
+
+
+def test_run_all_skips_strategy_functions_disabled_in_all_modes():
+    engine = object.__new__(RetailStrategyEngine)
+    signal = {"strategy": "BB_REV", "side": "LONG"}
+    method_names = (
+        "strat_rsi_counter_trend",
+        "strat_ma_crossover",
+        "strat_sr_bounce",
+        "strat_macd_divergence",
+        "strat_bband_reversion",
+        "strat_double_pattern",
+        "strat_spike_fade",
+    )
+    mocks = {}
+    for name in method_names:
+        result = signal if name == "strat_bband_reversion" else None
+        mocks[name] = Mock(return_value=result)
+        setattr(engine, name, mocks[name])
+
+    results = engine.run_all(object(), "BTC/USDT", enabled_strategies={"BB_REV"})
+
+    assert results == [signal]
+    assert mocks["strat_bband_reversion"].call_count == 1
+    assert all(
+        mock.call_count == 0
+        for name, mock in mocks.items()
+        if name != "strat_bband_reversion"
+    )
+
+
+def test_run_all_empty_enabled_set_evaluates_no_strategy_functions():
+    engine = object.__new__(RetailStrategyEngine)
+    mocks = []
+    for name in (
+        "strat_rsi_counter_trend",
+        "strat_ma_crossover",
+        "strat_sr_bounce",
+        "strat_macd_divergence",
+        "strat_bband_reversion",
+        "strat_double_pattern",
+        "strat_spike_fade",
+    ):
+        mock = Mock(return_value=None)
+        setattr(engine, name, mock)
+        mocks.append(mock)
+
+    assert engine.run_all(object(), "BTC/USDT", enabled_strategies=set()) == []
+    assert all(mock.call_count == 0 for mock in mocks)
