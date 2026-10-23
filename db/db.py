@@ -1442,3 +1442,208 @@ def set_screener_control(enabled, overrides):
         cur.close()
     finally:
         conn.close()
+
+# ---------------------------------------------------------------------------
+# User-configurable backtest winner promotion policy and audit history
+# ---------------------------------------------------------------------------
+
+_STRATEGY_AUTO_PROMOTION_DEFAULTS = {
+    "enabled": False,
+    "min_test_trades": 30,
+    "min_profit_factor": 1.2,
+    "min_expectancy_r": 0.05,
+    "max_drawdown_r": 8.0,
+    "min_rank_score": 0.1,
+    "require_holdout": True,
+    "send_telegram": True,
+}
+
+
+def _ensure_strategy_auto_promotion_tables(cur):
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS strategy_auto_promotion_policy (
+            id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+            enabled TINYINT(1) NOT NULL DEFAULT 0,
+            min_test_trades INT UNSIGNED NOT NULL DEFAULT 30,
+            min_profit_factor DECIMAL(8,4) NOT NULL DEFAULT 1.2000,
+            min_expectancy_r DECIMAL(8,4) NOT NULL DEFAULT 0.0500,
+            max_drawdown_r DECIMAL(8,4) NOT NULL DEFAULT 8.0000,
+            min_rank_score DECIMAL(8,4) NOT NULL DEFAULT 0.1000,
+            require_holdout TINYINT(1) NOT NULL DEFAULT 1,
+            send_telegram TINYINT(1) NOT NULL DEFAULT 1,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB
+    """)
+    cur.execute("""
+        INSERT IGNORE INTO strategy_auto_promotion_policy
+            (id, enabled, min_test_trades, min_profit_factor, min_expectancy_r,
+             max_drawdown_r, min_rank_score, require_holdout, send_telegram)
+        VALUES (1, 0, 30, 1.2000, 0.0500, 8.0000, 0.1000, 1, 1)
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS strategy_promotion_audit (
+            decision_hash CHAR(64) NOT NULL PRIMARY KEY,
+            symbol VARCHAR(20) NOT NULL,
+            market VARCHAR(12) NOT NULL,
+            timeframe VARCHAR(10) NOT NULL,
+            data_segment VARCHAR(12) NOT NULL,
+            strategy_name VARCHAR(80) NOT NULL,
+            status VARCHAR(24) NOT NULL,
+            reason VARCHAR(500) NOT NULL,
+            metrics_json LONGTEXT NOT NULL,
+            criteria_json LONGTEXT NOT NULL,
+            paper_config_id INT NULL,
+            telegram_result VARCHAR(32) NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_strategy_promotion_audit_created (created_at),
+            KEY idx_strategy_promotion_audit_strategy (strategy_name, created_at)
+        ) ENGINE=InnoDB
+    """)
+
+
+def get_strategy_auto_promotion_policy():
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        _ensure_strategy_auto_promotion_tables(cur)
+        conn.commit()
+        cur.execute("SELECT * FROM strategy_auto_promotion_policy WHERE id=1")
+        row = cur.fetchone() or {}
+        cur.close()
+        policy = dict(_STRATEGY_AUTO_PROMOTION_DEFAULTS)
+        policy.update(row)
+        for key in ("enabled", "require_holdout", "send_telegram"):
+            policy[key] = bool(policy[key])
+        for key in ("min_profit_factor", "min_expectancy_r", "max_drawdown_r", "min_rank_score"):
+            policy[key] = float(policy[key])
+        policy["min_test_trades"] = int(policy["min_test_trades"])
+        policy["updated_at"] = str(policy["updated_at"]) if policy.get("updated_at") else None
+        return policy
+    finally:
+        conn.close()
+
+
+def set_strategy_auto_promotion_policy(policy):
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        _ensure_strategy_auto_promotion_tables(cur)
+        cur.execute("""
+            INSERT INTO strategy_auto_promotion_policy
+                (id, enabled, min_test_trades, min_profit_factor, min_expectancy_r,
+                 max_drawdown_r, min_rank_score, require_holdout, send_telegram)
+            VALUES (1,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON DUPLICATE KEY UPDATE
+                enabled=VALUES(enabled),
+                min_test_trades=VALUES(min_test_trades),
+                min_profit_factor=VALUES(min_profit_factor),
+                min_expectancy_r=VALUES(min_expectancy_r),
+                max_drawdown_r=VALUES(max_drawdown_r),
+                min_rank_score=VALUES(min_rank_score),
+                require_holdout=VALUES(require_holdout),
+                send_telegram=VALUES(send_telegram)
+        """, (
+            bool(policy["enabled"]), int(policy["min_test_trades"]),
+            float(policy["min_profit_factor"]), float(policy["min_expectancy_r"]),
+            float(policy["max_drawdown_r"]), float(policy["min_rank_score"]),
+            bool(policy["require_holdout"]), bool(policy["send_telegram"]),
+        ))
+        conn.commit()
+        cur.close()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_strategy_promotion_decision(decision_hash):
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        _ensure_strategy_auto_promotion_tables(cur)
+        conn.commit()
+        cur.execute(
+            "SELECT decision_hash, status, reason, paper_config_id, telegram_result "
+            "FROM strategy_promotion_audit WHERE decision_hash=%s",
+            (decision_hash,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        return row
+    finally:
+        conn.close()
+
+
+def record_strategy_promotion_decision(decision):
+    """Claim one metrics+policy decision exactly once to prevent duplicate
+    deployments/Telegram announcements from concurrent or repeated runs."""
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        _ensure_strategy_auto_promotion_tables(cur)
+        cur.execute("""
+            INSERT IGNORE INTO strategy_promotion_audit
+                (decision_hash, symbol, market, timeframe, data_segment,
+                 strategy_name, status, reason, metrics_json, criteria_json)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            decision["decision_hash"], decision["symbol"], decision["market"],
+            decision["timeframe"], decision["data_segment"], decision["strategy_name"],
+            decision["status"], decision["reason"][:500], decision["metrics_json"],
+            decision["criteria_json"],
+        ))
+        inserted = cur.rowcount == 1
+        conn.commit()
+        cur.close()
+        return inserted
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def update_strategy_promotion_decision(decision_hash, *, status, reason,
+                                       paper_config_id=None, telegram_result=None):
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE strategy_promotion_audit
+            SET status=%s, reason=%s, paper_config_id=%s, telegram_result=%s
+            WHERE decision_hash=%s
+        """, (status, str(reason)[:500], paper_config_id, telegram_result, decision_hash))
+        conn.commit()
+        cur.close()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_strategy_promotion_audit(limit=25):
+    limit = max(1, min(int(limit), 100))
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        _ensure_strategy_auto_promotion_tables(cur)
+        conn.commit()
+        cur.execute("""
+            SELECT decision_hash, symbol, market, timeframe, data_segment,
+                   strategy_name, status, reason, paper_config_id, telegram_result,
+                   created_at, updated_at
+            FROM strategy_promotion_audit
+            ORDER BY created_at DESC
+            LIMIT %s
+        """, (limit,))
+        rows = cur.fetchall()
+        cur.close()
+        for row in rows:
+            row["created_at"] = str(row["created_at"]) if row.get("created_at") else None
+            row["updated_at"] = str(row["updated_at"]) if row.get("updated_at") else None
+        return rows
+    finally:
+        conn.close()
