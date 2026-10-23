@@ -4,6 +4,9 @@
 ALTER TABLE paper_configs
     ADD COLUMN IF NOT EXISTS telegram_enabled TINYINT(1) NOT NULL DEFAULT 0;
 
+ALTER TABLE paper_orders
+    ADD COLUMN IF NOT EXISTS telegram_enabled TINYINT(1) NOT NULL DEFAULT 0;
+
 CREATE TABLE IF NOT EXISTS strategy_auto_promotion_policy (
     id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
     enabled TINYINT(1) NOT NULL DEFAULT 0,
