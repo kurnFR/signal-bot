@@ -1,13 +1,13 @@
 # Status
 
-What exists and works today, and the known gaps. Reconciled against current `master` on 2026-10-22; historical verification claims should still be checked against the latest CI and runtime evidence. Keep this file short: when a gap is fixed, delete the line; when you add a capability, add one row. Do not add dated reviews or history here (use pull-request descriptions).
+What exists and works today, and the known gaps. Reconciled against current `master` on 2026-10-23; historical verification claims should still be checked against the latest CI and runtime evidence. Keep this file short: when a gap is fixed, delete the line; when you add a capability, add one row. Do not add dated reviews or history here (use pull-request descriptions).
 
 ## 1. Implemented
 
 | Area | What exists | Where |
 |---|---|---|
 | Data pipeline | Historical backfill and live collectors for klines, funding, open interest, liquidations (BTC/ETH/BNB; 15m, 1h, 4h, 1d); shared feature builder | `collectors/`, `features/` |
-| Backtesting | One execution engine, shared accounting with fees, slippage, funding and position sizing; 24 strategy variants; metrics, equity, PnL report | `backtest/` |
+| Backtesting | One execution engine, shared accounting with configurable per-side fee/slippage assumptions, funding and position sizing; 24 strategy variants; metrics, equity, PnL report; read-only training-segment cost sensitivity report | `backtest/`, [cost sensitivity](BACKTEST_COST_SENSITIVITY.md) |
 | Validation | Train/holdout split, single-use holdout check, walk-forward, optimizer, ranked "run all" screening | [STRATEGIES.md](STRATEGIES.md) |
 | Paper trading | Shadow engine, shared accounting, idempotent syncs, circuit breakers that fail closed, Telegram alerts, backtest/paper parity tests | `paper/`, `notifications/` |
 | ML filters | Leakage-safe pipeline, tournament, versioned artifacts, deploy-to-paper | [ML.md](ML.md) |
@@ -42,7 +42,7 @@ Verified this session: a fresh database built from the README steps boots the ap
 **Still open**
 
 1. **Execution lifecycle code is implemented; release verification remains open (P0.5).** PRs #239/#241 add timing guards, #243 adds the ledger, #245 integrates atomic fills/recovery, #247 adds authenticated history/cancellation, #248 adds dashboard state/filter/cancel controls, and #250 adds passing disposable-MariaDB tests for concurrent fills, cancel-vs-fill races, and rollback/retry after a simulated crash. An opt-in MariaDB test now adopts a populated legacy-style database and checks historical OHLCV rows remain unchanged; still validate against a representative snapshot of the actual deployed schema and perform manual browser/accessibility checks. Paper/shadow only. See [PAPER_ORDER_LIFECYCLE.md](PAPER_ORDER_LIFECYCLE.md).
-2. **Cost realism remains open.** The shared accounting primitives now reject NaN/infinite inputs and non-finite derived results (PR #275), but fees (0.1%) and slippage (0.05%) per side remain fixed assumptions; there is no spread, volume or liquidity model.
+2. **Cost realism remains open.** Fees and slippage are now environment-configurable per side (`BACKTEST_FEE_PCT`, `BACKTEST_SLIPPAGE_PCT`) with backward-compatible defaults of 0.1% and 0.05% respectively (PR #289). PR #290 adds a read-only training-segment sensitivity report across explicit fee × slippage scenarios. These are still constant-rate assumptions: there is no historical bid/ask spread, order-book depth, volume participation, market-impact, latency, or venue-specific fee-tier model. Sensitivity is not evidence of profitability; validate assumptions against trustworthy venue/instrument data before treating results as realistic.
 3. **Artifact provenance:** runtime eligibility checks still trust editable manifest metrics and local model files; add a signed or otherwise trusted content-hash/provenance mechanism if the threat model includes an attacker who can modify both files.
 4. **Runtime data in git:** ignore rules are now prepared for `custom_strategies.json` and `Screen/signals.jsonl`, but the files remain tracked until a separate preservation-first untracking change. Back up the real files before pulling any commit that removes them; follow README, "Runtime data".
 5. **Repo hygiene:** over 30 branches, many merged or abandoned (including `do-not-use`, `ignore2`, `tmp-ignore`, `x`).
