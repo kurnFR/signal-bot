@@ -128,7 +128,7 @@ def get_paper_configs() -> List[Dict[str, Any]]:
             """
             SELECT id, symbol, market, timeframe, strategy_name, is_active,
                    allocated_capital, risk_per_trade_pct, ml_model_id,
-                   telegram_enabled, created_at
+                   telegram_enabled, report_enabled, created_at
             FROM paper_configs
             ORDER BY is_active DESC, symbol ASC
             """
@@ -141,6 +141,7 @@ def get_paper_configs() -> List[Dict[str, Any]]:
             r["risk_per_trade_pct"] = float(r["risk_per_trade_pct"])
             r["ml_model_id"] = r.get("ml_model_id")
             r["telegram_enabled"] = bool(r.get("telegram_enabled", False))
+            r["report_enabled"] = bool(r.get("report_enabled", True))
             r["created_at"] = str(r["created_at"])
         return rows
     finally:
@@ -157,6 +158,7 @@ def set_paper_config(
     risk_per_trade_pct: float = 1.0,
     ml_model_id: Optional[str] = None,
     telegram_enabled: Optional[bool] = None,
+    report_enabled: Optional[bool] = None,
 ) -> Dict[str, Any]:
     if allocated_capital <= 0:
         raise ValueError("allocated_capital must be positive")
@@ -166,9 +168,9 @@ def set_paper_config(
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        if telegram_enabled is None:
+        if telegram_enabled is None and report_enabled is None:
             # Legacy callers may update activation/capital without changing the
-            # user's separately configured Telegram alert preference.
+            # separately configured alert or report visibility preferences.
             cur.execute(
                 """
                 INSERT INTO paper_configs
@@ -184,7 +186,7 @@ def set_paper_config(
                 (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
                  allocated_capital, risk_per_trade_pct, ml_model_id),
             )
-        else:
+        elif report_enabled is None:
             cur.execute(
                 """
                 INSERT INTO paper_configs
@@ -200,6 +202,43 @@ def set_paper_config(
                 """,
                 (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
                  allocated_capital, risk_per_trade_pct, ml_model_id, bool(telegram_enabled)),
+            )
+        elif telegram_enabled is None:
+            cur.execute(
+                """
+                INSERT INTO paper_configs
+                    (symbol, market, timeframe, strategy_name, is_active,
+                     allocated_capital, risk_per_trade_pct, ml_model_id, report_enabled)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    is_active = VALUES(is_active),
+                    allocated_capital = VALUES(allocated_capital),
+                    risk_per_trade_pct = VALUES(risk_per_trade_pct),
+                    ml_model_id = VALUES(ml_model_id),
+                    report_enabled = VALUES(report_enabled)
+                """,
+                (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
+                 allocated_capital, risk_per_trade_pct, ml_model_id, bool(report_enabled)),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO paper_configs
+                    (symbol, market, timeframe, strategy_name, is_active,
+                     allocated_capital, risk_per_trade_pct, ml_model_id,
+                     telegram_enabled, report_enabled)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    is_active = VALUES(is_active),
+                    allocated_capital = VALUES(allocated_capital),
+                    risk_per_trade_pct = VALUES(risk_per_trade_pct),
+                    ml_model_id = VALUES(ml_model_id),
+                    telegram_enabled = VALUES(telegram_enabled),
+                    report_enabled = VALUES(report_enabled)
+                """,
+                (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
+                 allocated_capital, risk_per_trade_pct, ml_model_id,
+                 bool(telegram_enabled), bool(report_enabled)),
             )
         conn.commit()
         cur.close()
@@ -312,16 +351,19 @@ def get_paper_metrics() -> Dict[str, Any]:
         summary = cur.fetchone()
         cur.execute(
             """
-            SELECT strategy_name,
+            SELECT t.strategy_name,
                    COUNT(*) AS total_trades,
-                   SUM(CASE WHEN r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
-                   SUM(CASE WHEN r_multiple <= 0 THEN 1 ELSE 0 END) AS losses,
-                   SUM(r_multiple) AS sum_r,
-                   AVG(r_multiple) AS avg_r,
-                   SUM(net_pnl) AS net_pnl
-            FROM paper_trades
-            GROUP BY strategy_name
-            ORDER BY strategy_name
+                   SUM(CASE WHEN t.r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
+                   SUM(CASE WHEN t.r_multiple <= 0 THEN 1 ELSE 0 END) AS losses,
+                   SUM(t.r_multiple) AS sum_r,
+                   AVG(t.r_multiple) AS avg_r,
+                   SUM(t.net_pnl) AS net_pnl
+            FROM paper_trades t
+            LEFT JOIN paper_positions p ON p.id = t.position_id
+            LEFT JOIN paper_configs c ON c.id = p.config_id
+            WHERE COALESCE(c.report_enabled, TRUE) = TRUE
+            GROUP BY t.strategy_name
+            ORDER BY t.strategy_name
             """
         )
         strategy_rows = cur.fetchall()
