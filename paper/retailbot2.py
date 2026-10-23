@@ -1488,16 +1488,19 @@ class DatabaseManager:
             c = conn.cursor(dictionary=True)
             c.execute("""
                 SELECT
-                    strategy,
-                    mode,
+                    t.strategy,
+                    t.mode,
                     COUNT(*) AS total_trades,
                     SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END) AS wins,
                     SUM(CASE WHEN net_pnl <= 0 THEN 1 ELSE 0 END) AS losses,
                     COALESCE(SUM(net_pnl), 0) AS total_pnl
-                FROM rdt_trades
-                WHERE status='CLOSED'
-                GROUP BY strategy, mode
-                ORDER BY strategy, mode
+                FROM rdt_trades t
+                LEFT JOIN rdt_strategy_lifecycle l
+                  ON l.strategy_id = t.strategy AND l.mode = t.mode
+                WHERE t.status='CLOSED'
+                  AND COALESCE(l.report_enabled, TRUE) = TRUE
+                GROUP BY t.strategy, t.mode
+                ORDER BY t.strategy, t.mode
             """)
             rows = c.fetchall()
             c.close()
