@@ -1912,7 +1912,33 @@ const App = {
             elCumR.className = `text-2xl font-bold font-mono ${isPos ? "text-emerald-400" : "text-rose-400"}`;
         }
 
-        // 2. Render Active Positions Table
+        // 2. Render independent per-strategy closed-trade performance.
+        const strategyPerformanceBody = document.getElementById("paper-strategy-performance-body");
+        if (strategyPerformanceBody) {
+            const rows = Array.isArray(m.byStrategy) ? m.byStrategy : [];
+            if (!rows.length) {
+                strategyPerformanceBody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-500 text-xs">No closed paper trades recorded per strategy yet.</td></tr>`;
+            } else {
+                strategyPerformanceBody.innerHTML = rows.map(row => {
+                    const expectancy = Number(row.expectancyR || 0);
+                    const cumulative = Number(row.cumulativeR || 0);
+                    const netPnl = Number(row.netPnl || 0);
+                    const winRate = Number(row.winRatePct || 0);
+                    return `
+                        <tr>
+                            <td class="font-mono text-xs text-sky-400">${this._escapeHtml(row.strategy || "Unknown")}</td>
+                            <td class="font-mono text-xs text-slate-200">${this._escapeHtml(String(row.totalTrades || 0))}</td>
+                            <td class="font-mono text-xs text-slate-200">${this._escapeHtml(String(row.wins || 0))}</td>
+                            <td class="font-mono text-xs text-slate-200">${Number.isFinite(winRate) ? winRate.toFixed(2) : "—"}%</td>
+                            <td class="font-mono text-xs ${expectancy >= 0 ? "text-emerald-400" : "text-rose-400"}">${Number.isFinite(expectancy) ? expectancy.toFixed(4) : "—"}R</td>
+                            <td class="font-mono text-xs ${cumulative >= 0 ? "text-emerald-400" : "text-rose-400"}">${Number.isFinite(cumulative) ? cumulative.toFixed(4) : "—"}R</td>
+                            <td class="text-right font-mono text-xs ${netPnl >= 0 ? "text-emerald-400" : "text-rose-400"}">${Number.isFinite(netPnl) ? netPnl.toFixed(2) : "—"}</td>
+                        </tr>`;
+                }).join("");
+            }
+        }
+
+        // 3. Render Active Positions Table
         const posBody = document.getElementById("paper-positions-body");
         if (posBody) {
             if (this.paperPositions.length === 0) {
