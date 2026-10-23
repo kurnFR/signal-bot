@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 from dataclasses import replace
+import stat
 import tempfile
 from typing import Any
 
@@ -14,7 +15,7 @@ try:
 except ImportError:  # dependency is optional until ML runtime is installed
     joblib = None
 
-from ml.artifacts import ModelArtifact, resolve_model_artifact_paths, resolve_model_manifest_path, verify_model_weights_hash
+from ml.artifacts import ModelArtifact, resolve_model_artifact_paths, resolve_model_manifest_path
 
 
 class ModelStore:
@@ -82,8 +83,34 @@ class ModelStore:
             raise ValueError("ML artifact feature schema does not match requested features")
         manifest_path, path = resolve_model_artifact_paths(artifact.model_id, self.root)
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        verify_model_weights_hash(manifest, path)
-        return joblib.load(path)
+
+        # Open once, then hash and deserialize through the same file descriptor.
+        # Otherwise a writer could replace the path after digest verification but
+        # before joblib.load(path), causing unverified bytes to be deserialized.
+        # O_NOFOLLOW also closes the symlink-swap window on platforms that support it.
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(path, flags)
+        except OSError as exc:
+            raise ValueError("Model weights could not be opened safely") from exc
+        with os.fdopen(descriptor, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise ValueError("Model weights must be a regular file")
+            digest = hashlib.sha256()
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+            expected_digest = manifest.get("weights_sha256") if isinstance(manifest, dict) else None
+            actual_digest = digest.hexdigest()
+            if (
+                not isinstance(expected_digest, str)
+                or len(expected_digest) != 64
+                or any(char not in "0123456789abcdef" for char in expected_digest)
+            ):
+                raise ValueError("Model manifest must contain a valid weights_sha256 digest")
+            if actual_digest != expected_digest:
+                raise ValueError("Model weights SHA-256 does not match manifest")
+            handle.seek(0)
+            return joblib.load(handle)
 
     def load_manifest(self, model_id: str) -> dict[str, Any]:
         path = resolve_model_manifest_path(model_id, self.root)
