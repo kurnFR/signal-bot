@@ -71,7 +71,9 @@ class AuditArtifactDirectoryTests(unittest.TestCase):
 
     def test_reports_invalid_json_non_object_and_manifest_id_mismatch(self):
         (self.root / "broken.json").write_text("{", encoding="utf-8")
-        (self.root / "scalar.json").write_text(json.dumps(["not", "an object"]), encoding="utf-8")
+        (self.root / "scalar.json").write_text(
+            json.dumps(["not", "an object"]), encoding="utf-8"
+        )
         (self.root / "other.json").write_text(
             json.dumps({"model_id": "not-other"}), encoding="utf-8"
         )
@@ -79,20 +81,19 @@ class AuditArtifactDirectoryTests(unittest.TestCase):
         report = audit_artifact_directory(self.root)
         self.assertEqual(
             report["counts"],
-            {
-                "invalid_manifest": 2,
-                "manifest_id_mismatch": 1,
-            },
+            {"invalid_manifest": 2, "manifest_id_mismatch": 1},
         )
 
     def test_reports_symlinked_manifest_and_weights_without_following_them(self):
-        (self.root / "outside.json").write_text(
+        targets = self.root / "targets"
+        targets.mkdir()
+        (targets / "outside.json").write_text(
             json.dumps({"model_id": "linked-manifest"}), encoding="utf-8"
         )
-        (self.root / "outside.bin").write_bytes(b"opaque")
+        (targets / "outside.bin").write_bytes(b"opaque")
         try:
-            (self.root / "linked-manifest.json").symlink_to(self.root / "outside.json")
-            (self.root / "linked-weights.joblib").symlink_to(self.root / "outside.bin")
+            (self.root / "linked-manifest.json").symlink_to(targets / "outside.json")
+            (self.root / "linked-weights.joblib").symlink_to(targets / "outside.bin")
         except (NotImplementedError, OSError) as exc:
             self.skipTest(f"symlinks are unavailable in this environment: {exc}")
 
