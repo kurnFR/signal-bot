@@ -23,6 +23,20 @@ class TestMLModelStore(unittest.TestCase):
             manifest = store.load_manifest(artifact.model_id)
             self.assertEqual(manifest["model_id"], artifact.model_id)
 
+    def test_saved_weights_include_digest_and_load_detects_tampering(self):
+        import json
+        with tempfile.TemporaryDirectory() as d:
+            store = ModelStore(d)
+            artifact = self.artifact()
+            store.save(artifact, {"dummy": True})
+            manifest_path = Path(d) / f"{artifact.model_id}.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertRegex(manifest["weights_sha256"], r"^[a-f0-9]{64}$")
+            weight_path = Path(d) / f"{artifact.model_id}.joblib"
+            weight_path.write_bytes(weight_path.read_bytes() + b"tamper")
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                store.load(artifact, ["rsi", "atr"])
+
     def test_feature_schema_is_enforced(self):
         with tempfile.TemporaryDirectory() as d:
             store = ModelStore(d)

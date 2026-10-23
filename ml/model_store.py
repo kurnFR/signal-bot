@@ -1,9 +1,11 @@
 """Persistent ML model store with strict artifact/feature validation."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
+from dataclasses import replace
 import tempfile
 from typing import Any
 
@@ -12,7 +14,7 @@ try:
 except ImportError:  # dependency is optional until ML runtime is installed
     joblib = None
 
-from ml.artifacts import ModelArtifact, resolve_model_artifact_paths, resolve_model_manifest_path
+from ml.artifacts import ModelArtifact, resolve_model_artifact_paths, resolve_model_manifest_path, verify_model_weights_hash
 
 
 class ModelStore:
@@ -45,8 +47,12 @@ class ModelStore:
             # Compression keeps joblib output in one file so the atomic replace
             # cannot leave required sidecar arrays behind.
             joblib.dump(model, temp_path, compress=3)
+            digest = hashlib.sha256()
             with open(temp_path, "rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
                 os.fsync(handle.fileno())
+            artifact = replace(artifact, weights_sha256=digest.hexdigest())
             # Atomic replacement replaces a destination symlink itself instead
             # of writing through it if another process creates one after the check.
             os.replace(temp_path, model_path)
@@ -74,7 +80,9 @@ class ModelStore:
         expected = tuple(expected_features)
         if tuple(artifact.feature_columns) != expected:
             raise ValueError("ML artifact feature schema does not match requested features")
-        _, path = resolve_model_artifact_paths(artifact.model_id, self.root)
+        manifest_path, path = resolve_model_artifact_paths(artifact.model_id, self.root)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        verify_model_weights_hash(manifest, path)
         return joblib.load(path)
 
     def load_manifest(self, model_id: str) -> dict[str, Any]:

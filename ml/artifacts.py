@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
+import hashlib
 import math
 import os
 from pathlib import Path
@@ -19,6 +20,25 @@ from typing import Any
 
 
 _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
+_SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
+
+
+def verify_model_weights_hash(manifest: dict[str, Any], model_path: str | Path) -> str:
+    """Verify model bytes against the SHA-256 recorded in the manifest."""
+    expected = manifest.get("weights_sha256") if isinstance(manifest, dict) else None
+    if not isinstance(expected, str) or not _SHA256_RE.fullmatch(expected):
+        raise ValueError("Model manifest must contain a valid weights_sha256 digest")
+    digest = hashlib.sha256()
+    try:
+        with Path(model_path).open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise ValueError("Model weights could not be read for integrity verification") from exc
+    actual = digest.hexdigest()
+    if actual != expected:
+        raise ValueError("Model weights SHA-256 does not match manifest")
+    return actual
 
 
 def _validate_model_id(model_id: str) -> None:
@@ -79,6 +99,7 @@ class ModelArtifact:
     test_metrics: dict[str, Any]
     eligible_for_paper: bool = False
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    weights_sha256: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_id, str) or not _MODEL_ID_RE.fullmatch(self.model_id) or ".." in self.model_id:
@@ -87,6 +108,8 @@ class ModelArtifact:
             raise ValueError("experiment_id is required")
         if not 0 < self.threshold < 1:
             raise ValueError("threshold must be between 0 and 1")
+        if self.weights_sha256 is not None and (not isinstance(self.weights_sha256, str) or not _SHA256_RE.fullmatch(self.weights_sha256)):
+            raise ValueError("weights_sha256 must be a lowercase SHA-256 hex digest")
 
     def manifest(self) -> dict[str, Any]:
         return asdict(self)
@@ -201,6 +224,8 @@ def load_eligible_paper_artifact(
         raise ValueError("Model manifest ID does not match configured model ID")
     if manifest.get("eligible_for_paper") is not True:
         raise ValueError("Model manifest is not marked eligible for paper trading")
+    if not isinstance(manifest.get("weights_sha256"), str) or not _SHA256_RE.fullmatch(manifest["weights_sha256"]):
+        raise ValueError("Paper model manifest must contain a valid weights_sha256 digest")
     report = paper_eligibility_report(test_metrics=manifest.get("test_metrics"))
     if not report["eligible"]:
         raise ValueError("Model no longer passes paper eligibility: " + "; ".join(report["reasons"]))

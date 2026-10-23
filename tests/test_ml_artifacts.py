@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ml.artifacts import ModelArtifact, load_eligible_paper_artifact, paper_eligibility, resolve_model_artifact_paths, resolve_model_manifest_path
+from ml.artifacts import ModelArtifact, load_eligible_paper_artifact, paper_eligibility, resolve_model_artifact_paths, resolve_model_manifest_path, verify_model_weights_hash
 
 
 class TestMLArtifacts(unittest.TestCase):
@@ -53,6 +53,7 @@ class TestMLArtifacts(unittest.TestCase):
             test_metrics={"trade_count": 40, "profit_factor": 1.2,
                           "max_drawdown_pct": 10, "net_pnl": 10},
             eligible_for_paper=True,
+            weights_sha256="a" * 64,
         ).manifest()
         self.assertEqual(load_eligible_paper_artifact(manifest, "model-v1").model_id, "model-v1")
 
@@ -69,6 +70,29 @@ class TestMLArtifacts(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "ID does not match"):
             load_eligible_paper_artifact(mismatched_id, "model-v1")
 
+
+
+    def test_weight_hash_verification_detects_tampering(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "model.joblib"
+            path.write_bytes(b"trusted weights")
+            manifest = {"weights_sha256": hashlib.sha256(b"trusted weights").hexdigest()}
+            self.assertEqual(verify_model_weights_hash(manifest, path), manifest["weights_sha256"])
+            path.write_bytes(b"tampered weights")
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                verify_model_weights_hash(manifest, path)
+
+    def test_paper_manifest_requires_weight_digest(self):
+        manifest = ModelArtifact(
+            model_id="model-v1", experiment_id="exp-1", model_type="random_forest",
+            base_strategy="trend_ema", feature_columns=("rsi",), strategy_params={},
+            model_params={}, threshold=0.5, train_metrics={}, validation_metrics={},
+            test_metrics={"trade_count": 40, "profit_factor": 1.2, "max_drawdown_pct": 10, "net_pnl": 10},
+            eligible_for_paper=True,
+        ).manifest()
+        with self.assertRaisesRegex(ValueError, "weights_sha256"):
+            load_eligible_paper_artifact(manifest, "model-v1")
 
     def test_model_artifact_rejects_unsafe_model_ids(self):
         for model_id in ("../outside", "..", "nested/model", ""):
