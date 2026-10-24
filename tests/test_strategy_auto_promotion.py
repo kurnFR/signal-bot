@@ -231,3 +231,63 @@ def test_promotion_policy_put_rejects_non_finite_thresholds():
         else:
             raise AssertionError("non-finite policy threshold was accepted")
     save.assert_not_called()
+
+
+
+def test_auto_promotion_rejects_strategy_outside_executable_registry():
+    candidate = _candidate(strategy="unregistered_strategy_v99")
+    validation_metrics = {
+        "total_trades": 35,
+        "expectancy_r": 0.12,
+        "profit_factor": 1.32,
+        "max_drawdown_r": 4.0,
+    }
+    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy()), \
+         patch("web.routes.backtest.record_strategy_promotion_decision", return_value=True), \
+         patch("paper.engine.set_paper_config") as set_config:
+        result = _call(
+            candidate,
+            data_segment="train",
+            validation_metrics=validation_metrics,
+            validation_segment="holdout",
+        )
+
+    assert result["status"] == "rejected"
+    assert "executable paper-trading registry" in result["reason"].lower()
+    set_config.assert_not_called()
+
+
+def test_auto_promotion_fails_closed_when_policy_store_is_unavailable():
+    with patch(
+        "web.routes.backtest.get_strategy_auto_promotion_policy",
+        side_effect=RuntimeError("database unavailable"),
+    ), patch("paper.engine.set_paper_config") as set_config:
+        result = _call(_candidate())
+
+    assert result["status"] == "error"
+    assert "policy unavailable" in result["reason"].lower()
+    set_config.assert_not_called()
+
+
+def test_auto_promotion_fails_closed_when_audit_claim_cannot_be_persisted():
+    validation_metrics = {
+        "total_trades": 35,
+        "expectancy_r": 0.12,
+        "profit_factor": 1.32,
+        "max_drawdown_r": 4.0,
+    }
+    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy()), \
+         patch(
+             "web.routes.backtest.record_strategy_promotion_decision",
+             side_effect=RuntimeError("audit database unavailable"),
+         ), patch("paper.engine.set_paper_config") as set_config:
+        result = _call(
+            _candidate(),
+            data_segment="train",
+            validation_metrics=validation_metrics,
+            validation_segment="holdout",
+        )
+
+    assert result["status"] == "error"
+    assert "promotion audit" in result["reason"].lower()
+    set_config.assert_not_called()
