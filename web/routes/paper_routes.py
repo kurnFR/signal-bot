@@ -101,9 +101,9 @@ def update_config(req: PaperConfigRequest):
         raise HTTPException(status_code=400, detail="timeframe must be one of: 15m, 1h, 4h, 1d")
     res = set_paper_config(
         req.symbol.strip().upper(),
-        market,
-        timeframe,
-        strategy_name,
+        req.market.strip().lower(),
+        req.timeframe.strip(),
+        req.strategy_name.strip(),
         req.is_active,
         req.allocated_capital,
         req.risk_per_trade_pct,
