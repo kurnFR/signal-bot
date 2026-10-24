@@ -190,6 +190,14 @@ def retailbot2_strategies_get():
                 })
             row.update(row_defaults)
             row.update({key: bool(saved[key]) for key in defaults if key in saved})
+            # Historical composite identities are report-only. Enforce this
+            # invariant after merging persisted rows too, because older or
+            # manually edited settings may contain unsafe legacy flags.
+            if row.get("historical_only"):
+                row["evaluation_enabled"] = False
+                row["paper_enabled"] = False
+                row["telegram_enabled"] = False
+                row["auto_promote_enabled"] = False
             row["updated_at"] = saved.get("updated_at")
         return {"strategies": registry}
     except Exception as e:
