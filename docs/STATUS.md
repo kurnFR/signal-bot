@@ -74,3 +74,6 @@ CI runs the pytest suite, project tests, RetailBot accounting regression, and an
 
 - Merged in PR #331 (`ac7be2d`): the Research API forces historical-only composite rows to remain non-executable after merging persisted settings; report visibility remains separately controlled. All five required CI checks passed on the final head.
 - Merged in PR #332 (`c9caa1c`): the RetailBot2 worker independently forces `COMPOSITE` and `COMPOSITE_INV` to remain non-executable even if legacy/manual lifecycle rows enable them. Report visibility remains separately controlled. All five required CI checks passed on final head; live worker/DB behavior is not verified.
+
+- Merged in PR #333 (`0553bbe`): progress/status docs now reflect PR #332's worker-side composite guard and retain the live-verification caveat.
+- Under review: ensure RetailBot2 always performs its initial lifecycle DB read regardless of OS monotonic uptime. Without an explicit initialized flag, startup during the first 15 seconds after boot could skip the read and use defaults temporarily. Regression test and fix are pending CI; no live worker/DB verification.

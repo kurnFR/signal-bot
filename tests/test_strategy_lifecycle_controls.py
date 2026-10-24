@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from paper.retailbot2 import RetailDeathTrapBot, RetailStrategyEngine
 
@@ -67,6 +67,28 @@ def test_historical_composites_remain_non_executable_with_legacy_enabled_rows():
         assert settings["auto_promote_enabled"] is False
     assert shadow["report_enabled"] is True
     assert inverse["report_enabled"] is False
+
+
+def test_first_lifecycle_read_loads_saved_settings_even_early_after_os_boot():
+    bot = _bot_for_lifecycle([{
+        "strategy_id": "BB_REV",
+        "mode": "shadow",
+        "evaluation_enabled": False,
+        "paper_enabled": False,
+        "telegram_enabled": False,
+        "report_enabled": False,
+        "auto_promote_enabled": False,
+    }])
+
+    # monotonic time is measured since OS boot; zeroing the reload timestamp
+    # must not cause the first database load to be skipped during boot's first
+    # 15 seconds.
+    with patch("paper.retailbot2.time.monotonic", return_value=5.0):
+        settings = bot._get_strategy_lifecycle("BB_REV", "shadow")
+
+    assert settings["evaluation_enabled"] is False
+    assert settings["paper_enabled"] is False
+    assert settings["report_enabled"] is False
 
 
 def test_stopped_strategy_remains_stopped_when_a_fresh_worker_loads_saved_rows():
@@ -274,6 +296,10 @@ def _bot_for_open_trade(settings):
         "auto_promote_enabled": False,
     }}
     bot._strategy_lifecycle_reload_at = time.monotonic()
+    # This fixture explicitly seeds a previously loaded cache. Mark it as
+    # initialized so _open_trade tests isolate entry/Telegram gating rather
+    # than triggering the first database refresh.
+    bot._strategy_lifecycle_initialized = True
     bot.tg = Mock()
     bot.logger = Mock()
     return bot
