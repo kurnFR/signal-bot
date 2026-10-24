@@ -1,15 +1,14 @@
+import logging
 from unittest.mock import Mock
 
 from paper.retailbot2 import RetailStrategyEngine
 
 
-def test_run_all_logs_strategy_exception_instead_of_treating_it_as_no_signal():
+def test_run_all_logs_strategy_exception_instead_of_treating_it_as_no_signal(caplog):
     engine = object.__new__(RetailStrategyEngine)
     engine.strat_rsi_counter_trend = Mock(side_effect=ValueError("bad indicator data"))
 
-    with __import__("unittest").TestCase().assertLogs(
-        "paper.retailbot2", level="ERROR"
-    ) as captured:
+    with caplog.at_level(logging.ERROR, logger="paper.retailbot2"):
         signals = engine.run_all(
             df=None,
             symbol="BTC/USDT",
@@ -17,8 +16,8 @@ def test_run_all_logs_strategy_exception_instead_of_treating_it_as_no_signal():
         )
 
     assert signals == []
-    assert any("strategy=RSI_CTR symbol=BTC/USDT" in line for line in captured.output)
-    assert any("bad indicator data" in line for line in captured.output)
+    assert "strategy=RSI_CTR symbol=BTC/USDT" in caplog.text
+    assert "bad indicator data" in caplog.text
     engine.strat_rsi_counter_trend.assert_called_once_with(None, "BTC/USDT")
 
 
