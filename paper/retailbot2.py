@@ -1785,7 +1785,8 @@ class RetailDeathTrapBot:
                 'target': t['target_price'],
                 'units': t['units'],
                 'strategy': t.get('strategy', 'unknown'),
-                'telegram_enabled': bool(t.get('telegram_enabled', True)),
+                # Legacy/malformed rows without a persisted decision must fail closed.
+                'telegram_enabled': bool(t.get('telegram_enabled', False)),
             }
             if record['mode'] == 'inverse':
                 self.active_inverse[t['id']] = record
