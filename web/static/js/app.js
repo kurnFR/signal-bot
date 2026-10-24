@@ -1245,6 +1245,10 @@ const App = {
     },
 
     async stopAndHideStrategy(strategyId, mode) {
+        const confirmed = window.confirm(
+            `Stop evaluation and paper entries, disable Telegram alerts, and hide ${strategyId} (${mode}) from future performance reports? Historical trades will be retained.`
+        );
+        if (!confirmed) return;
         const safePart = String(strategyId).replace(/[^a-zA-Z0-9_-]/g, "_");
         const prefix = `rlc-${safePart}-${mode}`;
         for (const field of ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled"]) {
@@ -1287,6 +1291,9 @@ const App = {
             await this.fetchResearchData();
         } catch (e) {
             this.showToast(`Failed to save strategy settings: ${e.message || e}`, "error");
+            // Restore the controls from persisted state when possible so a
+            // failed write does not leave an unsaved stop/hide looking active.
+            try { await this.fetchResearchData(); } catch (_) {}
         }
     },
 
