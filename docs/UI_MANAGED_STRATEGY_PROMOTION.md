@@ -52,6 +52,8 @@ Defaults must be conservative and fail closed. A strategy cannot auto-promote if
 
 The exact numerical criteria are product defaults and must be editable in the UI; they are not per-strategy hardcoded rules. UI values are validated server-side.
 
+**Important safety limitation:** the current Battle Royale request ranks candidates on the selected data segment. It must not promote a candidate ranked on the same `holdout` segment used as its promotion gate, because this reuses the holdout for both selection and confirmation. A follow-up safeguard rejects that path. With the default `require_holdout=true`, automatic promotion remains blocked until candidate selection on a separate train/validation segment and a distinct holdout evaluation are implemented. Disabling the holdout requirement is an explicit opt-out and permits only a `train`-segment run; it does not make training performance equivalent to out-of-sample evidence.
+
 ## Independent performance attribution
 
 - New RetailBot2 paper entries must be opened per strategy signal, not by assigning an aggregate composite result to the first contributor.
