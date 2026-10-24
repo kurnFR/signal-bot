@@ -1,6 +1,6 @@
 # Status
 
-What exists and works today, and the known gaps. Reconciled against current `master` on 2026-10-23; historical verification claims should still be checked against the latest CI and runtime evidence. Keep this file short: when a gap is fixed, delete the line; when you add a capability, add one row. Do not add dated reviews or history here (use pull-request descriptions).
+What exists and works today, and the known gaps. Reconciled against current `master` on 2026-10-24; historical verification claims should still be checked against the latest CI and runtime evidence. Keep this file short: when a gap is fixed, delete the line; when you add a capability, add one row. Do not add dated reviews or history here (use pull-request descriptions).
 
 ## 1. Implemented
 
@@ -13,7 +13,8 @@ What exists and works today, and the known gaps. Reconciled against current `mas
 | ML filters | Leakage-safe pipeline, tournament, versioned artifacts, deploy-to-paper | [ML.md](ML.md) |
 | News AI | News and calendar ingest, structured LLM reasoning, guarded paper execution | [NEWS_AI.md](NEWS_AI.md) |
 | Wallet tracking | Swap scanner, candidates, token flow, quality-gated follow with expiry, live feed, Telegram alerts, single-instance lock | [WALLET_TRACKER.md](WALLET_TRACKER.md) |
-| Research bots | `retailbot2` and the smart-money volume screener (experimental, own tables) | `paper/retailbot2.py`, `Screen/` |
+| Research bots | `retailbot2` and the smart-money volume screener (experimental, own tables); RetailBot2 has DB-backed per-strategy evaluation/paper/Telegram/report controls, fail-closed restored exit alerts, and lifecycle regression coverage | `paper/retailbot2.py`, `web/routes/research_routes.py`, `Screen/`, [lifecycle spec](UI_MANAGED_STRATEGY_PROMOTION.md) |
+| Main paper strategy management | Dashboard can add/update any registered executable Strategy Library strategy; deployment validates strategy, market, and timeframe before side effects. Telegram alerts are separately controlled and default off. | `web/routes/paper_routes.py`, dashboard paper view |
 | Web and security | FastAPI app, central fail-closed authentication, three roles, token revocation, audit log, login rate limiting, random first-admin password, ML experiment path containment | [SECURITY.md](SECURITY.md) |
 | Operations | `run_all.py` supervisor with restart backoff; CI on Python 3.11 including a MariaDB integration job | `.github/workflows/` |
 
