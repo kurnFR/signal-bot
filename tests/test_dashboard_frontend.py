@@ -1565,4 +1565,4 @@ class TestForcedPasswordModalFocusTrap(unittest.TestCase):
 
     def test_forced_password_modal_focus_trap_bumps_app_script_cache_token(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
-        self.assertRegex(html, r'app\\.js\\?v=20261025-1')
+        self.assertIn('app.js?v=20261025-1', html)
