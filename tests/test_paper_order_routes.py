@@ -49,5 +49,42 @@ class TestPaperOrderRoutes(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
 
 
+    def test_add_paper_config_accepts_registered_strategy(self):
+        with patch("web.app.authenticate_request", return_value=_user()), \
+             patch("web.routes.paper_routes.set_paper_config", return_value={"status": "success"}) as save:
+            response = self.client.post("/api/paper/configs", json={
+                "symbol": "BTCUSDT", "market": "spot", "timeframe": "1h",
+                "strategy_name": "trend_ema_v1", "is_active": True,
+                "allocated_capital": 5000, "risk_per_trade_pct": 1,
+                "telegram_enabled": False, "report_enabled": True,
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(save.call_args.args[3], "trend_ema_v1")
+        self.assertFalse(save.call_args.kwargs["telegram_enabled"])
+        self.assertTrue(save.call_args.kwargs["report_enabled"])
+
+    def test_add_paper_config_rejects_unregistered_strategy(self):
+        with patch("web.app.authenticate_request", return_value=_user()), \
+             patch("web.routes.paper_routes.set_paper_config") as save:
+            response = self.client.post("/api/paper/configs", json={
+                "symbol": "BTCUSDT", "market": "spot", "timeframe": "1h",
+                "strategy_name": "not_registered", "is_active": True,
+                "allocated_capital": 5000, "risk_per_trade_pct": 1,
+            })
+        self.assertEqual(response.status_code, 400)
+        save.assert_not_called()
+
+    def test_add_paper_config_rejects_unsupported_timeframe(self):
+        with patch("web.app.authenticate_request", return_value=_user()), \
+             patch("web.routes.paper_routes.set_paper_config") as save:
+            response = self.client.post("/api/paper/configs", json={
+                "symbol": "BTCUSDT", "market": "spot", "timeframe": "5m",
+                "strategy_name": "trend_ema_v1", "is_active": True,
+                "allocated_capital": 5000, "risk_per_trade_pct": 1,
+            })
+        self.assertEqual(response.status_code, 400)
+        save.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
