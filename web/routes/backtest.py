@@ -237,7 +237,8 @@ class BacktestRunRequest(BaseModel):
 
 def _auto_promote_top_candidate(
     candidate, *, symbol, market, timeframe, data_segment,
-    allocated_capital, risk_per_trade_pct,
+    allocated_capital, risk_per_trade_pct, validation_metrics=None,
+    validation_segment=None,
 ):
     """Apply the saved policy to the single top-ranked candidate. Fail closed
     on missing metrics, non-holdout data, unmapped strategies, or DB errors."""
@@ -253,7 +254,14 @@ def _auto_promote_top_candidate(
         return {"status": "no_candidate", "reason": "No profitable ranked candidate was found"}
 
     strategy_name = str(candidate.get("strategy") or "")
-    metrics = candidate.get("metrics") or {}
+    selection_metrics = candidate.get("metrics") or {}
+    # When holdout is required, apply profitability gates to the separately
+    # evaluated holdout metrics, never to training metrics used for ranking.
+    metrics = (
+        validation_metrics
+        if policy.get("require_holdout") and isinstance(validation_metrics, dict)
+        else selection_metrics
+    )
     try:
         total_trades_raw = metrics.get("total_trades")
         total_trades = int(total_trades_raw)
@@ -282,10 +290,14 @@ def _auto_promote_top_candidate(
         "profit_factor": profit_factor,
         "max_drawdown_r": drawdown_r,
         "rank_score": rank_score,
+        "selection_segment": data_segment,
+        "validation_segment": validation_segment,
     }
+    audit_segment = validation_segment if validation_metrics is not None and validation_segment else data_segment
     identity = {
         "symbol": symbol, "market": market, "timeframe": timeframe,
-        "data_segment": data_segment, "strategy_name": strategy_name,
+        "data_segment": audit_segment, "selection_segment": data_segment,
+        "strategy_name": strategy_name,
         "metrics": metrics_snapshot, "criteria": criteria,
     }
     decision_hash = hashlib.sha256(
@@ -295,24 +307,21 @@ def _auto_promote_top_candidate(
     failures = []
     if strategy_name not in STRATEGIES:
         failures.append("Strategy is not present in the executable paper-trading registry")
-    # Battle Royale currently ranks candidates and evaluates promotion gates on
-    # the same data_segment. A holdout-ranked winner has already been selected
-    # using the holdout, so it is not an independent confirmation set.
+    # Ranking must use train data. If holdout is required, profitability
+    # thresholds below are applied to a separate evaluation of that fixed winner.
     if data_segment == "holdout":
         failures.append(
-            "Candidate is ranked on the same holdout segment used for promotion; "
-            "an independently train-selected candidate and separate holdout evaluation are required"
-        )
-    elif criteria["require_holdout"]:
-        failures.append(
-            "Policy requires independent holdout validation after candidate selection; "
-            "this run does not provide a separate selection segment and holdout evaluation"
+            "Candidate was selected on the same holdout segment; it cannot also serve as independent validation"
         )
     elif data_segment != "train":
         failures.append(
-            "Without holdout validation, promotion is only allowed from the train segment; "
-            "full data is not an independent evaluation segment"
+            "Promotion requires train-based candidate selection; full data is not an independent evaluation segment"
         )
+    if criteria["require_holdout"]:
+        if validation_segment != "holdout" or not isinstance(validation_metrics, dict):
+            failures.append(
+                "Policy requires a separate holdout evaluation of the train-selected candidate"
+            )
     if total_trades < int(criteria["min_test_trades"]):
         failures.append(f"Trades {total_trades} < minimum {criteria['min_test_trades']}")
     if profit_factor < float(criteria["min_profit_factor"]):
@@ -329,7 +338,7 @@ def _auto_promote_top_candidate(
     decision = {
         "decision_hash": decision_hash,
         "symbol": symbol, "market": market, "timeframe": timeframe,
-        "data_segment": data_segment, "strategy_name": strategy_name,
+        "data_segment": audit_segment, "strategy_name": strategy_name,
         "status": status, "reason": reason,
         "metrics_json": json.dumps(metrics_snapshot, sort_keys=True, allow_nan=False),
         "criteria_json": json.dumps(criteria, sort_keys=True, allow_nan=False),
@@ -627,6 +636,7 @@ def run_all_strategies(
         raise HTTPException(status_code=400, detail=f"Segment {data_segment} has only {len(segment_df)} candles; cannot simulate.")
 
     # Higher timeframe for trend_alignment
+    htf_full = None
     htf_segment = None
     if timeframe != HTF_TIMEFRAME:
         htf_full = fetch_ohlcv_with_features_df(symbol, market, HTF_TIMEFRAME, closed_only=True)
@@ -638,6 +648,7 @@ def run_all_strategies(
                 htf_segment = htf_full
 
     # Pair dataframe for pairs_ratio
+    pair_full = None
     pair_segment = None
     if symbol != PAIRS_BASE_SYMBOL:
         pair_full = fetch_ohlcv_with_features_df(PAIRS_BASE_SYMBOL, market, timeframe, closed_only=True)
@@ -790,13 +801,51 @@ def run_all_strategies(
 
     top3 = eligible_for_top[:3]
 
-    # Promotion is opt-in and uses a persisted policy plus an audit claim to
-    # prevent repeated/concurrent runs from duplicating deployments or alerts.
+    # Promotion is opt-in. When candidates are ranked on train, evaluate the
+    # selected winner on the separate chronological holdout before applying
+    # profitability gates. Never promote a winner selected on holdout/full.
+    promotion_validation_metrics = None
+    promotion_validation_segment = None
+    if top3 and data_segment == "train" and cutoff is not None:
+        winner_name = top3[0]["strategy"]
+        try:
+            validation_df = holdout_df
+            validation_params = dict(BASE_PARAMS)
+            validation_params.update({
+                "symbol": symbol,
+                "market": market,
+                "timeframe": timeframe,
+                "data_segment": "holdout",
+                "initial_capital": initial_capital,
+                "risk_per_trade_pct": risk_per_trade_pct,
+            })
+            if winner_name in TREND_ALIGNMENT_STRATEGIES and htf_full is not None and len(htf_full) > 0:
+                _, validation_params["htf_df"] = split_by_cutoff(htf_full, cutoff)
+            if winner_name in PAIRS_STRATEGIES and pair_full is not None and len(pair_full) > 0:
+                validation_params["pair_df"] = split_by_cutoff(pair_full, cutoff)[1]
+                validation_params["pair_symbol"] = PAIRS_BASE_SYMBOL
+            if winner_name in FUNDING_STRATEGIES:
+                funding_full = fetch_ohlcv_with_features_df(
+                    symbol, market, timeframe, closed_only=True, include_funding=True
+                )
+                _, validation_df = split_by_cutoff(funding_full, cutoff)
+            validation_trades = STRATEGIES[winner_name](validation_df, validation_params)
+            promotion_validation_metrics = compute_metrics(validation_trades)
+            promotion_validation_segment = "holdout"
+        except Exception as validation_error:
+            logger.warning(
+                "Independent holdout evaluation failed for promotion candidate %s: %s",
+                winner_name, validation_error,
+            )
+
+    # The helper fails closed if the independent validation result is unavailable.
     auto_promotion = _auto_promote_top_candidate(
         top3[0] if top3 else None,
         symbol=symbol, market=market, timeframe=timeframe,
         data_segment=data_segment, allocated_capital=initial_capital,
         risk_per_trade_pct=risk_per_trade_pct,
+        validation_metrics=promotion_validation_metrics,
+        validation_segment=promotion_validation_segment,
     )
 
     # Generate Institutional AI Insight & Recommendations
