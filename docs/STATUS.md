@@ -72,4 +72,5 @@ CI runs the pytest suite, project tests, RetailBot accounting regression, and an
 | [ML_ARTIFACT_PROVENANCE_DESIGN.md](ML_ARTIFACT_PROVENANCE_DESIGN.md) | Threat model, signed-artifact contract, key-management decisions, and provenance rollout gates |
 | STATUS.md | This file: implemented capabilities and verified gaps |
 
-- Under review: the Research API now has a regression test for historical-only composite rows with legacy persisted flags enabled. The endpoint must force evaluation, paper, Telegram, and auto-promotion off after merging stored settings; report visibility remains separately controlled. This closes a UI/API state-consistency gap, not a live-worker verification gap.
+- Merged in PR #331 (`ac7be2d`): the Research API forces historical-only composite rows to remain non-executable after merging persisted settings; report visibility remains separately controlled. All five required CI checks passed on the final head.
+- Under review: worker-side enforcement is being added so legacy/manual lifecycle rows cannot make `COMPOSITE` or `COMPOSITE_INV` executable even if they bypass API validation. The worker must continue respecting each row's report-visibility flag. Regression test added; awaiting CI. This is not yet live-worker verification.

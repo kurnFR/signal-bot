@@ -38,6 +38,37 @@ def test_strategy_lifecycle_defaults_keep_research_on_and_telegram_off():
     assert settings["auto_promote_enabled"] is False
 
 
+def test_historical_composites_remain_non_executable_with_legacy_enabled_rows():
+    bot = _bot_for_lifecycle([{
+        "strategy_id": "COMPOSITE",
+        "mode": "shadow",
+        "evaluation_enabled": True,
+        "paper_enabled": True,
+        "telegram_enabled": True,
+        "report_enabled": True,
+        "auto_promote_enabled": True,
+    }, {
+        "strategy_id": "COMPOSITE_INV",
+        "mode": "inverse",
+        "evaluation_enabled": True,
+        "paper_enabled": True,
+        "telegram_enabled": True,
+        "report_enabled": False,
+        "auto_promote_enabled": True,
+    }])
+
+    shadow = bot._get_strategy_lifecycle("COMPOSITE", "shadow")
+    inverse = bot._get_strategy_lifecycle("COMPOSITE_INV", "inverse")
+
+    for settings in (shadow, inverse):
+        assert settings["evaluation_enabled"] is False
+        assert settings["paper_enabled"] is False
+        assert settings["telegram_enabled"] is False
+        assert settings["auto_promote_enabled"] is False
+    assert shadow["report_enabled"] is True
+    assert inverse["report_enabled"] is False
+
+
 def test_stopped_strategy_remains_stopped_when_a_fresh_worker_loads_saved_rows():
     # The database rows are the persistence boundary shared by old and new workers.
     saved_rows = [{
