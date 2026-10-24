@@ -211,7 +211,7 @@ def _bot_for_open_trade(settings):
     bot.equity_inverse = 1000.0
     bot.strategy_lifecycle = {("BB_REV", "shadow"): {
         "evaluation_enabled": True,
-        "paper_enabled": True,
+        "paper_enabled": settings.get("paper_enabled", True),
         "telegram_enabled": settings.get("telegram_enabled", False),
         "report_enabled": settings.get("report_enabled", True),
         "auto_promote_enabled": False,
@@ -236,7 +236,6 @@ def _sample_signal():
 
 def test_paper_disabled_strategy_does_not_open_a_background_trade():
     bot = _bot_for_open_trade({"telegram_enabled": True, "paper_enabled": False})
-    bot.strategy_lifecycle[("BB_REV", "shadow")]["paper_enabled"] = False
 
     result = bot._open_trade(_sample_signal(), "shadow")
 
