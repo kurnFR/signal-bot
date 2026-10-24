@@ -41,12 +41,17 @@ def resolve_retailbot2_promotion_target(
     version = mapping.get("mapping_version")
     if not isinstance(target_id, str) or not target_id.strip():
         return None
-    if mode not in {"shadow", "inverse"}:
+    if not isinstance(mode, str) or mode not in {"shadow", "inverse"}:
         return None
     if not isinstance(version, str) or not version.strip():
         return None
 
-    identities = list(executable_identities)
+    # Bad or unavailable registry input must reject the mapping rather than
+    # raising from list conversion or accidentally using a guessed fallback.
+    try:
+        identities = list(executable_identities)
+    except TypeError:
+        return None
     match = next(
         (
             row for row in identities
