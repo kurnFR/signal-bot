@@ -348,3 +348,11 @@ All pre-merge checks passed on head `080ecf6ce13c7e52e0a2d64ee0b913e90c15059a`. 
 - It also adds a worker reinitialization test that loads the same persisted-row fixture into a new RetailBot2 worker and verifies the stop/remove settings do not revert to defaults.
 - All five observed PR-head check runs passed: pytest (including duplicate run), unit tests, Wallet Tracker MariaDB integration, and paper-accounting regression. Merged as [`729c182`](https://github.com/kurnFR/signal-bot/commit/729c18227cc120653f3862543bc71bbd97e424d3).
 - These deterministic tests validate the settings boundary but do not replace a real owner-environment DB/worker restart check. General auto-promotion and verification of the user's actual saved `BB_REV_INV_inverse` / `DBL_PAT_INV_inverse` settings remain open.
+
+
+### Strategy lifecycle fail-closed API regression tests — PR #322 (2026-10-25)
+
+- [PR #322](https://github.com/kurnFR/signal-bot/pull/322) verifies that the requested inverse identities `BB_REV_INV` and `DBL_PAT_INV` are registered and default to evaluation/paper/report enabled while Telegram and auto-promotion remain disabled.
+- It also verifies that the RetailBot2 lifecycle API rejects an attempt to enable `auto_promote_enabled` and does not persist the request while the dedicated validated workflow is unavailable.
+- All five observed PR-head checks passed: pytest (including the duplicate run), unit tests, Wallet Tracker MariaDB integration, and paper-accounting regression. Merged as [`4bcdece`](https://github.com/kurnFR/signal-bot/commit/4bcdece6114eedd7af802cf5358a564ffa39235b).
+- These tests verify registration/default/API guardrails only. They do **not** confirm the user's actual saved DB choices, Telegram delivery, or worker behavior in the owner environment. No live deployment or production DB access was performed.
