@@ -356,3 +356,11 @@ All pre-merge checks passed on head `080ecf6ce13c7e52e0a2d64ee0b913e90c15059a`. 
 - It also verifies that the RetailBot2 lifecycle API rejects an attempt to enable `auto_promote_enabled` and does not persist the request while the dedicated validated workflow is unavailable.
 - All five observed PR-head checks passed: pytest (including the duplicate run), unit tests, Wallet Tracker MariaDB integration, and paper-accounting regression. Merged as [`4bcdece`](https://github.com/kurnFR/signal-bot/commit/4bcdece6114eedd7af802cf5358a564ffa39235b).
 - These tests verify registration/default/API guardrails only. They do **not** confirm the user's actual saved DB choices, Telegram delivery, or worker behavior in the owner environment. No live deployment or production DB access was performed.
+
+
+### Lifecycle UI clarity and promotion guardrails — PRs #323–#324 (2026-10-25)
+
+- [PR #323](https://github.com/kurnFR/signal-bot/pull/323) records the inverse-strategy registration/default tests and the fail-closed API guard from PR #322. It merged as [`2f9c0ed`](https://github.com/kurnFR/signal-bot/commit/2f9c0ed83bee6b97ddc129244491d9e35a8dd199); all five observed checks passed.
+- [PR #324](https://github.com/kurnFR/signal-bot/pull/324) corrects the RetailBot2 lifecycle UI copy: automatic promotion is not available for this lifecycle workflow yet, and backtest results do not activate strategies automatically. A regression test protects the wording. It merged as [`9672134`](https://github.com/kurnFR/signal-bot/commit/96721349a26901f0b0a9659e3f7121a49fb7883e); all five observed PR-head checks passed.
+- This is a UI/documentation clarity fix, not implementation of generalized RetailBot2 auto-promotion. The supported Battle Royale winner flow remains a separate feature and must not be presented as activating RetailBot2 strategies.
+- Still open: implement a validated, opt-in promotion workflow with supported strategy-to-paper mappings, holdout eligibility gates, auditable decisions, and explicit user-controlled Telegram permission. Separately verify actual saved lifecycle settings and worker restart behavior in the owner environment. No production DB access or deployment was performed.
