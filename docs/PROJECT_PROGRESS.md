@@ -385,3 +385,10 @@ All pre-merge checks passed on head `080ecf6ce13c7e52e0a2d64ee0b913e90c15059a`. 
 
 - [PR #333](https://github.com/kurnFR/signal-bot/pull/333) merged the documentation update for PR #332 as `0553bbe`; all five required CI checks passed.
 - [PR #334](https://github.com/kurnFR/signal-bot/pull/334) merged as [`436ab38`](https://github.com/kurnFR/signal-bot/commit/436ab3874f7d9b319d3af5c429b3a6f6cdc2733a). It ensures the RetailBot2 worker always attempts its first lifecycle DB read, even within 15 seconds of OS boot. The regression test and all five required CI checks passed on final head `535b88a1bed586c2d06a7a890b8313dec994f359`. Live worker/DB behavior remains unverified; no deployment or production DB changes.
+
+
+### RetailBot2 lifecycle refresh outage regression — in review
+
+- Added a regression test that simulates a failed first lifecycle-settings DB read, verifies fail-closed behavior while settings are unknown, and verifies recovery after the 15-second refresh interval.
+- The test explicitly checks that evaluation, new paper entries, Telegram, and auto-promotion stay disabled during the outage while historical report visibility remains available.
+- CI must pass on the final PR head before merge. This is test coverage only; no live DB or worker behavior is verified and no deployment is performed.

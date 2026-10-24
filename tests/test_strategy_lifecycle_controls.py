@@ -91,6 +91,45 @@ def test_first_lifecycle_read_loads_saved_settings_even_early_after_os_boot():
     assert settings["report_enabled"] is False
 
 
+
+def test_lifecycle_refresh_outage_fails_closed_then_recovers_after_retry_interval():
+    saved_rows = [{
+        "strategy_id": "BB_REV",
+        "mode": "shadow",
+        "evaluation_enabled": True,
+        "paper_enabled": True,
+        "telegram_enabled": True,
+        "report_enabled": False,
+        "auto_promote_enabled": False,
+    }]
+    bot = _bot_for_lifecycle(saved_rows)
+    bot.logger = Mock()
+    bot.db.get_strategy_lifecycle_settings = Mock(
+        side_effect=[RuntimeError("database temporarily unavailable"), saved_rows]
+    )
+
+    # First load fails; even permissive defaults must not permit evaluation,
+    # paper entries, Telegram, or auto-promotion while settings are unknown.
+    with patch("paper.retailbot2.time.monotonic", side_effect=[5.0, 10.0, 20.0]):
+        failed = bot._get_strategy_lifecycle("BB_REV", "shadow")
+        still_failed = bot._get_strategy_lifecycle("BB_REV", "shadow")
+        recovered = bot._get_strategy_lifecycle("BB_REV", "shadow")
+
+    for settings in (failed, still_failed):
+        assert settings["evaluation_enabled"] is False
+        assert settings["paper_enabled"] is False
+        assert settings["telegram_enabled"] is False
+        assert settings["auto_promote_enabled"] is False
+        # Reporting historical ledger rows remains available during an outage.
+        assert settings["report_enabled"] is True
+
+    assert recovered["evaluation_enabled"] is True
+    assert recovered["paper_enabled"] is True
+    assert recovered["telegram_enabled"] is True
+    assert recovered["report_enabled"] is False
+    assert bot.db.get_strategy_lifecycle_settings.call_count == 2
+    bot.logger.error.assert_called_once()
+
 def test_stopped_strategy_remains_stopped_when_a_fresh_worker_loads_saved_rows():
     # The database rows are the persistence boundary shared by old and new workers.
     saved_rows = [{

@@ -77,3 +77,6 @@ CI runs the pytest suite, project tests, RetailBot accounting regression, and an
 
 - Merged in PR #333 (`0553bbe`): progress/status docs now reflect PR #332's worker-side composite guard and retain the live-verification caveat.
 - Merged in PR #334 (`436ab38`): RetailBot2 now always attempts the initial lifecycle DB read regardless of OS monotonic uptime. All five required CI checks passed on the final head. This closes the startup code-path gap in tests; live worker/DB behavior remains unverified.
+
+
+- In review: lifecycle refresh outage regression coverage. Simulated DB read failure must fail closed for evaluation/new paper entries/Telegram/auto-promotion, preserve historical report visibility, and recover on the scheduled retry after 15 seconds. CI pending; no production DB or deployment changes.
