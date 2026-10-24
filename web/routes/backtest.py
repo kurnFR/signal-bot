@@ -295,8 +295,24 @@ def _auto_promote_top_candidate(
     failures = []
     if strategy_name not in STRATEGIES:
         failures.append("Strategy is not present in the executable paper-trading registry")
-    if criteria["require_holdout"] and data_segment != "holdout":
-        failures.append("Policy requires the recent holdout data segment")
+    # Battle Royale currently ranks candidates and evaluates promotion gates on
+    # the same data_segment. A holdout-ranked winner has already been selected
+    # using the holdout, so it is not an independent confirmation set.
+    if data_segment == "holdout":
+        failures.append(
+            "Candidate is ranked on the same holdout segment used for promotion; "
+            "an independently train-selected candidate and separate holdout evaluation are required"
+        )
+    elif criteria["require_holdout"]:
+        failures.append(
+            "Policy requires independent holdout validation after candidate selection; "
+            "this run does not provide a separate selection segment and holdout evaluation"
+        )
+    elif data_segment != "train":
+        failures.append(
+            "Without holdout validation, promotion is only allowed from the train segment; "
+            "full data is not an independent evaluation segment"
+        )
     if total_trades < int(criteria["min_test_trades"]):
         failures.append(f"Trades {total_trades} < minimum {criteria['min_test_trades']}")
     if profit_factor < float(criteria["min_profit_factor"]):
