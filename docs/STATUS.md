@@ -53,7 +53,7 @@ Verified this session: a fresh database built from the README steps boots the ap
 
 
 - Backtest Studio promotion regression coverage now explicitly checks that an unmapped strategy, unavailable policy storage, or unavailable audit-claim persistence cannot activate a paper config (PR #328, merged as `1f8b2ed`). This does not complete generalized RetailBot2 auto-promotion; its API remains fail-closed until an explicit executable mapping and lifecycle-safe validation path exists.
-- Follow-up in review: an identical promotion decision with a prior audit status of `processing` is now surfaced as `in_progress` and instructs operators to reconcile config/Telegram side effects before retrying. It does not auto-retry or claim crash recovery is solved; CI is pending.
+- Merged in PR #330 (`8fca11d`): an identical promotion decision with a prior audit status of `processing` is surfaced as `in_progress` and instructs operators to reconcile config/Telegram side effects before retrying. It does not auto-retry or claim crash recovery is solved; all five required CI checks passed on the final head.
 
 ## 3. Tests
 
@@ -71,3 +71,5 @@ CI runs the pytest suite, project tests, RetailBot accounting regression, and an
 | [RELEASE_VERIFICATION_CHECKLIST.md](RELEASE_VERIFICATION_CHECKLIST.md) | Evidence-based CI, migration, paper lifecycle, and manual accessibility release gates |
 | [ML_ARTIFACT_PROVENANCE_DESIGN.md](ML_ARTIFACT_PROVENANCE_DESIGN.md) | Threat model, signed-artifact contract, key-management decisions, and provenance rollout gates |
 | STATUS.md | This file: implemented capabilities and verified gaps |
+
+- Under review: the Research API now has a regression test for historical-only composite rows with legacy persisted flags enabled. The endpoint must force evaluation, paper, Telegram, and auto-promotion off after merging stored settings; report visibility remains separately controlled. This closes a UI/API state-consistency gap, not a live-worker verification gap.
