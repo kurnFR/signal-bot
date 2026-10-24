@@ -163,6 +163,20 @@ def test_auto_promotion_does_not_repeat_identical_decision():
     set_config.assert_not_called()
 
 
+def test_auto_promotion_reports_processing_decision_as_in_progress():
+    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy(require_holdout=False)), \
+         patch("web.routes.backtest.record_strategy_promotion_decision", return_value=False), \
+         patch("web.routes.backtest.get_strategy_promotion_decision", return_value={
+             "status": "processing", "reason": "claim persisted before activation"
+         }), \
+         patch("paper.engine.set_paper_config") as set_config:
+        result = _call(_candidate(), data_segment="train")
+
+    assert result["status"] == "in_progress"
+    assert "reconcile" in result["reason"].lower()
+    set_config.assert_not_called()
+
+
 def test_auto_promotion_rejects_unprofitable_metrics_even_if_candidate_is_top_ranked():
     candidate = _candidate(metrics={
         "total_trades": 40,

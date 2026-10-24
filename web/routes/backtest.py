@@ -347,10 +347,25 @@ def _auto_promote_top_candidate(
         claimed = record_strategy_promotion_decision(decision)
         if not claimed:
             prior = get_strategy_promotion_decision(decision_hash) or {}
+            prior_status = prior.get("status")
+            # A persisted "processing" claim may be left behind if the worker
+            # exits between claiming the audit row and finalizing activation.
+            # Do not silently label it complete or retry automatically: the
+            # paper-config/Telegram side effects may have partially succeeded.
+            if prior_status == "processing":
+                return {
+                    "status": "in_progress",
+                    "strategy": strategy_name,
+                    "previous_status": prior_status,
+                    "reason": (
+                        "A prior promotion claim is still marked processing. "
+                        "Reconcile the paper config and Telegram outcome before retrying."
+                    ),
+                }
             return {
                 "status": "already_processed",
                 "strategy": strategy_name,
-                "previous_status": prior.get("status"),
+                "previous_status": prior_status,
                 "reason": prior.get("reason", "This identical metrics/policy decision was already recorded"),
             }
     except Exception as exc:
