@@ -1557,7 +1557,8 @@ class TestForcedPasswordModalFocusTrap(unittest.TestCase):
         start = app_js.index("    enforcePasswordChangeIfRequired() {")
         end = app_js.index("    cancelForcedPasswordChange() {", start)
         method = app_js[start:end]
-        self.assertIn("if (event.key !== \"Tab\") return;", method)
+        self.assertIn("document.addEventListener(\"keydown\"", method)
+        self.assertIn('modal.classList.contains("hidden") || event.key !== "Tab"', method)
         self.assertIn("!modal.contains(document.activeElement)", method)
         self.assertIn("event.preventDefault();", method)
         self.assertIn("select:not([disabled])", method)
