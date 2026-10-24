@@ -393,3 +393,9 @@ All pre-merge checks passed on head `080ecf6ce13c7e52e0a2d64ee0b913e90c15059a`. 
 - Regression coverage simulates a failed first lifecycle-settings DB read, verifies fail-closed behavior while settings are unknown, preserves historical report visibility, and verifies recovery after the 15-second retry interval.
 - This is automated test coverage only. Live worker/DB behavior remains unverified; no deployment or production DB changes were performed.
 
+### RetailBot2 promotion identity mapping — initial contract in progress
+
+- Added a pure, fail-closed resolver contract that requires an explicit compatibility mapping, a registered executable strategy/mode, and a non-empty mapping version. It rejects missing/unapproved mappings, unknown identities, invalid modes, and historical-only composites.
+- Added focused tests for accepted and rejected mapping cases. This helper is not wired into activation, defines no strategy mappings, and cannot enable paper trading or Telegram by itself.
+- Next: integrate this validation into the promotion decision path only after mapping metadata is sourced and audited; keep RetailBot2 auto-promotion API rejection in place until end-to-end safety gates are complete.
+- No deployment or production DB changes. CI must pass on the final PR head.
