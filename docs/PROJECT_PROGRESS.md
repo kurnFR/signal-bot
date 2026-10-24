@@ -1,7 +1,7 @@
 # Project Progress, Completion Status, and Roadmap
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
-**Status reviewed:** 2026-10-24  
+**Status reviewed:** 2026-10-25  
 **Master commit at review:** `0fa6fe4e57e5bcdcc659bc890141717131fe49a0`  
 **Overall status:** Active / not finished. PR #282 makes migration status inspection read-only, PR #283, #285, and #287 refresh this progress document, PR #284 makes migration dry-runs read-only, and PR #286 adds a safety-gated populated-database migration rehearsal runbook; PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, #257 contains ML experiment paths, #259 validates deployment manifests before activation, and #263 contains model artifact paths; #265 hardens custom-strategy persistence, #266 validates runtime ML artifact paths, #267 rechecks ML eligibility immediately before model loading, and #269 makes model-weight/manifest writes atomic and prevents duplicate experiment runs from overwriting existing artifacts; #271 prevents the reusable model store from following external symlinks when reading weights or manifests. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
 
@@ -9,7 +9,7 @@
 
 
 
-### Verified RetailBot2 lifecycle and paper-strategy controls — PRs #312–#315 (2026-10-24)
+### Verified RetailBot2 lifecycle and paper-strategy controls — PRs #312–#317 (2026-10-25)
 
 - [PR #312](https://github.com/kurnFR/signal-bot/pull/312) makes restored legacy RetailBot2 trades fail closed for Telegram exit alerts when no explicit per-trade alert decision was persisted, and adds regression tests for legacy and explicitly enabled trades.
 - [PR #313](https://github.com/kurnFR/signal-bot/pull/313) adds regression coverage for lifecycle semantics: disabling paper tracking prevents new background trades, unpromoted strategies may continue paper evaluation without Telegram alerts, and explicitly promoted strategies may send entry alerts.
@@ -331,3 +331,12 @@ All pre-merge checks passed on head `080ecf6ce13c7e52e0a2d64ee0b913e90c15059a`. 
 ### MariaDB migration-test isolation — PR #280
 
 [PR #280](https://github.com/kurnFR/signal-bot/pull/280) replaces fixed MariaDB integration-test database names with unique per-run names. Setup no longer drops a database before creating it; cleanup drops only the unique database created for that test. This reduces the risk of destructive collisions when opt-in integration tests are run against a shared or developer-managed MariaDB server. CI passing does not replace a rehearsal against a representative deployed schema.
+
+
+### Follow-up reliability and accessibility — PRs #317–#318 (2026-10-25)
+
+- [PR #317](https://github.com/kurnFR/signal-bot/pull/317) makes RetailBot2 lifecycle refresh failures fail closed: strategy evaluation, new paper entries, Telegram alerts, and auto-promotion are disabled until persisted settings can be read again. Historical report visibility is preserved and refresh retries continue.
+- [PR #318](https://github.com/kurnFR/signal-bot/pull/318) moves the forced-password dialog's Tab focus trap to a document-level key handler, so keyboard focus is contained even if focus escapes the dialog. The handler ignores hidden dialogs and regression tests check outside-focus recovery and the static asset cache token.
+- PR #318 merged as [`293212b`](https://github.com/kurnFR/signal-bot/commit/293212b7f884f1567c99df1a2babc26c3465409a). All five observed PR-head check runs passed: pytest (including a duplicate run), unit tests, Wallet Tracker MariaDB integration, and paper-accounting regression.
+- No live deployment or production database change was performed.
+- Remaining lifecycle work is not complete: auto-promotion is not generally enabled; winner eligibility and supported paper-config mapping still need a safe, explicit workflow. Verify that stopped strategies stay stopped across worker restart, hidden strategies remain out of reports, and the requested `BB_REV_INV_inverse` / `DBL_PAT_INV_inverse` settings match persisted user choices. See [UI-managed strategy lifecycle](UI_MANAGED_STRATEGY_PROMOTION.md).
