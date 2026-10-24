@@ -1871,6 +1871,18 @@ class RetailDeathTrapBot:
                 self._strategy_lifecycle_unavailable = True
                 self._strategy_lifecycle_reload_at = now
                 self.logger.error("Strategy lifecycle reload failed: %s", e)
+        # Composite identities exist only for historical reporting. Enforce
+        # this in the worker too, rather than relying only on API validation:
+        # legacy/manual DB rows must never make them executable.
+        if strategy_id in {"COMPOSITE", "COMPOSITE_INV"}:
+            saved = self.strategy_lifecycle.get((strategy_id, mode), {})
+            return {
+                'evaluation_enabled': False,
+                'paper_enabled': False,
+                'telegram_enabled': False,
+                'report_enabled': saved.get('report_enabled', True),
+                'auto_promote_enabled': False,
+            }
         if getattr(self, "_strategy_lifecycle_unavailable", False):
             return {
                 'evaluation_enabled': False, 'paper_enabled': False,
