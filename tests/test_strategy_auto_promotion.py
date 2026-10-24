@@ -40,7 +40,7 @@ def _policy(**overrides):
     return policy
 
 
-def _call(candidate, data_segment="holdout"):
+def _call(candidate, data_segment="holdout", validation_metrics=None, validation_segment=None):
     return _auto_promote_top_candidate(
         candidate,
         symbol="BTCUSDT",
@@ -49,6 +49,8 @@ def _call(candidate, data_segment="holdout"):
         data_segment=data_segment,
         allocated_capital=5000.0,
         risk_per_trade_pct=1.0,
+        validation_metrics=validation_metrics,
+        validation_segment=validation_segment,
     )
 
 
@@ -81,6 +83,56 @@ def test_auto_promotion_rejects_candidate_ranked_on_the_same_holdout():
     assert result["status"] == "rejected"
     assert "same holdout" in result["reason"].lower()
     set_config.assert_not_called()
+
+def test_auto_promotion_uses_separate_holdout_metrics_for_train_selected_winner():
+    validation_metrics = {
+        "total_trades": 35,
+        "expectancy_r": 0.12,
+        "profit_factor": 1.32,
+        "max_drawdown_r": 4.0,
+    }
+    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy()), \
+         patch("web.routes.backtest.record_strategy_promotion_decision", return_value=True) as record, \
+         patch("web.routes.backtest.update_strategy_promotion_decision") as update, \
+         patch("paper.engine.set_paper_config", return_value={"status": "success", "id": 42}) as set_config, \
+         patch("notifications.telegram_notifier.send_deployment_alert", return_value={"success": True}):
+        result = _call(
+            _candidate(),
+            data_segment="train",
+            validation_metrics=validation_metrics,
+            validation_segment="holdout",
+        )
+
+    assert result["status"] == "promoted"
+    assert set_config.call_args.kwargs["is_active"] is True
+    decision = record.call_args.args[0]
+    assert decision["data_segment"] == "holdout"
+    assert '"selection_segment": "train"' in decision["metrics_json"]
+    assert '"validation_segment": "holdout"' in decision["metrics_json"]
+    assert update.call_args.kwargs["status"] == "promoted"
+
+
+def test_auto_promotion_rejects_candidate_when_holdout_metrics_fail_even_if_train_passes():
+    validation_metrics = {
+        "total_trades": 35,
+        "expectancy_r": 0.12,
+        "profit_factor": 0.8,
+        "max_drawdown_r": 4.0,
+    }
+    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy()), \
+         patch("web.routes.backtest.record_strategy_promotion_decision", return_value=True), \
+         patch("paper.engine.set_paper_config") as set_config:
+        result = _call(
+            _candidate(),
+            data_segment="train",
+            validation_metrics=validation_metrics,
+            validation_segment="holdout",
+        )
+
+    assert result["status"] == "rejected"
+    assert "profit factor" in result["reason"].lower()
+    set_config.assert_not_called()
+
 
 def test_auto_promotion_activates_train_candidate_only_when_holdout_gate_is_explicitly_disabled():
     with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy(require_holdout=False)), \
