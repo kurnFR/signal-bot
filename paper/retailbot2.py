@@ -1871,7 +1871,7 @@ class RetailDeathTrapBot:
                 self._strategy_lifecycle_unavailable = True
                 self._strategy_lifecycle_reload_at = now
                 self.logger.error("Strategy lifecycle reload failed: %s", e)
-        if self._strategy_lifecycle_unavailable:
+        if getattr(self, "_strategy_lifecycle_unavailable", False):
             return {
                 'evaluation_enabled': False, 'paper_enabled': False,
                 'telegram_enabled': False, 'report_enabled': True,
