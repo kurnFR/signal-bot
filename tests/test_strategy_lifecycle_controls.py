@@ -190,3 +190,81 @@ def test_exit_alert_uses_persisted_entry_promotion_decision():
 
     bot.tg.send_exit.assert_called_once()
 
+
+def _bot_for_open_trade(settings):
+    import time
+
+    bot = object.__new__(RetailDeathTrapBot)
+    bot.config = SimpleNamespace(
+        risk_per_trade=0.01,
+        max_open_trades_per_mode=8,
+        max_trades_per_symbol=1,
+        min_trade_interval_hours=0,
+    )
+    bot.db = Mock()
+    bot.db.save_trade.return_value = 42
+    bot.db.count_open.return_value = 0
+    bot.active_shadow = {}
+    bot.active_inverse = {}
+    bot.last_trade_time = {}
+    bot.equity_shadow = 1000.0
+    bot.equity_inverse = 1000.0
+    bot.strategy_lifecycle = {("BB_REV", "shadow"): {
+        "evaluation_enabled": True,
+        "paper_enabled": True,
+        "telegram_enabled": settings.get("telegram_enabled", False),
+        "report_enabled": settings.get("report_enabled", True),
+        "auto_promote_enabled": False,
+    }}
+    bot._strategy_lifecycle_reload_at = time.monotonic()
+    bot.tg = Mock()
+    bot.logger = Mock()
+    return bot
+
+
+def _sample_signal():
+    return {
+        "symbol": "BTC/USDT",
+        "side": "LONG",
+        "entry": 100.0,
+        "stop": 95.0,
+        "target": 110.0,
+        "strategy": "BB_REV",
+        "strategies_triggered": ["BB_REV"],
+    }
+
+
+def test_paper_disabled_strategy_does_not_open_a_background_trade():
+    bot = _bot_for_open_trade({"telegram_enabled": True, "paper_enabled": False})
+    bot.strategy_lifecycle[("BB_REV", "shadow")]["paper_enabled"] = False
+
+    result = bot._open_trade(_sample_signal(), "shadow")
+
+    assert result is None
+    bot.db.save_trade.assert_not_called()
+    bot.tg.send_entry.assert_not_called()
+
+
+def test_unpromoted_strategy_still_paper_trades_without_telegram_alert():
+    bot = _bot_for_open_trade({"telegram_enabled": False})
+
+    result = bot._open_trade(_sample_signal(), "shadow")
+
+    assert result == 42
+    bot.db.save_trade.assert_called_once()
+    assert bot.db.save_trade.call_args.args[0]["telegram_enabled"] is False
+    bot.tg.send_entry.assert_not_called()
+    assert 42 in bot.active_shadow
+
+
+def test_promoted_strategy_paper_trades_and_sends_telegram_entry():
+    bot = _bot_for_open_trade({"telegram_enabled": True})
+
+    result = bot._open_trade(_sample_signal(), "shadow")
+
+    assert result == 42
+    bot.db.save_trade.assert_called_once()
+    assert bot.db.save_trade.call_args.args[0]["telegram_enabled"] is True
+    bot.tg.send_entry.assert_called_once()
+    assert 42 in bot.active_shadow
+
