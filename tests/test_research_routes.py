@@ -115,6 +115,54 @@ class TestResearchRoutes(unittest.TestCase):
         self.assertTrue(args[2]["telegram_enabled"])
         self.assertFalse(args[2]["auto_promote_enabled"])
 
+    def test_strategy_lifecycle_stop_and_hide_persist_across_dashboard_reload(self):
+        saved_rows = []
+
+        def save_setting(strategy_id, mode, settings):
+            saved_rows[:] = [{
+                "strategy_id": strategy_id,
+                "mode": mode,
+                **settings,
+                "updated_at": "2026-10-25 00:00:00",
+            }]
+
+        with patch(
+            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
+            side_effect=lambda: [dict(row) for row in saved_rows],
+        ), patch(
+            "web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting",
+            side_effect=save_setting,
+        ):
+            stopped = self.client.post(
+                "/api/research/retailbot2/strategies",
+                headers=self.headers,
+                json={
+                    "strategy_id": "DBL_PAT_INV",
+                    "mode": "inverse",
+                    "evaluation_enabled": False,
+                    "paper_enabled": False,
+                    "telegram_enabled": False,
+                    "report_enabled": False,
+                    "auto_promote_enabled": False,
+                },
+            )
+            self.assertEqual(stopped.status_code, 200)
+
+            # A separate GET represents a dashboard refresh / new client session.
+            refreshed = self.client.get(
+                "/api/research/retailbot2/strategies",
+                headers=self.headers,
+            )
+            self.assertEqual(refreshed.status_code, 200)
+            row = next(
+                item for item in refreshed.json()["strategies"]
+                if item["strategy_id"] == "DBL_PAT_INV" and item["mode"] == "inverse"
+            )
+            self.assertFalse(row["evaluation_enabled"])
+            self.assertFalse(row["paper_enabled"])
+            self.assertFalse(row["telegram_enabled"])
+            self.assertFalse(row["report_enabled"])
+
     def test_retailbot2_positions_endpoint(self):
         res = self.client.get("/api/research/retailbot2/positions", headers=self.headers)
         self.assertEqual(res.status_code, 200)

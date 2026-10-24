@@ -38,6 +38,32 @@ def test_strategy_lifecycle_defaults_keep_research_on_and_telegram_off():
     assert settings["auto_promote_enabled"] is False
 
 
+def test_stopped_strategy_remains_stopped_when_a_fresh_worker_loads_saved_rows():
+    # The database rows are the persistence boundary shared by old and new workers.
+    saved_rows = [{
+        "strategy_id": "DBL_PAT_INV",
+        "mode": "inverse",
+        "evaluation_enabled": False,
+        "paper_enabled": False,
+        "telegram_enabled": False,
+        "report_enabled": False,
+        "auto_promote_enabled": False,
+    }]
+    first_worker = _bot_for_lifecycle(saved_rows)
+    first_settings = first_worker._get_strategy_lifecycle("DBL_PAT_INV", "inverse")
+    assert first_settings["evaluation_enabled"] is False
+    assert first_settings["paper_enabled"] is False
+    assert first_settings["report_enabled"] is False
+
+    # Re-create the worker as if the process restarted; it has no prior in-memory cache.
+    restarted_worker = _bot_for_lifecycle(saved_rows)
+    restarted_settings = restarted_worker._get_strategy_lifecycle("DBL_PAT_INV", "inverse")
+    assert restarted_settings["evaluation_enabled"] is False
+    assert restarted_settings["paper_enabled"] is False
+    assert restarted_settings["telegram_enabled"] is False
+    assert restarted_settings["report_enabled"] is False
+
+
 def test_strategy_lifecycle_reads_saved_per_mode_promotion_flags():
     bot = _bot_for_lifecycle([{
         "strategy_id": "BB_REV_INV",
