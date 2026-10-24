@@ -340,3 +340,11 @@ All pre-merge checks passed on head `080ecf6ce13c7e52e0a2d64ee0b913e90c15059a`. 
 - PR #318 merged as [`293212b`](https://github.com/kurnFR/signal-bot/commit/293212b7f884f1567c99df1a2babc26c3465409a). All five observed PR-head check runs passed: pytest (including a duplicate run), unit tests, Wallet Tracker MariaDB integration, and paper-accounting regression.
 - No live deployment or production database change was performed.
 - Remaining lifecycle work is not complete: auto-promotion is not generally enabled; winner eligibility and supported paper-config mapping still need a safe, explicit workflow. Verify that stopped strategies stay stopped across worker restart, hidden strategies remain out of reports, and the requested `BB_REV_INV_inverse` / `DBL_PAT_INV_inverse` settings match persisted user choices. See [UI-managed strategy lifecycle](UI_MANAGED_STRATEGY_PROMOTION.md).
+
+
+### Strategy lifecycle stop/remove regression coverage — PR #320 (2026-10-25)
+
+- [PR #320](https://github.com/kurnFR/signal-bot/pull/320) adds API coverage that saves a strategy with evaluation, paper trading, Telegram, and report visibility disabled, then confirms a fresh dashboard read returns those disabled settings.
+- It also adds a worker reinitialization test that loads the same persisted-row fixture into a new RetailBot2 worker and verifies the stop/remove settings do not revert to defaults.
+- All five observed PR-head check runs passed: pytest (including duplicate run), unit tests, Wallet Tracker MariaDB integration, and paper-accounting regression. Merged as [`729c182`](https://github.com/kurnFR/signal-bot/commit/729c18227cc120653f3862543bc71bbd97e424d3).
+- These deterministic tests validate the settings boundary but do not replace a real owner-environment DB/worker restart check. General auto-promotion and verification of the user's actual saved `BB_REV_INV_inverse` / `DBL_PAT_INV_inverse` settings remain open.
