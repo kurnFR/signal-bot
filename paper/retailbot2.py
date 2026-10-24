@@ -1016,7 +1016,14 @@ class RetailStrategyEngine:
                 if sig is not None:
                     results.append(sig)
             except Exception:
-                pass  # Silent per-strategy failures
+                # Do not silently turn implementation/data errors into a
+                # normal "no signal" result. Include the strategy and symbol
+                # so operators can identify a broken strategy from worker logs.
+                logging.getLogger(__name__).exception(
+                    "Strategy evaluation failed: strategy=%s symbol=%s",
+                    strategy_id.value,
+                    symbol,
+                )
         return results
 
     def build_composite(self, signals: List[Dict]) -> Optional[Dict]:
