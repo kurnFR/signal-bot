@@ -101,9 +101,9 @@ def update_config(req: PaperConfigRequest):
         raise HTTPException(status_code=400, detail="timeframe must be one of: 15m, 1h, 4h, 1d")
     res = set_paper_config(
         req.symbol.strip().upper(),
-        req.market.strip().lower(),
-        req.timeframe.strip(),
-        req.strategy_name.strip(),
+        market,
+        timeframe,
+        strategy_name,
         req.is_active,
         req.allocated_capital,
         req.risk_per_trade_pct,
@@ -160,12 +160,24 @@ def deploy_strategy(req: DeployStrategyRequest):
         raise HTTPException(status_code=400, detail="rank_score must be finite")
     if not req.symbol.strip() or not req.strategy_name.strip():
         raise HTTPException(status_code=400, detail="symbol and strategy_name must not be blank")
+    strategy_name = req.strategy_name.strip()
+    market = req.market.strip().lower()
+    timeframe = req.timeframe.strip()
+    if strategy_name not in STRATEGIES and strategy_name not in OVERLAY_STRATEGIES:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown executable paper strategy. Refresh the Strategy Library and select a registered strategy.",
+        )
+    if market not in {"spot", "futures"}:
+        raise HTTPException(status_code=400, detail="market must be spot or futures")
+    if timeframe not in {"15m", "1h", "4h", "1d"}:
+        raise HTTPException(status_code=400, detail="timeframe must be one of: 15m, 1h, 4h, 1d")
     # 1. Update/Add paper config
     res = set_paper_config(
         req.symbol.strip().upper(),
-        req.market.strip().lower(),
-        req.timeframe.strip(),
-        req.strategy_name.strip(),
+        market,
+        timeframe,
+        strategy_name,
         is_active=True,
         allocated_capital=req.allocated_capital,
         risk_per_trade_pct=req.risk_per_trade_pct,
@@ -181,9 +193,9 @@ def deploy_strategy(req: DeployStrategyRequest):
             from notifications.telegram_notifier import send_deployment_alert
             telegram_res = send_deployment_alert(
                 symbol=req.symbol.strip().upper(),
-                market=req.market.strip().lower(),
-                timeframe=req.timeframe.strip(),
-                strategy_name=req.strategy_name.strip(),
+                market=market,
+                timeframe=timeframe,
+                strategy_name=strategy_name,
                 allocated_capital=req.allocated_capital,
                 risk_per_trade_pct=req.risk_per_trade_pct,
                 rank=req.rank,
