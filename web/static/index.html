@@ -474,6 +474,7 @@
                                 <option value="train">Train (Oldest 80%)</option>
                                 <option value="holdout">Holdout (Recent 20%)</option>
                             </select>
+                            <p class="text-[10px] text-slate-500 mt-1">For auto-promotion, select Train to rank candidates. The selected winner is then evaluated separately on Holdout. Full/Holdout-selected runs are analysis-only for promotion.</p>
                         </div>
                     </div>
 
@@ -503,7 +504,7 @@
                         <div class="flex flex-wrap items-center justify-between gap-2">
                             <div>
                                 <h3 class="text-xs font-bold text-slate-100">Automatic Winner Promotion</h3>
-                                <p class="text-[10px] text-slate-500 mt-1">Opt-in only. A ranked winner is promoted to paper trading only when every saved gate passes. Default requires the holdout segment.</p>
+                                <p class="text-[10px] text-slate-500 mt-1">Opt-in only. Choose Train for candidate selection; the selected winner must pass the separate Holdout evaluation and every saved gate before paper trading is enabled.</p>
                             </div>
                             <label class="inline-flex items-center gap-2 text-xs text-slate-300">
                                 <input id="bt-auto-promote-enabled" type="checkbox" class="rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500">
