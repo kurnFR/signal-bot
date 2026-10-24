@@ -395,7 +395,7 @@ All pre-merge checks passed on head `080ecf6ce13c7e52e0a2d64ee0b913e90c15059a`. 
 
 ### RetailBot2 promotion identity mapping — initial contract in progress
 
-- Added a pure, fail-closed resolver contract that requires an explicit compatibility mapping, a registered executable strategy/mode, and a non-empty mapping version. It rejects missing/unapproved mappings, unknown identities, invalid modes, and historical-only composites.
-- Added focused tests for accepted and rejected mapping cases. This helper is not wired into activation, defines no strategy mappings, and cannot enable paper trading or Telegram by itself.
-- Next: integrate this validation into the promotion decision path only after mapping metadata is sourced and audited; keep RetailBot2 auto-promotion API rejection in place until end-to-end safety gates are complete.
-- No deployment or production DB changes. CI must pass on the final PR head.
+- [PR #338](https://github.com/kurnFR/signal-bot/pull/338) merged as [`02ada39`](https://github.com/kurnFR/signal-bot/commit/02ada39ed94910d4199eea9addd8ca3428847fe2) after all five required CI checks passed on final head `bac30fa38a5528162dedd878f787d0196edef988`.
+- Added a pure, fail-closed resolver contract requiring explicit compatibility metadata, a registered executable strategy/mode, and a non-empty mapping version. It rejects missing/unapproved mappings, unknown identities, invalid modes, and historical-only composites.
+- The helper is not wired into activation, defines no actual mappings, and cannot enable paper trading or Telegram by itself. RetailBot2 auto-promotion remains rejected pending a sourced/audited mapping registry and end-to-end safety gates.
+- Follow-up in progress: malformed mode values and an unavailable executable registry must return a safe rejection rather than raising an exception. No deployment or production DB changes.
