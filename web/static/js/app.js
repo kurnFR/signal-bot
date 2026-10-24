@@ -1556,8 +1556,8 @@ const App = {
         modal.classList.remove("hidden");
         modal.classList.add("flex");
         if (modal.dataset.focusTrapInitialized !== "true") {
-            modal.addEventListener("keydown", (event) => {
-                if (event.key !== "Tab") return;
+            document.addEventListener("keydown", (event) => {
+                if (modal.classList.contains("hidden") || event.key !== "Tab") return;
                 const focusable = Array.from(modal.querySelectorAll(
                     'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
                 )).filter((element) => !element.hidden && element.getClientRects().length > 0);
