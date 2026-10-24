@@ -837,6 +837,60 @@
                     </div>
                 </div>
 
+                <!-- Add paper strategy from the executable Strategy Library -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-100">Add Strategy to Paper Trading</h3>
+                        <p class="text-[11px] text-slate-500 mt-1">Select any strategy registered in Backtest Studio. Paper tracking, Telegram alerts, and report visibility are separate controls. Telegram is off by default.</p>
+                    </div>
+                    <form id="paper-config-form" onsubmit="App.addPaperStrategyConfig(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <label class="text-[11px] text-slate-400">Symbol
+                            <input id="paper-config-symbol" type="text" required maxlength="32" value="BTCUSDT" autocomplete="off" class="cfg-input">
+                        </label>
+                        <label class="text-[11px] text-slate-400">Market
+                            <select id="paper-config-market" class="cfg-input">
+                                <option value="spot">Spot</option>
+                                <option value="futures">Futures</option>
+                            </select>
+                        </label>
+                        <label class="text-[11px] text-slate-400">Timeframe
+                            <select id="paper-config-timeframe" class="cfg-input">
+                                <option value="15m">15 minutes</option>
+                                <option value="1h" selected>1 hour</option>
+                                <option value="4h">4 hours</option>
+                                <option value="1d">1 day</option>
+                            </select>
+                        </label>
+                        <label class="text-[11px] text-slate-400">Strategy Library
+                            <select id="paper-config-strategy" required class="cfg-input">
+                                <option value="">Loading executable strategies…</option>
+                            </select>
+                        </label>
+                        <label class="text-[11px] text-slate-400">Allocated Capital
+                            <input id="paper-config-capital" type="number" min="100" step="100" value="5000" required class="cfg-input">
+                        </label>
+                        <label class="text-[11px] text-slate-400">Risk per Trade (%)
+                            <input id="paper-config-risk" type="number" min="0.1" max="10" step="0.1" value="1" required class="cfg-input">
+                        </label>
+                        <div class="flex flex-wrap items-center gap-3 sm:col-span-2 lg:col-span-4">
+                            <label class="inline-flex items-center gap-2 text-xs text-slate-300">
+                                <input id="paper-config-active" type="checkbox" checked class="rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500">
+                                Start paper evaluation
+                            </label>
+                            <label class="inline-flex items-center gap-2 text-xs text-slate-300">
+                                <input id="paper-config-telegram" type="checkbox" class="rounded border-slate-600 bg-slate-800 text-sky-500 focus:ring-sky-500">
+                                Allow Telegram entry alerts
+                            </label>
+                            <label class="inline-flex items-center gap-2 text-xs text-slate-300">
+                                <input id="paper-config-report" type="checkbox" checked class="rounded border-slate-600 bg-slate-800 text-violet-500 focus:ring-violet-500">
+                                Include in performance report
+                            </label>
+                            <button type="submit" class="px-4 py-2 rounded bg-sky-700 hover:bg-sky-600 text-white text-xs font-semibold">Add / Update Strategy</button>
+                            <span id="paper-config-form-status" class="text-[10px] text-slate-500" aria-live="polite"></span>
+                        </div>
+                    </form>
+                </div>
+
                 <!-- Strategy Activation Matrix -->
                 <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
                     <div class="flex items-center justify-between">
