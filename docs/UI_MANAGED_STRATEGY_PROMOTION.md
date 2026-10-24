@@ -1,6 +1,6 @@
 # UI-Managed Strategy Lifecycle and Telegram Promotion
 
-Status: PRs #302–#304 implement composite attribution correction, UI-managed RetailBot2 lifecycle controls, and configurable Battle Royale backtest-winner promotion. Runtime migration/application and live behavior still require owner-environment verification.
+Status: PRs #302–#307 implement composite attribution correction, UI-managed RetailBot2 lifecycle controls, configurable Battle Royale backtest-winner promotion, report visibility, and evaluation error logging. PR #309 adds independent holdout validation for auto-promotion. Runtime migration/application and live behavior still require owner-environment verification.
 Owner-facing behavior: all lifecycle controls are persisted in the application database and editable in the authenticated dashboard. Strategy names and promotion decisions must not be embedded as backend allowlists.
 
 ## Goals
@@ -52,7 +52,7 @@ Defaults must be conservative and fail closed. A strategy cannot auto-promote if
 
 The exact numerical criteria are product defaults and must be editable in the UI; they are not per-strategy hardcoded rules. UI values are validated server-side.
 
-**Important safety limitation:** the current Battle Royale request ranks candidates on the selected data segment. It must not promote a candidate ranked on the same `holdout` segment used as its promotion gate, because this reuses the holdout for both selection and confirmation. A follow-up safeguard rejects that path. With the default `require_holdout=true`, automatic promotion remains blocked until candidate selection on a separate train/validation segment and a distinct holdout evaluation are implemented. Disabling the holdout requirement is an explicit opt-out and permits only a `train`-segment run; it does not make training performance equivalent to out-of-sample evidence.
+**Selection and validation flow (PR #309):** choose `Train` in the Backtest Studio data-segment selector to rank candidates on the oldest 80% of candles. The single top-ranked candidate is then evaluated separately on the recent holdout segment, and the configured trade-count, profit-factor, expectancy, and drawdown gates use those holdout metrics. Selecting `Full` or `Holdout` is analysis-only for auto-promotion; candidates selected on those segments fail closed. If holdout evaluation errors or is missing, promotion is rejected. The holdout remains a limited historical test, not a guarantee of future performance.
 
 ## Independent performance attribution
 
@@ -87,7 +87,7 @@ The exact numerical criteria are product defaults and must be editable in the UI
 1. **Correct attribution and contract**: merged in PR #302. Composite history remains unchanged and new composite P&L is no longer attributed to the first contributor.
 2. **Persistent lifecycle API and UI**: implemented in PR #303. Settings are stored in the database and can be changed per strategy/mode without code edits.
 3. **Independent paper accounting**: implemented in PR #303 for new signals, with per-strategy/mode entries, capacity checks, cooldowns, and restart recovery. Composite is no longer booked as if it were an independent contributor.
-4. **Backtest-driven auto-promotion**: implemented for Battle Royale winners in PR #304. Policy is opt-in, configurable in Backtest Studio, requires the configured gates (including holdout evidence by default), and records deduplicated audit decisions. Verify migration 018 in the owner environment before enabling it. Broader automatic promotion for strategy families not mapped to supported paper configurations remains out of scope.
+4. **Backtest-driven auto-promotion**: implemented for Battle Royale winners in PRs #304 and #309. Policy is opt-in, configurable in Backtest Studio, selects on Train and evaluates the fixed winner on a separate Holdout by default, and records deduplicated audit decisions. Verify migration 018 in the owner environment before enabling it. Broader automatic promotion for strategy families not mapped to supported paper configurations remains out of scope.
 5. **Verification**: automated tests and CI are required before merge. Then do read-only runtime inventory and user-authorized runtime validation. Do not deploy or mutate production runtime settings automatically.
 
 ## Acceptance criteria
