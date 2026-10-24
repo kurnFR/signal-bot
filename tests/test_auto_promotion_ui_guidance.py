@@ -8,3 +8,11 @@ def test_backtest_auto_promotion_ui_explains_train_selection_and_holdout_validat
     assert "evaluated separately on Holdout" in html
     assert "Full/Holdout-selected runs are analysis-only for promotion." in html
     assert "Default requires the holdout segment." not in html
+
+
+def test_retailbot2_lifecycle_ui_does_not_claim_auto_promotion_is_available():
+    html = Path("web/static/index.html").read_text(encoding="utf-8")
+
+    assert "RetailBot2 automatic promotion is not available yet" in html
+    assert "until the validated promotion workflow is implemented" in html
+    assert "Automatic promotion is opt-in and configured in Backtest Studio." not in html
