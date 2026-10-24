@@ -10,8 +10,9 @@ import math
 from paper.engine import (
     get_active_positions, get_paper_trades, get_paper_configs,
     set_paper_config, manual_close_position, sync_and_evaluate_paper_trading,
-    get_paper_metrics
+    get_paper_metrics, OVERLAY_STRATEGIES,
 )
+from backtest.strategies import STRATEGIES
 from paper.orders import (
     OrderTransitionConflict, OrderValidationError, cancel_pending_order, list_orders,
 )
@@ -89,6 +90,15 @@ def update_config(req: PaperConfigRequest):
         raise HTTPException(status_code=400, detail="allocated_capital and risk_per_trade_pct must be finite")
     if not req.symbol.strip() or not req.strategy_name.strip():
         raise HTTPException(status_code=400, detail="symbol and strategy_name must not be blank")
+    if req.strategy_name.strip() not in STRATEGIES and req.strategy_name.strip() not in OVERLAY_STRATEGIES:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown executable paper strategy. Refresh the Strategy Library and select a registered strategy.",
+        )
+    if req.market.strip().lower() not in {"spot", "futures"}:
+        raise HTTPException(status_code=400, detail="market must be spot or futures")
+    if req.timeframe.strip() not in {"15m", "1h", "4h", "1d"}:
+        raise HTTPException(status_code=400, detail="timeframe must be one of: 15m, 1h, 4h, 1d")
     res = set_paper_config(
         req.symbol.strip().upper(),
         req.market.strip().lower(),
