@@ -71,14 +71,25 @@ def test_auto_promotion_rejects_non_holdout_when_required():
     set_config.assert_not_called()
 
 
-def test_auto_promotion_activates_qualified_winner_and_persists_alert_preference():
-    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy()), \
+
+def test_auto_promotion_rejects_candidate_ranked_on_the_same_holdout():
+    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy()), patch(
+        "web.routes.backtest.record_strategy_promotion_decision", return_value=True
+    ), patch("paper.engine.set_paper_config") as set_config:
+        result = _call(_candidate(), data_segment="holdout")
+
+    assert result["status"] == "rejected"
+    assert "same holdout" in result["reason"].lower()
+    set_config.assert_not_called()
+
+def test_auto_promotion_activates_train_candidate_only_when_holdout_gate_is_explicitly_disabled():
+    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy(require_holdout=False)), \
          patch("web.routes.backtest.record_strategy_promotion_decision", return_value=True), \
          patch("web.routes.backtest.update_strategy_promotion_decision") as update, \
          patch("web.routes.backtest.get_strategy_promotion_decision", return_value=None), \
          patch("paper.engine.set_paper_config", return_value={"status": "success"}) as set_config, \
          patch("notifications.telegram_notifier.send_deployment_alert", return_value={"success": True}):
-        result = _call(_candidate())
+        result = _call(_candidate(), data_segment="train")
 
     assert result["status"] == "promoted"
     assert result["telegram_result"] == "sent"
@@ -88,13 +99,13 @@ def test_auto_promotion_activates_qualified_winner_and_persists_alert_preference
 
 
 def test_auto_promotion_does_not_repeat_identical_decision():
-    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy()), \
+    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy(require_holdout=False)), \
          patch("web.routes.backtest.record_strategy_promotion_decision", return_value=False), \
          patch("web.routes.backtest.get_strategy_promotion_decision", return_value={
              "status": "promoted", "reason": "already done"
          }), \
          patch("paper.engine.set_paper_config") as set_config:
-        result = _call(_candidate())
+        result = _call(_candidate(), data_segment="train")
 
     assert result["status"] == "already_processed"
     set_config.assert_not_called()
