@@ -1850,7 +1850,14 @@ class RetailDeathTrapBot:
 
     def _get_strategy_lifecycle(self, strategy_id: str, mode: str) -> Dict[str, bool]:
         now = time.monotonic()
-        if now - self._strategy_lifecycle_reload_at >= 15:
+        # Always attempt the first read, even when the OS monotonic clock is
+        # less than 15 seconds after boot and the initial reload timestamp is 0.
+        # Otherwise a fast-starting worker can temporarily ignore saved Stop &
+        # Hide settings and use permissive defaults until the first refresh.
+        if (
+            not getattr(self, "_strategy_lifecycle_initialized", False)
+            or now - self._strategy_lifecycle_reload_at >= 15
+        ):
             try:
                 rows = self.db.get_strategy_lifecycle_settings()
                 self.strategy_lifecycle = {
@@ -1862,6 +1869,7 @@ class RetailDeathTrapBot:
                     } for row in rows
                 }
                 self._strategy_lifecycle_unavailable = False
+                self._strategy_lifecycle_initialized = True
                 self._strategy_lifecycle_reload_at = now
             except Exception as e:
                 # A failed refresh must not reuse stale promotion decisions:
@@ -1869,6 +1877,7 @@ class RetailDeathTrapBot:
                 # Retry after the normal refresh interval, but fail closed until
                 # a fresh database read succeeds. Exit management still runs.
                 self._strategy_lifecycle_unavailable = True
+                self._strategy_lifecycle_initialized = True
                 self._strategy_lifecycle_reload_at = now
                 self.logger.error("Strategy lifecycle reload failed: %s", e)
         # Composite identities exist only for historical reporting. Enforce
