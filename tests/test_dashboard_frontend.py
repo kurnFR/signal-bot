@@ -1549,3 +1549,20 @@ class TestLightThemeSortIndicatorContrast(unittest.TestCase):
     def test_light_theme_sort_indicator_change_bumps_stylesheet_cache_token(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
         self.assertIn('dashboard_enhancements.css?v=20261020-35', html)
+
+
+class TestForcedPasswordModalFocusTrap(unittest.TestCase):
+    def test_forced_password_modal_traps_tab_even_if_focus_escapes(self):
+        app_js = APP_JS.read_text(encoding="utf-8")
+        start = app_js.index("    enforcePasswordChangeIfRequired() {")
+        end = app_js.index("    cancelForcedPasswordChange() {", start)
+        method = app_js[start:end]
+        self.assertIn("if (event.key !== \"Tab\") return;", method)
+        self.assertIn("!modal.contains(document.activeElement)", method)
+        self.assertIn("event.preventDefault();", method)
+        self.assertIn("select:not([disabled])", method)
+        self.assertIn("textarea:not([disabled])", method)
+
+    def test_forced_password_modal_focus_trap_bumps_app_script_cache_token(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        self.assertRegex(html, r'app\\.js\\?v=20261025-1')
