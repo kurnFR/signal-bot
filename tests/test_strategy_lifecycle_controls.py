@@ -296,6 +296,10 @@ def _bot_for_open_trade(settings):
         "auto_promote_enabled": False,
     }}
     bot._strategy_lifecycle_reload_at = time.monotonic()
+    # This fixture explicitly seeds a previously loaded cache. Mark it as
+    # initialized so _open_trade tests isolate entry/Telegram gating rather
+    # than triggering the first database refresh.
+    bot._strategy_lifecycle_initialized = True
     bot.tg = Mock()
     bot.logger = Mock()
     return bot
