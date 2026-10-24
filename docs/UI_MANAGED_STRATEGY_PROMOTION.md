@@ -1,5 +1,7 @@
 # UI-Managed Strategy Lifecycle and Telegram Promotion
 
+**Latest lifecycle UI update:** PR #326 adds one-click Stop & Hide for executable strategy/mode rows. It disables evaluation, new paper entries, Telegram, and report visibility through the existing authenticated API; historical ledger rows remain, and existing open positions are not force-closed. The change passed CI and was merged as [`0d207ff`](https://github.com/kurnFR/signal-bot/commit/0d207ff2a1f68ed25da5319c120330eaf4ab7072). Actual owner-environment DB/worker restart behavior remains unverified.
+
 Status: PRs #302–#307 implement composite attribution correction, UI-managed RetailBot2 lifecycle controls, configurable Battle Royale backtest-winner promotion, report visibility, and evaluation error logging. PR #309 adds independent holdout validation for auto-promotion. Runtime migration/application and live behavior still require owner-environment verification.
 Owner-facing behavior: all lifecycle controls are persisted in the application database and editable in the authenticated dashboard. Strategy names and promotion decisions must not be embedded as backend allowlists.
 
@@ -88,7 +90,8 @@ The exact numerical criteria are product defaults and must be editable in the UI
 2. **Persistent lifecycle API and UI**: implemented in PR #303. Settings are stored in the database and can be changed per strategy/mode without code edits.
 3. **Independent paper accounting**: implemented in PR #303 for new signals, with per-strategy/mode entries, capacity checks, cooldowns, and restart recovery. Composite is no longer booked as if it were an independent contributor.
 4. **Backtest-driven auto-promotion**: implemented for Battle Royale winners in PRs #304 and #309. Policy is opt-in, configurable in Backtest Studio, selects on Train and evaluates the fixed winner on a separate Holdout by default, and records deduplicated audit decisions. Verify migration 018 in the owner environment before enabling it. Broader automatic promotion for strategy families not mapped to supported paper configurations remains out of scope.
-5. **Verification**: automated tests and CI are required before merge. Then do read-only runtime inventory and user-authorized runtime validation. Do not deploy or mutate production runtime settings automatically.
+5. **Operator stop/hide controls**: PR #326 adds a confirmed one-click action that disables evaluation, paper entries, Telegram, and report visibility while retaining historical trades. Existing open positions are not force-closed; runtime/DB restart behavior still needs owner-environment verification.
+6. **Verification**: automated tests and CI are required before merge. Then do read-only runtime inventory and user-authorized runtime validation. Do not deploy or mutate production runtime settings automatically.
 
 ## Acceptance criteria
 
