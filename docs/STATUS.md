@@ -79,4 +79,4 @@ CI runs the pytest suite, project tests, RetailBot accounting regression, and an
 - Merged in PR #334 (`436ab38`): RetailBot2 now always attempts the initial lifecycle DB read regardless of OS monotonic uptime. All five required CI checks passed on the final head. This closes the startup code-path gap in tests; live worker/DB behavior remains unverified.
 
 
-- In review: lifecycle refresh outage regression coverage. Simulated DB read failure must fail closed for evaluation/new paper entries/Telegram/auto-promotion, preserve historical report visibility, and recover on the scheduled retry after 15 seconds. CI pending; no production DB or deployment changes.
+- Merged in PR #336 (`f65abab`): lifecycle refresh outage regression coverage simulates a failed initial DB read, verifies fail-closed evaluation/new paper entries/Telegram/auto-promotion, preserves historical report visibility, and verifies recovery on the 15-second retry. All five required CI checks passed on final head `4e4c8084ce427fdc8b57a319cd3af316ae799fa4`. Live worker/DB behavior remains unverified; no production DB or deployment changes.
