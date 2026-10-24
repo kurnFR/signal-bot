@@ -1785,7 +1785,7 @@ class RetailDeathTrapBot:
                 'target': t['target_price'],
                 'units': t['units'],
                 'strategy': t.get('strategy', 'unknown'),
-                'telegram_enabled': bool(t.get('telegram_enabled', True)),
+                'telegram_enabled': bool(t.get('telegram_enabled', False)),
             }
             if record['mode'] == 'inverse':
                 self.active_inverse[t['id']] = record
@@ -1998,7 +1998,7 @@ class RetailDeathTrapBot:
 
         del active[tid]
 
-        if trade.get('telegram_enabled', True):
+        if trade.get('telegram_enabled', False):
             self.tg.send_exit(trade, exit_price, reason, pnl, pnl_pct)
         result_icon = "✅" if pnl > 0 else "❌"
         self.logger.info(
