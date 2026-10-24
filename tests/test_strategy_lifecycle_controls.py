@@ -147,3 +147,46 @@ def test_run_all_empty_enabled_set_evaluates_no_strategy_functions():
 
     assert engine.run_all(object(), "BTC/USDT", enabled_strategies=set()) == []
     assert all(mock.call_count == 0 for mock in mocks)
+
+
+def _bot_for_exit_alert(telegram_enabled_marker=None):
+    bot = object.__new__(RetailDeathTrapBot)
+    trade = {
+        "id": 7,
+        "symbol": "BTC/USDT",
+        "side": "LONG",
+        "mode": "shadow",
+        "entry": 100.0,
+        "units": 2.0,
+        "strategy": "BB_REV",
+    }
+    if telegram_enabled_marker is not None:
+        trade["telegram_enabled"] = telegram_enabled_marker
+    bot.active_shadow = {7: trade}
+    bot.active_inverse = {}
+    bot.db = Mock()
+    bot.db.close_trade_and_update_stats.return_value = True
+    bot.equity_shadow = 1000.0
+    bot.equity_inverse = 1000.0
+    bot.tg = Mock()
+    bot.logger = Mock()
+    return bot
+
+
+def test_legacy_open_trade_without_persisted_telegram_decision_fails_closed():
+    bot = _bot_for_exit_alert()
+
+    bot._close_trade(7, 110.0, "target", "shadow")
+
+    bot.tg.send_exit.assert_not_called()
+    assert 7 not in bot.active_shadow
+    assert bot.equity_shadow == 1020.0
+
+
+def test_exit_alert_uses_persisted_entry_promotion_decision():
+    bot = _bot_for_exit_alert(True)
+
+    bot._close_trade(7, 110.0, "target", "shadow")
+
+    bot.tg.send_exit.assert_called_once()
+
