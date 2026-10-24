@@ -109,6 +109,36 @@ class TestResearchRoutes(unittest.TestCase):
             self.assertFalse(row["telegram_enabled"])
             self.assertFalse(row["auto_promote_enabled"])
 
+    def test_historical_composite_rows_fail_closed_even_if_legacy_settings_enable_them(self):
+        legacy_rows = [{
+            "strategy_id": "COMPOSITE",
+            "mode": "shadow",
+            "evaluation_enabled": 1,
+            "paper_enabled": 1,
+            "telegram_enabled": 1,
+            "report_enabled": 1,
+            "auto_promote_enabled": 1,
+        }]
+        with patch(
+            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
+            return_value=legacy_rows,
+        ):
+            res = self.client.get(
+                "/api/research/retailbot2/strategies",
+                headers=self.headers,
+            )
+
+        self.assertEqual(res.status_code, 200)
+        row = next(
+            item for item in res.json()["strategies"]
+            if item["strategy_id"] == "COMPOSITE" and item["mode"] == "shadow"
+        )
+        self.assertFalse(row["evaluation_enabled"])
+        self.assertFalse(row["paper_enabled"])
+        self.assertFalse(row["telegram_enabled"])
+        self.assertTrue(row["report_enabled"])
+        self.assertFalse(row["auto_promote_enabled"])
+
     def test_strategy_lifecycle_rejects_auto_promotion_until_validation_workflow_exists(self):
         with patch(
             "web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting"
