@@ -1223,8 +1223,13 @@ const App = {
                     <td>${checkbox("paper_enabled", "Paper track strategy")}</td>
                     <td>${checkbox("telegram_enabled", "Telegram alerts")}</td>
                     <td>${checkbox("report_enabled", "Include in performance report")}</td>
-                    <td><button type="button" data-strategy-lifecycle-save data-strategy-id="${safeId}" data-strategy-mode="${safeMode}"
-                        class="px-3 py-1.5 text-[10px] font-semibold bg-sky-600 hover:bg-sky-500 text-white rounded-md">Save</button></td>
+                    <td class="whitespace-nowrap">
+                        <button type="button" data-strategy-lifecycle-save data-strategy-id="${safeId}" data-strategy-mode="${safeMode}"
+                            class="px-3 py-1.5 text-[10px] font-semibold bg-sky-600 hover:bg-sky-500 text-white rounded-md">Save</button>
+                        ${row.historical_only ? "" : `<button type="button" data-strategy-lifecycle-stop-hide data-strategy-id="${safeId}" data-strategy-mode="${safeMode}"
+                            aria-label="Stop and hide ${safeId} (${safeMode})"
+                            class="ml-1 px-3 py-1.5 text-[10px] font-semibold bg-rose-700 hover:bg-rose-600 text-white rounded-md">Stop &amp; Hide</button>`}
+                    </td>
                 </tr>`;
         }).join("");
         tbody.querySelectorAll("[data-strategy-lifecycle-save]").forEach(button => {
@@ -1232,6 +1237,29 @@ const App = {
                 this.saveStrategyLifecycle(button.dataset.strategyId, button.dataset.strategyMode);
             });
         });
+        tbody.querySelectorAll("[data-strategy-lifecycle-stop-hide]").forEach(button => {
+            button.addEventListener("click", () => {
+                this.stopAndHideStrategy(button.dataset.strategyId, button.dataset.strategyMode);
+            });
+        });
+    },
+
+    async stopAndHideStrategy(strategyId, mode) {
+        const confirmed = window.confirm(
+            `Stop evaluation and paper entries, disable Telegram alerts, and hide ${strategyId} (${mode}) from future performance reports? Historical trades will be retained.`
+        );
+        if (!confirmed) return;
+        const safePart = String(strategyId).replace(/[^a-zA-Z0-9_-]/g, "_");
+        const prefix = `rlc-${safePart}-${mode}`;
+        for (const field of ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled"]) {
+            const el = document.getElementById(`${prefix}-${field}`);
+            if (!el) {
+                this.showToast("Strategy control is missing from the page. Refresh and try again.", "error");
+                return;
+            }
+            el.checked = false;
+        }
+        await this.saveStrategyLifecycle(strategyId, mode);
     },
 
     async saveStrategyLifecycle(strategyId, mode) {
@@ -1263,6 +1291,9 @@ const App = {
             await this.fetchResearchData();
         } catch (e) {
             this.showToast(`Failed to save strategy settings: ${e.message || e}`, "error");
+            // Restore the controls from persisted state when possible so a
+            // failed write does not leave an unsaved stop/hide looking active.
+            try { await this.fetchResearchData(); } catch (_) {}
         }
     },
 
