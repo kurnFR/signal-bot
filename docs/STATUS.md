@@ -53,6 +53,7 @@ Verified this session: a fresh database built from the README steps boots the ap
 
 
 - Backtest Studio promotion regression coverage now explicitly checks that an unmapped strategy, unavailable policy storage, or unavailable audit-claim persistence cannot activate a paper config (PR #328, merged as `1f8b2ed`). This does not complete generalized RetailBot2 auto-promotion; its API remains fail-closed until an explicit executable mapping and lifecycle-safe validation path exists.
+- Follow-up in review: an identical promotion decision with a prior audit status of `processing` is now surfaced as `in_progress` and instructs operators to reconcile config/Telegram side effects before retrying. It does not auto-retry or claim crash recovery is solved; CI is pending.
 
 ## 3. Tests
 
