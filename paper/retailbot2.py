@@ -1697,6 +1697,7 @@ class RetailDeathTrapBot:
         }
         self.strategy_lifecycle: Dict[Tuple[str, str], Dict[str, bool]] = {}
         self._strategy_lifecycle_reload_at = 0.0
+        self._strategy_lifecycle_unavailable = False
 
         self._load_state()
         self._startup_msg()
@@ -1860,9 +1861,22 @@ class RetailDeathTrapBot:
                         )
                     } for row in rows
                 }
+                self._strategy_lifecycle_unavailable = False
                 self._strategy_lifecycle_reload_at = now
             except Exception as e:
+                # A failed refresh must not reuse stale promotion decisions:
+                # an operator may have just disabled paper trading or alerts.
+                # Retry after the normal refresh interval, but fail closed until
+                # a fresh database read succeeds. Exit management still runs.
+                self._strategy_lifecycle_unavailable = True
+                self._strategy_lifecycle_reload_at = now
                 self.logger.error("Strategy lifecycle reload failed: %s", e)
+        if self._strategy_lifecycle_unavailable:
+            return {
+                'evaluation_enabled': False, 'paper_enabled': False,
+                'telegram_enabled': False, 'report_enabled': True,
+                'auto_promote_enabled': False,
+            }
         return self.strategy_lifecycle.get((strategy_id, mode), {
             'evaluation_enabled': True, 'paper_enabled': True,
             'telegram_enabled': False, 'report_enabled': True,
