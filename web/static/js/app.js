@@ -1827,6 +1827,93 @@ const App = {
     // ----------------------------------------------------
     // PHASE B: PAPER TRADING
     // ----------------------------------------------------
+    async fetchPaperStrategyOptions() {
+        const select = document.getElementById("paper-config-strategy");
+        const status = document.getElementById("paper-config-form-status");
+        if (!select) return;
+        try {
+            const response = await fetch(`${API_BASE}/api/backtest/strategies`, {
+                headers: this.getAuthHeaders(),
+            });
+            let payload = {};
+            try { payload = await response.json(); } catch (_) {}
+            if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+            if (!payload || !Array.isArray(payload.strategies)) {
+                throw new Error("Invalid strategy registry response");
+            }
+            const previous = select.value;
+            const options = payload.strategies
+                .filter(item => item && typeof item.id === "string" && item.id.trim())
+                .map(item => {
+                    const id = this._escapeHtml(item.id);
+                    const label = this._escapeHtml(item.displayName || item.id);
+                    const category = item.category ? ` · ${this._escapeHtml(item.category)}` : "";
+                    return `<option value="${id}">${label}${category}</option>`;
+                });
+            select.innerHTML = `<option value="">Select a strategy…</option>` + options.join("");
+            if (previous && payload.strategies.some(item => item && item.id === previous)) {
+                select.value = previous;
+            }
+            if (status) status.textContent = options.length
+                ? `${options.length} executable strategy variants available`
+                : "No executable strategies returned";
+        } catch (error) {
+            select.innerHTML = `<option value="">Strategy list unavailable</option>`;
+            if (status) status.textContent = `Unable to load strategies: ${error.message || error}`;
+        }
+    },
+
+    async addPaperStrategyConfig(event) {
+        if (event && typeof event.preventDefault === "function") event.preventDefault();
+        const value = id => document.getElementById(id)?.value;
+        const checked = id => Boolean(document.getElementById(id)?.checked);
+        const symbol = String(value("paper-config-symbol") || "").trim().toUpperCase();
+        const market = String(value("paper-config-market") || "spot").trim().toLowerCase();
+        const timeframe = String(value("paper-config-timeframe") || "").trim();
+        const strategyName = String(value("paper-config-strategy") || "").trim();
+        const allocatedCapital = Number(value("paper-config-capital"));
+        const riskPerTradePct = Number(value("paper-config-risk"));
+        if (!symbol || !strategyName || !timeframe || !["spot", "futures"].includes(market)) {
+            this.showToast("Choose a valid symbol, market, timeframe, and executable strategy.", "error");
+            return;
+        }
+        if (!Number.isFinite(allocatedCapital) || allocatedCapital < 100 ||
+            !Number.isFinite(riskPerTradePct) || riskPerTradePct < 0.1 || riskPerTradePct > 10) {
+            this.showToast("Capital must be at least 100 and risk per trade must be between 0.1% and 10%.", "error");
+            return;
+        }
+        const status = document.getElementById("paper-config-form-status");
+        const submit = document.querySelector("#paper-config-form button[type='submit']");
+        if (submit) submit.disabled = true;
+        if (status) status.textContent = "Saving configuration…";
+        try {
+            const response = await fetch(`${API_BASE}/api/paper/configs`, {
+                method: "POST",
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify({
+                    symbol, market, timeframe, strategy_name: strategyName,
+                    is_active: checked("paper-config-active"),
+                    allocated_capital: allocatedCapital,
+                    risk_per_trade_pct: riskPerTradePct,
+                    telegram_enabled: checked("paper-config-telegram"),
+                    report_enabled: checked("paper-config-report"),
+                }),
+            });
+            let payload = {};
+            try { payload = await response.json(); } catch (_) {}
+            if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+            if (status) status.textContent = `Saved ${strategyName} for ${symbol}.`;
+            this.showToast(`Paper strategy ${strategyName} (${symbol}) saved.`, "success");
+            await this.fetchPaperData();
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error || "Unknown error");
+            if (status) status.textContent = `Save failed: ${message}`;
+            this.showToast(`Unable to save paper strategy: ${message}`, "error");
+        } finally {
+            if (submit) submit.disabled = false;
+        }
+    },
+
     async fetchPaperData() {
         try {
             const responses = await Promise.all([
@@ -1874,6 +1961,7 @@ const App = {
             this.paperMetrics = metricsData.metrics;
             this.paperOrders = ordersData.orders;
             this.renderPaperView();
+            await this.fetchPaperStrategyOptions();
         } catch (e) {
             const message = e && e.message ? e.message : String(e || "Unknown error");
             const safeMessage = this._escapeHtml(message);
