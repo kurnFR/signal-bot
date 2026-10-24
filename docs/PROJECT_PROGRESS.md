@@ -2,7 +2,7 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-25  
-**Master commit at review:** `0fa6fe4e57e5bcdcc659bc890141717131fe49a0`  
+**Master commit at review:** `f65abab8a28de3167356f054ad8686a4e7d22f50`  
 **Overall status:** Active / not finished. PR #282 makes migration status inspection read-only, PR #283, #285, and #287 refresh this progress document, PR #284 makes migration dry-runs read-only, and PR #286 adds a safety-gated populated-database migration rehearsal runbook; PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, #257 contains ML experiment paths, #259 validates deployment manifests before activation, and #263 contains model artifact paths; #265 hardens custom-strategy persistence, #266 validates runtime ML artifact paths, #267 rechecks ML eligibility immediately before model loading, and #269 makes model-weight/manifest writes atomic and prevents duplicate experiment runs from overwriting existing artifacts; #271 prevents the reusable model store from following external symlinks when reading weights or manifests. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
@@ -387,8 +387,9 @@ All pre-merge checks passed on head `080ecf6ce13c7e52e0a2d64ee0b913e90c15059a`. 
 - [PR #334](https://github.com/kurnFR/signal-bot/pull/334) merged as [`436ab38`](https://github.com/kurnFR/signal-bot/commit/436ab3874f7d9b319d3af5c429b3a6f6cdc2733a). It ensures the RetailBot2 worker always attempts its first lifecycle DB read, even within 15 seconds of OS boot. The regression test and all five required CI checks passed on final head `535b88a1bed586c2d06a7a890b8313dec994f359`. Live worker/DB behavior remains unverified; no deployment or production DB changes.
 
 
-### RetailBot2 lifecycle refresh outage regression — in review
+### RetailBot2 lifecycle refresh outage regression — PR #336 (merged 2026-10-25)
 
-- Added a regression test that simulates a failed first lifecycle-settings DB read, verifies fail-closed behavior while settings are unknown, and verifies recovery after the 15-second refresh interval.
-- The test explicitly checks that evaluation, new paper entries, Telegram, and auto-promotion stay disabled during the outage while historical report visibility remains available.
-- CI must pass on the final PR head before merge. This is test coverage only; no live DB or worker behavior is verified and no deployment is performed.
+- [PR #336](https://github.com/kurnFR/signal-bot/pull/336) merged as [`f65abab`](https://github.com/kurnFR/signal-bot/commit/f65abab8a28de3167356f054ad8686a4e7d22f50) after all five required CI checks passed on final head `4e4c8084ce427fdc8b57a319cd3af316ae799fa4`.
+- Regression coverage simulates a failed first lifecycle-settings DB read, verifies fail-closed behavior while settings are unknown, preserves historical report visibility, and verifies recovery after the 15-second retry interval.
+- This is automated test coverage only. Live worker/DB behavior remains unverified; no deployment or production DB changes were performed.
+
