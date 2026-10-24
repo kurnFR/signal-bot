@@ -86,5 +86,32 @@ class TestPaperOrderRoutes(unittest.TestCase):
         save.assert_not_called()
 
 
+    def test_deploy_rejects_unregistered_strategy_before_any_side_effect(self):
+        with patch("web.app.authenticate_request", return_value=_user()), \
+             patch("web.routes.paper_routes.set_paper_config") as save, \
+             patch("web.routes.paper_routes.sync_and_evaluate_paper_trading") as sync:
+            response = self.client.post("/api/paper/deploy", json={
+                "symbol": "BTCUSDT", "market": "spot", "timeframe": "1h",
+                "strategy_name": "not_registered", "allocated_capital": 5000,
+                "risk_per_trade_pct": 1, "send_telegram": True,
+            })
+        self.assertEqual(response.status_code, 400)
+        save.assert_not_called()
+        sync.assert_not_called()
+
+    def test_deploy_rejects_unsupported_timeframe_before_any_side_effect(self):
+        with patch("web.app.authenticate_request", return_value=_user()), \
+             patch("web.routes.paper_routes.set_paper_config") as save, \
+             patch("web.routes.paper_routes.sync_and_evaluate_paper_trading") as sync:
+            response = self.client.post("/api/paper/deploy", json={
+                "symbol": "BTCUSDT", "market": "spot", "timeframe": "5m",
+                "strategy_name": "trend_ema_v1", "allocated_capital": 5000,
+                "risk_per_trade_pct": 1, "send_telegram": True,
+            })
+        self.assertEqual(response.status_code, 400)
+        save.assert_not_called()
+        sync.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
