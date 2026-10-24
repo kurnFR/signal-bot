@@ -44,5 +44,6 @@ Before deploying this code, run the repository's migration runner (or apply the 
 - `promoted_alert_failed`: paper config activated but Telegram deployment notification failed.
 - `failed`: paper config activation failed.
 - `already_processed`: identical metrics and policy snapshot was already audited; no repeated side effect.
+- `in_progress`: an identical decision is already claimed with audit status `processing`. This may mean a prior request stopped between claiming the decision and finalizing side effects. The API does not automatically retry it because paper activation or Telegram delivery may have partially succeeded; reconcile the paper config and notification outcome before any manual recovery.
 
-The audit keeps a snapshot of candidate metrics and the policy used. Changing the policy creates a distinct decision identity and allows explicit re-evaluation under the new criteria.
+The audit keeps a snapshot of candidate metrics and the policy used. Changing the policy creates a distinct decision identity and allows explicit re-evaluation under the new criteria. A stuck `processing` row still requires operational reconciliation; this status makes that ambiguity visible but does not implement automatic crash recovery.
