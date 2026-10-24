@@ -94,6 +94,42 @@ class TestResearchRoutes(unittest.TestCase):
         self.assertFalse(bb_inverse["telegram_enabled"])
         self.assertFalse(bb_inverse["auto_promote_enabled"])
 
+    def test_requested_inverse_strategies_are_registered_and_default_telegram_off(self):
+        res = self.client.get("/api/research/retailbot2/strategies", headers=self.headers)
+        self.assertEqual(res.status_code, 200)
+        rows = res.json()["strategies"]
+        for strategy_id in ("BB_REV_INV", "DBL_PAT_INV"):
+            row = next(
+                item for item in rows
+                if item["strategy_id"] == strategy_id and item["mode"] == "inverse"
+            )
+            self.assertTrue(row["evaluation_enabled"])
+            self.assertTrue(row["paper_enabled"])
+            self.assertTrue(row["report_enabled"])
+            self.assertFalse(row["telegram_enabled"])
+            self.assertFalse(row["auto_promote_enabled"])
+
+    def test_strategy_lifecycle_rejects_auto_promotion_until_validation_workflow_exists(self):
+        with patch(
+            "web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting"
+        ) as save:
+            res = self.client.post(
+                "/api/research/retailbot2/strategies",
+                headers=self.headers,
+                json={
+                    "strategy_id": "DBL_PAT_INV",
+                    "mode": "inverse",
+                    "evaluation_enabled": True,
+                    "paper_enabled": True,
+                    "telegram_enabled": False,
+                    "report_enabled": True,
+                    "auto_promote_enabled": True,
+                },
+            )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("not available", res.json()["detail"].lower())
+        save.assert_not_called()
+
     def test_strategy_lifecycle_rejects_unknown_strategy(self):
         res = self.client.post("/api/research/retailbot2/strategies", headers=self.headers, json={
             "strategy_id": "NOT_A_STRATEGY", "mode": "shadow",
