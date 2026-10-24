@@ -51,6 +51,9 @@ Verified this session: a fresh database built from the README steps boots the ap
 
 **Wallet tracking** has its own list of verified limitations in [WALLET_TRACKER.md](WALLET_TRACKER.md#6-known-limitations-verified-open) (alert digest, per-pool grouping, stablecoin metadata, bot filtering, no skill scoring, Birdeye fallback unvalidated, startup ALTER privilege).
 
+
+- Backtest Studio promotion regression coverage now explicitly checks that an unmapped strategy, unavailable policy storage, or unavailable audit-claim persistence cannot activate a paper config (PR #328, merged as `1f8b2ed`). This does not complete generalized RetailBot2 auto-promotion; its API remains fail-closed until an explicit executable mapping and lifecycle-safe validation path exists.
+
 ## 3. Tests
 
 CI runs the pytest suite, project tests, RetailBot accounting regression, and an opt-in MariaDB integration job. Consult the latest workflow results for the current counts and conclusions; test success is not evidence of trading edge. Only the strategies documented in [STRATEGIES.md](STRATEGIES.md#4-results-that-passed-holdout) have passed the stated holdout process.
