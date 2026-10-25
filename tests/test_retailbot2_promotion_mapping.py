@@ -1,5 +1,6 @@
 import pytest
 
+from backtest.strategies import STRATEGIES
 from web.routes.retailbot2_promotion_mapping import resolve_retailbot2_promotion_target
 
 
@@ -112,4 +113,12 @@ def test_rejects_unavailable_executable_registry_without_raising(mapping_registr
 def test_rejects_unavailable_or_malformed_mapping_registry(registry, executable_identities):
     assert resolve_retailbot2_promotion_target(
         _candidate(), executable_identities, registry
+    ) is None
+
+@pytest.mark.parametrize("source_id", sorted(STRATEGIES))
+def test_empty_reviewed_registry_rejects_every_registered_backtest_candidate(source_id, executable_identities):
+    # No source/target pair has been approved by the compatibility audit.
+    # An empty server-owned registry must never silently infer a mapping.
+    assert resolve_retailbot2_promotion_target(
+        {"strategy": source_id}, executable_identities, {}
     ) is None
