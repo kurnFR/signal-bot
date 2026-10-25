@@ -129,3 +129,10 @@ CI runs the pytest suite, project tests, RetailBot accounting regression, and an
 - [PR #351](https://github.com/kurnFR/signal-bot/pull/351) merged as [`f999f4c`](https://github.com/kurnFR/signal-bot/commit/f999f4cbbdd4c1df59858de87d534121c4818b34). The five required pre-merge checks and four post-merge checks passed.
 - Lifecycle API switches now use strict boolean validation. Numeric `0`/`1` and string values such as `"true"`/`"false"` are rejected with HTTP 422 rather than silently coerced into decisions. Valid JSON boolean clients are unchanged.
 - PR #349 also strengthened tests for strategy-and-mode-specific report visibility; PR #350 documented that guard. No runtime settings, production DB, or deployment changed.
+
+
+### RetailBot2 lifecycle readback hardening — PR #353 (2026-10-25)
+
+- [PR #353](https://github.com/kurnFR/signal-bot/pull/353) merged as [`4424db9`](https://github.com/kurnFR/signal-bot/commit/4424db91def562d7156a5c2ca852f9b89167fb43) after all five required pre-merge checks passed.
+- Lifecycle GET no longer uses Python `bool(value)` on persisted values; text `"0"`/`"false"` is correctly false and unknown values fail closed. The endpoint also never returns auto-promotion enabled while the feature is unavailable.
+- Post-merge CI was pending at documentation time. No DB/runtime/deployment changes.
