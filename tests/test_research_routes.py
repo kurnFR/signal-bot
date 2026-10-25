@@ -168,6 +168,36 @@ class TestResearchRoutes(unittest.TestCase):
         })
         self.assertEqual(res.status_code, 400)
 
+    def test_strategy_lifecycle_rejects_coerced_boolean_values(self):
+        # These controls must receive explicit JSON booleans. Pydantic's plain
+        # bool coercion would otherwise accept strings and numeric 0/1 values.
+        with patch("web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting") as save:
+            for field in (
+                "evaluation_enabled", "paper_enabled",
+                "telegram_enabled", "report_enabled", "auto_promote_enabled",
+            ):
+                for invalid in (1, 0, "true", "false"):
+                    payload = {
+                        "strategy_id": "BB_REV_INV",
+                        "mode": "inverse",
+                        "evaluation_enabled": True,
+                        "paper_enabled": True,
+                        "telegram_enabled": False,
+                        "report_enabled": True,
+                        "auto_promote_enabled": False,
+                    }
+                    payload[field] = invalid
+                    response = self.client.post(
+                        "/api/research/retailbot2/strategies",
+                        headers=self.headers,
+                        json=payload,
+                    )
+                    self.assertEqual(
+                        response.status_code, 422,
+                        f"{field}={invalid!r} should require an explicit JSON boolean",
+                    )
+        save.assert_not_called()
+
     def test_strategy_lifecycle_saves_user_selected_telegram_promotion(self):
         with patch("web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting") as save:
             res = self.client.post("/api/research/retailbot2/strategies", headers=self.headers, json={
