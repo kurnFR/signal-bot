@@ -119,3 +119,27 @@ PR #341 hardens the test-only mapping resolver to accept only a separate server-
 - RetailBot2 `strat_double_pattern` uses recent extrema and can enter after price moves away from an extreme; Backtest Studio `double_pattern_v1` waits for confirmed pivots and neckline-break confirmation. Entry semantics differ, so the names alone do not justify mapping them.
 - **No valid source-to-RetailBot2 mappings are approved yet.** Do not map `BB_REV_INV` or `DBL_PAT_INV` to superficially similar Backtest Studio strategies. Review signal definitions, parameters, market/timeframe assumptions, risk/exit behavior and accounting before approving any mapping.
 - The server-owned mapping resolver remains a fail-closed helper, disconnected from activation. Generalized RetailBot2 auto-promotion must remain rejected until a reviewed registry and end-to-end lifecycle integration exist, including opt-in policy, persistent lifecycle settings, idempotent audit/recovery, independent paper accounting, Telegram separation, and stop/hide/report behavior. CI does not verify owner-environment worker or DB state. No deployment or production DB changes.
+
+
+
+### Seven-strategy compatibility crosswalk — reviewed 2026-10-25
+
+This is a source-code compatibility review, not a performance ranking. “Nearest candidate” means only a strategy worth inspecting in a future comparative study; it is **not** an approved activation mapping. RetailBot2 signals are emitted from its own feature calculations and configured 15-minute primary timeframe; Backtest Studio strategies use their own parameter schema, feature preparation, stop/target sizing, and backtest execution path. Similar labels or opposite-direction variants do not make the systems equivalent.
+
+| RetailBot2 identity | RetailBot2 entry concept | Nearest Backtest Studio candidate(s) to investigate | Current mapping decision / reason |
+|---|---|---|---|
+| RSI_CTR | RSI exits an oversold/overbought zone and starts recovering/rejecting | confluence_reversal_v1 | **Not approved.** The Backtest Studio strategy also requires rolling-support context, elevated volume, volatility and MACD-turn conditions; it is not a plain RSI counter-trend equivalent. |
+| MA_WHIP | Fresh EMA 9/21 crossover with a minimum ATR-based separation; EMA 200 supplies context only in other logic | trend_ema_v1, trend_alignment_v1 | **Not approved.** The RetailBot2 trigger is a crossover event. Trend/pullback and higher-timeframe alignment strategies have different entry conditions and data requirements. |
+| SR_TRAP | Price near repeated pivot-based support/resistance; direction is LONG at support and SHORT at resistance, even when trend context is adverse | supply_demand_v1, smc_liquidity_sweep_v1 | **Not approved.** Zone formation/retest and liquidity-sweep confirmation differ from proximity to repeated S/R levels. |
+| MACD_DIV | Price forms a lower low/higher low in MACD histogram or higher high/lower high in histogram using detected extrema | confluence_reversal_v1 | **Not approved.** Shared reversal intent is insufficient; the Backtest Studio strategy does not implement the same explicit price/MACD-divergence trigger. |
+| BB_REV | Price is within configured proximity of Bollinger band or crosses back inside after exceeding it | No direct Bollinger-band strategy in the current registry; confluence_reversal_v1 is not equivalent | **No mapping.** Its RSI/support/volume/volatility/MACD conjunction is materially different. |
+| DBL_PAT | Two similar extrema separated by configured bars; enters when price has moved away from the extrema, before a required neckline-break confirmation | double_pattern_v1 | **Not approved.** Backtest Studio confirms pivots and waits for neckline-break confirmation; timing and trade population differ. |
+| SPIKE_FADE | Large ATR-relative candle followed by an opposite-colour confirmation candle; trades against the spike | volatility_breakout_v1, breakout_continuation_v1 | **No mapping.** These are breakout/continuation concepts, not a confirmed counter-spike fade. Reversing their direction does not reproduce the fade trigger. |
+
+#### Crosswalk conclusion and gate
+
+- **Approved mapping count: zero of seven.** This is deliberate; no current Backtest Studio strategy has been demonstrated source-equivalent to a RetailBot2 strategy from this inspection alone.
+- The current server-owned mapping resolver validates a supplied registry but is not connected to activation. Do not add registry entries merely to make a winner promotable.
+- Before any mapping is approved, compare entry/exit conditions, indicator calculation and warm-up, closed-candle/lookahead rules, symbol/market/timeframe support, parameter meaning, stop/target/risk behavior, fees/slippage, trade accounting and out-of-sample outcomes. Add deterministic fixture-based parity tests where equivalent behavior is claimed.
+- A mapping approval must identify the exact source strategy ID, target RetailBot2 strategy ID and mode, mapping version, reviewer rationale, compatible parameter translation, and tests. Unmapped or ambiguous winners must be rejected with a visible reason.
+- No activation, Telegram, database, runtime, or deployment changes are part of this audit. Keep RetailBot2 promotion API fail-closed until the mapping and full lifecycle workflow are implemented and tested end to end.
