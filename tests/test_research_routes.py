@@ -109,6 +109,37 @@ class TestResearchRoutes(unittest.TestCase):
             self.assertFalse(row["telegram_enabled"])
             self.assertFalse(row["auto_promote_enabled"])
 
+    def test_lifecycle_readback_parses_legacy_flags_and_never_exposes_auto_promotion(self):
+        legacy_rows = [{
+            "strategy_id": "BB_REV_INV",
+            "mode": "inverse",
+            "evaluation_enabled": "0",
+            "paper_enabled": "0",
+            "telegram_enabled": "0",
+            "report_enabled": "false",
+            "auto_promote_enabled": "1",
+        }]
+        with patch(
+            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
+            return_value=legacy_rows,
+        ):
+            res = self.client.get(
+                "/api/research/retailbot2/strategies",
+                headers=self.headers,
+            )
+
+        self.assertEqual(res.status_code, 200)
+        row = next(
+            item for item in res.json()["strategies"]
+            if item["strategy_id"] == "BB_REV_INV" and item["mode"] == "inverse"
+        )
+        self.assertFalse(row["evaluation_enabled"])
+        self.assertFalse(row["paper_enabled"])
+        self.assertFalse(row["telegram_enabled"])
+        self.assertFalse(row["report_enabled"])
+        # Legacy DB values must not make an unavailable feature appear enabled.
+        self.assertFalse(row["auto_promote_enabled"])
+
     def test_historical_composite_rows_fail_closed_even_if_legacy_settings_enable_them(self):
         legacy_rows = [{
             "strategy_id": "COMPOSITE",
