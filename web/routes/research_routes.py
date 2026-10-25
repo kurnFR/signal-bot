@@ -17,7 +17,7 @@ supervisor) -- these toggles only pause/resume what it does once it's up.
 import logging
 import os
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 from typing import Any, Dict, Optional
 import math
 
@@ -41,11 +41,13 @@ class BotControlRequest(BaseModel):
 class StrategyLifecycleRequest(BaseModel):
     strategy_id: str = Field(min_length=1, max_length=64)
     mode: str
-    evaluation_enabled: bool
-    paper_enabled: bool
-    telegram_enabled: bool
-    report_enabled: bool
-    auto_promote_enabled: bool = False
+    # Lifecycle switches are security-sensitive controls. Accept JSON booleans
+    # only; do not silently coerce strings or numeric values into decisions.
+    evaluation_enabled: StrictBool
+    paper_enabled: StrictBool
+    telegram_enabled: StrictBool
+    report_enabled: StrictBool
+    auto_promote_enabled: StrictBool = False
 
 
 def _strategy_lifecycle_registry():
