@@ -165,3 +165,10 @@ This is a source-code compatibility review, not a performance ranking. “Neares
 
 - [PR #351](https://github.com/kurnFR/signal-bot/pull/351) makes `evaluation_enabled`, `paper_enabled`, `telegram_enabled`, `report_enabled`, and `auto_promote_enabled` strict booleans at the API boundary. String/numeric coercion attempts return HTTP 422, and tests verify the persistence helper is not called.
 - All five pre-merge and four post-merge CI checks passed. This does not enable automatic promotion: its API rejection remains in place. No DB/runtime/deployment changes.
+
+
+### Lifecycle readback must fail closed — PR #353 (2026-10-25)
+
+- [PR #353](https://github.com/kurnFR/signal-bot/pull/353) merged as [`4424db9`](https://github.com/kurnFR/signal-bot/commit/4424db91def562d7156a5c2ca852f9b89167fb43). All five required PR-head checks passed.
+- Persisted lifecycle flags are explicitly parsed rather than relying on Python truthiness, and auto-promotion is always returned as disabled until its reviewed workflow is implemented. Regression coverage includes textual false values and legacy auto-promotion true.
+- Post-merge CI was pending when recorded. No live DB, runtime, or deployment changes.
