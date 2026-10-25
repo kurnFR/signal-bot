@@ -124,6 +124,9 @@ PR #341 hardens the test-only mapping resolver to accept only a separate server-
 
 ### Seven-strategy compatibility crosswalk — reviewed 2026-10-25
 
+- [PR #344](https://github.com/kurnFR/signal-bot/pull/344) merged this compatibility audit after all five required pre-merge checks passed; observed post-merge pytest, unit, Wallet Tracker MariaDB integration, and paper-accounting checks also passed. This is source-review and regression evidence only, not proof of deployment or profitability.
+
+
 This is a source-code compatibility review, not a performance ranking. “Nearest candidate” means only a strategy worth inspecting in a future comparative study; it is **not** an approved activation mapping. RetailBot2 signals are emitted from its own feature calculations and configured 15-minute primary timeframe; Backtest Studio strategies use their own parameter schema, feature preparation, stop/target sizing, and backtest execution path. Similar labels or opposite-direction variants do not make the systems equivalent.
 
 | RetailBot2 identity | RetailBot2 entry concept | Nearest Backtest Studio candidate(s) to investigate | Current mapping decision / reason |

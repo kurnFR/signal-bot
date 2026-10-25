@@ -2,7 +2,7 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-25  
-**Master commit at review:** `f65abab8a28de3167356f054ad8686a4e7d22f50`  
+**Master commit at review:** `18362f3204a2e466059a6a5220789e988f09394d`  
 **Overall status:** Active / not finished. PR #282 makes migration status inspection read-only, PR #283, #285, and #287 refresh this progress document, PR #284 makes migration dry-runs read-only, and PR #286 adds a safety-gated populated-database migration rehearsal runbook; PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, #257 contains ML experiment paths, #259 validates deployment manifests before activation, and #263 contains model artifact paths; #265 hardens custom-strategy persistence, #266 validates runtime ML artifact paths, #267 rechecks ML eligibility immediately before model loading, and #269 makes model-weight/manifest writes atomic and prevents duplicate experiment runs from overwriting existing artifacts; #271 prevents the reusable model store from following external symlinks when reading weights or manifests. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
@@ -424,3 +424,10 @@ All pre-merge checks passed on head `080ecf6ce13c7e52e0a2d64ee0b913e90c15059a`. 
 ### Seven-strategy compatibility crosswalk — documentation follow-up
 
 The source review now covers every RetailBot2 strategy ID and records the nearest Backtest Studio candidate only as a future investigation lead. No mapping is approved: matching labels, broad trading intent, or inverse direction do not prove equivalent triggers, data requirements, risk exits or accounting. The mapping registry must remain empty for unsupported pairs; promotion must reject them visibly. See [UI-managed strategy lifecycle](UI_MANAGED_STRATEGY_PROMOTION.md) for the full matrix and the evidence required to approve a mapping. No runtime or production DB changes.
+
+
+### RetailBot2 compatibility audit — PR #344 (2026-10-25)
+
+- [PR #344](https://github.com/kurnFR/signal-bot/pull/344) merged the seven-strategy Backtest Studio-to-RetailBot2 source-compatibility crosswalk. All five required pre-merge checks and the observed post-merge pytest, unit, Wallet Tracker MariaDB integration, and paper-accounting checks passed.
+- The audit approved **zero of seven mappings**. The server-owned mapping resolver remains disconnected from activation; do not create guessed mappings or enable RetailBot2 auto-promotion. Backtest Studio's existing winner flow targets the main paper engine and does not activate RetailBot2.
+- No production DB changes or deployment were performed. CI does not establish owner-environment worker/database state or strategy profitability.
