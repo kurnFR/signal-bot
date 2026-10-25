@@ -2,7 +2,7 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-25  
-**Master commit at review:** `2f7ead76e170b8a1a6cb9e32e1b7fb6896bbc9d8`  
+**Master commit at review:** `cf74e872078a8e92a9f136f5dcbbdb13bc577643`  
 **Overall status:** Active / not finished. PR #282 makes migration status inspection read-only, PR #283, #285, and #287 refresh this progress document, PR #284 makes migration dry-runs read-only, and PR #286 adds a safety-gated populated-database migration rehearsal runbook; PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, #257 contains ML experiment paths, #259 validates deployment manifests before activation, and #263 contains model artifact paths; #265 hardens custom-strategy persistence, #266 validates runtime ML artifact paths, #267 rechecks ML eligibility immediately before model loading, and #269 makes model-weight/manifest writes atomic and prevents duplicate experiment runs from overwriting existing artifacts; #271 prevents the reusable model store from following external symlinks when reading weights or manifests. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
@@ -438,4 +438,11 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - [PR #346](https://github.com/kurnFR/signal-bot/pull/346) merged as [`2f7ead7`](https://github.com/kurnFR/signal-bot/commit/2f7ead76e170b8a1a6cb9e32e1b7fb6896bbc9d8). All five required PR-head checks passed before merge: both pytest runs, unit tests, Wallet Tracker MariaDB integration, and paper-accounting regression.
 - Added a parameterized regression test for every currently registered Backtest Studio strategy, including inverse variants, asserting that an empty server-owned RetailBot2 mapping registry rejects every candidate.
 - This prevents accidental name-based or implicit mapping as the Backtest Studio registry grows. It does not add mappings or activate paper trading/Telegram. RetailBot2 auto-promotion remains unavailable until exact mappings are reviewed and the separate lifecycle workflow is implemented.
-- Post-merge CI was still running at the time of this documentation update; do not interpret the pre-merge checks as post-merge verification. No live deployment or production DB changes were performed.
+- Post-merge verification subsequently completed successfully on merge commit `2f7ead76e170b8a1a6cb9e32e1b7fb6896bbc9d8`: both pytest runs, unit tests, paper-accounting regression, and Wallet Tracker MariaDB integration all passed. No live deployment or production DB changes were performed.
+
+
+### Post-merge CI verification — mapping guard and documentation (2026-10-25)
+
+- PR #346 merge commit `2f7ead76e170b8a1a6cb9e32e1b7fb6896bbc9d8`: both pytest runs, unit tests, paper-accounting regression, and Wallet Tracker MariaDB integration all passed.
+- PR #347 documentation merge commit `cf74e872078a8e92a9f136f5dcbbdb13bc577643`: post-merge pytest, unit tests, paper-accounting regression, and Wallet Tracker MariaDB integration all passed.
+- This confirms CI only; it does not verify the owner environment's worker, DB state, Telegram delivery, profitability, or deployment.
