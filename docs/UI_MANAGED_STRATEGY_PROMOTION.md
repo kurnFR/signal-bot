@@ -178,4 +178,12 @@ This is a source-code compatibility review, not a performance ranking. “Neares
 
 - [PR #355](https://github.com/kurnFR/signal-bot/pull/355) merged as [`80b1c12`](https://github.com/kurnFR/signal-bot/commit/80b1c125c0ee80c4fcb9e58f15b11e404669a43b) after all five required pre-merge checks passed.
 - Worker-side lifecycle refresh now parses boolean representations explicitly and always forces `auto_promote_enabled` false until the reviewed workflow is implemented. Regression coverage tests malformed legacy string values.
-- PR #353 and #354 post-merge checks passed; PR #355 post-merge checks were pending when recorded. No live runtime or deployment changes.
+- PR #353 and #354 post-merge checks passed; PR #355 post-merge checks subsequently completed successfully (all five checks). No live runtime or deployment changes.
+
+
+### Database-boundary lifecycle flag parsing — PR #357 (2026-10-25)
+
+- [PR #357](https://github.com/kurnFR/signal-bot/pull/357) merged as [`fb8be81`](https://github.com/kurnFR/signal-bot/commit/fb8be81c9446cb4c16dd307db04075c1a6a82c3f).
+- The DB helper no longer uses Python `bool(value)` for persisted lifecycle flags. It accepts explicit booleans, integer 0/1, and known text forms; unknown values fail closed.
+- Regression tests cover false-like strings and malformed legacy values at the DB helper boundary. All five PR-head checks and all four post-merge checks passed.
+- This does not enable RetailBot2 auto-promotion or prove owner-environment worker/DB behavior. No live DB or deployment changes.
