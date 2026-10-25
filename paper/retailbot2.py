@@ -51,6 +51,21 @@ warnings.filterwarnings('ignore')
 # ENUMS
 # ═══════════════════════════════════════════════════════════════════
 
+def _lifecycle_flag(value: object) -> bool:
+    """Interpret persisted lifecycle flags explicitly; malformed values fail closed."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return value == 1
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true"}:
+            return True
+        if normalized in {"0", "false"}:
+            return False
+    return False
+
+
 class SignalMode(Enum):
     SHADOW = "shadow"
     INVERSE = "inverse"
@@ -1862,7 +1877,10 @@ class RetailDeathTrapBot:
                 rows = self.db.get_strategy_lifecycle_settings()
                 self.strategy_lifecycle = {
                     (row['strategy_id'], row['mode']): {
-                        key: bool(row[key]) for key in (
+                        key: (
+                            False if key == 'auto_promote_enabled'
+                            else _lifecycle_flag(row.get(key))
+                        ) for key in (
                             'evaluation_enabled', 'paper_enabled', 'telegram_enabled',
                             'report_enabled', 'auto_promote_enabled'
                         )
