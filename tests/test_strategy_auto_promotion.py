@@ -110,6 +110,7 @@ def test_auto_promotion_uses_separate_holdout_metrics_for_train_selected_winner(
     assert '"selection_segment": "train"' in decision["metrics_json"]
     assert '"validation_segment": "holdout"' in decision["metrics_json"]
     assert update.call_args.kwargs["status"] == "promoted"
+    assert update.call_args.kwargs["paper_config_id"] == 42
 
 
 def test_auto_promotion_rejects_candidate_when_holdout_metrics_fail_even_if_train_passes():
