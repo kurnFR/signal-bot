@@ -146,3 +146,10 @@ This is a source-code compatibility review, not a performance ranking. “Neares
 - Before any mapping is approved, compare entry/exit conditions, indicator calculation and warm-up, closed-candle/lookahead rules, symbol/market/timeframe support, parameter meaning, stop/target/risk behavior, fees/slippage, trade accounting and out-of-sample outcomes. Add deterministic fixture-based parity tests where equivalent behavior is claimed.
 - A mapping approval must identify the exact source strategy ID, target RetailBot2 strategy ID and mode, mapping version, reviewer rationale, compatible parameter translation, and tests. Unmapped or ambiguous winners must be rejected with a visible reason.
 - No activation, Telegram, database, runtime, or deployment changes are part of this audit. Keep RetailBot2 promotion API fail-closed until the mapping and full lifecycle workflow are implemented and tested end to end.
+
+
+### Empty reviewed-registry regression guard — PR #346 (2026-10-25)
+
+- [PR #346](https://github.com/kurnFR/signal-bot/pull/346) merged as [`2f7ead7`](https://github.com/kurnFR/signal-bot/commit/2f7ead76e170b8a1a6cb9e32e1b7fb6896bbc9d8), after all five required PR-head checks passed.
+- A parameterized test now checks every registered Backtest Studio strategy against an empty server-owned mapping registry. Every candidate must be rejected; strategy-name similarity must never infer compatibility.
+- The approved mapping count remains zero. No activation or Telegram behavior changed, and the resolver remains disconnected from activation. Post-merge CI was pending at the time of this note; no deployment or production DB changes were made.
