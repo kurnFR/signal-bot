@@ -115,3 +115,10 @@ CI runs the pytest suite, project tests, RetailBot accounting regression, and an
 - PR #346's merge commit passed both pytest runs, unit tests, Wallet Tracker MariaDB integration, and paper-accounting regression.
 - PR #347's documentation merge commit passed post-merge pytest, unit tests, Wallet Tracker MariaDB integration, and paper-accounting regression.
 - No runtime, production database, Telegram, or deployment verification is implied.
+
+
+### RetailBot2 report visibility mode isolation — PR #349 (2026-10-25)
+
+- Merged [PR #349](https://github.com/kurnFR/signal-bot/pull/349) as [`86a26a9`](https://github.com/kurnFR/signal-bot/commit/86a26a92970dd69cdc802b2bc9a7af7802491ef5).
+- Tests now assert that both report query paths join lifecycle settings by exact strategy ID and mode. A hidden inverse identity must not suppress shadow results for the same base strategy.
+- All five required PR-head checks and all four post-merge checks passed. CI does not establish live DB/worker behavior or deployment.
