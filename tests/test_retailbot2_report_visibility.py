@@ -53,6 +53,9 @@ def test_telegram_performance_stats_respect_strategy_report_visibility():
     assert stats["BB_REV_INV_inverse"]["total"] == 10
     assert stats["BB_REV_INV_inverse"]["net_pnl"] == 125.5
     assert "LEFT JOIN rdt_strategy_lifecycle" in connection.cur.query
+    # Visibility is scoped to the exact strategy/mode pair: hiding inverse
+    # results must not hide the same strategy in shadow mode (or vice versa).
+    assert "ON l.strategy_id = t.strategy AND l.mode = t.mode" in connection.cur.query
     assert "COALESCE(l.report_enabled, TRUE) = TRUE" in connection.cur.query
     assert connection.cur.closed is True
     assert connection.closed is True
