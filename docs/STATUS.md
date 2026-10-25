@@ -107,4 +107,11 @@ CI runs the pytest suite, project tests, RetailBot accounting regression, and an
 
 - Merged [PR #346](https://github.com/kurnFR/signal-bot/pull/346) as [`2f7ead7`](https://github.com/kurnFR/signal-bot/commit/2f7ead76e170b8a1a6cb9e32e1b7fb6896bbc9d8). The five required PR-head checks passed before merge.
 - Regression coverage now iterates over every Backtest Studio strategy registry entry and verifies that the empty reviewed mapping registry rejects it. This guards against accidental implicit mapping when new candidates are registered.
-- No approved mappings were added. The RetailBot2 promotion API remains fail-closed; Backtest Studio's existing main-paper-engine auto-promotion is separate. Post-merge checks were still running when this note was written. No deployment or production DB changes.
+- No approved mappings were added. The RetailBot2 promotion API remains fail-closed; Backtest Studio's existing main-paper-engine auto-promotion is separate. Post-merge pytest, unit tests, Wallet Tracker MariaDB integration, and paper-accounting checks subsequently completed successfully on the documentation merge commit `cf74e872078a8e92a9f136f5dcbbdb13bc577643`. This is CI evidence only; no deployment or production DB changes.
+
+
+### Post-merge CI status (2026-10-25)
+
+- PR #346's merge commit passed both pytest runs, unit tests, Wallet Tracker MariaDB integration, and paper-accounting regression.
+- PR #347's documentation merge commit passed post-merge pytest, unit tests, Wallet Tracker MariaDB integration, and paper-accounting regression.
+- No runtime, production database, Telegram, or deployment verification is implied.
