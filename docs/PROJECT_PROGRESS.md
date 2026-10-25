@@ -418,3 +418,9 @@ All pre-merge checks passed on head `080ecf6ce13c7e52e0a2d64ee0b913e90c15059a`. 
 - RetailBot2 `strat_double_pattern` uses recent extrema and can enter after price moves away from an extreme; Backtest Studio `double_pattern_v1` waits for confirmed pivots and neckline-break confirmation. Entry semantics differ, so the names alone do not justify mapping them.
 - **No valid source-to-RetailBot2 mappings are approved yet.** Do not map `BB_REV_INV` or `DBL_PAT_INV` to superficially similar Backtest Studio strategies. Review signal definitions, parameters, market/timeframe assumptions, risk/exit behavior and accounting before approving any mapping.
 - The server-owned mapping resolver remains a fail-closed helper, disconnected from activation. Generalized RetailBot2 auto-promotion must remain rejected until a reviewed registry and end-to-end lifecycle integration exist, including opt-in policy, persistent lifecycle settings, idempotent audit/recovery, independent paper accounting, Telegram separation, and stop/hide/report behavior. CI does not verify owner-environment worker or DB state. No deployment or production DB changes.
+
+
+
+### Seven-strategy compatibility crosswalk — documentation follow-up
+
+The source review now covers every RetailBot2 strategy ID and records the nearest Backtest Studio candidate only as a future investigation lead. No mapping is approved: matching labels, broad trading intent, or inverse direction do not prove equivalent triggers, data requirements, risk exits or accounting. The mapping registry must remain empty for unsupported pairs; promotion must reject them visibly. See [UI-managed strategy lifecycle](UI_MANAGED_STRATEGY_PROMOTION.md) for the full matrix and the evidence required to approve a mapping. No runtime or production DB changes.
