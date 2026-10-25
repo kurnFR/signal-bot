@@ -101,3 +101,10 @@ CI runs the pytest suite, project tests, RetailBot accounting regression, and an
 - Reviewed all seven RetailBot2 strategy identities (RSI_CTR, MA_WHIP, SR_TRAP, MACD_DIV, BB_REV, DBL_PAT, SPIKE_FADE) against the current Backtest Studio strategy registry.
 - Result: **zero approved mappings**. Nearest candidates (such as EMA trend, supply/demand, or double-pattern strategies) have material trigger/data/entry-timing differences; they are investigation candidates only, not safe mappings. The detailed matrix and approval gate are in [UI-managed strategy lifecycle](UI_MANAGED_STRATEGY_PROMOTION.md).
 - The server-owned mapping resolver remains disconnected from activation. RetailBot2 auto-promotion must remain fail-closed; no code activation, production DB change, or deployment was performed.
+
+
+### RetailBot2 promotion mapping guard — PR #346 (2026-10-25)
+
+- Merged [PR #346](https://github.com/kurnFR/signal-bot/pull/346) as [`2f7ead7`](https://github.com/kurnFR/signal-bot/commit/2f7ead76e170b8a1a6cb9e32e1b7fb6896bbc9d8). The five required PR-head checks passed before merge.
+- Regression coverage now iterates over every Backtest Studio strategy registry entry and verifies that the empty reviewed mapping registry rejects it. This guards against accidental implicit mapping when new candidates are registered.
+- No approved mappings were added. The RetailBot2 promotion API remains fail-closed; Backtest Studio's existing main-paper-engine auto-promotion is separate. Post-merge checks were still running when this note was written. No deployment or production DB changes.
