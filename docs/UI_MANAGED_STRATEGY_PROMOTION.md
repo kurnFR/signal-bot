@@ -103,3 +103,10 @@ The exact numerical criteria are product defaults and must be editable in the UI
 - Auto-promotion uses editable persisted criteria, is opt-in, fail-closed, auditable, and cannot promote an unmapped or unprofitable candidate.
 - Screener and wallet alerts remain unchanged.
 - CI verifies the settings, accounting, alert, report, and promotion behaviors.
+
+
+## Backtest Studio vs RetailBot2 identity boundary (reviewed 2026-10-25)
+
+Backtest Studio's existing Battle Royale auto-promotion path targets the main paper engine (`paper.engine` / `paper_configs`) and validates against the Backtest Studio `STRATEGIES` registry. RetailBot2 has a separate `StrategyID` registry, per-strategy/mode lifecycle settings, worker, and report/Telegram gates. Passing the main paper engine's promotion gates does **not** activate a RetailBot2 strategy and must not be treated as equivalent.
+
+PR #341 hardens the test-only mapping resolver to accept only a separate server-owned mapping registry keyed by exact source strategy identity. Candidate payloads cannot supply or override trusted mapping records. The resolver is not connected to activation and no production mappings are defined. Do not add guessed mappings from similar names: compatibility must be reviewed against signal semantics, parameters, market/timeframe assumptions, risk/exit behavior, and accounting. Keep generalized RetailBot2 auto-promotion rejected until this source is established and the entire flow has explicit opt-in, lifecycle persistence, audit/recovery, paper-trading activation, separate Telegram controls, and stop/hide coverage.
