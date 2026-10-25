@@ -172,3 +172,10 @@ This is a source-code compatibility review, not a performance ranking. “Neares
 - [PR #353](https://github.com/kurnFR/signal-bot/pull/353) merged as [`4424db9`](https://github.com/kurnFR/signal-bot/commit/4424db91def562d7156a5c2ca852f9b89167fb43). All five required PR-head checks passed.
 - Persisted lifecycle flags are explicitly parsed rather than relying on Python truthiness, and auto-promotion is always returned as disabled until its reviewed workflow is implemented. Regression coverage includes textual false values and legacy auto-promotion true.
 - Post-merge CI was pending when recorded. No live DB, runtime, or deployment changes.
+
+
+### Worker execution boundary lifecycle guard — PR #355 (2026-10-25)
+
+- [PR #355](https://github.com/kurnFR/signal-bot/pull/355) merged as [`80b1c12`](https://github.com/kurnFR/signal-bot/commit/80b1c125c0ee80c4fcb9e58f15b11e404669a43b) after all five required pre-merge checks passed.
+- Worker-side lifecycle refresh now parses boolean representations explicitly and always forces `auto_promote_enabled` false until the reviewed workflow is implemented. Regression coverage tests malformed legacy string values.
+- PR #353 and #354 post-merge checks passed; PR #355 post-merge checks were pending when recorded. No live runtime or deployment changes.
