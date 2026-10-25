@@ -48,7 +48,7 @@ def start_worker(name, target_fn):
 
 def main():
     logger.info("==================================================================")
-    logger.info("  ⚡ Starting News + Economic Calendar AI Overlay Engine")
+    logger.info("  * Starting News + Economic Calendar AI Overlay Engine")
     logger.info("==================================================================")
 
     workers = [

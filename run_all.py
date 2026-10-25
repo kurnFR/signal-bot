@@ -105,6 +105,57 @@ def _shutdown_all():
     logger.info("All processes stopped.")
 
 
+def ensure_database_running():
+    """Checks if database port is open; starts embedded MariaDB if available."""
+    import socket
+    from pathlib import Path
+
+    host = os.getenv("MYSQL_HOST", "127.0.0.1")
+    port = int(os.getenv("MYSQL_PORT", 3306))
+
+    def is_port_open():
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                return True
+        except OSError:
+            return False
+
+    if is_port_open():
+        logger.info(f"Database ({host}:{port}) is reachable.")
+        return None
+
+    candidates = [
+        Path(os.path.dirname(os.path.abspath(__file__))).parent / "mariadb",
+        Path(os.path.dirname(os.path.abspath(__file__))) / "mariadb",
+    ]
+    for mariadb_root in candidates:
+        mysqld_paths = list(mariadb_root.glob("**/bin/mysqld.exe"))
+        ini_paths = list(mariadb_root.glob("**/my.ini"))
+        if mysqld_paths and ini_paths:
+            mysqld_bin = mysqld_paths[0]
+            my_ini = ini_paths[0]
+            logger.info("Database is not running. Starting embedded MariaDB (%s)...", mysqld_bin)
+            proc = subprocess.Popen(
+                [str(mysqld_bin), f"--defaults-file={str(my_ini)}", "--console"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            for _ in range(15):
+                time.sleep(1)
+                if is_port_open():
+                    logger.info("Embedded MariaDB started successfully (PID %s).", proc.pid)
+                    with _children_lock:
+                        _children["mariadb"] = proc
+                    return proc
+            logger.warning("MariaDB process started (PID %s) but port %s was not open within 15s.", proc.pid, port)
+            with _children_lock:
+                _children["mariadb"] = proc
+            return proc
+
+    logger.warning("Database at %s:%s is not reachable and local MariaDB binary not found.", host, port)
+    return None
+
+
 def apply_migrations(runner=subprocess.run) -> bool:
     """Bring the database schema up to date before any process starts.
 
@@ -140,6 +191,8 @@ def main():
     if not to_run:
         logger.error("Nothing selected to run (check --skip/--only). Exiting.")
         return
+
+    ensure_database_running()
 
     if not apply_migrations():
         sys.exit(1)

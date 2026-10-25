@@ -18,9 +18,50 @@ if __name__ == "__main__":
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
     args = parser.parse_args()
 
+    # Ensure database is reachable before running web server
+    import socket
+    import subprocess
+    import time
+    from pathlib import Path
+
+    db_host = os.getenv("MYSQL_HOST", "127.0.0.1")
+    db_port = int(os.getenv("MYSQL_PORT", 3306))
+    def is_port_open():
+        try:
+            with socket.create_connection((db_host, db_port), timeout=1):
+                return True
+        except OSError:
+            return False
+
+    if not is_port_open():
+        candidates = [
+            Path(os.path.dirname(os.path.abspath(__file__))).parent / "mariadb",
+            Path(os.path.dirname(os.path.abspath(__file__))) / "mariadb",
+        ]
+        for mariadb_root in candidates:
+            mysqld_paths = list(mariadb_root.glob("**/bin/mysqld.exe"))
+            ini_paths = list(mariadb_root.glob("**/my.ini"))
+            if mysqld_paths and ini_paths:
+                print(f"  Starting local MariaDB ({mysqld_paths[0]})...")
+                subprocess.Popen(
+                    [str(mysqld_paths[0]), f"--defaults-file={str(ini_paths[0])}", "--console"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                for _ in range(15):
+                    time.sleep(1)
+                    if is_port_open():
+                        print("  Embedded MariaDB is ready.")
+                        break
+
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
     import uvicorn
     print(f"\n==================================================================")
-    print(f"  ⚡ Crypto Signal Bot — Quantitative Trading Platform")
+    print(f"  * Crypto Signal Bot - Quantitative Trading Platform")
     shown_host = "localhost" if args.host in ("127.0.0.1", "localhost") else args.host
     print(f"  Listening on {args.host}:{args.port}  ->  http://{shown_host}:{args.port}")
     if args.host in ("0.0.0.0", "::"):

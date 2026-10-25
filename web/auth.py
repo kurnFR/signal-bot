@@ -42,7 +42,8 @@ def _load_or_create_secret(path: str) -> str:
     secret = secrets.token_hex(32)
     fd, temp_path = tempfile.mkstemp(prefix=".app_secret.", dir=directory)
     try:
-        os.fchmod(fd, 0o600)
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as secret_file:
             fd = -1
             secret_file.write(secret)
@@ -52,10 +53,25 @@ def _load_or_create_secret(path: str) -> str:
         # Linking a fully written temporary file avoids exposing an empty/partial key
         # if multiple application workers start at the same time. The first link wins.
         try:
-            os.link(temp_path, path)
+            if hasattr(os, "link"):
+                os.link(temp_path, path)
+            else:
+                os.replace(temp_path, path)
             return secret
         except FileExistsError:
-            os.chmod(path, 0o600)
+            try:
+                os.chmod(path, 0o600)
+            except OSError:
+                pass
+            with open(path, "r", encoding="utf-8") as secret_file:
+                existing = secret_file.read().strip()
+            if not existing:
+                raise RuntimeError("Application secret file exists but is empty")
+            return existing
+        except OSError:
+            if not os.path.exists(path):
+                os.replace(temp_path, path)
+                return secret
             with open(path, "r", encoding="utf-8") as secret_file:
                 existing = secret_file.read().strip()
             if not existing:
