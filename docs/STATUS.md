@@ -92,3 +92,11 @@ CI runs the pytest suite, project tests, RetailBot accounting regression, and an
 - Reviewed RetailBot2 Bollinger-reversion and double-pattern entry logic against Backtest Studio's registered strategies. `confluence_reversal_v1` is not semantically equivalent to Bollinger reversion; `double_pattern_v1` requires confirmed pivots plus a neckline break, unlike RetailBot2's earlier extrema-based entry.
 - No source-to-RetailBot2 mappings are approved. Do not guess mappings for `BB_REV_INV` / `DBL_PAT_INV` based on names. The mapping resolver is server-registry-based but not wired to activation; RetailBot2 auto-promotion remains fail-closed pending reviewed mappings and end-to-end lifecycle, audit/recovery, accounting, Telegram and stop/hide tests.
 - PR #342 merged as `e17713a` after all five required CI checks passed. This was documentation-only; no production DB changes or deployment.
+
+
+
+### RetailBot2 seven-strategy crosswalk (2026-10-25)
+
+- Reviewed all seven RetailBot2 strategy identities (RSI_CTR, MA_WHIP, SR_TRAP, MACD_DIV, BB_REV, DBL_PAT, SPIKE_FADE) against the current Backtest Studio strategy registry.
+- Result: **zero approved mappings**. Nearest candidates (such as EMA trend, supply/demand, or double-pattern strategies) have material trigger/data/entry-timing differences; they are investigation candidates only, not safe mappings. The detailed matrix and approval gate are in [UI-managed strategy lifecycle](UI_MANAGED_STRATEGY_PROMOTION.md).
+- The server-owned mapping resolver remains disconnected from activation. RetailBot2 auto-promotion must remain fail-closed; no code activation, production DB change, or deployment was performed.
