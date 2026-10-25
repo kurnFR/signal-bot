@@ -56,3 +56,30 @@ def test_lifecycle_database_recovery_restores_saved_settings(monkeypatch):
     assert settings["telegram_enabled"] is False
     assert settings["report_enabled"] is False
     assert bot._strategy_lifecycle_unavailable is False
+
+
+def test_lifecycle_readback_parses_string_flags_and_never_enables_auto_promotion(monkeypatch):
+    bot = object.__new__(RetailDeathTrapBot)
+    bot.logger = logging.getLogger("test.retailbot2.lifecycle")
+    bot.db = Mock()
+    bot.db.get_strategy_lifecycle_settings.return_value = [{
+        "strategy_id": "BB_REV_INV",
+        "mode": "inverse",
+        "evaluation_enabled": "0",
+        "paper_enabled": "0",
+        "telegram_enabled": "0",
+        "report_enabled": "false",
+        "auto_promote_enabled": "1",
+    }]
+    bot.strategy_lifecycle = {}
+    bot._strategy_lifecycle_reload_at = 0.0
+    bot._strategy_lifecycle_unavailable = False
+    monkeypatch.setattr("paper.retailbot2.time.monotonic", lambda: 100.0)
+
+    settings = bot._get_strategy_lifecycle("BB_REV_INV", "inverse")
+
+    assert settings["evaluation_enabled"] is False
+    assert settings["paper_enabled"] is False
+    assert settings["telegram_enabled"] is False
+    assert settings["report_enabled"] is False
+    assert settings["auto_promote_enabled"] is False
