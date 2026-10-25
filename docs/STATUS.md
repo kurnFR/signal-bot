@@ -122,3 +122,10 @@ CI runs the pytest suite, project tests, RetailBot accounting regression, and an
 - Merged [PR #349](https://github.com/kurnFR/signal-bot/pull/349) as [`86a26a9`](https://github.com/kurnFR/signal-bot/commit/86a26a92970dd69cdc802b2bc9a7af7802491ef5).
 - Tests now assert that both report query paths join lifecycle settings by exact strategy ID and mode. A hidden inverse identity must not suppress shadow results for the same base strategy.
 - All five required PR-head checks and all four post-merge checks passed. CI does not establish live DB/worker behavior or deployment.
+
+
+### RetailBot2 lifecycle API validation — PR #351 (2026-10-25)
+
+- [PR #351](https://github.com/kurnFR/signal-bot/pull/351) merged as [`f999f4c`](https://github.com/kurnFR/signal-bot/commit/f999f4cbbdd4c1df59858de87d534121c4818b34). The five required pre-merge checks and four post-merge checks passed.
+- Lifecycle API switches now use strict boolean validation. Numeric `0`/`1` and string values such as `"true"`/`"false"` are rejected with HTTP 422 rather than silently coerced into decisions. Valid JSON boolean clients are unchanged.
+- PR #349 also strengthened tests for strategy-and-mode-specific report visibility; PR #350 documented that guard. No runtime settings, production DB, or deployment changed.
