@@ -149,6 +149,9 @@ class TestRetailBotLedgerStats(unittest.TestCase):
         self.assertIn("FROM rdt_trades", conn.cursor_obj.executed_sql)
         self.assertIn("WHERE t.status='CLOSED'", conn.cursor_obj.executed_sql)
         self.assertIn("COALESCE(l.report_enabled, TRUE) = TRUE", conn.cursor_obj.executed_sql)
+        # Keep visibility isolated by both strategy and mode; an inverse-only
+        # hide must not suppress the strategy's shadow performance row.
+        self.assertIn("ON l.strategy_id = t.strategy AND l.mode = t.mode", conn.cursor_obj.executed_sql)
         self.assertNotIn("FROM rdt_strategy_stats", conn.cursor_obj.executed_sql)
         self.assertTrue(conn.closed)
         self.assertTrue(conn.cursor_obj.closed)
