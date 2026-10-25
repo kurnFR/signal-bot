@@ -159,3 +159,9 @@ This is a source-code compatibility review, not a performance ranking. “Neares
 
 - [PR #349](https://github.com/kurnFR/signal-bot/pull/349) added regression assertions for both RetailBot2 performance-report query paths, requiring `l.strategy_id = t.strategy AND l.mode = t.mode`.
 - This protects independent shadow/inverse report visibility. All five pre-merge checks and all four post-merge checks passed. No production code, mappings, activation, DB state, or deployment changed.
+
+
+### Strict lifecycle boolean contract — PR #351 (2026-10-25)
+
+- [PR #351](https://github.com/kurnFR/signal-bot/pull/351) makes `evaluation_enabled`, `paper_enabled`, `telegram_enabled`, `report_enabled`, and `auto_promote_enabled` strict booleans at the API boundary. String/numeric coercion attempts return HTTP 422, and tests verify the persistence helper is not called.
+- All five pre-merge and four post-merge CI checks passed. This does not enable automatic promotion: its API rejection remains in place. No DB/runtime/deployment changes.
