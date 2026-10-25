@@ -389,6 +389,29 @@ def _auto_promote_top_candidate(
             telegram_enabled=bool(criteria["send_telegram"]),
             report_enabled=True,
         )
+        config_id = config_result.get("id") if isinstance(config_result, dict) else None
+        if (
+            not isinstance(config_result, dict)
+            or config_result.get("status") != "success"
+            or isinstance(config_id, bool)
+            or not isinstance(config_id, int)
+            or config_id <= 0
+        ):
+            final_reason = (
+                "Paper config activation did not return a confirmed persisted config ID; "
+                "reconcile paper_configs before retrying or sending a deployment alert"
+            )
+            update_strategy_promotion_decision(
+                decision_hash, status="failed", reason=final_reason,
+                paper_config_id=config_id if isinstance(config_id, int) and not isinstance(config_id, bool) else None,
+                telegram_result="not_attempted",
+            )
+            return {
+                "status": "failed", "strategy": strategy_name,
+                "reason": final_reason, "telegram_result": "not_attempted",
+                "criteria": criteria,
+            }
+
         telegram_result = "disabled"
         final_status = "promoted"
         final_reason = "Passed policy gates and activated in paper trading"
