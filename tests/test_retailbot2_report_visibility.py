@@ -59,3 +59,69 @@ def test_telegram_performance_stats_respect_strategy_report_visibility():
     assert "COALESCE(l.report_enabled, TRUE) = TRUE" in connection.cur.query
     assert connection.cur.closed is True
     assert connection.closed is True
+
+
+
+def test_lifecycle_database_readback_parses_string_flags_without_truthiness(monkeypatch):
+    from db import db as db_module
+
+    rows = [{
+        "strategy_id": "BB_REV_INV",
+        "mode": "inverse",
+        "evaluation_enabled": "0",
+        "paper_enabled": "false",
+        "telegram_enabled": "1",
+        "report_enabled": "false",
+        "auto_promote_enabled": "1",
+        "updated_at": None,
+    }, {
+        "strategy_id": "DBL_PAT",
+        "mode": "shadow",
+        "evaluation_enabled": "unexpected",
+        "paper_enabled": None,
+        "telegram_enabled": "true",
+        "report_enabled": "0",
+        "auto_promote_enabled": "false",
+        "updated_at": None,
+    }]
+
+    class Cursor:
+        def execute(self, query, params=None):
+            self.query = query
+
+        def fetchall(self):
+            return [dict(row) for row in rows]
+
+        def close(self):
+            pass
+
+    class Connection:
+        def cursor(self, dictionary=False):
+            assert dictionary is True
+            return Cursor()
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    class Pool:
+        def get_connection(self):
+            return Connection()
+
+    monkeypatch.setattr(db_module, "get_retailbot2_pool", lambda: Pool())
+
+    settings = db_module.get_retailbot2_strategy_lifecycle_settings()
+    by_key = {(row["strategy_id"], row["mode"]): row for row in settings}
+
+    assert by_key[("BB_REV_INV", "inverse")]["evaluation_enabled"] is False
+    assert by_key[("BB_REV_INV", "inverse")]["paper_enabled"] is False
+    assert by_key[("BB_REV_INV", "inverse")]["telegram_enabled"] is True
+    assert by_key[("BB_REV_INV", "inverse")]["report_enabled"] is False
+    assert by_key[("BB_REV_INV", "inverse")]["auto_promote_enabled"] is True
+    assert by_key[("DBL_PAT", "shadow")]["evaluation_enabled"] is False
+    assert by_key[("DBL_PAT", "shadow")]["paper_enabled"] is False
+    assert by_key[("DBL_PAT", "shadow")]["telegram_enabled"] is True
+    assert by_key[("DBL_PAT", "shadow")]["report_enabled"] is False
+    assert by_key[("DBL_PAT", "shadow")]["auto_promote_enabled"] is False

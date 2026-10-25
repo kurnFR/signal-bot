@@ -1212,6 +1212,25 @@ def _ensure_retailbot2_strategy_lifecycle_table(cur):
     """)
 
 
+def _retailbot2_lifecycle_flag(value):
+    """Parse persisted lifecycle flags without treating non-empty strings as true.
+
+    MariaDB BOOLEAN columns normally return 0/1, but fail closed if a legacy
+    adapter or imported row supplies textual or malformed values.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return value == 1
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true"}:
+            return True
+        if normalized in {"0", "false"}:
+            return False
+    return False
+
+
 def get_retailbot2_strategy_lifecycle_settings():
     """Read UI-managed strategy settings. An empty table is valid and means
     worker defaults apply; no promotion is implicitly enabled."""
@@ -1232,7 +1251,7 @@ def get_retailbot2_strategy_lifecycle_settings():
         for row in rows:
             for key in ("evaluation_enabled", "paper_enabled", "telegram_enabled",
                         "report_enabled", "auto_promote_enabled"):
-                row[key] = bool(row[key])
+                row[key] = _retailbot2_lifecycle_flag(row[key])
             if row.get("updated_at") is not None:
                 row["updated_at"] = str(row["updated_at"])
         return rows
