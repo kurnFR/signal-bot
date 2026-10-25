@@ -401,3 +401,11 @@ All pre-merge checks passed on head `080ecf6ce13c7e52e0a2d64ee0b913e90c15059a`. 
 - [PR #339](https://github.com/kurnFR/signal-bot/pull/339) merged as [`01712d6`](https://github.com/kurnFR/signal-bot/commit/01712d62d5985489c8b48b1aa0b56f0307a32448) after all five required pre-merge checks passed on head `f223112e72b8a364e347a409171d3ae6817c693d`.
 - Added regression coverage ensuring malformed mode values and an unavailable/non-iterable executable registry are rejected without raising. The helper remains test-only, defines no real mappings, and is not connected to activation.
 - Next: source and audit a real mapping registry before connecting it to any promotion path. Keep automatic promotion rejected until eligibility, lifecycle, audit/recovery, explicit user controls, and Telegram separation are tested end to end. No deployment or production DB changes.
+
+
+### RetailBot2 mapping trust boundary — PR #341 (merged 2026-10-25)
+
+- [PR #341](https://github.com/kurnFR/signal-bot/pull/341) merged as [`9893d72`](https://github.com/kurnFR/signal-bot/commit/9893d7261003992c29fb0befaf009cfeae07d8e1) after all five required CI checks passed on head `09db6a81cf17613001e8e69eb668fe0fdac720af`.
+- The mapping resolver now receives a separate server-owned registry keyed by exact Backtest Studio source strategy ID; candidate-supplied mapping metadata cannot self-attest compatibility or override the target. Regression tests cover forged metadata, unknown source IDs, malformed registries, invalid targets/modes, and fail-closed behavior.
+- Code-path review confirms Backtest Studio's existing `_auto_promote_top_candidate` promotes into the main `paper.engine` / `paper_configs` workflow, whose `STRATEGIES` registry is separate from RetailBot2's `StrategyID` and lifecycle registry. Do not reuse that workflow as if it activates RetailBot2.
+- No production mapping records were added. The resolver remains disconnected from activation; generalized RetailBot2 auto-promotion stays rejected until a real mapping source is reviewed and the distinct lifecycle, user opt-in, audit/recovery, paper accounting, Telegram and stop/hide controls are integrated and tested end to end. No deployment or production DB changes.
