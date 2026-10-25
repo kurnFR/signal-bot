@@ -50,6 +50,26 @@ class StrategyLifecycleRequest(BaseModel):
     auto_promote_enabled: StrictBool = False
 
 
+def _stored_lifecycle_bool(value: Any) -> bool:
+    """Parse persisted lifecycle flags without Python's truthy-string trap.
+
+    MariaDB normally returns TINYINT flags as integers, but tolerate explicit
+    textual representations from legacy/imported rows. Unknown values fail
+    closed instead of enabling a control.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return value == 1
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true"}:
+            return True
+        if normalized in {"0", "false"}:
+            return False
+    return False
+
+
 def _strategy_lifecycle_registry():
     """Build editable rows from executable strategy identities, not a
     hardcoded list of strategies selected for Telegram promotion."""
@@ -191,7 +211,7 @@ def retailbot2_strategies_get():
                     "report_enabled": True,
                 })
             row.update(row_defaults)
-            row.update({key: bool(saved[key]) for key in defaults if key in saved})
+            row.update({key: _stored_lifecycle_bool(saved[key]) for key in defaults if key in saved})
             # Historical composite identities are report-only. Enforce this
             # invariant after merging persisted rows too, because older or
             # manually edited settings may contain unsafe legacy flags.
@@ -200,6 +220,9 @@ def retailbot2_strategies_get():
                 row["paper_enabled"] = False
                 row["telegram_enabled"] = False
                 row["auto_promote_enabled"] = False
+            # Automatic promotion is not implemented yet. Never echo a legacy
+            # true value back to the UI as if it were an available control.
+            row["auto_promote_enabled"] = False
             row["updated_at"] = saved.get("updated_at")
         return {"strategies": registry}
     except Exception as e:
