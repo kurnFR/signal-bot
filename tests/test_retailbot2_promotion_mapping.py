@@ -64,3 +64,18 @@ def test_rejects_unregistered_invalid_or_historical_only_targets(mapping, execut
 
 def test_rejects_blank_source_identity(executable_identities):
     assert resolve_retailbot2_promotion_target(_candidate(strategy="  "), executable_identities) is None
+
+
+@pytest.mark.parametrize("mode", [None, [], {}, 1])
+def test_rejects_non_string_modes_without_raising(mode, executable_identities):
+    candidate = _candidate(retailbot2_mapping={
+        "strategy_id": "BB_REV_INV",
+        "mode": mode,
+        "compatible": True,
+        "mapping_version": "reviewed-v1",
+    })
+    assert resolve_retailbot2_promotion_target(candidate, executable_identities) is None
+
+
+def test_rejects_unavailable_executable_registry_without_raising():
+    assert resolve_retailbot2_promotion_target(_candidate(), None) is None
