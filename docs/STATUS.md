@@ -85,3 +85,10 @@ CI runs the pytest suite, project tests, RetailBot accounting regression, and an
 - Merged in PR #339 (`01712d6`): malformed mapping modes and unavailable executable registries now fail closed, with regression coverage. The helper is still disconnected from activation; no actual mappings or automatic promotion are enabled. No deployment or production DB changes.
 
 - Merged in PR #341 (`9893d72`): mapping resolution now uses a separate server-owned reviewed registry rather than trusting candidate-supplied mapping metadata. All five required CI checks passed on head `09db6a81cf17613001e8e69eb668fe0fdac720af`. Code review also confirms Backtest Studio auto-promotion writes to the main `paper_configs` engine, not RetailBot2 lifecycle state; the two registries and activation paths must remain distinct. No real mappings, RetailBot2 auto-promotion, production DB changes, or deployment were introduced.
+
+
+### RetailBot2 strategy compatibility audit (2026-10-25)
+
+- Reviewed RetailBot2 Bollinger-reversion and double-pattern entry logic against Backtest Studio's registered strategies. `confluence_reversal_v1` is not semantically equivalent to Bollinger reversion; `double_pattern_v1` requires confirmed pivots plus a neckline break, unlike RetailBot2's earlier extrema-based entry.
+- No source-to-RetailBot2 mappings are approved. Do not guess mappings for `BB_REV_INV` / `DBL_PAT_INV` based on names. The mapping resolver is server-registry-based but not wired to activation; RetailBot2 auto-promotion remains fail-closed pending reviewed mappings and end-to-end lifecycle, audit/recovery, accounting, Telegram and stop/hide tests.
+- PR #342 merged as `e17713a` after all five required CI checks passed. This was documentation-only; no production DB changes or deployment.
