@@ -142,4 +142,11 @@ CI runs the pytest suite, project tests, RetailBot accounting regression, and an
 
 - [PR #355](https://github.com/kurnFR/signal-bot/pull/355) merged as [`80b1c12`](https://github.com/kurnFR/signal-bot/commit/80b1c125c0ee80c4fcb9e58f15b11e404669a43b); all five required PR-head checks passed.
 - RetailBot2 worker lifecycle reload now explicitly parses stored flags; text values `"0"` and `"false"` are false, unknown values fail closed, and auto-promotion is forced off in the worker cache until implemented.
-- PR #353 and #354 post-merge checks passed. PR #355 post-merge CI was pending at documentation time. No DB/runtime/deployment changes.
+- PR #353 and #354 post-merge checks passed. PR #355 post-merge CI subsequently completed successfully (all five checks). No DB/runtime/deployment changes.
+
+
+### RetailBot2 lifecycle DB-boundary parsing — PR #357 (2026-10-25)
+
+- [PR #357](https://github.com/kurnFR/signal-bot/pull/357) merged as [`fb8be81`](https://github.com/kurnFR/signal-bot/commit/fb8be81c9446cb4c16dd307db04075c1a6a82c3f).
+- The DB helper now parses known boolean representations explicitly; textual `"0"`/`"false"` and malformed values fail closed instead of relying on Python truthiness.
+- All five pre-merge checks and all four post-merge checks passed. Auto-promotion remains disabled. No production DB, runtime, Telegram, or deployment changes.
