@@ -153,3 +153,9 @@ This is a source-code compatibility review, not a performance ranking. “Neares
 - [PR #346](https://github.com/kurnFR/signal-bot/pull/346) merged as [`2f7ead7`](https://github.com/kurnFR/signal-bot/commit/2f7ead76e170b8a1a6cb9e32e1b7fb6896bbc9d8), after all five required PR-head checks passed.
 - A parameterized test now checks every registered Backtest Studio strategy against an empty server-owned mapping registry. Every candidate must be rejected; strategy-name similarity must never infer compatibility.
 - The approved mapping count remains zero. No activation or Telegram behavior changed, and the resolver remains disconnected from activation. Post-merge CI subsequently completed successfully: PR #346 passed both pytest runs, unit tests, Wallet Tracker MariaDB integration, and paper-accounting regression; PR #347 passed its post-merge pytest, unit tests, Wallet Tracker MariaDB integration, and paper-accounting regression. No deployment or production DB changes were made.
+
+
+### Report visibility must remain mode-scoped — PR #349 (2026-10-25)
+
+- [PR #349](https://github.com/kurnFR/signal-bot/pull/349) added regression assertions for both RetailBot2 performance-report query paths, requiring `l.strategy_id = t.strategy AND l.mode = t.mode`.
+- This protects independent shadow/inverse report visibility. All five pre-merge checks and all four post-merge checks passed. No production code, mappings, activation, DB state, or deployment changed.
