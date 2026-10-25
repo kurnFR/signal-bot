@@ -476,4 +476,12 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - [PR #355](https://github.com/kurnFR/signal-bot/pull/355) merged as [`80b1c12`](https://github.com/kurnFR/signal-bot/commit/80b1c125c0ee80c4fcb9e58f15b11e404669a43b) after all five required PR-head checks passed.
 - The worker now parses persisted lifecycle flags explicitly rather than using `bool(value)`, which misinterprets non-empty strings such as `"0"`. Unknown representations fail closed.
 - The worker cache now forces `auto_promote_enabled` false while promotion is not implemented, even if a legacy row contains true. Regression coverage exercises the worker execution boundary.
-- PR #353's four post-merge checks and PR #354's five post-merge checks passed. PR #355 post-merge checks were still running when this note was written. No deployment or production DB changes.
+- PR #353's four post-merge checks and PR #354's five post-merge checks passed. PR #355 post-merge checks subsequently completed successfully (all five checks). No deployment or production DB changes.
+
+
+### RetailBot2 lifecycle DB-boundary parsing — PR #357 (2026-10-25)
+
+- [PR #357](https://github.com/kurnFR/signal-bot/pull/357) merged as [`fb8be81`](https://github.com/kurnFR/signal-bot/commit/fb8be81c9446cb4c16dd307db04075c1a6a82c3f).
+- The shared database helper now parses lifecycle flags explicitly instead of applying Python `bool(value)`; textual `"0"`/`"false"` and unknown legacy representations no longer become enabled by truthiness.
+- A regression test exercises string false values and malformed values through the database helper itself.
+- All five PR-head checks passed; all four post-merge checks passed. This is automated regression evidence only. No live DB, worker runtime, Telegram, or deployment changes.
