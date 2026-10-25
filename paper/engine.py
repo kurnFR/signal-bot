@@ -240,10 +240,22 @@ def set_paper_config(
                  allocated_capital, risk_per_trade_pct, ml_model_id,
                  bool(telegram_enabled), bool(report_enabled)),
             )
+        # Resolve the persisted row after the upsert so promotion audit records
+        # can link to the actual paper config, including on duplicate-key updates.
+        cur.execute(
+            """
+            SELECT id FROM paper_configs
+            WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
+            """,
+            (symbol, market, timeframe, strategy_name),
+        )
+        config_row = cur.fetchone()
+        config_id = config_row.get("id") if isinstance(config_row, dict) else None
         conn.commit()
         cur.close()
         return {
             "status": "success",
+            "id": config_id,
             "symbol": symbol,
             "strategy": strategy_name,
             "is_active": is_active,
