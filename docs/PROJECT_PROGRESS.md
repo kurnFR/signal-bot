@@ -2,7 +2,7 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-25  
-**Master commit at review:** `00373a07341fa42a51c4a5bf0f65ad8f03c372e1`  
+**Master commit at review:** `a1e0820f50ccf829461f8697d2cee22b107f2c8c`  
 **Overall status:** Active / not finished. PR #282 makes migration status inspection read-only, PR #283, #285, and #287 refresh this progress document, PR #284 makes migration dry-runs read-only, and PR #286 adds a safety-gated populated-database migration rehearsal runbook; PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, #257 contains ML experiment paths, #259 validates deployment manifests before activation, and #263 contains model artifact paths; #265 hardens custom-strategy persistence, #266 validates runtime ML artifact paths, #267 rechecks ML eligibility immediately before model loading, and #269 makes model-weight/manifest writes atomic and prevents duplicate experiment runs from overwriting existing artifacts; #271 prevents the reusable model store from following external symlinks when reading weights or manifests. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete. Recent RetailBot2 lifecycle safety fixes are also merged: PR #351 enforces strict API booleans, PR #353 hardens lifecycle readback, PR #355 hardens worker flag parsing, and PR #357 parses persisted DB flags explicitly; PR #358 records the latest hardening and CI evidence. Auto-promotion remains fail-closed because the compatibility crosswalk found zero approved RetailBot2 mappings.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
@@ -17,6 +17,16 @@
 - [PR #315](https://github.com/kurnFR/signal-bot/pull/315) validates strategy identity, market, and timeframe before paper deployment side effects.
 - GitHub Actions for current `master` commit `0fa6fe4` were verified successful for `pytest`, `unit-tests`, `wallet-tracker-mariadb-integration`, and `paper-accounting`.
 - Follow-up validation remains necessary: verify runtime DB state and worker behavior in the owner environment, confirm stopped/hidden strategy behavior across reloads and reports, and manually inspect the dashboard at mobile/desktop sizes. No live deployment was performed.
+
+### RetailBot2 lifecycle and Backtest Studio boundary audit — 2026-10-25
+
+A follow-up source review traced lifecycle settings through the dashboard API, persisted database rows, worker refresh, trade entry/exit, and reporting.
+
+- **Worker refresh and restart:** the worker attempts an initial lifecycle read even shortly after OS boot, reloads settings periodically, and fails closed for evaluation, paper entries, Telegram, and auto-promotion when the lifecycle DB refresh is unavailable. A fresh worker reads the persisted settings again. Unit tests cover early startup, refresh failure/recovery, and restart behavior. These tests do not verify the owner environment's actual DB or worker process.
+- **Mode identity:** inverse signals receive the `_INV` suffix and are controlled independently from their shadow counterparts.
+- **Report visibility:** both the Telegram performance-stat query and dashboard per-strategy stats query filter by the exact strategy/mode pair using `report_enabled`. Overall shadow/inverse realized-P&L totals intentionally continue to include all closed trades, including hidden strategies, so hiding a row does not rewrite account-level accounting.
+- **Backtest Studio boundary:** `web/routes/backtest.py` only activates candidates registered in the main Backtest Studio `STRATEGIES` registry and creates a main paper-engine configuration. It does not activate RetailBot2 strategies. The RetailBot2 compatibility resolver still has no production-approved mappings and no activation caller; do not connect it or enable auto-promotion until semantic compatibility and lifecycle integration are reviewed and tested.
+- **Remaining release verification:** verify the saved settings against the owner's runtime database, check worker logs after a real process restart, manually confirm dashboard behavior at desktop/mobile sizes, and reconcile any stale `processing` promotion audit entries before retrying. No live DB, worker, Telegram, or deployment changes were performed during this audit.
 
 ## 1. Project purpose and boundaries
 
