@@ -2,7 +2,7 @@
 
 **Repository:** [`kurnFR/signal-bot`](https://github.com/kurnFR/signal-bot)  
 **Status reviewed:** 2026-10-25  
-**Master commit at review:** `f999f4cbbdd4c1df59858de87d534121c4818b34`  
+**Master commit at review:** `4424db91def562d7156a5c2ca852f9b89167fb43`  
 **Overall status:** Active / not finished. PR #282 makes migration status inspection read-only, PR #283, #285, and #287 refresh this progress document, PR #284 makes migration dry-runs read-only, and PR #286 adds a safety-gated populated-database migration rehearsal runbook; PRs #239/#241 improve paper-entry timing, #243 adds the ledger, #245 integrates engine fills/recovery, #247/#248 add order APIs and dashboard controls, #250 adds MariaDB concurrency/crash-recovery tests, #252 preserves alerts after recovered fills, #253/#255 harden ML promotion/listing, #257 contains ML experiment paths, #259 validates deployment manifests before activation, and #263 contains model artifact paths; #265 hardens custom-strategy persistence, #266 validates runtime ML artifact paths, #267 rechecks ML eligibility immediately before model loading, and #269 makes model-weight/manifest writes atomic and prevents duplicate experiment runs from overwriting existing artifacts; #271 prevents the reusable model store from following external symlinks when reading weights or manifests. Manual accessibility checks, populated-database upgrade validation, cost-model realism, runtime-data hygiene, and trading-edge validation remain incomplete.
 
 > This document separates verified completed work from known gaps and items that still need fresh verification. A green CI run proves the covered tests passed; it does not prove production deployment, profitability, or that every possible bug is absent.
@@ -461,3 +461,11 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - [PR #350](https://github.com/kurnFR/signal-bot/pull/350) records the report-mode guard and verified CI in project documentation. All five PR-head and five post-merge checks passed.
 - [PR #351](https://github.com/kurnFR/signal-bot/pull/351) uses Pydantic `StrictBool` for the five RetailBot2 lifecycle flags and adds tests rejecting numeric/string boolean coercion with HTTP 422. All five PR-head checks and all four post-merge checks passed on merge commit [`f999f4c`](https://github.com/kurnFR/signal-bot/commit/f999f4cbbdd4c1df59858de87d534121c4818b34).
 - These changes are test/API hardening only. RetailBot2 auto-promotion remains rejected; no live DB, worker settings, or deployment were changed.
+
+
+### RetailBot2 lifecycle readback fail-closed fix — PR #353 (2026-10-25)
+
+- [PR #353](https://github.com/kurnFR/signal-bot/pull/353) merged as [`4424db9`](https://github.com/kurnFR/signal-bot/commit/4424db91def562d7156a5c2ca852f9b89167fb43); all five required pre-merge checks passed.
+- Fixed a truthiness hazard in lifecycle GET: legacy text `"0"` no longer becomes enabled merely because non-empty strings are truthy in Python. Recognized booleans and explicit `0`/`1` values are parsed; unknown values fail closed.
+- GET now always reports `auto_promote_enabled: false` until the promotion workflow is implemented, even if an old persisted row contains a true value. A regression test covers legacy text flags and unavailable auto-promotion readback.
+- Post-merge CI was still running when this note was written. No production DB, worker runtime, strategy activation, or deployment changes were made.
