@@ -136,3 +136,10 @@ CI runs the pytest suite, project tests, RetailBot accounting regression, and an
 - [PR #353](https://github.com/kurnFR/signal-bot/pull/353) merged as [`4424db9`](https://github.com/kurnFR/signal-bot/commit/4424db91def562d7156a5c2ca852f9b89167fb43) after all five required pre-merge checks passed.
 - Lifecycle GET no longer uses Python `bool(value)` on persisted values; text `"0"`/`"false"` is correctly false and unknown values fail closed. The endpoint also never returns auto-promotion enabled while the feature is unavailable.
 - Post-merge CI was pending at documentation time. No DB/runtime/deployment changes.
+
+
+### Worker-side lifecycle fail-closed guard — PR #355 (2026-10-25)
+
+- [PR #355](https://github.com/kurnFR/signal-bot/pull/355) merged as [`80b1c12`](https://github.com/kurnFR/signal-bot/commit/80b1c125c0ee80c4fcb9e58f15b11e404669a43b); all five required PR-head checks passed.
+- RetailBot2 worker lifecycle reload now explicitly parses stored flags; text values `"0"` and `"false"` are false, unknown values fail closed, and auto-promotion is forced off in the worker cache until implemented.
+- PR #353 and #354 post-merge checks passed. PR #355 post-merge CI was pending at documentation time. No DB/runtime/deployment changes.
