@@ -306,3 +306,29 @@ def test_auto_promotion_fails_closed_when_audit_claim_cannot_be_persisted():
     assert result["status"] == "error"
     assert "promotion audit" in result["reason"].lower()
     set_config.assert_not_called()
+
+
+def test_auto_promotion_does_not_report_success_without_persisted_config_id():
+    validation_metrics = {
+        "total_trades": 35,
+        "expectancy_r": 0.12,
+        "profit_factor": 1.32,
+        "max_drawdown_r": 4.0,
+    }
+    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy()), \\
+         patch("web.routes.backtest.record_strategy_promotion_decision", return_value=True), \\
+         patch("web.routes.backtest.update_strategy_promotion_decision") as update, \\
+         patch("paper.engine.set_paper_config", return_value={"status": "success", "id": None}), \\
+         patch("notifications.telegram_notifier.send_deployment_alert") as alert:
+        result = _call(
+            _candidate(),
+            data_segment="train",
+            validation_metrics=validation_metrics,
+            validation_segment="holdout",
+        )
+
+    assert result["status"] == "failed"
+    assert "reconcil" in result["reason"].lower()
+    assert update.call_args.kwargs["status"] == "failed"
+    assert update.call_args.kwargs["paper_config_id"] is None
+    alert.assert_not_called()
