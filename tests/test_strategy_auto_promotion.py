@@ -315,10 +315,10 @@ def test_auto_promotion_does_not_report_success_without_persisted_config_id():
         "profit_factor": 1.32,
         "max_drawdown_r": 4.0,
     }
-    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy()), \\
-         patch("web.routes.backtest.record_strategy_promotion_decision", return_value=True), \\
-         patch("web.routes.backtest.update_strategy_promotion_decision") as update, \\
-         patch("paper.engine.set_paper_config", return_value={"status": "success", "id": None}), \\
+    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy()), \
+         patch("web.routes.backtest.record_strategy_promotion_decision", return_value=True), \
+         patch("web.routes.backtest.update_strategy_promotion_decision") as update, \
+         patch("paper.engine.set_paper_config", return_value={"status": "success", "id": None}), \
          patch("notifications.telegram_notifier.send_deployment_alert") as alert:
         result = _call(
             _candidate(),
