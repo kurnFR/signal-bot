@@ -12,22 +12,31 @@ def executable_identities():
     ]
 
 
-def _candidate(**overrides):
-    candidate = {
-        "strategy": "backtest_reversal_v1",
-        "retailbot2_mapping": {
+@pytest.fixture
+def mapping_registry():
+    # Test-only reviewed registry. No production mapping is implied by this fixture.
+    return {
+        "backtest_reversal_v1": {
             "strategy_id": "BB_REV_INV",
             "mode": "inverse",
             "compatible": True,
             "mapping_version": "reviewed-v1",
         },
     }
+
+
+def _candidate(**overrides):
+    candidate = {"strategy": "backtest_reversal_v1"}
     candidate.update(overrides)
     return candidate
 
 
-def test_resolves_explicit_reviewed_mapping_to_registered_executable_identity(executable_identities):
-    result = resolve_retailbot2_promotion_target(_candidate(), executable_identities)
+def test_resolves_server_reviewed_mapping_to_registered_executable_identity(
+    executable_identities, mapping_registry
+):
+    result = resolve_retailbot2_promotion_target(
+        _candidate(), executable_identities, mapping_registry
+    )
     assert result == {
         "source_strategy": "backtest_reversal_v1",
         "strategy_id": "BB_REV_INV",
@@ -36,17 +45,34 @@ def test_resolves_explicit_reviewed_mapping_to_registered_executable_identity(ex
     }
 
 
+def test_candidate_cannot_self_attest_or_override_reviewed_mapping(
+    executable_identities, mapping_registry
+):
+    candidate = _candidate(retailbot2_mapping={
+        "strategy_id": "DBL_PAT_INV",
+        "mode": "inverse",
+        "compatible": True,
+        "mapping_version": "attacker-supplied",
+    })
+    result = resolve_retailbot2_promotion_target(
+        candidate, executable_identities, mapping_registry
+    )
+    assert result["strategy_id"] == "BB_REV_INV"
+    assert result["mapping_version"] == "reviewed-v1"
+
+
 @pytest.mark.parametrize("candidate", [
-    {"strategy": "backtest_reversal_v1"},
-    {"strategy": "backtest_reversal_v1", "retailbot2_mapping": None},
-    {"strategy": "backtest_reversal_v1", "retailbot2_mapping": {"compatible": False}},
-    {"strategy": "backtest_reversal_v1", "retailbot2_mapping": {
-        "strategy_id": "BB_REV_INV", "mode": "inverse", "compatible": 1,
-        "mapping_version": "reviewed-v1",
+    {},
+    {"strategy": "  "},
+    {"strategy": "unknown_backtest_strategy", "retailbot2_mapping": {
+        "strategy_id": "BB_REV_INV", "mode": "inverse", "compatible": True,
+        "mapping_version": "attacker-supplied",
     }},
 ])
-def test_rejects_missing_or_unapproved_mapping(candidate, executable_identities):
-    assert resolve_retailbot2_promotion_target(candidate, executable_identities) is None
+def test_rejects_missing_or_unregistered_source(candidate, executable_identities, mapping_registry):
+    assert resolve_retailbot2_promotion_target(
+        candidate, executable_identities, mapping_registry
+    ) is None
 
 
 @pytest.mark.parametrize("mapping", [
@@ -54,28 +80,36 @@ def test_rejects_missing_or_unapproved_mapping(candidate, executable_identities)
     {"strategy_id": "BB_REV_INV", "mode": "both", "compatible": True, "mapping_version": "v1"},
     {"strategy_id": "BB_REV_INV", "mode": "inverse", "compatible": True, "mapping_version": ""},
     {"strategy_id": "COMPOSITE", "mode": "shadow", "compatible": True, "mapping_version": "v1"},
+    {"strategy_id": "BB_REV_INV", "mode": "inverse", "compatible": 1, "mapping_version": "v1"},
 ])
-def test_rejects_unregistered_invalid_or_historical_only_targets(mapping, executable_identities):
+def test_rejects_invalid_reviewed_mapping(mapping, executable_identities):
+    registry = {"backtest_reversal_v1": mapping}
     assert resolve_retailbot2_promotion_target(
-        {"strategy": "backtest_reversal_v1", "retailbot2_mapping": mapping},
-        executable_identities,
+        _candidate(), executable_identities, registry
     ) is None
-
-
-def test_rejects_blank_source_identity(executable_identities):
-    assert resolve_retailbot2_promotion_target(_candidate(strategy="  "), executable_identities) is None
 
 
 @pytest.mark.parametrize("mode", [None, [], {}, 1])
 def test_rejects_non_string_modes_without_raising(mode, executable_identities):
-    candidate = _candidate(retailbot2_mapping={
+    registry = {"backtest_reversal_v1": {
         "strategy_id": "BB_REV_INV",
         "mode": mode,
         "compatible": True,
         "mapping_version": "reviewed-v1",
-    })
-    assert resolve_retailbot2_promotion_target(candidate, executable_identities) is None
+    }}
+    assert resolve_retailbot2_promotion_target(
+        _candidate(), executable_identities, registry
+    ) is None
 
 
-def test_rejects_unavailable_executable_registry_without_raising():
-    assert resolve_retailbot2_promotion_target(_candidate(), None) is None
+def test_rejects_unavailable_executable_registry_without_raising(mapping_registry):
+    assert resolve_retailbot2_promotion_target(
+        _candidate(), None, mapping_registry
+    ) is None
+
+
+@pytest.mark.parametrize("registry", [None, [], "not-a-registry"])
+def test_rejects_unavailable_or_malformed_mapping_registry(registry, executable_identities):
+    assert resolve_retailbot2_promotion_target(
+        _candidate(), executable_identities, registry
+    ) is None

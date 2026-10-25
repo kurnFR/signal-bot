@@ -1,38 +1,39 @@
-"""Fail-closed mapping contract for Backtest Studio -> RetailBot2 promotion.
+'''Fail-closed mapping contract for Backtest Studio -> RetailBot2 promotion.
 
 Backtest strategy IDs and RetailBot2 strategy IDs belong to different registries.
-A candidate must carry an explicit, reviewed compatibility mapping before it can
-be translated into an executable RetailBot2 strategy/mode. This helper validates
-that mapping only; it does not activate paper trading or enable Telegram.
-"""
+Only a server-sourced, reviewed mapping registry may authorize translation to an
+executable RetailBot2 identity. Candidate payload metadata is untrusted and must
+never self-attest compatibility. This helper validates mapping only; it does not
+activate paper trading or enable Telegram.
+'''
 from typing import Any, Dict, Iterable, Optional
 
 
 def resolve_retailbot2_promotion_target(
     candidate: Dict[str, Any],
     executable_identities: Iterable[Dict[str, Any]],
+    mapping_registry: Dict[str, Any],
 ) -> Optional[Dict[str, str]]:
-    """Return a validated RetailBot2 target, or None when mapping is unsafe.
+    '''Return a validated RetailBot2 target, or None when mapping is unsafe.
 
-    Expected candidate metadata:
-      strategy: source Backtest Studio strategy identity
-      retailbot2_mapping: {
-        strategy_id: executable RetailBot2 identity,
-        mode: "shadow" | "inverse",
-        compatible: True,
-        mapping_version: non-empty reviewed mapping version
-      }
+    mapping_registry is server-owned configuration keyed by exact source
+    Backtest Studio strategy identity. Each record must explicitly provide
+    strategy_id, mode (shadow or inverse), compatible=True, and a non-empty
+    reviewed mapping_version. Never use mapping metadata supplied by the candidate.
 
-    No implicit name matching or fallback is permitted. The executable identity
-    list must come from the current RetailBot2 registry, not a promotion allowlist.
-    """
+    The executable identity list must come from the current RetailBot2 registry,
+    not a promotion allowlist. Missing or malformed registries fail closed.
+    '''
     if not isinstance(candidate, dict):
         return None
     source_id = candidate.get("strategy")
     if not isinstance(source_id, str) or not source_id.strip():
         return None
+    source_id = source_id.strip()
 
-    mapping = candidate.get("retailbot2_mapping")
+    if not isinstance(mapping_registry, dict):
+        return None
+    mapping = mapping_registry.get(source_id)
     if not isinstance(mapping, dict) or mapping.get("compatible") is not True:
         return None
 
@@ -46,8 +47,6 @@ def resolve_retailbot2_promotion_target(
     if not isinstance(version, str) or not version.strip():
         return None
 
-    # Bad or unavailable registry input must reject the mapping rather than
-    # raising from list conversion or accidentally using a guessed fallback.
     try:
         identities = list(executable_identities)
     except TypeError:
@@ -65,7 +64,7 @@ def resolve_retailbot2_promotion_target(
         return None
 
     return {
-        "source_strategy": source_id.strip(),
+        "source_strategy": source_id,
         "strategy_id": target_id.strip(),
         "mode": mode,
         "mapping_version": version.strip(),
