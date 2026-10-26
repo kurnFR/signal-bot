@@ -451,10 +451,12 @@ def _auto_promote_top_candidate(
                 final_reason = f"Paper config activated; Telegram alert failed: {alert_exc}"
 
         try:
-            update_strategy_promotion_decision(
+            audit_updated = update_strategy_promotion_decision(
                 decision_hash, status=final_status, reason=final_reason,
                 paper_config_id=config_result.get("id"), telegram_result=telegram_result,
             )
+            if audit_updated is False:
+                raise RuntimeError("promotion audit row was not updated")
         except Exception as audit_exc:
             # Activation and any alert delivery have already happened. Do not
             # misreport that side effect as failed or trigger an unsafe retry.
