@@ -389,5 +389,5 @@ def test_auto_promotion_requires_reconciliation_when_activation_raises():
     assert result["status"] == "reconciliation_required"
     assert "reconcile" in result["reason"].lower()
     assert update.call_args.kwargs["status"] == "reconciliation_required"
-    assert update.call_args.kwargs["telegram_result"] == "not_attempted"
+    assert update.call_args.kwargs["telegram_result"] == "unknown"
     alert.assert_not_called()
