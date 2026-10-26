@@ -22,13 +22,26 @@ export function assertApiPath(path: string): void {
   }
 }
 
+function readAuthToken(): string | null {
+  try {
+    const token = window.localStorage.getItem("token");
+    return token && token.trim() ? token : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Request a JSON API resource without permitting mutation methods or external origins. */
 export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   assertApiPath(path);
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const token = readAuthToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
   const response = await fetch(path, {
     method: "GET",
     credentials: "same-origin",
-    headers: { Accept: "application/json" },
+    headers,
     signal,
   });
 
