@@ -1550,6 +1550,19 @@ def get_strategy_auto_promotion_policy():
 
 
 def set_strategy_auto_promotion_policy(policy):
+    # Validate at the persistence boundary as well as the API boundary.
+    # In Python, bool("false") is True, so coercing arbitrary values here
+    # could persist an unintended enabled/Telegram/holdout flag.
+    normalized_flags = {}
+    for key in ("enabled", "require_holdout", "send_telegram"):
+        value = policy[key]
+        if isinstance(value, bool):
+            normalized_flags[key] = value
+        elif type(value) is int and value in (0, 1):
+            normalized_flags[key] = bool(value)
+        else:
+            raise ValueError(f"Invalid auto-promotion policy: {key} must be boolean/0/1")
+
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
@@ -1569,10 +1582,10 @@ def set_strategy_auto_promotion_policy(policy):
                 require_holdout=VALUES(require_holdout),
                 send_telegram=VALUES(send_telegram)
         """, (
-            bool(policy["enabled"]), int(policy["min_test_trades"]),
+            normalized_flags["enabled"], int(policy["min_test_trades"]),
             float(policy["min_profit_factor"]), float(policy["min_expectancy_r"]),
             float(policy["max_drawdown_r"]), float(policy["min_rank_score"]),
-            bool(policy["require_holdout"]), bool(policy["send_telegram"]),
+            normalized_flags["require_holdout"], normalized_flags["send_telegram"],
         ))
         conn.commit()
         cur.close()
