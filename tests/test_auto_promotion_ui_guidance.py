@@ -29,7 +29,7 @@ def test_retailbot2_lifecycle_has_one_click_stop_and_hide_without_deleting_histo
     assert "const confirmed = window.confirm(" in js
     assert "try { await this.fetchResearchData(); } catch (_) {}" in js
     assert "Stop &amp; Hide" in js
-    assert 'app.js?v=20261025-3' in html
+    assert 'app.js?v=20261026-1' in html
 
 
 def test_backtest_ui_handles_reconciliation_statuses_without_success_toast():
