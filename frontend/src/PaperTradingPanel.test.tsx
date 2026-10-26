@@ -24,7 +24,7 @@ describe("read-only Paper Trading panel", () => {
     render(<PaperTradingPanel />);
     expect(await screen.findByRole("heading", { name: "Open positions" })).toBeInTheDocument();
     expect((await screen.findAllByText("BTCUSDT")).length).toBeGreaterThan(0);
-    expect(screen.getByText("demo_strategy", { exact: false })).toBeInTheDocument();
+    expect((await screen.findAllByText("demo_strategy", { exact: false })).length).toBeGreaterThan(0);
     expect(screen.getByText("$125.50")).toBeInTheDocument();
     expect(screen.getByText("Risk checks passed")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Refresh snapshot/ })).toBeInTheDocument();

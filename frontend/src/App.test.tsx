@@ -34,6 +34,6 @@ describe("frontend foundation shell", () => {
     fireEvent.click(screen.getByRole("button", { name: /Market Screener/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Market Screener" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Market Screener/ })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText(/cannot start workers, change settings, place trades/i)).toBeInTheDocument();
+    expect(screen.getByText(/order execution, worker control, deployment, and Telegram actions are deliberately not exposed/i)).toBeInTheDocument();
   });
 });
