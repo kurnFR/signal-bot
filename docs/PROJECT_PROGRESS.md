@@ -707,13 +707,13 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - The recommended target stack and phased migration are documented in [UI_UX_MODERNIZATION_PLAN.md](UI_UX_MODERNIZATION_PLAN.md).
 - [UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md) turns that roadmap into execution work items UIX-00 through UIX-05, with scope boundaries, acceptance gates, test requirements, and an Antigravity handoff.
 - **Planning status: execution-ready for the inventory phase; frontend migration remains not started.** First task is UIX-00: verify every dashboard view/API and current frontend/static-serving/test setup, then submit a documentation-only inventory PR. Do not start framework code before this inventory is reviewed and merged.
-- The handoff is being proposed in [PR #412](https://github.com/kurnFR/signal-bot/pull/412). This is documentation-only and does not imply runtime changes or deployment.
+- The execution handoff was merged via [PR #412](https://github.com/kurnFR/signal-bot/pull/412). This is documentation-only and does not imply runtime changes or deployment.
 - Existing dashboard accessibility/mobile improvements are retained. The React/TypeScript build, pilot view, screener migration, strategy/paper-trading migration, and final browser/accessibility acceptance are still outstanding.
 
 
 ### UI/UX UIX-00 inventory draft review — 2026-10-26
 
-- Antigravity's first-pass inventory is available in [`docs/UI_UX_VIEW_INVENTORY.md`](UI_UX_VIEW_INVENTORY.md) on the inventory reconciliation work branch.
+- Antigravity's first-pass inventory is available on `master` in [`docs/UI_UX_VIEW_INVENTORY.md`](UI_UX_VIEW_INVENTORY.md), added via [PR #413](https://github.com/kurnFR/signal-bot/pull/413).
 - The draft identifies 11 main views and 7 modal dialogs and records useful static-serving, polling, accessibility, and responsive context. It is **not yet accepted as complete**: the stated total of 81 endpoints is not auditable without a row-by-row route/method register; role and forced-password-change rules need endpoint-specific verification; host Node/npm availability is not established by repository inspection; and some chart parity statements may describe future requirements rather than existing behavior.
 - UIX-00 remains **pending review**. Antigravity/reviewer must add source-linked endpoint contracts and side effects, verify all conditional UI flows and RBAC exceptions, and distinguish verified facts from assumptions. Do not begin UIX-01 frontend implementation until the inventory acceptance PR is reviewed and merged.
 - Documentation-only work. No runtime/frontend code, dependencies, database, worker, trading, Telegram, or deployment changes.
