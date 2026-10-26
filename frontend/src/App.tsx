@@ -33,14 +33,14 @@ export function App() {
   return <div className="app-frame">
     <a className="skip-link" href="#main-content">Skip to main content</a>
     {sidebarOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
-    <aside className={"sidebar " + (sidebarOpen ? "sidebar-open" : "")} aria-label="Primary navigation">
+    <aside className={"sidebar " + (sidebarOpen ? "sidebar-open" : "")} aria-label="Dashboard sidebar">
       <div className="brand">
         <div className="brand-mark" aria-hidden="true"><Activity size={20} strokeWidth={2.5} /></div>
         <div className="brand-copy"><strong>Signal Bot</strong><span>QUANTITATIVE PLATFORM</span></div>
         <button className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
       </div>
       <div className="workspace-label">WORKSPACE</div>
-      <nav className="nav-list">
+      <nav className="nav-list" aria-label="Primary navigation">
         {NAV_ITEMS.map(({ label, description, icon: Icon }) => <button key={label}
           className={"nav-item " + (activeView === label ? "nav-item-active" : "")}
           aria-current={activeView === label ? "page" : undefined} title={description}
