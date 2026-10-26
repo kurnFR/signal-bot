@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { SystemStatusPanel } from "./SystemStatusPanel";
 import { ScreenerPanel } from "./ScreenerPanel";
-import { Activity, Bell, ChevronDown, CircleHelp, Command, LayoutDashboard, Menu, Moon, Search, Settings2, ShieldCheck, Sun, WalletCards, X } from "lucide-react";
+import { Activity, Bell, ChevronDown, CircleHelp, Command, LayoutDashboard, LogOut, Menu, Moon, Search, Settings2, ShieldCheck, Sun, WalletCards, X } from "lucide-react";
+import { useAuth } from "./AuthGate";
 
 type Theme = "dark" | "light";
 const NAV_ITEMS = [
@@ -23,6 +24,7 @@ export function App() {
   const [theme, setTheme] = useState<Theme>(readInitialTheme);
   const [activeView, setActiveView] = useState<string>("Overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const auth = useAuth();
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -54,7 +56,7 @@ export function App() {
       <div className="sidebar-bottom">
         <div className="security-note"><ShieldCheck size={16} /><span>Server-controlled permissions</span></div>
         <div className="user-profile"><div className="avatar" aria-hidden="true">SB</div>
-          <div className="user-meta"><strong>Preview workspace</strong><span>Frontend foundation</span></div><ChevronDown size={15} aria-hidden="true" />
+          <div className="user-meta"><strong>{auth?.user.username ?? "Preview workspace"}</strong><span>{auth?.user.role ?? "Frontend preview"}</span></div>{auth?.user ? <button className="icon-button" aria-label="Sign out" title="Sign out" onClick={() => void auth.logout()}><LogOut size={15} /></button> : <ChevronDown size={15} aria-hidden="true" />}
         </div>
       </div>
     </aside>
