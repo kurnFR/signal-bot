@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Activity, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
 import { fetchScreenerSnapshot, type ScreenerSnapshot, type ScreenerSignal } from "./lib/screener";
+import { ScreenerControlsPanel } from "./ScreenerControlsPanel";
 
 const compactNumber = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
 const priceNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits: 8 });
@@ -50,6 +51,7 @@ export function ScreenerPanel() {
       {loading && !snapshot ? <p className="empty-state" role="status">Loading recent signals…</p> : signals.length ? <div className="status-table-wrap"><table className="status-table screener-table"><thead><tr><th scope="col">Symbol</th><th scope="col">Signal</th><th scope="col">Price</th><th scope="col">24h quote vol.</th><th scope="col">RVOL</th><th scope="col">Velocity</th><th scope="col">Quality</th><th scope="col">Telegram</th><th scope="col">Detected</th></tr></thead><tbody>{signals.map((item: ScreenerSignal, index) => <tr key={item.id ?? item.symbol + "-" + item.detected_at + "-" + index}><td className="screener-symbol">{item.symbol}</td><td>{item.signal_type}</td><td>{priceNumber.format(item.price)}</td><td>${compactNumber.format(item.quote_volume)}</td><td>{Number(item.rvol).toFixed(2)}×</td><td>{Number(item.volume_velocity).toFixed(2)}×</td><td><span className={pill(Number(item.quality_score) >= 70)}>{Math.round(Number(item.quality_score))}</span></td><td><span className={pill(item.telegram_sent)}>{item.telegram_sent ? "Sent" : "Not sent"}</span></td><td className="heartbeat-time">{dateTime(item.detected_at)}</td></tr>)}</tbody></table></div> : <p className="empty-state">{error ? "Signal rows are unavailable until the API request succeeds." : query ? "No signals match this filter." : "No recent smart-money signals were returned."}</p>}
       {status?.last_signal_at && <p className="screener-footnote">Last worker signal timestamp: {dateTime(status.last_signal_at)}. This is worker metadata, not a promise that an alert was delivered.</p>}
     </section>
-    <p className="screener-safety-note"><ShieldCheck size={15} /> Read-only view. Alert settings and screener controls remain in the legacy dashboard until their mutation contracts and permissions are migrated separately.</p>
+    <ScreenerControlsPanel />
+    <p className="screener-safety-note"><ShieldCheck size={15} /> Data panels are read-only. Only admin and trader roles can save alert-gate and detection overrides; the server remains authoritative for validation and permissions.</p>
   </>;
 }
