@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, assertApiPath, getJson } from "./api";
+import { assertApiPath, getJson } from "./api";
 
 describe("read-only same-origin API transport", () => {
   afterEach(() => vi.unstubAllGlobals());
