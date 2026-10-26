@@ -322,7 +322,7 @@ def get_paper_trades(limit: int = 50) -> List[Dict[str, Any]]:
                 net_return_pct, r_multiple, holding_bars, created_at
             FROM paper_trades t
             LEFT JOIN paper_positions p ON p.id = t.position_id
-            LEFT JOIN paper_configs c ON c.id = p.config_id
+            LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE
             ORDER BY t.id DESC
             LIMIT %s
@@ -362,7 +362,7 @@ def get_paper_metrics() -> Dict[str, Any]:
                    SUM(t.net_pnl) AS net_pnl
             FROM paper_trades t
             LEFT JOIN paper_positions p ON p.id = t.position_id
-            LEFT JOIN paper_configs c ON c.id = p.config_id
+            LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE
             """
         )
@@ -378,7 +378,7 @@ def get_paper_metrics() -> Dict[str, Any]:
                    SUM(t.net_pnl) AS net_pnl
             FROM paper_trades t
             LEFT JOIN paper_positions p ON p.id = t.position_id
-            LEFT JOIN paper_configs c ON c.id = p.config_id
+            LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE
             GROUP BY t.strategy_name
             ORDER BY t.strategy_name
