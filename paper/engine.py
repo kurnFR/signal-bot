@@ -352,12 +352,15 @@ def get_paper_metrics() -> Dict[str, Any]:
         cur.execute(
             """
             SELECT COUNT(*) AS total_trades,
-                   SUM(CASE WHEN r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
-                   SUM(CASE WHEN r_multiple <= 0 THEN 1 ELSE 0 END) AS losses,
-                   SUM(r_multiple) AS sum_r,
-                   AVG(r_multiple) AS avg_r,
-                   SUM(net_pnl) AS net_pnl
-            FROM paper_trades
+                   SUM(CASE WHEN t.r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
+                   SUM(CASE WHEN t.r_multiple <= 0 THEN 1 ELSE 0 END) AS losses,
+                   SUM(t.r_multiple) AS sum_r,
+                   AVG(t.r_multiple) AS avg_r,
+                   SUM(t.net_pnl) AS net_pnl
+            FROM paper_trades t
+            LEFT JOIN paper_positions p ON p.id = t.position_id
+            LEFT JOIN paper_configs c ON c.id = p.config_id
+            WHERE COALESCE(c.report_enabled, TRUE) = TRUE
             """
         )
         summary = cur.fetchone()
