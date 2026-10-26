@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SystemStatusPanel } from "./SystemStatusPanel";
 import { Activity, Bell, ChevronDown, CircleHelp, Command, LayoutDashboard, Menu, Moon, Search, Settings2, ShieldCheck, Sun, WalletCards, X } from "lucide-react";
 
 type Theme = "dark" | "light";
