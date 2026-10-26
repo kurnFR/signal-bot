@@ -14,7 +14,7 @@ export function SystemStatusPanel() {
     setError(null);
     fetchSystemStatus(controller.signal).then(setData).catch((cause: unknown) => {
       if (controller.signal.aborted) return;
-      if (cause instanceof ApiError && cause.status === 401) setError("Sign in through the existing dashboard first. This preview does not include the login flow yet.");
+      if (cause instanceof ApiError && cause.status === 401) setError("Your session has expired. Sign in again to view system status.");
       else if (cause instanceof ApiError && cause.status === 403) setError("Your account cannot access system status.");
       else setError("System status could not be loaded. Check the API connection and retry.");
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
