@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { SystemStatusPanel } from "./SystemStatusPanel";
+import { ScreenerPanel } from "./ScreenerPanel";
 import { Activity, Bell, ChevronDown, CircleHelp, Command, LayoutDashboard, Menu, Moon, Search, Settings2, ShieldCheck, Sun, WalletCards, X } from "lucide-react";
 
 type Theme = "dark" | "light";
@@ -88,7 +89,7 @@ export function App() {
           <span className="notice-tag">READ ONLY</span>
         </section>
 
-        {activeView === "Overview" ? <SystemStatusPanel /> : <section className="panel preview-placeholder"><div className="panel-heading"><div><h2>{activeView} migration slice</h2><p>This view remains preview-only until its routes, permissions, schemas, and side effects have been verified.</p></div><span className="panel-counter">NOT CONNECTED</span></div><p className="empty-state">No live data or controls are exposed here yet. Existing dashboard functionality remains available in the legacy application.</p></section>}
+        {activeView === "Overview" ? <SystemStatusPanel /> : activeView === "Market Screener" ? <ScreenerPanel /> : <section className="panel preview-placeholder"><div className="panel-heading"><div><h2>{activeView} migration slice</h2><p>This view remains preview-only until its routes, permissions, schemas, and side effects have been verified.</p></div><span className="panel-counter">NOT CONNECTED</span></div><p className="empty-state">No live data or controls are exposed here yet. Existing dashboard functionality remains available in the legacy application.</p></section>}
 
         <section className="panel" aria-labelledby="roadmap-title">
           <div className="panel-heading"><div><h2 id="roadmap-title">Migration roadmap</h2><p>Small, testable slices with legacy fallback preserved.</p></div><span className="panel-counter">01 / 05</span></div>
