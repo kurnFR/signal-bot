@@ -547,3 +547,26 @@ def test_policy_db_reader_rejects_invalid_persisted_numeric_values():
                     )
                 else:
                     raise AssertionError(f"invalid persisted policy values accepted: {overrides}")
+
+
+
+def test_promotion_policy_put_reports_saved_when_readback_fails():
+    request = StrategyAutoPromotionPolicyRequest(
+        enabled=True,
+        min_test_trades=45,
+        min_profit_factor=1.4,
+        min_expectancy_r=0.1,
+        max_drawdown_r=5.0,
+        min_rank_score=0.25,
+        require_holdout=True,
+        send_telegram=False,
+    )
+    with (patch("web.routes.backtest.set_strategy_auto_promotion_policy") as save,
+          patch("web.routes.backtest.get_strategy_auto_promotion_policy", side_effect=RuntimeError("read replica unavailable"))):
+        response = update_promotion_policy(request)
+
+    save.assert_called_once()
+    assert response["status"] == "saved_readback_unavailable"
+    assert response["policy"]["min_test_trades"] == 45
+    assert response["policy"]["send_telegram"] is False
+    assert "readback" in response["warning"].lower()

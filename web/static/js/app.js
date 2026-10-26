@@ -4247,6 +4247,16 @@ const App = {
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+            if (data.status === "saved_readback_unavailable") {
+                const warning = data.warning || "The policy save completed, but readback could not be verified.";
+                this.showToast(warning, "warning");
+                const statusEl = get("bt-promotion-policy-status");
+                if (statusEl) {
+                    statusEl.innerText = warning;
+                    statusEl.className = "text-[10px] text-amber-300";
+                }
+                return;
+            }
             this.showToast("Auto-promotion policy saved.", "success");
             await this.fetchStrategyPromotionPolicy();
         } catch (e) {
