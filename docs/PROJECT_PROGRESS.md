@@ -661,3 +661,11 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - The test also asserts the report query joins by both strategy and mode and applies `COALESCE(l.report_enabled, TRUE) = TRUE`.
 - All required PR-head workflows passed on exact head SHA `6a233783d7d404ab9a36c7768945e7de377579ce`: `tests` (including `unit-tests` and `wallet-tracker-mariadb-integration`), `Test`, and `RetailBot accounting regression`. Merged as [`e5a7a76`](https://github.com/kurnFR/signal-bot/commit/e5a7a766357a3bb3352753b171d65f2772c08163).
 - This is regression coverage only. No production DB, worker, Telegram, or deployment actions were performed.
+
+
+### General paper-trading headline report visibility — PR #401 (2026-10-26)
+
+- [PR #401](https://github.com/kurnFR/signal-bot/pull/401) fixes a mismatch in `get_paper_metrics()`: the per-strategy report already respected `paper_configs.report_enabled`, but headline totals still aggregated all `paper_trades`. Headline trade count, wins/losses, win rate, cumulative R, expectancy, and net P&L now use the same visibility filter as the per-strategy table.
+- Regression test `tests/test_paper_metrics_visibility.py` verifies both aggregate queries join `paper_positions` and `paper_configs` and apply `COALESCE(c.report_enabled, TRUE) = TRUE`. The test commit preceded the implementation.
+- Exact implementation head `92b26ae81120eb3bbc03c915a252c12294bd081d` passed all required workflows: `tests`, `Test`, and `RetailBot accounting regression`; `unit-tests`, `wallet-tracker-mariadb-integration`, and `paper-accounting` jobs passed.
+- Merged as [`40a388a`](https://github.com/kurnFR/signal-bot/commit/40a388a84b7ab245dacc10d353985a91a1b2f088). This is a reporting-only aggregation change; paper trade history and accounting records remain unchanged. No production database, worker, Telegram, or deployment actions were performed.
