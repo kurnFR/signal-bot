@@ -745,3 +745,12 @@ This section supersedes older UIX status statements above where they say the Rea
 ### Hard safety boundary
 
 The React preview is currently an isolated frontend build and is **not** wired into FastAPI static serving. Do not describe the frontend migration as complete. Do not remove or redirect the legacy dashboard until each view's parity and permissions are accepted. No backend API semantics, database schema, worker lifecycle, trading/accounting behavior, risk control, or Telegram gate was changed by PRs #417–#419.
+
+
+### UIX-03 Market Screener V2 read-only slice — 2026-10-26
+
+- **PR #421 merged:** the React preview now has a read-only Market Screener V2 view using the verified `GET /api/research/screener/status`, `/api/research/screener/signals?limit=50`, and `/api/research/screener/stats` endpoints.
+- The view presents worker heartbeat, alert-gate state, monitored-symbol count, signal totals, recent signal rows, and a client-side symbol/type filter. It includes loading, error, auth, empty, retry, and responsive table states.
+- The new view intentionally does not call any `/control` endpoint. Screener settings and alert controls remain in the legacy dashboard until mutation contracts, role gates, persistence semantics, and worker pickup timing are migrated and tested separately.
+- Frontend type-check, component tests, production build, and all existing backend regression checks passed on PR #421's exact head before merge.
+- **Important:** the React preview is still not mounted by FastAPI. This is not yet the production dashboard and does not constitute full Market Screener feature parity.
