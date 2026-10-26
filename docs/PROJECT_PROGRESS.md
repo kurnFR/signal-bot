@@ -553,3 +553,10 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - Regression coverage verifies that a zero-row finalization preserves the known Telegram result, reports the pending audit/reconciliation state, and does not repeat or hide the alert side effect.
 - Required observed PR-head checks passed on `1f6930615aef1d2217da4d9f0645f260a8c62b32`: `tests`, both `Test` runs, and `RetailBot accounting regression`.
 - Merged as [`8ab73b9`](https://github.com/kurnFR/signal-bot/commit/8ab73b9dcf9800e9abd6a23718c2428ff20b55be). This is code and CI evidence only; no production database, worker, live Telegram, or deployment changes were made.
+
+### Backtest Studio invalid persisted promotion policy guard — PR #377 (2026-10-26)
+
+- [PR #377](https://github.com/kurnFR/signal-bot/pull/377) revalidates persisted auto-promotion thresholds before decision identity creation or audit claiming. Non-finite thresholds, out-of-range values, and invalid minimum-trade counts return an explicit policy error before paper-config activation or Telegram delivery.
+- Test-first regression coverage checks non-finite and out-of-range thresholds and asserts that no audit claim, paper-config activation, or Telegram alert is attempted.
+- All observed checks passed on exact PR head `69d9982b9159a76a897efdbf8f683b4b2852ff09`: `tests`, both `Test` runs, and `RetailBot accounting regression`. The `wallet-tracker-mariadb-integration` job within the `tests` workflow also completed successfully on that head.
+- Merged as [`64c4ede`](https://github.com/kurnFR/signal-bot/commit/64c4ede147daa264989b03f34388c0741f394912). This validates the code path in CI; it does not mutate or verify production DB policy values, worker state, Telegram, or deployment.
