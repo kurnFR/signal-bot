@@ -21,6 +21,6 @@ describe("read-only Overview status panel", () => {
   it("shows a recoverable authentication error", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 401, headers: { "content-type": "application/json" } })));
     render(<SystemStatusPanel />);
-    expect(await screen.findByRole("alert")).toHaveTextContent(/sign in through the existing dashboard/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/session has expired\. sign in again/i);
   });
 });
