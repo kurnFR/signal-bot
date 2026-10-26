@@ -389,3 +389,25 @@ def test_promoted_strategy_paper_trades_and_sends_telegram_entry():
     bot.tg.send_entry.assert_called_once()
     assert 42 in bot.active_shadow
 
+
+
+def test_unknown_strategy_identity_fails_closed_for_worker_lifecycle():
+    bot = _bot_for_lifecycle()
+
+    settings = bot._get_strategy_lifecycle("UNREGISTERED_STRATEGY", "shadow")
+
+    assert settings["evaluation_enabled"] is False
+    assert settings["paper_enabled"] is False
+    assert settings["telegram_enabled"] is False
+    assert settings["auto_promote_enabled"] is False
+
+
+def test_unknown_strategy_mode_fails_closed_for_worker_lifecycle():
+    bot = _bot_for_lifecycle()
+
+    settings = bot._get_strategy_lifecycle("BB_REV", "unsupported-mode")
+
+    assert settings["evaluation_enabled"] is False
+    assert settings["paper_enabled"] is False
+    assert settings["telegram_enabled"] is False
+    assert settings["auto_promote_enabled"] is False
