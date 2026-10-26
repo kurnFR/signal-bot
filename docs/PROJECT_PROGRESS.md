@@ -717,3 +717,31 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - The original branch diverged from current `master`. This reconciled branch starts from current `master` and carries forward the detailed register without discarding the master-side documentation corrections.
 - The register remains a draft pending independent route-registry/source verification, endpoint-count reconciliation, view-flow/RBAC review, and owner acceptance. Do not describe the 81 count or all route-level claims as independently verified until those checks are recorded.
 - UIX-01 remains blocked. This PR is documentation-only; no runtime code, dependencies, database, worker, trading, Telegram, or deployment changes are included.
+
+
+## UI/UX migration — owner-led execution update (2026-10-26)
+
+This section supersedes older UIX status statements above where they say the React foundation or read-only pilot has not started. Migration work is being executed directly through reviewed GitHub changes; Antigravity is not the executor for these phases.
+
+### Verified repository state
+
+- **PR #417 — merged:** isolated React + TypeScript + Vite foundation, responsive shell, light/dark tokens, initial accessibility semantics and component tests, and frontend CI. This preview is not mounted by FastAPI; `web/static` remains the default dashboard.
+- **PR #418 — merged:** same-origin GET-only JSON API transport, existing bearer-token forwarding from localStorage, safe normalized errors, transport tests, removal of external Google Fonts dependency, and a typed adapter for the existing system-status route.
+- **PR #419 — merged:** read-only Overview pilot using the verified `GET /api/system/status` contract. Displays database status/table count, Binance Spot/Futures connectivity, and collector heartbeat metadata while deliberately omitting the heartbeat `detail` field. Includes loading/error/retry/empty states and component tests.
+- The required frontend type-check, unit tests, production build, Python tests, wallet-tracker MariaDB integration, and paper-accounting checks were green on PR #419's exact head before merge.
+- These are repository/CI results, not browser/device acceptance. No production deployment or live server operation was performed.
+
+### Remaining gates and phase status
+
+| Work item | Status | Next action |
+|---|---|---|
+| UIX-00 route/view inventory | In review / not accepted | Independently reconcile inventory rows and totals against current FastAPI route registry and source; audit RBAC, view flows, polling, and side effects; record owner acceptance. |
+| UIX-01 frontend foundation | Merged; release hardening incomplete | Generate and commit a reproducible npm lockfile; keep CI install deterministic. |
+| UIX-02 read-only Overview | Pilot merged; not served by FastAPI | Finish API contract/parity review, verify authentication/session behavior, add browser-level tests, and decide a safe preview/rollout mechanism before serving it. |
+| UIX-03 Market Screener V2 | Not started | Map existing screener endpoints and behavior first; then migrate as a separate tested slice. |
+| UIX-04 remaining domain views | Not started | Migrate strategies, paper trading, backtest, wallets, ML/research, settings, and related dialogs in separate risk-ordered slices. |
+| UIX-05 final parity and release | Not started | Complete route parity, accessibility, browser/device, regression, reproducible-build, and owner acceptance gates before legacy retirement. |
+
+### Hard safety boundary
+
+The React preview is currently an isolated frontend build and is **not** wired into FastAPI static serving. Do not describe the frontend migration as complete. Do not remove or redirect the legacy dashboard until each view's parity and permissions are accepted. No backend API semantics, database schema, worker lifecycle, trading/accounting behavior, risk control, or Telegram gate was changed by PRs #417–#419.

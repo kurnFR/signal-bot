@@ -1,10 +1,10 @@
 # Signal Bot UI/UX Migration — Antigravity Execution Brief
 
-**Document type:** execution handoff / source of truth for frontend migration work  
+**Document type:** migration execution brief / source of truth for frontend migration work  
 **Repository:** `kurnFR/signal-bot`  
 **Prepared:** 2026-10-26  
 **Current baseline:** `master` at `6f686340e2b8d0e017847f8c09a9fea027e2af38`  
-**Status:** Planning decisions are sufficiently defined to begin execution. This does not mean the migration has started or is complete.
+**Status:** Owner-led execution is active. PRs #417–#419 are merged; the isolated React preview and read-only Overview pilot exist, but FastAPI still serves the legacy dashboard. The full migration is not complete.
 
 This document turns `docs/UI_UX_MODERNIZATION_PLAN.md` into an actionable sequence for Antigravity. Read both documents before making changes. Update this document's checkboxes and progress notes in every meaningful UI/UX PR.
 
@@ -280,8 +280,8 @@ Update this table after each meaningful PR.
 | Work item | Status | PR / evidence | Blocker / next action |
 |---|---|---|---|
 | UIX-00 Baseline inventory | In review — independent verification pending | `docs/UI_UX_VIEW_INVENTORY.md` | Reconcile the 81-row draft against current FastAPI routes/source, verify view flows/RBAC, and obtain owner acceptance |
-| UIX-01 Frontend foundation | Not started | — | Wait for UIX-00 inventory and existing-tooling audit |
-| UIX-02 Read-only pilot | Not started | — | Requires UIX-01 gates |
+| UIX-01 Frontend foundation | Merged (PR #417); lockfile gate open | PR #417 | Commit reproducible npm lockfile and preserve legacy default |
+| UIX-02 Read-only pilot | Pilot merged (PR #419); not served | PR #419 | Finish API/session parity and browser tests; choose reviewed rollout mechanism |
 | UIX-03 Market Screener V2 | Not started | — | Requires inventory and pilot patterns |
 | UIX-04 Strategy/paper-trading and remaining views | Not started | — | Migrate separately by risk and domain |
 | UIX-05 Consolidation/release readiness | Not started | — | Requires route parity and full acceptance evidence |
