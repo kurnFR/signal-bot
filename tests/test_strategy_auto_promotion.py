@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 
-from db.db import set_strategy_auto_promotion_policy
+from db.db import get_strategy_auto_promotion_policy, set_strategy_auto_promotion_policy
 
 from web.routes.backtest import (
     _auto_promote_top_candidate,
@@ -499,3 +499,51 @@ def test_policy_db_writer_rejects_invalid_numeric_values_before_database_access(
                 else:
                     raise AssertionError(f"invalid {key} value {value!r} was accepted")
             get_pool.assert_not_called()
+
+
+
+def test_policy_db_reader_rejects_invalid_persisted_numeric_values():
+    invalid_rows = [
+        {"min_test_trades": 29},
+        {"min_test_trades": 30.5},
+        {"min_profit_factor": float("nan")},
+        {"min_profit_factor": 0.9},
+        {"min_expectancy_r": float("inf")},
+        {"max_drawdown_r": 0},
+        {"min_rank_score": 1.1},
+    ]
+    defaults = {
+        "enabled": 0,
+        "min_test_trades": 30,
+        "min_profit_factor": 1.2,
+        "min_expectancy_r": 0.05,
+        "max_drawdown_r": 8.0,
+        "min_rank_score": 0.1,
+        "require_holdout": 1,
+        "send_telegram": 1,
+        "updated_at": None,
+    }
+
+    for overrides in invalid_rows:
+        row = {**defaults, **overrides}
+        cursor = type("Cursor", (), {
+            "execute": lambda self, *args, **kwargs: None,
+            "fetchone": lambda self: row,
+            "close": lambda self: None,
+        })()
+        connection = type("Connection", (), {
+            "cursor": lambda self, **kwargs: cursor,
+            "close": lambda self: None,
+            "commit": lambda self: None,
+        })()
+        with patch("db.db.get_pool") as get_pool, \\
+             patch("db.db._ensure_strategy_auto_promotion_tables"):
+            get_pool.return_value.get_connection.return_value = connection
+            try:
+                get_strategy_auto_promotion_policy()
+            except (TypeError, ValueError) as exc:
+                assert "invalid" in str(exc).lower() or any(
+                    key in str(exc) for key in overrides
+                )
+            else:
+                raise AssertionError(f"invalid persisted policy values accepted: {overrides}")
