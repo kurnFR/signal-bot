@@ -25,7 +25,7 @@ describe("screener control editor", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<AuthGate><ScreenerControlsPanel /></AuthGate>);
     expect(await screen.findByRole("heading", { name: "Screener configuration" })).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText(/Telegram alerting enabled/));
+    fireEvent.click(await screen.findByLabelText(/Telegram alerting enabled/));
     fireEvent.click(screen.getByRole("button", { name: /Save changes/ }));
     expect(await screen.findByRole("status")).toHaveTextContent(/takes effect within ~60s/i);
     await waitFor(() => expect(savedBody).toEqual({ enabled: false, overrides: { rvol_multiplier: 8, enable_velocity_detection: false } }));
