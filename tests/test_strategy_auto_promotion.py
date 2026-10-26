@@ -561,8 +561,8 @@ def test_promotion_policy_put_reports_saved_when_readback_fails():
         require_holdout=True,
         send_telegram=False,
     )
-    with patch("web.routes.backtest.set_strategy_auto_promotion_policy") as save, \\
-         patch("web.routes.backtest.get_strategy_auto_promotion_policy", side_effect=RuntimeError("read replica unavailable")):
+    with (patch("web.routes.backtest.set_strategy_auto_promotion_policy") as save,
+          patch("web.routes.backtest.get_strategy_auto_promotion_policy", side_effect=RuntimeError("read replica unavailable"))):
         response = update_promotion_policy(request)
 
     save.assert_called_once()
