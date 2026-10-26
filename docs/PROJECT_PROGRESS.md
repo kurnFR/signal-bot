@@ -602,3 +602,12 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - The UI displays the readback warning rather than claiming that the save failed or that the saved policy was verified.
 - Exact implementation head `75d14bc1bd5663eda10cf044b86ff2f8c5063446) passed all observed PR-head workflows: `tests`, `Test`, and `RetailBot accounting regression`. Both `unit-tests` and `wallet-tracker-mariadb-integration` jobs inside `tests` passed.
 - Merged as [`06966dc`](https://github.com/kurnFR/signal-bot/commit/06966dcbfeb7bc5f4d0051a1ded6907c8f69b07e). Verification was automated CI only; no production database, worker, live Telegram, or deployment changes were made.
+
+
+### Backtest Studio policy loading independent of audit feed — PR #389 (2026-10-26)
+
+- [PR #389](https://github.com/kurnFR/signal-bot/pull/389) fixes a frontend reliability issue where `fetchStrategyPromotionPolicy()` fetched the policy and promotion-audit feed in one `Promise.all`. A failing audit endpoint therefore prevented otherwise valid policy settings from loading.
+- The UI now loads the persisted policy first and renders audit history through a separate `fetchStrategyPromotionAudit()` helper. Audit failures show an audit-specific warning without replacing successfully loaded policy fields/status.
+- Added a regression assertion in `tests/test_auto_promotion_ui_guidance.py` and bumped the dashboard `app.js` cache key to `20261026-1`.
+- Exact implementation head `bdd149dad6aabbaab79d5d4e48cd687b28be8245` passed all observed PR-head workflows: `tests`, `Test`, and `RetailBot accounting regression`. The `unit-tests` and `wallet-tracker-mariadb-integration` jobs within `tests` also passed.
+- Merged as [`14912ad`](https://github.com/kurnFR/signal-bot/commit/14912ad0900c1e47a69192a8000acf0eb577ada5). Verification was automated CI only; no production database, worker, live Telegram, or deployment changes were made.
