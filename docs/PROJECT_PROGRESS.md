@@ -530,3 +530,12 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - Regression test covers the known reconciliation states and asserts the unsafe generic-success fallback is absent. An overly broad initial test assertion failed; it was narrowed to target the exact unsafe fallback, after which all PR-head CI checks passed.
 - Required PR-head checks passed at `0eafe93464c850cc0e468558d010af63a579ab2e`: `pytest`, `unit-tests`, `paper-accounting`, and `wallet-tracker-mariadb-integration`. PR #369 merged as [`df6ec3a`](https://github.com/kurnFR/signal-bot/commit/df6ec3a3d7325c0adf4b71f94e1bd30d5edf8da0). Post-merge workflows were queued when this note was prepared; they are not marked passed here.
 - This is UI status messaging only. It does not reconcile DB records automatically or change production DB, worker, Telegram, or deployment state.
+
+
+### Backtest Studio uncertain activation reconciliation — PR #371 (2026-10-26)
+
+- [PR #371](https://github.com/kurnFR/signal-bot/pull/371) hardens the promotion path when `set_paper_config()` raises after a write may have started. Instead of returning an ordinary failure that could encourage an unsafe retry, the flow returns `reconciliation_required` and instructs operators to reconcile `paper_configs` and the promotion audit before retrying.
+- The regression test verifies the uncertain activation status, persisted audit status, `telegram_result="unknown"`, and that Telegram is not attempted.
+- All PR-head checks passed on `6f1e542d37f8c1f042b675f82e3c5eeb8c85bb9d`: `tests`, both `Test` runs, `RetailBot accounting regression`, and `wallet-tracker-mariadb-integration`. Merged as [`0abea95`](https://github.com/kurnFR/signal-bot/commit/0abea954cfdc13f6d3dd8426c66fed3d23a0f21f).
+- Expected failure paths after a confirmed activation remain separately handled: Telegram exceptions become `promoted_alert_failed`, and final audit-write exceptions become `promoted_audit_pending` while preserving the known Telegram result. CI validates these paths; live runtime reconciliation remains an owner-environment task.
+- Scope is Backtest Studio's main paper engine. No production DB, worker, live Telegram, or deployment changes were made.
