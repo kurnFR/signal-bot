@@ -546,3 +546,10 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - The regression test verifies the returned and persisted reconciliation status, the missing `paper_config_id`, `telegram_result="not_attempted"`, and that Telegram is not called.
 - All observed PR-head checks passed on `17d9f3378b6dbb289752ef520793ef5a9d3303ba`: `tests`, both `Test` runs, and `RetailBot accounting regression`. The Wallet Tracker MariaDB integration workflow was not present in the observed PR-head runs, so it is not claimed as a PR-head check for this change.
 - Merged as [`3027113`](https://github.com/kurnFR/signal-bot/commit/30271138d4a75479ef415250d63853ba57d2d48e). This is code/automated-test evidence only; any uncertain runtime activation still requires owner-environment reconciliation. No production DB, worker, live Telegram, or deployment changes were made.
+
+### Backtest Studio promotion audit finalization — PR #375 (2026-10-26)
+
+- [PR #375](https://github.com/kurnFR/signal-bot/pull/375) makes `update_strategy_promotion_decision` return whether exactly one audit row was updated. After paper activation, a zero-row finalization is treated as `promoted_audit_pending` rather than reporting a completed promotion without confirmation of the final audit state.
+- Regression coverage verifies that a zero-row finalization preserves the known Telegram result, reports the pending audit/reconciliation state, and does not repeat or hide the alert side effect.
+- Required observed PR-head checks passed on `1f6930615aef1d2217da4d9f0645f260a8c62b32`: `tests`, both `Test` runs, and `RetailBot accounting regression`.
+- Merged as [`8ab73b9`](https://github.com/kurnFR/signal-bot/commit/8ab73b9dcf9800e9abd6a23718c2428ff20b55be). This is code and CI evidence only; no production database, worker, live Telegram, or deployment changes were made.
