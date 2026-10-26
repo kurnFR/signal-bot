@@ -16,17 +16,19 @@ describe("read-only same-origin API transport", () => {
       status: 200,
       headers: { "content-type": "application/json" },
     }));
+    window.localStorage.setItem("token", "test-session-token");
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(getJson<{ status: string }>("/api/health")).resolves.toEqual({ status: "ok" });
     expect(fetchMock).toHaveBeenCalledWith("/api/health", expect.objectContaining({
       method: "GET",
       credentials: "same-origin",
-      headers: { Accept: "application/json" },
+      headers: { Accept: "application/json", Authorization: "Bearer test-session-token" },
     }));
   });
 
   it("surfaces HTTP failures without leaking response bodies", async () => {
+    window.localStorage.removeItem("token");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("secret server detail", { status: 403 })));
     await expect(getJson("/api/health")).rejects.toMatchObject({
       name: "ApiError", status: 403, code: "http",
