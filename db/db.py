@@ -1078,10 +1078,15 @@ def get_retailbot2_stats():
         open_counts = {r["mode"]: r["open_count"] for r in cur.fetchall()}
 
         cur.execute("""
-            SELECT mode, COALESCE(SUM(net_pnl), 0) AS realized_pnl,
+            SELECT t.mode, COALESCE(SUM(t.net_pnl), 0) AS realized_pnl,
                    COUNT(*) AS closed_count,
-                   SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END) AS wins
-            FROM rdt_trades WHERE status='CLOSED' GROUP BY mode
+                   SUM(CASE WHEN t.net_pnl > 0 THEN 1 ELSE 0 END) AS wins
+            FROM rdt_trades t
+            LEFT JOIN rdt_strategy_lifecycle l
+              ON l.strategy_id = t.strategy AND l.mode = t.mode
+            WHERE t.status='CLOSED'
+              AND COALESCE(l.report_enabled, TRUE) = TRUE
+            GROUP BY t.mode
         """)
         pnl_rows = cur.fetchall()
         by_mode = {}

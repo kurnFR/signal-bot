@@ -125,3 +125,70 @@ def test_lifecycle_database_readback_parses_string_flags_without_truthiness(monk
     assert by_key[("DBL_PAT", "shadow")]["telegram_enabled"] is True
     assert by_key[("DBL_PAT", "shadow")]["report_enabled"] is False
     assert by_key[("DBL_PAT", "shadow")]["auto_promote_enabled"] is False
+
+
+def test_report_mode_aggregates_exclude_hidden_strategies_but_keep_open_counts(monkeypatch):
+    from db import db as db_module
+
+    class Cursor:
+        def __init__(self):
+            self.queries = []
+            self.fetchall_index = 0
+
+        def execute(self, query, params=None):
+            self.queries.append(query)
+
+        def fetchall(self):
+            rows = [
+                [{
+                    "strategy": "VISIBLE_STRATEGY", "mode": "inverse",
+                    "total_trades": 2, "wins": 1, "losses": 1,
+                    "total_pnl": Decimal("15.00"), "last_updated": None,
+                }],
+                [{"mode": "inverse", "open_count": 1}],
+                [{
+                    "mode": "inverse", "realized_pnl": Decimal("15.00"),
+                    "closed_count": 2, "wins": 1,
+                }],
+            ]
+            result = rows[self.fetchall_index]
+            self.fetchall_index += 1
+            return result
+
+        def close(self):
+            pass
+
+    cursor = Cursor()
+
+    class Connection:
+        def cursor(self, dictionary=False):
+            assert dictionary is True
+            return cursor
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    class Pool:
+        def get_connection(self):
+            return Connection()
+
+    monkeypatch.setattr(db_module, "get_retailbot2_pool", lambda: Pool())
+
+    result = db_module.get_retailbot2_stats()
+
+    # Report-level mode aggregates must use the same visibility rule as the
+    # per-strategy rows. Operational open-position counts remain independent:
+    # stopping/hiding a strategy does not force-close its existing positions.
+    mode_query = next(
+        query for query in cursor.queries
+        if "realized_pnl" in query and "closed_count" in query
+    )
+    assert "LEFT JOIN rdt_strategy_lifecycle" in mode_query
+    assert "ON l.strategy_id = t.strategy AND l.mode = t.mode" in mode_query
+    assert "COALESCE(l.report_enabled, TRUE) = TRUE" in mode_query
+    assert result["by_mode"]["inverse"]["realized_pnl"] == 15.0
+    assert result["by_mode"]["inverse"]["closed_count"] == 2
+    assert result["by_mode"]["inverse"]["open_count"] == 1
