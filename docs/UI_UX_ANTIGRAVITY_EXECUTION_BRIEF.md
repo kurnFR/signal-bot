@@ -279,7 +279,7 @@ Update this table after each meaningful PR.
 
 | Work item | Status | PR / evidence | Blocker / next action |
 |---|---|---|---|
-| UIX-00 Baseline inventory | Not complete | — | Inspect current source and add `docs/UI_UX_VIEW_INVENTORY.md` |
+| UIX-00 Baseline inventory | In review — independent verification pending | `docs/UI_UX_VIEW_INVENTORY.md` | Reconcile the 81-row draft against current FastAPI routes/source, verify view flows/RBAC, and obtain owner acceptance |
 | UIX-01 Frontend foundation | Not started | — | Wait for UIX-00 inventory and existing-tooling audit |
 | UIX-02 Read-only pilot | Not started | — | Requires UIX-01 gates |
 | UIX-03 Market Screener V2 | Not started | — | Requires inventory and pilot patterns |
@@ -288,6 +288,6 @@ Update this table after each meaningful PR.
 
 ## 10. First instruction to Antigravity
 
-Start with **UIX-00 only**. Inspect current `master`, produce the verified view/API inventory, identify existing frontend tooling and the actual FastAPI static-routing behavior, then open a documentation-only PR. Do not install packages, alter runtime code, or start the React migration until the inventory is reviewed and merged.
+Continue with **UIX-00 only** until acceptance. Review the detailed inventory draft against current `master`, verify route count/contracts/RBAC and frontend flows, confirm actual tooling/static-routing behavior, then submit a documentation-only acceptance PR. Do not install packages, alter runtime code, or start the React migration until the inventory is reviewed and merged.
 
 After UIX-00 is merged, implement UIX-01 in its own PR. Continue in order and update this brief after each phase. Do not ask the user to repeat decisions already specified here; raise a question only when source inspection reveals a genuine product decision that cannot be safely inferred.
