@@ -403,7 +403,7 @@ def _auto_promote_top_candidate(
             )
             try:
                 update_strategy_promotion_decision(
-                    decision_hash, status="failed", reason=final_reason,
+                    decision_hash, status="reconciliation_required", reason=final_reason,
                     paper_config_id=config_id if isinstance(config_id, int) and not isinstance(config_id, bool) else None,
                     telegram_result="not_attempted",
                 )
@@ -422,7 +422,7 @@ def _auto_promote_top_candidate(
                     "criteria": criteria,
                 }
             return {
-                "status": "failed", "strategy": strategy_name,
+                "status": "reconciliation_required", "strategy": strategy_name,
                 "reason": final_reason, "telegram_result": "not_attempted",
                 "criteria": criteria,
             }
