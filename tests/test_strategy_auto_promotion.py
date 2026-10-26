@@ -69,9 +69,9 @@ def test_auto_promotion_fails_closed_when_persisted_policy_thresholds_are_invali
         _policy(min_rank_score=2.0),
     )
     for invalid_policy in invalid_policies:
-        with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=invalid_policy), \\
-             patch("web.routes.backtest.record_strategy_promotion_decision") as record, \\
-             patch("paper.engine.set_paper_config") as set_config, \\
+        with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=invalid_policy), \
+             patch("web.routes.backtest.record_strategy_promotion_decision") as record, \
+             patch("paper.engine.set_paper_config") as set_config, \
              patch("notifications.telegram_notifier.send_deployment_alert") as alert:
             result = _call(_candidate(), data_segment="train", validation_metrics={
                 "total_trades": 40,
