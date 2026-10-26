@@ -39,4 +39,4 @@ def test_backtest_ui_handles_reconciliation_statuses_without_success_toast():
     assert 'promotion.status === "reconciliation_required"' in js
     assert 'promotion.status === "in_progress"' in js
     assert "Reconcile paper config and promotion audit before retrying" in js
-    assert "Battle Royale complete:" not in js[js.index('const promotion = data.autoPromotion'):js.index("await this.fetchStrategyPromotionPolicy();")]
+    assert 'this.showToast(`Battle Royale complete: ${data.top3.length} qualifying models discovered.`, "success");' not in js[js.index('const promotion = data.autoPromotion'):js.index("await this.fetchStrategyPromotionPolicy();")]
