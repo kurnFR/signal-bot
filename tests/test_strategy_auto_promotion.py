@@ -153,10 +153,10 @@ def test_auto_promotion_activates_train_candidate_only_when_holdout_gate_is_expl
 
 
 def test_auto_promotion_preserves_activation_outcome_when_final_audit_write_fails():
-    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy(require_holdout=False)), \\
-         patch("web.routes.backtest.record_strategy_promotion_decision", return_value=True), \\
-         patch("web.routes.backtest.update_strategy_promotion_decision", side_effect=RuntimeError("audit store unavailable")) as update, \\
-         patch("paper.engine.set_paper_config", return_value={"status": "success", "id": 42}), \\
+    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy(require_holdout=False)), \
+         patch("web.routes.backtest.record_strategy_promotion_decision", return_value=True), \
+         patch("web.routes.backtest.update_strategy_promotion_decision", side_effect=RuntimeError("audit store unavailable")) as update, \
+         patch("paper.engine.set_paper_config", return_value={"status": "success", "id": 42}), \
          patch("notifications.telegram_notifier.send_deployment_alert", return_value={"success": True}) as alert:
         result = _call(_candidate(), data_segment="train")
 
