@@ -248,6 +248,15 @@ def _auto_promote_top_candidate(
         logger.exception("Could not load auto-promotion policy")
         return {"status": "error", "reason": f"Policy unavailable: {exc}"}
 
+    # Persisted flags must be actual booleans. In particular, strings such
+    # as "false" are truthy in Python and must never enable promotion or alerts.
+    for key in ("enabled", "require_holdout", "send_telegram"):
+        if not isinstance(policy.get(key), bool):
+            return {
+                "status": "error",
+                "reason": f"Invalid auto-promotion policy: {key} must be a boolean. Correct the saved policy before retrying.",
+            }
+
     if not policy.get("enabled"):
         return {"status": "disabled", "reason": "Automatic promotion is disabled in settings"}
 

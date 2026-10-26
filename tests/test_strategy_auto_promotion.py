@@ -67,6 +67,9 @@ def test_auto_promotion_fails_closed_when_persisted_policy_thresholds_are_invali
         _policy(min_profit_factor=0.5),
         _policy(max_drawdown_r=0.0),
         _policy(min_rank_score=2.0),
+        _policy(enabled="false"),
+        _policy(require_holdout="false"),
+        _policy(send_telegram="false"),
     )
     for invalid_policy in invalid_policies:
         with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=invalid_policy), \

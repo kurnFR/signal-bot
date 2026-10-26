@@ -1533,7 +1533,13 @@ def get_strategy_auto_promotion_policy():
         policy = dict(_STRATEGY_AUTO_PROMOTION_DEFAULTS)
         policy.update(row)
         for key in ("enabled", "require_holdout", "send_telegram"):
-            policy[key] = bool(policy[key])
+            value = policy[key]
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, int) and value in (0, 1):
+                policy[key] = bool(value)
+                continue
+            raise ValueError(f"Invalid persisted auto-promotion policy: {key} must be boolean/0/1")
         for key in ("min_profit_factor", "min_expectancy_r", "max_drawdown_r", "min_rank_score"):
             policy[key] = float(policy[key])
         policy["min_test_trades"] = int(policy["min_test_trades"])
