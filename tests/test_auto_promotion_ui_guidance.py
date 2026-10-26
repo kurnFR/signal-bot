@@ -30,3 +30,13 @@ def test_retailbot2_lifecycle_has_one_click_stop_and_hide_without_deleting_histo
     assert "try { await this.fetchResearchData(); } catch (_) {}" in js
     assert "Stop &amp; Hide" in js
     assert 'app.js?v=20261025-3' in html
+
+
+def test_backtest_ui_handles_reconciliation_statuses_without_success_toast():
+    js = Path("web/static/js/app.js").read_text(encoding="utf-8")
+
+    assert 'promotion.status === "promoted_audit_pending"' in js
+    assert 'promotion.status === "reconciliation_required"' in js
+    assert 'promotion.status === "in_progress"' in js
+    assert "Reconcile paper config and promotion audit before retrying" in js
+    assert "Battle Royale complete:" not in js[js.index('const promotion = data.autoPromotion'):js.index("await this.fetchStrategyPromotionPolicy();")]
