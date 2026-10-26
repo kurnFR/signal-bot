@@ -395,3 +395,18 @@ def test_auto_promotion_requires_reconciliation_when_activation_raises():
     assert update.call_args.kwargs["status"] == "reconciliation_required"
     assert update.call_args.kwargs["telegram_result"] == "unknown"
     alert.assert_not_called()
+
+def test_auto_promotion_reports_audit_pending_when_final_update_changes_no_row():
+    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy(require_holdout=False)), \
+         patch("web.routes.backtest.record_strategy_promotion_decision", return_value=True), \
+         patch("web.routes.backtest.update_strategy_promotion_decision", return_value=False) as update, \
+         patch("paper.engine.set_paper_config", return_value={"status": "success", "id": 42}), \
+         patch("notifications.telegram_notifier.send_deployment_alert", return_value={"success": True}) as alert:
+        result = _call(_candidate(), data_segment="train")
+
+    assert result["status"] == "promoted_audit_pending"
+    assert result["telegram_result"] == "sent"
+    assert "audit" in result["reason"].lower()
+    assert "reconcile" in result["reason"].lower()
+    alert.assert_called_once()
+    update.assert_called_once()
