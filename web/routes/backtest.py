@@ -435,10 +435,25 @@ def _auto_promote_top_candidate(
                 final_status = "promoted_alert_failed"
                 final_reason = f"Paper config activated; Telegram alert failed: {alert_exc}"
 
-        update_strategy_promotion_decision(
-            decision_hash, status=final_status, reason=final_reason,
-            paper_config_id=config_result.get("id"), telegram_result=telegram_result,
-        )
+        try:
+            update_strategy_promotion_decision(
+                decision_hash, status=final_status, reason=final_reason,
+                paper_config_id=config_result.get("id"), telegram_result=telegram_result,
+            )
+        except Exception as audit_exc:
+            # Activation and any alert delivery have already happened. Do not
+            # misreport that side effect as failed or trigger an unsafe retry.
+            logger.exception("Paper config activated but promotion audit finalization failed")
+            return {
+                "status": "promoted_audit_pending", "strategy": strategy_name,
+                "reason": (
+                    "Paper config is active and Telegram outcome is "
+                    f"{telegram_result}; final promotion audit write failed: {audit_exc}. "
+                    "Reconcile the promotion audit and paper_configs before retrying."
+                ),
+                "telegram_result": telegram_result,
+                "criteria": criteria,
+            }
         return {
             "status": final_status, "strategy": strategy_name,
             "reason": final_reason, "telegram_result": telegram_result,
