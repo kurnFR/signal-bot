@@ -281,7 +281,7 @@ Update this table after each meaningful PR.
 |---|---|---|---|
 | UIX-00 Baseline inventory | In review — independent verification pending | `docs/UI_UX_VIEW_INVENTORY.md` | Reconcile the 81-row draft against current FastAPI routes/source, verify view flows/RBAC, and obtain owner acceptance |
 | UIX-01 Frontend foundation | Merged (PR #417); lockfile gate open | PR #417 | Commit reproducible npm lockfile and preserve legacy default |
-| UIX-02 Read-only pilot | Pilot merged (PR #419); not served | PR #419 | Finish API/session parity and browser tests; choose reviewed rollout mechanism |
+| UIX-02 Overview/authentication | Read-only Overview (PR #419) and auth gate (PR #423) merged; not served | PRs #419, #423 | Browser-level session parity, role/permission checks, password-change parity, and reviewed serving mechanism |
 | UIX-03 Market Screener V2 | Read-only pilot merged (PR #421); controls remain legacy | PR #421 | Verify parity, then migrate controls separately with RBAC and persistence tests |
 | UIX-04 Strategy/paper-trading and remaining views | Not started | — | Migrate separately by risk and domain |
 | UIX-05 Consolidation/release readiness | Not started | — | Requires route parity and full acceptance evidence |
