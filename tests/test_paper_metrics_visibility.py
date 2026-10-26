@@ -56,7 +56,7 @@ def test_paper_metrics_headline_uses_same_report_visibility_as_strategy_rows():
     summary_query, strategy_query = cursor.queries
     for query in (summary_query, strategy_query):
         assert "LEFT JOIN paper_positions p ON p.id = t.position_id" in query
-        assert "LEFT JOIN paper_configs c ON c.id = p.config_id" in query
+        assert "LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name" in query
         assert "WHERE COALESCE(c.report_enabled, TRUE) = TRUE" in query
 
     assert metrics["totalTrades"] == 2
@@ -108,5 +108,5 @@ def test_recent_paper_trades_respect_report_visibility(monkeypatch):
 
     assert len(rows) == 1
     assert "LEFT JOIN paper_positions p ON p.id = t.position_id" in cursor.queries[0]
-    assert "LEFT JOIN paper_configs c ON c.id = p.config_id" in cursor.queries[0]
+    assert "LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name" in cursor.queries[0]
     assert "COALESCE(c.report_enabled, TRUE) = TRUE" in cursor.queries[0]
