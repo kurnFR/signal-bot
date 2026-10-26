@@ -1541,9 +1541,34 @@ def get_strategy_auto_promotion_policy():
                 policy[key] = bool(value)
                 continue
             raise ValueError(f"Invalid persisted auto-promotion policy: {key} must be boolean/0/1")
-        for key in ("min_profit_factor", "min_expectancy_r", "max_drawdown_r", "min_rank_score"):
-            policy[key] = float(policy[key])
-        policy["min_test_trades"] = int(policy["min_test_trades"])
+        min_trades = policy["min_test_trades"]
+        if type(min_trades) is not int or not 30 <= min_trades <= 10000:
+            raise ValueError(
+                "Invalid persisted auto-promotion policy: min_test_trades must be an integer from 30 to 10000"
+            )
+
+        numeric_bounds = {
+            "min_profit_factor": (1.0, 10.0, True),
+            "min_expectancy_r": (0.0, 10.0, True),
+            "max_drawdown_r": (0.0, 100.0, False),
+            "min_rank_score": (0.01, 1.0, True),
+        }
+        for key, (minimum, maximum, minimum_inclusive) in numeric_bounds.items():
+            raw_value = policy[key]
+            if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float, Decimal)):
+                raise ValueError(
+                    f"Invalid persisted auto-promotion policy: {key} must be a finite number"
+                )
+            value = float(raw_value)
+            if not math.isfinite(value):
+                raise ValueError(
+                    f"Invalid persisted auto-promotion policy: {key} must be a finite number"
+                )
+            if (value < minimum if minimum_inclusive else value <= minimum) or value > maximum:
+                raise ValueError(
+                    f"Invalid persisted auto-promotion policy: {key} is outside the supported range"
+                )
+            policy[key] = value
         policy["updated_at"] = str(policy["updated_at"]) if policy.get("updated_at") else None
         return policy
     finally:
