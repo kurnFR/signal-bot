@@ -693,3 +693,12 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - Test-only change; runtime behavior is unchanged. The regression now asserts both schema bootstrap and report visibility query are executed.
 - All required PR-head workflows passed on exact SHA `6a233783d7d404ab9a36c7768945e7de377579ce`: `tests` (including `unit-tests` and `wallet-tracker-mariadb-integration`), `Test`, and `RetailBot accounting regression`.
 - Merged as [`894b7c9`](https://github.com/kurnFR/signal-bot/commit/894b7c94de90e67484f8ad54818db8bdfa0a1613). No production database, worker, live Telegram, or deployment actions were performed.
+
+
+### UI/UX modernization status and phased frontend migration plan — 2026-10-26
+
+- Added [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md) to distinguish merged dashboard polish from the full recommended React/TypeScript migration, define the target stack, and track phase-by-phase acceptance gates.
+- **Current status: not finished.** The current dashboard remains `web/static/index.html` plus a large vanilla JavaScript app, CSS, Tailwind CDN, Lucide CDN, Lightweight Charts and Chart.js. The light/dark toggle, Market Screener V2, responsive table work and targeted accessibility fixes already exist, but the React/TypeScript + local build + shadcn/ui architecture has not been implemented as a migration.
+- The plan prioritizes baseline inventory and browser acceptance, then a pinned build/design system, one low-risk pilot view, Market Screener V2, strategy/paper-trading views, and final consolidation. It explicitly preserves the Python/FastAPI backend and server-side trading, risk, lifecycle, accounting and Telegram controls.
+- Outstanding release evidence includes full keyboard-only and screen-reader passes, real-browser contrast/zoom/forced-colors/reduced-motion/mobile checks, Playwright coverage for critical flows, reproducible frontend build validation, and separately authorized runtime verification. No deployment is implied.
+- No runtime code, production database, worker, trading, or Telegram behavior was changed in this documentation PR.
