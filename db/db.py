@@ -1573,9 +1573,9 @@ def set_strategy_auto_promotion_policy(policy):
 
     numeric_bounds = {
         "min_profit_factor": (1.0, 10.0, True),
-        "min_expectancy_r": (0.0, 10.0, False),
+        "min_expectancy_r": (0.0, 10.0, True),
         "max_drawdown_r": (0.0, 100.0, False),
-        "min_rank_score": (0.01, 1.0, False),
+        "min_rank_score": (0.01, 1.0, True),
     }
     normalized_numeric = {}
     for key, (minimum, maximum, minimum_inclusive) in numeric_bounds.items():
