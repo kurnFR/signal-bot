@@ -637,3 +637,11 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - Regression tests cover an unregistered strategy ID and an unsupported mode. The test-only commit preceded the implementation commit.
 - All observed PR-head workflows passed on exact implementation SHA `04ef34db26a2f25dfcdc2d4d17be0f48d9934907`: `tests`, `Test`, and `RetailBot accounting regression`. The `unit-tests` and `wallet-tracker-mariadb-integration` jobs within `tests` also passed.
 - Merged as [`741f7d4`](https://github.com/kurnFR/signal-bot/commit/741f7d45c37ed817403a6fdd24b3ae994ed4f8f2). Automatic promotion remains unavailable and fail-closed. This is code/CI evidence only; no production database, worker, live Telegram, or deployment changes were made.
+
+
+### RetailBot2 recent closed-trade report visibility — PR #395 (2026-10-26)
+
+- [PR #395](https://github.com/kurnFR/signal-bot/pull/395) applies the exact strategy/mode `report_enabled` visibility rule to the recent closed-trades endpoint, closing a gap where a strategy row could be hidden from statistics but still appear in the recent-results list.
+- Added a test-first regression assertion for the recent closed-trade query. The query joins `rdt_strategy_lifecycle` on both strategy and mode and excludes rows with `report_enabled = FALSE`.
+- Open positions remain operationally visible, and no trade records or accounting calculations are changed. All observed PR-head workflows passed on exact implementation SHA `74f2999d4c3c9a3bcc2eec4cb9b9d7ad30ef863b`: `tests`, `Test`, and `RetailBot accounting regression`. The `unit-tests` and `wallet-tracker-mariadb-integration` jobs inside `tests` also passed.
+- Merged as [`c15870b`](https://github.com/kurnFR/signal-bot/commit/c15870be939166c75007f7d1f1ddc3f03423cc9e). Automated CI only; no production database, worker, live Telegram, or deployment changes were made.
