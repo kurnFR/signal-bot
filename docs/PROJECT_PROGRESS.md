@@ -685,3 +685,11 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - The recent paper-trade history and both aggregate/per-strategy metric queries now join `paper_configs` by its stable unique key `(symbol, market, timeframe, strategy_name)`. The unique key is defined by `uq_paper_cfg`; this also handles existing positions with a missing config ID without rewriting their ledger rows.
 - Regression assertions were updated before implementation to require the stable identity join. All three required PR-head workflows passed on exact implementation SHA `d9a8eb3defcf3b72efb02241d8bdb9eb8e42db1a`: `tests` (including `unit-tests` and `wallet-tracker-mariadb-integration`), `Test`, and `RetailBot accounting regression`. Merged as [`1a7ab34`](https://github.com/kurnFR/signal-bot/commit/1a7ab347f54b84ccedb7adf5ce3ecb047e2e66eb).
 - This is report filtering only; no paper trades, positions, or accounting/equity reconstruction data were modified. No production DB, worker, Telegram, or deployment actions were performed.
+
+
+### Recent closed-trade report schema-bootstrap regression coverage — PR #407 (2026-10-26)
+
+- [PR #407](https://github.com/kurnFR/signal-bot/pull/407) strengthens the recent-trades visibility regression test to reflect the endpoint's real initialization order: ensure the `rdt_strategy_lifecycle` table, commit schema bootstrap, then query recent closed trades with the exact strategy/mode `report_enabled` filter.
+- Test-only change; runtime behavior is unchanged. The regression now asserts both schema bootstrap and report visibility query are executed.
+- All required PR-head workflows passed on exact SHA `6a233783d7d404ab9a36c7768945e7de377579ce`: `tests` (including `unit-tests` and `wallet-tracker-mariadb-integration`), `Test`, and `RetailBot accounting regression`.
+- Merged as [`894b7c9`](https://github.com/kurnFR/signal-bot/commit/894b7c94de90e67484f8ad54818db8bdfa0a1613). No production database, worker, live Telegram, or deployment actions were performed.
