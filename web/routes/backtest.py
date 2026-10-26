@@ -401,11 +401,26 @@ def _auto_promote_top_candidate(
                 "Paper config activation did not return a confirmed persisted config ID; "
                 "reconcile paper_configs before retrying or sending a deployment alert"
             )
-            update_strategy_promotion_decision(
-                decision_hash, status="failed", reason=final_reason,
-                paper_config_id=config_id if isinstance(config_id, int) and not isinstance(config_id, bool) else None,
-                telegram_result="not_attempted",
-            )
+            try:
+                update_strategy_promotion_decision(
+                    decision_hash, status="failed", reason=final_reason,
+                    paper_config_id=config_id if isinstance(config_id, int) and not isinstance(config_id, bool) else None,
+                    telegram_result="not_attempted",
+                )
+            except Exception as audit_exc:
+                # The config helper did not confirm a persisted ID. It may still
+                # have performed a partial write, so do not claim activation
+                # failed conclusively or send an alert; require reconciliation.
+                logger.exception("Paper config ID unconfirmed and promotion audit write failed")
+                return {
+                    "status": "reconciliation_required", "strategy": strategy_name,
+                    "reason": (
+                        f"{final_reason}; promotion audit update also failed: {audit_exc}. "
+                        "Reconcile paper_configs and the promotion audit before retrying."
+                    ),
+                    "telegram_result": "not_attempted",
+                    "criteria": criteria,
+                }
             return {
                 "status": "failed", "strategy": strategy_name,
                 "reason": final_reason, "telegram_result": "not_attempted",
