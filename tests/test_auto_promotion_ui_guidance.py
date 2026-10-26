@@ -29,7 +29,7 @@ def test_retailbot2_lifecycle_has_one_click_stop_and_hide_without_deleting_histo
     assert "const confirmed = window.confirm(" in js
     assert "try { await this.fetchResearchData(); } catch (_) {}" in js
     assert "Stop &amp; Hide" in js
-    assert 'app.js?v=20261025-3' in html
+    assert 'app.js?v=20261026-1' in html
 
 
 def test_backtest_ui_handles_reconciliation_statuses_without_success_toast():
@@ -40,3 +40,14 @@ def test_backtest_ui_handles_reconciliation_statuses_without_success_toast():
     assert 'promotion.status === "in_progress"' in js
     assert "Reconcile paper config and promotion audit before retrying" in js
     assert 'this.showToast(`Battle Royale complete: ${data.top3.length} qualifying models discovered.`, "success");' not in js[js.index('const promotion = data.autoPromotion'):js.index("await this.fetchStrategyPromotionPolicy();")]
+
+
+def test_promotion_policy_load_is_independent_of_audit_endpoint_failure():
+    js = Path("web/static/js/app.js").read_text(encoding="utf-8")
+    method = js[js.index("async fetchStrategyPromotionPolicy()"):js.index("async saveStrategyPromotionPolicy()")]
+
+    assert "const policyRes = await fetch(" in method
+    assert "await this.fetchStrategyPromotionAudit()" in method
+    assert "async fetchStrategyPromotionAudit()" in js
+    assert "Failed to load promotion audit" in js
+    assert "const [policyRes, auditRes] = await Promise.all([" not in method
