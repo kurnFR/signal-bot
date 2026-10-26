@@ -1087,7 +1087,7 @@ def get_retailbot2_stats():
             WHERE t.status='CLOSED'
               AND COALESCE(l.report_enabled, TRUE) = TRUE
             GROUP BY t.mode
-        """))
+        """)
         pnl_rows = cur.fetchall()
         by_mode = {}
         for r in pnl_rows:
