@@ -669,3 +669,11 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - Regression test `tests/test_paper_metrics_visibility.py` verifies both aggregate queries join `paper_positions` and `paper_configs` and apply `COALESCE(c.report_enabled, TRUE) = TRUE`. The test commit preceded the implementation.
 - Exact implementation head `92b26ae81120eb3bbc03c915a252c12294bd081d` passed all required workflows: `tests`, `Test`, and `RetailBot accounting regression`; `unit-tests`, `wallet-tracker-mariadb-integration`, and `paper-accounting` jobs passed.
 - Merged as [`40a388a`](https://github.com/kurnFR/signal-bot/commit/40a388a84b7ab245dacc10d353985a91a1b2f088). This is a reporting-only aggregation change; paper trade history and accounting records remain unchanged. No production database, worker, Telegram, or deployment actions were performed.
+
+
+### General paper-trade history visibility — PR #403 (2026-10-26)
+
+- [PR #403](https://github.com/kurnFR/signal-bot/pull/403) applies the same `paper_configs.report_enabled` rule to the recent paper-trade history query that is already used by headline and per-strategy metrics. Hidden strategies therefore no longer appear in the dashboard's recent trade-history list.
+- Added a regression test in `tests/test_paper_metrics_visibility.py`; test-only change preceded the implementation. The history query joins `paper_trades` to `paper_positions` and `paper_configs`, retaining legacy/orphan rows when no explicit disabled configuration is found.
+- All three required PR-head workflows passed on exact implementation SHA `90040747a45aedb31fdb8881331b5e7dcb52ce73`: `tests` (including `unit-tests` and `wallet-tracker-mariadb-integration`), `Test`, and `RetailBot accounting regression`. Merged as [`6895d5b`](https://github.com/kurnFR/signal-bot/commit/6895d5b971c00b13d7a15c8d5e96a592f0db4e35).
+- Reporting-only change: no paper-trade history is deleted, no open positions are changed, and accounting/equity reconstruction remains unchanged. No production database, worker, Telegram, or deployment actions were performed.
