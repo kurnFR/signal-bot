@@ -145,7 +145,7 @@ Build artifacts must not overwrite `web/static/index.html` or legacy JavaScript.
 ## 6. Execution plan and PR sequence
 
 ### UIX-00 — Reconcile planning and inventory
-**Status:** Complete (Deliverable checked in as `docs/UI_UX_VIEW_INVENTORY.md`).
+**Status:** In review / Pending acceptance (Deliverable prepared as `docs/UI_UX_VIEW_INVENTORY.md`; mark complete only after review and acceptance).
 
 - [x] Re-read `docs/UI_UX_MODERNIZATION_PLAN.md`, this brief, and the current `master`.
 - [x] Inventory all user-visible dashboard views/navigation, including hidden or conditionally rendered panels.
@@ -276,8 +276,8 @@ Update this table after each meaningful PR.
 
 | Work item | Status | PR / evidence | Blocker / next action |
 |---|---|---|---|
-| UIX-00 Baseline inventory | Complete | `docs/UI_UX_VIEW_INVENTORY.md` | PR prepared; all 11 views and 7 dialogs mapped to verified backend APIs |
-| UIX-01 Frontend foundation | Ready to start | — | Provision Node.js/npm and initiate `frontend/` foundation PR |
+| UIX-00 Baseline inventory | In review | `docs/UI_UX_VIEW_INVENTORY.md` | Exhaustive 81-endpoint register submitted; pending user review and acceptance |
+| UIX-01 Frontend foundation | Blocked | — | Blocked until UIX-00 inventory is reviewed, accepted, and merged |
 | UIX-02 Read-only pilot | Not started | — | Requires UIX-01 gates |
 | UIX-03 Market Screener V2 | Not started | — | Requires inventory and pilot patterns |
 | UIX-04 Strategy/paper-trading and remaining views | Not started | — | Migrate separately by risk and domain |

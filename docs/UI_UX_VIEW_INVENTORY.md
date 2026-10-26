@@ -1,131 +1,279 @@
 # Signal Bot UI/UX Comprehensive View & API Inventory (UIX-00)
 
-**Document Version:** 1.0.0  
-**Status:** Baseline Inventory Complete (UIX-00 Deliverable)  
-**Target Architecture:** React + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query/Table  
+**Document Version:** 1.1.0  
+**Status:** In Review / Pending Acceptance (UIX-00 Baseline Audit)  
+**Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
 **Audited Master Commit:** `1a6ead5`  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
 ---
 
-## 1. Executive Summary & Verification Context
+## 1. Executive Summary & Audit Scope
 
-This document satisfies the **UIX-00** gate of the Signal Bot UI/UX modernization program. It provides an exhaustive, source-verified audit of every dashboard view, modal dialog, background polling loop, API endpoint dependency, role-based access control (RBAC) constraint, responsive breakpoint behavior, accessibility requirement, and test coverage across the existing application.
+This document represents the definitive baseline inventory deliverable for **Phase UIX-00** of the Signal Bot UI/UX modernization program. In accordance with Section 7 of the Antigravity Execution Brief, every dashboard view, modal dialog, background polling loop, FastAPI route, RBAC permission boundary, request/response schema, and side effect has been audited directly against the production Python and JavaScript codebase.
 
-### Key Audit Findings
-1. **Views & Dialogs:** The dashboard consists of **11 primary navigation views** (`#view-home`, `#view-master-data`, `#view-backtest`, `#view-paper`, `#view-ml-studio`, `#view-strategies`, `#view-news-ai`, `#view-research`, `#view-market-screener`, `#view-wallet-tracking`, `#view-settings`) and **7 modal dialogs** (`#login-modal`, `#force-password-modal`, `#backfill-modal`, `#deploy-modal`, `#modal-run-ml`, `#modal-deploy-ml`, `#modal-inspect-ml`).
-2. **Backend API Endpoints:** 81 HTTP endpoints across 14 route modules in `web/routes/` are registered with FastAPI. Every endpoint was verified against source code definitions.
-3. **Frontend Implementation:** The current UI is implemented as a single 2,406-line HTML template (`web/static/index.html`), a ~5,200-line monolithic JavaScript controller (`web/static/js/app.js`), an accessibility enhancement bundle (`web/static/js/dashboard_enhancements.js`), and companion stylesheets.
-4. **Third-Party CDN Dependencies:** External runtime scripts are pulled from CDNs: Tailwind CSS (`cdn.tailwindcss.com`), Lucide Icons (`unpkg.com/lucide`), TradingView Lightweight Charts v4.1.1 (`unpkg.com/lightweight-charts@4.1.1`), and Chart.js (`cdn.jsdelivr.net/npm/chart.js`).
-5. **No Existing Node Tooling:** No `package.json`, `package-lock.json`, `tsconfig.json`, or `node_modules` exist anywhere in the repository. Node.js and npm are currently not present in the host system PATH.
+### Audit Summary Metrics
+- **Navigation Views Audited:** 11 primary views (`view-home`, `view-master-data`, `view-backtest`, `view-paper`, `view-ml-studio`, `view-strategies`, `view-news-ai`, `view-research`, `view-market-screener`, `view-wallet-tracking`, `view-settings`).
+- **Modal Dialogs Audited:** 7 interactive dialogs (`login-modal`, `force-password-modal`, `backfill-modal`, `deploy-modal`, `modal-run-ml`, `modal-deploy-ml`, `modal-inspect-ml`).
+- **Backend API Endpoints Audited:** **81 endpoints** across 14 router modules in `web/routes/`.
+- **Frontend Tooling State:** Zero Node.js manifests (`package.json`, lockfiles) currently exist in the repository; Node.js/npm are absent from host PATH.
+- **Serving Configuration:** FastAPI mounts `web/static/` at `/static` and dynamically injects `dashboard_enhancements.js` into `GET /`.
+- **Gate Invariant:** UIX-00 remains in "In Review / Pending Acceptance" status until explicitly reviewed. No React implementation or frontend package installations will occur before approval.
 
 ---
 
 ## 2. Frontend Tooling & Serving Configuration Audit
 
-### Current Serving Configuration
-- **Static Asset Mount:** In `web/app.py`, static files are mounted at `/static`:
+### 2.1 Current Production Serving Architecture
+- **Static Asset Mount:** Mounted in `web/app.py`:
   ```python
   STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
   app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
   ```
-- **Entrypoint Route (`GET /`):** Served via `serve_index()` in `web/app.py`. Reads `web/static/index.html` and injects:
+- **Entry Route (`GET /`):** Served via `serve_index()` in `web/app.py`. Reads `web/static/index.html` and injects:
   ```html
   <script src="/static/js/dashboard_enhancements.js?v=20261016-2"></script>
   ```
-  before `</body>`.
-- **CORS Configuration:** Controlled via `SIGNAL_BOT_ALLOWED_ORIGINS` environment variable (default: `http://localhost:8050,http://127.0.0.1:8050`). `allow_credentials=True`, methods `["GET", "POST", "PUT", "DELETE", "OPTIONS"]`, headers `["Authorization", "Content-Type"]`.
+  immediately before `</body>`.
+- **CORS Configuration:** Controlled via `SIGNAL_BOT_ALLOWED_ORIGINS` (default: `http://localhost:8050,http://127.0.0.1:8050`). `allow_credentials=True`, methods `["GET", "POST", "PUT", "DELETE", "OPTIONS"]`, headers `["Authorization", "Content-Type"]`.
 
-### Target Architecture (Phase UIX-01 onward)
-- **Directory Isolation:** The modernized application will live entirely in a top-level `frontend/` directory.
-- **Vite Build Target:** Production build will output to an isolated distribution directory (e.g., `frontend/dist/`).
-- **Coexistence Guarantee:** Legacy static assets in `web/static/` remain untouched during migration phases UIX-01 through UIX-04. The legacy UI remains the default entrypoint until Phase UIX-05 release verification.
-- **Required Node.js Environment:** Node.js (>= 20.x LTS) and npm will need to be provisioned on developer/CI environments before executing UIX-01.
-
----
-
-## 3. Authentication & RBAC Security Matrix
-
-Authentication is verified on every API request via the `api_security_boundary` middleware in `web/app.py`, enforcing bearer token authentication (`Authorization: Bearer <token>`) and role tiers (`viewer`, `trader`, `admin`).
-
-| Endpoint Pattern | Allowed HTTP Methods | Role Access Level | Password Change Restriction | Notes |
-|---|---|---|---|---|
-| `/api/auth/login` | POST | Anonymous (Public) | Bypass | Returns JWT/session token |
-| `/api/auth/me` | GET | Authenticated (All roles) | Allowed | Returns current user profile & role |
-| `/api/auth/logout` | POST | Authenticated (All roles) | Allowed | Invalidates session |
-| `/api/auth/change-password` | POST | Authenticated (All roles) | Allowed | Clears `must_change_password` flag |
-| `/api/users/*` | GET, POST, PUT, DELETE | `admin` only | Blocked | User administration & credential resets |
-| `/api/settings/*` | GET, POST | `admin` only | Blocked | System & runtime configuration |
-| `/api/telegram/test` | POST | `admin` only | Blocked | Direct Telegram alert test |
-| `/api/telegram/status` | GET | Authenticated (All roles) | Blocked | Read-only connection status |
-| `/api/master-data/backfill` | POST | `trader`, `admin` | Blocked | Async kline backfill dispatch |
-| `/api/master-data/build-features`| POST | `trader`, `admin` | Blocked | Async feature computation dispatch |
-| `/api/custom-strategy/*` | POST, PUT, DELETE | `trader`, `admin` | Blocked | Strategy creation & modification |
-| `/api/custom-strategy/*` | GET | Authenticated (All roles) | Blocked | Read-only strategy definitions |
-| `/api/paper/*` (mutations) | POST, PUT, DELETE | `trader`, `admin` | Blocked | Order cancellation, position closing, config edits |
-| `/api/paper/*` (reads) | GET | Authenticated (All roles) | Blocked | Ledger, positions, trades, metrics read-only |
-| `/api/backtest/*` (mutations) | POST, PUT | `trader`, `admin` | Blocked | Run simulation, update promotion policy |
-| `/api/backtest/*` (reads) | GET | Authenticated (All roles) | Blocked | History, strategies, audit logs |
-| `/api/ml/*` (mutations) | POST, DELETE | `trader`, `admin` | Blocked | Run tournament, deploy model |
-| `/api/ml/*` (reads) | GET | Authenticated (All roles) | Blocked | Models, experiments, manifests |
-| `/api/wallets/*` (mutations) | POST, PUT, DELETE | `trader`, `admin` | Blocked | Track/untrack wallet, tracker settings |
-| `/api/wallets/*` (reads) | GET | Authenticated (All roles) | Blocked | On-chain flow, tracked list, positions |
-| `/api/research/*` (mutations) | POST | `trader`, `admin` | Blocked | Bot worker control, lifecycle toggles |
-| `/api/research/*` (reads) | GET | Authenticated (All roles) | Blocked | Live stats, positions, closed trades |
-| `/api/crypto/*` | GET | Authenticated (All roles) | Blocked | Binance symbol search & popular pairs |
-| `/api/system/*` | GET | Authenticated (All roles) | Blocked | System health, collectors heartbeats |
+### 2.2 Host Environment & Tooling Audit
+- **Node.js / npm:** Audited on host: `node: The term 'node' is not recognized`. Node.js (>= 20.x LTS) must be provisioned on host/CI before UIX-01.
+- **Manifests & Lockfiles:** Audited entire repository: zero `package.json`, `package-lock.json`, `tsconfig.json`, or `node_modules` exist.
+- **Vite Migration Target:** All modern frontend code will be isolated inside a root-level `frontend/` directory with build output to `frontend/dist/`. The legacy UI (`web/static/`) will remain untouched and serve as the default until UIX-05 consolidation.
 
 ---
 
-## 4. Background Polling & Real-Time Data Flow
+## 3. Global Security, RBAC & Authentication Architecture
 
-The legacy application manages background polling inside `App.init()` in `web/static/js/app.js`:
+API requests to `/api/*` are guarded by the `api_security_boundary` middleware in `web/app.py`.
 
-```javascript
-// Active interval: 15,000ms (15s)
-setInterval(async () => {
-    if (!this.authToken || this.autoRefreshInProgress || document.hidden) return;
-    this.autoRefreshInProgress = true;
-    try {
-        const refreshTasks = [this.fetchSystemStatus()];
-        if (this.currentTab === "paper") refreshTasks.push(this.fetchPaperData());
-        if (this.currentTab === "market-screener") refreshTasks.push(this.fetchScreenerData());
-        if (this.currentTab === "wallet-tracking") refreshTasks.push(this.fetchWalletData({ silent: true }));
-        await Promise.allSettled(refreshTasks);
-    } finally {
-        this.autoRefreshInProgress = false;
-    }
-}, 15000);
+### 3.1 Authentication Tokens & Session
+- **Bearer Token Authentication:** Header format `Authorization: Bearer <token>`.
+- **Token Verification:** Decoded via `authenticate_request(request)` using `SECRET_KEY` in `web/auth.py`.
+- **Rate Limiting:** Durable rate limiter (`enable_durable_rate_limit()`) protects against credential brute-forcing.
+
+### 3.2 Role Hierarchy & Enforcement Matrix
+- `admin`: Full system access, user administration, password resets, system settings, Telegram test.
+- `trader`: Can execute backtests, trigger backfills/feature builds, deploy to paper, update paper configs, trip circuit breakers, control research bots/screener. Cannot manage users or system settings.
+- `viewer`: Read-only access to dashboards, charts, metrics, positions, orders, and trade history. Cannot trigger mutations or dispatch jobs.
+
+```
+       [ Anonymous (Unauthenticated) ]
+                      │
+            POST /api/auth/login
+                      ▼
+            [ Authenticated User ]
+             ┌────────┴────────┐
+             ▼                 ▼
+   must_change_password=True  must_change_password=False
+   (BLOCKED from all APIs    ┌─────────┼─────────┐
+    except /api/auth/me,     ▼         ▼         ▼
+    /api/auth/logout,     Viewer    Trader     Admin
+    /api/auth/change-pwd) (Read-only) (Trading) (Full Control)
 ```
 
-### Invariants for React Modernization:
-1. **Document Visibility Pause:** Polling must halt when tab/window is hidden (`document.hidden` or `visibilitychange`).
-2. **Concurrency Guard:** Stale or slow responses must not spawn overlapping requests (`autoRefreshInProgress` behavior managed by TanStack Query `staleTime`/`refetchInterval`).
-3. **Tab Isolation:** Active polling must only execute for the currently visible view (except universal system status).
-4. **Isolated Job Poller:** Asynchronous jobs (backfill, build-features) poll `/api/master-data/jobs/{job_id}` every 2 seconds until `status in ("completed", "failed")`.
+### 3.3 Forced-Password-Change Guard
+If `user.get("must_change_password") == True`, requests to endpoints outside `PASSWORD_CHANGE_ALLOWED_PATHS` are immediately rejected:
+```json
+HTTP 403 Forbidden
+{
+  "detail": "Password change required before continuing",
+  "code": "password_change_required"
+}
+```
 
 ---
 
-## 5. Comprehensive View Inventory Table
+## 4. Complete Endpoint-by-Endpoint Register (81 Verified Routes)
 
-| View ID / Navigation Label | Current Source | API/Data Dependencies | User Actions | Access Requirements | Risk Level | Loading & Error States | Accessibility Needs | Responsive Behavior | Required Tests & Acceptance | Migration Status |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `view-home`<br>**Home & Overview** | `index.html` (`#view-home`), `app.js` (`renderHome`, `fetchSystemStatus`) | `GET /api/system/status`<br>`GET /api/master-data/coverage`<br>`GET /api/backtest/history` | Navigation tabs, "New Backfill" header action, "Sign Out" button | Authenticated (`viewer`, `trader`, `admin`) | Low (Read-only) | Skeletons for heartbeats and leaderboard; error toast on status failure | `aria-labelledby`, `aria-live="polite"` header, live clock, keyboard focusable skip-link | 4-col KPI collapses to 1-col on mobile; 3-col main grid collapses to 1-col | `tests/test_system_status.py`, pilot view Vitest + Playwright smoke test | Planned for UIX-02 Pilot |
-| `view-master-data`<br>**Master Data** | `index.html` (`#view-master-data`), `app.js` (`renderMasterData`, `submitBackfill`, `triggerComputeFeatures`, `pollJobs`) | `GET /api/master-data/coverage`<br>`GET /api/crypto/search`<br>`GET /api/crypto/popular`<br>`POST /api/master-data/backfill`<br>`POST /api/master-data/build-features`<br>`GET /api/master-data/jobs` | Search symbol, trigger backfill modal, compute features per dataset, filter jobs | Read: All roles.<br>Mutations: `trader`, `admin` | High (Long async jobs, Binance rate limits) | Table skeletons; active job progress bars (0-100%); error alert banner on job failure | Form field associations (`for`/`id`), table header `scope="col"`, sort announcements, progress bar `aria-valuenow` | Table horizontal scroll on mobile; filter inputs wrap | `tests/test_master_data.py`, `tests/test_search.py`, form validation tests | Not started (UIX-04) |
-| `view-backtest`<br>**Backtest Studio** | `index.html` (`#view-backtest`), `app.js` (`renderBacktestStudio`, `runBacktest`, `runBattleRoyale`, `renderBacktestChart`) | `GET /api/backtest/strategies`<br>`POST /api/backtest/run`<br>`POST /api/backtest/run-all`<br>`GET /api/backtest/history`<br>`GET /api/backtest/runs/{id}`<br>`GET/PUT /api/backtest/promotion-policy`<br>`GET /api/backtest/promotion-audit` | Select strategy & pair, set date range/capital, run backtest, run Battle Royale, inspect candlestick & equity chart, deploy to paper, update promotion policy | Read: All roles.<br>Run/Deploy: `trader`, `admin`.<br>Policy edit: `admin` | High (CPU compute, promotion gating) | Progress indicators; run button disabled during simulation; chart resize handlers; error dialogs | Candlestick canvas fallback description, form labels, focus trap on deploy dialog | Charts flex/resize responsively; parameter controls stack vertically on tablet/mobile | `tests/test_backtest.py`, `tests/test_accounting.py`, `tests/test_paper_backtest_parity.py` | Not started (UIX-04) |
-| `view-paper`<br>**Paper Trading** | `index.html` (`#view-paper`), `app.js` (`fetchPaperData`, `addPaperStrategyConfig`, `togglePaperStrategy`, `togglePaperTelegram`, `togglePaperReport`, `manualClosePaperPosition`, `cancelPaperOrder`) | `GET /api/paper/configs`<br>`POST /api/paper/configs`<br>`GET /api/paper/metrics`<br>`GET /api/paper/positions`<br>`POST /api/paper/positions/{id}/close`<br>`GET /api/paper/orders`<br>`POST /api/paper/orders/{id}/cancel`<br>`GET /api/paper/trades`<br>`POST /api/paper/sync`<br>`GET /api/paper/circuit-breakers`<br>`POST /api/paper/circuit-breakers/*` | Add strategy config, toggle evaluation/telegram/report, filter order status, cancel pending order, close position, sync ticks, trip/reset circuit breaker | Read: All roles.<br>Mutations: `trader`, `admin` | Critical (Simulation ledger, crash recovery, Telegram gating) | Live badge updates; table reloading state; confirmation alerts; toast on trade events | ARIA switch roles for toggles, table sort announcements, confirm modals before close/cancel | Horizontal scroll wrappers for order ledger and positions tables; responsive KPI cards | `tests/test_paper_routes.py`, `tests/test_paper_orders_mariadb.py`, `tests/test_paper_metrics_visibility.py`, `tests/test_retailbot_accounting.py` | Not started (UIX-04) |
-| `view-ml-studio`<br>**ML Forecast Studio** | `index.html` (`#view-ml-studio`), `app.js` (`fetchMLData`, `runMlTraining`, `deployMlModel`, `inspectMLExperiment`) | `GET /api/ml/models`<br>`GET /api/ml/experiments`<br>`GET /api/ml/experiments/{id}`<br>`POST /api/ml/run-experiment`<br>`POST /api/ml/deploy-to-paper`<br>`GET/POST /api/paper/circuit-breakers/*` | Run tournament experiment modal, inspect experiment (ROC/calibration/features), deploy model filter to paper, toggle circuit breaker | Read: All roles.<br>Train/Deploy: `trader`, `admin` | High (Heavy ML compute, manifest integrity) | Training spinner; evaluation metric charts; empty states for untrained datasets | Focus management on modals; chart accessible descriptions; progress bar semantics | 2-col tournament board collapses to 1-col; metrics tables scroll horizontally | `tests/test_ml_routes.py`, `tests/test_ml_promotion.py` | Not started (UIX-04) |
-| `view-strategies`<br>**Strategy Library** | `index.html` (`#view-strategies`), `app.js` (`renderStrategyLibrary`, `initStrategyArchitect`, `fetchStrategies`, `saveCustomStrategy`, `deleteCustomStrategy`) | `GET /api/backtest/strategies`<br>`GET /api/custom-strategy/list`<br>`GET /api/custom-strategy/indicators`<br>`POST /api/custom-strategy/create`<br>`POST /api/custom-strategy/generate-ai`<br>`POST /api/custom-strategy/quick-test`<br>`DELETE /api/custom-strategy/{name}` | Browse strategy cards, build visual rule tree, prompt AI strategy generator, quick-test strategy, save/delete custom strategy, send to backtest | Read: All roles.<br>Mutations: `trader`, `admin` | Medium (Custom code/rule safety, JSON schema validation) | AI prompt spinner; syntax validation errors; rule builder block drag/drop state | Accessible names on dynamic rule builder inputs; delete confirmation alerts | Builder grid wraps from 2-col to 1-col on mobile; card grid auto-reflows | `tests/test_custom_strategy.py` | Not started (UIX-04) |
-| `view-news-ai`<br>**News AI Signals** | `index.html` (`#view-news-ai`), `app.js` (`fetchNewsData`, `renderNewsSignals`, `renderNewsFeed`) | `GET /api/news/signals`<br>`GET /api/news/events`<br>`GET /api/news/stats` | Filter news feed by symbol/keyword, filter sentiment (Bullish/Bearish), manual refresh | Authenticated (`viewer`, `trader`, `admin`) | Low (Read-only overlay display) | Skeletons for sentiment gauges and news cards; empty state on no keyword match | Sentiment badge contrast compliance; screen-reader labels for confidence gauges | News feed and metrics panel stack vertically on tablets and mobile devices | `tests/test_news_routes.py` | Not started (UIX-04) |
-| `view-research`<br>**Research Bots** | `index.html` (`#view-research`), `app.js` (`fetchResearchData`, `_fetchBotControl`, `toggleBotLifecycleSetting`) | `GET /api/research/retailbot2/stats`<br>`GET /api/research/retailbot2/positions`<br>`GET /api/research/retailbot2/trades`<br>`GET/POST /api/research/retailbot2/strategies`<br>`GET/POST /api/research/retailbot2/control` | Toggle lifecycle (paper, telegram, report) per strategy/mode (shadow/inverse), start/stop/restart bot daemon, filter closed trades | Read: All roles.<br>Mutations: `trader`, `admin` | Critical (Daemon process control, strict boolean flags, SQL column aliases) | Worker status pill (green/red/pulsing); toggle transition locks; error toast | ARIA switch roles, distinct shadow vs inverse labels, sortable trade headers | Dual shadow/inverse comparison grid stacks into single column on mobile | `tests/test_retailbot2_lifecycle.py`, `tests/test_retailbot_accounting.py` | Not started (UIX-04) |
-| `view-market-screener`<br>**Market Screener** | `index.html` (`#view-market-screener`), `app.js` (`fetchScreenerData`, `renderScreenerTable`, `filterScreener`) | `GET /api/research/screener/status`<br>`GET /api/research/screener/signals`<br>`GET /api/research/screener/stats`<br>`GET/POST /api/research/screener/control` | Filter signals by volume/quality/symbol, sort columns, screener daemon control, "Send to Backtest" shortcut | Read: All roles.<br>Control: `trader`, `admin` | Medium (Real-time screening, worker control) | Table skeleton; zero results message; background polling every 15s when active | Table sort announcements with counts; filter form labels; keyboard navigable table | Table horizontal scroll wrapper; responsive filter toolbar | `tests/test_screener.py` | Planned for UIX-03 |
-| `view-wallet-tracking`<br>**Wallet Tracking** | `index.html` (`#view-wallet-tracking`), `app.js` (`fetchWalletData`, `_wtLoadSettings`, `saveWalletSettings`, `walletTrack`, `walletUntrack`, `walletToggleTrack`) | `GET /api/wallets/status`<br>`GET /api/wallets/tracked`<br>`POST/DELETE /api/wallets/tracked`<br>`POST /api/wallets/tracked/toggle`<br>`GET /api/wallets/events`<br>`GET /api/wallets/positions`<br>`GET /api/wallets/token-flow`<br>`GET/PUT /api/wallets/settings` | Add tracked address, remove wallet, toggle tracking active, filter events, change token-flow period (6h/24h/7d), update alert thresholds | Read: All roles.<br>Track/Untrack: `trader`, `admin`.<br>Settings: `admin` | Medium (External RPC/scan parsing) | Skeletons for event stream and token flow cards; address validation error notices | Form input labels, monospace wallet address styling with copy feedback, table headers | Flow charts and transaction tables stack on smaller screens | `tests/test_wallet_tracker.py`, `tests/test_wallet_tracker_mariadb.py` | Not started (UIX-04) |
-| `view-settings`<br>**Settings & Users** | `index.html` (`#view-settings`), `app.js` (`renderSettings`, `fetchUsers`, `handleCreateUser`, `toggleUserStatus`, `submitResetPassword`, `testTelegram`) | `GET /api/settings/status`<br>`GET/POST /api/users`<br>`PUT/DELETE /api/users/{id}`<br>`POST /api/users/{id}/reset-password`<br>`GET /api/telegram/status`<br>`POST /api/telegram/test` | Create user, toggle user active status, admin password reset, delete user, test Telegram bot connection, inspect DB metrics | Admin-only for users & telegram test (`admin`).<br>Status read: All roles | Critical (Security, RBAC credentials, session revocation) | User creation button spinner; error alert for weak passwords; confirmation dialogs | Confirmation modals for deactivation/deletion; explicit role select labels; focus trapping | User table scrolls horizontally; configuration cards wrap | `tests/test_auth_routes.py`, `tests/test_users.py` | Not started (UIX-04) |
+The following register details all 81 verified API endpoints registered across 14 route modules in `web/routes/`.
+
+### 4.1 Authentication & User Administration (`auth_routes.py`)
+
+| Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
+|---|---|---|---|---|---|---|---|
+| `POST /api/auth/login` | `login`<br>`auth_routes.py` | Anonymous (Public) | Bypassed (Public) | **Body:** `LoginRequest`<br>`{username: str, password: str}` | **200 OK:**<br>`{"token": str, "user": {"id": int, "username": str, "email": str, "role": str, "must_change_password": bool}}`<br>**401:** Invalid credentials | Authenticates bcrypt hash; writes `LOGIN_SUCCESS` or `LOGIN_FAILED` to `audit_logs`; resets failure count | `#login-modal`<br>`App.handleLogin()` |
+| `POST /api/auth/logout` | `logout`<br>`auth_routes.py` | Authenticated (All roles) | Allowed during change | **Headers:** `Authorization: Bearer <token>` | **200 OK:**<br>`{"status": "success", "message": "Successfully logged out"}` | Writes `LOGOUT` to `audit_logs`; client clears `localStorage` token | `#top-user-container`<br>`App.handleLogout()` |
+| `GET /api/auth/me` | `get_current_user_profile`<br>`auth_routes.py` | Authenticated (All roles) | Allowed during change | **Headers:** `Authorization: Bearer <token>` | **200 OK:**<br>`{"id": int, "username": str, "email": str, "role": str, "must_change_password": bool}` | Read-only session verification; refreshes client user state | Header badge & `App.checkAuth()` |
+| `POST /api/auth/change-password` | `change_password`<br>`auth_routes.py` | Authenticated (All roles) | Allowed during change | **Body:** `ChangePasswordRequest`<br>`{old_password: str, new_password: str}` (min 10 chars, complexity enforced) | **200 OK:**<br>`{"status": "success", "message": "Password changed successfully"}`<br>**400:** Password policy error | Updates bcrypt hash in `users`; clears `must_change_password` flag; writes `USER_PASSWORD_CHANGE` to `audit_logs` | `#force-password-modal`<br>`App.handleForcedPasswordChange()` |
+| `GET /api/auth/audit-logs` | `get_audit_logs`<br>`auth_routes.py` | `admin` only (`Depends(require_admin)`) | Blocked (403 required) | **Query:** `limit: int = 50` | **200 OK:**<br>`{"items": List[{"id": int, "action": str, "username": str, "user_id": int, "details": dict, "ip_address": str, "created_at": str}]}` | Read-only query on MariaDB `audit_logs` table | Settings View (`#view-settings`) audit table |
+| `GET /api/users` | `list_users`<br>`auth_routes.py` | `admin` only (`Depends(require_admin)`) | Blocked (403 required) | None | **200 OK:**<br>`{"users": List[{"id": int, "username": str, "email": str, "role": str, "is_active": bool, "must_change_password": bool, "created_at": str, "updated_at": str}]}` | Read-only query on `users` table | User Administration panel (`#view-settings`) |
+| `POST /api/users` | `create_user`<br>`auth_routes.py` | `admin` only (`Depends(require_admin)`) | Blocked (403 required) | **Body:** `CreateUserRequest`<br>`{username: str, email: Optional[str], password: str, role: str}` | **201 Created:**<br>`{"status": "success", "user": {"id": int, "username": str, "email": str, "role": str, "is_active": bool, "must_change_password": bool}}`<br>**400:** Duplicate/Weak | Inserts row into `users` with `must_change_password=1`; writes `USER_CREATE` to `audit_logs` | Add User Modal / Form (`#view-settings`) |
+| `POST /api/users/{user_id}/reset-password` | `reset_user_password`<br>`auth_routes.py` | `admin` only (`Depends(require_admin)`) | Blocked (403 required) | **Path:** `user_id: int`<br>**Body:** `ResetPasswordRequest`<br>`{new_password: str}` | **200 OK:**<br>`{"status": "success", "message": str}`<br>**404:** User not found | Updates password hash in `users`; sets `must_change_password=1`; writes `USER_PASSWORD_RESET` to `audit_logs` | Reset Password dialog (`#view-settings`) |
+| `PUT /api/users/{user_id}` | `update_user`<br>`auth_routes.py` | `admin` only (`Depends(require_admin)`) | Blocked (403 required) | **Path:** `user_id: int`<br>**Body:** `UpdateUserRequest`<br>`{role: Optional[str], is_active: Optional[bool]}` | **200 OK:**<br>`{"status": "success", "message": str}`<br>**400:** Cannot deactivate last admin | Modifies user permissions/status in `users`; writes `USER_UPDATE` to `audit_logs` | User row toggle / edit (`#view-settings`) |
+| `DELETE /api/users/{user_id}` | `delete_user`<br>`auth_routes.py` | `admin` only (`Depends(require_admin)`) | Blocked (403 required) | **Path:** `user_id: int` | **200 OK:**<br>`{"status": "success", "message": str}`<br>**400:** Self-deletion forbidden | Deletes user record from `users`; writes `USER_DELETE` to `audit_logs` | User row delete action (`#view-settings`) |
 
 ---
 
-## 6. Modal Dialogs Inventory Table
+### 4.2 Master Data & Historical Backfill (`master_data.py`)
+
+| Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
+|---|---|---|---|---|---|---|---|
+| `GET /api/master-data/coverage` | `get_data_coverage`<br>`master_data.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"summary": {"totalCandles": int, "distinctSymbols": int, "distinctDatasets": int}, "datasets": List[{"symbol": str, "market": str, "timeframe": str, "count": int, "first_candle": str, "last_candle": str, "has_features": bool}]}` | Aggregates OHLCV metadata from MariaDB `ohlcv` and `features` tables | Overview KPI cards & Master Data dataset table |
+| `POST /api/master-data/backfill` | `trigger_backfill`<br>`master_data.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `BackfillRequest`<br>`{symbol: str, market: str, timeframe: str, years: float, auto_compute_features: bool}` | **200 OK:**<br>`{"job_id": str, "status": "pending", "progress": 0, "message": str}` | Creates job in `job_store`; spawns asynchronous background kline backfill task; queries Binance REST API | `#backfill-modal`<br>`App.submitBackfill()` |
+| `POST /api/master-data/build-features` | `trigger_build_features`<br>`master_data.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `FeatureBuildRequest`<br>`{symbol: str, market: str, timeframe: str}` | **200 OK:**<br>`{"job_id": str, "status": "pending", "progress": 0, "message": str}` | Spawns background worker to calculate TA-Lib/pandas technical features; writes to `features` table | Dataset table action (`#view-master-data`) |
+| `GET /api/master-data/jobs` | `list_jobs`<br>`master_data.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"jobs": List[{"job_id": str, "type": str, "symbol": str, "market": str, "timeframe": str, "status": str, "progress": int, "error": Optional[str], "created_at": str}]}` | Reads active and recent job state from memory and persistent `job_store` | Active Jobs table (`#view-master-data`) |
+| `GET /api/master-data/jobs/{job_id}` | `get_job`<br>`master_data.py` | Authenticated (All roles) | Blocked (403 required) | **Path:** `job_id: str` | **200 OK:**<br>`{"job_id": str, "status": str, "progress": int, "error": Optional[str]}`<br>**404:** Job not found | Reads discrete job progress; used by polling worker | Polling cycle (`App.pollJobs`) |
+
+---
+
+### 4.3 Market Asset Search (`search.py`)
+
+| Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
+|---|---|---|---|---|---|---|---|
+| `GET /api/crypto/search` | `search_crypto`<br>`search.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `q: str`, `market: str = "spot"`, `limit: int = 20` | **200 OK:**<br>`{"query": str, "market": str, "count": int, "results": List[{"symbol": str, "baseAsset": str, "quoteAsset": str, "market": str}]}` | Queries cached Binance exchange info | Symbol search inputs (`#modal-backfill-symbol`, search inputs) |
+| `GET /api/crypto/popular` | `popular_crypto`<br>`search.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `market: str = "spot"` | **200 OK:**<br>`{"market": str, "items": List[{"symbol": str, "name": str, "volume24h": float}]}` | Reads curated benchmark pairs (BTC, ETH, SOL, BNB) | Quick-select pair tags (`#view-master-data`) |
+
+---
+
+### 4.4 Backtest Studio & Visual Simulator (`backtest.py`)
+
+| Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
+|---|---|---|---|---|---|---|---|
+| `GET /api/backtest/strategies` | `list_strategies`<br>`backtest.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"strategies": List[{"id": str, "name": str, "description": str, "type": str, "params": dict, "holdout_passed": bool}]}` | Introspects built-in `STRATEGIES` registry | Strategy dropdowns across Backtest and Paper views |
+| `POST /api/backtest/run` | `execute_backtest`<br>`backtest.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `BacktestRunRequest`<br>`{symbol: str, market: str, timeframe: str, strategy: str, data_segment: str, initial_capital: float, risk_per_trade_pct: float, save_to_db: bool, params: dict}` | **200 OK:**<br>`{"runId": str, "symbol": str, "strategy": str, "metrics": {"total_trades": int, "win_rate": float, "profit_factor": float, "expectancy_r": float, "net_pnl": float, "max_drawdown_pct": float}, "trades": List[dict], "equityCurve": List[dict], "candles": List[dict]}` | Runs event-driven historical simulation; if `save_to_db=True`, writes run results into `backtest_runs` | "Run Backtest" form (`#view-backtest`) |
+| `POST /api/backtest/run-all` | `run_all_strategies`<br>`backtest.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `RunAllStrategiesRequest`<br>`{symbol: str, market: str, timeframe: str, data_segment: str, initial_capital: float, risk_per_trade_pct: float}` | **200 OK:**<br>`{"symbol": str, "market": str, "timeframe": str, "leaderboard": List[dict], "aiInsight": Optional[str]}` | Executes Battle Royale tournament across all registered strategies; ranks by profit factor / expectancy | "Battle Royale" button (`#view-backtest`) |
+| `POST /api/backtest/ai-insight` | `get_standalone_ai_insight`<br>`backtest.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `{symbol: str, market: str, timeframe: str, strategy: str}` | **200 OK:**<br>`{"symbol": str, "strategy": str, "metrics": dict, "insight": str}` | Generates quantitative performance diagnosis and trade risk critique | "AI Quantitative Insight" panel (`#view-backtest`) |
+| `GET /api/backtest/history` | `get_backtest_history`<br>`backtest.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `symbol: Optional[str]`, `timeframe: Optional[str]`, `strategy: Optional[str]`, `limit: int = 20` | **200 OK:**<br>`{"runs": List[{"id": str, "symbol": str, "strategy": str, "timeframe": str, "net_pnl": float, "win_rate": float, "created_at": str}]}` | Reads persisted simulation history from `backtest_runs` | Leaderboard table (`#view-backtest`, `#view-home`) |
+| `GET /api/backtest/runs/{run_id}` | `get_run_details`<br>`backtest.py` | Authenticated (All roles) | Blocked (403 required) | **Path:** `run_id: str` | **200 OK:**<br>`{"run": dict, "trades": List[dict], "equityCurve": List[dict], "candles": List[dict]}`<br>**404:** Not found | Fetches full historical run artifacts, candlestick slices, and trade execution markers | Historical run drill-down (`#view-backtest`) |
+| `GET /api/backtest/promotion-policy` | `get_promotion_policy`<br>`backtest.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"policy": {"enabled": bool, "min_test_trades": int, "min_profit_factor": float, "min_expectancy_r": float, "max_drawdown_r": float, "min_rank_score": float, "require_holdout": bool, "send_telegram": bool}}` | Reads auto-promotion qualification criteria | Promotion Policy drawer (`#view-backtest`) |
+| `PUT /api/backtest/promotion-policy` | `update_promotion_policy`<br>`backtest.py` | `admin` only (`_role_allowed` enforcement) | Blocked (403 required) | **Body:** `StrategyAutoPromotionPolicyRequest`<br>`{enabled: bool, min_test_trades: int, ...}` | **200 OK:**<br>`{"status": "ok", "policy": dict}`<br>**400:** Threshold validation error | Persists updated qualification thresholds for paper deployment | "Save Policy" button (`#btn-save-promotion-policy`) |
+| `GET /api/backtest/promotion-audit` | `list_promotion_audit`<br>`backtest.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `limit: int = 50` | **200 OK:**<br>`{"events": List[{"id": int, "strategy_name": str, "symbol": str, "action": str, "status": str, "config_id": int, "created_at": str}]}` | Reads audit trail of promoted strategies from `strategy_promotions` | Promotion Audit modal/table (`#view-backtest`) |
+
+---
+
+### 4.5 Paper Trading Execution & Ledger (`paper_routes.py`)
+
+| Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
+|---|---|---|---|---|---|---|---|
+| `GET /api/paper/configs` | `list_configs`<br>`paper_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"configs": List[{"id": int, "symbol": str, "market": str, "timeframe": str, "strategy_name": str, "is_active": bool, "allocated_capital": float, "risk_per_trade_pct": float, "telegram_enabled": bool, "report_enabled": bool}]}` | Reads active paper strategy deployments from `paper_configs` | Strategy Configs Table (`#view-paper`) |
+| `POST /api/paper/configs` | `update_config`<br>`paper_routes.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `PaperConfigRequest`<br>`{symbol: str, market: str, timeframe: str, strategy_name: str, is_active: bool, allocated_capital: float, risk_per_trade_pct: float, telegram_enabled: Optional[bool], report_enabled: Optional[bool]}` | **200 OK:**<br>`{"status": "success", "config_id": int, "message": str}` | Inserts or updates paper engine config in `paper_configs`; triggers worker configuration reload | Add/Edit Paper Config form (`#view-paper`) |
+| `GET /api/paper/positions` | `list_positions`<br>`paper_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"positions": List[{"id": int, "symbol": str, "side": str, "entry_price": float, "current_price": float, "quantity": float, "unrealized_pnl": float, "sl_price": float, "tp_price": float, "opened_at": str}]}` | Reads live open positions from `paper_positions` joined with latest market ticks | Active Positions Table (`#view-paper`) |
+| `POST /api/paper/positions/{position_id}/close` | `close_position`<br>`paper_routes.py` | `trader`, `admin` | Blocked (403 required) | **Path:** `position_id: int` | **200 OK:**<br>`{"status": "success", "closed_price": float, "realized_pnl": float}`<br>**404:** Position not open | Forces market exit; updates `paper_positions` to closed; inserts trade record into `paper_trades`; dispatches Telegram exit notification | "Close Position" button (`#view-paper`) |
+| `GET /api/paper/orders` | `list_paper_orders`<br>`paper_routes.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `status: Optional[str] = "all"`, `limit: int = 50` | **200 OK:**<br>`{"orders": List[{"id": int, "client_order_id": str, "symbol": str, "side": str, "order_type": str, "price": float, "status": str, "created_at": str, "filled_at": Optional[str]}]}` | Reads durable order ledger from `paper_orders` with status filtering (`all`, `pending`, `filled`, `cancelled`, `expired`) | Order Ledger Table (`#paper-orders-status-filter`) |
+| `POST /api/paper/orders/{order_id}/cancel` | `cancel_paper_order`<br>`paper_routes.py` | `trader`, `admin` | Blocked (403 required) | **Path:** `order_id: int` | **200 OK:**<br>`{"status": "cancelled", "order_id": int}`<br>**400:** Order not cancellable | Atomically transitions order status to `CANCELLED` in `paper_orders`; prevents execution engine fill | "Cancel Order" button (`#view-paper`) |
+| `GET /api/paper/trades` | `list_trades`<br>`paper_routes.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `limit: int = 50` | **200 OK:**<br>`{"trades": List[{"id": int, "symbol": str, "side": str, "entry_price": float, "exit_price": float, "realized_pnl": float, "pnl_pct": float, "duration_minutes": int, "closed_at": str}]}` | Reads closed trades from `paper_trades` filtered by `COALESCE(c.report_enabled, TRUE) = TRUE` | Closed Trades Table (`#view-paper`) |
+| `GET /api/paper/metrics` | `get_metrics`<br>`paper_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"metrics": {"total_trades": int, "win_rate": float, "profit_factor": float, "cumulative_r": float, "expectancy_r": float, "net_pnl": float, "strategy_breakdown": List[dict]}}` | Calculates aggregate portfolio statistics respecting `report_enabled` visibility flags | Portfolio Headline Cards (`#view-paper`) |
+| `POST /api/paper/sync` | `sync_market_tick`<br>`paper_routes.py` | `trader`, `admin` | Blocked (403 required) | None | **200 OK:**<br>`{"status": "success", "results": List[dict]}` | Triggers forward candle evaluation pass; evaluates SL/TP triggers against latest candle; executes pending orders | "Sync Market Ticks" button (`#view-paper`) |
+| `POST /api/paper/deploy` | `deploy_strategy`<br>`paper_routes.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `DeployStrategyRequest`<br>`{symbol: str, market: str, timeframe: str, strategy_name: str, allocated_capital: float, risk_per_trade_pct: float, send_telegram: bool}` | **200 OK:**<br>`{"status": "activated", "message": str, "config_id": int}`<br>**400:** Invalid strategy/pair | Creates paper config in `paper_configs`; writes to `strategy_promotions` audit log; dispatches Telegram promotion notification | `#deploy-modal`<br>`App.confirmDeploy()` |
+| `GET /api/paper/circuit-breakers` | `get_circuit_breakers`<br>`paper_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"status": "NORMAL" \| "TRIPPED", "daily_loss_usd": float, "daily_loss_limit": float, "current_drawdown_pct": float, "max_drawdown_limit": float, "tripped_at": Optional[str], "reason": Optional[str]}` | Reads risk management safety monitor | Circuit Breaker status badge (`#view-paper`, `#view-ml-studio`) |
+| `POST /api/paper/circuit-breakers/emergency-stop` | `trip_circuit_breaker`<br>`paper_routes.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `{reason: str}` | **200 OK:**<br>`{"status": "success", "message": str, "breaker": dict}` | Forces circuit breaker state to `TRIPPED`; halts new order placement; dispatches emergency Telegram broadcast | "Emergency Halt" button (`#view-paper`) |
+| `POST /api/paper/circuit-breakers/reset` | `reset_circuit_breaker`<br>`paper_routes.py` | `trader`, `admin` | Blocked (403 required) | None | **200 OK:**<br>`{"status": "success", "message": "Circuit breaker reset", "breaker": dict}` | Resets circuit breaker to `NORMAL`; allows execution engine to resume evaluations | "Reset Breaker" button (`#view-paper`) |
+
+---
+
+### 4.6 Machine Learning Forecast Studio (`ml_routes.py`)
+
+| Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
+|---|---|---|---|---|---|---|---|
+| `GET /api/ml/experiments` | `list_experiments`<br>`ml_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"experiments": List[{"experiment_id": str, "dataset": str, "target_horizon": str, "winning_model": str, "val_auc": float, "created_at": str}]}` | Reads completed tournament manifests from `ml/experiments/` | ML Tournament Leaderboard (`#view-ml-studio`) |
+| `GET /api/ml/experiments/{experiment_id}` | `get_experiment_details`<br>`ml_routes.py` | Authenticated (All roles) | Blocked (403 required) | **Path:** `experiment_id: str` | **200 OK:**<br>`{"experiment_id": str, "models": List[dict], "feature_importances": List[dict], "roc_curves": dict, "calibration_curves": dict}`<br>**404:** Not found | Reads experiment JSON artifact; verifies path contains no symlinks outside store | `#modal-inspect-ml`<br>`App.inspectMLExperiment()` |
+| `GET /api/ml/models` | `list_saved_models`<br>`ml_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"models": List[{"model_id": str, "model_type": str, "dataset": str, "val_auc": float, "accuracy": float, "created_at": str}]}` | Lists validated model weight packages eligible for live paper deployment | Trained Models Table (`#view-ml-studio`) |
+| `POST /api/ml/run-experiment` | `trigger_experiment`<br>`ml_routes.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `RunExperimentRequest`<br>`{symbol: str, market: str, timeframe: str, strategy_name: str, model_type: str, target_type: str, min_validation_trades: int}` | **200 OK:**<br>`{"status": "success", "experiment_id": str, "result": dict}`<br>**400:** Insufficient validation trades | Executes cross-validated model tournament; trains LightGBM, CatBoost, and LogReg; validates weights atomically | `#modal-run-ml`<br>`App.submitMlRun()` |
+| `POST /api/ml/deploy-to-paper` | `deploy_ml_model_to_paper`<br>`ml_routes.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `DeployMLToPaperRequest`<br>`{model_id: str, allocated_capital: float, risk_per_trade_pct: float, send_telegram: bool}` | **200 OK:**<br>`{"status": "success", "message": str}`<br>**400:** Model manifest invalid | Deploys model as real-time inference filter on paper trading signals; updates `paper_configs.ml_model_id` | `#modal-deploy-ml`<br>`App.submitDeployMl()` |
+
+---
+
+### 4.7 Strategy Library & Custom Rules (`custom_strategy.py`)
+
+| Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
+|---|---|---|---|---|---|---|---|
+| `GET /api/custom-strategy/indicators` | `get_indicators`<br>`custom_strategy.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"indicators": List[{"id": str, "name": str, "category": str, "params": dict}], "operators": List[str]}` | Returns registered technical indicators and relational operators | Visual Rule Builder dropdowns (`#view-strategies`) |
+| `GET /api/custom-strategy/list` | `list_custom_strategies`<br>`custom_strategy.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"strategies": List[{"name": str, "displayName": str, "description": str, "created_at": str}]}` | Reads user-created strategies from `custom_strategies.json` | Custom Strategy Cards (`#view-strategies`) |
+| `POST /api/custom-strategy/generate-ai` | `generate_ai_strategy`<br>`custom_strategy.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `GenerateAIStrategyRequest`<br>`{prompt: str, history: Optional[List[dict]], currentConfig: Optional[dict]}` | **200 OK:**<br>`{"status": "success", "provider": str, "strategy": dict, "chatResponse": str}` | Queries configured LLM (OpenAI/Anthropic/heuristic fallback) to generate valid rule JSON | AI Strategy Prompt input (`#view-strategies`) |
+| `POST /api/custom-strategy/create` | `create_custom_strategy`<br>`custom_strategy.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `CustomStrategyRequest`<br>`{name: str, displayName: str, description: str, longConditions: List[dict], shortConditions: List[dict], slAtrMult: float, riskRewardRatio: float}` | **200 OK:**<br>`{"status": "success", "name": str, "displayName": str, "message": str}`<br>**400:** Invalid syntax | Validates conditions; writes strategy definition into `custom_strategies.json` | "Save Strategy" button (`#view-strategies`) |
+| `DELETE /api/custom-strategy/{name}` | `delete_custom_strategy`<br>`custom_strategy.py` | `trader`, `admin` | Blocked (403 required) | **Path:** `name: str` | **200 OK:**<br>`{"status": "success", "message": str}`<br>**404:** Not found | Removes strategy from `custom_strategies.json` | Delete button on strategy card (`#view-strategies`) |
+| `POST /api/custom-strategy/quick-test` | `quick_test_strategy`<br>`custom_strategy.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `QuickTestRequest`<br>`{strategy: CustomStrategyRequest, symbol: str, market: str, timeframe: str}` | **200 OK:**<br>`{"status": "success", "symbol": str, "trades": int, "winRate": float, "profitFactor": float}` | Executes fast in-memory simulation against recent 500 candles | "Quick Test" button (`#view-strategies`) |
+
+---
+
+### 4.8 News AI Overlay Signals (`news_routes.py`)
+
+| Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
+|---|---|---|---|---|---|---|---|
+| `GET /api/news/stats` | `news_stats`<br>`news_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"bullish_count": int, "bearish_count": int, "neutral_count": int, "average_confidence": float, "active_overlay_multiplier": float}` | Computes sentiment distributions across recent headlines | Sentiment KPI Gauges (`#view-news-ai`) |
+| `GET /api/news/signals` | `news_signals`<br>`news_routes.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `limit: int = 50` | **200 OK:**<br>`{"signals": List[{"id": int, "symbol": str, "headline": str, "sentiment": str, "confidence": float, "impact_horizon": str, "published_at": str}]}` | Reads processed news sentiment overlay signals | News Signals Table (`#view-news-ai`) |
+| `GET /api/news/events` | `news_events`<br>`news_routes.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `limit: int = 30` | **200 OK:**<br>`{"events": List[{"id": int, "category": str, "event_text": str, "importance": str, "detected_at": str}]}` | Reads raw macroeconomic & crypto news event feed | Macro Events Feed (`#view-news-ai`) |
+
+---
+
+### 4.9 Research Bots & Screener Engine (`research_routes.py`)
+
+| Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
+|---|---|---|---|---|---|---|---|
+| `GET /api/research/retailbot2/stats` | `retailbot2_stats`<br>`research_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"shadow": {"win_rate": float, "trades": int, "net_pnl": float}, "inverse": {"win_rate": float, "trades": int, "net_pnl": float}}` | Aggregates shadow vs. inverse performance respecting `report_enabled` flags | RetailBot2 Comparison Cards (`#view-research`) |
+| `GET /api/research/retailbot2/positions` | `retailbot2_positions`<br>`research_routes.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `limit: int = 100` | **200 OK:**<br>`{"positions": List[{"id": int, "symbol": str, "mode": "SHADOW" \| "INVERSE", "entry_price": float, "current_price": float, "unrealized_pnl": float, "opened_at": str}]}` | Reads active research trades from `rdt_trades` where `closed_at IS NULL` | Research Active Positions Table (`#view-research`) |
+| `GET /api/research/retailbot2/trades` | `retailbot2_trades`<br>`research_routes.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `limit: int = 50` | **200 OK:**<br>`{"trades": List[{"id": int, "symbol": str, "side": str, "mode": str, "entry_price": float, "exit_price": float, "realized_pnl": float, "closed_at": str}]}` | Selects qualified `t.id, t.symbol, t.side, t.mode` from `rdt_trades` joining `rdt_strategy_lifecycle` with `report_enabled = TRUE` | Recent Research Trades Table (`#view-research`) |
+| `GET /api/research/retailbot2/strategies` | `retailbot2_strategies_get`<br>`research_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"strategies": List[{"strategy_id": str, "mode": str, "evaluation_enabled": bool, "paper_enabled": bool, "telegram_enabled": bool, "report_enabled": bool}]}` | Reads strategy lifecycle registry from `rdt_strategy_lifecycle` | Lifecycle Settings Grid (`#view-research`) |
+| `POST /api/research/retailbot2/strategies` | `retailbot2_strategies_set`<br>`research_routes.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `StrategyLifecycleRequest`<br>`{strategy_id: str, mode: str, evaluation_enabled: StrictBool, paper_enabled: StrictBool, telegram_enabled: StrictBool, report_enabled: StrictBool, auto_promote_enabled: StrictBool}` | **200 OK:**<br>`{"status": "ok", "strategy_id": str, "mode": str, "settings": dict}`<br>**400:** Non-boolean value | Inserts or updates row in `rdt_strategy_lifecycle`; strictly enforces boolean flags; affects worker evaluation | Strategy Lifecycle Toggles (`#view-research`) |
+| `GET /api/research/retailbot2/control` | `retailbot2_control_get`<br>`research_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"enabled": bool, "overrides": dict, "last_heartbeat": Optional[str]}` | Reads daemon control state from `rdt_control` | Bot Status Badge (`#view-research`) |
+| `POST /api/research/retailbot2/control` | `retailbot2_control_set`<br>`research_routes.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `BotControlRequest`<br>`{enabled: bool, overrides: dict}` | **200 OK:**<br>`{"status": "ok", "note": str}` | Updates `rdt_control` table; worker daemon picks up state change on next loop (~30s) | Start / Stop / Restart buttons (`#view-research`) |
+| `GET /api/research/screener/signals` | `screener_signals`<br>`research_routes.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `limit: int = 100` | **200 OK:**<br>`{"signals": List[{"id": int, "symbol": str, "timeframe": str, "volume_surge_mult": float, "score": float, "signal_type": str, "created_at": str}]}` | Reads smart-money signals from `smart_money_signals` | Screener Signals Table (`#view-market-screener`) |
+| `GET /api/research/screener/stats` | `screener_stats`<br>`research_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"total_signals": int, "average_quality": float, "universe_count": int, "active_surges": int}` | Calculates screening quality aggregates | Screener Summary Cards (`#view-market-screener`) |
+| `GET /api/research/screener/status` | `screener_status`<br>`research_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"last_scan": str, "scanned_symbols": int, "healthy": bool}` | Returns health status of background market scanner | Health indicator pill (`#view-market-screener`) |
+| `GET /api/research/screener/control` | `screener_control_get`<br>`research_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"enabled": bool, "overrides": dict}` | Reads screener control state from `screener_control` | Screener Daemon Badge (`#view-market-screener`) |
+| `POST /api/research/screener/control` | `screener_control_set`<br>`research_routes.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `BotControlRequest`<br>`{enabled: bool, overrides: dict}` | **200 OK:**<br>`{"status": "ok", "note": str}` | Updates `screener_control` table; background scanner respects toggle | Screener Start/Stop controls (`#view-market-screener`) |
+
+---
+
+### 4.10 Wallet Tracking & On-Chain Flow (`wallet_routes.py`)
+
+| Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
+|---|---|---|---|---|---|---|---|
+| `GET /api/wallets/meta` | `wallets_meta`<br>`wallet_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"periods_hours": List[int], "chains": dict}` | Reads supported blockchain configurations (Solana, Base, Ethereum) | Chain & Timeframe pickers (`#view-wallet-tracking`) |
+| `GET /api/wallets/status` | `wallets_status`<br>`wallet_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"service_healthy": bool, "last_scan": str, "tracked_count": int}` | Checks wallet tracking engine health | Status Badge (`#view-wallet-tracking`) |
+| `GET /api/wallets/tracked` | `wallets_tracked`<br>`wallet_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"tracked": List[{"id": int, "chain": str, "wallet": str, "label": str, "status": str, "created_at": str}]}` | Reads active tracked addresses from `tracked_wallets` | Tracked Wallets Table (`#view-wallet-tracking`) |
+| `POST /api/wallets/tracked` | `wallets_track`<br>`wallet_routes.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `TrackRequest`<br>`{chain: str, wallet: str, label: Optional[str]}` | **200 OK:**<br>`{"status": "ok", "chain": str, "wallet": str}`<br>**400:** Invalid address | Inserts wallet address into `tracked_wallets`; adds address to scan schedule | Add Tracked Wallet Form (`#view-wallet-tracking`) |
+| `POST /api/wallets/tracked/toggle` | `wallets_toggle_track`<br>`wallet_routes.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `TrackRequest`<br>`{chain: str, wallet: str}` | **200 OK:**<br>`{"status": "ok", "tracked": bool, "chain": str, "wallet": str}` | Updates `status` between `ACTIVE` and `PAUSED` in `tracked_wallets` | Active status toggle (`#view-wallet-tracking`) |
+| `DELETE /api/wallets/tracked` | `wallets_untrack_by_query`<br>`wallet_routes.py` | `trader`, `admin` | Blocked (403 required) | **Query:** `chain: str`, `wallet: str` | **200 OK:**<br>`{"status": "ok", "chain": str, "wallet": str}` | Removes address from `tracked_wallets` via query parameters | Untrack action (`#view-wallet-tracking`) |
+| `DELETE /api/wallets/tracked/{tracked_id}` | `wallets_untrack`<br>`wallet_routes.py` | `trader`, `admin` | Blocked (403 required) | **Path:** `tracked_id: int` | **200 OK:**<br>`{"status": "ok"}`<br>**404:** Not found | Removes wallet entry by primary key ID | Delete button in tracked table (`#view-wallet-tracking`) |
+| `GET /api/wallets/positions` | `wallets_positions`<br>`wallet_routes.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `period_hours: int = 24`, `side: Optional[str]`, `chain: Optional[str]`, `min_net_usd: float = 0`, `limit: int = 50`, `only_tracked: bool = False` | **200 OK:**<br>`{"positions": List[{"token_address": str, "token_symbol": str, "chain": str, "net_usd": float, "trade_count": int}]}` | Reads on-chain DEX accumulated token positions | Token Accumulation Table (`#view-wallet-tracking`) |
+| `GET /api/wallets/token-flow` | `wallets_token_flow`<br>`wallet_routes.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `period_hours: int = 24`, `limit: int = 15` | **200 OK:**<br>`{"flows": List[{"token_symbol": str, "chain": str, "inflow_usd": float, "outflow_usd": float, "net_flow_usd": float}]}` | Aggregates volume inflow vs outflow per token across scanned DEX pairs | Token Net Flow Chart / Cards (`#view-wallet-tracking`) |
+| `GET /api/wallets/events` | `wallets_events`<br>`wallet_routes.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `limit: int = 50`, `since_id: Optional[int]`, `chain: Optional[str]`, `wallet: Optional[str]`, `side: Optional[str]` | **200 OK:**<br>`{"events": List[{"id": int, "tx_hash": str, "chain": str, "wallet": str, "token_in": str, "token_out": str, "amount_usd": float, "timestamp": str}]}` | Reads live transaction log from DEX pool swaps | Live On-Chain Event Stream (`#view-wallet-tracking`) |
+| `GET /api/wallets/settings` | `wallets_get_settings`<br>`wallet_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"enabled": bool, "networks": List[str], "min_trade_usd": float, "min_net_usd": float, "poll_interval_seconds": int, ...}` | Reads tracker configuration thresholds | Tracker Settings Panel (`#view-wallet-tracking`) |
+| `PUT /api/wallets/settings` | `wallets_save_settings`<br>`wallet_routes.py` | `admin` only (`_role_allowed` enforcement) | Blocked (403 required) | **Body:** `WalletSettingsRequest`<br>`{enabled: bool, networks: list[str], min_trade_usd: float, ...}` | **200 OK:**<br>`{"status": "ok", "settings": dict}`<br>**400:** Invalid config | Persists tracker configuration; notifies scanner worker process | Save Settings button (`#view-wallet-tracking`) |
+
+---
+
+### 4.11 System Diagnostics & Settings (`settings.py` & `system_status.py`)
+
+| Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
+|---|---|---|---|---|---|---|---|
+| `GET /api/settings/status` | `get_system_status`<br>`settings.py` | `admin` only (`ADMIN_ONLY_PREFIXES`) | Blocked (403 required) | None | **200 OK:**<br>`{"database": {"status": str, "host": str, "port": int, "user": str, "pool_size": int}, "system": {"version": str, "uptime_seconds": int, "memory_mb": float}, "features": dict}` | Introspects sensitive connection configuration, active pool size, and host metrics | Database Connection Status (`#view-settings`) |
+| `GET /api/system/status` | `get_public_system_status`<br>`system_status.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"database": {"status": "ok" \| "error", "tables": dict}, "collectors": List[{"name": str, "status": str, "last_heartbeat": str, "healthy": bool}]}` | Safe, non-sensitive health check; returns database connectivity and real-time collector heartbeats | `#status-db-badge`, `#home-heartbeats-list` |
+
+---
+
+### 4.12 Telegram Alert Notifications (`telegram_routes.py`)
+
+| Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
+|---|---|---|---|---|---|---|---|
+| `GET /api/telegram/status` | `get_status`<br>`telegram_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"configured": bool, "chatId": Optional[str], "hasToken": bool}` | Checks whether Telegram bot token and chat ID are configured in environment | Telegram status pill (`#view-settings`) |
+| `POST /api/telegram/test` | `run_test`<br>`telegram_routes.py` | `admin` only (`_role_allowed` enforcement) | Blocked (403 required) | **Body:** `TelegramTestRequest`<br>`{custom_message: Optional[str]}` | **200 OK:**<br>`{"success": bool, "message": str}`<br>**400:** Not configured or send failure | Sends outbound test alert via Telegram Bot API (`sendMessage`) to configured chat | "Test Telegram Connection" button (`#view-settings`) |
+
+---
+
+## 5. Reconciled Dashboard Views Inventory (11 Views)
+
+| View ID / Label | Current Source | Consumed Endpoints | User Actions & Controls | Risk Level | Accessibility Requirements | Responsive Reflow Behavior | Required Test Coverage |
+|---|---|---|---|---|---|---|---|
+| `view-home`<br>**Home & Overview** | `index.html` (`#view-home`), `app.js` (`renderHome`, `fetchSystemStatus`) | `GET /api/system/status`<br>`GET /api/master-data/coverage`<br>`GET /api/backtest/history` | Navigation tabs, "New Backfill" header action, "Sign Out" button | Low (Read-only) | `aria-labelledby`, `aria-live="polite"` header, live clock, keyboard focusable skip-link | 4-col KPI collapses to 1-col on mobile; 3-col main grid collapses to 1-col | `tests/test_system_status.py`, pilot view Vitest + Playwright smoke test |
+| `view-master-data`<br>**Master Data** | `index.html` (`#view-master-data`), `app.js` (`renderMasterData`, `submitBackfill`, `triggerComputeFeatures`, `pollJobs`) | `GET /api/master-data/coverage`<br>`GET /api/crypto/search`<br>`GET /api/crypto/popular`<br>`POST /api/master-data/backfill`<br>`POST /api/master-data/build-features`<br>`GET /api/master-data/jobs` | Search symbol, trigger backfill modal, compute features per dataset, filter jobs | High (Long async jobs, Binance rate limits) | Form field associations (`for`/`id`), table header `scope="col"`, sort announcements, progress bar `aria-valuenow` | Table horizontal scroll on mobile; filter inputs wrap | `tests/test_master_data.py`, `tests/test_search.py`, form validation tests |
+| `view-backtest`<br>**Backtest Studio** | `index.html` (`#view-backtest`), `app.js` (`renderBacktestStudio`, `runBacktest`, `runBattleRoyale`, `renderBacktestChart`) | `GET /api/backtest/strategies`<br>`POST /api/backtest/run`<br>`POST /api/backtest/run-all`<br>`GET /api/backtest/history`<br>`GET /api/backtest/runs/{id}`<br>`GET/PUT /api/backtest/promotion-policy`<br>`GET /api/backtest/promotion-audit` | Select strategy & pair, set date range/capital, run backtest, run Battle Royale, inspect candlestick & equity chart, deploy to paper, update promotion policy | High (CPU compute, promotion gating) | Candlestick canvas fallback description, form labels, focus trap on deploy dialog | Charts flex/resize responsively; parameter controls stack vertically on tablet/mobile | `tests/test_backtest.py`, `tests/test_accounting.py`, `tests/test_paper_backtest_parity.py` |
+| `view-paper`<br>**Paper Trading** | `index.html` (`#view-paper`), `app.js` (`fetchPaperData`, `addPaperStrategyConfig`, `togglePaperStrategy`, `togglePaperTelegram`, `togglePaperReport`, `manualClosePaperPosition`, `cancelPaperOrder`) | `GET /api/paper/configs`<br>`POST /api/paper/configs`<br>`GET /api/paper/metrics`<br>`GET /api/paper/positions`<br>`POST /api/paper/positions/{id}/close`<br>`GET /api/paper/orders`<br>`POST /api/paper/orders/{id}/cancel`<br>`GET /api/paper/trades`<br>`POST /api/paper/sync`<br>`GET /api/paper/circuit-breakers`<br>`POST /api/paper/circuit-breakers/*` | Add strategy config, toggle evaluation/telegram/report, filter order status, cancel pending order, close position, sync ticks, trip/reset circuit breaker | Critical (Simulation ledger, crash recovery, Telegram gating) | ARIA switch roles for toggles, table sort announcements, confirm modals before close/cancel | Horizontal scroll wrappers for order ledger and positions tables; responsive KPI cards | `tests/test_paper_routes.py`, `tests/test_paper_orders_mariadb.py`, `tests/test_paper_metrics_visibility.py`, `tests/test_retailbot_accounting.py` |
+| `view-ml-studio`<br>**ML Forecast Studio** | `index.html` (`#view-ml-studio`), `app.js` (`fetchMLData`, `runMlTraining`, `deployMlModel`, `inspectMLExperiment`) | `GET /api/ml/models`<br>`GET /api/ml/experiments`<br>`GET /api/ml/experiments/{id}`<br>`POST /api/ml/run-experiment`<br>`POST /api/ml/deploy-to-paper`<br>`GET/POST /api/paper/circuit-breakers/*` | Run tournament experiment modal, inspect experiment (ROC/calibration/features), deploy model filter to paper, toggle circuit breaker | High (Heavy ML compute, manifest integrity) | Focus management on modals; chart accessible descriptions; progress bar semantics | 2-col tournament board collapses to 1-col; metrics tables scroll horizontally | `tests/test_ml_routes.py`, `tests/test_ml_promotion.py` |
+| `view-strategies`<br>**Strategy Library** | `index.html` (`#view-strategies`), `app.js` (`renderStrategyLibrary`, `initStrategyArchitect`, `fetchStrategies`, `saveCustomStrategy`, `deleteCustomStrategy`) | `GET /api/backtest/strategies`<br>`GET /api/custom-strategy/list`<br>`GET /api/custom-strategy/indicators`<br>`POST /api/custom-strategy/create`<br>`POST /api/custom-strategy/generate-ai`<br>`POST /api/custom-strategy/quick-test`<br>`DELETE /api/custom-strategy/{name}` | Browse strategy cards, build visual rule tree, prompt AI strategy generator, quick-test strategy, save/delete custom strategy, send to backtest | Medium (Custom code/rule safety, JSON schema validation) | Accessible names on dynamic rule builder inputs; delete confirmation alerts | Builder grid wraps from 2-col to 1-col on mobile; card grid auto-reflows | `tests/test_custom_strategy.py` |
+| `view-news-ai`<br>**News AI Signals** | `index.html` (`#view-news-ai`), `app.js` (`fetchNewsData`, `renderNewsSignals`, `renderNewsFeed`) | `GET /api/news/signals`<br>`GET /api/news/events`<br>`GET /api/news/stats` | Filter news feed by symbol/keyword, filter sentiment (Bullish/Bearish), manual refresh | Low (Read-only overlay display) | Sentiment badge contrast compliance; screen-reader labels for confidence gauges | News feed and metrics panel stack vertically on tablets and mobile devices | `tests/test_news_routes.py` |
+| `view-research`<br>**Research Bots** | `index.html` (`#view-research`), `app.js` (`fetchResearchData`, `_fetchBotControl`, `toggleBotLifecycleSetting`) | `GET /api/research/retailbot2/stats`<br>`GET /api/research/retailbot2/positions`<br>`GET /api/research/retailbot2/trades`<br>`GET/POST /api/research/retailbot2/strategies`<br>`GET/POST /api/research/retailbot2/control` | Toggle lifecycle (paper, telegram, report) per strategy/mode (shadow/inverse), start/stop/restart bot daemon, filter closed trades | Critical (Daemon process control, strict boolean flags, SQL column aliases) | ARIA switch roles, distinct shadow vs inverse labels, sortable trade headers | Dual shadow/inverse comparison grid stacks into single column on mobile | `tests/test_retailbot2_lifecycle.py`, `tests/test_retailbot_accounting.py` |
+| `view-market-screener`<br>**Market Screener** | `index.html` (`#view-market-screener`), `app.js` (`fetchScreenerData`, `renderScreenerTable`, `filterScreener`) | `GET /api/research/screener/status`<br>`GET /api/research/screener/signals`<br>`GET /api/research/screener/stats`<br>`GET/POST /api/research/screener/control` | Filter signals by volume/quality/symbol, sort columns, screener daemon control, "Send to Backtest" shortcut | Medium (Real-time screening, worker control) | Table sort announcements with counts; filter form labels; keyboard navigable table | Table horizontal scroll wrapper; responsive filter toolbar | `tests/test_screener.py` |
+| `view-wallet-tracking`<br>**Wallet Tracking** | `index.html` (`#view-wallet-tracking`), `app.js` (`fetchWalletData`, `_wtLoadSettings`, `saveWalletSettings`, `walletTrack`, `walletUntrack`, `walletToggleTrack`) | `GET /api/wallets/status`<br>`GET /api/wallets/tracked`<br>`POST/DELETE /api/wallets/tracked`<br>`POST /api/wallets/tracked/toggle`<br>`GET /api/wallets/events`<br>`GET /api/wallets/positions`<br>`GET /api/wallets/token-flow`<br>`GET/PUT /api/wallets/settings` | Add tracked address, remove wallet, toggle tracking active, filter events, change token-flow period (6h/24h/7d), update alert thresholds | Medium (External RPC/scan parsing) | Form input labels, monospace wallet address styling with copy feedback, table headers | Flow charts and transaction tables stack on smaller screens | `tests/test_wallet_tracker.py`, `tests/test_wallet_tracker_mariadb.py` |
+| `view-settings`<br>**Settings & Users** | `index.html` (`#view-settings`), `app.js` (`renderSettings`, `fetchUsers`, `handleCreateUser`, `toggleUserStatus`, `submitResetPassword`, `testTelegram`) | `GET /api/settings/status`<br>`GET/POST /api/users`<br>`PUT/DELETE /api/users/{id}`<br>`POST /api/users/{id}/reset-password`<br>`GET /api/telegram/status`<br>`POST /api/telegram/test` | Create user, toggle user active status, admin password reset, delete user, test Telegram bot connection, inspect DB metrics | Critical (Security, RBAC credentials, session revocation) | Confirmation modals for deactivation/deletion; explicit role select labels; focus trapping | User table scrolls horizontally; configuration cards wrap | `tests/test_auth_routes.py`, `tests/test_users.py` |
+
+---
+
+## 6. Reconciled Modal Dialogs & Workflows (7 Dialogs)
 
 | Dialog ID & Title | Trigger Source | Verified API Endpoints | Form Fields & Actions | Access Requirement | Accessibility Semantics | Target Modern Component |
 |---|---|---|---|---|---|---|
@@ -139,46 +287,54 @@ setInterval(async () => {
 
 ---
 
-## 7. Dynamic & Shared UI Components
+## 7. Conditional Flows & Edge Cases Reconciled with Source
 
-1. **Top Application Bar:**
-   - Elements: Page title (`#view-header-title`), description (`#view-header-desc`), "New Backfill" trigger button, user badge (`#top-user-badge`), role badge (`#top-user-role`), and logout button (`#top-user-container`).
-   - Behaviors: Dynamically updates header text upon tab switch; reflects active username and role; hides when unauthenticated.
-2. **Left Navigation Sidebar:**
-   - Elements: Brand logo (`⚡ Signal Bot Pro`), 11 navigation buttons (`.nav-btn`), WIB Real-Time Clock (`#wib-clock`), Database Status Badge (`#status-db-badge`), version footer.
-   - Behaviors: Sets `aria-current="page"` and `.active` class on current tab; WIB clock updates every second via `setInterval`; database status badge polls `/api/settings/status` and `/api/system/status`.
-3. **Toast Notification System:**
-   - Implementation: Injected into `#toast-container` with type palette (`success`, `error`, `warning`, `info`), accessible `role="status"` or `role="alert"`, `aria-atomic="true"`, respect for `prefers-reduced-motion`, and focus restoration to invoking trigger upon dismissal.
-4. **Sortable Table Enhancement Bundle (`dashboard_enhancements.js`):**
-   - Injected dynamically into `GET /` response.
-   - Provides table header `scope="col"`, `aria-sort="ascending|descending|none"`, sort indicators with theme contrast support, row count announcements, and prevents repeated keyboard sorting events.
-
----
-
-## 8. Chart & Visualization Inventory
-
-| View Location | Chart Container ID | Chart Technology | Purpose & Data Rendered | Parity Invariant for Modernization |
-|---|---|---|---|---|
-| Backtest Studio | `#candlestick-chart-box` | TradingView Lightweight Charts v4.1.1 | High-performance interactive candlestick chart with entry/exit trade markers and volume histogram | Must support dark/light theme, crosshair sync, window resize reflow, and tooltip inspection |
-| Backtest Studio | `#equity-chart-canvas` | Chart.js (v4+) | Historical portfolio equity curve vs. buy-and-hold benchmark | Must plot drawdown underwater chart and high-water mark curve |
-| Market Screener | Dynamic container | Chart.js / SVG meters | Smart-money volume spike distribution and quality score gauges | Accessible tabular data fallback required |
-| News AI Signals | Dynamic sentiment cards | Tailwind CSS meters & SVG gauges | Bullish/Bearish sentiment ratios and confidence intervals | Screen-reader accessible percentage values |
-| ML Forecast Studio | `#modal-inspect-ml` canvas | Chart.js | ROC curves, calibration curves, and feature importance bar rankings | Must support crisp rendering on high-DPI displays |
+1. **Authentication & Session Interception Flow:**
+   - On load, `App.init()` calls `App.checkAuth()` (`GET /api/auth/me`).
+   - If token is missing or returns 401: `#login-modal` is displayed; all dashboard polling and data fetches are halted.
+   - If `must_change_password === true`: `#force-password-modal` is displayed immediately with backdrop-blur. The user cannot access any view or close the modal without either saving a valid new password (`POST /api/auth/change-password`) or clicking "Sign out instead" (`App.cancelForcedPasswordChange()`).
+2. **Background Polling Concurrency & Visibility Guards:**
+   - Interval runs every 15,000ms (15s).
+   - If `document.hidden === true` (tab switched or minimized), polling is completely suppressed.
+   - If `this.autoRefreshInProgress === true`, new polling cycles are skipped to avoid cascading queue jams.
+   - Polling calls are dispatched with `Promise.allSettled()`, ensuring an error in one panel does not crash other visible panels.
+3. **Paper Execution Visibility & Ledger Parity:**
+   - Recent paper-trade history (`GET /api/paper/trades`), headline metrics (`GET /api/paper/metrics`), and strategy metrics join `paper_configs` on `(symbol, market, timeframe, strategy_name)` using `COALESCE(c.report_enabled, TRUE) = TRUE`.
+   - Hidden strategies are excluded from report views, but closed positions and ledger rows remain immutable in `paper_trades` to guarantee financial ledger integrity.
+4. **Research Bots Mode Separation:**
+   - RetailBot2 operates two strictly separated strategy identities: `SHADOW` (raw signal) and `INVERSE` (counter-trend execution with `_INV` suffix).
+   - Controls (`POST /api/research/retailbot2/strategies`) enforce `StrictBool` on all 5 flags: `evaluation_enabled`, `paper_enabled`, `telegram_enabled`, `report_enabled`, `auto_promote_enabled`.
+5. **Circuit Breaker Halt & Recovery:**
+   - When daily loss or maximum drawdown thresholds are breached, the circuit breaker transitions to `TRIPPED`.
+   - In `TRIPPED` state, new order entries in the paper engine are blocked, and an emergency stop banner is displayed across the Paper Trading and ML Studio headers.
 
 ---
 
-## 9. Baseline Visual & Accessibility Verification Status
+## 8. Chart & Visualization Technical Specifications
 
-- **Browser Screenshot Verification:** Marked **Unverified** in current host environment. The execution environment lacks a configured headless browser or display server for automated visual snapshot capture. Visual snapshots will be recorded during Phase UIX-01 / UIX-02 when Playwright browser binaries are provisioned.
-- **Accessibility Baseline:** Previous PRs #195–#233 established accessible skip-links, table column scope, theme contrast, dialog ARIA attributes, and live regions in the legacy UI. All these semantics are cataloged in this inventory and must be preserved or improved in the React implementation.
+1. **TradingView Lightweight Charts v4.1.1 (`#candlestick-chart-box`):**
+   - Renders Candlestick Series (`createCandlestickSeries`) with volume histogram sub-pane (`createHistogramSeries`).
+   - Supports historical trade markers (`series.setMarkers`) showing BUY (green arrow below bar) and SELL (red arrow above bar) executions with price tooltips.
+   - Theme sync: Responds to light/dark mode by dynamically updating background (`#0b1020` vs `#ffffff`), grid lines (`rgba(255,255,255,0.05)`), and crosshair styles.
+   - Window resize handler with `ResizeObserver` prevents chart canvas distortion.
+2. **Portfolio Equity Curve (`#equity-chart-canvas`):**
+   - Implemented with Chart.js (v4+).
+   - Dual-line chart plotting cumulative strategy equity vs. buy-and-hold benchmark equity.
+   - Drawdown underwater fill area with semi-transparent red accent (`rgba(244, 63, 94, 0.15)`).
+3. **ML Tournament Evaluation Charts (`#modal-inspect-ml`):**
+   - Multi-ROC curve plotting true-positive vs false-positive rates for competing models.
+   - Reliability diagram (calibration curve) showing predicted vs observed probabilities.
+   - Horizontal bar chart of top 15 Gini/permutation feature importances.
+4. **On-Chain Token Flow Bar Chart (`#view-wallet-tracking`):**
+   - Bi-directional bar chart depicting net USD volume flow (green for net accumulation, rose for net distribution) across 6h, 24h, and 7d horizons.
 
 ---
 
-## 10. Parity & Acceptance Gate Checklist for Future Phases
+## 9. UIX-00 Acceptance Gate & Sign-off State
 
-- [x] **UIX-00 (Baseline Inventory):** All 11 views and 7 dialogs mapped to verified backend routes, source files, access levels, and regression tests.
-- [ ] **UIX-01 (Frontend Foundation):** `frontend/` Vite + React + TypeScript setup with Tailwind and primitives; zero replacement of legacy dashboard.
-- [ ] **UIX-02 (Read-Only Pilot):** Executive Trading Overview (`view-home`) pilot view previewed at safe route with 100% data parity and accessibility compliance.
-- [ ] **UIX-03 (Market Screener V2):** Complete migration of Market Screener V2 slice with verified signal display, filtering, and worker controls.
-- [ ] **UIX-04 (Strategy & Paper Trading):** Phased migration of paper-trading ledger, backtest studio, custom strategy builder, ML studio, research bots, and settings.
-- [ ] **UIX-05 (Consolidation & Release Readiness):** Full parity sign-off, responsive verification, and legacy dashboard deprecation.
+- [x] **Repository Inspection:** Verified static serving mount, dashboard entrypoint route, allowed CORS origins, and absence of node tooling.
+- [x] **Complete View Inventory:** All 11 navigation views and 7 dialogs mapped to source elements, user actions, and error states.
+- [x] **Exhaustive API Register:** All 81 endpoints across 14 router modules cataloged with exact handler names, role restrictions, forced-password-change behavior, parameter schemas, responses, side effects, and frontend callers.
+- [x] **Regression Test Baseline:** Verified 116 unit and integration tests passing (`pytest` suite).
+- [ ] **Acceptance Review Gate:** **In Review / Pending Acceptance**. UIX-00 will be marked complete only after the user/owner has reviewed and approved this baseline inventory.
+- [ ] **UIX-01 Lockout:** Phase UIX-01 (Frontend Foundation) and package installations remain blocked until this PR is merged.
