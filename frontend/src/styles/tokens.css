@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+:root, :root[data-theme="dark"] {
+ color-scheme: dark; --color-canvas:#080e19; --color-surface:#0d1726; --color-elevated:#111e30;
+ --color-text:#e7edf6; --color-muted:#91a0b5; --color-border:#243449; --color-accent:#52a9f5;
+ --color-positive:#40c69a; --color-warning:#eab66a; --color-negative:#f07883; --color-focus:#63b7ff;
+ --shadow-panel:0 12px 30px rgb(0 0 0 / 12%);
+}
+:root[data-theme="light"] {
+ color-scheme:light; --color-canvas:#f3f6fa; --color-surface:#fff; --color-elevated:#f8fafc;
+ --color-text:#182538; --color-muted:#64748b; --color-border:#dce4ee; --color-accent:#1769aa;
+ --color-positive:#137a5c; --color-warning:#99600d; --color-negative:#b52e3c; --color-focus:#075ca7;
+ --shadow-panel:0 10px 28px rgb(18 40 68 / 7%);
+}
