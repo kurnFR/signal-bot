@@ -629,3 +629,11 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - Open-position counts intentionally remain operational and independent of report visibility. Hiding/stopping a strategy does not force-close its existing positions; ledger history is retained.
 - Exact implementation head `95c24c3a808857d86230f7440a89294bd821b3e1` passed all observed PR-head workflows: `tests`, `Test`, and `RetailBot accounting regression`. Both `unit-tests` and `wallet-tracker-mariadb-integration` jobs inside `tests` passed.
 - Merged as [`c3c31b1`](https://github.com/kurnFR/signal-bot/commit/c3c31b136bf04103d8e553e08c2888b2a08e143d). Automated CI only; no production database, worker, live Telegram, or deployment changes.
+
+
+### RetailBot2 unsupported strategy identity fail-closed guard — PR #393 (2026-10-26)
+
+- [PR #393](https://github.com/kurnFR/signal-bot/pull/393) adds worker-side validation for RetailBot2 strategy/mode identities before lifecycle defaults are applied. Unknown identities and unsupported modes now fail closed for evaluation, paper entries, and Telegram rather than inheriting permissive defaults.
+- Regression tests cover an unregistered strategy ID and an unsupported mode. The test-only commit preceded the implementation commit.
+- All observed PR-head workflows passed on exact implementation SHA `04ef34db26a2f25dfcdc2d4d17be0f48d9934907`: `tests`, `Test`, and `RetailBot accounting regression`. The `unit-tests` and `wallet-tracker-mariadb-integration` jobs within `tests` also passed.
+- Merged as [`741f7d4`](https://github.com/kurnFR/signal-bot/commit/741f7d45c37ed817403a6fdd24b3ae994ed4f8f2). Automatic promotion remains unavailable and fail-closed. This is code/CI evidence only; no production database, worker, live Telegram, or deployment changes were made.
