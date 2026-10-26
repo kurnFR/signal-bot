@@ -693,3 +693,11 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - Test-only change; runtime behavior is unchanged. The regression now asserts both schema bootstrap and report visibility query are executed.
 - All required PR-head workflows passed on exact SHA `6a233783d7d404ab9a36c7768945e7de377579ce`: `tests` (including `unit-tests` and `wallet-tracker-mariadb-integration`), `Test`, and `RetailBot accounting regression`.
 - Merged as [`894b7c9`](https://github.com/kurnFR/signal-bot/commit/894b7c94de90e67484f8ad54818db8bdfa0a1613). No production database, worker, live Telegram, or deployment actions were performed.
+
+
+### Recent RetailBot2 trade report SQL column qualification — PR #410 (2026-10-26)
+
+- [PR #410](https://github.com/kurnFR/signal-bot/pull/410) qualifies all selected recent-trade columns with the `rdt_trades` alias after the report query joins `rdt_strategy_lifecycle`. This prevents ambiguous-column errors for `mode`, which exists in both joined tables.
+- Added a regression assertion requiring the qualified `SELECT t.id, t.symbol, t.side, t.mode` projection. Test assertion was committed before the SQL implementation change.
+- All three required workflows passed on exact PR head `cdcb0003c61e4921584b979a07f8d4fc1d7399c9`: `tests` (including `unit-tests` and `wallet-tracker-mariadb-integration`), `Test`, and `RetailBot accounting regression`.
+- Merged as [`509a7fe`](https://github.com/kurnFR/signal-bot/commit/509a7fe3109be206d5ff729691a103cbfc62d4d6). No production database, worker, live Telegram, or deployment actions were performed.
