@@ -34,6 +34,12 @@ describe("frontend foundation shell", () => {
     fireEvent.click(screen.getByRole("button", { name: /Market Screener/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Market Screener" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Market Screener/ })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText(/mutating strategy, trading, worker, deployment, and Telegram actions remain deliberately unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/mutating strategy, wallet tracking, trading, worker, deployment, and Telegram actions remain deliberately unavailable/i)).toBeInTheDocument();
+  });
+  it("routes Wallet Tracking to the read-only view", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Wallet Tracking/ }));
+    expect(screen.getByRole("heading", { level: 1, name: "Wallet Tracking" })).toBeInTheDocument();
+    expect(screen.getByText(/Wallet Tracking displays existing health, monitored addresses, token flow, and recent events/i)).toBeInTheDocument();
   });
 });
