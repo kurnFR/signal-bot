@@ -1634,8 +1634,10 @@ def update_strategy_promotion_decision(decision_hash, *, status, reason,
             SET status=%s, reason=%s, paper_config_id=%s, telegram_result=%s
             WHERE decision_hash=%s
         """, (status, str(reason)[:500], paper_config_id, telegram_result, decision_hash))
+        updated = cur.rowcount == 1
         conn.commit()
         cur.close()
+        return updated
     except Exception:
         conn.rollback()
         raise
