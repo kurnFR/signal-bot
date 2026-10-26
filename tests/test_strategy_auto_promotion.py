@@ -2,6 +2,8 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 
+from db.db import set_strategy_auto_promotion_policy
+
 from web.routes.backtest import (
     _auto_promote_top_candidate,
     StrategyAutoPromotionPolicyRequest,
@@ -440,3 +442,28 @@ def test_auto_promotion_reports_audit_pending_when_final_update_changes_no_row()
     assert "reconcile" in result["reason"].lower()
     alert.assert_called_once()
     update.assert_called_once()
+
+
+def test_policy_db_writer_rejects_malformed_boolean_flags_before_database_access():
+    valid_policy = {
+        "enabled": True,
+        "min_test_trades": 30,
+        "min_profit_factor": 1.2,
+        "min_expectancy_r": 0.05,
+        "max_drawdown_r": 8.0,
+        "min_rank_score": 0.1,
+        "require_holdout": True,
+        "send_telegram": True,
+    }
+    for key in ("enabled", "require_holdout", "send_telegram"):
+        malformed = dict(valid_policy)
+        malformed[key] = "false"
+        with patch("db.db.get_pool") as get_pool:
+            try:
+                set_strategy_auto_promotion_policy(malformed)
+            except ValueError as exc:
+                assert key in str(exc)
+            else:
+                raise AssertionError(f"malformed {key} flag was accepted")
+        get_pool.assert_not_called()
+
