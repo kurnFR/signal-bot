@@ -754,3 +754,11 @@ The React preview is currently an isolated frontend build and is **not** wired i
 - The new view intentionally does not call any `/control` endpoint. Screener settings and alert controls remain in the legacy dashboard until mutation contracts, role gates, persistence semantics, and worker pickup timing are migrated and tested separately.
 - Frontend type-check, component tests, production build, and all existing backend regression checks passed on PR #421's exact head before merge.
 - **Important:** the React preview is still not mounted by FastAPI. This is not yet the production dashboard and does not constitute full Market Screener feature parity.
+
+
+### UIX-02 authentication gate — 2026-10-26
+
+- **PR #423 merged:** the isolated React app now has a server-backed sign-in gate using the existing `POST /api/auth/login` and `GET /api/auth/me` contracts, stores the issued token under the same `token` key as the legacy UI, respects `must_change_password`, supports the existing password-change endpoint, and clears the local token on sign-out.
+- The general data API client remains GET-only; POST requests are restricted to an explicit auth endpoint allowlist. Server authentication, rate limiting, password policy, and RBAC remain authoritative.
+- Strict TypeScript, auth/component tests, production build, and all existing backend regression checks passed on PR #423's exact head before merge.
+- The React app remains isolated and is still not mounted by FastAPI. Browser-level session parity, role-based UI controls, the npm lockfile, and final rollout acceptance remain open.
