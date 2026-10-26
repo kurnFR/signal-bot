@@ -653,3 +653,11 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - Test-first regression coverage verifies lifecycle table creation is the first query and that the subsequent closed-trade query applies the exact strategy/mode `report_enabled` filter.
 - Exact implementation head `6a233783d7d404ab9a36c7768945e7de377579ce` passed all three required workflows: `tests`, `Test`, and `RetailBot accounting regression`; both `unit-tests` and `wallet-tracker-mariadb-integration` jobs passed within `tests`.
 - Merged as [`b3329dd`](https://github.com/kurnFR/signal-bot/commit/b3329dd3e390fcbbdf398dc1298205033194869a). This was repository/CI-only work; no production DB, worker, Telegram, or deployment actions were performed.
+
+
+### Recent closed-trade report lifecycle schema bootstrap test — PR #399 (2026-10-26)
+
+- [PR #399](https://github.com/kurnFR/signal-bot/pull/399) adds regression coverage ensuring the recent closed-trade report creates the `rdt_strategy_lifecycle` table before joining it. This protects first-use dashboard/report requests on installations where the lifecycle table has not yet been initialized.
+- The test also asserts the report query joins by both strategy and mode and applies `COALESCE(l.report_enabled, TRUE) = TRUE`.
+- All required PR-head workflows passed on exact head SHA `6a233783d7d404ab9a36c7768945e7de377579ce`: `tests` (including `unit-tests` and `wallet-tracker-mariadb-integration`), `Test`, and `RetailBot accounting regression`. Merged as [`e5a7a76`](https://github.com/kurnFR/signal-bot/commit/e5a7a766357a3bb3352753b171d65f2772c08163).
+- This is regression coverage only. No production DB, worker, Telegram, or deployment actions were performed.
