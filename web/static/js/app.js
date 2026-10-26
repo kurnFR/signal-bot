@@ -4124,14 +4124,36 @@ const App = {
                 this.showToast(`Auto-promoted ${promotion.strategy} to paper trading.`, "success");
             } else if (promotion.status === "promoted_alert_failed") {
                 this.showToast(`Paper trading activated for ${promotion.strategy}, but Telegram delivery failed.`, "warning");
+            } else if (promotion.status === "promoted_audit_pending") {
+                this.showToast(
+                    `Paper trading activated for ${promotion.strategy}, but the promotion audit needs reconciliation. Reconcile paper config and promotion audit before retrying.`,
+                    "error"
+                );
+            } else if (promotion.status === "reconciliation_required") {
+                this.showToast(
+                    `Promotion outcome for ${promotion.strategy || "the candidate"} is uncertain. Reconcile paper config and promotion audit before retrying.`,
+                    "error"
+                );
+            } else if (promotion.status === "in_progress") {
+                this.showToast(
+                    `Promotion for ${promotion.strategy || "the candidate"} is still marked processing. Reconcile paper config and Telegram outcome before retrying.`,
+                    "warning"
+                );
             } else if (promotion.status === "rejected") {
                 this.showToast(`No auto-promotion: ${promotion.reason || "winner did not pass policy"}.`, "warning");
             } else if (promotion.status === "failed" || promotion.status === "error") {
                 this.showToast(`Auto-promotion did not complete: ${promotion.reason || "see promotion audit"}.`, "error");
             } else if (promotion.status === "already_processed") {
                 this.showToast(`This exact winner/policy result was already processed (${promotion.previous_status || "recorded"}).`, "info");
+            } else if (promotion.status === "disabled") {
+                this.showToast(`Battle Royale complete: ${data.top3.length} qualifying models discovered; automatic promotion is disabled.`, "info");
+            } else if (promotion.status === "no_candidate") {
+                this.showToast("Battle Royale complete; no profitable ranked candidate was found for promotion.", "info");
             } else {
-                this.showToast(`Battle Royale complete: ${data.top3.length} qualifying models discovered.`, "success");
+                this.showToast(
+                    `Battle Royale completed, but promotion status "${promotion.status || "unknown"}" is not recognized. Verify the promotion audit before retrying.`,
+                    "warning"
+                );
             }
             await this.fetchStrategyPromotionPolicy();
         } catch (e) {
