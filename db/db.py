@@ -1019,6 +1019,8 @@ def get_retailbot2_recent_trades(limit=50):
     conn = get_retailbot2_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
+        _ensure_retailbot2_strategy_lifecycle_table(cur)
+        conn.commit()
         cur.execute("""
             SELECT id, symbol, side, mode, entry_price, stop_price, target_price,
                    units, strategy, confluence_score, status, exit_price,

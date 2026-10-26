@@ -200,10 +200,10 @@ def test_recent_closed_trade_rows_respect_strategy_report_visibility(monkeypatch
 
     class Cursor:
         def __init__(self):
-            self.query = None
+            self.queries = []
 
         def execute(self, query, params=None):
-            self.query = query
+            self.queries.append(query)
 
         def fetchall(self):
             return [{
@@ -226,6 +226,9 @@ def test_recent_closed_trade_rows_respect_strategy_report_visibility(monkeypatch
             assert dictionary is True
             return cursor
 
+        def commit(self):
+            self.committed = True
+
         def close(self):
             pass
 
@@ -238,6 +241,8 @@ def test_recent_closed_trade_rows_respect_strategy_report_visibility(monkeypatch
     rows = db_module.get_retailbot2_recent_trades(limit=20)
 
     assert len(rows) == 1
-    assert "LEFT JOIN rdt_strategy_lifecycle" in cursor.query
-    assert "ON l.strategy_id = t.strategy AND l.mode = t.mode" in cursor.query
-    assert "COALESCE(l.report_enabled, TRUE) = TRUE" in cursor.query
+    assert len(cursor.queries) == 2
+    assert "CREATE TABLE IF NOT EXISTS rdt_strategy_lifecycle" in cursor.queries[0]
+    assert "LEFT JOIN rdt_strategy_lifecycle" in cursor.queries[1]
+    assert "ON l.strategy_id = t.strategy AND l.mode = t.mode" in cursor.queries[1]
+    assert "COALESCE(l.report_enabled, TRUE) = TRUE" in cursor.queries[1]
