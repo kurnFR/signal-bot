@@ -145,7 +145,7 @@ Build artifacts must not overwrite `web/static/index.html` or legacy JavaScript.
 ## 6. Execution plan and PR sequence
 
 ### UIX-00 — Reconcile planning and inventory
-**Status:** In progress / must be completed before UI implementation.
+**Status:** Draft inventory is present on a work branch; source-level review and acceptance are still required before UI implementation.
 
 - [ ] Re-read `docs/UI_UX_MODERNIZATION_PLAN.md`, this brief, and the current `master`.
 - [ ] Inventory all user-visible dashboard views/navigation, including hidden or conditionally rendered panels.
@@ -154,10 +154,13 @@ Build artifacts must not overwrite `web/static/index.html` or legacy JavaScript.
 - [ ] Locate existing frontend package manifests, scripts, lockfiles and browser-test tooling before adding duplicates.
 - [ ] Record desktop/tablet/mobile baseline screenshots if a browser environment is available; otherwise record this as unverified rather than inventing evidence.
 - [ ] Add a view/API parity checklist to this document or a linked inventory file.
+- [ ] Add a complete row-by-row endpoint register for every concrete route/method, including handler/source, request/response contract, exact auth/role and password-change guards, side effects, and tests.
+- [ ] Verify endpoint count against FastAPI's actual registered routes and document counting/exclusion rules.
+- [ ] Separate source-verified facts from environment-specific observations and future design requirements.
 
 **Deliverable:** checked-in `docs/UI_UX_VIEW_INVENTORY.md` with route/view, current implementation location, APIs/data, user actions, access requirements, risk level, migration status, and parity tests. Do not infer endpoints from UI labels; verify them in source.
 
-**Gate:** inventory covers every existing navigation item and conditionally rendered major view. No production changes.
+**Gate:** inventory covers every existing navigation item and conditionally rendered major view, and the endpoint/RBAC register is complete and source-linked. Review and merge the documentation-only acceptance PR before UIX-01. No production changes.
 
 ### UIX-01 — Frontend foundation (first implementation PR)
 **Status:** Not started. This is the first code PR after UIX-00.
