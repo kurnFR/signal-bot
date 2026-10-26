@@ -560,3 +560,10 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - Test-first regression coverage checks non-finite and out-of-range thresholds and asserts that no audit claim, paper-config activation, or Telegram alert is attempted.
 - All observed checks passed on exact PR head `69d9982b9159a76a897efdbf8f683b4b2852ff09`: `tests`, both `Test` runs, and `RetailBot accounting regression`. The `wallet-tracker-mariadb-integration` job within the `tests` workflow also completed successfully on that head.
 - Merged as [`64c4ede`](https://github.com/kurnFR/signal-bot/commit/64c4ede147daa264989b03f34388c0741f394912). This validates the code path in CI; it does not mutate or verify production DB policy values, worker state, Telegram, or deployment.
+
+### Backtest Studio malformed persisted promotion policy flags — PR #379 (2026-10-26)
+
+- [PR #379](https://github.com/kurnFR/signal-bot/pull/379) closes a Python truthiness hazard in auto-promotion policy flags. Persisted values such as the string `"false"` are no longer coerced into enabled booleans; the loader accepts actual booleans or integer `0/1` values and rejects malformed values. The promotion route also validates the three policy flags before evaluating a candidate.
+- Test-first regression cases cover malformed `enabled`, `require_holdout`, and `send_telegram` flags, asserting a policy error and no audit record, paper-config activation, or Telegram alert.
+- All observed PR-head workflows passed on exact SHA `e0465d7f9bdac5f972bf55d0530295dd3534db5b`: `tests`, `Test`, and `RetailBot accounting regression`. The `wallet-tracker-mariadb-integration` job inside the `tests` workflow also passed.
+- Merged as [`3abfadd`](https://github.com/kurnFR/signal-bot/commit/3abfadd45e8713ed2400e558d8094956f05db60d). These results validate automated tests only; no production DB, worker, live Telegram delivery, or deployment was changed.
