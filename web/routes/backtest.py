@@ -439,7 +439,7 @@ def _auto_promote_top_candidate(
                     risk_per_trade_pct=risk_per_trade_pct,
                     rank=1, rank_score=rank_score,
                 )
-                telegram_ok = not isinstance(alert, dict) or alert.get("success", True)
+                telegram_ok = isinstance(alert, dict) and alert.get("success") is True
                 telegram_result = "sent" if telegram_ok else "failed"
                 if not telegram_ok:
                     final_status = "promoted_alert_failed"
