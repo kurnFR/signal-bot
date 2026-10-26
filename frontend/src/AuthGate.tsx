@@ -1,19 +1,11 @@
-import { createContext, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Activity, ShieldCheck } from "lucide-react";
 import { ApiError, getJson } from "./lib/api";
 import { AuthRequestError, changePassword, login, logout, type AuthUser } from "./lib/auth";
 
 interface AuthContextValue { user: AuthUser; logout: () => Promise<void> }
 const AuthContext = createContext<AuthContextValue | null>(null);
-export function useAuth() { return useContextSafe(); }
-function useContextSafe() {
-  // Kept as a named helper so preview-only component tests can render App without the auth gate.
-  return AuthContextValueHook();
-}
-function AuthContextValueHook() {
-  // This hook is replaced below by the actual context hook import.
-  return null as AuthContextValue | null;
-}
+export function useAuth() { return useContext(AuthContext); }
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const [screen, setScreen] = useState<"checking" | "login" | "authenticated" | "password-change">("checking");
