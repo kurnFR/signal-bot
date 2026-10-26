@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Activity, AlertTriangle, RefreshCw, ShieldCheck, WalletCards } from "lucide-react";
 import { ApiError } from "./lib/api";
 import { fetchPaperTradingSnapshot, type PaperTradingSnapshot } from "./lib/paperTrading";
@@ -25,7 +25,7 @@ export function PaperTradingPanel() {
   }, [attempt]);
   const m = data?.metrics;
   const breaker = data?.breaker;
-  const metric = (label: string, value: string, note: string, icon: React.ReactNode, className = "") => <article className="metric-card" key={label}><div className="metric-top"><span>{label}</span><span className="metric-icon">{icon}</span></div><div className={"metric-value " + className}>{value}</div><div className="metric-foot"><span>{note}</span></div></article>;
+  const metric = (label: string, value: string, note: string, icon: ReactNode, className = "") => <article className="metric-card" key={label}><div className="metric-top"><span>{label}</span><span className="metric-icon">{icon}</span></div><div className={"metric-value " + className}>{value}</div><div className="metric-foot"><span>{note}</span></div></article>;
   return <div className="paper-trading-view" aria-busy={loading}>
     <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>Read-only paper trading monitor</strong><p>This view only reads the existing ledger and risk-status APIs. It cannot place/cancel orders, close positions, deploy strategies, sync ticks, or change safety controls.</p></div><span className="panel-counter">READ ONLY</span></section>
     {error && <div className="api-error" role="alert"><div><strong>Unable to load Paper Trading</strong><p>{error}</p></div><button className="button button-secondary" onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={15} /> Retry</button></div>}
