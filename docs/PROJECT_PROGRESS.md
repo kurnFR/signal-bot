@@ -645,3 +645,11 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - Added a test-first regression assertion for the recent closed-trade query. The query joins `rdt_strategy_lifecycle` on both strategy and mode and excludes rows with `report_enabled = FALSE`.
 - Open positions remain operationally visible, and no trade records or accounting calculations are changed. All observed PR-head workflows passed on exact implementation SHA `74f2999d4c3c9a3bcc2eec4cb9b9d7ad30ef863b`: `tests`, `Test`, and `RetailBot accounting regression`. The `unit-tests` and `wallet-tracker-mariadb-integration` jobs inside `tests` also passed.
 - Merged as [`c15870b`](https://github.com/kurnFR/signal-bot/commit/c15870be939166c75007f7d1f1ddc3f03423cc9e). Automated CI only; no production database, worker, live Telegram, or deployment changes were made.
+
+
+### Recent closed-trade report schema bootstrap — PR #397 (2026-10-26)
+
+- [PR #397](https://github.com/kurnFR/signal-bot/pull/397) fixes a fresh/partially initialized database edge case introduced when recent closed-trade reporting began joining `rdt_strategy_lifecycle`: that read path now ensures the lifecycle table exists before querying it, matching the statistics path's schema bootstrap behavior.
+- Test-first regression coverage verifies lifecycle table creation is the first query and that the subsequent closed-trade query applies the exact strategy/mode `report_enabled` filter.
+- Exact implementation head `6a233783d7d404ab9a36c7768945e7de377579ce` passed all three required workflows: `tests`, `Test`, and `RetailBot accounting regression`; both `unit-tests` and `wallet-tracker-mariadb-integration` jobs passed within `tests`.
+- Merged as [`b3329dd`](https://github.com/kurnFR/signal-bot/commit/b3329dd3e390fcbbdf398dc1298205033194869a). This was repository/CI-only work; no production DB, worker, Telegram, or deployment actions were performed.
