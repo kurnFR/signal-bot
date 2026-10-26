@@ -23,7 +23,7 @@ describe("read-only Paper Trading panel", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<PaperTradingPanel />);
     expect(await screen.findByRole("heading", { name: "Open positions" })).toBeInTheDocument();
-    expect(screen.getByText("BTCUSDT")).toBeInTheDocument();
+    expect((await screen.findAllByText("BTCUSDT")).length).toBeGreaterThan(0);
     expect(screen.getByText("demo_strategy", { exact: false })).toBeInTheDocument();
     expect(screen.getByText("$125.50")).toBeInTheDocument();
     expect(screen.getByText("Risk checks passed")).toBeInTheDocument();
