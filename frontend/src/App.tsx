@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Activity, ArrowUpRight, Bell, ChevronDown, CircleHelp, Command, LayoutDashboard, Menu, Moon, Search, Settings2, ShieldCheck, Sun, WalletCards, X } from "lucide-react";
+import { Activity, Bell, ChevronDown, CircleHelp, Command, LayoutDashboard, Menu, Moon, Search, Settings2, ShieldCheck, Sun, WalletCards, X } from "lucide-react";
 
 type Theme = "dark" | "light";
 const NAV_ITEMS = [
@@ -83,16 +83,11 @@ export function App() {
 
         <section className="migration-notice" aria-labelledby="preview-notice-title">
           <div className="notice-icon"><ShieldCheck size={20} /></div>
-          <div><h2 id="preview-notice-title">Migration foundation — preview only</h2><p>This shell is isolated. It does not connect to trading APIs, start workers, change settings, or send Telegram alerts. The current dashboard remains the default application.</p></div>
-          <span className="notice-tag">NOT LIVE</span>
+          <div><h2 id="preview-notice-title">Read-only Overview pilot</h2><p>The Overview reads the existing authenticated system-status endpoint only. It cannot start workers, change settings, place trades, or send Telegram alerts. Other sections remain preview-only; the current dashboard remains the default application.</p></div>
+          <span className="notice-tag">READ ONLY</span>
         </section>
 
-        <section className="metrics-grid" aria-label="Interface component examples">
-          <article className="metric-card"><div className="metric-top"><span>Interface status</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">Foundation</div><div className="metric-foot"><span className="status-pill status-neutral">In progress</span><span>UIX-01</span></div></article>
-          <article className="metric-card"><div className="metric-top"><span>Backend changes</span><span className="metric-icon"><ShieldCheck size={17} /></span></div><div className="metric-value">None</div><div className="metric-foot"><span className="status-pill status-positive">Preserved</span><span>API contracts</span></div></article>
-          <article className="metric-card"><div className="metric-top"><span>Theme system</span><span className="metric-icon">{theme === "dark" ? <Moon size={17} /> : <Sun size={17} />}</span></div><div className="metric-value">{theme === "dark" ? "Dark" : "Light"}</div><div className="metric-foot"><span className="status-pill status-neutral">Switchable</span><span>Saved locally</span></div></article>
-          <article className="metric-card"><div className="metric-top"><span>Next migration slice</span><span className="metric-icon"><ArrowUpRight size={17} /></span></div><div className="metric-value">Overview</div><div className="metric-foot"><span className="status-pill status-warning">Not connected</span><span>UIX-02</span></div></article>
-        </section>
+        <SystemStatusPanel />
 
         <section className="panel" aria-labelledby="roadmap-title">
           <div className="panel-heading"><div><h2 id="roadmap-title">Migration roadmap</h2><p>Small, testable slices with legacy fallback preserved.</p></div><span className="panel-counter">01 / 05</span></div>
