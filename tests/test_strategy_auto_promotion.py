@@ -167,6 +167,20 @@ def test_auto_promotion_preserves_activation_outcome_when_final_audit_write_fail
     alert.assert_called_once()
     update.assert_called_once()
 
+
+def test_auto_promotion_requires_reconciliation_if_config_id_unconfirmed_and_audit_write_fails():
+    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy(require_holdout=False)), \
+         patch("web.routes.backtest.record_strategy_promotion_decision", return_value=True), \
+         patch("web.routes.backtest.update_strategy_promotion_decision", side_effect=RuntimeError("audit store unavailable")), \
+         patch("paper.engine.set_paper_config", return_value={"status": "success", "id": None}), \
+         patch("notifications.telegram_notifier.send_deployment_alert") as alert:
+        result = _call(_candidate(), data_segment="train")
+
+    assert result["status"] == "reconciliation_required"
+    assert "reconcile paper_configs" in result["reason"].lower()
+    assert result["telegram_result"] == "not_attempted"
+    alert.assert_not_called()
+
 def test_auto_promotion_does_not_repeat_identical_decision():
     with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy(require_holdout=False)), \
          patch("web.routes.backtest.record_strategy_promotion_decision", return_value=False), \
