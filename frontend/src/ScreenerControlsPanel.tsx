@@ -35,7 +35,7 @@ export function ScreenerControlsPanel() {
   const [enabled, setEnabled] = useState(true);
   const [numbers, setNumbers] = useState<Record<string, string>>({});
   const [booleans, setBooleans] = useState<BooleanDraft>({});
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
