@@ -592,3 +592,13 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - The policy reader now validates that the persisted trade count is an exact integer from 30 to 10000 and that numeric thresholds are finite numeric values within the API-supported ranges before returning the policy. It supports numeric database values including `Decimal`, while rejecting booleans or non-numeric values in threshold fields.
 - All observed PR-head workflows passed on exact implementation SHA `2f56ec8ccacf18b2acf6b42abd8872b65ce0f246`: `tests`, `Test`, and `RetailBot accounting regression`. The `wallet-tracker-mariadb-integration` job inside `tests` also passed.
 - Merged as [`0c7062c`](https://github.com/kurnFR/signal-bot/commit/0c7062cd43be19fe08551b934d71da18e783f0f4). Automated checks only; no production database, worker, live Telegram, or deployment changes were made.
+
+
+
+### Backtest Studio policy save/readback reliability — PR #387 (2026-10-26)
+
+- [PR #387](https://github.com/kurnFR/signal-bot/pull/387) covers a partial-success case in `PUT /api/backtest/promotion-policy`: the policy writer succeeds, but the immediate readback fails. The test-first regression reproduced the bug as HTTP 500 despite a successful write.
+- The route now separates write errors from readback errors. When the write returns successfully but readback fails, it responds with `saved_readback_unavailable`, includes the submitted policy values, and explicitly warns that authoritative readback was not verified. Genuine write failures still return an error.
+- The UI displays the readback warning rather than claiming that the save failed or that the saved policy was verified.
+- Exact implementation head `75d14bc1bd5663eda10cf044b86ff2f8c5063446) passed all observed PR-head workflows: `tests`, `Test`, and `RetailBot accounting regression`. Both `unit-tests` and `wallet-tracker-mariadb-integration` jobs inside `tests` passed.
+- Merged as [`06966dc`](https://github.com/kurnFR/signal-bot/commit/06966dcbfeb7bc5f4d0051a1ded6907c8f69b07e). Verification was automated CI only; no production database, worker, live Telegram, or deployment changes were made.
