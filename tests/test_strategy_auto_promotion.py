@@ -357,10 +357,11 @@ def test_auto_promotion_does_not_report_success_without_persisted_config_id():
             validation_segment="holdout",
         )
 
-    assert result["status"] == "failed"
+    assert result["status"] == "reconciliation_required"
     assert "reconcil" in result["reason"].lower()
-    assert update.call_args.kwargs["status"] == "failed"
+    assert update.call_args.kwargs["status"] == "reconciliation_required"
     assert update.call_args.kwargs["paper_config_id"] is None
+    assert update.call_args.kwargs["telegram_result"] == "not_attempted"
     alert.assert_not_called()
 
 
