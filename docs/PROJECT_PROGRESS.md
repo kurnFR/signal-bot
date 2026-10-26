@@ -611,3 +611,21 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - Added a regression assertion in `tests/test_auto_promotion_ui_guidance.py` and bumped the dashboard `app.js` cache key to `20261026-1`.
 - Exact implementation head `bdd149dad6aabbaab79d5d4e48cd687b28be8245` passed all observed PR-head workflows: `tests`, `Test`, and `RetailBot accounting regression`. The `unit-tests` and `wallet-tracker-mariadb-integration` jobs within `tests` also passed.
 - Merged as [`14912ad`](https://github.com/kurnFR/signal-bot/commit/14912ad0900c1e47a69192a8000acf0eb577ada5). Verification was automated CI only; no production database, worker, live Telegram, or deployment changes were made.
+
+
+### Backtest Studio policy loading independent of audit feed — PR #389 (2026-10-26)
+
+- [PR #389](https://github.com/kurnFR/signal-bot/pull/389) fixes a frontend reliability issue where `fetchStrategyPromotionPolicy()` fetched the policy and promotion-audit feed in one `Promise.all`. A failing audit endpoint therefore prevented otherwise valid policy settings from loading.
+- The UI now loads the persisted policy first and renders audit history through a separate `fetchStrategyPromotionAudit()` helper. Audit failures show an audit-specific warning without replacing successfully loaded policy fields/status.
+- Added a regression assertion in `tests/test_auto_promotion_ui_guidance.py` and bumped the dashboard `app.js` cache key to `20261026-1`.
+- Exact implementation head `bdd149dad6aabbaab79d5d4e48cd687b28be8245` passed all observed PR-head workflows: `tests`, `Test`, and `RetailBot accounting regression`. The `unit-tests` and `wallet-tracker-mariadb-integration` jobs inside `tests` also passed.
+- Merged as [`14912ad`](https://github.com/kurnFR/signal-bot/commit/14912ad0900c1e47a69192a8000acf0eb577ada5). Automated CI only; no production database, worker, live Telegram, or deployment changes.
+
+
+### RetailBot2 hidden strategy report aggregation — PR #391 (2026-10-26)
+
+- [PR #391](https://github.com/kurnFR/signal-bot/pull/391) fixes a report consistency gap: the per-strategy table respected `report_enabled`, but the report's closed-trade totals grouped by mode still counted hidden strategies. This could leave a hidden strategy's realized P&L and wins/losses in the summary after its row disappeared.
+- The closed-trade mode aggregate now joins `rdt_strategy_lifecycle` on the exact strategy/mode identity and applies `COALESCE(l.report_enabled, TRUE) = TRUE`, matching the per-strategy visibility rule.
+- Open-position counts intentionally remain operational and independent of report visibility. Hiding/stopping a strategy does not force-close its existing positions; ledger history is retained.
+- Exact implementation head `95c24c3a808857d86230f7440a89294bd821b3e1` passed all observed PR-head workflows: `tests`, `Test`, and `RetailBot accounting regression`. Both `unit-tests` and `wallet-tracker-mariadb-integration` jobs inside `tests` passed.
+- Merged as [`c3c31b1`](https://github.com/kurnFR/signal-bot/commit/c3c31b136bf04103d8e553e08c2888b2a08e143d). Automated CI only; no production database, worker, live Telegram, or deployment changes.
