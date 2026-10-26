@@ -475,16 +475,27 @@ def _auto_promote_top_candidate(
             "criteria": criteria,
         }
     except Exception as exc:
-        logger.exception("Auto-promotion failed while activating paper config")
+        # The activation helper may raise after a write has started (for
+        # example, if the connection drops before commit acknowledgement).
+        # A generic failure status could invite an unsafe retry, so treat the
+        # side-effect outcome as uncertain and require explicit reconciliation.
+        logger.exception("Auto-promotion activation outcome is uncertain")
+        final_reason = (
+            "Paper config activation raised an exception and its persisted state "
+            f"could not be confirmed: {exc}. Reconcile paper_configs and the "
+            "promotion audit before retrying; Telegram outcome is not confirmed."
+        )
         try:
             update_strategy_promotion_decision(
-                decision_hash, status="failed",
-                reason=f"Paper activation failed: {exc}",
+                decision_hash, status="reconciliation_required",
+                reason=final_reason, telegram_result="unknown",
             )
         except Exception:
-            logger.exception("Could not update failed promotion audit")
-        return {"status": "failed", "strategy": strategy_name,
-                "reason": f"Paper activation failed: {exc}"}
+            logger.exception("Could not update uncertain promotion audit")
+        return {
+            "status": "reconciliation_required", "strategy": strategy_name,
+            "reason": final_reason, "telegram_result": "unknown",
+        }
 
 
 @router.get("/strategies")
