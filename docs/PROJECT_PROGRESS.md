@@ -701,3 +701,11 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - Added a regression assertion requiring the qualified `SELECT t.id, t.symbol, t.side, t.mode` projection. Test assertion was committed before the SQL implementation change.
 - All three required workflows passed on exact PR head `cdcb0003c61e4921584b979a07f8d4fc1d7399c9`: `tests` (including `unit-tests` and `wallet-tracker-mariadb-integration`), `Test`, and `RetailBot accounting regression`.
 - Merged as [`509a7fe`](https://github.com/kurnFR/signal-bot/commit/509a7fe3109be206d5ff729691a103cbfc62d4d6). No production database, worker, live Telegram, or deployment actions were performed.
+
+### UI/UX modernization execution handoff — 2026-10-26
+
+- The recommended target stack and phased migration are documented in [UI_UX_MODERNIZATION_PLAN.md](UI_UX_MODERNIZATION_PLAN.md).
+- [UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md) turns that roadmap into execution work items UIX-00 through UIX-05, with scope boundaries, acceptance gates, test requirements, and an Antigravity handoff.
+- **Planning status: execution-ready for the inventory phase; frontend migration remains not started.** First task is UIX-00: verify every dashboard view/API and current frontend/static-serving/test setup, then submit a documentation-only inventory PR. Do not start framework code before this inventory is reviewed and merged.
+- The handoff is being proposed in [PR #412](https://github.com/kurnFR/signal-bot/pull/412). This is documentation-only and does not imply runtime changes or deployment.
+- Existing dashboard accessibility/mobile improvements are retained. The React/TypeScript build, pilot view, screener migration, strategy/paper-trading migration, and final browser/accessibility acceptance are still outstanding.
