@@ -44,3 +44,33 @@ export async function fetchScreenerSnapshot(signal?: AbortSignal): Promise<Scree
   ]);
   return { status, signals: signalPayload.signals, stats };
 }
+
+export interface ScreenerControlResponse {
+  enabled: boolean;
+  overrides: Record<string, number | boolean>;
+  updated_at: string | null;
+  tunable_fields: string[];
+}
+export interface ScreenerControlSaveResult { status: string; note: string }
+export class ScreenerControlError extends Error {
+  constructor(readonly status: number, message: string) { super(message); this.name = "ScreenerControlError"; }
+}
+
+export function fetchScreenerControl(signal?: AbortSignal): Promise<ScreenerControlResponse> {
+  return getJson<ScreenerControlResponse>("/api/research/screener/control", signal);
+}
+
+/** The only non-read-only request in the screener feature; its path is fixed and server-authorized. */
+export async function saveScreenerControl(enabled: boolean, overrides: Record<string, number | boolean>): Promise<ScreenerControlSaveResult> {
+  const headers: Record<string, string> = { Accept: "application/json", "Content-Type": "application/json" };
+  try { const token = window.localStorage.getItem("token"); if (token) headers.Authorization = `Bearer ${token}`; } catch { /* The server will return an auth error if no token is available. */ }
+  const response = await fetch("/api/research/screener/control", { method: "POST", credentials: "same-origin", headers, body: JSON.stringify({ enabled, overrides }) });
+  let payload: unknown;
+  try { payload = await response.json(); } catch { payload = null; }
+  if (!response.ok) {
+    const detail = payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string" ? payload.detail.slice(0, 300) : `Screener settings could not be saved (${response.status})`;
+    throw new ScreenerControlError(response.status, detail);
+  }
+  if (!payload || typeof payload !== "object" || !("status" in payload) || payload.status !== "ok") throw new ScreenerControlError(response.status, "Screener returned an invalid save response");
+  return payload as ScreenerControlSaveResult;
+}
