@@ -244,5 +244,6 @@ def test_recent_closed_trade_rows_respect_strategy_report_visibility(monkeypatch
     assert len(cursor.queries) == 2
     assert "CREATE TABLE IF NOT EXISTS rdt_strategy_lifecycle" in cursor.queries[0]
     assert "LEFT JOIN rdt_strategy_lifecycle" in cursor.queries[1]
+    assert "SELECT t.id, t.symbol, t.side, t.mode" in cursor.queries[1]
     assert "ON l.strategy_id = t.strategy AND l.mode = t.mode" in cursor.queries[1]
     assert "COALESCE(l.report_enabled, TRUE) = TRUE" in cursor.queries[1]

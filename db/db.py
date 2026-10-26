@@ -1022,9 +1022,9 @@ def get_retailbot2_recent_trades(limit=50):
         _ensure_retailbot2_strategy_lifecycle_table(cur)
         conn.commit()
         cur.execute("""
-            SELECT id, symbol, side, mode, entry_price, stop_price, target_price,
-                   units, strategy, confluence_score, status, exit_price,
-                   exit_reason, net_pnl, pnl_percent, entry_time, exit_time
+            SELECT t.id, t.symbol, t.side, t.mode, t.entry_price, t.stop_price, t.target_price,
+                   t.units, t.strategy, t.confluence_score, t.status, t.exit_price,
+                   t.exit_reason, t.net_pnl, t.pnl_percent, t.entry_time, t.exit_time
             FROM rdt_trades t
             LEFT JOIN rdt_strategy_lifecycle l
               ON l.strategy_id = t.strategy AND l.mode = t.mode
