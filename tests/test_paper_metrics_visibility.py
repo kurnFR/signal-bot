@@ -65,3 +65,48 @@ def test_paper_metrics_headline_uses_same_report_visibility_as_strategy_rows():
     assert metrics["winRatePct"] == 50.0
     assert metrics["netPnl"] == 15.0
     assert [row["strategy"] for row in metrics["byStrategy"]] == ["visible_strategy"]
+
+
+
+def test_recent_paper_trades_respect_report_visibility(monkeypatch):
+    from paper import engine
+
+    class Cursor:
+        def __init__(self):
+            self.queries = []
+
+        def execute(self, query, params=None):
+            self.queries.append(query)
+
+        def fetchall(self):
+            return [{
+                "id": 7, "position_id": 12, "symbol": "BTC/USDT", "market": "spot",
+                "timeframe": "1h", "strategy_name": "hidden_strategy", "direction": "LONG",
+                "entry_time_wib": None, "exit_time_wib": None, "created_at": None,
+            }]
+
+        def close(self):
+            pass
+
+    cursor = Cursor()
+
+    class Connection:
+        def cursor(self, dictionary=False):
+            assert dictionary is True
+            return cursor
+
+        def close(self):
+            pass
+
+    class Pool:
+        def get_connection(self):
+            return Connection()
+
+    monkeypatch.setattr(engine, "get_pool", lambda: Pool())
+
+    rows = engine.get_paper_trades(limit=20)
+
+    assert len(rows) == 1
+    assert "LEFT JOIN paper_positions p ON p.id = t.position_id" in cursor.queries[0]
+    assert "LEFT JOIN paper_configs c ON c.id = p.config_id" in cursor.queries[0]
+    assert "COALESCE(c.report_enabled, TRUE) = TRUE" in cursor.queries[0]
