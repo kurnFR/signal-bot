@@ -250,6 +250,37 @@ def _auto_promote_top_candidate(
 
     if not policy.get("enabled"):
         return {"status": "disabled", "reason": "Automatic promotion is disabled in settings"}
+
+    # The UI/API validates policy writes, but the persisted row may be stale,
+    # manually edited, or corrupted. Revalidate before building the decision
+    # identity or claiming an audit row so invalid thresholds cannot crash the
+    # backtest request or weaken promotion gates.
+    try:
+        min_trades_raw = policy["min_test_trades"]
+        min_trades = int(min_trades_raw)
+        if isinstance(min_trades_raw, bool) or float(min_trades_raw) != min_trades:
+            raise ValueError("min_test_trades must be an integer")
+        if not 30 <= min_trades <= 10000:
+            raise ValueError("min_test_trades is outside the supported range")
+        threshold_ranges = {
+            "min_profit_factor": (1.0, 10.0, False),
+            "min_expectancy_r": (0.0, 10.0, False),
+            "max_drawdown_r": (0.0, 100.0, True),
+            "min_rank_score": (0.01, 1.0, False),
+        }
+        for key, (minimum, maximum, exclusive_minimum) in threshold_ranges.items():
+            value = float(policy[key])
+            if not math.isfinite(value):
+                raise ValueError(f"{key} must be finite")
+            if (value <= minimum if exclusive_minimum else value < minimum) or value > maximum:
+                raise ValueError(f"{key} is outside the supported range")
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        logger.error("Invalid persisted auto-promotion policy: %s", exc)
+        return {
+            "status": "error",
+            "reason": f"Invalid auto-promotion policy: {exc}. Correct the saved policy before retrying.",
+        }
+
     if not candidate:
         return {"status": "no_candidate", "reason": "No profitable ranked candidate was found"}
 
