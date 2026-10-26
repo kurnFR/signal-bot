@@ -64,6 +64,7 @@ Primary project references:
 | Database migrations, durable jobs, and runtime-file hygiene | **Partially complete** | Versioned migrations and durable job state are merged. PR #282 makes status inspection read-only; PR #284 makes dry-run read-only. A safety-gated populated-database rehearsal runbook is available in [POPULATED_DATABASE_MIGRATION_REHEARSAL.md](POPULATED_DATABASE_MIGRATION_REHEARSAL.md), but the actual rehearsal remains **not performed**. `custom_strategies.json` and `Screen/signals.jsonl` remain tracked; ignore rules are prepared, but final untracking must be performed with a verified backup on the machine that owns the real data. |
 | Strategy and ML evidence of trading edge | **Not complete** | Use leakage-safe chronological evaluation and untouched holdout data; passing software tests is not proof of profitability. |
 | GCAO project documentation and status | **Needs identification / blocked** | The accessible `signal-bot` repository and retrieved project context did not identify what “GCAO” stands for, its canonical repository, or its scope. Do not assume it is the same as Signal Bot or the separate `ai_insight` / `forecast_engine` work. Add verified details after its identity and source are confirmed. |
+| UI/UX Modernization Program (UIX-00 to UIX-05) | **Phase UIX-00 Complete** | PR #412 merged handoff; UIX-00 baseline view and API inventory checked in as [docs/UI_UX_VIEW_INVENTORY.md](UI_UX_VIEW_INVENTORY.md). UIX-01 frontend foundation pending environment setup. |
 | Production deployment and live-environment verification | **Not done by this work** | No deployment was performed as part of the PR batch summarized here. Confirm the target environment and follow its release procedure separately. |
 
 ## 3. Recent merged work
@@ -709,3 +710,14 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - **Planning status: execution-ready for the inventory phase; frontend migration remains not started.** First task is UIX-00: verify every dashboard view/API and current frontend/static-serving/test setup, then submit a documentation-only inventory PR. Do not start framework code before this inventory is reviewed and merged.
 - The handoff is being proposed in [PR #412](https://github.com/kurnFR/signal-bot/pull/412). This is documentation-only and does not imply runtime changes or deployment.
 - Existing dashboard accessibility/mobile improvements are retained. The React/TypeScript build, pilot view, screener migration, strategy/paper-trading migration, and final browser/accessibility acceptance are still outstanding.
+
+
+### UI/UX baseline view and API inventory — UIX-00 (2026-10-26)
+
+- Completed **Phase UIX-00** baseline audit and generated [`docs/UI_UX_VIEW_INVENTORY.md`](UI_UX_VIEW_INVENTORY.md).
+- Comprehensive mapping covers all 11 main dashboard views (`view-home`, `view-master-data`, `view-backtest`, `view-paper`, `view-ml-studio`, `view-strategies`, `view-news-ai`, `view-research`, `view-market-screener`, `view-wallet-tracking`, `view-settings`) and 7 modal dialogs (`login-modal`, `force-password-modal`, `backfill-modal`, `deploy-modal`, `modal-run-ml`, `modal-deploy-ml`, `modal-inspect-ml`).
+- Verified 81 FastAPI backend endpoints across 14 router modules, mapping HTTP methods, parameter payloads, RBAC privilege requirements (`viewer`, `trader`, `admin`), and password change restriction guards.
+- Audited static asset serving: `/static` directory mount, `GET /` dynamic bundle injection of `dashboard_enhancements.js`, and configurable CORS origins via `SIGNAL_BOT_ALLOWED_ORIGINS`.
+- Confirmed zero existing frontend manifests (`package.json`, lockfiles) and documented that Node.js/npm is not yet in the host environment PATH.
+- Recorded browser visual checks as unverified in the current headless environment, preserving all accessibility and responsive test invariants for future phases.
+- Documentation-only PR: no frontend packages installed, no runtime changes, no database migrations, no worker restarts, no live trading, and no Telegram alerts dispatched.

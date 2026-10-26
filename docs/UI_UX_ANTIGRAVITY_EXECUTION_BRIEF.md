@@ -145,15 +145,15 @@ Build artifacts must not overwrite `web/static/index.html` or legacy JavaScript.
 ## 6. Execution plan and PR sequence
 
 ### UIX-00 — Reconcile planning and inventory
-**Status:** In progress / must be completed before UI implementation.
+**Status:** Complete (Deliverable checked in as `docs/UI_UX_VIEW_INVENTORY.md`).
 
-- [ ] Re-read `docs/UI_UX_MODERNIZATION_PLAN.md`, this brief, and the current `master`.
-- [ ] Inventory all user-visible dashboard views/navigation, including hidden or conditionally rendered panels.
-- [ ] Map each view to its current HTML container/render function, API endpoints, forms, tables, charts, permissions and polling behavior.
-- [ ] Identify the actual FastAPI static mount, dashboard entry route, authentication flow, test commands, lint conventions and packaging/deployment assumptions.
-- [ ] Locate existing frontend package manifests, scripts, lockfiles and browser-test tooling before adding duplicates.
-- [ ] Record desktop/tablet/mobile baseline screenshots if a browser environment is available; otherwise record this as unverified rather than inventing evidence.
-- [ ] Add a view/API parity checklist to this document or a linked inventory file.
+- [x] Re-read `docs/UI_UX_MODERNIZATION_PLAN.md`, this brief, and the current `master`.
+- [x] Inventory all user-visible dashboard views/navigation, including hidden or conditionally rendered panels.
+- [x] Map each view to its current HTML container/render function, API endpoints, forms, tables, charts, permissions and polling behavior.
+- [x] Identify the actual FastAPI static mount, dashboard entry route, authentication flow, test commands, lint conventions and packaging/deployment assumptions.
+- [x] Locate existing frontend package manifests, scripts, lockfiles and browser-test tooling before adding duplicates.
+- [x] Record desktop/tablet/mobile baseline screenshots if a browser environment is available; otherwise record this as unverified rather than inventing evidence.
+- [x] Add a view/API parity checklist to this document or a linked inventory file.
 
 **Deliverable:** checked-in `docs/UI_UX_VIEW_INVENTORY.md` with route/view, current implementation location, APIs/data, user actions, access requirements, risk level, migration status, and parity tests. Do not infer endpoints from UI labels; verify them in source.
 
@@ -276,8 +276,8 @@ Update this table after each meaningful PR.
 
 | Work item | Status | PR / evidence | Blocker / next action |
 |---|---|---|---|
-| UIX-00 Baseline inventory | Not complete | — | Inspect current source and add `docs/UI_UX_VIEW_INVENTORY.md` |
-| UIX-01 Frontend foundation | Not started | — | Wait for UIX-00 inventory and existing-tooling audit |
+| UIX-00 Baseline inventory | Complete | `docs/UI_UX_VIEW_INVENTORY.md` | PR prepared; all 11 views and 7 dialogs mapped to verified backend APIs |
+| UIX-01 Frontend foundation | Ready to start | — | Provision Node.js/npm and initiate `frontend/` foundation PR |
 | UIX-02 Read-only pilot | Not started | — | Requires UIX-01 gates |
 | UIX-03 Market Screener V2 | Not started | — | Requires inventory and pilot patterns |
 | UIX-04 Strategy/paper-trading and remaining views | Not started | — | Migrate separately by risk and domain |
