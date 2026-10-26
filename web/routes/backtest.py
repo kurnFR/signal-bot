@@ -208,10 +208,28 @@ def update_promotion_policy(req: StrategyAutoPromotionPolicyRequest):
             raise HTTPException(status_code=400, detail=f"{key} must be finite")
     try:
         set_strategy_auto_promotion_policy(values)
-        return {"status": "ok", "policy": get_strategy_auto_promotion_policy()}
     except Exception as exc:
         logger.exception("Failed to save auto-promotion policy")
         raise HTTPException(status_code=500, detail=f"Unable to save promotion policy: {exc}")
+
+    try:
+        persisted_policy = get_strategy_auto_promotion_policy()
+    except Exception as exc:
+        # The write has already returned successfully. Do not report this as a
+        # failed save: the UI might retry and the user could mistake the
+        # committed policy for a rejected update. Keep the submitted values
+        # explicit, but do not imply that authoritative readback was confirmed.
+        logger.exception("Promotion policy saved but readback failed")
+        return {
+            "status": "saved_readback_unavailable",
+            "policy": values,
+            "warning": (
+                "The policy save completed, but reading it back failed. "
+                "The returned policy reflects the submitted values and has not been verified by readback."
+            ),
+        }
+
+    return {"status": "ok", "policy": persisted_policy}
 
 
 @router.get("/promotion-audit")
