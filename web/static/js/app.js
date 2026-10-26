@@ -4167,18 +4167,17 @@ const App = {
     async fetchStrategyPromotionPolicy() {
         const statusEl = document.getElementById("bt-promotion-policy-status");
         try {
-            const [policyRes, auditRes] = await Promise.all([
-                fetch(`${API_BASE}/api/backtest/promotion-policy`, { headers: this.getAuthHeaders() }),
-                fetch(`${API_BASE}/api/backtest/promotion-audit?limit=5`, { headers: this.getAuthHeaders() }),
-            ]);
-            if (!policyRes.ok || !auditRes.ok) {
-                const failed = !policyRes.ok ? policyRes : auditRes;
-                let detail = `HTTP ${failed.status}`;
-                try { detail = (await failed.json()).detail || detail; } catch (_) {}
+            // The policy is the primary settings resource. Do not make it depend on
+            // the optional audit feed being healthy.
+            const policyRes = await fetch(`${API_BASE}/api/backtest/promotion-policy`, {
+                headers: this.getAuthHeaders(),
+            });
+            if (!policyRes.ok) {
+                let detail = `HTTP ${policyRes.status}`;
+                try { detail = (await policyRes.json()).detail || detail; } catch (_) {}
                 throw new Error(detail);
             }
             const policyData = await policyRes.json();
-            const auditData = await auditRes.json();
             const policy = policyData.policy || {};
             const fields = {
                 "bt-auto-promote-enabled": "enabled",
@@ -4202,21 +4201,41 @@ const App = {
                     : `Auto-promotion disabled · updated ${policy.updated_at || "saved"}`;
                 statusEl.className = `text-[10px] ${policy.enabled ? "text-amber-300" : "text-slate-500"}`;
             }
-            const auditEl = document.getElementById("bt-promotion-audit");
-            if (auditEl) {
-                const events = Array.isArray(auditData.events) ? auditData.events : [];
-                auditEl.innerHTML = events.length ? events.map(event => `
-                    <div class="flex flex-wrap gap-x-2 gap-y-1 border-t border-slate-800 pt-1">
-                        <span class="font-semibold ${event.status === "promoted" ? "text-emerald-300" : event.status === "rejected" ? "text-amber-300" : "text-slate-400"}">${this._escapeHtml(event.status)}</span>
-                        <span class="text-slate-300">${this._escapeHtml(event.strategy_name)}</span>
-                        <span>${this._escapeHtml(event.symbol)} ${this._escapeHtml(event.timeframe)} · ${this._escapeHtml(event.data_segment)}</span>
-                        <span class="flex-1">${this._escapeHtml(event.reason)}</span>
-                        <span>${this._escapeHtml(event.created_at || "")}</span>
-                    </div>`).join("") : "No promotion decisions recorded yet.";
-            }
         } catch (e) {
             if (statusEl) statusEl.innerText = `Promotion policy unavailable: ${e.message || e}`;
             this.showToast(`Failed to load auto-promotion policy: ${e.message || e}`, "error");
+            return;
+        }
+
+        // Audit history is useful context, but it must not block policy settings.
+        await this.fetchStrategyPromotionAudit();
+    },
+
+    async fetchStrategyPromotionAudit() {
+        const auditEl = document.getElementById("bt-promotion-audit");
+        if (!auditEl) return;
+        try {
+            const auditRes = await fetch(`${API_BASE}/api/backtest/promotion-audit?limit=5`, {
+                headers: this.getAuthHeaders(),
+            });
+            if (!auditRes.ok) {
+                let detail = `HTTP ${auditRes.status}`;
+                try { detail = (await auditRes.json()).detail || detail; } catch (_) {}
+                throw new Error(detail);
+            }
+            const auditData = await auditRes.json();
+            const events = Array.isArray(auditData.events) ? auditData.events : [];
+            auditEl.innerHTML = events.length ? events.map(event => `
+                <div class="flex flex-wrap gap-x-2 gap-y-1 border-t border-slate-800 pt-1">
+                    <span class="font-semibold ${event.status === "promoted" ? "text-emerald-300" : event.status === "rejected" ? "text-amber-300" : "text-slate-400"}">${this._escapeHtml(event.status)}</span>
+                    <span class="text-slate-300">${this._escapeHtml(event.strategy_name)}</span>
+                    <span>${this._escapeHtml(event.symbol)} ${this._escapeHtml(event.timeframe)} · ${this._escapeHtml(event.data_segment)}</span>
+                    <span class="flex-1">${this._escapeHtml(event.reason)}</span>
+                    <span>${this._escapeHtml(event.created_at || "")}</span>
+                </div>`).join("") : "No promotion decisions recorded yet.";
+        } catch (e) {
+            auditEl.innerText = `Promotion audit unavailable: ${e.message || e}`;
+            this.showToast(`Failed to load promotion audit: ${e.message || e}`, "warning");
         }
     },
 
