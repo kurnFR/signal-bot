@@ -711,9 +711,9 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - Existing dashboard accessibility/mobile improvements are retained. The React/TypeScript build, pilot view, screener migration, strategy/paper-trading migration, and final browser/accessibility acceptance are still outstanding.
 
 
-### UI/UX UIX-00 inventory draft review — 2026-10-26
+### UI/UX UIX-00 inventory reconciliation update — 2026-10-26
 
-- Antigravity's first-pass inventory is available on `master` in [`docs/UI_UX_VIEW_INVENTORY.md`](UI_UX_VIEW_INVENTORY.md), added via [PR #413](https://github.com/kurnFR/signal-bot/pull/413).
-- The draft identifies 11 main views and 7 modal dialogs and records useful static-serving, polling, accessibility, and responsive context. It is **not yet accepted as complete**: the stated total of 81 endpoints is not auditable without a row-by-row route/method register; role and forced-password-change rules need endpoint-specific verification; host Node/npm availability is not established by repository inspection; and some chart parity statements may describe future requirements rather than existing behavior.
-- UIX-00 remains **pending review**. Antigravity/reviewer must add source-linked endpoint contracts and side effects, verify all conditional UI flows and RBAC exceptions, and distinguish verified facts from assumptions. Do not begin UIX-01 frontend implementation until the inventory acceptance PR is reviewed and merged.
-- Documentation-only work. No runtime/frontend code, dependencies, database, worker, trading, Telegram, or deployment changes.
+- Antigravity pushed commit [74d67c2](https://github.com/kurnFR/signal-bot/commit/74d67c2c04fc492786b1456f79df2ead59c56be8) with a detailed 81-row endpoint register and handoff updates. Its `pytest` check passed on that exact commit.
+- The original branch diverged from current `master`. This reconciled branch starts from current `master` and carries forward the detailed register without discarding the master-side documentation corrections.
+- The register remains a draft pending independent route-registry/source verification, endpoint-count reconciliation, view-flow/RBAC review, and owner acceptance. Do not describe the 81 count or all route-level claims as independently verified until those checks are recorded.
+- UIX-01 remains blocked. This PR is documentation-only; no runtime code, dependencies, database, worker, trading, Telegram, or deployment changes are included.
