@@ -320,8 +320,11 @@ def get_paper_trades(limit: int = 50) -> List[Dict[str, Any]]:
                 gross_pnl, entry_fee, exit_fee, funding_pnl, net_pnl,
                 allocated_capital, risk_per_trade_pct, risk_amount,
                 net_return_pct, r_multiple, holding_bars, created_at
-            FROM paper_trades
-            ORDER BY id DESC
+            FROM paper_trades t
+            LEFT JOIN paper_positions p ON p.id = t.position_id
+            LEFT JOIN paper_configs c ON c.id = p.config_id
+            WHERE COALESCE(c.report_enabled, TRUE) = TRUE
+            ORDER BY t.id DESC
             LIMIT %s
             """,
             (limit,),
