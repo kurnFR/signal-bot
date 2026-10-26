@@ -378,12 +378,15 @@ def test_auto_promotion_fails_closed_when_telegram_result_does_not_confirm_succe
     assert update.call_args.kwargs["status"] == "promoted_alert_failed"
     assert update.call_args.kwargs["telegram_result"] == "failed"
 
+
 def test_auto_promotion_requires_reconciliation_when_activation_raises():
-    with patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy(require_holdout=False)), \\
-         patch("web.routes.backtest.record_strategy_promotion_decision", return_value=True), \\
-         patch("web.routes.backtest.update_strategy_promotion_decision") as update, \\
-         patch("paper.engine.set_paper_config", side_effect=RuntimeError("connection lost after write")), \\
-         patch("notifications.telegram_notifier.send_deployment_alert") as alert:
+    with (
+        patch("web.routes.backtest.get_strategy_auto_promotion_policy", return_value=_policy(require_holdout=False)),
+        patch("web.routes.backtest.record_strategy_promotion_decision", return_value=True),
+        patch("web.routes.backtest.update_strategy_promotion_decision") as update,
+        patch("paper.engine.set_paper_config", side_effect=RuntimeError("connection lost after write")),
+        patch("notifications.telegram_notifier.send_deployment_alert") as alert,
+    ):
         result = _call(_candidate(), data_segment="train")
 
     assert result["status"] == "reconciliation_required"
