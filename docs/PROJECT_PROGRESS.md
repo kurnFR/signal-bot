@@ -677,3 +677,11 @@ The source review now covers every RetailBot2 strategy ID and records the neares
 - Added a regression test in `tests/test_paper_metrics_visibility.py`; test-only change preceded the implementation. The history query joins `paper_trades` to `paper_positions` and `paper_configs`, retaining legacy/orphan rows when no explicit disabled configuration is found.
 - All three required PR-head workflows passed on exact implementation SHA `90040747a45aedb31fdb8881331b5e7dcb52ce73`: `tests` (including `unit-tests` and `wallet-tracker-mariadb-integration`), `Test`, and `RetailBot accounting regression`. Merged as [`6895d5b`](https://github.com/kurnFR/signal-bot/commit/6895d5b971c00b13d7a15c8d5e96a592f0db4e35).
 - Reporting-only change: no paper-trade history is deleted, no open positions are changed, and accounting/equity reconstruction remains unchanged. No production database, worker, Telegram, or deployment actions were performed.
+
+
+### Paper report visibility stable config identity — PR #405 (2026-10-26)
+
+- [PR #405](https://github.com/kurnFR/signal-bot/pull/405) closes a follow-up gap after PR #401/#403: `paper_positions.config_id` is not populated by the current position insertion path, so joins that relied only on `p.config_id` could fail to match a saved config with `report_enabled = FALSE`.
+- The recent paper-trade history and both aggregate/per-strategy metric queries now join `paper_configs` by its stable unique key `(symbol, market, timeframe, strategy_name)`. The unique key is defined by `uq_paper_cfg`; this also handles existing positions with a missing config ID without rewriting their ledger rows.
+- Regression assertions were updated before implementation to require the stable identity join. All three required PR-head workflows passed on exact implementation SHA `d9a8eb3defcf3b72efb02241d8bdb9eb8e42db1a`: `tests` (including `unit-tests` and `wallet-tracker-mariadb-integration`), `Test`, and `RetailBot accounting regression`. Merged as [`1a7ab34`](https://github.com/kurnFR/signal-bot/commit/1a7ab347f54b84ccedb7adf5ce3ecb047e2e66eb).
+- This is report filtering only; no paper trades, positions, or accounting/equity reconstruction data were modified. No production DB, worker, Telegram, or deployment actions were performed.
