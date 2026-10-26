@@ -1864,6 +1864,26 @@ class RetailDeathTrapBot:
     # ──────────────────────────────────────────────────────────────
 
     def _get_strategy_lifecycle(self, strategy_id: str, mode: str) -> Dict[str, bool]:
+        # Never allow an unknown strategy/mode pair to inherit the permissive
+        # defaults used for registered research strategies. This is a worker-side
+        # guard in addition to the API registry, because signals may originate
+        # from legacy state or future strategy code.
+        registered = {item.value for item in StrategyID}
+        supported = (
+            (mode == "shadow" and strategy_id in registered)
+            or (mode == "inverse" and strategy_id.endswith("_INV") and strategy_id[:-4] in registered)
+            or (mode == "shadow" and strategy_id == "COMPOSITE")
+            or (mode == "inverse" and strategy_id == "COMPOSITE_INV")
+        )
+        if not supported:
+            return {
+                'evaluation_enabled': False,
+                'paper_enabled': False,
+                'telegram_enabled': False,
+                'report_enabled': True,
+                'auto_promote_enabled': False,
+            }
+
         now = time.monotonic()
         # Always attempt the first read, even when the OS monotonic clock is
         # less than 15 seconds after boot and the initial reload timestamp is 0.
