@@ -29,7 +29,7 @@ describe("screener control editor", () => {
     fireEvent.click(screen.getByRole("button", { name: /Save changes/ }));
     expect(await screen.findByRole("status")).toHaveTextContent(/takes effect within ~60s/i);
     await waitFor(() => expect(savedBody).toEqual({ enabled: false, overrides: { rvol_multiplier: 8, enable_velocity_detection: false } }));
-    expect(fetchMock.mock.calls.every(([path, init]) => !String(path).includes("/control") || init?.method === "POST" || init?.method === undefined)).toBe(true);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").every(([path]) => String(path) === "/api/research/screener/control")).toBe(true);
   });
   it("does not load or render editable settings for a viewer role", async () => {
     window.localStorage.setItem("token", "viewer-session");
