@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { SystemStatusPanel } from "./SystemStatusPanel";
 import { ScreenerPanel } from "./ScreenerPanel";
 import { PaperTradingPanel } from "./PaperTradingPanel";
-import { Activity, Bell, ChevronDown, CircleHelp, Command, LayoutDashboard, LogOut, Menu, Moon, Search, Settings2, ShieldCheck, Sun, WalletCards, X } from "lucide-react";
+import { StrategyLibraryPanel } from "./StrategyLibraryPanel";
+import { Activity, Bell, BookOpen, ChevronDown, CircleHelp, Command, LayoutDashboard, LogOut, Menu, Moon, Search, Settings2, ShieldCheck, Sun, WalletCards, X } from "lucide-react";
 import { useAuth } from "./AuthGate";
 
 type Theme = "dark" | "light";
@@ -10,6 +11,7 @@ const NAV_ITEMS = [
   { label: "Overview", description: "System overview", icon: LayoutDashboard },
   { label: "Market Screener", description: "Signals and market coverage", icon: Activity },
   { label: "Paper Trading", description: "Simulated orders and positions", icon: WalletCards },
+  { label: "Strategy Library", description: "Saved rules and indicator catalog", icon: BookOpen },
   { label: "Settings", description: "Preferences and access", icon: Settings2 },
 ] as const;
 
@@ -88,20 +90,20 @@ export function App() {
 
         <section className="migration-notice" aria-labelledby="preview-notice-title">
           <div className="notice-icon"><ShieldCheck size={20} /></div>
-          <div><h2 id="preview-notice-title">Incremental frontend migration</h2><p>Overview and Market Screener V2 are connected to existing APIs. Paper Trading is a read-only ledger and risk monitor; order execution, worker control, deployment, and Telegram actions are deliberately not exposed. The legacy dashboard remains the default application.</p></div>
+          <div><h2 id="preview-notice-title">Incremental frontend migration</h2><p>Overview and Market Screener V2 are connected to existing APIs. Paper Trading is a read-only ledger and risk monitor. Strategy Library is a read-only view of saved rules and indicator metadata. Mutating strategy, trading, worker, deployment, and Telegram actions remain deliberately unavailable. The legacy dashboard remains the default application.</p></div>
           <span className="notice-tag">READ ONLY</span>
         </section>
 
-        {activeView === "Overview" ? <SystemStatusPanel /> : activeView === "Market Screener" ? <ScreenerPanel /> : activeView === "Paper Trading" ? <PaperTradingPanel /> : <section className="panel preview-placeholder"><div className="panel-heading"><div><h2>{activeView} migration slice</h2><p>This view remains preview-only until its routes, permissions, schemas, and side effects have been verified.</p></div><span className="panel-counter">NOT CONNECTED</span></div><p className="empty-state">No live data or controls are exposed here yet. Existing dashboard functionality remains available in the legacy application.</p></section>}
+        {activeView === "Overview" ? <SystemStatusPanel /> : activeView === "Market Screener" ? <ScreenerPanel /> : activeView === "Paper Trading" ? <PaperTradingPanel /> : activeView === "Strategy Library" ? <StrategyLibraryPanel /> : <section className="panel preview-placeholder"><div className="panel-heading"><div><h2>{activeView} migration slice</h2><p>This view remains preview-only until its routes, permissions, schemas, and side effects have been verified.</p></div><span className="panel-counter">NOT CONNECTED</span></div><p className="empty-state">No live data or controls are exposed here yet. Existing dashboard functionality remains available in the legacy application.</p></section>}
 
         <section className="panel" aria-labelledby="roadmap-title">
-          <div className="panel-heading"><div><h2 id="roadmap-title">Migration roadmap</h2><p>Small, testable slices with legacy fallback preserved.</p></div><span className="panel-counter">01 / 05</span></div>
+          <div className="panel-heading"><div><h2 id="roadmap-title">Migration roadmap</h2><p>Small, testable slices with legacy fallback preserved.</p></div><span className="panel-counter">02 / 05</span></div>
           <ol className="roadmap-list">
             <li className="roadmap-complete"><span className="roadmap-step">00</span><div><strong>Inventory and parity plan</strong><p>Document existing views, endpoints, roles, and consequential side effects.</p></div><span className="roadmap-state">Documentation merged</span></li>
             <li className="roadmap-complete"><span className="roadmap-step">01</span><div><strong>Frontend foundation</strong><p>React, TypeScript, local styling pipeline, accessible shell, and tests.</p></div><span className="roadmap-state">Merged</span></li>
             <li className="roadmap-complete"><span className="roadmap-step">02</span><div><strong>Overview and authentication</strong><p>Existing auth gate, typed system-status reads, loading/error states.</p></div><span className="roadmap-state">Merged · not served</span></li>
             <li className="roadmap-complete"><span className="roadmap-step">03</span><div><strong>Market Screener V2</strong><p>Signals, metrics, search, alert gate, and role-gated detection overrides.</p></div><span className="roadmap-state">Merged · read and control UI</span></li>
-            <li className="roadmap-active"><span className="roadmap-step">04</span><div><strong>Domain views and final parity</strong><p>Paper Trading read-only monitor first, then strategies, wallets, ML, backtests, research, settings, and parity regression.</p></div><span className="roadmap-state">In progress</span></li>
+            <li className="roadmap-active"><span className="roadmap-step">04</span><div><strong>Domain views and final parity</strong><p>Paper Trading read-only monitor first, then wallets, ML, backtests, research, settings, and parity regression.</p></div><span className="roadmap-state">In progress</span></li>
           </ol>
         </section>
         <footer className="page-footer"><span><Activity size={14} /> Signal Bot frontend migration</span><span>Preview build · no production data</span></footer>
