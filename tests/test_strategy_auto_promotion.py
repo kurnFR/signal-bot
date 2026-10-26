@@ -467,3 +467,35 @@ def test_policy_db_writer_rejects_malformed_boolean_flags_before_database_access
                 raise AssertionError(f"malformed {key} flag was accepted")
         get_pool.assert_not_called()
 
+
+
+def test_policy_db_writer_rejects_invalid_numeric_values_before_database_access():
+    valid_policy = {
+        "enabled": True,
+        "min_test_trades": 30,
+        "min_profit_factor": 1.2,
+        "min_expectancy_r": 0.05,
+        "max_drawdown_r": 8.0,
+        "min_rank_score": 0.1,
+        "require_holdout": True,
+        "send_telegram": True,
+    }
+    invalid_values = {
+        "min_test_trades": (29, 10001, 30.5, "30", True),
+        "min_profit_factor": (float("nan"), float("inf"), 0.9, 10.1, "1.2"),
+        "min_expectancy_r": (float("nan"), -0.1, 10.1, "0.05"),
+        "max_drawdown_r": (float("nan"), 0, 100.1, "8.0"),
+        "min_rank_score": (float("nan"), 0, 1.1, "0.1"),
+    }
+    for key, values in invalid_values.items():
+        for value in values:
+            malformed = dict(valid_policy)
+            malformed[key] = value
+            with patch("db.db.get_pool") as get_pool:
+                try:
+                    set_strategy_auto_promotion_policy(malformed)
+                except (TypeError, ValueError) as exc:
+                    assert key in str(exc) or "invalid" in str(exc).lower()
+                else:
+                    raise AssertionError(f"invalid {key} value {value!r} was accepted")
+            get_pool.assert_not_called()

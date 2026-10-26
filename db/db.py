@@ -7,6 +7,7 @@ import mysql.connector
 from mysql.connector import pooling
 import logging
 import json
+import math
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -1563,6 +1564,29 @@ def set_strategy_auto_promotion_policy(policy):
         else:
             raise ValueError(f"Invalid auto-promotion policy: {key} must be boolean/0/1")
 
+    # Validate the full policy at the persistence boundary. The HTTP model is
+    # not the only possible caller, and int()/float() alone silently coerce
+    # values such as 30.5, "30", or NaN into unsafe persisted policy.
+    min_trades = policy["min_test_trades"]
+    if type(min_trades) is not int or not 30 <= min_trades <= 10000:
+        raise ValueError("Invalid auto-promotion policy: min_test_trades must be an integer from 30 to 10000")
+
+    numeric_bounds = {
+        "min_profit_factor": (1.0, 10.0, True),
+        "min_expectancy_r": (0.0, 10.0, True),
+        "max_drawdown_r": (0.0, 100.0, False),
+        "min_rank_score": (0.01, 1.0, True),
+    }
+    normalized_numeric = {}
+    for key, (minimum, maximum, minimum_inclusive) in numeric_bounds.items():
+        value = policy[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError(f"Invalid auto-promotion policy: {key} must be a finite number")
+        if (value < minimum if minimum_inclusive else value <= minimum) or value > maximum:
+            lower = "[" if minimum_inclusive else "("
+            raise ValueError(f"Invalid auto-promotion policy: {key} must be in {lower}{minimum}, {maximum}]")
+        normalized_numeric[key] = float(value)
+
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
@@ -1582,9 +1606,9 @@ def set_strategy_auto_promotion_policy(policy):
                 require_holdout=VALUES(require_holdout),
                 send_telegram=VALUES(send_telegram)
         """, (
-            normalized_flags["enabled"], int(policy["min_test_trades"]),
-            float(policy["min_profit_factor"]), float(policy["min_expectancy_r"]),
-            float(policy["max_drawdown_r"]), float(policy["min_rank_score"]),
+            normalized_flags["enabled"], min_trades,
+            normalized_numeric["min_profit_factor"], normalized_numeric["min_expectancy_r"],
+            normalized_numeric["max_drawdown_r"], normalized_numeric["min_rank_score"],
             normalized_flags["require_holdout"], normalized_flags["send_telegram"],
         ))
         conn.commit()
