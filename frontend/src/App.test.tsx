@@ -1,13 +1,21 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { App } from "./App";
+
+const statusResponse = {
+  database: { status: "ok", tables: { signals: 42 }, error: null },
+  heartbeats: [{ collector: "market-data", status: "ok", lastBeat: "2026-10-26 12:00:00" }],
+  binance: { spotApi: "online", futuresApi: "online", enableFuturesConfig: true },
+};
 
 describe("frontend foundation shell", () => {
   beforeEach(() => {
     cleanup();
     window.localStorage.clear();
     document.documentElement.removeAttribute("data-theme");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(statusResponse), { status: 200, headers: { "content-type": "application/json" } })));
   });
+  afterEach(() => vi.unstubAllGlobals());
   it("provides a skip link and labelled primary navigation", () => {
     render(<App />);
     expect(screen.getByRole("link", { name: "Skip to main content" })).toHaveAttribute("href", "#main-content");
@@ -21,11 +29,11 @@ describe("frontend foundation shell", () => {
     expect(document.documentElement).toHaveAttribute("data-theme", "light");
     expect(window.localStorage.getItem("signal-bot-ui-theme")).toBe("light");
   });
-  it("changes the active preview navigation item without calling the backend", () => {
+  it("changes the active navigation item and keeps non-Overview views disconnected", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Market Screener/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Market Screener" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Market Screener/ })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText(/does not connect to trading APIs/i)).toBeInTheDocument();
+    expect(screen.getByText(/cannot start workers, change settings, place trades/i)).toBeInTheDocument();
   });
 });
