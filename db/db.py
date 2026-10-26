@@ -1023,8 +1023,12 @@ def get_retailbot2_recent_trades(limit=50):
             SELECT id, symbol, side, mode, entry_price, stop_price, target_price,
                    units, strategy, confluence_score, status, exit_price,
                    exit_reason, net_pnl, pnl_percent, entry_time, exit_time
-            FROM rdt_trades WHERE status='CLOSED'
-            ORDER BY exit_time DESC LIMIT %s
+            FROM rdt_trades t
+            LEFT JOIN rdt_strategy_lifecycle l
+              ON l.strategy_id = t.strategy AND l.mode = t.mode
+            WHERE t.status='CLOSED'
+              AND COALESCE(l.report_enabled, TRUE) = TRUE
+            ORDER BY t.exit_time DESC LIMIT %s
         """, (limit,))
         rows = cur.fetchall()
         cur.close()
