@@ -15,7 +15,7 @@ const fixture = {
 
 describe("read-only Paper Trading panel", () => {
   it("renders ledger, performance and risk data without issuing mutations", async () => {
-    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const path = new URL(String(input), "http://localhost").pathname + new URL(String(input), "http://localhost").search;
       const payload = fixture[path as keyof typeof fixture];
       return Promise.resolve(payload ? json(payload) : json({ detail: "Unexpected route" }, 404));
