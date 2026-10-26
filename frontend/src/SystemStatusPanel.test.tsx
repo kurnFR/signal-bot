@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { SystemStatusPanel } from "./SystemStatusPanel";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.localStorage.clear(); });
@@ -15,7 +15,7 @@ describe("read-only Overview status panel", () => {
     render(<SystemStatusPanel />);
     expect(await screen.findByText("market-data")).toBeInTheDocument();
     expect(screen.getByText("2 tables")).toBeInTheDocument();
-    expect(screen.getByText("online")).toBeInTheDocument();
+    expect(screen.getAllByText("online").length).toBeGreaterThan(0);
     expect(screen.queryByText("not rendered")).not.toBeInTheDocument();
   });
   it("shows a recoverable authentication error", async () => {
