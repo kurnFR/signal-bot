@@ -192,3 +192,52 @@ def test_report_mode_aggregates_exclude_hidden_strategies_but_keep_open_counts(m
     assert result["by_mode"]["inverse"]["realized_pnl"] == 15.0
     assert result["by_mode"]["inverse"]["closed_count"] == 2
     assert result["by_mode"]["inverse"]["open_count"] == 1
+
+
+
+def test_recent_closed_trade_rows_respect_strategy_report_visibility(monkeypatch):
+    from db import db as db_module
+
+    class Cursor:
+        def __init__(self):
+            self.query = None
+
+        def execute(self, query, params=None):
+            self.query = query
+
+        def fetchall(self):
+            return [{
+                "id": 1, "symbol": "BTC/USDT", "side": "LONG", "mode": "inverse",
+                "entry_price": Decimal("100"), "stop_price": Decimal("95"),
+                "target_price": Decimal("110"), "units": Decimal("1"),
+                "strategy": "BB_REV_INV", "confluence_score": 1, "status": "CLOSED",
+                "exit_price": Decimal("110"), "exit_reason": "TAKE_PROFIT",
+                "net_pnl": Decimal("10"), "pnl_percent": Decimal("10"),
+                "entry_time": None, "exit_time": None,
+            }]
+
+        def close(self):
+            pass
+
+    cursor = Cursor()
+
+    class Connection:
+        def cursor(self, dictionary=False):
+            assert dictionary is True
+            return cursor
+
+        def close(self):
+            pass
+
+    class Pool:
+        def get_connection(self):
+            return Connection()
+
+    monkeypatch.setattr(db_module, "get_retailbot2_pool", lambda: Pool())
+
+    rows = db_module.get_retailbot2_recent_trades(limit=20)
+
+    assert len(rows) == 1
+    assert "LEFT JOIN rdt_strategy_lifecycle" in cursor.query
+    assert "ON l.strategy_id = t.strategy AND l.mode = t.mode" in cursor.query
+    assert "COALESCE(l.report_enabled, TRUE) = TRUE" in cursor.query
