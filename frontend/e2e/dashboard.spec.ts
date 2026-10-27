@@ -163,6 +163,6 @@ test("Escape closes mobile navigation and restores focus in the browser", async 
 
   await expect(menuButton).toHaveAttribute("aria-expanded", "false");
   await expect(menuButton).toBeFocused();
-  await expect(page.getByRole("button", { name: "Close navigation" }).first()).toBeHidden();
+  await expect(page.locator("#dashboard-sidebar")).not.toHaveClass(/sidebar-open/);
   await expect(page.locator(".mobile-scrim")).toHaveCount(0);
 });
