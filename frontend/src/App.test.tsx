@@ -21,6 +21,12 @@ describe("frontend foundation shell", () => {
     expect(screen.getByText("Read-only API preview · legacy dashboard unchanged")).toBeInTheDocument();
     expect(screen.getByText(/Overview and Market Screener V2 are connected to existing APIs/i)).toBeInTheDocument();
   });
+  it("disables placeholder actions that are not implemented in the preview", () => {
+    render(<App />);
+    expect(screen.getByRole("button", { name: "Search (preview only)" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Notifications (preview only)" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Help (preview only)" })).toBeDisabled();
+  });
   it("provides a skip link and labelled primary navigation", () => {
     render(<App />);
     expect(screen.getByRole("link", { name: "Skip to main content" })).toHaveAttribute("href", "#main-content");
