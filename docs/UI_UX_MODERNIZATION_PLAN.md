@@ -178,7 +178,8 @@ This execution record supplements the phase checklist and preserves the previous
 - PR #473 handles a session expiring after initial sign-in: protected API GET responses with HTTP 401 clear the stale token and return the authenticated shell to the sign-in screen. Transport/auth-gate regression tests and the frontend typecheck, unit tests, and build passed on its exact head. This is component-level coverage, not a replacement for the outstanding Playwright browser-flow gate.
 - **Mobile navigation accessibility follow-ups merged:** #441 adds Escape dismissal; #443 adds `aria-expanded`/`aria-controls`; #444 manages focus entry and restoration. Their frontend tests/build and backend regression workflows passed on each exact PR head.
 - [ ] Reconcile every route and API call in `docs/UI_UX_VIEW_INVENTORY.md` against current `master`, including roles, forced-password behavior, side effects, polling, and empty/error states.
-- [x] Add initial Playwright smoke coverage for sign-in, forced password change, navigation, theme persistence, and session expiry (PR #476; three real-browser tests passed on the exact PR head). [ ] Extend browser coverage to narrow viewports and broader critical flows.
+- [x] Add initial Playwright smoke coverage for sign-in, forced password change, navigation, theme persistence, and session expiry (PR #476; three real-browser tests passed on the exact PR head).
+- [ ] Extend browser coverage to narrow viewports and broader critical flows.
 - [ ] Run keyboard/focus, screen-reader, zoom/reflow, reduced-motion, contrast, and forced-colors checks across every migrated view.
 - [ ] Complete missing read-only Master Data/Settings parity and identify any remaining unimplemented views before exposing the preview to users.
 - [ ] Decide and test a controlled route/feature-flag rollout only after parity acceptance; do not switch FastAPI's default dashboard until explicit owner acceptance.
