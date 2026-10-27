@@ -128,7 +128,9 @@ def _role_allowed(method: str, path: str, role: str) -> bool:
         return True
     if path == "/api/telegram/test":
         return role == "admin"
-    return True
+    # Fail closed for new or unclassified mutation endpoints. A newly added
+    # POST/PUT/PATCH/DELETE route must be explicitly covered by a policy above.
+    return method.upper() == "GET"
 
 
 @app.middleware("http")
