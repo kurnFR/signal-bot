@@ -1,9 +1,9 @@
 # Signal Bot UI/UX Comprehensive View & API Inventory (UIX-00)
 
-**Document Version:** 1.1.0  
-**Status:** In review — React preview endpoint mapping added; lockfile committed and CI uses `npm ci`; full route-by-route source verification and owner acceptance pending  
+**Document Version:** 1.2.0  
+**Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `13f2823541367cce1c676db83116eb390b8be552` (master after PR #439; source-level route decorator count checked on 2026-10-27, runtime route registry and endpoint-to-row parity still pending)  
+**Source baseline for reconciliation:** `0edc71cdc93712666ec2b9de708f84a800b21e49` (master after PR #501; source-level route decorator count checked on 2026-10-27, runtime route registry and endpoint-to-row parity still pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -350,7 +350,7 @@ This table records the endpoints called by the currently merged React preview cl
 |---|---|---|---|
 | Authentication gate | `lib/auth.ts` | `POST /api/auth/login`, `GET /api/auth/me` (session bootstrap contract), `POST /api/auth/logout`, `POST /api/auth/change-password` | Authentication mutations are intentional and use the existing server contract; password-change gating and browser-level session-expiry tests remain required. Component tests now cover a 401 after successful sign-in, clearing the stale token, and returning to the sign-in screen. |
 | Overview | `lib/systemStatus.ts` | `GET /api/system/status` | Sanitized status read; must not expose the admin-only `/api/settings/status` connection details. |
-| Market Screener | `lib/screener.ts` | `GET /api/research/screener/status`, `GET /api/research/screener/signals?limit=50`, `GET /api/research/screener/stats` | The read snapshot uses GET only. The module also exports a separate control save helper; its reachability, rendering, and role behavior must be reviewed independently before claiming the whole feature is read-only. |
+| Market Screener | `lib/screener.ts`, `ScreenerControlsPanel.tsx` | `GET /api/research/screener/status`, `GET /api/research/screener/signals?limit=50`, `GET /api/research/screener/stats`, `GET/POST /api/research/screener/control` | The control editor is reachable in the React preview. Reads use GET; saving requires an explicit user action and POST. Editing is limited to admin/trader roles, with server-side authorization unchanged. The worker applies saved settings on its next loop tick; no restart is triggered. |
 | Paper Trading | `lib/paperTrading.ts` | `GET /api/paper/positions`, `GET /api/paper/configs`, `GET /api/paper/orders?limit=20`, `GET /api/paper/trades?limit=20`, `GET /api/paper/metrics`, `GET /api/paper/circuit-breakers` | Read-only ledger/risk monitor; no order, config, deploy, cancel, or worker mutation from this view. |
 | Strategy Library | `lib/strategyLibrary.ts` | `GET /api/custom-strategy/list`, `GET /api/custom-strategy/indicators` | Catalog-only view; create/update/test/AI actions are not exposed by this client. |
 | Wallet Tracking | `lib/walletTracking.ts` | `GET /api/wallets/meta`, `GET /api/wallets/settings`, `GET /api/wallets/status`, `GET /api/wallets/tracked`, `GET /api/wallets/positions?period_hours=24&limit=20`, `GET /api/wallets/token-flow?period_hours=24&limit=10`, `GET /api/wallets/events?limit=20` | Read-only snapshot; no wallet settings, tracked-address, or worker mutation. Verify that all returned settings fields are safe for every authorized role. |
@@ -361,11 +361,17 @@ This table records the endpoints called by the currently merged React preview cl
 | Master Data | `lib/masterData.ts` | `GET /api/master-data/coverage`, `GET /api/master-data/jobs` | Coverage/job status only; no backfill, feature build, or worker launch. |
 | Settings | `SettingsPanel.tsx` | No API calls; uses existing local theme state and auth-gate identity | No admin status, credentials, user administration, Telegram test, or server setting mutation. |
 
+### Audit checkpoint (2026-10-27; refreshed after PR #501)
+
+- PR #501 merged at `0edc71cdc93712666ec2b9de708f84a800b21e49`. On head `072f8ba7d6961890bac57455bd2141a521bac437`, the frontend workflow passed typecheck, unit tests, production build, Chromium setup, and Playwright browser smoke tests. Pytest, Wallet Tracker MariaDB integration, unit tests, and RetailBot accounting regression also passed.
+- The Market Screener controls editor is now reachable in the React preview. Admin/trader sessions see editable controls; viewers see a restriction. Saving is explicit and calls `POST /api/research/screener/control`; the existing server-side role gate remains authoritative. Other strategy, paper-trading, wallet, worker, Telegram, backtest, and ML mutations remain unavailable.
+- No production deployment or root-route cutover was performed. FastAPI continues to serve `web/static/index.html`.
+
 ### Audit checkpoint (2026-10-27)
 
 - `web/app.py` includes 13 routers and serves the legacy dashboard from the FastAPI application; the React preview remains separate from the production root entrypoint.
 - Source decorator count: 81 HTTP route decorators across the 13 included routers, plus `GET /` in `web/app.py`. The count is not a substitute for inspecting FastAPI's final route registry or validating each handler.
-- `frontend/src/App.tsx` currently renders `ScreenerPanel` but does not import/render `ScreenerControlsPanel`. The latter is a standalone component that calls `saveScreenerControl` (`POST /api/research/screener/control`). Therefore, its mutation UI is not reachable from the current preview navigation at this source baseline; the preview notice and roadmap copy should be reconciled with this fact before any claim that the control UI is shipped.
+- PR #501 (`0edc71c`) connected `ScreenerControlsPanel` to the Market Screener view. The preview now identifies its limited control capability accurately. Browser smoke tests verify that admin/trader sessions see editable controls while viewer sessions see the restriction. Other strategy promotion, paper-trading, wallet, worker lifecycle, Telegram administration, backtest, and model deployment mutations remain unavailable in the React preview.
 - `frontend/e2e/dashboard.spec.ts` already includes browser coverage for sign-in/rejected sign-in, forced password change and API isolation, expired sessions, sign-out, temporary session-validation outage, theme persistence, mobile navigation/focus/viewport overflow, denied read endpoints, and read-only behavior across domain views. Workflow run #132 passed these browser smoke tests. Remaining acceptance gaps include end-to-end role-difference coverage across the actual preview views, broader keyboard/screen-reader checks, and real-device validation; component tests for the screener control editor do separately cover viewer restrictions.
 - `web/app.py::_role_allowed` is the central role/method gate. `GET` is the default for unclassified routes; non-GET requests fail closed unless an explicit policy allows them. Forced-password accounts are restricted to `/api/auth/me`, `/api/auth/logout`, and `/api/auth/change-password`.
 - Role-policy observation to resolve: `/api/custom-strategy` is in `ADMIN_OR_TRADER_PREFIXES`, which restricts **all** methods under that prefix—including the catalog GET routes `/api/custom-strategy/list` and `/api/custom-strategy/indicators`—to `admin` or `trader`. This differs from a blanket assumption that every preview read-only panel is available to `viewer`; confirm intended product policy and add role-specific browser/API tests before changing access.
