@@ -3,7 +3,7 @@
 **Document Version:** 1.1.0  
 **Status:** In review — React preview endpoint mapping added; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `96cce57422230a24937bc5306f9b0b4b5aa0c395` (master as of 2026-10-27; route-by-route reconciliation remains open)  
+**Source baseline for reconciliation:** `13f2823541367cce1c676db83116eb390b8be552` (master after PR #439; source-level route decorator count checked on 2026-10-27, runtime route registry and endpoint-to-row parity still pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -16,7 +16,7 @@ This document is Antigravity's detailed baseline inventory draft for **Phase UIX
 ### Audit Summary Metrics
 - **Navigation Views Audited:** 11 primary views (`view-home`, `view-master-data`, `view-backtest`, `view-paper`, `view-ml-studio`, `view-strategies`, `view-news-ai`, `view-research`, `view-market-screener`, `view-wallet-tracking`, `view-settings`).
 - **Modal Dialogs Audited:** 7 interactive dialogs (`login-modal`, `force-password-modal`, `backfill-modal`, `deploy-modal`, `modal-run-ml`, `modal-deploy-ml`, `modal-inspect-ml`).
-- **Backend API Endpoint Rows Listed:** The draft register contains 81 endpoint rows. The current `web/app.py` explicitly includes 13 router modules (`auth`, `paper`, `search`, `master_data`, `backtest`, `settings`, `system_status`, `custom_strat`, `telegram`, `ml`, `news`, `research`, and `wallet`). The 81-row endpoint count and completeness remain unverified until compared with the runtime FastAPI route registry, including routes registered outside those routers.
+- **Backend API Endpoint Rows Listed:** Source inspection counted 81 `@router` HTTP endpoint decorators across the 13 modules explicitly included by `web/app.py` (`auth`, `paper`, `search`, `master_data`, `backtest`, `settings`, `system_status`, `custom_strategy`, `telegram`, `ml`, `news`, `research`, and `wallet`). `web/app.py` also declares `GET /` outside those routers. This verifies the static decorator count, not runtime registry completeness or one-to-one parity with all 81 rows in the draft register.
 - **Frontend Tooling State:** The isolated React preview now exists under `frontend/` with `package.json`, TypeScript, Vite, and Vitest. A committed npm lockfile and browser-level Playwright coverage remain outstanding; CI component tests are not a substitute for browser/device acceptance.
 - **Serving Configuration:** FastAPI mounts `web/static/` at `/static` and dynamically injects `dashboard_enhancements.js` into `GET /`.
 - **Gate Invariant:** UIX-00 remains in "In Review / Pending Acceptance" status until route-by-route source verification and owner acceptance are recorded. The isolated React preview has already been implemented in reviewed slices, but must remain disconnected from FastAPI production serving until release gates pass.
@@ -89,7 +89,7 @@ HTTP 403 Forbidden
 
 ## 4. Draft Endpoint-by-Endpoint Register (81 Listed Route Rows)
 
-The following draft register lists 81 API endpoint rows across 14 route modules in `web/routes/`. Reviewers must reconcile this list against the actual FastAPI route registry and source; the total is not considered verified until that reconciliation is recorded.
+The following draft register lists 81 API endpoint rows across the 13 router modules included in `web/app.py`. Static source inspection found 81 `@router` HTTP endpoint decorators across those modules, plus the app-level `GET /` route. The remaining audit is to compare every row and effective prefix/method/path with FastAPI's runtime route registry, account for mounted/static and framework routes, and verify handler contracts, RBAC, forced-password behavior, polling, and side effects. Do not treat the inventory as accepted until that mapping and owner review are recorded.
 
 ### 4.1 Authentication & User Administration (`auth_routes.py`)
 
