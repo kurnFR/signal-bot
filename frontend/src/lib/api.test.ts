@@ -6,7 +6,7 @@ describe("read-only same-origin API transport", () => {
 
   it("accepts only API-relative same-origin paths", () => {
     expect(() => assertApiPath("/api/health")).not.toThrow();
-    for (const path of ["https://example.com/api/health", "//example.com/api/health", "/static/app.js", "/api\\health", "javascript:alert(1)"]) {
+    for (const path of ["https://example.com/api/health", "//example.com/api/health", "/static/app.js", "/api\\health", "/api/../static/app.js", "/api/%2e%2e/static/app.js", "/api/%2E./static/app.js", "javascript:alert(1)"]) {
       expect(() => assertApiPath(path)).toThrow(TypeError);
     }
   });
