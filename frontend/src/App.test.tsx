@@ -66,4 +66,10 @@ describe("frontend foundation shell", () => {
     expect(screen.getByRole("heading", { level: 1, name: "News AI" })).toBeInTheDocument();
     expect(screen.getByText(/News AI displays persisted sentiment metrics, signals, and macro events/i)).toBeInTheDocument();
   });
+  it("routes Master Data to read-only coverage and job history", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Master Data/ }));
+    expect(screen.getByRole("heading", { level: 1, name: "Master Data" })).toBeInTheDocument();
+    expect(screen.getByText(/Master Data displays stored candle coverage, feature availability, and recent job status/i)).toBeInTheDocument();
+  });
 });
