@@ -54,4 +54,10 @@ describe("frontend foundation shell", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Wallet Tracking" })).toBeInTheDocument();
     expect(screen.getByText(/Wallet Tracking displays tracker health, monitored addresses, token flow, and recent events/i)).toBeInTheDocument();
   });
+  it("routes Research to the read-only positions and lifecycle monitor", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Research/ }));
+    expect(screen.getByRole("heading", { level: 1, name: "Research" })).toBeInTheDocument();
+    expect(screen.getByText(/Review RetailBot2 positions, closed trades, strategy lifecycle flags/i)).toBeInTheDocument();
+  });
 });
