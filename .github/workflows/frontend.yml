@@ -37,3 +37,17 @@ jobs:
         run: npm test
       - name: Production build
         run: npm run build
+      - name: Install pinned Playwright test runner
+        run: npm install --no-save --package-lock=false --no-audit --no-fund @playwright/test@1.55.0
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Run browser smoke tests
+        run: npx playwright test
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-playwright-traces
+          path: frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
