@@ -27,6 +27,12 @@ describe("frontend foundation shell", () => {
     expect(screen.getByRole("button", { name: "Notifications (preview only)" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Help (preview only)" })).toBeDisabled();
   });
+  it("reports the current roadmap phase consistently with the active domain-view phase", () => {
+    render(<App />);
+    expect(screen.getByText("04 / 05")).toBeInTheDocument();
+    expect(screen.getByText("Domain views and final parity")).toBeInTheDocument();
+    expect(screen.getByText("In progress")).toBeInTheDocument();
+  });
   it("provides a skip link and labelled primary navigation", () => {
     render(<App />);
     expect(screen.getByRole("link", { name: "Skip to main content" })).toHaveAttribute("href", "#main-content");
