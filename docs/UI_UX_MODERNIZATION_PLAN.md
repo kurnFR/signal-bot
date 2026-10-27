@@ -1,6 +1,6 @@
 # Signal Bot UI/UX Modernization Plan
 
-**Status as of 2026-10-27: the isolated React/TypeScript preview migration is actively underway; it is not production-mounted and is not a replacement for the legacy dashboard.**
+**Status as of 2026-10-27: the isolated React/TypeScript preview migration is actively underway; it is not production-mounted and is not a replacement for the legacy dashboard.** The frontend lockfile is now committed; CI is being switched to reproducible `npm ci` installs.
 
 This plan separates the improvements already present in the current dashboard from the future frontend architecture. It is intentionally incremental: preserve the Python/FastAPI backend, existing APIs, database schema, worker behavior, strategy/risk controls, and Telegram gates unless a separately reviewed change requires otherwise. No deployment is implied by a merge.
 
@@ -72,14 +72,15 @@ All trading decisions, risk limits, paper execution, lifecycle persistence, Tele
 - [ ] Identify CDN dependencies and a safe build/deployment strategy before introducing a new toolchain.
 
 ### Phase 1 — Design system and build foundation
-**Status: foundation merged; reproducible install hardening and full design-system adoption remain in progress.**
+**Status: foundation merged; reproducible install hardening is in validation and full design-system adoption remains in progress.**
 
 - [x] Add an isolated React + TypeScript + Vite package/build setup and frontend CI; keep the existing dashboard entry point as the default.
-- [ ] Generate and commit `frontend/package-lock.json`, verify it in a clean install, and change CI from `npm install` to `npm ci` so dependency resolution is reproducible.
+- [x] Generate and commit `frontend/package-lock.json` through PR #456, based on the registry-resolved install.
+- [ ] Verify `npm ci` in CI on the exact PR head and merge the workflow change that uses it.
 - [ ] Define design tokens for dark/light surfaces, text, borders, semantic status, focus, spacing, radius and typography.
 - [ ] Add the shared app shell, navigation, buttons, inputs, dialogs, tables, badges, skeletons, empty/error states and toast conventions.
 - [ ] Verify keyboard navigation, focus management, reduced motion, forced colors and contrast in both themes.
-- [ ] Add Vitest/Testing Library and Playwright smoke coverage before migrating a feature.
+- [ ] Add Playwright smoke coverage before migrating additional features; component tests alone are not browser acceptance.
 
 **Gate:** existing dashboard remains available and all required backend/CI tests pass.
 
@@ -136,7 +137,7 @@ The migration is complete only when all of the following are true:
 - Keyboard, screen-reader, contrast, zoom/reflow, reduced-motion and forced-colors checks are completed.
 - Core user flows are covered by browser-level tests, including authentication/permissions, screener filters, strategy settings, paper-trade reports and error recovery.
 - API contracts, accounting, worker lifecycle, risk controls and Telegram gating remain server-authoritative and unchanged unless separately reviewed.
-- The local build is reproducible with pinned dependencies; CDN dependency and supply-chain decisions are documented.
+- The local build is reproducible with the committed npm lockfile and `npm ci`; CDN dependency and supply-chain decisions are documented.
 - CI is green on the exact final head, documentation is updated, and runtime/deployment verification is separately recorded.
 
 ## 6. Working constraints
@@ -145,42 +146,5 @@ The migration is complete only when all of the following are true:
 2. Make one independently reviewable slice per PR and add regression tests before implementation.
 3. Preserve existing functionality and API behavior; separate necessary backend changes into their own reviewed scope.
 4. Merge only after all required checks pass on the exact PR head.
-5. Update this plan and `docs/PROJECT_PROGRESS.md` after each meaningful phase.
-6. No live deployment, production database mutation, worker restart, live trading, or Telegram changes without explicit authorization.
-
-
-## 9. Execution update — 2026-10-27
-
-This update supersedes earlier status lines that state the React preview foundation or pilot views have not started. It does **not** supersede the production-safety rule: the preview is isolated, the legacy dashboard remains the default, and no deployment is implied by a GitHub merge.
-
-### Merged preview slices
-
-| PR | Preview capability | Boundary |
-|---|---|---|
-| [#417](https://github.com/kurnFR/signal-bot/pull/417) | React/TypeScript/Vite foundation and responsive shell | Isolated build; not mounted by FastAPI |
-| [#421](https://github.com/kurnFR/signal-bot/pull/421) | Market Screener V2 read view | No screener control mutations |
-| [#423](https://github.com/kurnFR/signal-bot/pull/423) | Existing authentication gate | Browser-level parity and role-aware control audit remain open |
-| [#427](https://github.com/kurnFR/signal-bot/pull/427) | Paper Trading ledger/risk monitor | Read-only; no deploy/cancel/config actions |
-| [#430](https://github.com/kurnFR/signal-bot/pull/430) | Wallet Tracking | Read-only; no wallet/worker mutations |
-| [#431](https://github.com/kurnFR/signal-bot/pull/431) | Backtest Studio saved results | No backtest execution or promotion |
-| [#432](https://github.com/kurnFR/signal-bot/pull/432) | ML Studio saved experiments and model eligibility | No ML runs or model deployment |
-| [#433](https://github.com/kurnFR/signal-bot/pull/433) | Research positions, closed trades, lifecycle readback | No lifecycle, paper, or Telegram mutations |
-| [#434](https://github.com/kurnFR/signal-bot/pull/434) | News AI sentiment and event feed | No polling, inference, strategy execution, or alerts |
-| [#435](https://github.com/kurnFR/signal-bot/pull/435) | Master Data coverage and job history | No backfills, feature builds, or worker launches |
-| [#436](https://github.com/kurnFR/signal-bot/pull/436) | Safe Settings preview | Local theme preference and basic session identity only; no admin settings |
-
-### Verified CI and remaining gates
-
-- The above merged slices were merged only after the observed required checks passed on their exact PR heads, including frontend type-check, frontend unit tests/build, pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration.
-- CI is repository-level evidence only. It does not establish browser visual parity, production deployment, real-user authorization behavior in the owner's environment, or live data correctness.
-- **Mobile navigation accessibility follow-ups merged:** #441 adds Escape dismissal; #443 adds `aria-expanded`/`aria-controls`; #444 manages focus entry and restoration. Their frontend tests/build and backend regression workflows passed on each exact PR head.
-- [ ] Reconcile every route and API call in `docs/UI_UX_VIEW_INVENTORY.md` against current `master`, including roles, forced-password behavior, side effects, polling, and empty/error states.
-- [ ] Add Playwright smoke coverage for sign-in, forced password change, navigation, theme persistence, session expiry, and narrow viewport behavior.
-- [ ] Run keyboard/focus, screen-reader, zoom/reflow, reduced-motion, contrast, and forced-colors checks across every migrated view.
-- [ ] Complete missing read-only Master Data/Settings parity and identify any remaining unimplemented views before exposing the preview to users.
-- [ ] Decide and test a controlled route/feature-flag rollout only after parity acceptance; do not switch FastAPI's default dashboard until explicit owner acceptance.
-- [ ] Keep mutation work (strategy promotion, Telegram eligibility, paper controls, backfills, model deployment, wallet/worker control) in separate API-backed PRs with role and side-effect tests.
-
-### Current safe operating rule
-
-The React preview is still **not mounted by FastAPI**. Do not claim a complete frontend migration. Do not remove or redirect the legacy dashboard until every view's parity, permissions, side effects, responsive behavior, accessibility, and regression tests are accepted. No live deployment, production DB, worker, trading, or Telegram changes were made by these UI preview slices.
+5. Never deploy or switch production serving without explicit approval.
+6. Record incomplete checks honestly; a successful unit build does not prove route parity or runtime safety.
