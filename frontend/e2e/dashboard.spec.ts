@@ -102,12 +102,14 @@ test("mobile navigation remains usable at a narrow viewport", async ({ page }) =
   await menuButton.click();
 
   await expect(menuButton).toHaveAttribute("aria-expanded", "true");
-  await expect(page.getByRole("button", { name: "Close navigation" })).toBeVisible();
+  await expect(page.locator(".sidebar-close")).toBeVisible();
+  await expect(page.locator(".mobile-scrim")).toBeVisible();
   await expect(page.getByRole("button", { name: "Wallet Tracking" })).toBeVisible();
 
   await page.getByRole("button", { name: "Wallet Tracking" }).click();
   await expect(page.getByRole("heading", { level: 1, name: "Wallet Tracking" })).toBeVisible();
   await expect(menuButton).toHaveAttribute("aria-expanded", "false");
-  await expect(page.getByRole("button", { name: "Close navigation" })).toHaveCount(0);
+  await expect(page.locator(".sidebar-close")).toBeHidden();
+  await expect(page.locator(".mobile-scrim")).toHaveCount(0);
   await expect(menuButton).toBeFocused();
 });
