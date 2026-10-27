@@ -189,7 +189,7 @@ test("mobile viewport keeps navigation usable and exposes the selected view", as
 test("Market Screener exposes role-gated control settings to an authorized trader", async ({ page }) => {
   await mockApi(page);
   await signIn(page);
-  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: "Market Screener", exact: true }).click();
+  await page.getByRole("button", { name: /Market Screener/ }).click();
   await expect(page.getByRole("heading", { name: "Screener configuration" })).toBeVisible();
   await expect(page.getByLabel(/Telegram alerting enabled/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Save changes" })).toBeVisible();
@@ -198,7 +198,7 @@ test("Market Screener exposes role-gated control settings to an authorized trade
 test("Market Screener hides editable controls from viewer sessions", async ({ page }) => {
   await mockApi(page, { role: "viewer" });
   await signIn(page);
-  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: "Market Screener", exact: true }).click();
+  await page.getByRole("button", { name: /Market Screener/ }).click();
   await expect(page.getByRole("heading", { name: "Screener configuration" })).toBeVisible();
   await expect(page.getByText(/restricted to admin and trader roles/i)).toBeVisible();
   await expect(page.getByRole("button", { name: "Save changes" })).toHaveCount(0);
