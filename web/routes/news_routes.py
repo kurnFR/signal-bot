@@ -22,8 +22,8 @@ def news_stats():
     try:
         return get_news_overlay_stats()
     except Exception as e:
-        logger.exception("news_stats failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load News AI stats: {e}")
+        logger.error("news_stats failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to load News AI stats")
 
 
 @router.get("/signals")
@@ -31,8 +31,8 @@ def news_signals(limit: int = 50):
     try:
         return {"signals": get_recent_news_signals(limit=limit)}
     except Exception as e:
-        logger.exception("news_signals failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load News AI signals: {e}")
+        logger.error("news_signals failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to load News AI signals")
 
 
 @router.get("/events")
@@ -40,5 +40,5 @@ def news_events(limit: int = 30):
     try:
         return {"events": get_recent_news_events(limit=limit)}
     except Exception as e:
-        logger.exception("news_events failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load news events: {e}")
+        logger.error("news_events failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to load news events")
