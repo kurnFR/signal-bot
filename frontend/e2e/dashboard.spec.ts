@@ -125,11 +125,23 @@ test("sign-in, navigation, and theme preference work in a real browser", async (
 });
 
 test("a forced password change blocks the dashboard until completed", async ({ page }) => {
+  const apiRequests: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/")) {
+      apiRequests.push(request.method() + " " + url.pathname);
+    }
+  });
+
   await page.addInitScript(() => window.localStorage.setItem("token", "temporary-browser-token"));
   await mockApi(page, { forcePasswordChange: true });
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Change your password" })).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toHaveCount(0);
+
+  // Password-reset-required sessions may validate identity, but must not load
+  // protected dashboard data before the user completes the required change.
+  expect(apiRequests).toEqual(["GET /api/auth/me"]);
 });
 
 test("an API 401 after sign-in returns the user to the sign-in screen", async ({ page }) => {
