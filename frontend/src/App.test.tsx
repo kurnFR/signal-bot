@@ -36,7 +36,7 @@ describe("frontend foundation shell", () => {
     expect(sidebar).toHaveClass("sidebar-open");
     fireEvent.keyDown(window, { key: "Escape" });
     expect(sidebar).not.toHaveClass("sidebar-open");
-    expect(screen.queryByRole("button", { name: "Close navigation" })).not.toBeInTheDocument();
+    expect(document.querySelector(".mobile-scrim")).not.toBeInTheDocument();
   });
   it("changes the active navigation item and keeps non-Overview views disconnected", () => {
     render(<App />);
