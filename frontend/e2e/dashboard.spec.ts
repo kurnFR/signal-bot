@@ -8,7 +8,7 @@ const user = {
   must_change_password: false,
 };
 
-async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePasswordChange?: boolean; sessionValidationUnavailable?: boolean; deniedPath?: string; loginRejected?: boolean } = {}) {
+async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePasswordChange?: boolean; sessionValidationUnavailable?: boolean; deniedPath?: string; loginRejected?: boolean; role?: string } = {}) {
   const activeUser = { ...user, role: options.role ?? user.role };
   await page.route("**/api/**", async (route) => {
     const request = route.request();
