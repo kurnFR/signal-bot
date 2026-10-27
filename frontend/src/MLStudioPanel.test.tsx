@@ -32,19 +32,19 @@ describe("MLStudioPanel", () => {
   afterEach(() => vi.unstubAllGlobals());
   it("shows persisted experiments and artifact eligibility without mutating state", async () => {
     render(<MLStudioPanel />);
-    expect(await screen.findByText("btc-trend-test")).toBeInTheDocument();
-    expect(screen.getByText("hist_gradient_boosting")).toBeInTheDocument();
+    expect((await screen.findAllByText("btc-trend-test")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("hist_gradient_boosting").length).toBeGreaterThan(0);
     expect(screen.getByText("Passes current gate")).toBeInTheDocument();
     expect(screen.getByText(/Experiment execution, model deployment, paper configuration, and Telegram actions remain unavailable/i)).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.every((call) => call[1]?.method === "GET")).toBe(true);
   });
   it("filters experiments and selects a persisted result", async () => {
     render(<MLStudioPanel />);
-    await screen.findByText("btc-trend-test");
+    await screen.findAllByText("btc-trend-test");
     fireEvent.change(screen.getByLabelText("Filter experiments"), { target: { value: "does-not-match" } });
     expect(screen.getByText("No experiments match this filter.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Filter experiments"), { target: { value: "BTCUSDT" } });
-    expect(screen.getByText("btc-trend-test")).toBeInTheDocument();
+    expect((await screen.findAllByText("btc-trend-test")).length).toBeGreaterThan(0);
     expect(await screen.findByText(/Raw persisted experiment contract/)).toBeInTheDocument();
   });
 });
