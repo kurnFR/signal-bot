@@ -126,7 +126,7 @@ def wallets_save_settings(req: WalletSettingsRequest):
     try:
         store.save_settings(settings)
         result = store.get_settings()
-        raw_key = result.get("birdeye_api_key", "")
+        raw_key = result.pop("birdeye_api_key", "")
         result["birdeye_api_key_masked"] = _mask_api_key(raw_key)
         result["has_birdeye_key"] = bool(raw_key)
         return result
