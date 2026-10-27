@@ -343,11 +343,11 @@ The following draft register lists 81 API endpoint rows across the 13 router mod
 
 ## 13. React preview route-to-API map (verified 2026-10-27)
 
-This table records the endpoints called by the currently merged React preview clients at source baseline `96cce57422230a24937bc5306f9b0b4b5aa0c395`. It is **not** a claim that the full legacy dashboard inventory has been reconciled or that the React preview has feature parity. Confirm actual FastAPI route registration, RBAC and forced-password behavior against source before any production cutover.
+This table records the endpoints called by the currently merged React preview clients at source baseline `d2f513234e2ee5aa7c1883000bb79bde1558004a` (2026-10-27). It is **not** a claim that the full legacy dashboard inventory has been reconciled or that the React preview has feature parity. Confirm actual FastAPI route registration, RBAC and forced-password behavior against source before any production cutover.
 
 | React preview view | Client module | Endpoints called by the view | Side-effect boundary |
 |---|---|---|---|
-| Authentication gate | `lib/auth.ts` | `POST /api/auth/login`, `GET /api/auth/me` (session bootstrap contract), `POST /api/auth/logout`, `POST /api/auth/change-password` | Authentication mutations are intentional and use the existing server contract; password-change gating and session-expiry browser tests remain required. |
+| Authentication gate | `lib/auth.ts` | `POST /api/auth/login`, `GET /api/auth/me` (session bootstrap contract), `POST /api/auth/logout`, `POST /api/auth/change-password` | Authentication mutations are intentional and use the existing server contract; password-change gating and browser-level session-expiry tests remain required. Component tests now cover a 401 after successful sign-in, clearing the stale token, and returning to the sign-in screen. |
 | Overview | `lib/systemStatus.ts` | `GET /api/system/status` | Sanitized status read; must not expose the admin-only `/api/settings/status` connection details. |
 | Market Screener | `lib/screener.ts` | `GET /api/research/screener/status`, `GET /api/research/screener/signals?limit=50`, `GET /api/research/screener/stats` | The read snapshot uses GET only. The module also exports a separate control save helper; its reachability, rendering, and role behavior must be reviewed independently before claiming the whole feature is read-only. |
 | Paper Trading | `lib/paperTrading.ts` | `GET /api/paper/positions`, `GET /api/paper/configs`, `GET /api/paper/orders?limit=20`, `GET /api/paper/trades?limit=20`, `GET /api/paper/metrics`, `GET /api/paper/circuit-breakers` | Read-only ledger/risk monitor; no order, config, deploy, cancel, or worker mutation from this view. |
