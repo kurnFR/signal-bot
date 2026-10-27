@@ -190,3 +190,36 @@ test("password confirmation mismatch is rejected in the browser without sending 
   expect(passwordChangeRequests).toEqual([]);
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toHaveCount(0);
 });
+
+
+test("all domain preview views remain read-only during browser navigation", async ({ page }) => {
+  const mutations: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/") && request.method() !== "GET") {
+      mutations.push(request.method() + " " + url.pathname);
+    }
+  });
+
+  await mockApi(page);
+  await signIn(page);
+
+  const views = [
+    "Paper Trading",
+    "Strategy Library",
+    "Wallet Tracking",
+    "Backtest Studio",
+    "ML Studio",
+    "Research",
+    "News AI",
+    "Master Data",
+    "Settings",
+  ];
+
+  for (const view of views) {
+    await page.getByRole("button", { name: new RegExp(view) }).click();
+    await expect(page.getByRole("heading", { level: 1, name: view })).toBeVisible();
+  }
+
+  expect(mutations).toEqual([]);
+});
