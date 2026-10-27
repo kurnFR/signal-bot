@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SystemStatusPanel } from "./SystemStatusPanel";
 import { ScreenerPanel } from "./ScreenerPanel";
 import { PaperTradingPanel } from "./PaperTradingPanel";
@@ -40,6 +40,9 @@ export function App() {
   const [theme, setTheme] = useState<Theme>(readInitialTheme);
   const [activeView, setActiveView] = useState<string>("Overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const sidebarCloseButtonRef = useRef<HTMLButtonElement>(null);
+  const wasSidebarOpen = useRef(false);
   const auth = useAuth();
 
   useEffect(() => {
@@ -57,6 +60,18 @@ export function App() {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [sidebarOpen]);
 
+  useEffect(() => {
+    if (sidebarOpen) {
+      wasSidebarOpen.current = true;
+      sidebarCloseButtonRef.current?.focus();
+      return;
+    }
+    if (wasSidebarOpen.current) {
+      wasSidebarOpen.current = false;
+      menuButtonRef.current?.focus();
+    }
+  }, [sidebarOpen]);
+
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
 
   return <div className="app-frame">
@@ -66,7 +81,7 @@ export function App() {
       <div className="brand">
         <div className="brand-mark" aria-hidden="true"><Activity size={20} strokeWidth={2.5} /></div>
         <div className="brand-copy"><strong>Signal Bot</strong><span>QUANTITATIVE PLATFORM</span></div>
-        <button className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
+        <button ref={sidebarCloseButtonRef} className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
       </div>
       <div className="workspace-label">WORKSPACE</div>
       <nav className="nav-list" aria-label="Primary navigation">
@@ -89,7 +104,7 @@ export function App() {
     <div className="main-column">
       <header className="topbar">
         <div className="topbar-left">
-          <button className="icon-button mobile-menu" aria-label="Open navigation" aria-controls="dashboard-sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
+          <button ref={menuButtonRef} className="icon-button mobile-menu" aria-label="Open navigation" aria-controls="dashboard-sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
           <div className="breadcrumb"><span>Workspace</span><span className="breadcrumb-separator">/</span><strong>{activeView}</strong></div>
         </div>
         <div className="topbar-actions">
