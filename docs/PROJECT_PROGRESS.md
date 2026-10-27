@@ -762,3 +762,17 @@ The React preview is currently an isolated frontend build and is **not** wired i
 - The general data API client remains GET-only; POST requests are restricted to an explicit auth endpoint allowlist. Server authentication, rate limiting, password policy, and RBAC remain authoritative.
 - Strict TypeScript, auth/component tests, production build, and all existing backend regression checks passed on PR #423's exact head before merge.
 - The React app remains isolated and is still not mounted by FastAPI. Browser-level session parity, role-based UI controls, the npm lockfile, and final rollout acceptance remain open.
+
+
+### UI/UX React preview execution update — 2026-10-27
+
+This section supersedes older UI/UX statements in this document that describe the React foundation or pilot migration as not started. The preview is still isolated and **not mounted by FastAPI**; this is not a production rollout.
+
+- **Merged read-only views:** Paper Trading (#427), Wallet Tracking (#430), Backtest Studio (#431), ML Studio (#432), Research (#433), News AI (#434), Master Data (#435).
+- **Merged safe Settings preview:** #436 exposes the existing local light/dark preference and basic auth-gate identity only. Admin-only system details, credentials, user management, and Telegram controls remain out of this preview.
+- **Existing foundation:** #417 created the React/TypeScript/Vite shell, #421 added Market Screener V2 read-only preview, and #423 added the existing server-backed auth gate.
+- **CI evidence:** each merged UI PR was gated on the exact PR head with frontend type-check/unit tests/build plus repository pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration checks. This is CI evidence, not proof of runtime deployment, production behavior, profitability, or full UI parity.
+- **Remaining UIX work:** reconcile the comprehensive route/API inventory against current master; add Playwright/browser smoke coverage; perform keyboard, focus, screen-reader, contrast, zoom/reflow, forced-colors and mobile checks; document any routes that are still not migrated; obtain explicit owner acceptance before any route cutover.
+- **Safety boundary:** no production deployment, DB changes, worker restarts, backfills, paper execution, model deployment, or Telegram actions were performed by these preview PRs. Legacy dashboard remains the default.
+
+Next recommended work is inventory reconciliation and browser-level parity/accessibility coverage, followed by separately scoped settings or other view gaps. Strategy-promotion and Telegram policy changes must remain separate, server-authorized work with explicit persistence, eligibility, accounting, audit, and stop/hide regression tests.
