@@ -31,6 +31,13 @@ jobs:
           cache-dependency-path: frontend/package.json
       - name: Install pinned frontend dependencies
         run: npm install --no-audit --no-fund
+      - name: Bootstrap lockfile artifact (temporary)
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-lockfile-bootstrap
+          path: frontend/package-lock.json
+          if-no-files-found: error
+          retention-days: 1
       - name: Type-check
         run: npm run typecheck
       - name: Unit tests
