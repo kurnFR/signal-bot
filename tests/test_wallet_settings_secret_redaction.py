@@ -60,8 +60,8 @@ class TestWalletSettingsSecretRedaction(unittest.TestCase):
         }
         request = WalletSettingsRequest(**{k: v for k, v in saved.items() if k != "birdeye_api_key"},
                                         birdeye_api_key=secret)
-        with patch("web.routes.wallet_routes.store.get_settings", side_effect=[saved.copy(), saved.copy()]), \\
-             patch("web.routes.wallet_routes.store.save_settings") as save:
+        with (patch("web.routes.wallet_routes.store.get_settings", side_effect=[saved.copy(), saved.copy()]),
+              patch("web.routes.wallet_routes.store.save_settings") as save):
             payload = wallets_save_settings(request)
 
         save.assert_called_once()
