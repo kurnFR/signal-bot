@@ -29,6 +29,15 @@ describe("frontend foundation shell", () => {
     expect(document.documentElement).toHaveAttribute("data-theme", "light");
     expect(window.localStorage.getItem("signal-bot-ui-theme")).toBe("light");
   });
+  it("closes mobile navigation when Escape is pressed", () => {
+    render(<App />);
+    const sidebar = screen.getByLabelText("Dashboard sidebar");
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
+    expect(sidebar).toHaveClass("sidebar-open");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(sidebar).not.toHaveClass("sidebar-open");
+    expect(document.querySelector(".mobile-scrim")).not.toBeInTheDocument();
+  });
   it("changes the active navigation item and keeps non-Overview views disconnected", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Market Screener/ }));
