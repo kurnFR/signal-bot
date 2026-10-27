@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `0edc71cdc93712666ec2b9de708f84a800b21e49` (master after PR #501; source-level route decorator count checked on 2026-10-27, runtime route registry and endpoint-to-row parity still pending)  
+**Source baseline for reconciliation:** `3c176ebe2c407a3d035e370cbf1da180f5c6b786` (master after PR #503; source-level route decorator count checked on 2026-10-27, runtime route registry and endpoint-to-row parity still pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -413,3 +413,18 @@ This slice is verified against the current source files `web/app.py`, `web/route
 - [x] React control editor call path and soft-control side-effect boundary checked against source.
 - [ ] Complete runtime route-registry reconciliation and verify every route row, including schema and side effects, across all 13 routers.
 - [ ] Complete legacy view/dialog/polling/fetch parity, role-specific browser acceptance, broader accessibility/device checks, and explicit owner acceptance.
+
+
+## UIX-00 security discrepancy register — custom-strategy reads (2026-10-27)
+
+**Status: documented for product/security review; no policy change made.**
+
+The role hierarchy in Section 3 describes `viewer` as read-only for dashboards and data. However, the effective `api_security_boundary` in `web/app.py` checks `ADMIN_OR_TRADER_PREFIXES` before the default GET-read rule. That prefix list includes `/api/custom-strategy`, so **all methods under that prefix, including GET catalog/read endpoints, are restricted to `admin` or `trader`**. This is stricter than a general viewer-read-only interpretation and can make strategy catalog data unavailable to viewers.
+
+| Source fact | Current behavior | Required decision |
+|---|---|---|
+| `ADMIN_OR_TRADER_PREFIXES` includes `/api/custom-strategy` | `_role_allowed` returns false for viewer before falling through to the default GET allowance; viewer receives HTTP 403 for custom-strategy GET as well as mutation methods. | Product/security owner must decide whether strategy catalog GETs should be readable by viewers or remain trader/admin-only. |
+| `frontend/src/App.tsx` may hide controls by role | Client-side visibility is not an authorization boundary; server middleware is authoritative. | After policy decision, add role-specific API/browser tests and update UI copy/inventory to match. |
+| `ADMIN_OR_TRADER_PREFIXES` is a prefix-wide rule | Changing it to permit GET broadly could unintentionally alter access for every route under the prefix. | If viewer reads are approved, split read and mutation policy narrowly by exact method/path rather than relaxing the prefix indiscriminately. |
+
+**Gate:** Do not modify authorization behavior as part of a documentation-only UI migration slice. Resolve the policy with the owner, add regression tests for the chosen rule, and only then implement it in a separate code change. This discrepancy is not proof of a vulnerability; it is a mismatch between broad role documentation and the effective route policy that needs an explicit decision.
