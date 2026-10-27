@@ -186,3 +186,28 @@ This execution record supplements the phase checklist and preserves the previous
 ### Current safe operating rule
 
 The React preview is still **not mounted by FastAPI**. Do not claim a complete frontend migration. Do not remove or redirect the legacy dashboard until every view's parity, permissions, side effects, responsive behavior, accessibility, and regression tests are accepted. No live deployment, production DB, worker, trading, or Telegram changes were made by these UI preview slices.
+
+
+## 8. API error-redaction audit — 2026-10-27
+
+The follow-up API audit found several failure paths that returned raw exception text to authenticated clients or logged exception strings that could contain token-bearing URLs, database metadata, or internal implementation details. The following independently reviewed fixes were merged only after their required workflows passed on the exact PR head:
+
+| PR | Scope | Merged commit |
+|---|---|---|
+| [#467](https://github.com/kurnFR/signal-bot/pull/467) | Telegram notifier: redact request exceptions from send results, connectivity checks, and logs | \`a4b3a2c2905572be1e187f2fe3155369ba33adab\` |
+| [#468](https://github.com/kurnFR/signal-bot/pull/468) | Paper-trading sync and deployment response errors | \`c1e008d7afa3ff9f3d8fb78e4baa30f0e9698b48\` |
+| [#469](https://github.com/kurnFR/signal-bot/pull/469) | ML experiment and model-deployment error responses | \`aee8b1beff6ea2673a4cf80a5ca8b132bffbd86e\` |
+| [#470](https://github.com/kurnFR/signal-bot/pull/470) | Backtest policy, audit, and per-strategy simulation errors | \`90e4064d3ef9330ba734a75925cdfa0410790b0f\` |
+| [#471](https://github.com/kurnFR/signal-bot/pull/471) | Research and News AI route errors | \`a26a4ea0ddcfdda75bd836530559aafb568cfc18\` |
+
+Regression tests inject synthetic secret-bearing exception strings and assert that API responses/log messages do not return those strings. Unexpected failures now use stable generic client messages; server diagnostics record exception types for these reviewed paths. This does not mean every exception/logging path in the repository has been audited.
+
+### Remaining security and migration work
+
+- [ ] Continue auditing API routes and background services for raw exception details, credential leakage, unsafe logging, authorization mismatches, and unintended side effects.
+- [ ] Review all authenticated role/method combinations against route inventory, especially endpoints added after the centralized fail-closed authorization boundary.
+- [ ] Run the documented Playwright route/critical-flow checks and accessibility acceptance suite.
+- [ ] Complete view/API parity and document remaining limitations before any production route switch.
+- [ ] Keep production deployment, live trading, workers, database changes, and Telegram operations outside this work unless explicitly approved.
+
+The frontend migration remains incomplete. These backend error-redaction fixes do not change the production dashboard mount or authorize deployment.
