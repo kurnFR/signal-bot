@@ -61,8 +61,9 @@ test("sign-in, navigation, and theme preference work in a real browser", async (
   await signIn(page);
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
 
-  await page.getByRole("button", { name: /Settings/ }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
+  await page.getByRole("button", { name: /Market Screener/ }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Market Screener" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent smart-money signals" })).toBeVisible();
 
   await page.locator(".topbar").getByRole("button", { name: "Switch to light theme" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
