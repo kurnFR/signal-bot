@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from web.app import app
+from web.app import app, _role_allowed
 
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 # Mutating endpoints every authenticated user (incl. viewer) legitimately needs.
@@ -40,6 +40,14 @@ class TestRouteAuthorizationSweep(unittest.TestCase):
     def setUpClass(cls):
         cls.client = TestClient(app, raise_server_exceptions=False)
         cls.ops = _operations()
+
+    def test_unclassified_mutations_are_denied_by_default(self):
+        for method in ("POST", "PUT", "PATCH", "DELETE"):
+            self.assertFalse(
+                _role_allowed(method, "/api/new-unclassified-control", "admin"),
+                f"unclassified {method} endpoint must fail closed",
+            )
+        self.assertTrue(_role_allowed("GET", "/api/new-read-endpoint", "viewer"))
 
     def test_route_table_is_not_empty(self):
         self.assertGreater(len(self.ops), 40)

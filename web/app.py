@@ -110,6 +110,10 @@ def _is_prefix(path: str, prefixes: tuple[str, ...]) -> bool:
 
 
 def _role_allowed(method: str, path: str, role: str) -> bool:
+    # Every authenticated role must be able to end its own session or fix its
+    # own password, including accounts forced through first-login rotation.
+    if method.upper() == "POST" and path in {"/api/auth/logout", "/api/auth/change-password"}:
+        return True
     if path.startswith("/api/users"):
         return role == "admin"
     if _is_prefix(path, ADMIN_ONLY_PREFIXES):
@@ -128,7 +132,9 @@ def _role_allowed(method: str, path: str, role: str) -> bool:
         return True
     if path == "/api/telegram/test":
         return role == "admin"
-    return True
+    # Fail closed for new or unclassified mutation endpoints. A newly added
+    # POST/PUT/PATCH/DELETE route must be explicitly covered by a policy above.
+    return method.upper() == "GET"
 
 
 @app.middleware("http")
