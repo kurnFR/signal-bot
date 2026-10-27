@@ -17,11 +17,27 @@ export class ApiError extends Error {
 }
 
 export function assertApiPath(path: string): void {
-  if (!path.startsWith("/api/") || path.startsWith("//") || path.includes("\\") || /^[a-z][a-z\d+.-]*:/i.test(path)) {
+  if (!path.startsWith("/api/") || path.startsWith("//") || path.includes("\\\\") || /^[a-z][a-z\\d+.-]*:/i.test(path)) {
     throw new TypeError("API requests must use a same-origin /api/ path");
   }
-}
 
+  // URL parsers normalize literal and percent-encoded dot segments before
+  // sending the request. Reject traversal and encoded separators so a path
+  // that looks like /api/... cannot escape to /static or another same-origin
+  // route while still carrying the caller's bearer token.
+  const pathname = path.split(/[?#]/, 1)[0];
+  for (const segment of pathname.split("/")) {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      throw new TypeError("API request path contains invalid percent encoding");
+    }
+    if (decoded === "." || decoded === ".." || decoded.includes("/") || decoded.includes("\\\\")) {
+      throw new TypeError("API request path must not contain traversal or encoded separators");
+    }
+  }
+}
 function readAuthToken(): string | null {
   try {
     const token = window.localStorage.getItem("token");
