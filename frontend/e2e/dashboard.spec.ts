@@ -8,7 +8,7 @@ const user = {
   must_change_password: false,
 };
 
-async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePasswordChange?: boolean } = {}) {
+async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePasswordChange?: boolean; sessionValidationUnavailable?: boolean } = {}) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -18,6 +18,10 @@ async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePa
       return;
     }
     if (path === "/api/auth/me") {
+      if (options.sessionValidationUnavailable) {
+        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "Service unavailable" }) });
+        return;
+      }
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...user, must_change_password: Boolean(options.forcePasswordChange) }) });
       return;
     }
@@ -132,4 +136,15 @@ test("Market Screener preview does not issue mutation requests", async ({ page }
   await expect(page.getByRole("heading", { level: 1, name: "Market Screener" })).toBeVisible();
   await expect(page.getByText("No recent smart-money signals were returned.")).toBeVisible();
   expect(mutations).toEqual([]);
+});
+
+
+test("a temporary session-validation outage preserves the stored token without opening the dashboard", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("token", "possibly-valid-browser-token"));
+  await mockApi(page, { sessionValidationUnavailable: true });
+  await page.goto("/");
+
+  await expect(page.getByRole("alert")).toHaveText("Unable to verify your session. The server may be temporarily unavailable. Please try signing in again.");
+  expect(await page.evaluate(() => window.localStorage.getItem("token"))).toBe("possibly-valid-browser-token");
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toHaveCount(0);
 });
