@@ -93,7 +93,7 @@ describe("frontend foundation shell", () => {
     expect(screen.getByRole("button", { name: /Market Screener/ })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { name: "Screener configuration" })).toBeInTheDocument();
     expect(screen.getByText(/configuration editing is restricted to admin and trader roles/i)).toBeInTheDocument();
-    expect(screen.getByText(/other strategy, wallet tracking, trading, worker, deployment, and Telegram mutations remain deliberately unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/changing strategy promotion policy, paper-trading controls, wallet settings, worker lifecycle, and Telegram administration remain unavailable/i)).toBeInTheDocument();
   });
   it("routes Backtest Studio to saved results without enabling execution", () => {
     render(<App />);
