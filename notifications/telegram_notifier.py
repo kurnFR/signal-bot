@@ -64,8 +64,10 @@ def send_telegram_message(text: str, parse_mode: str = "HTML", max_retries: int 
                 if res.status_code < 500 and res.status_code != 429:
                     break
         except (requests.RequestException, ValueError) as e:
-            last_error = str(e)
-            logger.warning("Telegram send attempt %d/%d failed: %s", attempt, max_retries, e)
+            # Requests exceptions can embed the token-bearing Bot API URL.
+            # Keep diagnostics useful without returning or logging credential material.
+            last_error = f"{type(e).__name__} while contacting Telegram API"
+            logger.warning("Telegram send attempt %d/%d failed (%s)", attempt, max_retries, type(e).__name__)
 
         if attempt < max_retries:
             time.sleep(1.0 * attempt)
@@ -88,7 +90,9 @@ def test_telegram_connection() -> Dict[str, Any]:
             return {"success": False, "error": me_res.get("description", "Invalid bot token")}
         bot_info = me_res.get("result", {})
     except Exception as e:
-        return {"success": False, "error": f"Connection error: {e}"}
+        # Network exceptions may include the token-bearing request URL.
+        logger.warning("Telegram connectivity check failed (%s)", type(e).__name__)
+        return {"success": False, "error": "Connection error while contacting Telegram API"}
 
     # If chat_id is present, send a ping message
     if cfg["chat_id"]:
