@@ -80,7 +80,7 @@ class TestRouteAuthorizationSweep(unittest.TestCase):
                 self.assertEqual(res.status_code, 403, f"viewer can reach {method} {path}")
 
     def test_only_admin_can_reach_admin_prefixes(self):
-        admin_paths = [(m, p) for m, p in self.ops if p.startswith(("/api/users", "/api/settings"))]
+        admin_paths = [(m, p) for m, p in self.ops if p.startswith(("/api/users", "/api/settings", "/api/auth/audit-logs"))]
         self.assertTrue(admin_paths)
         for role in ("viewer", "trader"):
             with patch("web.app.authenticate_request", return_value=_user(role)):
