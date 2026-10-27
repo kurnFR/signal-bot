@@ -7,19 +7,10 @@ const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3
 const percentFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 function num(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? numberFormat.format(value) : "—"; }
 function percent(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? `${percentFormat.format(value)}%` : "—"; }
-function dateLabel(value: unknown) {
-  if (typeof value !== "string" || !value) return "—";
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? new Date(parsed).toLocaleString() : value;
-}
 function errorMessage(cause: unknown) {
   if (cause instanceof ApiError && cause.status === 401) return "Your session has expired. Sign in again to view ML research data.";
   if (cause instanceof ApiError && cause.status === 403) return "Your account cannot view ML research data.";
   return "ML research data could not be loaded. Check API and artifact-directory health, then retry.";
-}
-function detailValue(value: unknown) {
-  if (value == null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value ?? "—");
-  return JSON.stringify(value);
 }
 export function MLStudioPanel() {
   const [experiments, setExperiments] = useState<MLExperimentSummary[]>([]);
