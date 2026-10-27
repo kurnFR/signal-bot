@@ -89,3 +89,28 @@ test("an API 401 after sign-in returns the user to the sign-in screen", async ({
   await expect(page.getByRole("alert")).toHaveText("Your session has expired. Sign in again to continue.");
   expect(await page.evaluate(() => window.localStorage.getItem("token"))).toBeNull();
 });
+
+
+test("mobile viewport keeps navigation usable and exposes the selected view", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  await mockApi(page);
+  await signIn(page);
+
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+  const menuButton = page.getByRole("button", { name: "Open navigation" });
+  await expect(menuButton).toBeVisible();
+  await menuButton.click();
+  await expect(menuButton).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
+
+  await page.getByRole("button", { name: /Settings/ }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
+  await expect(menuButton).toHaveAttribute("aria-expanded", "false");
+  await expect(menuButton).toBeFocused();
+
+  const dimensions = await page.evaluate(() => ({
+    viewportWidth: document.documentElement.clientWidth,
+    documentWidth: document.documentElement.scrollWidth,
+  }));
+  expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
+});
