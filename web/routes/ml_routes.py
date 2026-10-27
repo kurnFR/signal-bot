@@ -84,7 +84,7 @@ def list_experiments() -> Dict[str, Any]:
             }
             results.append(summary)
         except Exception as exc:
-            logger.warning("Error reading experiment file %s: %s", file, exc)
+            logger.warning("Error reading experiment file %s (%s)", file.name, type(exc).__name__)
 
     return {"experiments": results}
 
@@ -105,7 +105,8 @@ def get_experiment_details(experiment_id: str) -> Dict[str, Any]:
         data = json.loads(file_path.read_text(encoding="utf-8"))
         return data
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to parse experiment data: {exc}")
+        logger.warning("Failed to parse experiment data %s (%s)", file_path.name, type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Failed to parse experiment data")
 
 
 @router.get("/models")
@@ -133,7 +134,7 @@ def list_saved_models() -> Dict[str, Any]:
             data["eligibility"] = {"eligible": not reasons, "reasons": reasons}
             models.append(data)
         except Exception as exc:
-            logger.warning("Failed to parse model manifest %s: %s", manifest_file, exc)
+            logger.warning("Failed to parse model manifest %s (%s)", manifest_file.name, type(exc).__name__)
 
     return {"models": models}
 
@@ -158,8 +159,8 @@ def trigger_experiment(req: RunExperimentRequest):
             "result": data,
         }
     except Exception as exc:
-        logger.error("ML experiment execution failed: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.error("ML experiment execution failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="ML experiment execution failed; check server logs for diagnostics")
 
 
 @router.post("/deploy-to-paper")
@@ -177,7 +178,8 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to parse model manifest: {exc}")
+        logger.warning("Failed to parse model manifest %s (%s)", manifest_path.name, type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Failed to parse model manifest")
 
     if manifest.get("model_id") != req.model_id:
         raise HTTPException(status_code=409, detail="Model manifest ID does not match the requested model ID")
@@ -260,5 +262,5 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
             "sync": sync_res,
         }
     except Exception as exc:
-        logger.error("Failed to deploy ML model to paper: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.error("Failed to deploy ML model to paper (%s)", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="ML model deployment failed; check server logs for diagnostics")
