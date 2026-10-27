@@ -38,10 +38,15 @@ describe("frontend foundation shell", () => {
     fireEvent.click(menuButton);
     expect(sidebar).toHaveClass("sidebar-open");
     expect(menuButton).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Close navigation" })).toHaveFocus();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(sidebar).not.toHaveClass("sidebar-open");
     expect(menuButton).toHaveAttribute("aria-expanded", "false");
+    expect(menuButton).toHaveFocus();
     expect(document.querySelector(".mobile-scrim")).not.toBeInTheDocument();
+    fireEvent.click(menuButton);
+    fireEvent.click(screen.getByRole("button", { name: "Close navigation" }));
+    expect(menuButton).toHaveFocus();
   });
   it("changes the active navigation item and keeps non-Overview views disconnected", () => {
     render(<App />);
