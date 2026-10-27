@@ -2,12 +2,13 @@
 
 ### Latest UIX migration verification — 2026-10-27
 
-**Master reviewed:** `4f66c0deecf01984c93129006cf344a895158269`
+**Master reviewed:** `46940bba9e8461b0b39040b6cd50360fb4b6771a`
 
 - **PR #488 merged:** added Playwright coverage across Paper Trading, Strategy Library, Wallet Tracking, Backtest Studio, ML Studio, Research, News AI, Master Data, and Settings. The test confirms navigation across these preview domains issues no non-GET API requests after authentication. The same browser run now checks password-confirmation mismatch without sending a mutation.
 - **PR #489 merged:** added a Python contract test that discovers frontend `getJson` read paths and verifies they resolve to registered FastAPI GET routes, including normalized query strings and dynamic path segments.
 - **CI evidence for PR #488 exact head `44855b17d6869b33713905357c770f637703cbb9`:** Frontend foundation, pytest, unit tests + Wallet Tracker MariaDB integration, and RetailBot accounting regression all passed before merge.
 - **CI evidence for PR #489 exact head `ae04c4e5b1ab062e57fd1023aad2c6ed3787c136`:** pytest, unit tests + Wallet Tracker MariaDB integration, and RetailBot accounting regression all passed before merge.
+- **PR #491 merged:** extended the same contract guard to require every connected preview GET endpoint to be readable by the `trader` role used by browser smoke tests. All backend/accounting workflows passed on exact head `30864c09acb1e2904e05adeaeddddb8ce5e965fc`.
 - **Current safety boundary:** React/Vite remains a read-only preview; the legacy dashboard is still the production default. No deployment, production DB mutation, worker restart, live trading, or Telegram action was performed.
 
 **Still incomplete:** manual keyboard/screen-reader and real-device acceptance; broader runtime API permission/schema/side-effect parity; final legacy-vs-preview feature reconciliation; and explicit owner acceptance before any production integration. A green CI run is not proof of full accessibility or production readiness.
