@@ -147,8 +147,8 @@ def retailbot2_positions(limit: int = Query(100, ge=1, le=200)):
     try:
         return {"positions": get_retailbot2_open_trades(limit=limit)}
     except Exception as e:
-        logger.exception("retailbot2_positions failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load retailbot2 positions: {e}")
+        logger.error("retailbot2_positions failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to load retailbot2 positions")
 
 
 @router.get("/retailbot2/trades")
@@ -156,8 +156,8 @@ def retailbot2_trades(limit: int = Query(50, ge=1, le=200)):
     try:
         return {"trades": get_retailbot2_recent_trades(limit=limit)}
     except Exception as e:
-        logger.exception("retailbot2_trades failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load retailbot2 trades: {e}")
+        logger.error("retailbot2_trades failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to load retailbot2 trades")
 
 
 @router.get("/retailbot2/stats")
@@ -165,8 +165,8 @@ def retailbot2_stats():
     try:
         return get_retailbot2_stats()
     except Exception as e:
-        logger.exception("retailbot2_stats failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load retailbot2 stats: {e}")
+        logger.error("retailbot2_stats failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to load retailbot2 stats")
 
 
 @router.get("/screener/signals")
@@ -174,8 +174,8 @@ def screener_signals(limit: int = Query(50, ge=1, le=200)):
     try:
         return {"signals": get_recent_smart_money_signals(limit=limit)}
     except Exception as e:
-        logger.exception("screener_signals failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load screener signals: {e}")
+        logger.error("screener_signals failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to load screener signals")
 
 
 @router.get("/screener/stats")
@@ -183,8 +183,8 @@ def screener_stats():
     try:
         return get_smart_money_stats()
     except Exception as e:
-        logger.exception("screener_stats failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load screener stats: {e}")
+        logger.error("screener_stats failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to load screener stats")
 
 
 @router.get("/retailbot2/strategies")
@@ -226,8 +226,8 @@ def retailbot2_strategies_get():
             row["updated_at"] = saved.get("updated_at")
         return {"strategies": registry}
     except Exception as e:
-        logger.exception("retailbot2_strategies_get failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load strategy lifecycle settings: {e}")
+        logger.error("retailbot2_strategies_get failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to load strategy lifecycle settings")
 
 
 @router.post("/retailbot2/strategies")
@@ -267,8 +267,8 @@ def retailbot2_strategies_set(req: StrategyLifecycleRequest):
         return {"status": "ok", "strategy_id": req.strategy_id, "mode": req.mode,
                 "settings": settings, "note": "Runtime worker applies settings on its next lifecycle refresh."}
     except Exception as e:
-        logger.exception("retailbot2_strategies_set failed")
-        raise HTTPException(status_code=500, detail=f"Failed to save strategy lifecycle settings: {e}")
+        logger.error("retailbot2_strategies_set failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to save strategy lifecycle settings")
 
 
 @router.get("/retailbot2/control")
@@ -278,10 +278,10 @@ def retailbot2_control_get():
         control["tunable_fields"] = sorted(RETAILBOT2_TUNABLE_FIELDS)
         return control
     except Exception as e:
-        logger.exception("retailbot2_control_get failed")
+        logger.error("retailbot2_control_get failed (%s)", type(e).__name__)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to load retailbot2 control (has paper/retailbot2.py been started at least once?): {e}",
+            detail="Failed to load retailbot2 control; verify the worker has initialized its control state",
         )
 
 
@@ -292,8 +292,8 @@ def retailbot2_control_set(req: BotControlRequest):
         set_retailbot2_control(req.enabled, overrides)
         return {"status": "ok", "note": "Takes effect within ~30s -- retailbot2 polls this table periodically, no restart needed."}
     except Exception as e:
-        logger.exception("retailbot2_control_set failed")
-        raise HTTPException(status_code=500, detail=f"Failed to update retailbot2 control: {e}")
+        logger.error("retailbot2_control_set failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to update retailbot2 control")
 
 
 @router.get("/screener/status")
@@ -311,8 +311,8 @@ def screener_status():
         status["last_signal_at"] = status.get("last_signal_at")
         return status
     except Exception as e:
-        logger.exception("screener_status failed")
-        raise HTTPException(status_code=500, detail=f"Failed to load screener status: {e}")
+        logger.error("screener_status failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to load screener status")
 
 
 @router.get("/screener/control")
@@ -322,10 +322,10 @@ def screener_control_get():
         control["tunable_fields"] = sorted(SCREENER_TUNABLE_FIELDS)
         return control
     except Exception as e:
-        logger.exception("screener_control_get failed")
+        logger.error("screener_control_get failed (%s)", type(e).__name__)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to load screener control (has Screen/screening.py been started at least once?): {e}",
+            detail="Failed to load screener control; verify the screener worker has initialized its control state",
         )
 
 
@@ -336,5 +336,5 @@ def screener_control_set(req: BotControlRequest):
         set_screener_control(req.enabled, overrides)
         return {"status": "ok", "note": "Takes effect within ~60s -- the screener polls this table on its main loop tick, no restart needed."}
     except Exception as e:
-        logger.exception("screener_control_set failed")
-        raise HTTPException(status_code=500, detail=f"Failed to update screener control: {e}")
+        logger.error("screener_control_set failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to update screener control")
