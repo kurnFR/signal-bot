@@ -196,8 +196,8 @@ def get_promotion_policy():
     try:
         return {"policy": get_strategy_auto_promotion_policy()}
     except Exception as exc:
-        logger.exception("Failed to load auto-promotion policy")
-        raise HTTPException(status_code=500, detail=f"Unable to load promotion policy: {exc}")
+        logger.error("Failed to load auto-promotion policy (%s)", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Unable to load promotion policy")
 
 
 @router.put("/promotion-policy")
@@ -209,8 +209,8 @@ def update_promotion_policy(req: StrategyAutoPromotionPolicyRequest):
     try:
         set_strategy_auto_promotion_policy(values)
     except Exception as exc:
-        logger.exception("Failed to save auto-promotion policy")
-        raise HTTPException(status_code=500, detail=f"Unable to save promotion policy: {exc}")
+        logger.error("Failed to save auto-promotion policy (%s)", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Unable to save promotion policy")
 
     try:
         persisted_policy = get_strategy_auto_promotion_policy()
@@ -219,7 +219,7 @@ def update_promotion_policy(req: StrategyAutoPromotionPolicyRequest):
         # failed save: the UI might retry and the user could mistake the
         # committed policy for a rejected update. Keep the submitted values
         # explicit, but do not imply that authoritative readback was confirmed.
-        logger.exception("Promotion policy saved but readback failed")
+        logger.error("Promotion policy saved but readback failed (%s)", type(exc).__name__)
         return {
             "status": "saved_readback_unavailable",
             "policy": values,
@@ -237,8 +237,8 @@ def list_promotion_audit(limit: int = Query(25, ge=1, le=100)):
     try:
         return {"events": get_strategy_promotion_audit(limit)}
     except Exception as exc:
-        logger.exception("Failed to load promotion audit")
-        raise HTTPException(status_code=500, detail=f"Unable to load promotion audit: {exc}")
+        logger.error("Failed to load promotion audit (%s)", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Unable to load promotion audit")
 
 
 class BacktestRunRequest(BaseModel):
@@ -654,7 +654,7 @@ def execute_backtest(req: BacktestRunRequest):
             )
             insert_backtest_trades(run_id, trades)
         except Exception as db_err:
-            logger.error(f"Failed to save backtest to DB: {db_err}")
+            logger.error("Failed to save backtest to DB (%s)", type(db_err).__name__)
 
     # Format trades with human-readable timestamps
     formatted_trades = []
@@ -847,12 +847,12 @@ def run_all_strategies(
                 "error": None,
             })
         except Exception as e:
-            logger.warning(f"Strategy {strategy_name} simulation error: {e}")
+            logger.warning("Strategy %s simulation failed (%s)", strategy_name, type(e).__name__)
             results.append({
                 "strategy": strategy_name,
                 "displayName": STRATEGY_METADATA.get(strategy_name, {}).get("displayName", strategy_name),
                 "category": STRATEGY_METADATA.get(strategy_name, {}).get("category", "Other"),
-                "error": str(e),
+                "error": "Strategy simulation failed",
                 "totalCandles": len(segment_df),
                 "metrics": {"total_trades": 0, "expectancy_r": None, "profit_factor": None, "win_rate_pct": None, "max_drawdown_r": None},
                 "equity": None,
@@ -872,7 +872,7 @@ def run_all_strategies(
                 "category": r["category"],
                 "rankScore": 0.0,
                 "isProfitable": False,
-                "rankNote": f"Error: {r['error']}",
+                "rankNote": "Strategy simulation failed",
                 "metrics": r["metrics"],
                 "equity": None,
                 "totalCandles": r.get("totalCandles", 0),
