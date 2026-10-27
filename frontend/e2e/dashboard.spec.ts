@@ -67,7 +67,8 @@ test("sign-in, navigation, and theme preference work in a real browser", async (
   await page.getByRole("button", { name: "Switch to light theme" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  // The active view is intentionally session-local; theme preference persists across reloads.
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 });
 
