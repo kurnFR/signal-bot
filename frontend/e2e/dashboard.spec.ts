@@ -317,3 +317,31 @@ test("a denied read endpoint shows a recoverable permission message without cras
   await expect(page.getByRole("button", { name: "Paper Trading", exact: true })).toHaveAttribute("aria-current", "page");
   expect(await page.evaluate(() => window.localStorage.getItem("token"))).toBe("playwright-session-token");
 });
+
+
+test("explicit sign-out revokes the session and returns to the sign-in screen", async ({ page }) => {
+  const logoutRequests: Array<{ method: string; authorization: string | undefined }> = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/auth/logout") {
+      logoutRequests.push({
+        method: request.method(),
+        authorization: request.headers()["authorization"],
+      });
+    }
+  });
+
+  await mockApi(page);
+  await signIn(page);
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+  expect(await page.evaluate(() => window.localStorage.getItem("token"))).toBe("playwright-session-token");
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toHaveCount(0);
+  expect(await page.evaluate(() => window.localStorage.getItem("token"))).toBeNull();
+  expect(logoutRequests).toEqual([{
+    method: "POST",
+    authorization: "Bearer playwright-session-token",
+  }]);
+});
