@@ -1,7 +1,7 @@
 # Signal Bot UI/UX Comprehensive View & API Inventory (UIX-00)
 
 **Document Version:** 1.1.0  
-**Status:** In review — React preview endpoint mapping added; lockfile committed in PR #456; full route-by-route source verification and owner acceptance pending  
+**Status:** In review — React preview endpoint mapping added; lockfile committed and CI uses `npm ci`; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
 **Source baseline for reconciliation:** `13f2823541367cce1c676db83116eb390b8be552` (master after PR #439; source-level route decorator count checked on 2026-10-27, runtime route registry and endpoint-to-row parity still pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
@@ -17,7 +17,7 @@ This document is Antigravity's detailed baseline inventory draft for **Phase UIX
 - **Navigation Views Audited:** 11 primary views (`view-home`, `view-master-data`, `view-backtest`, `view-paper`, `view-ml-studio`, `view-strategies`, `view-news-ai`, `view-research`, `view-market-screener`, `view-wallet-tracking`, `view-settings`).
 - **Modal Dialogs Audited:** 7 interactive dialogs (`login-modal`, `force-password-modal`, `backfill-modal`, `deploy-modal`, `modal-run-ml`, `modal-deploy-ml`, `modal-inspect-ml`).
 - **Backend API Endpoint Rows Listed:** Source inspection counted 81 `@router` HTTP endpoint decorators across the 13 modules explicitly included by `web/app.py` (`auth`, `paper`, `search`, `master_data`, `backtest`, `settings`, `system_status`, `custom_strategy`, `telegram`, `ml`, `news`, `research`, and `wallet`). `web/app.py` also declares `GET /` outside those routers. This verifies the static decorator count, not runtime registry completeness or one-to-one parity with all 81 rows in the draft register.
-- **Frontend Tooling State:** The isolated React preview now exists under `frontend/` with `package.json`, TypeScript, Vite, and Vitest. The npm lockfile is committed in PR #456; the follow-up CI change to use `npm ci` is in progress. Browser-level Playwright coverage remains outstanding; CI component tests are not a substitute for browser/device acceptance.
+- **Frontend Tooling State:** The isolated React preview now exists under `frontend/` with `package.json`, TypeScript, Vite, and Vitest. The npm lockfile is committed in PR #456 and CI now uses `npm ci` after PR #457. Browser-level Playwright coverage remains outstanding; CI component tests are not a substitute for browser/device acceptance.
 - **Serving Configuration:** FastAPI mounts `web/static/` at `/static` and dynamically injects `dashboard_enhancements.js` into `GET /`.
 - **Gate Invariant:** UIX-00 remains in "In Review / Pending Acceptance" status until route-by-route source verification and owner acceptance are recorded. The isolated React preview has already been implemented in reviewed slices, but must remain disconnected from FastAPI production serving until release gates pass.
 
