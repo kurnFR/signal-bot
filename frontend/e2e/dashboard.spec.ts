@@ -166,3 +166,27 @@ test("Escape closes mobile navigation and restores focus in the browser", async 
   await expect(page.locator("#dashboard-sidebar")).not.toHaveClass(/sidebar-open/);
   await expect(page.locator(".mobile-scrim")).toHaveCount(0);
 });
+
+
+test("password confirmation mismatch is rejected in the browser without sending a mutation", async ({ page }) => {
+  const passwordChangeRequests: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/auth/change-password" && request.method() !== "GET") {
+      passwordChangeRequests.push(request.method());
+    }
+  });
+
+  await page.addInitScript(() => window.localStorage.setItem("token", "temporary-browser-token"));
+  await mockApi(page, { forcePasswordChange: true });
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Change your password" })).toBeVisible();
+  await page.getByLabel("Current password").fill("current-password");
+  await page.getByLabel("New password").fill("valid-new-password");
+  await page.getByLabel("Confirm new password").fill("different-new-password");
+  await page.getByRole("button", { name: "Change password" }).click();
+
+  await expect(page.getByRole("alert")).toHaveText("New password and confirmation do not match.");
+  expect(passwordChangeRequests).toEqual([]);
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toHaveCount(0);
+});
