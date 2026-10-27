@@ -263,3 +263,38 @@ test("all domain preview views remain read-only during browser navigation", asyn
 
   expect(mutations).toEqual([]);
 });
+
+
+test("all read-only domain views fit a narrow mobile viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  await mockApi(page);
+  await signIn(page);
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+
+  const views = [
+    "Paper Trading",
+    "Strategy Library",
+    "Wallet Tracking",
+    "Backtest Studio",
+    "ML Studio",
+    "Research",
+    "News AI",
+    "Master Data",
+    "Settings",
+  ];
+
+  for (const view of views) {
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: view, exact: true }).click();
+    await expect(page.locator("h1")).toHaveText(view);
+
+    const dimensions = await page.evaluate(() => ({
+      viewportWidth: document.documentElement.clientWidth,
+      documentWidth: document.documentElement.scrollWidth,
+    }));
+    expect(
+      dimensions.documentWidth,
+      `${view} must not create horizontal page overflow at 320px`,
+    ).toBeLessThanOrEqual(dimensions.viewportWidth);
+  }
+});
