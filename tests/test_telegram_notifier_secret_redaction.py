@@ -18,7 +18,7 @@ class TestTelegramTokenRedaction(unittest.TestCase):
             "TELEGRAM_CHAT_ID": "chat-123",
         }, clear=True), \
              patch.object(telegram_notifier.requests, "post", side_effect=error), \
-             patch("notifications.telegram_notifier.time.sleep"), \
+             patch("time.sleep"), \
              self.assertLogs("notifications.telegram", level="WARNING") as captured:
             result = telegram_notifier.send_telegram_message("test", max_retries=1)
 
