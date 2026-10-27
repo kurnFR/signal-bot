@@ -178,7 +178,8 @@ This execution record supplements the phase checklist and preserves the previous
 - PR #473 handles a session expiring after initial sign-in: protected API GET responses with HTTP 401 clear the stale token and return the authenticated shell to the sign-in screen. Transport/auth-gate regression tests and the frontend typecheck, unit tests, and build passed on its exact head. This is component-level coverage, not a replacement for the outstanding Playwright browser-flow gate.
 - **Mobile navigation accessibility follow-ups merged:** #441 adds Escape dismissal; #443 adds `aria-expanded`/`aria-controls`; #444 manages focus entry and restoration. Their frontend tests/build and backend regression workflows passed on each exact PR head.
 - [ ] Reconcile every route and API call in `docs/UI_UX_VIEW_INVENTORY.md` against current `master`, including roles, forced-password behavior, side effects, polling, and empty/error states.
-- [ ] Add Playwright smoke coverage for sign-in, forced password change, navigation, theme persistence, session expiry, and narrow viewport behavior.
+- [x] Add initial Playwright smoke coverage for sign-in, forced password change, navigation, theme persistence, and session expiry (PR #476; three real-browser tests passed on the exact PR head).
+- [ ] Extend browser coverage to narrow viewports and broader critical flows.
 - [ ] Run keyboard/focus, screen-reader, zoom/reflow, reduced-motion, contrast, and forced-colors checks across every migrated view.
 - [ ] Complete missing read-only Master Data/Settings parity and identify any remaining unimplemented views before exposing the preview to users.
 - [ ] Decide and test a controlled route/feature-flag rollout only after parity acceptance; do not switch FastAPI's default dashboard until explicit owner acceptance.
@@ -195,11 +196,11 @@ The follow-up API audit found several failure paths that returned raw exception 
 
 | PR | Scope | Merged commit |
 |---|---|---|
-| [#467](https://github.com/kurnFR/signal-bot/pull/467) | Telegram notifier: redact request exceptions from send results, connectivity checks, and logs | \`a4b3a2c2905572be1e187f2fe3155369ba33adab\` |
-| [#468](https://github.com/kurnFR/signal-bot/pull/468) | Paper-trading sync and deployment response errors | \`c1e008d7afa3ff9f3d8fb78e4baa30f0e9698b48\` |
-| [#469](https://github.com/kurnFR/signal-bot/pull/469) | ML experiment and model-deployment error responses | \`aee8b1beff6ea2673a4cf80a5ca8b132bffbd86e\` |
-| [#470](https://github.com/kurnFR/signal-bot/pull/470) | Backtest policy, audit, and per-strategy simulation errors | \`90e4064d3ef9330ba734a75925cdfa0410790b0f\` |
-| [#471](https://github.com/kurnFR/signal-bot/pull/471) | Research and News AI route errors | \`a26a4ea0ddcfdda75bd836530559aafb568cfc18\` |
+| [#467](https://github.com/kurnFR/signal-bot/pull/467) | Telegram notifier: redact request exceptions from send results, connectivity checks, and logs | `a4b3a2c2905572be1e187f2fe3155369ba33adab` |
+| [#468](https://github.com/kurnFR/signal-bot/pull/468) | Paper-trading sync and deployment response errors | `c1e008d7afa3ff9f3d8fb78e4baa30f0e9698b48` |
+| [#469](https://github.com/kurnFR/signal-bot/pull/469) | ML experiment and model-deployment error responses | `aee8b1beff6ea2673a4cf80a5ca8b132bffbd86e` |
+| [#470](https://github.com/kurnFR/signal-bot/pull/470) | Backtest policy, audit, and per-strategy simulation errors | `90e4064d3ef9330ba734a75925cdfa0410790b0f` |
+| [#471](https://github.com/kurnFR/signal-bot/pull/471) | Research and News AI route errors | `a26a4ea0ddcfdda75bd836530559aafb568cfc18` |
 
 Regression tests inject synthetic secret-bearing exception strings and assert that API responses/log messages do not return those strings. Unexpected failures now use stable generic client messages; server diagnostics record exception types for these reviewed paths. This does not mean every exception/logging path in the repository has been audited.
 
@@ -207,8 +208,20 @@ Regression tests inject synthetic secret-bearing exception strings and assert th
 
 - [ ] Continue auditing API routes and background services for raw exception details, credential leakage, unsafe logging, authorization mismatches, and unintended side effects.
 - [ ] Review all authenticated role/method combinations against route inventory, especially endpoints added after the centralized fail-closed authorization boundary.
-- [ ] Run the documented Playwright route/critical-flow checks and accessibility acceptance suite.
+- [x] Establish a Playwright Chromium smoke gate for authentication, forced-password gating, navigation/theme persistence, and session-expiry recovery (PR #476). [ ] Expand to route parity, narrow viewport, keyboard/focus, and broader accessibility acceptance.
 - [ ] Complete view/API parity and document remaining limitations before any production route switch.
 - [ ] Keep production deployment, live trading, workers, database changes, and Telegram operations outside this work unless explicitly approved.
 
 The frontend migration remains incomplete. These backend error-redaction fixes do not change the production dashboard mount or authorize deployment.
+
+
+## 9. Real-browser smoke gate — 2026-10-27
+
+PR [#476](https://github.com/kurnFR/signal-bot/pull/476) adds a Playwright Chromium smoke suite to the existing Frontend foundation workflow. The suite uses Vite and mocked `/api/*` responses only; it does not connect to a live backend, database, trading service, worker, or Telegram.
+
+- Sign-in and navigation to Settings.
+- Theme preference persistence across a page reload (the selected view remains session-local by design).
+- Forced-password-change gating before protected content is rendered.
+- A protected API 401 after sign-in clears the stale token and returns the user to sign-in.
+
+Validation on exact PR head `afd29907cd9124ff59c5d412b97bc7d1d6657ffe`: frontend typecheck, Vitest unit tests, production build, Playwright Chromium smoke tests, Python tests, wallet-tracker MariaDB integration, and RetailBot accounting regression all passed. The browser suite is an initial smoke gate, not full visual parity, device coverage, route acceptance, or WCAG certification.
