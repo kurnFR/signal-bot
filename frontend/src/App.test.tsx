@@ -18,7 +18,7 @@ describe("frontend foundation shell", () => {
   afterEach(() => vi.unstubAllGlobals());
   it("clearly labels the preview as API-connected and keeps the legacy dashboard unchanged", () => {
     render(<App />);
-    expect(screen.getByText("Read-only API preview · legacy dashboard unchanged")).toBeInTheDocument();
+    expect(screen.getByText("API preview · limited screener controls; legacy dashboard unchanged")).toBeInTheDocument();
     expect(screen.getByText(/Overview and Market Screener V2 are connected to existing APIs/i)).toBeInTheDocument();
   });
   it("disables placeholder actions that are not implemented in the preview", () => {
@@ -91,7 +91,9 @@ describe("frontend foundation shell", () => {
     fireEvent.click(screen.getByRole("button", { name: /Market Screener/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Market Screener" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Market Screener/ })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText(/mutating strategy, wallet tracking, trading, worker, deployment, and Telegram actions remain deliberately unavailable/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Screener configuration" })).toBeInTheDocument();
+    expect(screen.getByText(/configuration editing is restricted to admin and trader roles/i)).toBeInTheDocument();
+    expect(screen.getByText(/changing strategy promotion policy, paper-trading controls, wallet settings, worker lifecycle, and Telegram administration remain unavailable/i)).toBeInTheDocument();
   });
   it("routes Backtest Studio to saved results without enabling execution", () => {
     render(<App />);
