@@ -26,6 +26,22 @@ describe("React authentication gate", () => {
     expect(await screen.findByRole("heading", { name: "Change your password" })).toBeInTheDocument();
     expect(screen.queryByText("Protected dashboard")).not.toBeInTheDocument();
   });
+  it("clears an expired stored session and returns to sign in", async () => {
+    window.localStorage.setItem("token", "expired-session-token");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Not authenticated" }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><div>Protected dashboard</div></AuthGate>);
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("token")).toBeNull();
+    expect(screen.queryByText("Protected dashboard")).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/me", expect.objectContaining({
+      method: "GET",
+      credentials: "same-origin",
+    }));
+  });
   it("shows server login errors accessibly", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Invalid username or password" }), { status: 401, headers: { "content-type": "application/json" } })));
     render(<AuthGate><div>Protected dashboard</div></AuthGate>);
