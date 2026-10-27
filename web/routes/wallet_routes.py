@@ -80,7 +80,7 @@ def _mask_api_key(key: str) -> str:
 def wallets_get_settings():
     try:
         data = store.get_settings()
-        raw_key = data.get("birdeye_api_key", "")
+        raw_key = data.pop("birdeye_api_key", "")
         data["birdeye_api_key_masked"] = _mask_api_key(raw_key)
         data["has_birdeye_key"] = bool(raw_key)
         return data
