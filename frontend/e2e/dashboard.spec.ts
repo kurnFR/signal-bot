@@ -8,7 +8,7 @@ const user = {
   must_change_password: false,
 };
 
-async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePasswordChange?: boolean; sessionValidationUnavailable?: boolean } = {}) {
+async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePasswordChange?: boolean; sessionValidationUnavailable?: boolean; deniedPath?: string } = {}) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -23,6 +23,10 @@ async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePa
         return;
       }
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...user, must_change_password: Boolean(options.forcePasswordChange) }) });
+      return;
+    }
+    if (options.deniedPath === path) {
+      await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ detail: "Insufficient privileges for this operation" }) });
       return;
     }
     if (options.expiredScreener && path.startsWith("/api/research/screener/")) {
@@ -297,4 +301,19 @@ test("all read-only domain views fit a narrow mobile viewport", async ({ page })
       `${view} must not create horizontal page overflow at 320px`,
     ).toBeLessThanOrEqual(dimensions.viewportWidth);
   }
+});
+
+
+test("a denied read endpoint shows a recoverable permission message without crashing the preview", async ({ page }) => {
+  await mockApi(page, { deniedPath: "/api/paper/positions" });
+  await signIn(page);
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Paper Trading", exact: true }).click();
+
+  await expect(page.locator("h1")).toHaveText("Paper Trading");
+  await expect(page.getByRole("alert")).toContainText("Your account cannot view paper trading data.");
+  await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Paper Trading", exact: true })).toHaveAttribute("aria-current", "page");
+  expect(await page.evaluate(() => window.localStorage.getItem("token"))).toBe("playwright-session-token");
 });
