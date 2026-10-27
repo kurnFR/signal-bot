@@ -40,5 +40,36 @@ class TestWalletSettingsSecretRedaction(unittest.TestCase):
         self.assertTrue(payload["has_birdeye_key"])
 
 
+    def test_save_settings_response_never_returns_raw_birdeye_key(self):
+        from web.routes.wallet_routes import WalletSettingsRequest, wallets_save_settings
+
+        secret = "birdeye-live-secret-123456"
+        saved = {
+            "enabled": True,
+            "networks": ["ethereum"],
+            "pools_per_network": 4,
+            "min_trade_usd": 10000,
+            "min_net_usd": 150000,
+            "auto_track_net_usd": 500000,
+            "poll_interval_seconds": 300,
+            "retention_days": 8,
+            "api_delay_seconds": 4,
+            "token_mode": "all",
+            "token_addresses": [],
+            "birdeye_api_key": secret,
+        }
+        request = WalletSettingsRequest(**{k: v for k, v in saved.items() if k != "birdeye_api_key"},
+                                        birdeye_api_key=secret)
+        with patch("web.routes.wallet_routes.store.get_settings", side_effect=[saved.copy(), saved.copy()]), \\
+             patch("web.routes.wallet_routes.store.save_settings") as save:
+            payload = wallets_save_settings(request)
+
+        save.assert_called_once()
+        self.assertNotIn("birdeye_api_key", payload)
+        self.assertNotIn(secret, str(payload))
+        self.assertEqual(payload["birdeye_api_key_masked"], "••••••••3456")
+        self.assertTrue(payload["has_birdeye_key"])
+
+
 if __name__ == "__main__":
     unittest.main()
