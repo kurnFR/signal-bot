@@ -80,7 +80,7 @@ app.add_middleware(
 PUBLIC_API_PATHS = {"/api/auth/login"}
 # A user flagged must_change_password may only do what is needed to fix that.
 PASSWORD_CHANGE_ALLOWED_PATHS = {"/api/auth/me", "/api/auth/logout", "/api/auth/change-password"}
-ADMIN_ONLY_PREFIXES = ("/api/settings",)
+ADMIN_ONLY_PREFIXES = ("/api/settings", "/api/auth/audit-logs")
 ADMIN_OR_TRADER_PREFIXES = (
     "/api/master-data/backfill",
     "/api/master-data/build-features",
