@@ -72,11 +72,11 @@ All trading decisions, risk limits, paper execution, lifecycle persistence, Tele
 - [ ] Identify CDN dependencies and a safe build/deployment strategy before introducing a new toolchain.
 
 ### Phase 1 — Design system and build foundation
-**Status: foundation merged; reproducible install hardening is in validation and full design-system adoption remains in progress.**
+**Status: foundation merged; reproducible install hardening is complete and full design-system adoption remains in progress.**
 
 - [x] Add an isolated React + TypeScript + Vite package/build setup and frontend CI; keep the existing dashboard entry point as the default.
 - [x] Generate and commit `frontend/package-lock.json` through PR #456, based on the registry-resolved install.
-- [ ] Verify `npm ci` in CI on the exact PR head and merge the workflow change that uses it.
+- [x] Verify `npm ci` in CI on the exact PR head and merge the workflow change that uses it (PR #457).
 - [ ] Define design tokens for dark/light surfaces, text, borders, semantic status, focus, spacing, radius and typography.
 - [ ] Add the shared app shell, navigation, buttons, inputs, dialogs, tables, badges, skeletons, empty/error states and toast conventions.
 - [ ] Verify keyboard navigation, focus management, reduced motion, forced colors and contrast in both themes.
@@ -173,7 +173,7 @@ This execution record supplements the phase checklist and preserves the previous
 ### Verified CI and remaining gates
 
 - PR #456 committed `frontend/package-lock.json`; Frontend foundation, pytest, general tests/MariaDB integration, and RetailBot accounting regression passed on its exact PR head before merge.
-- PR #457 is changing CI to `npm ci`, using the lockfile for cache keys, removing temporary bootstrap automation, and updating these docs. It is not considered complete until all required checks pass on its exact head.
+- PR #457 changed CI to `npm ci`, used the lockfile for cache keys, removed temporary bootstrap automation, and updated the migration docs. All required checks passed on its exact head and the first `master` run passed.
 - Repository CI is not evidence of browser visual parity, production deployment, real-user authorization behavior in the owner's environment, or live data correctness.
 - **Mobile navigation accessibility follow-ups merged:** #441 adds Escape dismissal; #443 adds `aria-expanded`/`aria-controls`; #444 manages focus entry and restoration. Their frontend tests/build and backend regression workflows passed on each exact PR head.
 - [ ] Reconcile every route and API call in `docs/UI_UX_VIEW_INVENTORY.md` against current `master`, including roles, forced-password behavior, side effects, polling, and empty/error states.
