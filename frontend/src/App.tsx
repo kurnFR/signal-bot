@@ -62,7 +62,7 @@ export function App() {
   return <div className="app-frame">
     <a className="skip-link" href="#main-content">Skip to main content</a>
     {sidebarOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
-    <aside className={"sidebar " + (sidebarOpen ? "sidebar-open" : "")} aria-label="Dashboard sidebar">
+    <aside id="dashboard-sidebar" className={"sidebar " + (sidebarOpen ? "sidebar-open" : "")} aria-label="Dashboard sidebar">
       <div className="brand">
         <div className="brand-mark" aria-hidden="true"><Activity size={20} strokeWidth={2.5} /></div>
         <div className="brand-copy"><strong>Signal Bot</strong><span>QUANTITATIVE PLATFORM</span></div>
@@ -89,7 +89,7 @@ export function App() {
     <div className="main-column">
       <header className="topbar">
         <div className="topbar-left">
-          <button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
+          <button className="icon-button mobile-menu" aria-label="Open navigation" aria-controls="dashboard-sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
           <div className="breadcrumb"><span>Workspace</span><span className="breadcrumb-separator">/</span><strong>{activeView}</strong></div>
         </div>
         <div className="topbar-actions">
