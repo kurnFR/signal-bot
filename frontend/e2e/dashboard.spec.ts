@@ -148,3 +148,21 @@ test("a temporary session-validation outage preserves the stored token without o
   expect(await page.evaluate(() => window.localStorage.getItem("token"))).toBe("possibly-valid-browser-token");
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toHaveCount(0);
 });
+
+test("Escape closes mobile navigation and restores focus in the browser", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  await mockApi(page);
+  await signIn(page);
+
+  const menuButton = page.getByRole("button", { name: "Open navigation" });
+  await menuButton.click();
+  await expect(menuButton).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("button", { name: "Close navigation" }).first()).toBeVisible();
+
+  await page.keyboard.press("Escape");
+
+  await expect(menuButton).toHaveAttribute("aria-expanded", "false");
+  await expect(menuButton).toBeFocused();
+  await expect(page.locator("#dashboard-sidebar")).not.toHaveClass(/sidebar-open/);
+  await expect(page.locator(".mobile-scrim")).toHaveCount(0);
+});
