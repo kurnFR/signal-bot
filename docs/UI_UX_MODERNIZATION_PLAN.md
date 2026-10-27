@@ -173,6 +173,7 @@ This update supersedes earlier status lines that state the React preview foundat
 
 - The above merged slices were merged only after the observed required checks passed on their exact PR heads, including frontend type-check, frontend unit tests/build, pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration.
 - CI is repository-level evidence only. It does not establish browser visual parity, production deployment, real-user authorization behavior in the owner's environment, or live data correctness.
+- **Mobile navigation accessibility follow-ups merged:** #441 adds Escape dismissal; #443 adds `aria-expanded`/`aria-controls`; #444 manages focus entry and restoration. Their frontend tests/build and backend regression workflows passed on each exact PR head.
 - [ ] Reconcile every route and API call in `docs/UI_UX_VIEW_INVENTORY.md` against current `master`, including roles, forced-password behavior, side effects, polling, and empty/error states.
 - [ ] Add Playwright smoke coverage for sign-in, forced password change, navigation, theme persistence, session expiry, and narrow viewport behavior.
 - [ ] Run keyboard/focus, screen-reader, zoom/reflow, reduced-motion, contrast, and forced-colors checks across every migrated view.
