@@ -36,6 +36,12 @@ describe("frontend foundation shell", () => {
     expect(screen.getByRole("button", { name: /Market Screener/ })).toHaveAttribute("aria-current", "page");
     expect(screen.getByText(/mutating strategy, wallet tracking, trading, worker, deployment, and Telegram actions remain deliberately unavailable/i)).toBeInTheDocument();
   });
+  it("routes Backtest Studio to saved results without enabling execution", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Backtest Studio/ }));
+    expect(screen.getByRole("heading", { level: 1, name: "Backtest Studio" })).toBeInTheDocument();
+    expect(screen.getByText(/Backtest Studio displays saved results and closed-trade evidence/i)).toBeInTheDocument();
+  });
   it("routes Wallet Tracking to the read-only view", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Wallet Tracking/ }));
