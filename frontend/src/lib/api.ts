@@ -62,6 +62,12 @@ export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T>
   });
 
   if (!response.ok) {
+    if (response.status === 401 && path !== "/api/auth/me") {
+      // An authenticated page can outlive its server session. Clear the stale
+      // token and notify the auth gate so the user can sign in again.
+      try { window.localStorage.removeItem("token"); } catch { /* Auth state still resets via the event. */ }
+      window.dispatchEvent(new Event("signal-bot:session-expired"));
+    }
     throw new ApiError(`API request failed with status ${response.status}`, response.status, "http");
   }
 
