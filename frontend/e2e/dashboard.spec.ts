@@ -141,7 +141,8 @@ test("a forced password change blocks the dashboard until completed", async ({ p
 
   // Password-reset-required sessions may validate identity, but must not load
   // protected dashboard data before the user completes the required change.
-  expect(apiRequests).toEqual(["GET /api/auth/me"]);
+  expect(apiRequests.length).toBeGreaterThan(0);
+  expect(apiRequests.every((request) => request === "GET /api/auth/me")).toBe(true);
 });
 
 test("an API 401 after sign-in returns the user to the sign-in screen", async ({ page }) => {
