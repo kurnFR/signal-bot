@@ -143,7 +143,7 @@ export function App() {
             <li className="roadmap-active"><span className="roadmap-step">04</span><div><strong>Domain views and final parity</strong><p>Paper Trading read-only monitor first, then wallets, ML, backtests, research, settings, and parity regression.</p></div><span className="roadmap-state">In progress</span></li>
           </ol>
         </section>
-        <footer className="page-footer"><span><Activity size={14} /> Signal Bot frontend migration</span><span>Preview build · no production data</span></footer>
+        <footer className="page-footer"><span><Activity size={14} /> Signal Bot frontend migration</span><span>Read-only API preview · legacy dashboard unchanged</span></footer>
       </main>
     </div>
   </div>;
