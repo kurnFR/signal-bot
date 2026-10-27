@@ -7,6 +7,7 @@ import { WalletTrackingPanel } from "./WalletTrackingPanel";
 import { BacktestStudioPanel } from "./BacktestStudioPanel";
 import { MLStudioPanel } from "./MLStudioPanel";
 import { ResearchPanel } from "./ResearchPanel";
+import { NewsAIPanel } from "./NewsAIPanel";
 import { Activity, BarChart3, Bell, BookOpen, BrainCircuit, ChevronDown, CircleHelp, Command, LayoutDashboard, LogOut, Menu, Moon, Search, Settings2, ShieldCheck, Sun, WalletCards, X } from "lucide-react";
 import { useAuth } from "./AuthGate";
 
@@ -20,6 +21,7 @@ const NAV_ITEMS = [
   { label: "Backtest Studio", description: "Saved backtest results and trade evidence", icon: BarChart3 },
   { label: "ML Studio", description: "Saved ML experiments and model artifacts", icon: BrainCircuit },
   { label: "Research", description: "RetailBot2 positions and strategy performance", icon: Activity },
+  { label: "News AI", description: "Sentiment signals and macro events", icon: Activity },
   { label: "Settings", description: "Preferences and access", icon: Settings2 },
 ] as const;
 
@@ -98,11 +100,11 @@ export function App() {
 
         <section className="migration-notice" aria-labelledby="preview-notice-title">
           <div className="notice-icon"><ShieldCheck size={20} /></div>
-          <div><h2 id="preview-notice-title">Incremental frontend migration</h2><p>Overview and Market Screener V2 are connected to existing APIs. Paper Trading is a read-only ledger and risk monitor. Strategy Library, Wallet Tracking, Backtest Studio, and ML Studio are read-only views. Wallet Tracking displays tracker health, monitored addresses, token flow, and recent events. Backtest Studio displays saved results and closed-trade evidence; ML Studio displays persisted experiments and model eligibility. Research displays RetailBot2 positions, closed trades, and lifecycle readback. Running backtests or experiments, deploying models, and changing promotion policy are not available. Mutating strategy, wallet tracking, trading, worker, deployment, and Telegram actions remain deliberately unavailable. The legacy dashboard remains the default application.</p></div>
+          <div><h2 id="preview-notice-title">Incremental frontend migration</h2><p>Overview and Market Screener V2 are connected to existing APIs. Paper Trading is a read-only ledger and risk monitor. Strategy Library, Wallet Tracking, Backtest Studio, and ML Studio are read-only views. Wallet Tracking displays tracker health, monitored addresses, token flow, and recent events. Backtest Studio displays saved results and closed-trade evidence; ML Studio displays persisted experiments and model eligibility. Research displays RetailBot2 positions, closed trades, and lifecycle readback. News AI displays persisted sentiment metrics, signals, and macro events. Running backtests or experiments, deploying models, and changing promotion policy are not available. Mutating strategy, wallet tracking, trading, worker, deployment, and Telegram actions remain deliberately unavailable. The legacy dashboard remains the default application.</p></div>
           <span className="notice-tag">READ ONLY</span>
         </section>
 
-        {activeView === "Overview" ? <SystemStatusPanel /> : activeView === "Market Screener" ? <ScreenerPanel /> : activeView === "Paper Trading" ? <PaperTradingPanel /> : activeView === "Strategy Library" ? <StrategyLibraryPanel /> : activeView === "Wallet Tracking" ? <WalletTrackingPanel /> : activeView === "Backtest Studio" ? <BacktestStudioPanel /> : activeView === "ML Studio" ? <MLStudioPanel /> : activeView === "Research" ? <ResearchPanel /> : <section className="panel preview-placeholder"><div className="panel-heading"><div><h2>{activeView} migration slice</h2><p>This view remains preview-only until its routes, permissions, schemas, and side effects have been verified.</p></div><span className="panel-counter">NOT CONNECTED</span></div><p className="empty-state">No live data or controls are exposed here yet. Existing dashboard functionality remains available in the legacy application.</p></section>}
+        {activeView === "Overview" ? <SystemStatusPanel /> : activeView === "Market Screener" ? <ScreenerPanel /> : activeView === "Paper Trading" ? <PaperTradingPanel /> : activeView === "Strategy Library" ? <StrategyLibraryPanel /> : activeView === "Wallet Tracking" ? <WalletTrackingPanel /> : activeView === "Backtest Studio" ? <BacktestStudioPanel /> : activeView === "ML Studio" ? <MLStudioPanel /> : activeView === "Research" ? <ResearchPanel /> : activeView === "News AI" ? <NewsAIPanel /> : <section className="panel preview-placeholder"><div className="panel-heading"><div><h2>{activeView} migration slice</h2><p>This view remains preview-only until its routes, permissions, schemas, and side effects have been verified.</p></div><span className="panel-counter">NOT CONNECTED</span></div><p className="empty-state">No live data or controls are exposed here yet. Existing dashboard functionality remains available in the legacy application.</p></section>}
 
         <section className="panel" aria-labelledby="roadmap-title">
           <div className="panel-heading"><div><h2 id="roadmap-title">Migration roadmap</h2><p>Small, testable slices with legacy fallback preserved.</p></div><span className="panel-counter">02 / 05</span></div>
