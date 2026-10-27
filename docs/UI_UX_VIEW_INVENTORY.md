@@ -385,3 +385,31 @@ This table records the endpoints called by the currently merged React preview cl
 - [ ] Add browser-level tests for login, forced password change, logout/session expiry, role differences, responsive navigation, and theme persistence.
 - [ ] Record unresolved discrepancies rather than silently treating draft counts or old endpoint rows as authoritative.
 - [ ] Obtain explicit owner acceptance before the inventory is marked complete or any FastAPI route cutover is proposed.
+
+
+## UIX-00 source audit slice: Market Screener API boundary (2026-10-27)
+
+This slice is verified against the current source files `web/app.py`, `web/routes/research_routes.py`, `db/db.py`, `frontend/src/App.tsx`, `frontend/src/ScreenerPanel.tsx`, `frontend/src/ScreenerControlsPanel.tsx`, and `frontend/src/lib/screener.ts`. It is a focused source audit, not completion of the full 81-route register or a production-readiness claim.
+
+| Method and path | Handler / input | Effective access policy | Result and side effects | React preview consumer |
+|---|---|---|---|---|
+| `GET /api/research/screener/status` | `research_routes.screener_status`; no request body | Authenticated roles including viewer; blocked if `must_change_password` is set | Combines stored screener status with the persisted `enabled` flag. If the control row/table read fails, status falls back to enabled=true; the status helper must still succeed. Does not start or stop the worker process. | `ScreenerPanel` |
+| `GET /api/research/screener/signals?limit=50` | `research_routes.screener_signals`; `limit` integer 1–200, default 50 | Authenticated roles including viewer; blocked if forced password change is required | Read-only query of recent smart-money signals; handler returns `{"signals": [...]}`; failures are returned as HTTP 500 with a generic message. | `ScreenerPanel` |
+| `GET /api/research/screener/stats` | `research_routes.screener_stats`; no request body | Authenticated roles including viewer; blocked if forced password change is required | Read-only aggregate of smart-money signal statistics; failures return HTTP 500 with a generic message. | `ScreenerPanel` |
+| `GET /api/research/screener/control` | `research_routes.screener_control_get`; no request body | Authenticated roles including viewer; blocked if forced password change is required | Returns persisted `enabled`, `overrides`, `updated_at`, and sorted `tunable_fields`. Unlike the status endpoint, a failed control read returns HTTP 500; the React editor currently only fetches this control payload for admin/trader. | `ScreenerControlsPanel` (admin/trader only) |
+| `POST /api/research/screener/control` | `BotControlRequest`: `enabled: bool`, `overrides: Dict[str, Any]` defaulting to empty | `api_security_boundary` allows admin/trader only; viewer is denied with HTTP 403. Forced-password guard runs before role policy. | Validates override keys against `SCREENER_TUNABLE_FIELDS`, checks boolean fields and finite numeric values, and applies configured bounds before calling `set_screener_control`. Persists a soft control record for the running worker to poll; it does not launch, terminate, or restart the process. Success returns status and an approximately 60-second/next-loop-tick note. | Explicit Save action in `ScreenerControlsPanel` |
+
+### Cross-checks and known limits
+
+- The role gate is centralized in `web/app.py`. `RESEARCH_CONTROL_PREFIXES` includes `/api/research/screener/control`; GET is allowed for authenticated roles, while non-GET methods require `admin` or `trader`. The middleware rejects forced-password-change accounts on these paths before reaching the handlers.
+- The control request model accepts `enabled` and an overrides object. The override filter is an allowlist and validates known boolean toggles, rejects booleans/non-numbers where numeric values are required, rejects non-finite numbers, and applies explicit lower/upper bounds for bounded fields. The database helper/worker implementation remains the source of truth for persistence and application timing.
+- The React editor exposes explicit Save and Reload actions, client-side numeric range validation, feedback states, and a viewer restriction message. Its UI role check improves usability only; the server middleware remains authoritative.
+- The frontend preview remains isolated: `web/app.py` still serves `web/static/index.html` from `GET /` and mounts `web/static/` at `/static`. No deployment, production route cutover, or process-control behavior is introduced by this audit.
+- This slice does not establish that every legacy fetch/dialog is mapped, nor does it independently prove live database initialization, runtime worker health, screen-reader conformance, real-device acceptance, or owner approval.
+
+### UIX-00 audit status after this slice
+
+- [x] Focused Market Screener status/signals/stats/control handlers and their central method/role/password gates checked against source.
+- [x] React control editor call path and soft-control side-effect boundary checked against source.
+- [ ] Complete runtime route-registry reconciliation and verify every route row, including schema and side effects, across all 13 routers.
+- [ ] Complete legacy view/dialog/polling/fetch parity, role-specific browser acceptance, broader accessibility/device checks, and explicit owner acceptance.
