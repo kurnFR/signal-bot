@@ -79,6 +79,16 @@ class TestRouteAuthorizationSweep(unittest.TestCase):
                 res = self.client.request(method, path, json={})
                 self.assertEqual(res.status_code, 403, f"viewer can reach {method} {path}")
 
+    def test_custom_strategy_catalog_reads_remain_admin_or_trader_only(self):
+        # Current policy intentionally classifies the whole custom-strategy
+        # prefix as admin/trader-only. Protect the observed behavior until the
+        # product/security owner decides whether viewers should read catalogs.
+        paths = ("/api/custom-strategy/list", "/api/custom-strategy/indicators")
+        with patch("web.app.authenticate_request", return_value=_user("viewer")):
+            for path in paths:
+                res = self.client.get(path)
+                self.assertEqual(res.status_code, 403, f"viewer can read restricted catalog path {path}")
+
     def test_only_admin_can_reach_admin_prefixes(self):
         admin_paths = [(m, p) for m, p in self.ops if p.startswith(("/api/users", "/api/settings", "/api/auth/audit-logs"))]
         self.assertTrue(admin_paths)
