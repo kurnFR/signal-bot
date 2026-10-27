@@ -46,6 +46,6 @@ describe("frontend foundation shell", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Wallet Tracking/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Wallet Tracking" })).toBeInTheDocument();
-    expect(screen.getByText(/Wallet Tracking displays existing health, monitored addresses, token flow, and recent events/i)).toBeInTheDocument();
+    expect(screen.getByText(/Wallet Tracking displays tracker health, monitored addresses, token flow, and recent events/i)).toBeInTheDocument();
   });
 });
