@@ -22,6 +22,12 @@ describe("frontend foundation shell", () => {
     expect(screen.getByRole("navigation", { name: "Primary navigation" })).toBeInTheDocument();
     expect(screen.getByRole("main")).toHaveAttribute("id", "main-content");
   });
+  it("restores the saved theme on the next render", () => {
+    window.localStorage.setItem("signal-bot-ui-theme", "light");
+    render(<App />);
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+    expect(screen.getByRole("button", { name: "Switch to dark theme" })).toBeInTheDocument();
+  });
   it("switches and persists the selected theme", () => {
     render(<App />);
     expect(document.documentElement).toHaveAttribute("data-theme", "dark");
