@@ -60,4 +60,10 @@ describe("frontend foundation shell", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Research" })).toBeInTheDocument();
     expect(screen.getByText(/Review RetailBot2 positions, closed trades, strategy lifecycle flags/i)).toBeInTheDocument();
   });
+  it("routes News AI to the read-only sentiment and events view", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /News AI/ }));
+    expect(screen.getByRole("heading", { level: 1, name: "News AI" })).toBeInTheDocument();
+    expect(screen.getByText(/News AI displays persisted sentiment metrics, signals, and macro events/i)).toBeInTheDocument();
+  });
 });
