@@ -42,7 +42,7 @@ describe("frontend foundation shell", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Backtest Studio" })).toBeInTheDocument();
     expect(screen.getByText(/Backtest Studio displays saved results and closed-trade evidence/i)).toBeInTheDocument();
   });
-  it("routes Wallet Tracking to the read-only view", () => {
+  it("routes ML Studio to persisted research without enabling deployment", () => {\n    render(<App />);\n    fireEvent.click(screen.getByRole("button", { name: /ML Studio/ }));\n    expect(screen.getByRole("heading", { level: 1, name: "ML Studio" })).toBeInTheDocument();\n    expect(screen.getByText(/ML Studio displays persisted experiments and model eligibility/i)).toBeInTheDocument();\n  });\n  it("routes Wallet Tracking to the read-only view", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Wallet Tracking/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Wallet Tracking" })).toBeInTheDocument();
