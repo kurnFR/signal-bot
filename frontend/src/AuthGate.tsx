@@ -27,9 +27,16 @@ export function AuthGate({ children }: { children: ReactNode }) {
       if (!active) return;
       setUser(profile);
       setScreen(profile.must_change_password ? "password-change" : "authenticated");
-    }).catch(() => {
+    }).catch((cause) => {
       if (!active) return;
-      try { window.localStorage.removeItem("token"); } catch { /* Session state still resets below. */ }
+      // Only an explicit 401 proves the stored session is invalid. A timeout,
+      // network failure, or server error must not destroy a valid local session.
+      if (cause instanceof ApiError && cause.status === 401) {
+        try { window.localStorage.removeItem("token"); } catch { /* Session state still resets below. */ }
+        setError(null);
+      } else {
+        setError("Unable to verify your session. The server may be temporarily unavailable. Please try signing in again.");
+      }
       setScreen("login");
     });
     return () => { active = false; };

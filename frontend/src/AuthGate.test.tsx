@@ -89,6 +89,17 @@ describe("React authentication gate", () => {
       credentials: "same-origin",
     }));
   });
+  it("preserves the stored session when session validation has a server error", async () => {
+    window.localStorage.setItem("token", "possibly-valid-session-token");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Service unavailable" }), {
+      status: 503,
+      headers: { "content-type": "application/json" },
+    })));
+    render(<AuthGate><div>Protected dashboard</div></AuthGate>);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Unable to verify your session/i);
+    expect(window.localStorage.getItem("token")).toBe("possibly-valid-session-token");
+    expect(screen.queryByText("Protected dashboard")).not.toBeInTheDocument();
+  });
   it("shows server login errors accessibly", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Invalid username or password" }), { status: 401, headers: { "content-type": "application/json" } })));
     render(<AuthGate><div>Protected dashboard</div></AuthGate>);
