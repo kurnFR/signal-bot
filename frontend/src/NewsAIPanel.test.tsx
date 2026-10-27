@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { NewsAIPanel } from "./NewsAIPanel";
 
 const responses = {
@@ -35,7 +35,7 @@ describe("NewsAIPanel", () => {
     render(<NewsAIPanel />);
     await screen.findByText("Bitcoin market update");
     const input = screen.getByRole("textbox", { name: "Filter News AI signals" });
-    await import("@testing-library/react").then(({ fireEvent }) => fireEvent.change(input, { target: { value: "ETH" } }));
+    fireEvent.change(input, { target: { value: "ETH" } });
     expect(screen.queryByText("Bitcoin market update")).not.toBeInTheDocument();
     expect(screen.getByText("No signals match this filter.")).toBeInTheDocument();
   });
