@@ -49,6 +49,45 @@ async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePa
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ total_signals: 0, signals_last_24h: 0, by_type_last_24h: {} }) });
       return;
     }
+
+    // Domain views receive realistic empty payloads so this browser test checks
+    // navigation and read-only behavior, rather than crashing on malformed mocks.
+    const json = (body: unknown) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+    if (path === "/api/paper/positions") return json({ positions: [] });
+    if (path === "/api/paper/configs") return json({ configs: [] });
+    if (path === "/api/paper/orders") return json({ orders: [] });
+    if (path === "/api/paper/trades") return json({ trades: [] });
+    if (path === "/api/paper/metrics") return json({ metrics: { totalTrades: 0, wins: 0, losses: 0, winRatePct: 0, cumulativeR: 0, expectancyR: 0, netPnl: 0, byStrategy: [] } });
+    if (path === "/api/paper/circuit-breakers") return json({ status: "ok", emergency_stop_active: false, emergency_stop_reason: null, active_positions: 0, max_concurrent_positions: 10, today_realized_pnl_usd: 0, max_daily_loss_usd: 100, open_notional_usd: 0, max_total_notional_usd: 1000, can_open_new_position: true, message: "ok" });
+
+    if (path === "/api/custom-strategy/list") return json({ strategies: [] });
+    if (path === "/api/custom-strategy/indicators") return json({ indicators: [], operators: [] });
+
+    if (path === "/api/wallets/meta") return json({ periods_hours: [], chains: {}, min_net_usd: 0, auto_track_net_usd: 0 });
+    if (path === "/api/wallets/settings") return json({ enabled: false, networks: [], pools_per_network: 0, min_trade_usd: 0, min_net_usd: 0, auto_track_net_usd: 0, poll_interval_seconds: 0, retention_days: 0, api_delay_seconds: 0, token_mode: "all", token_addresses: [] });
+    if (path === "/api/wallets/status") return json({});
+    if (path === "/api/wallets/tracked") return json({ tracked: [] });
+    if (path === "/api/wallets/positions") return json({ positions: [] });
+    if (path === "/api/wallets/token-flow") return json({ flows: [] });
+    if (path === "/api/wallets/events") return json({ events: [] });
+
+    if (path === "/api/backtest/strategies") return json({ strategies: [] });
+    if (path === "/api/backtest/history") return json({ runs: [] });
+    if (path === "/api/ml/experiments") return json({ experiments: [] });
+    if (path === "/api/ml/models") return json({ models: [] });
+
+    if (path === "/api/research/retailbot2/positions") return json({ positions: [] });
+    if (path === "/api/research/retailbot2/trades") return json({ trades: [] });
+    if (path === "/api/research/retailbot2/stats") return json({ by_strategy: [], by_mode: {} });
+    if (path === "/api/research/retailbot2/strategies") return json({ strategies: [] });
+
+    if (path === "/api/news/stats") return json({ bullish_count: 0, bearish_count: 0, neutral_count: 0, average_confidence: 0, active_overlay_multiplier: 1 });
+    if (path === "/api/news/signals") return json({ signals: [] });
+    if (path === "/api/news/events") return json({ events: [] });
+
+    if (path === "/api/master-data/coverage") return json({ summary: { totalCandles: 0, distinctSymbols: 0, coverageEntries: 0 }, coverage: [] });
+    if (path === "/api/master-data/jobs") return json({ jobs: [] });
+
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
   });
 }
