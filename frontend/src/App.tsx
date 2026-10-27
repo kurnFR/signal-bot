@@ -3,6 +3,7 @@ import { SystemStatusPanel } from "./SystemStatusPanel";
 import { ScreenerPanel } from "./ScreenerPanel";
 import { PaperTradingPanel } from "./PaperTradingPanel";
 import { StrategyLibraryPanel } from "./StrategyLibraryPanel";
+import { WalletTrackingPanel } from "./WalletTrackingPanel";
 import { Activity, Bell, BookOpen, ChevronDown, CircleHelp, Command, LayoutDashboard, LogOut, Menu, Moon, Search, Settings2, ShieldCheck, Sun, WalletCards, X } from "lucide-react";
 import { useAuth } from "./AuthGate";
 
@@ -12,6 +13,7 @@ const NAV_ITEMS = [
   { label: "Market Screener", description: "Signals and market coverage", icon: Activity },
   { label: "Paper Trading", description: "Simulated orders and positions", icon: WalletCards },
   { label: "Strategy Library", description: "Saved rules and indicator catalog", icon: BookOpen },
+  { label: "Wallet Tracking", description: "On-chain wallet and token flow monitor", icon: WalletCards },
   { label: "Settings", description: "Preferences and access", icon: Settings2 },
 ] as const;
 
@@ -90,11 +92,11 @@ export function App() {
 
         <section className="migration-notice" aria-labelledby="preview-notice-title">
           <div className="notice-icon"><ShieldCheck size={20} /></div>
-          <div><h2 id="preview-notice-title">Incremental frontend migration</h2><p>Overview and Market Screener V2 are connected to existing APIs. Paper Trading is a read-only ledger and risk monitor. Strategy Library is a read-only view of saved rules and indicator metadata. Mutating strategy, trading, worker, deployment, and Telegram actions remain deliberately unavailable. The legacy dashboard remains the default application.</p></div>
+          <div><h2 id="preview-notice-title">Incremental frontend migration</h2><p>Overview and Market Screener V2 are connected to existing APIs. Paper Trading is a read-only ledger and risk monitor. Strategy Library and Wallet Tracking are read-only views. Wallet Tracking displays existing health, monitored addresses, token flow, and recent events. Mutating strategy, wallet tracking, trading, worker, deployment, and Telegram actions remain deliberately unavailable. The legacy dashboard remains the default application.</p></div>
           <span className="notice-tag">READ ONLY</span>
         </section>
 
-        {activeView === "Overview" ? <SystemStatusPanel /> : activeView === "Market Screener" ? <ScreenerPanel /> : activeView === "Paper Trading" ? <PaperTradingPanel /> : activeView === "Strategy Library" ? <StrategyLibraryPanel /> : <section className="panel preview-placeholder"><div className="panel-heading"><div><h2>{activeView} migration slice</h2><p>This view remains preview-only until its routes, permissions, schemas, and side effects have been verified.</p></div><span className="panel-counter">NOT CONNECTED</span></div><p className="empty-state">No live data or controls are exposed here yet. Existing dashboard functionality remains available in the legacy application.</p></section>}
+        {activeView === "Overview" ? <SystemStatusPanel /> : activeView === "Market Screener" ? <ScreenerPanel /> : activeView === "Paper Trading" ? <PaperTradingPanel /> : activeView === "Strategy Library" ? <StrategyLibraryPanel /> : activeView === "Wallet Tracking" ? <WalletTrackingPanel /> : <section className="panel preview-placeholder"><div className="panel-heading"><div><h2>{activeView} migration slice</h2><p>This view remains preview-only until its routes, permissions, schemas, and side effects have been verified.</p></div><span className="panel-counter">NOT CONNECTED</span></div><p className="empty-state">No live data or controls are exposed here yet. Existing dashboard functionality remains available in the legacy application.</p></section>}
 
         <section className="panel" aria-labelledby="roadmap-title">
           <div className="panel-heading"><div><h2 id="roadmap-title">Migration roadmap</h2><p>Small, testable slices with legacy fallback preserved.</p></div><span className="panel-counter">02 / 05</span></div>
