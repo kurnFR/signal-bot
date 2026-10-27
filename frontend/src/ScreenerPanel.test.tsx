@@ -26,7 +26,7 @@ describe("read-only Market Screener V2 panel", () => {
     expect(screen.getByText("BTCUSDT")).toBeInTheDocument();
     expect(screen.queryByText("ETHUSDT")).not.toBeInTheDocument();
     const requestedPaths = fetchMock.mock.calls.map(([path]) => String(path));
-    expect(screen.getByText(/settings editing is unavailable in the migration preview/i)).toBeInTheDocument();
+    expect(screen.getByText(/This migration preview is read-only/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Save changes/i })).not.toBeInTheDocument();
     expect(requestedPaths.some((path) => path.includes("/control"))).toBe(false);
     expect(fetchMock.mock.calls.every(([, options]) => options?.method === "GET" || options?.method === undefined)).toBe(true);
