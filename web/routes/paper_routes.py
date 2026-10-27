@@ -135,8 +135,15 @@ def sync_market_tick():
         # res.json() call then throws its own confusing
         # "Unexpected token... is not valid JSON" error, masking whatever
         # the real backend bug was. Return JSON with the real detail instead.
-        logging.getLogger("web.paper_routes").exception("sync_market_tick failed")
-        raise HTTPException(status_code=500, detail=f"Sync failed: {e}")
+        # Preserve JSON errors without exposing exception text that may contain
+        # credentials, internal paths, or database metadata.
+        logging.getLogger("web.paper_routes").error(
+            "sync_market_tick failed (%s)", type(e).__name__
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Paper-trading sync failed; check server logs for diagnostics",
+        )
 
 
 class DeployStrategyRequest(BaseModel):
@@ -202,14 +209,21 @@ def deploy_strategy(req: DeployStrategyRequest):
                 rank_score=req.rank_score
             )
         except Exception as e:
-            telegram_res = {"success": False, "error": str(e)}
+            # Raw exceptions may contain token-bearing URLs or request details.
+            logging.getLogger("web.paper_routes").error(
+                "Deployment Telegram alert failed (%s)", type(e).__name__
+            )
+            telegram_res = {"success": False, "error": "Telegram deployment alert failed"}
 
     # 3. Immediate evaluation against latest candle
     eval_res = {}
     try:
         eval_res = sync_and_evaluate_paper_trading()
     except Exception as eval_err:
-        eval_res = {"error": str(eval_err)}
+        logging.getLogger("web.paper_routes").error(
+            "Paper-trading evaluation after deployment failed (%s)", type(eval_err).__name__
+        )
+        eval_res = {"error": "Paper-trading evaluation failed"}
 
     deployment_status = "success" if "error" not in eval_res else "partial"
     return {
