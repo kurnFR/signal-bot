@@ -8,12 +8,16 @@ const user = {
   must_change_password: false,
 };
 
-async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePasswordChange?: boolean; sessionValidationUnavailable?: boolean; deniedPath?: string } = {}) {
+async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePasswordChange?: boolean; sessionValidationUnavailable?: boolean; deniedPath?: string; loginRejected?: boolean } = {}) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
     if (path === "/api/auth/login" && request.method() === "POST") {
+      if (options.loginRejected) {
+        await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "Invalid username or password" }) });
+        return;
+      }
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ token: "playwright-session-token", user: { ...user, must_change_password: Boolean(options.forcePasswordChange) } }) });
       return;
     }
@@ -344,4 +348,14 @@ test("explicit sign-out revokes the session and returns to the sign-in screen", 
     method: "POST",
     authorization: "Bearer playwright-session-token",
   }]);
+});
+
+test("a rejected sign-in keeps protected content hidden and does not persist a token", async ({ page }) => {
+  await mockApi(page, { loginRejected: true });
+  await signIn(page);
+
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveText("Invalid username or password");
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toHaveCount(0);
+  expect(await page.evaluate(() => window.localStorage.getItem("token"))).toBeNull();
 });
