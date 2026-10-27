@@ -26,6 +26,53 @@ describe("React authentication gate", () => {
     expect(await screen.findByRole("heading", { name: "Change your password" })).toBeInTheDocument();
     expect(screen.queryByText("Protected dashboard")).not.toBeInTheDocument();
   });
+  it("validates password confirmation before sending a password-change request", async () => {
+    window.localStorage.setItem("token", "temporary-session-token");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: true };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(profile), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><div>Protected dashboard</div></AuthGate>);
+    expect(await screen.findByRole("heading", { name: "Change your password" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Current password"), { target: { value: "temporary-password" } });
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "new-password-123" } });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "different-password-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("New password and confirmation do not match.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Protected dashboard")).not.toBeInTheDocument();
+  });
+  it("unlocks the dashboard only after the server confirms a forced password change", async () => {
+    window.localStorage.setItem("token", "temporary-session-token");
+    const temporaryProfile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: true };
+    const activeProfile = { ...temporaryProfile, must_change_password: false };
+    const json = (body: unknown) => new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json(temporaryProfile))
+      .mockResolvedValueOnce(json({}))
+      .mockResolvedValueOnce(json(activeProfile));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><div>Protected dashboard</div></AuthGate>);
+    expect(await screen.findByRole("heading", { name: "Change your password" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Current password"), { target: { value: "temporary-password" } });
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "new-password-123" } });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "new-password-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+    expect(await screen.findByText("Protected dashboard")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/auth/change-password", expect.objectContaining({
+      method: "POST",
+      credentials: "same-origin",
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/auth/me", expect.objectContaining({
+      method: "GET",
+      credentials: "same-origin",
+    }));
+  });
   it("clears an expired stored session and returns to sign in", async () => {
     window.localStorage.setItem("token", "expired-session-token");
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Not authenticated" }), {
