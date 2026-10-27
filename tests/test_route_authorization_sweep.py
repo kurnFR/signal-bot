@@ -52,6 +52,18 @@ class TestRouteAuthorizationSweep(unittest.TestCase):
     def test_route_table_is_not_empty(self):
         self.assertGreater(len(self.ops), 40)
 
+    def test_every_registered_mutation_has_an_explicit_role_policy(self):
+        # New mutating routes must be deliberately classified, not merely
+        # denied by the fail-closed fallback. This catches policy drift as
+        # router modules add endpoints.
+        for method, path in self.ops:
+            if method not in MUTATING or (method, path) in PUBLIC:
+                continue
+            self.assertTrue(
+                any(_role_allowed(method, path, role) for role in ("admin", "trader", "viewer")),
+                f"{method} {path} has no explicit role policy; classify it before merging",
+            )
+
     def test_every_api_operation_requires_authentication(self):
         for method, path in self.ops:
             if (method, path) in PUBLIC:
