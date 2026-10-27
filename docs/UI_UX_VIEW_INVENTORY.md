@@ -1,9 +1,9 @@
 # Signal Bot UI/UX Comprehensive View & API Inventory (UIX-00)
 
 **Document Version:** 1.1.0  
-**Status:** In review — detailed draft; independent source verification and owner acceptance pending  
+**Status:** In review — React preview endpoint mapping added; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `b412118d46055a216628c3548f0be898e1457e90` (current master; source-level recheck remains required)  
+**Source baseline for reconciliation:** `96cce57422230a24937bc5306f9b0b4b5aa0c395` (master as of 2026-10-27; route-by-route reconciliation remains open)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -338,3 +338,32 @@ The following draft register lists 81 API endpoint rows across 14 route modules 
 - [x] **Available CI Evidence:** The `pytest` check passed on Antigravity commit `74d67c2`; the reported total of 116 tests and complete suite coverage have not been independently audited in this review.
 - [ ] **Acceptance Review Gate:** **In Review / Pending Acceptance**. UIX-00 will be marked complete only after the user/owner has reviewed and approved this baseline inventory.
 - [ ] **UIX-01 Lockout:** Phase UIX-01 (Frontend Foundation) and package installations remain blocked until this PR is merged.
+
+
+## 13. React preview route-to-API map (verified 2026-10-27)
+
+This table records the endpoints called by the currently merged React preview clients at source baseline `96cce57422230a24937bc5306f9b0b4b5aa0c395`. It is **not** a claim that the full legacy dashboard inventory has been reconciled or that the React preview has feature parity. Confirm actual FastAPI route registration, RBAC and forced-password behavior against source before any production cutover.
+
+| React preview view | Client module | Endpoints called by the view | Side-effect boundary |
+|---|---|---|---|
+| Authentication gate | `lib/auth.ts` | `POST /api/auth/login`, `GET /api/auth/me` (session bootstrap contract), `POST /api/auth/logout`, `POST /api/auth/change-password` | Authentication mutations are intentional and use the existing server contract; password-change gating and session-expiry browser tests remain required. |
+| Overview | `lib/systemStatus.ts` | `GET /api/system/status` | Sanitized status read; must not expose the admin-only `/api/settings/status` connection details. |
+| Market Screener | `lib/screener.ts` | `GET /api/research/screener/status`, `GET /api/research/screener/signals?limit=50`, `GET /api/research/screener/stats` | The read snapshot uses GET only. The module also exports a separate control save helper; its reachability, rendering, and role behavior must be reviewed independently before claiming the whole feature is read-only. |
+| Paper Trading | `lib/paperTrading.ts` | `GET /api/paper/positions`, `GET /api/paper/configs`, `GET /api/paper/orders?limit=20`, `GET /api/paper/trades?limit=20`, `GET /api/paper/metrics`, `GET /api/paper/circuit-breakers` | Read-only ledger/risk monitor; no order, config, deploy, cancel, or worker mutation from this view. |
+| Strategy Library | `lib/strategyLibrary.ts` | `GET /api/custom-strategy/list`, `GET /api/custom-strategy/indicators` | Catalog-only view; create/update/test/AI actions are not exposed by this client. |
+| Wallet Tracking | `lib/walletTracking.ts` | `GET /api/wallets/meta`, `GET /api/wallets/settings`, `GET /api/wallets/status`, `GET /api/wallets/tracked`, `GET /api/wallets/positions?period_hours=24&limit=20`, `GET /api/wallets/token-flow?period_hours=24&limit=10`, `GET /api/wallets/events?limit=20` | Read-only snapshot; no wallet settings, tracked-address, or worker mutation. Verify that all returned settings fields are safe for every authorized role. |
+| Backtest Studio | `lib/backtestStudio.ts` | `GET /api/backtest/strategies`, `GET /api/backtest/history?limit=100`, `GET /api/backtest/runs/{runId}` | Saved results only; no run, run-all, promotion, or paper deployment request. |
+| ML Studio | `lib/mlStudio.ts` | `GET /api/ml/experiments`, `GET /api/ml/models`, `GET /api/ml/experiments/{experimentId}` | Persisted experiment/model reads only; no training or deploy-to-paper request. |
+| Research | `lib/research.ts` | `GET /api/research/retailbot2/positions?limit=100`, `GET /api/research/retailbot2/trades?limit=50`, `GET /api/research/retailbot2/stats`, `GET /api/research/retailbot2/strategies` | Lifecycle readback only; no evaluation/paper/Telegram/report mutation. |
+| News AI | `lib/news.ts` | `GET /api/news/stats`, `GET /api/news/signals?limit=50`, `GET /api/news/events?limit=30` | Saved overlay data only; no poller, inference, execution, or Telegram action. |
+| Master Data | `lib/masterData.ts` | `GET /api/master-data/coverage`, `GET /api/master-data/jobs` | Coverage/job status only; no backfill, feature build, or worker launch. |
+| Settings | `SettingsPanel.tsx` | No API calls; uses existing local theme state and auth-gate identity | No admin status, credentials, user administration, Telegram test, or server setting mutation. |
+
+### Still required before accepting UIX-00
+
+- [ ] Compare every legacy `web/static/index.html` view, dynamically created dialog, polling loop, and fetch call against the current route registry.
+- [ ] Verify method, request/response schema, role restriction, forced-password guard, and side effects for every endpoint; include `/api/auth/me` and all mutation paths.
+- [ ] Verify whether any component reachable from the React preview imports or calls mutation helpers outside the view's declared read-only path.
+- [ ] Add browser-level tests for login, forced password change, logout/session expiry, role differences, responsive navigation, and theme persistence.
+- [ ] Record unresolved discrepancies rather than silently treating draft counts or old endpoint rows as authoritative.
+- [ ] Obtain explicit owner acceptance before the inventory is marked complete or any FastAPI route cutover is proposed.
