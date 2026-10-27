@@ -72,4 +72,12 @@ describe("frontend foundation shell", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Master Data" })).toBeInTheDocument();
     expect(screen.getByText(/Master Data displays stored candle coverage, feature availability, and recent job status/i)).toBeInTheDocument();
   });
+  it("routes Settings to safe workspace preferences without server mutations", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+    expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Current session" })).toBeInTheDocument();
+    expect(screen.getByText(/System connection details, user management, credential settings/i)).toBeInTheDocument();
+  });
 });
