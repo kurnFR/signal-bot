@@ -9,6 +9,7 @@ import { MLStudioPanel } from "./MLStudioPanel";
 import { ResearchPanel } from "./ResearchPanel";
 import { NewsAIPanel } from "./NewsAIPanel";
 import { MasterDataPanel } from "./MasterDataPanel";
+import { SettingsPanel } from "./SettingsPanel";
 import { Activity, BarChart3, Bell, BookOpen, BrainCircuit, Database, ChevronDown, CircleHelp, Command, LayoutDashboard, LogOut, Menu, Moon, Search, Settings2, ShieldCheck, Sun, WalletCards, X } from "lucide-react";
 import { useAuth } from "./AuthGate";
 
@@ -106,7 +107,7 @@ export function App() {
           <span className="notice-tag">READ ONLY</span>
         </section>
 
-        {activeView === "Overview" ? <SystemStatusPanel /> : activeView === "Market Screener" ? <ScreenerPanel /> : activeView === "Paper Trading" ? <PaperTradingPanel /> : activeView === "Strategy Library" ? <StrategyLibraryPanel /> : activeView === "Wallet Tracking" ? <WalletTrackingPanel /> : activeView === "Backtest Studio" ? <BacktestStudioPanel /> : activeView === "ML Studio" ? <MLStudioPanel /> : activeView === "Research" ? <ResearchPanel /> : activeView === "News AI" ? <NewsAIPanel /> : activeView === "Master Data" ? <MasterDataPanel /> : <section className="panel preview-placeholder"><div className="panel-heading"><div><h2>{activeView} migration slice</h2><p>This view remains preview-only until its routes, permissions, schemas, and side effects have been verified.</p></div><span className="panel-counter">NOT CONNECTED</span></div><p className="empty-state">No live data or controls are exposed here yet. Existing dashboard functionality remains available in the legacy application.</p></section>}
+        {activeView === "Overview" ? <SystemStatusPanel /> : activeView === "Market Screener" ? <ScreenerPanel /> : activeView === "Paper Trading" ? <PaperTradingPanel /> : activeView === "Strategy Library" ? <StrategyLibraryPanel /> : activeView === "Wallet Tracking" ? <WalletTrackingPanel /> : activeView === "Backtest Studio" ? <BacktestStudioPanel /> : activeView === "ML Studio" ? <MLStudioPanel /> : activeView === "Research" ? <ResearchPanel /> : activeView === "News AI" ? <NewsAIPanel /> : activeView === "Master Data" ? <MasterDataPanel /> : activeView === "Settings" ? <SettingsPanel theme={theme} onToggleTheme={toggleTheme} username={auth?.user.username} role={auth?.user.role} /> : <section className="panel preview-placeholder"><div className="panel-heading"><div><h2>{activeView} migration slice</h2><p>This view remains preview-only until its routes, permissions, schemas, and side effects have been verified.</p></div><span className="panel-counter">NOT CONNECTED</span></div><p className="empty-state">No live data or controls are exposed here yet. Existing dashboard functionality remains available in the legacy application.</p></section>}
 
         <section className="panel" aria-labelledby="roadmap-title">
           <div className="panel-heading"><div><h2 id="roadmap-title">Migration roadmap</h2><p>Small, testable slices with legacy fallback preserved.</p></div><span className="panel-counter">02 / 05</span></div>
