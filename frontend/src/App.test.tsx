@@ -91,7 +91,9 @@ describe("frontend foundation shell", () => {
     fireEvent.click(screen.getByRole("button", { name: /Market Screener/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Market Screener" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Market Screener/ })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText(/mutating strategy, wallet tracking, trading, worker, deployment, and Telegram actions remain deliberately unavailable/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Screener configuration" })).toBeInTheDocument();
+    expect(screen.getByText(/configuration editing is restricted to admin and trader roles/i)).toBeInTheDocument();
+    expect(screen.getByText(/other strategy, wallet tracking, trading, worker, deployment, and Telegram mutations remain deliberately unavailable/i)).toBeInTheDocument();
   });
   it("routes Backtest Studio to saved results without enabling execution", () => {
     render(<App />);
