@@ -359,3 +359,20 @@ test("a rejected sign-in keeps protected content hidden and does not persist a t
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toHaveCount(0);
   expect(await page.evaluate(() => window.localStorage.getItem("token"))).toBeNull();
 });
+
+test("an unauthenticated browser load does not request protected dashboard APIs", async ({ page }) => {
+  const apiRequests: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/")) {
+      apiRequests.push(request.method() + " " + url.pathname);
+    }
+  });
+
+  await mockApi(page);
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toHaveCount(0);
+  expect(apiRequests).toEqual([]);
+});
