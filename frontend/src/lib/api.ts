@@ -17,7 +17,7 @@ export class ApiError extends Error {
 }
 
 export function assertApiPath(path: string): void {
-  if (!path.startsWith("/api/") || path.startsWith("//") || path.includes("\\\\") || /^[a-z][a-z\\d+.-]*:/i.test(path)) {
+  if (!path.startsWith("/api/") || path.startsWith("//") || path.includes("\\") || /^[a-z][a-z\d+.-]*:/i.test(path)) {
     throw new TypeError("API requests must use a same-origin /api/ path");
   }
 
@@ -33,7 +33,7 @@ export function assertApiPath(path: string): void {
     } catch {
       throw new TypeError("API request path contains invalid percent encoding");
     }
-    if (decoded === "." || decoded === ".." || decoded.includes("/") || decoded.includes("\\\\")) {
+    if (decoded === "." || decoded === ".." || decoded.includes("/") || decoded.includes("\\")) {
       throw new TypeError("API request path must not contain traversal or encoded separators");
     }
   }
