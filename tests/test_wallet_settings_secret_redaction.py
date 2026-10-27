@@ -46,7 +46,7 @@ class TestWalletSettingsSecretRedaction(unittest.TestCase):
         secret = "birdeye-live-secret-123456"
         saved = {
             "enabled": True,
-            "networks": ["ethereum"],
+            "networks": ["eth"],
             "pools_per_network": 4,
             "min_trade_usd": 10000,
             "min_net_usd": 150000,
