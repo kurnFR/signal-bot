@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SystemStatusPanel } from "./SystemStatusPanel";
 import { ScreenerPanel } from "./ScreenerPanel";
+import { ScreenerControlsPanel } from "./ScreenerControlsPanel";
 import { PaperTradingPanel } from "./PaperTradingPanel";
 import { StrategyLibraryPanel } from "./StrategyLibraryPanel";
 import { WalletTrackingPanel } from "./WalletTrackingPanel";
