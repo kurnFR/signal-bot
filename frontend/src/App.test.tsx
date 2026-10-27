@@ -18,7 +18,7 @@ describe("frontend foundation shell", () => {
   afterEach(() => vi.unstubAllGlobals());
   it("clearly labels the preview as API-connected and keeps the legacy dashboard unchanged", () => {
     render(<App />);
-    expect(screen.getByText("Read-only API preview · legacy dashboard unchanged")).toBeInTheDocument();
+    expect(screen.getByText("API preview · limited screener controls; legacy dashboard unchanged")).toBeInTheDocument();
     expect(screen.getByText(/Overview and Market Screener V2 are connected to existing APIs/i)).toBeInTheDocument();
   });
   it("disables placeholder actions that are not implemented in the preview", () => {
