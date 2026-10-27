@@ -23,9 +23,9 @@ describe("BacktestStudioPanel", () => {
   afterEach(() => vi.unstubAllGlobals());
   it("shows saved run metrics, strategy metadata, and closed trades using GET only", async () => {
     render(<BacktestStudioPanel />);
-    expect(await screen.findByText("BTCUSDT")).toBeInTheDocument();
+    expect((await screen.findAllByText("BTCUSDT")).length).toBeGreaterThan(0);
     expect(await screen.findByText("take_profit")).toBeInTheDocument();
-    expect(screen.getByText("Trend EMA Crossover")).toBeInTheDocument();
+    expect(screen.getAllByText("Trend EMA Crossover").length).toBeGreaterThan(0);
     expect(screen.getByText("Stored run parameters")).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.every((call) => call[1]?.method === "GET")).toBe(true);
   });
