@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { AuthGate } from "./AuthGate";
+import { getJson } from "./lib/api";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.localStorage.clear(); });
 
@@ -109,4 +110,36 @@ describe("React authentication gate", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Invalid username or password");
     expect(screen.queryByText("Protected dashboard")).not.toBeInTheDocument();
   });
+  it("returns an active dashboard to sign-in when a later API request receives 401", async () => {
+    const user = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const loginResponse = new Response(JSON.stringify({ token: "active-session-token", user }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+    const expiredResponse = new Response(JSON.stringify({ detail: "Not authenticated" }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce(loginResponse).mockResolvedValueOnce(expiredResponse);
+    vi.stubGlobal("fetch", fetchMock);
+
+    function ProtectedContent() {
+      return <button onClick={() => void getJson("/api/paper/positions").catch(() => undefined)}>Load protected data</button>;
+    }
+
+    render(<AuthGate><ProtectedContent /></AuthGate>);
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "trader01" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "correct-password" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByRole("button", { name: "Load protected data" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("token")).toBe("active-session-token");
+
+    fireEvent.click(screen.getByRole("button", { name: "Load protected data" }));
+
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your session has expired. Sign in again to continue.");
+    expect(window.localStorage.getItem("token")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Load protected data" })).not.toBeInTheDocument();
+  });
+
 });

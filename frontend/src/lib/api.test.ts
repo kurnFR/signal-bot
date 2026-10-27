@@ -36,6 +36,19 @@ describe("read-only same-origin API transport", () => {
     await expect(getJson("/api/health")).rejects.not.toThrow("secret server detail");
   });
 
+  it("clears expired tokens and dispatches a session-expired event for protected API reads", async () => {
+    window.localStorage.setItem("token", "expired-session-token");
+    const listener = vi.fn();
+    window.addEventListener("signal-bot:session-expired", listener);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Not authenticated" }), { status: 401 })));
+
+    await expect(getJson("/api/paper/positions")).rejects.toMatchObject({ status: 401, code: "http" });
+
+    expect(window.localStorage.getItem("token")).toBeNull();
+    expect(listener).toHaveBeenCalledTimes(1);
+    window.removeEventListener("signal-bot:session-expired", listener);
+  });
+
   it("rejects HTML and malformed JSON responses", async () => {
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(new Response("<html></html>", { status: 200, headers: { "content-type": "text/html" } }))
