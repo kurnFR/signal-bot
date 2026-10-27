@@ -182,7 +182,7 @@ test("password confirmation mismatch is rejected in the browser without sending 
 
   await expect(page.getByRole("heading", { name: "Change your password" })).toBeVisible();
   await page.getByLabel("Current password").fill("current-password");
-  await page.getByLabel("New password").fill("valid-new-password");
+  await page.getByLabel("New password", { exact: true }).fill("valid-new-password");
   await page.getByLabel("Confirm new password").fill("different-new-password");
   await page.getByRole("button", { name: "Change password" }).click();
 
@@ -203,6 +203,7 @@ test("all domain preview views remain read-only during browser navigation", asyn
 
   await mockApi(page);
   await signIn(page);
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
 
   const views = [
     "Paper Trading",
@@ -217,8 +218,8 @@ test("all domain preview views remain read-only during browser navigation", asyn
   ];
 
   for (const view of views) {
-    await page.getByRole("button", { name: new RegExp(view) }).click();
-    await expect(page.getByRole("heading", { level: 1, name: view })).toBeVisible();
+    await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: view, exact: true }).click();
+    await expect(page.locator("h1")).toHaveText(view);
   }
 
   expect(mutations).toEqual([]);
