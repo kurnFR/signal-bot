@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import unittest
 
-from web.app import app
+from web.app import app, _role_allowed
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,4 +67,20 @@ class TestFrontendApiRouteParity(unittest.TestCase):
             missing,
             "Frontend GET helpers reference unregistered FastAPI routes: "
             + repr(missing),
+        )
+
+    def test_preview_get_endpoints_are_readable_by_the_trader_role(self):
+        # The browser smoke suite signs in as a trader. Keep every connected
+        # read-only panel usable for that role instead of silently rendering
+        # a permission error because its endpoint is admin-only.
+        frontend_paths = _frontend_get_paths()
+        denied = {
+            path: locations
+            for path, locations in frontend_paths.items()
+            if not _role_allowed("GET", path, "trader")
+        }
+        self.assertFalse(
+            denied,
+            "Preview GET endpoints are not readable by the trader role: "
+            + repr(denied),
         )
