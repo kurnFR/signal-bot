@@ -56,6 +56,19 @@ describe("frontend foundation shell", () => {
     fireEvent.click(closeButton!);
     expect(menuButton).toHaveFocus();
   });
+  it("closes mobile navigation after selecting a view and restores focus to the menu button", () => {
+    render(<App />);
+    const menuButton = screen.getByRole("button", { name: "Open navigation" });
+    fireEvent.click(menuButton);
+    expect(menuButton).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: /Wallet Tracking/ }));
+
+    expect(screen.getByRole("heading", { level: 1, name: "Wallet Tracking" })).toBeInTheDocument();
+    expect(menuButton).toHaveAttribute("aria-expanded", "false");
+    expect(menuButton).toHaveFocus();
+    expect(document.querySelector(".mobile-scrim")).not.toBeInTheDocument();
+  });
   it("changes the active navigation item and keeps non-Overview views disconnected", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Market Screener/ }));
