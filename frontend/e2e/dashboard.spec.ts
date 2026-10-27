@@ -232,6 +232,10 @@ test("password confirmation mismatch is rejected in the browser without sending 
 
 
 test("all domain preview views remain read-only during browser navigation", async ({ page }) => {
+  await mockApi(page);
+  await signIn(page);
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+
   const mutations: string[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
@@ -239,10 +243,6 @@ test("all domain preview views remain read-only during browser navigation", asyn
       mutations.push(request.method() + " " + url.pathname);
     }
   });
-
-  await mockApi(page);
-  await signIn(page);
-  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
 
   const views = [
     "Paper Trading",
