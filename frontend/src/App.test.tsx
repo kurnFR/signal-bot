@@ -16,7 +16,12 @@ describe("frontend foundation shell", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(statusResponse), { status: 200, headers: { "content-type": "application/json" } })));
   });
   afterEach(() => vi.unstubAllGlobals());
-  it("clearly labels the preview as API-connected and keeps the legacy dashboard unchanged", () => {\n    render(<App />);\n    expect(screen.getByText("Read-only API preview · legacy dashboard unchanged")).toBeInTheDocument();\n    expect(screen.getByText(/Overview and Market Screener V2 are connected to existing APIs/i)).toBeInTheDocument();\n  });\n  it("provides a skip link and labelled primary navigation", () => {
+  it("clearly labels the preview as API-connected and keeps the legacy dashboard unchanged", () => {
+    render(<App />);
+    expect(screen.getByText("Read-only API preview · legacy dashboard unchanged")).toBeInTheDocument();
+    expect(screen.getByText(/Overview and Market Screener V2 are connected to existing APIs/i)).toBeInTheDocument();
+  });
+  it("provides a skip link and labelled primary navigation", () => {
     render(<App />);
     expect(screen.getByRole("link", { name: "Skip to main content" })).toHaveAttribute("href", "#main-content");
     expect(screen.getByRole("navigation", { name: "Primary navigation" })).toBeInTheDocument();
