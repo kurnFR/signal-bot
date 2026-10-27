@@ -29,15 +29,16 @@ jobs:
           node-version: "20"
           cache: npm
           cache-dependency-path: frontend/package.json
-      - name: Install pinned frontend dependencies
+      - name: Install pinned frontend dependencies (lockfile bootstrap phase)
         run: npm install --no-audit --no-fund
-      - name: Bootstrap lockfile artifact (temporary)
+      # Temporary bridge until the generated lockfile is committed and CI uses npm ci.
+      - name: Bootstrap lockfile artifact for reproducible install migration
         uses: actions/upload-artifact@v4
         with:
           name: frontend-lockfile-bootstrap
           path: frontend/package-lock.json
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 2
       - name: Type-check
         run: npm run typecheck
       - name: Unit tests
