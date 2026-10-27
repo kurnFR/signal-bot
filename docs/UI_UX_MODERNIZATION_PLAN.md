@@ -179,7 +179,7 @@ This execution record supplements the phase checklist and preserves the previous
 - **Mobile navigation accessibility follow-ups merged:** #441 adds Escape dismissal; #443 adds `aria-expanded`/`aria-controls`; #444 manages focus entry and restoration. Their frontend tests/build and backend regression workflows passed on each exact PR head.
 - [ ] Reconcile every route and API call in `docs/UI_UX_VIEW_INVENTORY.md` against current `master`, including roles, forced-password behavior, side effects, polling, and empty/error states.
 - [x] Add initial Playwright smoke coverage for sign-in, forced password change, navigation, theme persistence, and session expiry (PR #476; three real-browser tests passed on the exact PR head).
-- [ ] Extend browser coverage to narrow viewports and broader critical flows.
+- [x] Add a 320px narrow-viewport Playwright smoke test (PR #480). It exposed 20px of horizontal overflow; disabled placeholder actions and Help are now hidden at widths <=380px, while the theme control remains available. Broader critical flows remain pending.
 - [ ] Run keyboard/focus, screen-reader, zoom/reflow, reduced-motion, contrast, and forced-colors checks across every migrated view.
 - [ ] Complete missing read-only Master Data/Settings parity and identify any remaining unimplemented views before exposing the preview to users.
 - [ ] Decide and test a controlled route/feature-flag rollout only after parity acceptance; do not switch FastAPI's default dashboard until explicit owner acceptance.
@@ -208,7 +208,9 @@ Regression tests inject synthetic secret-bearing exception strings and assert th
 
 - [ ] Continue auditing API routes and background services for raw exception details, credential leakage, unsafe logging, authorization mismatches, and unintended side effects.
 - [ ] Review all authenticated role/method combinations against route inventory, especially endpoints added after the centralized fail-closed authorization boundary.
-- [x] Establish a Playwright Chromium smoke gate for authentication, forced-password gating, navigation/theme persistence, and session-expiry recovery (PR #476). [ ] Expand to route parity, narrow viewport, keyboard/focus, and broader accessibility acceptance.
+- [x] Establish a Playwright Chromium smoke gate for authentication, forced-password gating, navigation/theme persistence, and session-expiry recovery (PR #476).
+- [x] Add narrow-viewport browser coverage and fix the overflow it revealed (PR #480).
+- [ ] Expand to route parity, keyboard/focus, screen-reader, zoom/reflow, forced-colors, and broader accessibility acceptance.
 - [ ] Complete view/API parity and document remaining limitations before any production route switch.
 - [ ] Keep production deployment, live trading, workers, database changes, and Telegram operations outside this work unless explicitly approved.
 
@@ -224,4 +226,4 @@ PR [#476](https://github.com/kurnFR/signal-bot/pull/476) adds a Playwright Chrom
 - Forced-password-change gating before protected content is rendered.
 - A protected API 401 after sign-in clears the stale token and returns the user to sign-in.
 
-Validation on exact PR head `afd29907cd9124ff59c5d412b97bc7d1d6657ffe`: frontend typecheck, Vitest unit tests, production build, Playwright Chromium smoke tests, Python tests, wallet-tracker MariaDB integration, and RetailBot accounting regression all passed. The browser suite is an initial smoke gate, not full visual parity, device coverage, route acceptance, or WCAG certification.
+Validation on exact PR head `afd29907cd9124ff59c5d412b97bc7d1d6657ffe`: frontend typecheck, Vitest unit tests, production build, Playwright Chromium smoke tests, Python tests, wallet-tracker MariaDB integration, and RetailBot accounting regression all passed. The browser suite is an initial smoke gate, not full visual parity, device coverage, route acceptance, or WCAG certification. PR [#480](https://github.com/kurnFR/signal-bot/pull/480) adds a 320px viewport navigation check and fixes the 20px horizontal overflow detected by that test; disabled placeholder actions and Help are hidden at <=380px while the theme control remains available. All required checks passed on exact head `ca4c9ab3351eb89703af73f9336923250ff5504a` before merge.
