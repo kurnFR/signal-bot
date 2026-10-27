@@ -29,13 +29,18 @@ describe("frontend foundation shell", () => {
     expect(document.documentElement).toHaveAttribute("data-theme", "light");
     expect(window.localStorage.getItem("signal-bot-ui-theme")).toBe("light");
   });
-  it("closes mobile navigation when Escape is pressed", () => {
+  it("exposes mobile navigation state and closes it when Escape is pressed", () => {
     render(<App />);
     const sidebar = screen.getByLabelText("Dashboard sidebar");
-    fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
+    const menuButton = screen.getByRole("button", { name: "Open navigation" });
+    expect(menuButton).toHaveAttribute("aria-controls", "dashboard-sidebar");
+    expect(menuButton).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(menuButton);
     expect(sidebar).toHaveClass("sidebar-open");
+    expect(menuButton).toHaveAttribute("aria-expanded", "true");
     fireEvent.keyDown(window, { key: "Escape" });
     expect(sidebar).not.toHaveClass("sidebar-open");
+    expect(menuButton).toHaveAttribute("aria-expanded", "false");
     expect(document.querySelector(".mobile-scrim")).not.toBeInTheDocument();
   });
   it("changes the active navigation item and keeps non-Overview views disconnected", () => {
