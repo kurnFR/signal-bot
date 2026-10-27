@@ -115,3 +115,21 @@ test("mobile viewport keeps navigation usable and exposes the selected view", as
   }));
   expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
 });
+
+
+test("Market Screener preview does not issue mutation requests", async ({ page }) => {
+  const mutations: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/research/screener/") && request.method() !== "GET") {
+      mutations.push(request.method() + " " + url.pathname);
+    }
+  });
+
+  await mockApi(page);
+  await signIn(page);
+  await page.getByRole("button", { name: /Market Screener/ }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Market Screener" })).toBeVisible();
+  await expect(page.getByText("No recent smart-money signals were returned.")).toBeVisible();
+  expect(mutations).toEqual([]);
+});
