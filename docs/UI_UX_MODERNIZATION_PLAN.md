@@ -1,6 +1,6 @@
 # Signal Bot UI/UX Modernization Plan
 
-**Status as of 2026-10-26: incremental UI/UX improvements are merged; the recommended React/TypeScript frontend migration is not complete and has not started as a production code migration.**
+**Status as of 2026-10-27: the isolated React/TypeScript preview migration is actively underway; it is not production-mounted and is not a replacement for the legacy dashboard.**
 
 This plan separates the improvements already present in the current dashboard from the future frontend architecture. It is intentionally incremental: preserve the Python/FastAPI backend, existing APIs, database schema, worker behavior, strategy/risk controls, and Telegram gates unless a separately reviewed change requires otherwise. No deployment is implied by a merge.
 
@@ -19,7 +19,7 @@ The repository already has a light/dark theme toggle and a substantial set of ta
 | Responsive table and mobile polish | **Implemented for identified issues** | Mobile viewport-aware scrolling, sticky headers and sorting improvements are present. Real-device verification remains open. |
 | Light/dark theme | **Present; full design-system consistency not verified** | Existing theme toggle and enhancement CSS exist. Audit every dashboard view, modal, chart, table, and dynamically inserted element for parity. |
 | Market Screener V2 | **Existing view; modernization completion unverified** | View and API integration exist. Complete product-level UX, empty/error/loading states, accessibility and mobile acceptance review remains open. |
-| React + TypeScript + component library migration | **Not started / not complete** | No evidence of an implemented React/TypeScript build pipeline or migration of the existing dashboard. |
+| React + TypeScript preview migration | **In progress; preview-only** | Vite/React/TypeScript foundation and read-only views are merged; frontend remains isolated from FastAPI static serving. Full parity, browser verification, and rollout acceptance remain open. |
 | Browser-level visual and interaction regression suite | **Incomplete** | Unit and static frontend checks exist; end-to-end browser checks and visual regression coverage are still needed. |
 | Runtime/manual verification | **Not done in this work** | No browser session against the owner's deployed environment was performed and no deployment was made. |
 
@@ -146,3 +146,39 @@ The migration is complete only when all of the following are true:
 4. Merge only after all required checks pass on the exact PR head.
 5. Update this plan and `docs/PROJECT_PROGRESS.md` after each meaningful phase.
 6. No live deployment, production database mutation, worker restart, live trading, or Telegram changes without explicit authorization.
+
+
+## 9. Execution update — 2026-10-27
+
+This update supersedes earlier status lines that state the React preview foundation or pilot views have not started. It does **not** supersede the production-safety rule: the preview is isolated, the legacy dashboard remains the default, and no deployment is implied by a GitHub merge.
+
+### Merged preview slices
+
+| PR | Preview capability | Boundary |
+|---|---|---|
+| [#417](https://github.com/kurnFR/signal-bot/pull/417) | React/TypeScript/Vite foundation and responsive shell | Isolated build; not mounted by FastAPI |
+| [#421](https://github.com/kurnFR/signal-bot/pull/421) | Market Screener V2 read view | No screener control mutations |
+| [#423](https://github.com/kurnFR/signal-bot/pull/423) | Existing authentication gate | Browser-level parity and role-aware control audit remain open |
+| [#427](https://github.com/kurnFR/signal-bot/pull/427) | Paper Trading ledger/risk monitor | Read-only; no deploy/cancel/config actions |
+| [#430](https://github.com/kurnFR/signal-bot/pull/430) | Wallet Tracking | Read-only; no wallet/worker mutations |
+| [#431](https://github.com/kurnFR/signal-bot/pull/431) | Backtest Studio saved results | No backtest execution or promotion |
+| [#432](https://github.com/kurnFR/signal-bot/pull/432) | ML Studio saved experiments and model eligibility | No ML runs or model deployment |
+| [#433](https://github.com/kurnFR/signal-bot/pull/433) | Research positions, closed trades, lifecycle readback | No lifecycle, paper, or Telegram mutations |
+| [#434](https://github.com/kurnFR/signal-bot/pull/434) | News AI sentiment and event feed | No polling, inference, strategy execution, or alerts |
+| [#435](https://github.com/kurnFR/signal-bot/pull/435) | Master Data coverage and job history | No backfills, feature builds, or worker launches |
+| [#436](https://github.com/kurnFR/signal-bot/pull/436) | Safe Settings preview | Local theme preference and basic session identity only; no admin settings |
+
+### Verified CI and remaining gates
+
+- The above merged slices were merged only after the observed required checks passed on their exact PR heads, including frontend type-check, frontend unit tests/build, pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration.
+- CI is repository-level evidence only. It does not establish browser visual parity, production deployment, real-user authorization behavior in the owner's environment, or live data correctness.
+- [ ] Reconcile every route and API call in `docs/UI_UX_VIEW_INVENTORY.md` against current `master`, including roles, forced-password behavior, side effects, polling, and empty/error states.
+- [ ] Add Playwright smoke coverage for sign-in, forced password change, navigation, theme persistence, session expiry, and narrow viewport behavior.
+- [ ] Run keyboard/focus, screen-reader, zoom/reflow, reduced-motion, contrast, and forced-colors checks across every migrated view.
+- [ ] Complete missing read-only Master Data/Settings parity and identify any remaining unimplemented views before exposing the preview to users.
+- [ ] Decide and test a controlled route/feature-flag rollout only after parity acceptance; do not switch FastAPI's default dashboard until explicit owner acceptance.
+- [ ] Keep mutation work (strategy promotion, Telegram eligibility, paper controls, backfills, model deployment, wallet/worker control) in separate API-backed PRs with role and side-effect tests.
+
+### Current safe operating rule
+
+The React preview is still **not mounted by FastAPI**. Do not claim a complete frontend migration. Do not remove or redirect the legacy dashboard until every view's parity, permissions, side effects, responsive behavior, accessibility, and regression tests are accepted. No live deployment, production DB, worker, trading, or Telegram changes were made by these UI preview slices.
