@@ -72,9 +72,10 @@ All trading decisions, risk limits, paper execution, lifecycle persistence, Tele
 - [ ] Identify CDN dependencies and a safe build/deployment strategy before introducing a new toolchain.
 
 ### Phase 1 — Design system and build foundation
-**Status: not started.**
+**Status: foundation merged; reproducible install hardening and full design-system adoption remain in progress.**
 
-- [ ] Add a pinned local frontend package/build setup on a dedicated branch; do not remove the existing dashboard entry point yet.
+- [x] Add an isolated React + TypeScript + Vite package/build setup and frontend CI; keep the existing dashboard entry point as the default.
+- [ ] Generate and commit `frontend/package-lock.json`, verify it in a clean install, and change CI from `npm install` to `npm ci` so dependency resolution is reproducible.
 - [ ] Define design tokens for dark/light surfaces, text, borders, semantic status, focus, spacing, radius and typography.
 - [ ] Add the shared app shell, navigation, buttons, inputs, dialogs, tables, badges, skeletons, empty/error states and toast conventions.
 - [ ] Verify keyboard navigation, focus management, reduced motion, forced colors and contrast in both themes.
