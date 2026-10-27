@@ -735,12 +735,12 @@ This section supersedes older UIX status statements above where they say the Rea
 
 | Work item | Status | Next action |
 |---|---|---|
-| UIX-00 route/view inventory | In review / not accepted | Independently reconcile inventory rows and totals against current FastAPI route registry and source; audit RBAC, view flows, polling, and side effects; record owner acceptance. |
-| UIX-01 frontend foundation | Merged; release hardening incomplete | Generate and commit a reproducible npm lockfile; keep CI install deterministic. |
-| UIX-02 read-only Overview | Pilot merged; not served by FastAPI | Finish API contract/parity review, verify authentication/session behavior, add browser-level tests, and decide a safe preview/rollout mechanism before serving it. |
-| UIX-03 Market Screener V2 | Not started | Map existing screener endpoints and behavior first; then migrate as a separate tested slice. |
-| UIX-04 remaining domain views | Not started | Migrate strategies, paper trading, backtest, wallets, ML/research, settings, and related dialogs in separate risk-ordered slices. |
-| UIX-05 final parity and release | Not started | Complete route parity, accessibility, browser/device, regression, reproducible-build, and owner acceptance gates before legacy retirement. |
+| UIX-00 route/view inventory | Source decorator count checked; runtime parity and owner acceptance pending | Static source review counted 81 router endpoint decorators across 13 included router modules plus app-level `GET /`; reconcile effective method/path and all 81 inventory rows against the runtime FastAPI registry, RBAC, polling, and side effects. |
+| UIX-01 frontend foundation | Merged; reproducible install hardening incomplete | Commit and validate a reproducible npm lockfile, then use `npm ci` in CI. Current workflow still uses `npm install`. |
+| UIX-02 read-only Overview and auth | Pilot merged; not served by FastAPI | Finish API contract/parity review and browser-level session/auth tests; legacy remains default. |
+| UIX-03 Market Screener V2 | Read-only preview merged; not served by FastAPI | Complete behavior parity and separate authorization/persistence tests before migrating any control mutations. |
+| UIX-04 read-only domain previews | Multiple slices merged; parity incomplete | Paper Trading, Strategy Library, Wallet Tracking, Backtest, ML, Research, News AI, Master Data, and safe Settings previews exist; reconcile each view's APIs, RBAC, responsive behavior, and side-effect boundaries. |
+| UIX-05 final parity and release | Not started | Add browser-level tests, complete accessibility/device checks, finish runtime route parity and reproducible-build gates, and obtain explicit owner acceptance before any cutover. |
 
 ### Hard safety boundary
 
@@ -772,7 +772,10 @@ This section supersedes older UI/UX statements in this document that describe th
 - **Merged safe Settings preview:** #436 exposes the existing local light/dark preference and basic auth-gate identity only. Admin-only system details, credentials, user management, and Telegram controls remain out of this preview.
 - **Existing foundation:** #417 created the React/TypeScript/Vite shell, #421 added Market Screener V2 read-only preview, and #423 added the existing server-backed auth gate.
 - **CI evidence:** each merged UI PR was gated on the exact PR head with frontend type-check/unit tests/build plus repository pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration checks. This is CI evidence, not proof of runtime deployment, production behavior, profitability, or full UI parity.
-- **Remaining UIX work:** reconcile the comprehensive route/API inventory against current master; add Playwright/browser smoke coverage; perform keyboard, focus, screen-reader, contrast, zoom/reflow, forced-colors and mobile checks; document any routes that are still not migrated; obtain explicit owner acceptance before any route cutover.
+- **PR #439 merged:** corrected stale inventory statements about frontend manifests and documented the remaining lockfile and browser-test gaps.
+- **PR #440 merged:** source inspection verified 81 HTTP route decorators across the 13 included router modules, plus app-level `GET /`. This is a static-source count only; effective runtime paths, mounted/framework routes, and one-to-one inventory parity still need validation.
+- **PR #441 merged:** mobile sidebar now closes on Escape; a Testing Library regression test covers open-state and scrim dismissal. Frontend type-check, unit tests, production build, Python test suite, unit tests, MariaDB integration, and paper-accounting workflows passed on the exact PR head.
+- **Remaining UIX work:** compare every inventory row to effective runtime routes and RBAC; add Playwright/browser smoke coverage; perform keyboard, focus, screen-reader, contrast, zoom/reflow, forced-colors and real-mobile checks; obtain explicit owner acceptance before any route cutover.
 - **Safety boundary:** no production deployment, DB changes, worker restarts, backfills, paper execution, model deployment, or Telegram actions were performed by these preview PRs. Legacy dashboard remains the default.
 
-Next recommended work is inventory reconciliation and browser-level parity/accessibility coverage, followed by separately scoped settings or other view gaps. Strategy-promotion and Telegram policy changes must remain separate, server-authorized work with explicit persistence, eligibility, accounting, audit, and stop/hide regression tests.
+Next recommended work is reproducible frontend installs (lockfile plus `npm ci`), then runtime route/RBAC reconciliation and browser-level parity/accessibility coverage. Strategy-promotion and Telegram policy changes remain separately scoped, server-authorized work with explicit persistence, eligibility, accounting, audit, and stop/hide regression tests.
