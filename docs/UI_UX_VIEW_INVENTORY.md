@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `3c176ebe2c407a3d035e370cbf1da180f5c6b786` (master after PR #503; source-level route decorator count checked on 2026-10-27, runtime route registry and endpoint-to-row parity still pending)  
+**Source baseline for reconciliation:** `abec7c24477a5774c429e4eb04de6948fe99470b` (master after PR #505; source-level route decorator count checked on 2026-10-27, runtime route registry and endpoint-to-row parity still pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -428,3 +428,10 @@ The role hierarchy in Section 3 describes `viewer` as read-only for dashboards a
 | `ADMIN_OR_TRADER_PREFIXES` is a prefix-wide rule | Changing it to permit GET broadly could unintentionally alter access for every route under the prefix. | If viewer reads are approved, split read and mutation policy narrowly by exact method/path rather than relaxing the prefix indiscriminately. |
 
 **Gate:** Do not modify authorization behavior as part of a documentation-only UI migration slice. Resolve the policy with the owner, add regression tests for the chosen rule, and only then implement it in a separate code change. This discrepancy is not proof of a vulnerability; it is a mismatch between broad role documentation and the effective route policy that needs an explicit decision.
+
+
+### Regression coverage follow-up (2026-10-27; PR #505)
+
+- PR #505 adds a route-authorization sweep regression asserting that viewer requests to `GET /api/custom-strategy/list` and `GET /api/custom-strategy/indicators` receive HTTP 403 under the current prefix-wide `ADMIN_OR_TRADER_PREFIXES` rule.
+- The test records existing behavior; it does not establish that this is the desired long-term product policy. The owner decision remains open. If viewer catalog access is approved, change policy narrowly and update tests/UI copy in a separate reviewed PR.
+- PR #505 passed pytest, unit tests, Wallet Tracker MariaDB integration, and RetailBot paper-accounting regression before merge. No runtime authorization change, deployment, or production route cutover occurred.
