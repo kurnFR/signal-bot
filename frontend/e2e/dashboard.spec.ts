@@ -89,3 +89,25 @@ test("an API 401 after sign-in returns the user to the sign-in screen", async ({
   await expect(page.getByRole("alert")).toHaveText("Your session has expired. Sign in again to continue.");
   expect(await page.evaluate(() => window.localStorage.getItem("token"))).toBeNull();
 });
+
+test("mobile navigation remains usable at a narrow viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockApi(page);
+  await signIn(page);
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+
+  const menuButton = page.getByRole("button", { name: "Open navigation" });
+  await expect(menuButton).toBeVisible();
+  await expect(menuButton).toHaveAttribute("aria-expanded", "false");
+  await menuButton.click();
+
+  await expect(menuButton).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("button", { name: "Close navigation" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Wallet Tracking" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Wallet Tracking" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Wallet Tracking" })).toBeVisible();
+  await expect(menuButton).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("button", { name: "Close navigation" })).toHaveCount(0);
+  await expect(menuButton).toBeFocused();
+});
