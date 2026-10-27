@@ -19,6 +19,18 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const handleSessionExpired = () => {
+      try { window.localStorage.removeItem("token"); } catch { /* In-memory auth state still resets. */ }
+      setUser(null);
+      setPassword("");
+      setError("Your session has expired. Sign in again to continue.");
+      setScreen("login");
+    };
+    window.addEventListener("signal-bot:session-expired", handleSessionExpired);
+    return () => window.removeEventListener("signal-bot:session-expired", handleSessionExpired);
+  }, []);
+
+  useEffect(() => {
     let active = true;
     let token: string | null = null;
     try { token = window.localStorage.getItem("token"); } catch { token = null; }
