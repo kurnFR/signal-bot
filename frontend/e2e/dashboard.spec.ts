@@ -9,6 +9,7 @@ const user = {
 };
 
 async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePasswordChange?: boolean; sessionValidationUnavailable?: boolean; deniedPath?: string; loginRejected?: boolean } = {}) {
+  const activeUser = { ...user, role: options.role ?? user.role };
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -18,7 +19,7 @@ async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePa
         await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "Invalid username or password" }) });
         return;
       }
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ token: "playwright-session-token", user: { ...user, must_change_password: Boolean(options.forcePasswordChange) } }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ token: "playwright-session-token", user: { ...activeUser, must_change_password: Boolean(options.forcePasswordChange) } }) });
       return;
     }
     if (path === "/api/auth/me") {
@@ -26,7 +27,7 @@ async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePa
         await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "Service unavailable" }) });
         return;
       }
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...user, must_change_password: Boolean(options.forcePasswordChange) }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...activeUser, must_change_password: Boolean(options.forcePasswordChange) }) });
       return;
     }
     if (options.deniedPath === path) {
@@ -55,6 +56,10 @@ async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePa
     }
     if (path === "/api/research/screener/stats") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ total_signals: 0, signals_last_24h: 0, by_type_last_24h: {} }) });
+      return;
+    }
+    if (path === "/api/research/screener/control" && request.method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ enabled: true, overrides: {}, updated_at: null, tunable_fields: ["rvol_multiplier", "enable_divergence_detection"] }) });
       return;
     }
 
@@ -180,6 +185,24 @@ test("mobile viewport keeps navigation usable and exposes the selected view", as
   expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
 });
 
+
+test("Market Screener exposes role-gated control settings to an authorized trader", async ({ page }) => {
+  await mockApi(page);
+  await signIn(page);
+  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: "Market Screener", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Screener configuration" })).toBeVisible();
+  await expect(page.getByLabel(/Telegram alerting enabled/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save changes" })).toBeVisible();
+});
+
+test("Market Screener hides editable controls from viewer sessions", async ({ page }) => {
+  await mockApi(page, { role: "viewer" });
+  await signIn(page);
+  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: "Market Screener", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Screener configuration" })).toBeVisible();
+  await expect(page.getByText(/restricted to admin and trader roles/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save changes" })).toHaveCount(0);
+});
 
 test("Market Screener preview does not issue mutation requests", async ({ page }) => {
   const mutations: string[] = [];
