@@ -335,10 +335,11 @@ The following draft register lists 81 API endpoint rows across the 13 router mod
 
 - [ ] **Repository Inspection:** Recheck static serving, entrypoint, CORS, manifests, and Node/npm availability on the current source baseline.
 - [ ] **View Inventory:** 11 navigation views and 7 dialogs are mapped in the draft; reconcile conditional panels, forms, modal triggers, and error states against current source.
-- [ ] **API Register:** 81 endpoint rows are supplied across 14 router modules; independently verify route count, handler names, role restrictions, forced-password-change behavior, schemas, side effects, and frontend callers.
+- [x] **API route-count baseline:** Source inspection of all 13 routers included by `web/app.py` confirms 81 `@router` HTTP endpoint decorators, plus the app-level `GET /` route. This confirms the decorator count only; runtime route registration, handler-by-handler authorization, schemas, side effects, and caller parity remain open.
 - [x] **Available CI Evidence:** The `pytest` check passed on Antigravity commit `74d67c2`; the reported total of 116 tests and complete suite coverage have not been independently audited in this review.
 - [ ] **Acceptance Review Gate:** **In Review / Pending Acceptance**. UIX-00 will be marked complete only after the user/owner has reviewed and approved this baseline inventory.
-- [ ] **UIX-01 Lockout:** Phase UIX-01 (Frontend Foundation) and package installations remain blocked until this PR is merged.
+- [x] **UIX-01 foundation status:** The React/Vite preview, committed lockfile, and frontend CI are already present. PR #499 is merged, and its `Frontend foundation` workflow run #132 completed successfully, including Playwright browser smoke tests. This does not complete UIX-00 or authorize production cutover.
+- [ ] **Remaining audit scope:** Verify route methods, request/response schemas, role restrictions, forced-password guard, side effects, and route-to-view parity; complete the full accessibility/responsive/role/session browser acceptance suite.
 
 
 ## 13. React preview route-to-API map (verified 2026-10-27)
@@ -359,6 +360,13 @@ This table records the endpoints called by the currently merged React preview cl
 | News AI | `lib/news.ts` | `GET /api/news/stats`, `GET /api/news/signals?limit=50`, `GET /api/news/events?limit=30` | Saved overlay data only; no poller, inference, execution, or Telegram action. |
 | Master Data | `lib/masterData.ts` | `GET /api/master-data/coverage`, `GET /api/master-data/jobs` | Coverage/job status only; no backfill, feature build, or worker launch. |
 | Settings | `SettingsPanel.tsx` | No API calls; uses existing local theme state and auth-gate identity | No admin status, credentials, user administration, Telegram test, or server setting mutation. |
+
+### Audit checkpoint (2026-10-27)
+
+- `web/app.py` includes 13 routers and serves the legacy dashboard from the FastAPI application; the React preview remains separate from the production root entrypoint.
+- Source decorator count: 81 HTTP route decorators across the 13 included routers, plus `GET /` in `web/app.py`. The count is not a substitute for inspecting FastAPI's final route registry or validating each handler.
+- `frontend/src/App.tsx` currently renders `ScreenerPanel` but does not import/render `ScreenerControlsPanel`. The latter is a standalone component that calls `saveScreenerControl` (`POST /api/research/screener/control`). Therefore, its mutation UI is not reachable from the current preview navigation at this source baseline; the preview notice and roadmap copy should be reconciled with this fact before any claim that the control UI is shipped.
+- The current workflow run #132 confirms the forced-password-change browser smoke test path passes, but does not establish completion of the full login, logout/session-expiry, role-difference, responsive-navigation, and theme-persistence acceptance suite.
 
 ### Still required before accepting UIX-00
 
