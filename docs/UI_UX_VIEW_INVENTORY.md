@@ -16,10 +16,10 @@ This document is Antigravity's detailed baseline inventory draft for **Phase UIX
 ### Audit Summary Metrics
 - **Navigation Views Audited:** 11 primary views (`view-home`, `view-master-data`, `view-backtest`, `view-paper`, `view-ml-studio`, `view-strategies`, `view-news-ai`, `view-research`, `view-market-screener`, `view-wallet-tracking`, `view-settings`).
 - **Modal Dialogs Audited:** 7 interactive dialogs (`login-modal`, `force-password-modal`, `backfill-modal`, `deploy-modal`, `modal-run-ml`, `modal-deploy-ml`, `modal-inspect-ml`).
-- **Backend API Endpoint Rows Listed:** **81 rows** across 14 router modules in `web/routes/`; count and coverage require reconciliation against FastAPI's actual route registry.
-- **Frontend Tooling State:** The inventory reports no Node.js manifests in the repository. Host Node.js/npm availability must be checked in the actual execution environment; repository inspection alone cannot establish PATH availability.
+- **Backend API Endpoint Rows Listed:** The draft register contains 81 endpoint rows. The current `web/app.py` explicitly includes 13 router modules (`auth`, `paper`, `search`, `master_data`, `backtest`, `settings`, `system_status`, `custom_strat`, `telegram`, `ml`, `news`, `research`, and `wallet`). The 81-row endpoint count and completeness remain unverified until compared with the runtime FastAPI route registry, including routes registered outside those routers.
+- **Frontend Tooling State:** The isolated React preview now exists under `frontend/` with `package.json`, TypeScript, Vite, and Vitest. A committed npm lockfile and browser-level Playwright coverage remain outstanding; CI component tests are not a substitute for browser/device acceptance.
 - **Serving Configuration:** FastAPI mounts `web/static/` at `/static` and dynamically injects `dashboard_enhancements.js` into `GET /`.
-- **Gate Invariant:** UIX-00 remains in "In Review / Pending Acceptance" status until explicitly reviewed. No React implementation or frontend package installations will occur before approval.
+- **Gate Invariant:** UIX-00 remains in "In Review / Pending Acceptance" status until route-by-route source verification and owner acceptance are recorded. The isolated React preview has already been implemented in reviewed slices, but must remain disconnected from FastAPI production serving until release gates pass.
 
 ---
 
@@ -38,10 +38,11 @@ This document is Antigravity's detailed baseline inventory draft for **Phase UIX
   immediately before `</body>`.
 - **CORS Configuration:** Controlled via `SIGNAL_BOT_ALLOWED_ORIGINS` (default: `http://localhost:8050,http://127.0.0.1:8050`). `allow_credentials=True`, methods `["GET", "POST", "PUT", "DELETE", "OPTIONS"]`, headers `["Authorization", "Content-Type"]`.
 
-### 2.2 Host Environment & Tooling Audit
-- **Node.js / npm:** Audited on host: `node: The term 'node' is not recognized`. Node.js (>= 20.x LTS) must be provisioned on host/CI before UIX-01.
-- **Manifests & Lockfiles:** Audited entire repository: zero `package.json`, `package-lock.json`, `tsconfig.json`, or `node_modules` exist.
-- **Vite Migration Target:** All modern frontend code will be isolated inside a root-level `frontend/` directory with build output to `frontend/dist/`. The legacy UI (`web/static/`) will remain untouched and serve as the default until UIX-05 consolidation.
+### 2.2 Repository Tooling & Serving State (rechecked 2026-10-27)
+- **Frontend manifests:** `frontend/package.json`, `frontend/tsconfig.json`, and `frontend/vite.config.ts` exist. The preview uses React, TypeScript, Vite, and Vitest; `npm run build` runs the TypeScript check before the production build.
+- **Lockfile:** No `frontend/package-lock.json` was found in the current repository state. Add and validate a committed lockfile before relying on reproducible `npm ci` installs.
+- **Host tooling:** The older note that Node.js was unavailable came from a prior host audit and is not evidence of current CI or execution-environment availability. Verify Node/npm versions in the actual environment used for any build.
+- **Serving boundary:** Modern frontend code remains isolated under `frontend/`, with build output to `frontend/dist/`. FastAPI still serves the legacy `web/static/` dashboard; do not switch routes or mount the preview before browser, parity, RBAC, accessibility, and owner-acceptance gates pass.
 
 ---
 
