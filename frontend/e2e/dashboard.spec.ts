@@ -103,8 +103,8 @@ test("mobile viewport keeps navigation usable and exposes the selected view", as
   await expect(menuButton).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
 
-  await page.getByRole("button", { name: /Wallet Tracking/ }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Wallet Tracking" })).toBeVisible();
+  await page.getByRole("button", { name: /Settings/ }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
   await expect(menuButton).toHaveAttribute("aria-expanded", "false");
   await expect(menuButton).toBeFocused();
 
