@@ -40,7 +40,7 @@ This document is Antigravity's detailed baseline inventory draft for **Phase UIX
 
 ### 2.2 Repository Tooling & Serving State (rechecked 2026-10-27)
 - **Frontend manifests:** `frontend/package.json`, `frontend/tsconfig.json`, and `frontend/vite.config.ts` exist. The preview uses React, TypeScript, Vite, and Vitest; `npm run build` runs the TypeScript check before the production build.
-- **Lockfile:** `frontend/package-lock.json` is now committed on `master` after PR #456. The follow-up workflow change is switching CI to `npm ci` and caching against this lockfile; that CI change must pass before the reproducible-install phase is considered complete.
+- **Lockfile:** `frontend/package-lock.json` is committed on `master` after PR #456, and the frontend workflow uses `npm ci`. Frontend workflow run #132 completed successfully on 2026-10-27, including type-check, unit tests, production build, Playwright setup, and browser smoke tests. Reproducible frontend installation is verified for that run; broader migration acceptance remains open.
 - **Host tooling:** The older note that Node.js was unavailable came from a prior host audit and is not evidence of current CI or execution-environment availability. Verify Node/npm versions in the actual environment used for any build.
 - **Serving boundary:** Modern frontend code remains isolated under `frontend/`, with build output to `frontend/dist/`. FastAPI still serves the legacy `web/static/` dashboard; do not switch routes or mount the preview before browser, parity, RBAC, accessibility, and owner-acceptance gates pass.
 
