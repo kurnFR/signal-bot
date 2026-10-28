@@ -77,9 +77,12 @@ describe("read-only strategy library", () => {
     render(<AuthGate><StrategyLibraryPanel /></AuthGate>);
 
     fireEvent.click(await screen.findByRole("button", { name: "New strategy" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Strategy name" }), { target: { value: "new_test_v1" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Strategy name" }), { target: { value: "rsi_volume_v1" } });
     fireEvent.change(screen.getByRole("textbox", { name: "Strategy display name" }), { target: { value: "New Test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save strategy" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/already exists/i);
     expect(calls.filter((call) => call.method === "POST" || call.method === "DELETE")).toEqual([]);
+    fireEvent.change(screen.getByRole("textbox", { name: "Strategy name" }), { target: { value: "new_test_v1" } });
     fireEvent.click(screen.getByRole("button", { name: "Save strategy" }));
     expect(await screen.findByText("Strategy new_test_v1 saved.")).toBeInTheDocument();
     const request = calls.find((call) => call.path === "/api/custom-strategy/create" && call.method === "POST");
