@@ -133,6 +133,8 @@ describe("read-only strategy library", () => {
 
     expect(await screen.findByText(/restricted to admin and trader roles/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Quick test" })).not.toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    expect(screen.queryByRole("button", { name: "New strategy" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete strategy" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST" || init?.method === "DELETE")).toBe(false);
   });
 });
