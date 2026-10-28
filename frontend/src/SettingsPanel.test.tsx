@@ -24,7 +24,7 @@ describe("SettingsPanel", () => {
       const method = init?.method ?? "GET";
       calls.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
-      if (path === "/api/settings/status" && method === "GET") return json({ database: { status: "error", host: "db.internal", port: 3306, database: "signal_bot", tables: { signals: 10 }, error: "Access denied for user secret-db-user" }, heartbeats: [{ collector: "wallet-worker", status: "stale", detail: "token=do-not-leak", lastBeat: null }], binance: { spotApi: "online", futuresApi: "offline", enableFuturesConfig: true }, system: { timezone: "Asia/Jakarta (WIB UTC+7)" } });
+      if (path === "/api/settings/status" && method === "GET") return json({ database: { status: "ok", host: "db.internal", port: 3306, database: "signal_bot", tables: { signals: 10 }, error: "Access denied for user secret-db-user" }, heartbeats: [{ collector: "wallet-worker", status: "stale", detail: "token=do-not-leak", lastBeat: null }], binance: { spotApi: "online", futuresApi: "offline", enableFuturesConfig: true }, system: { timezone: "Asia/Jakarta (WIB UTC+7)" } });
       if (path === "/api/telegram/status" && method === "GET") return json({ configured: true, chatId: "-100123456789", hasToken: true });
       if (path === "/api/telegram/test" && method === "POST") return json({ success: true, bot: { username: "signal_test_bot" }, chat_id: "-100123456789" });
       throw new Error("Unexpected endpoint: " + method + " " + path);
