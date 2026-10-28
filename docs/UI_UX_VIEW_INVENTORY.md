@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `b184bbc1421dcfd1c18a8516a8defeeedaf82fb6` (master after PR #527, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
+**Source baseline for reconciliation:** `57d3564a5b7211511f65a4fab8d70552cb12f729` (master after PR #528, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -661,7 +661,7 @@ Compared `web/routes/backtest.py` response construction with the inventory schem
 - If saving the run fails, the route logs the persistence error and can still return simulation results with `runId=null`. UI must not imply a saved historical run exists unless the returned ID is confirmed.
 - [x] Corrected strategy-list and run response contracts from source.
 - [ ] Add mocked route contract tests for registry field names, default request values, insufficient-data errors, and simulation-success/database-save-failure behavior.
-- [ ] Preserve the read-only boundary of the React preview until run execution is explicitly migrated with role enforcement, clear persistence status, and tests.
+- [x] Migrated single-run backtest execution into the React preview with admin/trader gating, explicit confirmation, dynamic strategy/shared parameters, persistence-status messaging, and regression tests (PR #529). Run-all, policy edits, promotion, and Telegram actions remain outside this slice.
 
 
 ## UIX-00 source audit slice: Custom strategy quick-test contract (2026-10-28)
