@@ -88,7 +88,7 @@ export function MasterDataPanel() {
   };
 
   return <div className="master-data-view" aria-busy={loading || actionBusy}>
-    <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>Read-only Master Data</strong><p>Review stored OHLCV coverage, computed feature availability, and background job status. Backfill and feature-build actions can write data or launch workers, so they remain unavailable in this preview.</p></div><span className="panel-counter">READ ONLY</span></section>
+    <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>Master Data operations</strong><p>Review stored OHLCV coverage and job status. Backfill and feature-build jobs can write data or launch workers, so they are restricted to admin/trader roles and require explicit confirmation.</p></div><span className="panel-counter">ROLE GATED</span></section>
     {error && <div className="api-error" role="alert"><div><strong>Unable to load Master Data</strong><p>{error}</p></div><button className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}><RefreshCw size={15} /> Retry</button></div>}
     {actionError && <div className="api-error" role="alert"><div><strong>Master Data action failed</strong><p>{actionError}</p></div><button className="button button-secondary" onClick={() => setActionError(null)}>Dismiss</button></div>}
     {actionMessage && <p className="control-feedback control-success" role="status">{actionMessage}</p>}
