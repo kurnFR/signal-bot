@@ -657,3 +657,24 @@ Compared `web/routes/custom_strategy.py` with the inventory and React Strategy L
 - [x] Corrected quick-test response schema and data-window behavior.
 - [ ] Add mocked route tests for the 50-candle guard, latest-1,000 window, and null sanitization of NaN/Infinity metrics.
 - [ ] Decide whether to migrate create, delete, AI generation, and quick-test workflows before calling Strategy Library feature parity complete.
+
+
+## UIX-00 source audit slice: News AI API contracts and preview mismatch (2026-10-28)
+
+Compared `web/routes/news_routes.py`, the `db/db.py` news read helpers, `frontend/src/lib/news.ts`, and `frontend/src/NewsAIPanel.tsx`. This was source inspection only; no collector, inference, trade, or Telegram action was triggered.
+
+- `GET /api/news/stats` returns collection/processing counts (`total_events_collected`, `events_evaluated_by_ai`), signal counts and confidence (`high_confidence_signals`, `avg_confidence`), execution state (`trades_opened`, `pending_signals`), a nested `performance` object (`closed_trades`, `wins`, `losses`, `win_rate`, `expectancy_r`, `profit_factor`, `total_r`, `net_pnl`, `max_drawdown_r`), and collector `heartbeats`. It does not return `bullish_count`, `bearish_count`, `neutral_count`, or `active_overlay_multiplier` as expected by the React preview.
+- `GET /api/news/signals?limit=N` returns `{signals: [...]} `; rows include `id`, `symbol`, `market`, `timeframe`, `bias`, `confidence`, `reasoning`, `invalidation_condition`, `time_horizon`, `trade_timing`, `acted_on`, `paper_position_id`, `skip_reason`, `created_at`, plus joined event context such as `headline`, `url`, `source`, `category`, and impact/value fields. The preview instead expects `sentiment`, `impact_horizon`, and `published_at`; those fields do not match the helper's returned names.
+- `GET /api/news/events?limit=N` returns `{events: [...]} `; rows include `source`, `category`, `headline`, `url`, `symbols`, `country`, `impact`, `published_at`, `scheduled_at`, actual/forecast/previous values, and processing/fetch timestamps. The preview instead expects `event_text`, `importance`, and `detected_at`.
+- The database helpers clamp signal/event limits to 1–200. Route defaults are 50 signals and 30 events; the React client explicitly requests those same limits. Stats/signals/events are read-only handlers and return HTTP 500 with sanitized route-level messages when the helper raises.
+- The route module's documented purpose is visibility into data produced by separate collectors and execution processes; these GET requests do not start polling, call AI, or execute trades.
+
+### Migration implications and remaining gates
+
+- [x] Compared route response construction with the database read helpers and React client types.
+- [x] Identified concrete schema mismatches in all three News AI data surfaces; the current preview's labels can display missing values and its signal/event tables can render blank columns despite successful API responses.
+- [ ] Update `frontend/src/lib/news.ts` types and `NewsAIPanel.tsx` to use the actual stats, signal, event, and heartbeat/performance contracts; choose truthful KPI labels instead of inventing sentiment buckets or an overlay multiplier.
+- [ ] Add mocked API/client component tests using representative backend-shaped payloads, including null confidence/performance values and empty arrays. Tests must not require a live database or start collectors.
+- [ ] Reconcile any remaining legacy News AI caller/polling behavior, verify role-specific browser behavior, and complete runtime route/view/caller parity, accessibility/device checks, and owner acceptance before production cutover.
+
+This finding is a migration defect report, not a claim that the preview is already corrected. The React preview remains isolated from FastAPI production serving.
