@@ -282,7 +282,7 @@ export function StrategyLibraryPanel({ onSelectForBacktest }: StrategyLibraryPan
       {catalogLoading ? <p className="empty-state">Loading strategy catalog…</p> : filteredCatalog.length === 0 ? <p className="empty-state">No strategies match this search and category.</p> : <div className="strategy-catalog-grid">{filteredCatalog.map((strategy) => <article className="strategy-catalog-card" key={strategy.id}>
         <div className="panel-heading"><div><h3>{strategy.displayName || strategy.id}</h3><p>{strategy.id}</p></div><span className="panel-counter">{strategy.category || "General"}</span></div>
         <p>{strategy.description || "No description provided."}</p>
-        <div className="strategy-param-list"><span>{strategy.params.length + strategy.sharedParams.length} parameters</span>{strategy.validated && <span>Holdout validated</span>}{strategy.isInverse && <span>Inverse variant</span>}</div>
+        <div className="strategy-param-list"><span>{(strategy.params?.length ?? 0) + (strategy.sharedParams?.length ?? 0)} parameters</span>{strategy.validated && <span>Holdout validated</span>}{strategy.isInverse && <span>Inverse variant</span>}</div>
         <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={loading || catalogLoading} onClick={() => onSelectForBacktest?.(strategy.id)}>Use in Backtest Studio</button></div>
       </article>)}</div>}
     </section>}
