@@ -20,6 +20,14 @@ def get_public_system_status():
             "tables": db.get("tables", {}),
             "error": "Database unavailable" if db.get("status") != "ok" else None,
         },
-        "heartbeats": full.get("heartbeats", []),
+        "heartbeats": [
+            {
+                "collector": heartbeat.get("collector"),
+                "status": heartbeat.get("status", "unknown"),
+                "lastBeat": heartbeat.get("lastBeat"),
+            }
+            for heartbeat in full.get("heartbeats", [])
+            if isinstance(heartbeat, dict)
+        ],
         "binance": full.get("binance", {}),
     }
