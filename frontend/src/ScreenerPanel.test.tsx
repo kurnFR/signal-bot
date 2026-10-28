@@ -36,7 +36,6 @@ describe("read-only Market Screener V2 panel", () => {
     render(<ScreenerPanel />);
     expect(await screen.findByRole("alert")).toHaveTextContent(/sign in through the existing dashboard/i);
   });
-}
 
   it("shows an explicit empty state when the API successfully returns no signals", async () => {
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
