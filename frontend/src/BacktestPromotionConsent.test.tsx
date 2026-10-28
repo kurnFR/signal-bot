@@ -35,6 +35,7 @@ describe("Backtest auto-promotion side-effect consent", () => {
 
     render(<AuthGate><BacktestStudioPanel /></AuthGate>);
     const reviewButton = await screen.findByRole("button", { name: "Review backtest run" });
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Backtest strategy" })).toHaveValue("trend_ema_v1"));
     await waitFor(() => expect(reviewButton).toBeEnabled());
     fireEvent.click(reviewButton);
 
