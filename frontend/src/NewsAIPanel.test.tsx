@@ -28,7 +28,7 @@ describe("NewsAIPanel", () => {
 
   it("renders actual backend-shaped stats, signals, events, and heartbeats without mutation requests", async () => {
     render(<NewsAIPanel />);
-    expect(await screen.findByText("BTCUSDT")).toBeInTheDocument();
+    expect((await screen.findAllByText("BTCUSDT")).length).toBe(2);
     expect(screen.getByText("Rate decision update")).toBeInTheDocument();
     expect(screen.getByText("Bitcoin market update")).toBeInTheDocument();
     expect(screen.getByText("120")).toBeInTheDocument();
