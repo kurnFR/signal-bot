@@ -93,7 +93,7 @@ describe("frontend foundation shell", () => {
     expect(screen.getByRole("button", { name: /Market Screener/ })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { name: "Screener configuration" })).toBeInTheDocument();
     expect(screen.getByText(/configuration editing is restricted to admin and trader roles/i)).toBeInTheDocument();
-    expect(screen.getByText(/changing strategy promotion policy, paper-trading controls, wallet settings, worker lifecycle, and Telegram administration remain unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/paper-trading controls, wallet settings, worker lifecycle, model deployment, and Telegram administration remain unavailable/i)).toBeInTheDocument();
   });
   it("describes Backtest Studio single-run execution and its confirmation boundary accurately", () => {
     render(<App />);
