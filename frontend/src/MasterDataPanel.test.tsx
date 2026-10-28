@@ -174,4 +174,52 @@ describe("MasterDataPanel", () => {
     expect(screen.queryByRole("button", { name: "Use SOLUSDT in backfill form" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
+
+  it("renders successful empty coverage and job responses without showing an API error", async () => {
+    const emptyResponses = {
+      "/api/master-data/coverage": { summary: { totalCandles: 0, distinctSymbols: 0, coverageEntries: 0 }, coverage: [] },
+      "/api/master-data/jobs": { jobs: [] },
+      "/api/crypto/popular": { market: "spot", items: [] },
+    };
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      if (init?.method && init.method !== "GET") throw new Error("Master Data preview must be GET-only");
+      const body = emptyResponses[path as keyof typeof emptyResponses];
+      if (!body) throw new Error("Unexpected endpoint: " + path);
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MasterDataPanel />);
+
+    expect(await screen.findByText("No datasets match this filter.")).toBeInTheDocument();
+    expect(screen.getByText("No recent background jobs returned.")).toBeInTheDocument();
+    expect(screen.getByText("No popular markets are available right now.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getAllByText("0", { selector: ".metric-value" })).toHaveLength(4);
+    expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+  });
+
+  it("recovers from a temporary coverage API failure after Retry", async () => {
+    let coverageAttempts = 0;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      if (init?.method && init.method !== "GET") throw new Error("Master Data preview must be GET-only");
+      if (path === "/api/master-data/coverage" && coverageAttempts++ === 0) {
+        return Promise.resolve(new Response(JSON.stringify({ detail: "temporary failure" }), { status: 503, headers: { "content-type": "application/json" } }));
+      }
+      const body = responses[path as keyof typeof responses];
+      if (!body) throw new Error("Unexpected endpoint: " + path);
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MasterDataPanel />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/check API\/database health, then retry/i);
+    fireEvent.click(screen.getByRole("button", { name: /Retry/i }));
+    expect(await screen.findByText("BTCUSDT")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(coverageAttempts).toBeGreaterThanOrEqual(2);
+    expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+  });
+
 });
