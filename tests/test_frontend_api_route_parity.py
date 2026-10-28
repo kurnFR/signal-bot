@@ -53,12 +53,13 @@ def _legacy_static_api_paths() -> dict[str, list[str]]:
     static_root = ROOT / "web" / "static"
     for source in sorted((*static_root.rglob("*.js"), *static_root.rglob("*.html"))):
         source_text = source.read_text(encoding="utf-8")
-        for match in re.finditer(r"/api/[^\\s\"'`]+", source_text):
+        for match in re.finditer(r"/api/[^\s"'\x60]+", source_text):
             raw_path = match.group(0).rstrip("),;")
             normalized = _normalize_path(raw_path)
-            line_number = source_text.count("\\n", 0, match.start()) + 1
+            line_number = source_text.count("\n", 0, match.start()) + 1
             paths.setdefault(normalized, []).append(f"{source.relative_to(ROOT)}:{line_number}: {raw_path}")
     return paths
+
 
 def _registered_get_paths() -> set[str]:
     registered: set[str] = set()
