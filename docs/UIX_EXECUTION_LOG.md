@@ -134,3 +134,13 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Coverage:** Empty tracked-wallet, token-flow, and event responses render intentional empty states; a temporary tracker-status API failure recovers after Retry. Snapshot requests remain GET-only.
 - **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `723929b178e2b7954789db79eabada21162551de`.
 - **Safety:** Mocked API responses only; no wallet settings, tracked addresses, worker, DB, trading, Telegram, or production state changed.
+
+
+### PR #564 — Paper Trading per-strategy performance
+
+- **Status:** Merged.
+- **Merge commit:** `366e0ef797e42675f9a486eb1a52af3a26bf7841`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/564
+- **Coverage/feature:** Added a read-only per-strategy performance table from the existing `GET /api/paper/metrics` `byStrategy` payload, including closed trades, wins/losses, win rate, cumulative R, expectancy, and net PnL. The view inventory now records this consumer.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `54268976c9c4b09290ed736042c0d4e7b3ddb6ea`.
+- **Safety:** Read-only metrics display; no orders, positions, configs, workers, database writes, Telegram messages, or production deployment.
