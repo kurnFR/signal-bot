@@ -95,7 +95,7 @@ class TestTelegramRouteContracts(unittest.TestCase):
             result = telegram_notifier.test_telegram_connection()
 
         self.assertTrue(result["success"])
-        self.assertIn("chat id is missing", result["note"].lower())
+        self.assertIn("chat_id is missing", result["note"].lower())
         send_message.assert_not_called()
 
 
