@@ -164,3 +164,13 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Coverage:** Focused tests cover strategy-registry response field names, API defaults, rejection of fewer than 50 candles before simulation/persistence, and the explicit `runId: null` response when a mocked save fails after a successful simulation.
 - **Exact-head validation:** All five reported repository checks passed on `3b7d89f1ecde5967fef7fa4cb6e1cbe758faf5c6`: pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration.
 - **Safety:** Synthetic candle frames and mocked database persistence only; no live market-data access, database writes, worker, trading, Telegram, or production deployment.
+
+
+### PR #567 — custom-strategy persistence failure safety
+
+- **Status:** Merged.
+- **Merge commit:** `731d2d862b35e6acbc4fb465dd3a37c210c44fc9`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/567
+- **Coverage:** Create and delete failures now have regression tests proving forward/inverse strategy registry entries and metadata remain unchanged when persistent storage rejects the write.
+- **Exact-head validation:** All five reported checks passed on `590e1492670c0fb7058f9a44b7cdcb34995922f3`: pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration.
+- **Safety:** Temporary files and mocked persistence failures only; no saved strategy files, live workers, trading, Telegram, or production state changed.
