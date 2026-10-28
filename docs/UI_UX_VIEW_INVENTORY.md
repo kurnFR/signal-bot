@@ -46,15 +46,15 @@ This document is Antigravity's detailed baseline inventory draft for **Phase UIX
 
 ### 2.3 React Preview Mutation Boundary (rechecked 2026-10-28)
 
-The preview is not strictly read-only: the Market Screener control editor is an intentional, role-gated mutation surface.
+The preview is mostly read-only, with two intentional, role-gated mutation surfaces.
 
-- `ScreenerControlsPanel.tsx` calls `POST /api/research/screener/control` only when an admin or trader explicitly selects **Save changes**. Viewer sessions do not fetch the editor configuration and cannot submit changes.
-- The request changes persisted screener settings, including the Telegram alert gate and detection thresholds. It does not itself send a Telegram message or restart the worker; the running worker reads settings on its control-loop tick.
+- `ScreenerControlsPanel.tsx` calls `POST /api/research/screener/control` only when an admin or trader explicitly selects **Save changes**. Viewer sessions do not fetch the editor configuration and cannot submit changes. The request changes persisted screener settings, including the Telegram alert gate and detection thresholds; it does not itself send a Telegram message or restart the worker.
+- `MasterDataPanel.tsx` allows admin/trader users to review and confirm a backfill request (`POST /api/master-data/backfill`) or feature-build request (`POST /api/master-data/build-features`). These actions can write OHLCV/features and launch background workers. Viewer sessions cannot access the controls.
 - Backend authorization remains authoritative. UI hiding is defense in depth, not a replacement for route-level role enforcement.
-- Other React preview panels remain read-only. No trade execution, strategy promotion, backfill/feature-build worker launch, deployment, wallet-tracking control, or Telegram-send action is exposed.
-- **Safety note:** Do not point the preview at a production-connected API while experimenting with the Screener editor unless changing the live screener configuration is intended. This exception does not authorize production serving of the React preview.
+- Other React preview panels remain read-only. No trade execution, strategy promotion, deployment, wallet-tracking control, or Telegram-send action is exposed.
+- **Safety note:** Do not point the preview at a production-connected API while experimenting with either editor unless changing the live screener configuration or starting data-processing jobs is intended. This does not authorize production serving of the React preview.
 
-Browser smoke tests that navigate between views assert no incidental mutation requests; the focused `ScreenerControlsPanel` component test separately verifies the explicit save flow and viewer restrictions.
+Browser smoke tests that navigate between views assert no incidental mutation requests; focused component tests cover the explicit Screener save flow, Master Data job confirmation, and viewer restrictions.
 
 ---
 
