@@ -191,13 +191,21 @@ export function deleteCustomStrategy(name: string): Promise<StrategyMutationResu
   return mutateStrategyLibrary(`/api/custom-strategy/${encodeURIComponent(normalized)}`, "DELETE");
 }
 
+export interface AIStrategyChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
 export interface AIStrategyDraftResponse {
   status: string;
   provider: string;
   strategy: CustomStrategy;
   chatResponse: string;
 }
-export async function generateAIStrategyDraft(prompt: string, currentConfig?: Partial<CustomStrategy>): Promise<AIStrategyDraftResponse> {
+export async function generateAIStrategyDraft(
+  prompt: string,
+  history: AIStrategyChatMessage[] = [],
+  currentConfig?: Partial<CustomStrategy>,
+): Promise<AIStrategyDraftResponse> {
   const path = "/api/custom-strategy/generate-ai";
   assertApiPath(path);
   const headers: Record<string, string> = { Accept: "application/json", "Content-Type": "application/json" };
@@ -211,7 +219,7 @@ export async function generateAIStrategyDraft(prompt: string, currentConfig?: Pa
     method: "POST",
     credentials: "same-origin",
     headers,
-    body: JSON.stringify({ prompt: prompt.trim(), currentConfig }),
+    body: JSON.stringify({ prompt: prompt.trim(), history, currentConfig }),
   });
   let payload: unknown;
   try { payload = await response.json(); } catch { payload = null; }
