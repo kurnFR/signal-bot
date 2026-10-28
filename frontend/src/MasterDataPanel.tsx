@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./AuthGate";
-import { Database, RefreshCw, ShieldCheck } from "lucide-react";
+import { ArrowRight, Database, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
-import { fetchMasterDataSnapshot, MasterDataActionError, triggerMasterDataBackfill, triggerMasterDataFeatureBuild, type MasterDataSnapshot } from "./lib/masterData";
+import { fetchMasterDataSnapshot, fetchPopularCrypto, searchCryptoSymbols, MasterDataActionError, triggerMasterDataBackfill, triggerMasterDataFeatureBuild, type CryptoMarketTicker, type MasterDataSnapshot } from "./lib/masterData";
 
 const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 function num(value: number | null | undefined) {
@@ -29,6 +29,16 @@ export function MasterDataPanel() {
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [filter, setFilter] = useState("");
+  const [cryptoQuery, setCryptoQuery] = useState("");
+  const [cryptoMarket, setCryptoMarket] = useState<"all" | "spot" | "futures">("all");
+  const [cryptoResults, setCryptoResults] = useState<CryptoMarketTicker[]>([]);
+  const [cryptoSearchBusy, setCryptoSearchBusy] = useState(false);
+  const [cryptoSearchError, setCryptoSearchError] = useState<string | null>(null);
+  const [cryptoSearched, setCryptoSearched] = useState(false);
+  const [popularCoins, setPopularCoins] = useState<CryptoMarketTicker[]>([]);
+  const [popularLoading, setPopularLoading] = useState(true);
+  const [popularError, setPopularError] = useState<string | null>(null);
+  const [popularAttempt, setPopularAttempt] = useState(0);
   const auth = useAuth();
   const canManageJobs = ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
   const [backfillSymbol, setBackfillSymbol] = useState("BTCUSDT");
@@ -56,12 +66,41 @@ export function MasterDataPanel() {
     });
     return () => controller.abort();
   }, [attempt]);
+  useEffect(() => {
+    const controller = new AbortController();
+    setPopularLoading(true); setPopularError(null);
+    fetchPopularCrypto("spot", controller.signal).then((result) => {
+      if (!controller.signal.aborted) setPopularCoins(result.items);
+    }).catch((cause: unknown) => {
+      if (!controller.signal.aborted) setPopularError(cause instanceof Error ? cause.message : "Popular markets are temporarily unavailable.");
+    }).finally(() => {
+      if (!controller.signal.aborted) setPopularLoading(false);
+    });
+    return () => controller.abort();
+  }, [popularAttempt]);
 
   const coverage = useMemo(() => (data?.coverage ?? []).filter((row) => {
     const needle = filter.trim().toLowerCase();
     return !needle || [row.symbol, row.market, row.timeframe].some((part) => part.toLowerCase().includes(needle));
   }), [data, filter]);
 
+  const searchAssets = async () => {
+    setCryptoSearchBusy(true); setCryptoSearchError(null); setCryptoSearched(true);
+    try {
+      const result = await searchCryptoSymbols(cryptoQuery, cryptoMarket);
+      setCryptoResults(result.results);
+    } catch (cause) {
+      setCryptoResults([]);
+      setCryptoSearchError(cause instanceof Error ? cause.message : "Unable to search Binance markets. Please retry.");
+    } finally { setCryptoSearchBusy(false); }
+  };
+  const useCryptoForBackfill = (coin: CryptoMarketTicker) => {
+    if (!canManageJobs) return;
+    setBackfillSymbol(coin.symbol);
+    setBackfillMarket(coin.market);
+    setActionError(null);
+    setActionMessage(`${coin.symbol} selected. Review the backfill settings and confirm before starting a job.`);
+  };
   const reviewBackfill = () => {
     const symbol = backfillSymbol.trim().toUpperCase();
     if (!/^[A-Z0-9._-]{1,30}$/.test(symbol)) { setActionError("Enter a valid symbol using letters, numbers, dot, underscore, or hyphen."); return; }
@@ -92,6 +131,27 @@ export function MasterDataPanel() {
     {error && <div className="api-error" role="alert"><div><strong>Unable to load Master Data</strong><p>{error}</p></div><button className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}><RefreshCw size={15} /> Retry</button></div>}
     {actionError && <div className="api-error" role="alert"><div><strong>Master Data action failed</strong><p>{actionError}</p></div><button className="button button-secondary" onClick={() => setActionError(null)}>Dismiss</button></div>}
     {actionMessage && <p className="control-feedback control-success" role="status">{actionMessage}</p>}
+    <section className="panel" aria-labelledby="crypto-search-title">
+      <div className="panel-heading"><div><h2 id="crypto-search-title"><Search size={17} className="inline-icon" /> Binance asset search</h2><p>Search spot and futures USDT pairs using the backend’s cached Binance market data. Selecting a pair only fills the backfill form; it never starts a job.</p></div><span className="panel-counter">READ ONLY</span></div>
+      <form className="screener-control-grid" onSubmit={(event) => { event.preventDefault(); void searchAssets(); }}>
+        <label className="screener-control-field">Search cryptocurrency symbols<input aria-label="Search cryptocurrency symbols" value={cryptoQuery} maxLength={80} onChange={(event) => setCryptoQuery(event.target.value)} placeholder="Symbol or keyword (e.g. SOL, PEPE, SUI)" /></label>
+        <label className="screener-control-field">Market to search<select aria-label="Search market" value={cryptoMarket} onChange={(event) => setCryptoMarket(event.target.value as "all" | "spot" | "futures")}><option value="all">All markets</option><option value="spot">Spot only</option><option value="futures">Futures only</option></select></label>
+        <div><button className="button button-primary" type="submit" disabled={cryptoSearchBusy}>{cryptoSearchBusy ? "Searching…" : "Search symbols"} <ArrowRight size={15} /></button></div>
+      </form>
+      {cryptoSearchError && <div className="api-error" role="alert"><div><strong>Market search failed</strong><p>{cryptoSearchError}</p></div><button className="button button-secondary" type="button" onClick={() => void searchAssets()} disabled={cryptoSearchBusy}><RefreshCw size={15} /> Retry</button></div>}
+      {cryptoSearched && !cryptoSearchBusy && !cryptoSearchError && cryptoResults.length === 0 && <p className="empty-state">No matching USDT pairs found on Binance.</p>}
+      {cryptoResults.length > 0 && <div className="overflow-x-auto"><table className="custom-table crypto-search-table"><thead><tr><th scope="col">Symbol</th><th scope="col">Market</th><th scope="col">Last price</th><th scope="col">24h change</th><th scope="col">24h volume (USDT)</th><th scope="col">Action</th></tr></thead><tbody>{cryptoResults.map((coin) => <tr key={coin.market + coin.symbol}><td><strong>{coin.symbol}</strong></td><td><span className={coin.market === "futures" ? "market-badge market-badge-futures" : "market-badge"}>{coin.market}</span></td><td>{Number.isFinite(coin.lastPrice) ? `${coin.lastPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })}` : "—"}</td><td>{Number.isFinite(coin.priceChangePercent) ? `${coin.priceChangePercent >= 0 ? "+" : ""}${coin.priceChangePercent.toFixed(2)}%` : "—"}</td><td>{Number.isFinite(coin.quoteVolume) ? `${coin.quoteVolume.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : "—"}</td><td>{canManageJobs ? <button className="button button-secondary" type="button" onClick={() => useCryptoForBackfill(coin)} aria-label={`Use ${coin.symbol} in backfill form`}>Use in backfill form</button> : <span className="settings-readonly-tag">Backfill: admin/trader</span>}</td></tr>)}</tbody></table></div>}
+      <div className="panel-subsection" aria-label="Popular spot markets">
+        <div className="panel-heading"><div><h3>Popular liquidity pairs</h3><p>Highest-quote-volume spot pairs from the backend market cache.</p></div><button className="button button-secondary" type="button" disabled={popularLoading} onClick={() => setPopularAttempt((value) => value + 1)}><RefreshCw size={14} /> Refresh</button></div>
+        {popularError && <div className="error-banner" role="alert"><p>Popular markets are temporarily unavailable. {popularError}</p><button className="button button-secondary" type="button" onClick={() => setPopularAttempt((value) => value + 1)}>Retry</button></div>}
+        {popularLoading ? <p className="empty-state">Loading popular markets…</p> : popularCoins.length === 0 ? <p className="empty-state">No popular markets are available right now.</p> : <div className="crypto-market-grid">{popularCoins.map((coin) => <article className="crypto-market-card" key={coin.symbol}>
+          <div className="panel-heading"><div><h3>{coin.symbol}</h3><p>{coin.market.toUpperCase()} · USDT</p></div><span className={coin.priceChangePercent >= 0 ? "market-change-positive" : "market-change-negative"}>{coin.priceChangePercent >= 0 ? "+" : ""}{coin.priceChangePercent.toFixed(2)}%</span></div>
+          <strong className="crypto-market-price">{Number.isFinite(coin.lastPrice) ? `${coin.lastPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })}` : "—"}</strong>
+          <p>24h volume: {Number.isFinite(coin.quoteVolume) ? `${(coin.quoteVolume / 1e6).toLocaleString(undefined, { maximumFractionDigits: 1 })}M` : "—"}</p>
+          {canManageJobs ? <button className="button button-secondary" type="button" onClick={() => useCryptoForBackfill(coin)} aria-label={`Use ${coin.symbol} in backfill form`}>Use in backfill form</button> : <span className="settings-readonly-tag">Backfill: admin/trader</span>}
+        </article>)}</div>}
+      </div>
+    </section>
     {canManageJobs ? <section className="panel" aria-labelledby="master-backfill-title">
       <div className="panel-heading"><div><h2 id="master-backfill-title">Backfill historical data</h2><p>Starts a background job that writes OHLCV rows and can optionally compute features.</p></div><span className="panel-counter">ADMIN / TRADER</span></div>
       <form className="screener-control-grid" onSubmit={(event) => { event.preventDefault(); reviewBackfill(); }}>
