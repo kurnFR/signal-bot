@@ -560,7 +560,7 @@ test("Market Screener saves control changes only after the explicit Save changes
 
   await mockApi(page);
   await signIn(page);
-  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: "Market Screener", exact: true }).click();
+  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: /Market Screener/ }).click();
   await expect(page.getByRole("heading", { name: "Screener configuration" })).toBeVisible();
   await expect(page.getByLabel(/Telegram alerting enabled/)).toBeChecked();
   expect(saveRequests.filter((request) => request.method === "POST")).toEqual([]);
