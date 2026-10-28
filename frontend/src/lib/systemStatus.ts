@@ -9,7 +9,7 @@ export interface SystemStatusResponse {
   heartbeats: Array<{
     collector: string;
     status: string;
-    lastBeat: string;
+    lastBeat: string | null;
   }>;
   binance: {
     spotApi: string;

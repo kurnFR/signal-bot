@@ -31,7 +31,7 @@ def collect_system_status() -> dict:
                 "collector": r["collector_name"],
                 "status": r["status"],
                 "detail": r["detail"],
-                "lastBeat": str(r["last_beat_time"]),
+                "lastBeat": str(r["last_beat_time"]) if r["last_beat_time"] is not None else None,
             }
             for r in cur.fetchall()
         ]
