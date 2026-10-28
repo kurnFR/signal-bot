@@ -612,3 +612,21 @@ test("primary navigation announces the selected page to assistive technology", a
   await expect(screener).toHaveAttribute("aria-current", "page");
   await expect(overview).not.toHaveAttribute("aria-current", "page");
 });
+
+
+test("mobile navigation close control restores focus to its opener", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  await mockApi(page);
+  await signIn(page);
+
+  const menuButton = page.getByRole("button", { name: "Open navigation" });
+  await menuButton.click();
+  await expect(menuButton).toHaveAttribute("aria-expanded", "true");
+
+  await page.getByRole("button", { name: "Close navigation" }).first().click();
+
+  await expect(menuButton).toHaveAttribute("aria-expanded", "false");
+  await expect(menuButton).toBeFocused();
+  await expect(page.locator("#dashboard-sidebar")).not.toHaveClass(/sidebar-open/);
+  await expect(page.locator(".mobile-scrim")).toHaveCount(0);
+});
