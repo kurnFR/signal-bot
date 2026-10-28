@@ -202,3 +202,13 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Exact-head validation:** All five reported checks passed on `f32717b98f10d9e3b48e7b90371669acea3bff1e`: pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration.
 - **Safety:** No network/provider calls, strategy persistence, workers, trading, Telegram, database writes, or deployment.
 \n
+
+### PR #572 — Backtest Studio capability copy
+
+- **Status:** Merged.
+- **Merge commit:** `e98321fea830c854f13d67088b30c8d6c5b9981f`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/572
+- **Change:** Corrected the preview notice and regression test to state that one backtest run is available to admin/trader roles after explicit review and confirmation, while run-all, policy edits, promotion, and Telegram actions remain unavailable.
+- **Exact-head validation:** All six reported checks passed on `fce4ace5345d77072f6943e11eda9ae5b5811ed7`: frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration.
+- **Safety:** Copy and test changes only; no backtest was executed, and the legacy dashboard remains the production default.
+\n
