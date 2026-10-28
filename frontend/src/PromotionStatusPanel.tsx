@@ -49,6 +49,8 @@ export function PromotionStatusPanel({ onPolicyLoaded }: PromotionStatusPanelPro
         setSnapshot(result);
         setDraftPolicy(result.policy);
         setReadbackUnverified(false);
+        setSaveNotice(null);
+        setSaveError(null);
         onPolicyLoaded?.(result.policy);
       })
       .catch(() => {
@@ -130,7 +132,7 @@ export function PromotionStatusPanel({ onPolicyLoaded }: PromotionStatusPanelPro
       <button className="button button-secondary" type="button" onClick={() => setAttempt((value) => value + 1)} disabled={loading}>Retry</button>
     </div>}
     {saveError && <div className="api-error" role="alert"><div><strong>Policy save failed</strong><p>{saveError}</p></div><button className="button button-secondary" type="button" onClick={() => setSaveError(null)}>Dismiss</button></div>}
-    {saveNotice && <p className={readbackUnverified ? "api-error" : "control-feedback control-success"} role={readbackUnverified ? "alert" : "status"}>{saveNotice} {readbackUnverified && <button className="button button-secondary" type="button" onClick={() => setAttempt((value) => value + 1)} disabled={loading}>Refresh saved state</button>}</p>}
+    {saveNotice && (readbackUnverified ? <div className="api-error" role="alert"><p>{saveNotice}</p><button className="button button-secondary" type="button" onClick={() => setAttempt((value) => value + 1)} disabled={loading}>Refresh saved state</button></div> : <p className="control-feedback control-success" role="status">{saveNotice}</p>)}
     {readbackUnverified && !loading && <p className="empty-state">The last policy write completed without authoritative readback. Editing and backtest review stay disabled until a refresh verifies the current policy.</p>}
     {loading && !snapshot ? <p className="empty-state" role="status">Loading promotion policy and audit…</p> : snapshot && <>
       <div className="panel-subsection">
