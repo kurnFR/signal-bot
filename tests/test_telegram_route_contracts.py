@@ -8,10 +8,10 @@ from notifications import telegram_notifier
 from web.app import app
 
 
-def _user(role):
+def _user(role, must_change_password=False):
     return {
         "id": 1, "username": "test-user", "email": None, "role": role,
-        "is_active": 1, "must_change_password": 0,
+        "is_active": 1, "must_change_password": int(must_change_password),
     }
 
 
@@ -24,14 +24,14 @@ class TestTelegramRouteContracts(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app, raise_server_exceptions=False)
 
-    def _get(self, path, role):
-        with patch("web.app.authenticate_request", return_value=_user(role)), \
-             patch("web.auth.authenticate_request", return_value=_user(role)):
+    def _get(self, path, role, must_change_password=False):
+        with patch("web.app.authenticate_request", return_value=_user(role, must_change_password)), \
+             patch("web.auth.authenticate_request", return_value=_user(role, must_change_password)):
             return self.client.get(path)
 
-    def _post(self, path, role, **kwargs):
-        with patch("web.app.authenticate_request", return_value=_user(role)), \
-             patch("web.auth.authenticate_request", return_value=_user(role)):
+    def _post(self, path, role, must_change_password=False, **kwargs):
+        with patch("web.app.authenticate_request", return_value=_user(role, must_change_password)), \
+             patch("web.auth.authenticate_request", return_value=_user(role, must_change_password)):
             return self.client.post(path, **kwargs)
 
     def test_status_exposes_chat_id_only_to_admin(self):
@@ -72,6 +72,17 @@ class TestTelegramRouteContracts(unittest.TestCase):
 
         self.assertEqual(trader.status_code, 403)
         self.assertEqual(viewer.status_code, 403)
+        test_helper.assert_not_called()
+
+    def test_forced_password_change_blocks_telegram_status_and_test(self):
+        with patch("web.routes.telegram_routes.get_telegram_config") as get_config, \
+             patch("web.routes.telegram_routes.test_telegram_connection") as test_helper:
+            status = self._get("/api/telegram/status", "admin", must_change_password=True)
+            test = self._post("/api/telegram/test", "admin", must_change_password=True, json={})
+
+        self.assertEqual(status.status_code, 403)
+        self.assertEqual(test.status_code, 403)
+        get_config.assert_not_called()
         test_helper.assert_not_called()
 
     def test_notifier_uses_mocked_outbound_helper_for_ping_and_does_not_include_token_in_message(self):
