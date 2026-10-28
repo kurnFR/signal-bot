@@ -87,6 +87,8 @@ describe("BacktestStudioPanel", () => {
     render(<AuthGate><BacktestStudioPanel /></AuthGate>);
 
     expect(await screen.findByRole("heading", { name: "Run a backtest" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Backtest strategy" })).toHaveValue("trend_ema_v1"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Review backtest run" })).toBeEnabled());
     fireEvent.change(screen.getByRole("textbox", { name: "Backtest symbol" }), { target: { value: "ethusdt" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Backtest timeframe" }), { target: { value: "1h" } });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Initial capital" }), { target: { value: "7500" } });
@@ -130,6 +132,8 @@ describe("BacktestStudioPanel", () => {
     render(<AuthGate><BacktestStudioPanel /></AuthGate>);
 
     expect(await screen.findByRole("heading", { name: "Strategy parameters" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Backtest strategy" })).toHaveValue("trend_ema_v1"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Review backtest run" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Review backtest run" }));
     fireEvent.click(await screen.findByRole("button", { name: "Run backtest" }));
     expect(await screen.findByText(/persistence was not confirmed/i)).toBeInTheDocument();
