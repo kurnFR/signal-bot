@@ -296,7 +296,17 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `07f62fc2341866f436aa2479fd6e15dec5b574d0`.
 - **Safety:** Mocked requests only; no backtest was executed.
 
-### Current PR #583 — policy-save expired-session coverage
+### PR #583 — policy-save expired-session coverage
 
-- Adds an auth-gate regression for HTTP 401 during promotion policy save. It expects the stale token to be cleared, the UI to return to sign-in, and no verified-save message to appear.
+- **Status:** Merged.
+- **Merge commit:** `f406b8d6070fbdd1685a3ef97bf94a1c6197176f`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/583
+- **Coverage:** An HTTP 401 during promotion policy save clears the stale token, returns the UI to sign-in, and does not report the save as verified.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `01b31aeb08c71f08469871140a9a42767bc7930a`.
+- **Safety:** Mocked responses only; no real policy save, backtest, promotion, paper activation, Telegram send, or deployment.
+
+### Current PR #584 — fail closed on malformed promotion policy reads
+
+- Reuses the complete policy validator for GET responses. A missing or incorrectly typed field, especially the Telegram side-effect flag, now makes the policy read invalid instead of silently treating it as verified.
+- Adds unit tests for valid policy reads and malformed, missing, and non-finite values.
 - Validation is pending on the exact PR head; do not merge until all required checks pass.
