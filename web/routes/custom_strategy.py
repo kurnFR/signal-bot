@@ -900,7 +900,7 @@ def quick_test_strategy(req: QuickTestRequest):
     metrics = compute_metrics(trades)
 
     r_multiples = [t["r_multiple"] for t in trades if t.get("r_multiple") is not None]
-    net_r = _clean_num(sum(r_multiples))
+    net_r = _clean_num(round(sum(r_multiples), 2))
     win_rate_pct = _clean_num(metrics.get("win_rate_pct"), default=0.0)
     win_rate_fraction = round(win_rate_pct / 100.0, 4) if win_rate_pct is not None else None
 
