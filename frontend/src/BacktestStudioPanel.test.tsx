@@ -6,10 +6,11 @@ import { BacktestStudioPanel } from "./BacktestStudioPanel";
 const strategies = { strategies: [{ id: "trend_ema_v1", baseName: "trend_ema_v1", isInverse: false, displayName: "Trend EMA Crossover", category: "Trend Following", validated: false, description: "Trend strategy", params: [], sharedParams: [] }, { id: "rsi_mean_reversion", baseName: "rsi_mean_reversion", isInverse: false, displayName: "RSI Mean Reversion", category: "Mean Reversion", validated: false, description: "RSI reversal strategy", params: [], sharedParams: [] }] };
 const run = { id: 42, symbol: "BTCUSDT", market: "spot", timeframe: "1h", strategy: "trend_ema_v1", dataSegment: "holdout", totalTrades: 2, winRatePct: 50, expectancyR: 0.25, profitFactor: 1.5, maxDrawdownR: 1.2, createdAt: "2026-10-26T10:00:00Z" };
 const history = { runs: [run] };
+const promotionPolicy = { enabled: false, min_test_trades: 30, min_profit_factor: 1.2, min_expectancy_r: 0.05, max_drawdown_r: 8, min_rank_score: 0.1, require_holdout: true, send_telegram: true };
 const details = { run: { ...run, params: { TREND_EMA_FAST: 20 } }, trades: [{ direction: "LONG", entryTime: "2026-10-26T09:00:00Z", entryTimeWib: "2026-10-26 16:00:00", entryPrice: 100, exitTime: "2026-10-26T10:00:00Z", exitTimeWib: "2026-10-26 17:00:00", exitPrice: 102, exitReason: "take_profit", stopLoss: 98, takeProfit: 102, netReturnPct: 1.8, rMultiple: 1, holdingBars: 1 }] };
 function responseFor(url: string) {
   const parsed = new URL(url, "http://localhost");
-  const payload = parsed.pathname === "/api/backtest/strategies" ? strategies : parsed.pathname === "/api/backtest/history" ? history : parsed.pathname === "/api/backtest/runs/42" ? details : {};
+  const payload = parsed.pathname === "/api/backtest/strategies" ? strategies : parsed.pathname === "/api/backtest/history" ? history : parsed.pathname === "/api/backtest/runs/42" ? details : parsed.pathname === "/api/backtest/promotion-policy" ? { policy: promotionPolicy } : parsed.pathname === "/api/backtest/promotion-audit" ? { events: [] } : {};
   return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
 }
 describe("BacktestStudioPanel", () => {
@@ -215,7 +216,7 @@ describe("BacktestStudioPanel", () => {
     let recovered = false;
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       expect(init?.method ?? "GET").toBe("GET");
-      if (!recovered) {
+      if (!recovered && String(input).includes("/api/backtest/history")) {
         return Promise.resolve(new Response(JSON.stringify({ detail: "temporary failure" }), {
           status: 503, headers: { "content-type": "application/json" },
         }));

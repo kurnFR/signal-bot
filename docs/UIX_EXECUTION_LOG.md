@@ -212,3 +212,55 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Exact-head validation:** All six reported checks passed on `fce4ace5345d77072f6943e11eda9ae5b5811ed7`: frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration.
 - **Safety:** Copy and test changes only; no backtest was executed, and the legacy dashboard remains the production default.
 \n
+
+### PR #574 — reduced-motion and forced-colors browser coverage
+
+- **Status:** Merged.
+- **Merge commit:** `b599b3595d70de55ce40a4c1ae19853fb195ee75`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/574
+- **Coverage:** Chromium emulates reduced motion and forced colors; verifies the sidebar transition is reduced and the keyboard-focused skip link retains a visible border.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `32cb2ba7e70138e3c6f28de6b8c531439190bdb7`.
+- **Safety:** Mocked browser only; no deployment.
+
+### PR #575 — preview fetch method parity
+
+- **Status:** Merged.
+- **Merge commit:** `0b455fd13fe0f41785a6aff9df5de64e08f0a9c9`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/575
+- **Coverage:** Static checks compare discoverable literal preview fetches, local API path constants, and shared mutation-helper call sites against mounted FastAPI method/path pairs.
+- **Exact-head validation:** Pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `452415ea7a0b821e0a06b22e3aabb794af26cdeb`.
+- **Safety:** Source and route metadata only; no API requests.
+
+### PR #576 — Screener expired-session recovery
+
+- **Status:** Merged.
+- **Merge commit:** `2bc6039ecbee926b865dfe00b9ca027c6311c858`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/576
+- **Finding/fix:** Test-first validation confirmed that a 401 during Screener settings save left the stale token in storage. The handler now clears the token and dispatches `signal-bot:session-expired`.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `4c75d75d4646b1ab3d0f2a7c5a8d4eac5c591681`.
+- **Safety:** Mocked 401 response only; no settings were saved.
+
+### PR #577 — forced password-change session expiry
+
+- **Status:** Merged.
+- **Merge commit:** `482288940acb461e946c9a279e897339cc96b2b5`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/577
+- **Finding/fix:** A 401 during a required password change now clears the stale token, dispatches the session-expired event, and preserves a clear sign-in message.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `a8af2041f27d117f2238dec0ce06d61414baad2d`.
+- **Safety:** Mocked authentication only; no real password/account change.
+
+### PR #578 — clear password fields after session expiry
+
+- **Status:** Merged.
+- **Merge commit:** `e39ac50eddee263c3eaf15cf6e342e19bd245029`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/578
+- **Finding/fix:** Test-first validation found that old/new/confirmation password fields remained in React state after an expired forced-password-change flow. The auth gate now clears all password fields on session expiry.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `5716e070f78592960f163c1a8e5cb66b20995e33`.
+- **Safety:** Mocked authentication only; no credentials were submitted to a live server.
+
+### Current PR #579 — read-only promotion policy and audit
+
+- Adds typed GET-only access to the saved auto-promotion policy and the five most recent promotion decisions.
+- Displays the stored thresholds and explicitly warns that the legacy workflow's Telegram setting may cause an external notification. Reconciliation-required and other non-success audit states remain visible.
+- Policy editing, activation, promotion, and Telegram-send actions remain unavailable in the preview. All such side-effecting migration work still requires explicit confirmation of the interaction and reconciliation design.
+- Validation is pending on the exact PR head; do not merge until all required checks pass.

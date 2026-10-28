@@ -142,3 +142,47 @@ export async function executeBacktest(input: BacktestExecutionInput): Promise<Ba
   }
   return payload as BacktestExecutionResult;
 }
+
+
+export interface PromotionPolicy {
+  enabled: boolean;
+  min_test_trades: number;
+  min_profit_factor: number;
+  min_expectancy_r: number;
+  max_drawdown_r: number;
+  min_rank_score: number;
+  require_holdout: boolean;
+  send_telegram: boolean;
+}
+
+export interface PromotionAuditEvent {
+  decision_hash: string;
+  symbol: string;
+  market: string;
+  timeframe: string;
+  data_segment: string;
+  strategy_name: string;
+  status: string;
+  reason: string;
+  paper_config_id: number | null;
+  telegram_result: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface PromotionSnapshot {
+  policy: PromotionPolicy;
+  events: PromotionAuditEvent[];
+}
+
+/** Read-only promotion state; never updates policy or triggers promotion/Telegram actions. */
+export async function fetchPromotionSnapshot(signal?: AbortSignal): Promise<PromotionSnapshot> {
+  const [policyPayload, auditPayload] = await Promise.all([
+    getJson<{ policy: PromotionPolicy }>("/api/backtest/promotion-policy", signal),
+    getJson<{ events: PromotionAuditEvent[] }>("/api/backtest/promotion-audit?limit=5", signal),
+  ]);
+  if (!policyPayload || !policyPayload.policy || !Array.isArray(auditPayload?.events)) {
+    throw new Error("Promotion status returned an invalid response");
+  }
+  return { policy: policyPayload.policy, events: auditPayload.events };
+}
