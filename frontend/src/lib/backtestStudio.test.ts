@@ -18,7 +18,7 @@ const validPolicy: PromotionPolicy = {
 };
 
 function mockSnapshot(policy: unknown, events: unknown = []) {
-  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const payload = path.includes("promotion-policy") ? { policy } : { events };
     return Promise.resolve(new Response(JSON.stringify(payload), {
