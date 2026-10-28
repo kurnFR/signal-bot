@@ -109,7 +109,7 @@ export function BacktestStudioPanel() {
         params[parameter.key] = value;
       }
     }
-    setRunError(null); setRunNotice(null);
+    setRunError(null); setRunNotice(null); setExecutionResult(null);
     setPendingRun({
       symbol: normalizedSymbol, market, timeframe, strategy: strategyId,
       data_segment: dataSegment, initial_capital: capital, risk_per_trade_pct: risk,
