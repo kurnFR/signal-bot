@@ -37,7 +37,7 @@ describe("MasterDataPanel", () => {
     expect(screen.getByText("1,200")).toBeInTheDocument();
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
     expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
-    expect(vi.mocked(fetch).mock.calls.map(([path]) => String(path))).toEqual(expect.arrayContaining(Object.keys(responses)));
+    expect(vi.mocked(fetch).mock.calls.map(([path]) => new URL(String(path), "http://localhost").pathname)).toEqual(expect.arrayContaining(Object.keys(responses)));
   });
 
   it("filters datasets by symbol, market, or timeframe", async () => {
