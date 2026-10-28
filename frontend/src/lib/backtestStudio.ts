@@ -181,7 +181,8 @@ export async function fetchPromotionSnapshot(signal?: AbortSignal): Promise<Prom
     getJson<{ policy: PromotionPolicy }>("/api/backtest/promotion-policy", signal),
     getJson<{ events: PromotionAuditEvent[] }>("/api/backtest/promotion-audit?limit=5", signal),
   ]);
-  if (!policyPayload || !isPromotionPolicy(policyPayload.policy) || !Array.isArray(auditPayload?.events)) {
+  if (!policyPayload || !isPromotionPolicy(policyPayload.policy) || !Array.isArray(auditPayload?.events) ||
+      !auditPayload.events.every(isPromotionAuditEvent)) {
     throw new Error("Promotion status returned an invalid response");
   }
   return { policy: policyPayload.policy, events: auditPayload.events };
@@ -212,6 +213,17 @@ function isPromotionPolicy(value: unknown): value is PromotionPolicy {
     typeof policy.min_rank_score === "number" && Number.isFinite(policy.min_rank_score) &&
     typeof policy.require_holdout === "boolean" &&
     typeof policy.send_telegram === "boolean";
+}
+
+function isPromotionAuditEvent(value: unknown): value is PromotionAuditEvent {
+  if (!value || typeof value !== "object") return false;
+  const event = value as Record<string, unknown>;
+  const requiredStrings = ["decision_hash", "symbol", "market", "timeframe", "data_segment", "strategy_name", "status", "reason"];
+  return requiredStrings.every((key) => typeof event[key] === "string") &&
+    (event.paper_config_id === null || (typeof event.paper_config_id === "number" && Number.isSafeInteger(event.paper_config_id))) &&
+    (event.telegram_result === null || typeof event.telegram_result === "string") &&
+    (event.created_at === null || typeof event.created_at === "string") &&
+    (event.updated_at === null || typeof event.updated_at === "string");
 }
 
 /** Save only the policy configuration. This does not execute a backtest or send Telegram. */
