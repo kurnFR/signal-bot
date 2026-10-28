@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `c336521763433a7f976667c347cb4d304cbed7b2` (master after PR #531 and quick-test metric hardening, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
+**Source baseline for reconciliation:** `be7381c3e66e40bda7216d833f5bd8f14837001c` (master after PR #533, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -673,10 +673,12 @@ Compared `web/routes/custom_strategy.py` with the inventory and React Strategy L
 
 - `POST /api/custom-strategy/quick-test` uses up to the latest 1,000 candles, not 500. It rejects insufficient history (<50 source candles) with HTTP 400.
 - Its successful response includes `totalCandles`, `totalTrades`, fractional `winRate` and percentage `winRatePct`, `netR`, `profitFactor`, `maxDrawdownR`, and `expectancyR`. Non-finite numeric metrics are sanitized to null where applicable.
-- The React Strategy Library only calls the list and indicator GET endpoints. It does not call AI generation, create/delete, or quick-test endpoints; all those legacy capabilities remain outside this preview. The existing inventory and role-policy notes correctly identify the prefix-wide viewer restriction, so no RBAC change is made here.
+- The React Strategy Library reads saved definitions and indicator metadata, supports admin/trader-only quick tests (PR #530), explicit create/delete with confirmation (PR #531), and AI draft generation that requires a separate user action to load and save (PR #533). This slice adds editing an existing saved definition with a review/confirmation step before the backend upsert; it does not activate or promote the strategy. Viewer sessions cannot see or invoke these actions. The legacy multi-turn AI conversation and full role-specific browser/device acceptance remain parity gaps.
 - [x] Corrected quick-test response schema and data-window behavior.
 - [x] Added mocked route tests for the 50-candle guard, latest-1,000 window, and null sanitization of NaN/Infinity metrics (PR #532); tests use synthetic candle frames and do not require live market data.
-- [ ] Decide whether to migrate create, delete, AI generation, and quick-test workflows before calling Strategy Library feature parity complete.
+- [x] Migrated create/delete with explicit confirmation (PR #531), non-persisted quick tests with admin/trader gating (PR #530) and contract tests (PR #532), and AI draft generation with explicit review before saving (PR #533).
+- [x] Migrated editing/replacing an existing saved definition with a review and explicit confirmation before the upsert; the strategy ID remains fixed while editing.
+- [ ] Decide whether multi-turn AI chat history is required for parity; continue route/view/caller reconciliation, role-specific browser acceptance, accessibility/device checks, and owner acceptance before production cutover.
 
 
 ## UIX-00 source audit slice: News AI API contracts and preview mismatch (2026-10-28)
