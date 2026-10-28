@@ -95,7 +95,14 @@ describe("frontend foundation shell", () => {
     expect(screen.getByText(/configuration editing is restricted to admin and trader roles/i)).toBeInTheDocument();
     expect(screen.getByText(/paper-trading controls, wallet settings, worker lifecycle, model deployment, and Telegram administration remain unavailable/i)).toBeInTheDocument();
   });
-  it("describes Strategy Library management and activation boundaries accurately", () => {\n    render(<App />);\n    fireEvent.click(screen.getByRole("button", { name: /Strategy Library/ }));\n    expect(screen.getByRole("heading", { level: 1, name: "Strategy Library" })).toBeInTheDocument();\n    expect(screen.getByText(/Strategy Library provides admin\/trader-only AI draft generation, quick tests, and create\/edit\/delete flows with explicit review\/save or confirmation/i)).toBeInTheDocument();\n    expect(screen.getByText(/it does not promote or activate strategies/i)).toBeInTheDocument();\n  });\n  it("describes Backtest Studio single-run execution and its confirmation boundary accurately", () => {
+  it("describes Strategy Library management and activation boundaries accurately", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Strategy Library/ }));
+    expect(screen.getByRole("heading", { level: 1, name: "Strategy Library" })).toBeInTheDocument();
+    expect(screen.getByText(/Strategy Library provides admin\/trader-only AI draft generation, quick tests, and create\/edit\/delete flows with explicit review\/save or confirmation/i)).toBeInTheDocument();
+    expect(screen.getByText(/it does not promote or activate strategies/i)).toBeInTheDocument();
+  });
+  it("describes Backtest Studio single-run execution and its confirmation boundary accurately", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Backtest Studio/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Backtest Studio" })).toBeInTheDocument();
