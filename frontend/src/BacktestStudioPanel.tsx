@@ -3,7 +3,7 @@ import { useAuth } from "./AuthGate";
 import { Activity, BarChart3, RefreshCw, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
 import { PromotionStatusPanel } from "./PromotionStatusPanel";
-import { BacktestExecutionError, executeBacktest, fetchBacktestHistory, fetchBacktestRunDetails, fetchBacktestStrategies, type BacktestExecutionInput, type BacktestExecutionResult, type BacktestRunDetails, type BacktestRunSummary, type BacktestStrategy, type BacktestStrategyParameter } from "./lib/backtestStudio";
+import { BacktestExecutionError, executeBacktest, fetchBacktestHistory, fetchBacktestRunDetails, fetchBacktestStrategies, type BacktestExecutionInput, type BacktestExecutionResult, type BacktestRunDetails, type BacktestRunSummary, type BacktestStrategy, type BacktestStrategyParameter, type PromotionPolicy } from "./lib/backtestStudio";
 
 const pct = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 const numeric = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 });
@@ -46,6 +46,8 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
   const [runError, setRunError] = useState<string | null>(null);
   const [runNotice, setRunNotice] = useState<string | null>(null);
   const [executionResult, setExecutionResult] = useState<BacktestExecutionResult | null>(null);
+  const [promotionPolicy, setPromotionPolicy] = useState<PromotionPolicy | null>(null);
+  const [promotionSideEffectAcknowledged, setPromotionSideEffectAcknowledged] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setError(null);
@@ -116,7 +118,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
         params[parameter.key] = value;
       }
     }
-    setRunError(null); setRunNotice(null); setExecutionResult(null);
+    setRunError(null); setRunNotice(null); setExecutionResult(null); setPromotionSideEffectAcknowledged(false);
     setPendingRun({
       symbol: normalizedSymbol, market, timeframe, strategy: strategyId,
       data_segment: dataSegment, initial_capital: capital, risk_per_trade_pct: risk,
@@ -124,12 +126,13 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
     });
   };
   const confirmRun = async () => {
-    if (!pendingRun) return;
+    if (!pendingRun || !promotionPolicy || (promotionPolicy.enabled && !promotionSideEffectAcknowledged)) return;
     setRunBusy(true); setRunError(null); setRunNotice(null);
     try {
       const result = await executeBacktest(pendingRun);
       setExecutionResult(result);
       setPendingRun(null);
+      setPromotionSideEffectAcknowledged(false);
       setRunNotice(result.runId == null
         ? "Backtest completed, but persistence was not confirmed (runId is null). The metrics below are from this response and may not appear in saved history."
         : `Backtest completed and saved as run #${result.runId}.`);
@@ -166,7 +169,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
           return <label className="screener-control-field" key={parameter.key}>{parameter.label}<input aria-label={parameter.label} type="number" min={parameter.min} max={parameter.max} step={parameter.step ?? 1} value={String(value)} onChange={(event) => setParameterValues((current) => ({ ...current, [parameter.key]: event.target.value }))} /></label>;
         })}</div> : <p className="empty-state">No adjustable parameters for this strategy.</p>}
       </div>}
-      <div className="screener-control-footer"><button className="button button-primary" type="button" disabled={loading || runBusy || !strategies.length} onClick={reviewRun}>Review backtest run</button></div>
+      <div className="screener-control-footer"><button className="button button-primary" type="button" disabled={loading || runBusy || !strategies.length || !promotionPolicy} onClick={reviewRun}>Review backtest run</button></div>
     </section> : <p className="empty-state">Backtest execution is restricted to admin and trader roles. This session can review saved results only.</p>}
     {executionResult && <section className="panel" aria-labelledby="backtest-latest-result-title">
       <div className="panel-heading"><div><h2 id="backtest-latest-result-title">Latest execution result</h2><p>{executionResult.symbol} · {executionResult.market} · {executionResult.timeframe} · {executionResult.dataSegment}</p></div><span className="panel-counter">{executionResult.runId == null ? "NOT CONFIRMED SAVED" : `RUN #${executionResult.runId}`}</span></div>
@@ -200,12 +203,14 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       </> : <p className="empty-state">{selectedId == null ? "Select a saved run to inspect its details." : "Run details are not available."}</p>}
     </section>
     {pendingRun && <section className="panel" aria-labelledby="backtest-confirm-title">
-      <div className="panel-heading"><div><h2 id="backtest-confirm-title">Confirm backtest run</h2><p>This simulation may take time and requests that results be saved to backtest history. It does not execute live trades.</p></div></div>
+      <div className="panel-heading"><div><h2 id="backtest-confirm-title">Confirm backtest run</h2><p>This simulation requests persistence in backtest history and does not execute live trades. The backend also evaluates its saved auto-promotion policy when a run completes.</p></div></div>
+      {promotionPolicy?.enabled ? <div className="api-error" role="note"><div><strong>Auto-promotion is enabled</strong><p>This run may activate a paper strategy. Telegram alerts are {promotionPolicy.send_telegram ? "enabled and may send an external message" : "disabled"} in the saved policy. Acknowledge these possible side effects before running.</p></div></div> : <p className="empty-state">The saved policy currently reports auto-promotion disabled. Verify this policy remains unchanged before running; the backend is authoritative.</p>}
       <p><strong>Configuration:</strong> {[pendingRun.symbol, pendingRun.market, pendingRun.timeframe, pendingRun.strategy, pendingRun.data_segment].join(" · ")}</p>
       <p><strong>Capital / risk:</strong> {numeric.format(pendingRun.initial_capital)} / {pendingRun.risk_per_trade_pct}% per trade</p>
-      <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={runBusy} onClick={() => setPendingRun(null)}>Cancel</button><button className="button button-primary" type="button" disabled={runBusy} onClick={() => void confirmRun()}>{runBusy ? "Running simulation…" : "Run backtest"}</button></div>
+      {promotionPolicy?.enabled && <label className="screener-alert-toggle"><input aria-label="Acknowledge auto-promotion side effects" type="checkbox" checked={promotionSideEffectAcknowledged} onChange={(event) => setPromotionSideEffectAcknowledged(event.target.checked)} /><span><strong>I understand this backtest may activate a paper strategy and, if enabled, send a Telegram alert.</strong></span></label>}
+      <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={runBusy} onClick={() => { setPendingRun(null); setPromotionSideEffectAcknowledged(false); }}>Cancel</button><button className="button button-primary" type="button" disabled={runBusy || !promotionPolicy || (promotionPolicy.enabled && !promotionSideEffectAcknowledged)} onClick={() => void confirmRun()}>{runBusy ? "Running simulation…" : "Run backtest"}</button></div>
     </section>}
-    <PromotionStatusPanel />
+    <PromotionStatusPanel onPolicyLoaded={setPromotionPolicy} />
     <p className="page-description">Backtest execution is an explicit, role-gated POST action. Promotion policy and audit are read-only; editing, activation, and Telegram actions remain unavailable.</p>
   </div>;
 }
