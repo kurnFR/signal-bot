@@ -190,3 +190,58 @@ export function deleteCustomStrategy(name: string): Promise<StrategyMutationResu
   }
   return mutateStrategyLibrary(`/api/custom-strategy/${encodeURIComponent(normalized)}`, "DELETE");
 }
+
+export interface GenerateCustomStrategyInput {
+  prompt: string;
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
+  currentConfig?: Partial<CustomStrategy> | null;
+}
+export interface GeneratedCustomStrategyResponse {
+  status: string;
+  provider?: string;
+  strategy: CustomStrategy;
+  chatResponse?: string;
+}
+export async function generateCustomStrategy(
+  input: GenerateCustomStrategyInput,
+): Promise<GeneratedCustomStrategyResponse> {
+  const path = "/api/custom-strategy/generate-ai";
+  assertApiPath(path);
+  const headers: Record<string, string> = { Accept: "application/json", "Content-Type": "application/json" };
+  try {
+    const token = window.localStorage.getItem("token");
+    if (token) headers.Authorization = `Bearer ${token}`;
+  } catch {
+    // The server rejects the request if no session token is available.
+  }
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers,
+    body: JSON.stringify({
+      prompt: input.prompt,
+      history: input.history ?? [],
+      currentConfig: input.currentConfig ?? null,
+    }),
+  });
+  let payload: unknown;
+  try { payload = await response.json(); } catch { payload = null; }
+  if (response.status === 401) {
+    try { window.localStorage.removeItem("token"); } catch { /* Auth state still resets via the event. */ }
+    window.dispatchEvent(new Event("signal-bot:session-expired"));
+  }
+  if (!response.ok) {
+    const detail = payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string"
+      ? payload.detail.slice(0, 400)
+      : `AI strategy generation failed (${response.status})`;
+    throw new StrategyLibraryActionError(response.status, detail);
+  }
+  if (!payload || typeof payload !== "object" || !("strategy" in payload) ||
+      !payload.strategy || typeof payload.strategy !== "object" ||
+      !("name" in payload.strategy) || typeof payload.strategy.name !== "string" ||
+      !("longConditions" in payload.strategy) || !Array.isArray(payload.strategy.longConditions) ||
+      !("shortConditions" in payload.strategy) || !Array.isArray(payload.strategy.shortConditions)) {
+    throw new StrategyLibraryActionError(response.status, "AI generator returned an invalid strategy draft");
+  }
+  return payload as GeneratedCustomStrategyResponse;
+}
