@@ -11,13 +11,17 @@ const responses = {
   "/api/master-data/jobs": {
     jobs: [{ id: "job-1", type: "backfill", symbol: "BTCUSDT", market: "spot", timeframe: "1h", status: "completed", progress: 100, message: "Completed successfully", created_at: 1793000000 }],
   },
+  "/api/crypto/popular": {
+    market: "spot",
+    items: [{ symbol: "SOLUSDT", baseAsset: "SOL", quoteAsset: "USDT", market: "spot", lastPrice: 150, priceChangePercent: 2.5, highPrice: 155, lowPrice: 145, volume: 10000, quoteVolume: 1500000 }],
+  },
 };
 
 describe("MasterDataPanel", () => {
   beforeEach(() => {
     cleanup();
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
+      const path = new URL(String(input), "http://localhost").pathname;
       if (init?.method && init.method !== "GET") throw new Error("Master Data preview must be GET-only");
       const body = responses[path as keyof typeof responses];
       if (!body) throw new Error("Unexpected endpoint: " + path);
@@ -31,7 +35,7 @@ describe("MasterDataPanel", () => {
     expect(await screen.findByText("BTCUSDT")).toBeInTheDocument();
     expect(screen.getByText("Completed successfully")).toBeInTheDocument();
     expect(screen.getByText("1,200")).toBeInTheDocument();
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
     expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
     expect(vi.mocked(fetch).mock.calls.map(([path]) => String(path))).toEqual(expect.arrayContaining(Object.keys(responses)));
   });
@@ -48,13 +52,14 @@ describe("MasterDataPanel", () => {
     const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
     const calls: Array<{ path: string; method: string; body?: unknown }> = [];
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
+      const path = new URL(String(input), "http://localhost").pathname;
       const method = init?.method ?? "GET";
       calls.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
       if (path === "/api/auth/me") return json(profile);
       if (path === "/api/master-data/coverage") return json(responses["/api/master-data/coverage"]);
       if (path === "/api/master-data/jobs") return json(responses["/api/master-data/jobs"]);
+      if (path === "/api/crypto/popular") return json(responses["/api/crypto/popular"]);
       if (path === "/api/master-data/backfill" && method === "POST") return json({ id: "job-new", type: "backfill", status: "queued", progress: 0, symbol: "ETHUSDT", market: "futures", timeframe: "4h" });
       throw new Error("Unexpected endpoint: " + method + " " + path);
     });
@@ -109,7 +114,7 @@ describe("MasterDataPanel", () => {
     window.localStorage.setItem("token", "viewer-session");
     const profile = { id: 9, username: "viewer01", email: null, role: "viewer", must_change_password: false };
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
-      const path = String(input);
+      const path = new URL(String(input), "http://localhost").pathname;
       const payload = path === "/api/auth/me" ? profile : responses[path as keyof typeof responses];
       if (!payload) throw new Error("Unexpected endpoint: " + path);
       return Promise.resolve(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }));
