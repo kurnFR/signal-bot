@@ -11,13 +11,17 @@ const responses = {
   "/api/master-data/jobs": {
     jobs: [{ id: "job-1", type: "backfill", symbol: "BTCUSDT", market: "spot", timeframe: "1h", status: "completed", progress: 100, message: "Completed successfully", created_at: 1793000000 }],
   },
+  "/api/crypto/popular": {
+    market: "spot",
+    items: [{ symbol: "SOLUSDT", baseAsset: "SOL", quoteAsset: "USDT", market: "spot", lastPrice: 150, priceChangePercent: 2.5, highPrice: 155, lowPrice: 145, volume: 10000, quoteVolume: 1500000 }],
+  },
 };
 
 describe("MasterDataPanel", () => {
   beforeEach(() => {
     cleanup();
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
+      const path = new URL(String(input), "http://localhost").pathname;
       if (init?.method && init.method !== "GET") throw new Error("Master Data preview must be GET-only");
       const body = responses[path as keyof typeof responses];
       if (!body) throw new Error("Unexpected endpoint: " + path);
@@ -31,9 +35,9 @@ describe("MasterDataPanel", () => {
     expect(await screen.findByText("BTCUSDT")).toBeInTheDocument();
     expect(screen.getByText("Completed successfully")).toBeInTheDocument();
     expect(screen.getByText("1,200")).toBeInTheDocument();
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
     expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
-    expect(vi.mocked(fetch).mock.calls.map(([path]) => String(path))).toEqual(expect.arrayContaining(Object.keys(responses)));
+    expect(vi.mocked(fetch).mock.calls.map(([path]) => new URL(String(path), "http://localhost").pathname)).toEqual(expect.arrayContaining(Object.keys(responses)));
   });
 
   it("filters datasets by symbol, market, or timeframe", async () => {
@@ -43,18 +47,63 @@ describe("MasterDataPanel", () => {
     expect(screen.getByText("No datasets match this filter.")).toBeInTheDocument();
   });
 
+  it("searches Binance markets and quick-selects a symbol without starting a backfill", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const pepe = { symbol: "PEPEUSDT", baseAsset: "PEPE", quoteAsset: "USDT", market: "futures", lastPrice: 0.00001, priceChangePercent: 3.25, highPrice: 0.000011, lowPrice: 0.000009, volume: 5000000000, quoteVolume: 50000 };
+    const calls: Array<{ path: string; url: string; method: string; body?: unknown }> = [];
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      const path = url.pathname;
+      const method = init?.method ?? "GET";
+      calls.push({ path, url: url.toString(), method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+      if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/master-data/coverage") return json(responses["/api/master-data/coverage"]);
+      if (path === "/api/master-data/jobs") return json(responses["/api/master-data/jobs"]);
+      if (path === "/api/crypto/popular") return json(responses["/api/crypto/popular"]);
+      if (path === "/api/crypto/search") return json({ query: url.searchParams.get("q"), market: url.searchParams.get("market"), count: 1, results: [pepe] });
+      throw new Error("Unexpected endpoint: " + method + " " + url.toString());
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><MasterDataPanel /></AuthGate>);
+
+    expect(await screen.findByRole("heading", { name: /Binance asset search/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "SOLUSDT" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Use SOLUSDT in backfill form" }));
+    expect(screen.getByRole("textbox", { name: "Backfill symbol" })).toHaveValue("SOLUSDT");
+    expect(screen.getByRole("combobox", { name: "Backfill market" })).toHaveValue("spot");
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search cryptocurrency symbols" }), { target: { value: "PEPE" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Search market" }), { target: { value: "futures" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search symbols" }));
+    expect(await screen.findByText("PEPEUSDT")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Use PEPEUSDT in backfill form" }));
+    expect(screen.getByRole("textbox", { name: "Backfill symbol" })).toHaveValue("PEPEUSDT");
+    expect(screen.getByRole("combobox", { name: "Backfill market" })).toHaveValue("futures");
+
+    const searchCall = calls.find((call) => call.path === "/api/crypto/search");
+    expect(searchCall?.method).toBe("GET");
+    const url = new URL(searchCall!.url);
+    expect(url.searchParams.get("q")).toBe("PEPE");
+    expect(url.searchParams.get("market")).toBe("futures");
+    expect(url.searchParams.get("limit")).toBe("20");
+    expect(calls.some((call) => call.method === "POST")).toBe(false);
+  });
+
   it("requires an explicit confirmation before a trader can launch a backfill", async () => {
     window.localStorage.setItem("token", "trader-session");
     const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
     const calls: Array<{ path: string; method: string; body?: unknown }> = [];
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
+      const path = new URL(String(input), "http://localhost").pathname;
       const method = init?.method ?? "GET";
       calls.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
       if (path === "/api/auth/me") return json(profile);
       if (path === "/api/master-data/coverage") return json(responses["/api/master-data/coverage"]);
       if (path === "/api/master-data/jobs") return json(responses["/api/master-data/jobs"]);
+      if (path === "/api/crypto/popular") return json(responses["/api/crypto/popular"]);
       if (path === "/api/master-data/backfill" && method === "POST") return json({ id: "job-new", type: "backfill", status: "queued", progress: 0, symbol: "ETHUSDT", market: "futures", timeframe: "4h" });
       throw new Error("Unexpected endpoint: " + method + " " + path);
     });
@@ -89,6 +138,7 @@ describe("MasterDataPanel", () => {
       if (path === "/api/auth/me") return json(profile);
       if (path === "/api/master-data/coverage") return json(responses["/api/master-data/coverage"]);
       if (path === "/api/master-data/jobs") return json(responses["/api/master-data/jobs"]);
+      if (path === "/api/crypto/popular") return json(responses["/api/crypto/popular"]);
       if (path === "/api/master-data/build-features" && method === "POST") return json({ id: "features-new", type: "build_features", status: "queued", progress: 0, symbol: "BTCUSDT", market: "spot", timeframe: "1h" });
       throw new Error("Unexpected endpoint: " + method + " " + path);
     });
@@ -109,7 +159,7 @@ describe("MasterDataPanel", () => {
     window.localStorage.setItem("token", "viewer-session");
     const profile = { id: 9, username: "viewer01", email: null, role: "viewer", must_change_password: false };
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
-      const path = String(input);
+      const path = new URL(String(input), "http://localhost").pathname;
       const payload = path === "/api/auth/me" ? profile : responses[path as keyof typeof responses];
       if (!payload) throw new Error("Unexpected endpoint: " + path);
       return Promise.resolve(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }));
@@ -120,6 +170,8 @@ describe("MasterDataPanel", () => {
     expect(await screen.findByText(/restricted to admin and trader roles/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Review backfill" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Build features" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "SOLUSDT" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use SOLUSDT in backfill form" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
 });

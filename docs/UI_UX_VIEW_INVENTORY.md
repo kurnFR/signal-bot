@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `85cf9e8694b8d700c15bf80ea9de47fe291fd212` (master after PR #536, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
+**Source baseline for reconciliation:** `4996744e1b7c028a6020dfb9a800dc3b88ff7b5b` (master after PR #537, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -615,14 +615,14 @@ Compared `web/routes/search.py` with the legacy `web/static/js/app.js` call site
 - The result rows contain numeric price/change/high/low/volume fields in addition to symbol/base/quote/market metadata. The old inventory schema omitted those fields.
 - `GET /api/crypto/popular` is not a curated fixed list of BTC/ETH/SOL/BNB. It returns up to 15 highest-quote-volume USDT tickers from the selected market; any market value other than the exact string `futures` selects spot data.
 - Both handlers depend on Binance 24-hour ticker APIs (spot and futures) with independent 60-second in-memory caches and 8-second HTTP timeouts. When a request fails, the helper logs the error and returns the existing cache, which may be empty or stale. These endpoints are authenticated by the central API security boundary.
-- The inspected legacy UI calls search with an explicit `limit=20` and displays a “Querying Binance live API…” loading state. It also calls popular with `market=spot`. The React Master Data preview does not call either endpoint; it is read-only and does not currently migrate the legacy symbol search or quick-select behavior.
+- The inspected legacy UI calls search with an explicit `limit=20` and displays a “Querying Binance live API…” loading state. It also calls popular with `market=spot`. The React Master Data preview now loads popular spot pairs, supports explicit search across spot/futures/all markets, and lets admin/trader users select a pair into the existing backfill form. Selection remains non-mutating; users still review and confirm the backfill job separately.
 
 ### Migration implications and remaining gates
 
 - [x] Corrected documented defaults, result fields, provider dependency, and popular-list semantics against source.
 - [x] Distinguished legacy consumers from the disconnected React preview.
 - [ ] Add mocked provider/route tests for defaults, market selection, response schema, cache fallback, and upstream failure; tests must not depend on live Binance availability.
-- [ ] Decide whether search/quick-select belong in the React Master Data migration and add browser-level tests if migrated.
+- [x] Migrated asset search, popular spot quick-select, and market selection into React Master Data with mocked browser tests. Selecting a pair only prefills the backfill form and never starts a job; the existing explicit confirmation remains required.
 - [ ] Continue route-to-inventory reconciliation, RBAC/browser/device/accessibility checks, and owner acceptance before production cutover.
 
 

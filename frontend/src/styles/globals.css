@@ -100,3 +100,15 @@ button:focus-visible,a:focus-visible,[tabindex="-1"]:focus-visible{outline:2px s
 .strategy-catalog-card h3 { overflow-wrap: anywhere; font-size: .95rem; font-weight: 650; }
 .strategy-catalog-card p { color: var(--text-secondary, #94a3b8); font-size: .8rem; line-height: 1.55; overflow-wrap: anywhere; }
 .strategy-catalog-card .screener-control-footer { margin-top: auto; }
+
+.crypto-market-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .75rem; margin-top: .75rem; }
+.crypto-market-card { display: flex; min-width: 0; flex-direction: column; gap: .6rem; padding: .9rem; border: 1px solid var(--border, rgba(148, 163, 184, .2)); border-radius: .85rem; background: var(--surface-subtle, rgba(148, 163, 184, .035)); }
+.crypto-market-card h3 { font-size: .9rem; font-weight: 700; overflow-wrap: anywhere; }
+.crypto-market-card p, .crypto-market-card .panel-heading p { color: var(--text-secondary, #94a3b8); font-size: .75rem; }
+.crypto-market-price { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.market-change-positive { color: var(--success, #34d399); font-size: .75rem; font-variant-numeric: tabular-nums; }
+.market-change-negative { color: var(--danger, #fb7185); font-size: .75rem; font-variant-numeric: tabular-nums; }
+.market-badge { display: inline-flex; padding: .2rem .45rem; border: 1px solid var(--border, rgba(148, 163, 184, .2)); border-radius: .35rem; font-size: .7rem; text-transform: uppercase; }
+.market-badge-futures { border-color: rgba(167, 139, 250, .4); color: #a78bfa; }
+.crypto-search-table { min-width: 48rem; }
+.inline-icon { display: inline-block; vertical-align: -0.2em; }
