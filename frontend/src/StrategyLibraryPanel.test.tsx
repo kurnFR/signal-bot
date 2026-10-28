@@ -122,6 +122,58 @@ describe("read-only strategy library", () => {
     expect(calls.some((call) => call.path === "/api/custom-strategy/rsi_volume_v1" && call.method === "DELETE")).toBe(true);
   });
 
+  it("generates an AI draft only on explicit request and does not save it automatically", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const calls: Array<{ path: string; method: string; body?: unknown }> = [];
+    const generated = {
+      status: "success",
+      provider: "AI Quantitative Heuristic Engine",
+      chatResponse: "Draft generated; review before saving.",
+      strategy: {
+        name: "ai_rsi_volume_v1",
+        displayName: "AI RSI Volume",
+        description: "Mean reversion with volume confirmation",
+        rationale: "Wait for oversold conditions and stronger volume.",
+        longConditions: [{ indicator: "rsi", operator: "<", value: 28 }],
+        shortConditions: [{ indicator: "rsi", operator: ">", value: 72 }],
+        slAtrMult: 2,
+        riskRewardRatio: 3,
+        useTrailingStop: true,
+        trailActivationR: 1.5,
+        trailDistanceAtrMult: 1.25,
+      },
+    };
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+      if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/custom-strategy/list") return json(payloads["/api/custom-strategy/list"]);
+      if (path === "/api/custom-strategy/indicators") return json(payloads["/api/custom-strategy/indicators"]);
+      if (path === "/api/custom-strategy/generate-ai" && method === "POST") return json(generated);
+      throw new Error("Unexpected endpoint: " + method + " " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><StrategyLibraryPanel /></AuthGate>);
+
+    const prompt = "Build an RSI mean-reversion strategy with volume confirmation.";
+    fireEvent.change(await screen.findByRole("textbox", { name: "AI strategy prompt" }), { target: { value: prompt } });
+    expect(calls.some((call) => call.path === "/api/custom-strategy/generate-ai")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Generate draft with AI" }));
+
+    expect(await screen.findByText(/AI draft generated with AI Quantitative Heuristic Engine/i)).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Strategy name" })).toHaveValue("ai_rsi_volume_v1");
+    expect(screen.getByRole("textbox", { name: "Strategy display name" })).toHaveValue("AI RSI Volume");
+    expect(screen.getByRole("textbox", { name: "Long condition 1 value" })).toHaveValue("28");
+    expect(screen.getByRole("textbox", { name: "Short condition 1 value" })).toHaveValue("72");
+    expect(screen.getByRole("spinbutton", { name: "Stop loss ATR multiple" })).toHaveValue(2);
+    const generationCall = calls.find((call) => call.path === "/api/custom-strategy/generate-ai" && call.method === "POST");
+    expect(generationCall?.body).toMatchObject({ prompt });
+    expect(calls.some((call) => call.path === "/api/custom-strategy/create" && call.method === "POST")).toBe(false);
+  });
+
   it("keeps strategy quick tests unavailable to viewers", async () => {
     window.localStorage.setItem("token", "viewer-session");
     const profile = { id: 9, username: "viewer01", email: null, role: "viewer", must_change_password: false };
@@ -137,7 +189,7 @@ describe("read-only strategy library", () => {
     expect(await screen.findByText(/restricted to admin and trader roles/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Quick test" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "New strategy" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Delete strategy" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete strategy" })).not.toBeInTheDocument();\n    expect(screen.queryByRole("button", { name: "Generate draft with AI" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST" || init?.method === "DELETE")).toBe(false);
   });
 });
