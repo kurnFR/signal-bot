@@ -10,7 +10,7 @@ describe("SettingsPanel", () => {
     render(<SettingsPanel theme="dark" onToggleTheme={onToggleTheme} username="tester" role="viewer" />);
     expect(screen.getByText("tester")).toBeInTheDocument();
     expect(screen.getByText("viewer")).toBeInTheDocument();
-    expect(screen.getByText(/API credentials remain hidden/i)).toBeInTheDocument();
+    expect(screen.getByText(/admin-only system diagnostics/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Switch to light theme" }));
     expect(onToggleTheme).toHaveBeenCalledTimes(1);
   });
