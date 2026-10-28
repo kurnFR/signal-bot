@@ -112,3 +112,8 @@ button:focus-visible,a:focus-visible,[tabindex="-1"]:focus-visible{outline:2px s
 .market-badge-futures { border-color: rgba(167, 139, 250, .4); color: #a78bfa; }
 .crypto-search-table { min-width: 48rem; }
 .inline-icon { display: inline-block; vertical-align: -0.2em; }
+
+.settings-telegram-status { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .8rem; margin: 1rem 0; }
+.settings-telegram-status > div { display: flex; min-width: 0; flex-direction: column; gap: .35rem; padding: .85rem; border: 1px solid var(--border, rgba(148, 163, 184, .2)); border-radius: .8rem; }
+.settings-telegram-status > div span { color: var(--text-secondary, #94a3b8); font-size: .75rem; }
+.settings-telegram-status > div strong { overflow-wrap: anywhere; font-size: .85rem; font-variant-numeric: tabular-nums; }
