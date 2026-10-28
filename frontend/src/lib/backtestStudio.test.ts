@@ -34,12 +34,38 @@ function mockSnapshot(policy: unknown, events: unknown = []) {
 
 describe("fetchPromotionSnapshot contract validation", () => {
   it("returns the complete verified policy and audit events", async () => {
-    const events = [{ decision_hash: "abc", status: "promoted" }];
+    const events = [{ decision_hash: "abc", symbol: "BTCUSDT", market: "spot", timeframe: "1h", data_segment: "holdout", strategy_name: "trend_ema_v1", status: "promoted", reason: "qualified", paper_config_id: 4, telegram_result: null, created_at: "2026-10-28T10:00:00Z", updated_at: null }];
     const { fetchMock, methods } = mockSnapshot(validPolicy, events);
 
     await expect(fetchPromotionSnapshot()).resolves.toEqual({ policy: validPolicy, events });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(methods).toEqual(["GET", "GET"]);
+  });
+
+
+  it("rejects audit records with invalid status types before the UI renders them", async () => {
+    mockSnapshot(validPolicy, [{
+      decision_hash: "abc",
+      symbol: "BTCUSDT",
+      market: "spot",
+      timeframe: "1h",
+      data_segment: "holdout",
+      strategy_name: "trend_ema_v1",
+      status: { unexpected: true },
+      reason: "qualified",
+      paper_config_id: null,
+      telegram_result: null,
+      created_at: null,
+      updated_at: null,
+    }]);
+
+    await expect(fetchPromotionSnapshot()).rejects.toThrow("Promotion status returned an invalid response");
+  });
+
+  it("rejects incomplete audit records instead of returning a falsely typed snapshot", async () => {
+    mockSnapshot(validPolicy, [{ decision_hash: "abc", status: "reconciliation_required" }]);
+
+    await expect(fetchPromotionSnapshot()).rejects.toThrow("Promotion status returned an invalid response");
   });
 
   it("rejects an enabled policy that omits the Telegram side-effect flag", async () => {
