@@ -40,7 +40,7 @@ describe("Backtest auto-promotion side-effect consent", () => {
     fireEvent.click(reviewButton);
 
     expect(await screen.findByText("Auto-promotion is enabled")).toBeInTheDocument();
-    expect(screen.getByText(/may activate a paper strategy/)).toBeInTheDocument();
+    expect(screen.getByText(/This run may activate a paper strategy/)).toBeInTheDocument();
     const runButton = screen.getByRole("button", { name: "Run backtest" });
     expect(runButton).toBeDisabled();
     expect(screen.getByRole("checkbox", { name: "Acknowledge auto-promotion side effects" })).toBeInTheDocument();
