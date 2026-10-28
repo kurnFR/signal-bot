@@ -186,3 +186,71 @@ export async function fetchPromotionSnapshot(signal?: AbortSignal): Promise<Prom
   }
   return { policy: policyPayload.policy, events: auditPayload.events };
 }
+
+
+export interface PromotionPolicySaveResult {
+  status: "ok" | "saved_readback_unavailable";
+  policy: PromotionPolicy;
+  warning?: string;
+}
+
+export class PromotionPolicySaveError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "PromotionPolicySaveError";
+  }
+}
+
+function isPromotionPolicy(value: unknown): value is PromotionPolicy {
+  if (!value || typeof value !== "object") return false;
+  const policy = value as Record<string, unknown>;
+  return typeof policy.enabled === "boolean" &&
+    Number.isInteger(policy.min_test_trades) &&
+    typeof policy.min_profit_factor === "number" && Number.isFinite(policy.min_profit_factor) &&
+    typeof policy.min_expectancy_r === "number" && Number.isFinite(policy.min_expectancy_r) &&
+    typeof policy.max_drawdown_r === "number" && Number.isFinite(policy.max_drawdown_r) &&
+    typeof policy.min_rank_score === "number" && Number.isFinite(policy.min_rank_score) &&
+    typeof policy.require_holdout === "boolean" &&
+    typeof policy.send_telegram === "boolean";
+}
+
+/** Save only the policy configuration. This does not execute a backtest or send Telegram. */
+export async function savePromotionPolicy(policy: PromotionPolicy): Promise<PromotionPolicySaveResult> {
+  const path = "/api/backtest/promotion-policy";
+  assertApiPath(path);
+  const headers: Record<string, string> = { Accept: "application/json", "Content-Type": "application/json" };
+  try {
+    const token = window.localStorage.getItem("token");
+    if (token) headers.Authorization = `Bearer ${token}`;
+  } catch {
+    // The server rejects the request if the browser cannot provide a session token.
+  }
+  const response = await fetch(path, {
+    method: "PUT",
+    credentials: "same-origin",
+    headers,
+    body: JSON.stringify(policy),
+  });
+  let payload: unknown;
+  try { payload = await response.json(); } catch { payload = null; }
+  if (response.status === 401) {
+    try { window.localStorage.removeItem("token"); } catch { /* Auth state still resets via the event. */ }
+    window.dispatchEvent(new Event("signal-bot:session-expired"));
+  }
+  if (!response.ok) {
+    const detail = payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string"
+      ? payload.detail.slice(0, 400)
+      : `Promotion policy save failed (${response.status})`;
+    throw new PromotionPolicySaveError(response.status, detail);
+  }
+  if (!payload || typeof payload !== "object" ||
+      !("status" in payload) || (payload.status !== "ok" && payload.status !== "saved_readback_unavailable") ||
+      !("policy" in payload) || !isPromotionPolicy(payload.policy)) {
+    throw new PromotionPolicySaveError(response.status, "Promotion policy save returned an invalid response");
+  }
+  const result = payload as PromotionPolicySaveResult;
+  if (result.status === "saved_readback_unavailable" && typeof result.warning !== "string") {
+    throw new PromotionPolicySaveError(response.status, "Promotion policy was saved but the server did not return a readback warning");
+  }
+  return result;
+}
