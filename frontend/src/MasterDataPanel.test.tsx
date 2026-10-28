@@ -195,7 +195,7 @@ describe("MasterDataPanel", () => {
     expect(screen.getByText("No recent background jobs returned.")).toBeInTheDocument();
     expect(screen.getByText("No popular markets are available right now.")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByText("0", { selector: ".metric-value" })).toBeInTheDocument();
+    expect(screen.getAllByText("0", { selector: ".metric-value" })).toHaveLength(4);
     expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
   });
 
