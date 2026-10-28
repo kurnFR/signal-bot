@@ -268,9 +268,18 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Safety:** GET-only client and mocked responses; no policy writes, strategy activation, promotion, Telegram sends, or deployment. Policy editing and promotion actions remain unavailable.
 
 
-### Current PR #580 — backtest auto-promotion side-effect consent
+### PR #580 — backtest auto-promotion side-effect consent
 
-- The backend evaluates its saved auto-promotion policy when a backtest run completes. The React preview now waits for a verified policy response before enabling run review.
-- When promotion is enabled, the confirmation explicitly warns that a paper strategy may be activated and that a Telegram alert may be sent if configured. A separate acknowledgement is required before the POST run can proceed.
-- If policy status cannot be verified, the preview does not allow a backtest run, avoiding an unreviewed side effect.
+- **Status:** Merged.
+- **Merge commit:** `e6a4ba336b1952407faa8d5d662a46bcbcc6b065`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/580
+- **Finding/fix:** The backend evaluates its saved auto-promotion policy when a backtest completes. The React preview now waits for a verified policy response before enabling run review. When promotion is enabled, the confirmation explains possible paper-strategy activation and Telegram notifications and requires separate acknowledgement before the run POST.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `a4d3db1e2865715cb9a6d102863acba4a19ad301`.
+- **Safety:** Mocked requests only; no backtest, promotion, paper activation, Telegram send, or deployment.
+
+### Current PR #581 — guarded auto-promotion policy editor
+
+- Adds admin/trader-only editing for the saved auto-promotion thresholds and toggles; viewers retain read-only policy/audit visibility.
+- Saving requires a review step. Enabling automatic promotion requires acknowledgement of future paper-strategy activation, and enabling Telegram requires a separate external-notification acknowledgement.
+- The client distinguishes verified `status: "ok"` readback from `saved_readback_unavailable`; it does not display submitted values as authoritative and keeps backtest review disabled until a successful refresh.
 - Validation is pending on the exact PR head; do not merge until all required checks pass.
