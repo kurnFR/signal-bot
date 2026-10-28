@@ -60,4 +60,54 @@ describe("NewsAIPanel", () => {
     expect(await screen.findByText("Collected events")).toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
+}
+
+  it("shows empty states when stats, signals, and events load successfully with no rows", async () => {
+    const emptyResponses = {
+      "/api/news/stats": {
+        total_events_collected: 0, events_evaluated_by_ai: 0, high_confidence_signals: 0,
+        avg_confidence: null, trades_opened: 0, pending_signals: 0,
+        performance: { closed_trades: 0, wins: 0, losses: 0, win_rate: null, expectancy_r: null, profit_factor: null, total_r: 0, net_pnl: 0, max_drawdown_r: 0 },
+        heartbeats: [],
+      },
+      "/api/news/signals?limit=50": { signals: [] },
+      "/api/news/events?limit=30": { events: [] },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const body = emptyResponses[String(input) as keyof typeof emptyResponses];
+      if (!body) throw new Error("Unexpected endpoint: " + String(input));
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
+    }));
+    render(<NewsAIPanel />);
+
+    expect(await screen.findByText("No signals match this filter.")).toBeInTheDocument();
+    expect(screen.getByText("No recent events returned.")).toBeInTheDocument();
+    expect(screen.getByText("No collector heartbeat records returned.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("recovers from a temporary API failure after Retry without issuing mutations", async () => {
+    let recovered = false;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (init?.method && init.method !== "GET") throw new Error("News AI preview must be GET-only");
+      if (!recovered) return Promise.resolve(new Response(JSON.stringify({ detail: "temporary failure" }), {
+        status: 503, headers: { "content-type": "application/json" },
+      }));
+      const body = responses[path as keyof typeof responses];
+      if (!body) throw new Error("Unexpected endpoint: " + path);
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<NewsAIPanel />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/check API\/database health, then retry/i);
+    recovered = true;
+    fireEvent.click(screen.getByRole("button", { name: /Retry/i }));
+
+    expect(await screen.findByText("Bitcoin market update")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(6);
+  });
 });
