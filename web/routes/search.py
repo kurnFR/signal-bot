@@ -1,6 +1,7 @@
 import time
 import requests
 import logging
+from typing import Literal
 from fastapi import APIRouter, Query
 
 router = APIRouter(prefix="/api/crypto", tags=["crypto"])
@@ -81,7 +82,7 @@ def get_futures_tickers():
 @router.get("/search")
 def search_crypto(
     q: str = Query("", description="Symbol or keyword to search"),
-    market: str = Query("all", description="Market: spot, futures, or all"),
+    market: Literal["all", "spot", "futures"] = Query("all", description="Market: spot, futures, or all"),
     limit: int = Query(25, ge=1, le=100),
 ):
     query = q.strip().upper()
