@@ -305,8 +305,17 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `01b31aeb08c71f08469871140a9a42767bc7930a`.
 - **Safety:** Mocked responses only; no real policy save, backtest, promotion, paper activation, Telegram send, or deployment.
 
-### Current PR #584 — fail closed on malformed promotion policy reads
+### PR #584 — fail closed on malformed promotion policy reads
 
-- Reuses the complete policy validator for GET responses. A missing or incorrectly typed field, especially the Telegram side-effect flag, now makes the policy read invalid instead of silently treating it as verified.
-- Adds unit tests for valid policy reads and malformed, missing, and non-finite values.
+- **Status:** Merged.
+- **Merge commit:** `7cda639fcf4d19fc6e7b392826bf7ff5dfa23451`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/584
+- **Coverage:** Applies the complete policy schema validator to GET responses, rejecting missing or incorrectly typed fields (including Telegram configuration) and invalid numeric values rather than silently treating policy as verified.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `9d1d83776837c96f81292576f4dea3a9ccbbd35a`.
+- **Safety:** Mocked API responses only; no policy changes, backtests, promotion, paper activation, Telegram, or deployment.
+
+### Current PR #585 — validate promotion audit event schema
+
+- Validates each audit event's required strings, nullable fields, timestamps, and paper configuration identifier before exposing it to React. This prevents malformed event fields (for example a non-string status) from crashing the audit table render.
+- Adds mocked contract tests for a valid event, invalid status type, and incomplete event.
 - Validation is pending on the exact PR head; do not merge until all required checks pass.

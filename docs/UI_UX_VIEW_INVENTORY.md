@@ -754,3 +754,11 @@ The News AI contract mismatch described in the historical audit has been correct
 - [x] Reject missing booleans/thresholds and invalid numeric values instead of silently presenting malformed policy as verified.
 - [x] Add mocked contract tests for valid, missing-field, wrong-type, and invalid-number payloads.
 - [ ] Continue route-by-route request/response/RBAC and legacy caller parity review. UIX-00 acceptance and production cutover remain open.
+
+
+## UIX-00 promotion audit event contract hardening (2026-10-28)
+
+- [x] Validate each promotion audit event before passing it to the UI, including status/reason and nullable timestamps/result/configuration fields.
+- [x] Reject malformed or incomplete events so the audit table cannot crash on unexpected backend payload types.
+- [x] Add mocked contract tests for valid and malformed event responses.
+- [ ] Continue route-by-route request/response/RBAC and legacy caller parity review. UIX-00 acceptance and production cutover remain open.
