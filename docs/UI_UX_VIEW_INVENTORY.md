@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `fd160f4d41898c82539e136b88283996d5e7570c` (master after PR #507; static router decorator count checked, runtime route registry and endpoint-to-row parity still pending)  
+**Source baseline for reconciliation:** `1e65e00465077a242d3930b66506bbb151d7dd75` (master after PR #508; static router decorator count checked, runtime route registry and endpoint-to-row parity still pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -476,3 +476,30 @@ This slice checks the six custom-strategy handlers in `web/routes/custom_strateg
 - [ ] Reconcile all custom-strategy routes with the runtime FastAPI route registry and verify legacy UI callers.
 - [ ] Resolve the viewer catalog policy with the owner; do not relax the prefix-wide rule without an explicit decision and narrow regression-tested policy.
 - [ ] Complete all-router route parity, role-specific browser/device/accessibility acceptance, and owner sign-off before any production route cutover.
+
+
+## UIX-00 source audit slice: system status data boundary and settings scope (2026-10-28)
+
+This slice compares `web/routes/system_status.py`, `web/routes/settings.py`, centralized route policy in `web/app.py`, and the React preview's `SystemStatusPanel` and `SettingsPanel`. It is a source-level audit, not a live operational health check.
+
+| Method and path | Effective access | Response / data boundary | React preview consumer |
+|---|---|---|---|
+| `GET /api/system/status` | Any authenticated role under the default GET policy; forced-password-change accounts are blocked before route execution. | Calls shared `collect_system_status()`, returns database status/table counts, heartbeat records, and Binance spot/futures connectivity/configuration. It omits database host, port and database name, and replaces the raw database error with the generic `Database unavailable` string when unhealthy. The returned heartbeat objects still include the backend's `detail` field, even though the current panel does not render it. | `SystemStatusPanel` calls `fetchSystemStatus`, displays database status/table count, spot/futures status, heartbeat count, and collector/status/last-beat rows. It handles 401/403 with specific copy, has retry, aborts stale requests, and renders loading/error/empty states. |
+| `GET /api/settings/status` | Admin only under `ADMIN_ONLY_PREFIXES`; forced-password-change accounts are blocked before route execution. | Returns the full `collect_system_status()` payload, including database host, port, database name, table counts, raw error text, heartbeats and Binance status. Treat it as an administrative diagnostic endpoint, not the general-purpose dashboard status API. | No call from the React `SettingsPanel`; administrative settings are explicitly marked legacy/not connected. |
+| `GET /api/auth/me` | Any authenticated role; also included in the forced-password-change allowlist. | Returns session identity fields including id, username, email, role and `must_change_password`; it does not return the bearer token. | `SettingsPanel` receives username/role as props from the app/auth flow; its comment says identity comes from the existing authentication gate. Verify separately that parent state remains synchronized after profile/role changes. |
+
+### Findings and migration implications
+
+- Both status endpoints call the same collector, which queries database table metadata and collector heartbeats and makes live HTTP requests to Binance spot and futures endpoints with three-second timeouts. A status request can therefore incur database/network work; UI loading and retry states are necessary and are present in `SystemStatusPanel`.
+- The public-facing `/api/system/status` response sanitizes the database connection identifiers and raw database error, but currently passes through heartbeat `detail`. The React panel does not render that field today. Before exposing it in a future UI, inspect real producer content and decide whether it may contain operational or sensitive details; do not infer that an unrendered field is safe to display.
+- `/api/settings/status` is admin-only and intentionally carries richer diagnostic information. Do not point the general system-status panel at this route or relax the admin-only prefix to make it work.
+- The React `SettingsPanel` is intentionally limited to local theme preference and basic session metadata. It does not call server settings, user administration, Telegram test, or credential endpoints. This is a scope boundary, not complete migration of legacy administrative settings.
+- These findings come from source inspection. Runtime role checks, actual response payload tests for heartbeat detail, frontend parent/auth synchronization, and browser acceptance for admin/trader/viewer remain part of the migration gate.
+
+### UIX-00 audit status update
+
+- [x] Compared system status and administrative status routes, role policy, response sanitization, and current React consumers at source level.
+- [x] Confirmed the preview uses `/api/system/status` and does not connect the Settings view to the admin-only full diagnostic endpoint.
+- [ ] Add a focused response-contract test asserting that public status omits database host/port/name and raw DB error while deciding whether heartbeat `detail` should be omitted or explicitly sanitized.
+- [ ] Verify auth/session parent state and role-specific browser behavior for settings and system status.
+- [ ] Continue runtime route-registry reconciliation and legacy-to-React parity for all 13 routers; owner acceptance and production cutover gates remain open.
