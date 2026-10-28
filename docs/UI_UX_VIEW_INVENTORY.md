@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `4996744e1b7c028a6020dfb9a800dc3b88ff7b5b` (master after PR #537, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
+**Source baseline for reconciliation:** `bf180f692f3ac5604fe21e709dde5bc24ba49aaf` (master after PR #538, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -621,7 +621,7 @@ Compared `web/routes/search.py` with the legacy `web/static/js/app.js` call site
 
 - [x] Corrected documented defaults, result fields, provider dependency, and popular-list semantics against source.
 - [x] Distinguished legacy consumers from the disconnected React preview.
-- [ ] Add mocked provider/route tests for defaults, market selection, response schema, cache fallback, and upstream failure; tests must not depend on live Binance availability.
+- [x] Added mocked provider/route tests for defaults, market selection, response schema, cache fallback, upstream failure, and invalid market rejection. Tests never call live Binance; the search route now rejects unknown market values with HTTP 422.
 - [x] Migrated asset search, popular spot quick-select, and market selection into React Master Data with mocked browser tests. Selecting a pair only prefills the backfill form and never starts a job; the existing explicit confirmation remains required.
 - [ ] Continue route-to-inventory reconciliation, RBAC/browser/device/accessibility checks, and owner acceptance before production cutover.
 
