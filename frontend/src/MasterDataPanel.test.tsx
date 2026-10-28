@@ -77,6 +77,34 @@ describe("MasterDataPanel", () => {
     }));
   });
 
+  it("requires confirmation before starting a feature-build job", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const calls: Array<{ path: string; method: string; body?: unknown }> = [];
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+      if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/master-data/coverage") return json(responses["/api/master-data/coverage"]);
+      if (path === "/api/master-data/jobs") return json(responses["/api/master-data/jobs"]);
+      if (path === "/api/master-data/build-features" && method === "POST") return json({ id: "features-new", type: "build_features", status: "queued", progress: 0, symbol: "BTCUSDT", market: "spot", timeframe: "1h" });
+      throw new Error("Unexpected endpoint: " + method + " " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><MasterDataPanel /></AuthGate>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Build features" }));
+    expect(await screen.findByRole("heading", { name: "Confirm feature build" })).toBeInTheDocument();
+    expect(calls.filter((call) => call.method === "POST")).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Start feature build" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(/feature build job queued \(features-new\)/i);
+    await waitFor(() => expect(calls.find((call) => call.path === "/api/master-data/build-features" && call.method === "POST")?.body).toEqual({
+      symbol: "BTCUSDT", market: "spot", timeframe: "1h",
+    }));
+  });
+
   it("keeps job-launch controls hidden for viewers", async () => {
     window.localStorage.setItem("token", "viewer-session");
     const profile = { id: 9, username: "viewer01", email: null, role: "viewer", must_change_password: false };
