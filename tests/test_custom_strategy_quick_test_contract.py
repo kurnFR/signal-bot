@@ -86,7 +86,7 @@ def test_quick_test_sanitizes_non_finite_metrics(monkeypatch):
     monkeypatch.setattr(
         custom_strategy,
         "_create_strategy_runner",
-        lambda _strategy: (lambda *_args, **_kwargs: [], lambda *_args, **_kwargs: []),
+        lambda _strategy: (lambda *_args, **_kwargs: [{"r_multiple": float("nan")}], lambda *_args, **_kwargs: []),
     )
     monkeypatch.setattr(
         custom_strategy,
@@ -103,6 +103,7 @@ def test_quick_test_sanitizes_non_finite_metrics(monkeypatch):
     result = custom_strategy.quick_test_strategy(_request())
 
     assert result["winRate"] is None
+    assert result["netR"] is None
     assert result["winRatePct"] is None
     assert result["profitFactor"] is None
     assert result["maxDrawdownR"] is None
