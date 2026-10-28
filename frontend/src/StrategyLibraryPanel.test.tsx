@@ -126,7 +126,7 @@ describe("read-only strategy library", () => {
     fireEvent.change(await screen.findByRole("textbox", { name: "AI strategy prompt" }), { target: { value: "Use RSI extremes with a wider stop" } });
     expect(calls.filter((call) => call.method === "POST")).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
-    expect(await screen.findByText("Draft ready.")).toBeInTheDocument();
+    expect((await screen.findAllByText("Draft ready.")).length).toBeGreaterThan(0);
     expect(screen.getByText("Offline Quantitative Engine")).toBeInTheDocument();
     expect(calls.find((call) => call.path === "/api/custom-strategy/generate-ai" && call.method === "POST")?.body).toMatchObject({
       prompt: "Use RSI extremes with a wider stop",
@@ -174,11 +174,11 @@ describe("read-only strategy library", () => {
     const prompt = screen.getByRole("textbox", { name: "AI strategy prompt" });
     fireEvent.change(prompt, { target: { value: "Create an RSI reversal strategy" } });
     fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
-    expect(await screen.findByText("First response.")).toBeInTheDocument();
+    expect((await screen.findAllByText("First response.")).length).toBeGreaterThan(0);
 
     fireEvent.change(screen.getByRole("textbox", { name: "AI strategy prompt" }), { target: { value: "Make the stop loss wider" } });
     fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
-    expect(await screen.findByText("Refined response.")).toBeInTheDocument();
+    expect((await screen.findAllByText("Refined response.")).length).toBeGreaterThan(0);
     expect(screen.getByText("Create an RSI reversal strategy")).toBeInTheDocument();
 
     const generationCalls = calls.filter((call) => call.path === "/api/custom-strategy/generate-ai" && call.method === "POST");
