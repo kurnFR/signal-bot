@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "./AuthGate";
 import { BookOpen, RefreshCw, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
-import { createCustomStrategy, deleteCustomStrategy, fetchCustomStrategies, fetchStrategyIndicators, quickTestCustomStrategy, StrategyLibraryActionError, StrategyQuickTestError, type CustomStrategy, type QuickTestResult, type StrategyConditionInput, type StrategyIndicator } from "./lib/strategyLibrary";
+import { createCustomStrategy, deleteCustomStrategy, fetchCustomStrategies, fetchStrategyIndicators, generateAIStrategyDraft, quickTestCustomStrategy, StrategyLibraryActionError, StrategyQuickTestError, type AIStrategyDraftResponse, type CustomStrategy, type QuickTestResult, type StrategyConditionInput, type StrategyIndicator } from "./lib/strategyLibrary";
 
 function messageFor(cause: unknown) {
   if (cause instanceof ApiError && cause.status === 401) return "Your session has expired. Sign in again to view the strategy library.";
@@ -43,6 +43,10 @@ export function StrategyLibraryPanel() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<CustomStrategy | null>(null);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiDraft, setAiDraft] = useState<AIStrategyDraftResponse | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setError(null);
@@ -93,6 +97,35 @@ export function StrategyLibraryPanel() {
       if (cause instanceof StrategyLibraryActionError && cause.status === 403) setActionError("Your account cannot create strategies. Only admin or trader roles can perform this action.");
       else setActionError(cause instanceof Error ? cause.message : "Strategy creation failed. Please retry.");
     } finally { setActionBusy(null); }
+  };
+  const generateDraft = async () => {
+    if (!aiPrompt.trim()) { setAiError("Describe the strategy you want to generate."); return; }
+    setAiBusy(true); setAiError(null); setActionError(null); setActionMessage(null); setAiDraft(null);
+    try {
+      const result = await generateAIStrategyDraft(aiPrompt.trim());
+      setAiDraft(result);
+    } catch (cause) {
+      if (cause instanceof StrategyLibraryActionError && cause.status === 403) setAiError("Your account cannot generate strategy drafts. Only admin or trader roles can perform this action.");
+      else setAiError(cause instanceof Error ? cause.message : "AI strategy generation failed. Please retry.");
+    } finally { setAiBusy(false); }
+  };
+  const useGeneratedDraft = () => {
+    if (!aiDraft) return;
+    const strategy = aiDraft.strategy;
+    setCreateName(strategy.name || "");
+    setCreateDisplayName(strategy.displayName || strategy.name || "");
+    setCreateDescription(strategy.description || "");
+    setCreateRationale(strategy.rationale || "");
+    setLongConditions((strategy.longConditions?.length ? strategy.longConditions : [{ indicator: "rsi", operator: "<", value: 30 }]).map((condition) => ({ indicator: condition.indicator || "rsi", operator: condition.operator || "<", value: String(condition.value ?? "") })));
+    setShortConditions((strategy.shortConditions?.length ? strategy.shortConditions : [{ indicator: "rsi", operator: ">", value: 70 }]).map((condition) => ({ indicator: condition.indicator || "rsi", operator: condition.operator || ">", value: String(condition.value ?? "") })));
+    setSlAtrMult(String(strategy.slAtrMult ?? 1.5));
+    setRiskRewardRatio(String(strategy.riskRewardRatio ?? 2.5));
+    setUseTrailingStop(Boolean(strategy.useTrailingStop));
+    setTrailActivationR(String(strategy.trailActivationR ?? 1));
+    setTrailDistanceAtrMult(String(strategy.trailDistanceAtrMult ?? 1.5));
+    setShowCreateForm(true);
+    setActionError(null);
+    setActionMessage("Generated draft loaded into the editor. Review it and select Save strategy to persist; nothing has been saved yet.");
   };
   const confirmDeleteStrategy = async () => {
     if (!pendingDelete) return;
