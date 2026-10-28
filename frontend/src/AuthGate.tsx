@@ -23,6 +23,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
       try { window.localStorage.removeItem("token"); } catch { /* In-memory auth state still resets. */ }
       setUser(null);
       setPassword("");
+      setOldPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
       setError("Your session has expired. Sign in again to continue.");
       setScreen("login");
     };
