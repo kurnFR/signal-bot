@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `abe4f28b728efe7148dd57ca4e421c77049733f4` (master after PR #509; static router decorator count checked, runtime route registry and endpoint-to-row parity still pending)  
+**Source baseline for reconciliation:** `b3c6ec48f3612178154d353b52fe22e863174330` (master after PR #510; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -531,3 +531,32 @@ This slice compares `web/routes/telegram_routes.py`, the central `api_security_b
 - [ ] Add/verify focused route tests for viewer/trader/admin access, forced-password-change rejection, response redaction, and mocked outbound-test behavior.
 - [ ] Verify the legacy Telegram UI call path and decide whether `chatId` should be visible to all authenticated roles.
 - [ ] Complete runtime route-registry parity, legacy-to-React view/dialog/fetch parity, browser/device/accessibility checks, and owner acceptance before production cutover.
+
+
+
+## UIX-00 follow-up: verify legacy Telegram test control call path (2026-10-28)
+
+Follow-up source review of `web/static/js/dashboard_enhancements.js` resolves part of the earlier legacy-call-path gap. The enhancement bundle installs `window.App.sendTelegramTestPing` and sends `POST /api/telegram/test` with authenticated headers and an empty JSON body from the `btn-tg-test` control. It disables the button while the request runs, restores it in `finally`, and displays success/failure toasts.
+
+| Legacy UI behavior | Verified source behavior | Migration implication |
+|---|---|---|
+| Trigger | `installTelegramPing()` attaches `sendTelegramTestPing` when `window.App` is available; the button id is `btn-tg-test`. | Keep this call path in the legacy inventory until the production route is intentionally migrated. |
+| Request | `fetch("/api/telegram/test", { method: "POST", headers: this.getAuthHeaders(), body: JSON.stringify({}) })`. | The legacy UI does not send `custom_message`; the request model's optional field is not used by this UI. |
+| Success UI | Checks HTTP success and `data.success`, then displays bot username and `data.chat_id` if present, with text stating a test message was sent. | The test action is not a read-only health check. Preserve explicit user initiation and a clear success state if migrated. |
+| Error UI | Prefers `detail`, then `error`, then HTTP status; displays the resulting error in a toast. | Review whether provider/helper errors may reveal operational details before presenting them to non-admin users. The endpoint itself remains admin-only. |
+| Loading/recovery | Disables the button, shows a spinner/“Testing...” label, and restores the original button content in `finally`. | Preserve keyboard operation, accessible name/state, and recovery behavior in a replacement component. |
+
+### Reconciled scope
+
+- The previous statement that Telegram testing remains in the legacy dashboard is accurate for the current React preview, but the legacy enhancement bundle does have a concrete caller for `POST /api/telegram/test`.
+- This slice confirms the outbound-test button call path only. It does **not** establish the complete source of the legacy Telegram status pill; the `GET /api/telegram/status` consumer remains to be located and verified.
+- The React preview still does not call either Telegram endpoint, and FastAPI continues serving `web/static/index.html`. No runtime behavior or authorization was changed.
+- Existing `tests/test_route_authorization_sweep.py` and `tests/test_frontend_api_route_parity.py` inspect `app.routes` at runtime, but the former's current assertions focus on auth/role policy and the latter checks preview GET helpers. Those tests do not by themselves prove every draft inventory row is accurate or that every legacy UI caller is cataloged.
+
+### UIX-00 audit status update
+
+- [x] Verified the legacy enhancement bundle's Telegram test trigger, authenticated POST body, loading state, success toast, error toast, and cleanup.
+- [x] Reconciled the distinction between legacy Telegram controls and the disconnected React preview.
+- [ ] Locate and verify the legacy `GET /api/telegram/status` consumer and its role-specific rendering.
+- [ ] Add/verify mocked route tests for the Telegram test handler's response and outbound helper behavior; CI must never send real Telegram messages.
+- [ ] Finish runtime route-to-inventory row reconciliation, full legacy-to-React parity, browser/device/accessibility checks, and owner acceptance before production cutover.
