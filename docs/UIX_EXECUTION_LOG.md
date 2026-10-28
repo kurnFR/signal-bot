@@ -287,8 +287,16 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `1cf862b2d2106afa1b961f35d3b6fb78c12d546f`.
 - **Safety:** Mocked responses only; policy saves, backtests, promotion, paper activation, Telegram sends, and deployment were not executed.
 
-### Current PR #582 — backtest gate when policy status is unavailable
+### PR #582 — backtest gate when policy status is unavailable
 
-- Adds an integration regression verifying the React preview keeps backtest review disabled when the promotion policy cannot be read, then enables review only after a successful retry.
-- The test asserts no backtest POST is sent in either state.
+- **Status:** Merged.
+- **Merge commit:** `1886fd24f8b57bed282ab7cf02f32160ba07b2a1`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/582
+- **Coverage:** Integration regression proves run review remains disabled if the saved promotion policy cannot be fetched and becomes available only after a successful retry. It asserts that no `POST /api/backtest/run` is sent while policy state is unknown.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `07f62fc2341866f436aa2479fd6e15dec5b574d0`.
+- **Safety:** Mocked requests only; no backtest was executed.
+
+### Current PR #583 — policy-save expired-session coverage
+
+- Adds an auth-gate regression for HTTP 401 during promotion policy save. It expects the stale token to be cleared, the UI to return to sign-in, and no verified-save message to appear.
 - Validation is pending on the exact PR head; do not merge until all required checks pass.
