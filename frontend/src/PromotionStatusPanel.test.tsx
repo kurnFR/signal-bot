@@ -24,7 +24,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 describe("read-only promotion status", () => {
   it("renders saved policy thresholds and an intentional empty audit state", async () => {
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(input);
       return Promise.resolve(path.includes("promotion-policy")
         ? json({ policy })
@@ -58,7 +58,7 @@ describe("read-only promotion status", () => {
       created_at: "2026-10-28T18:00:00",
       updated_at: "2026-10-28T18:01:00",
     };
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(input);
       if (path.includes("promotion-policy")) {
         policyCalls += 1;
