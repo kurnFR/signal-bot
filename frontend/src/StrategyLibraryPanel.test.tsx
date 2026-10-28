@@ -27,6 +27,42 @@ describe("read-only strategy library", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Your account cannot access the strategy library.");
   });
 
+  it("searches and filters the backtest strategy catalog and navigates without running a simulation", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const catalog = { strategies: [
+      { id: "trend_ema_v1", baseName: "trend_ema_v1", isInverse: false, displayName: "Trend EMA Crossover", category: "Trend Following", validated: true, description: "Trend-following EMA cross", params: [{ key: "fast" }], sharedParams: [] },
+      { id: "rsi_mean_reversion", baseName: "rsi_mean_reversion", isInverse: false, displayName: "RSI Mean Reversion", category: "Mean Reversion", validated: false, description: "RSI reversal with a wider stop", params: [], sharedParams: [] },
+      { id: "custom_momentum", baseName: "custom_momentum", isInverse: false, displayName: "Custom Momentum", category: "Custom Strategy", validated: false, description: "Custom rule strategy", params: [], sharedParams: [] },
+    ] };
+    const calls: Array<{ path: string; method: string }> = [];
+    const onSelectForBacktest = vi.fn();
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ path, method });
+      const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+      if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/custom-strategy/list") return json(payloads["/api/custom-strategy/list"]);
+      if (path === "/api/custom-strategy/indicators") return json(payloads["/api/custom-strategy/indicators"]);
+      if (path === "/api/backtest/strategies") return json(catalog);
+      throw new Error("Unexpected endpoint: " + method + " " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><StrategyLibraryPanel onSelectForBacktest={onSelectForBacktest} /></AuthGate>);
+
+    expect(await screen.findByRole("heading", { name: "Strategy catalog" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Trend EMA Crossover" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Strategy catalog category" }), { target: { value: "builtin" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Search strategy catalog" }), { target: { value: "rsi" } });
+    expect(await screen.findByRole("heading", { name: "RSI Mean Reversion" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Custom Momentum" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Use in Backtest Studio" }));
+    expect(onSelectForBacktest).toHaveBeenCalledWith("rsi_mean_reversion");
+    expect(calls.filter((call) => call.method === "POST")).toEqual([]);
+  });
+
   it("runs a non-persisted quick test only after a trader clicks the action", async () => {
     window.localStorage.setItem("token", "trader-session");
     const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };

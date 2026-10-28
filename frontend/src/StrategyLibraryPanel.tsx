@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./AuthGate";
 import { BookOpen, RefreshCw, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
+import { fetchBacktestStrategies, type BacktestStrategy } from "./lib/backtestStudio";
 import { createCustomStrategy, deleteCustomStrategy, fetchCustomStrategies, fetchStrategyIndicators, generateAIStrategyDraft, quickTestCustomStrategy, StrategyLibraryActionError, StrategyQuickTestError, type AIStrategyChatMessage, type AIStrategyDraftResponse, type CustomStrategy, type QuickTestResult, type StrategyConditionInput, type StrategyIndicator } from "./lib/strategyLibrary";
 
+interface StrategyLibraryPanelProps { onSelectForBacktest?: (strategyId: string) => void; }
 function messageFor(cause: unknown) {
   if (cause instanceof ApiError && cause.status === 401) return "Your session has expired. Sign in again to view the strategy library.";
   if (cause instanceof ApiError && cause.status === 403) return "Your account cannot access the strategy library.";
@@ -12,8 +14,13 @@ function messageFor(cause: unknown) {
 function Conditions({ label, items }: { label: string; items?: CustomStrategy["longConditions"] }) {
   return <div className="strategy-conditions"><strong>{label}</strong>{items?.length ? <ul>{items.map((condition, index) => <li key={label + index}><code>{condition.indicator ?? "indicator"} {condition.operator ?? "?"} {String(condition.value ?? "—")}</code></li>)}</ul> : <p className="empty-state">No conditions defined.</p>}</div>;
 }
-export function StrategyLibraryPanel() {
+export function StrategyLibraryPanel({ onSelectForBacktest }: StrategyLibraryPanelProps = {}) {
   const [strategies, setStrategies] = useState<CustomStrategy[]>([]);
+  const [catalogStrategies, setCatalogStrategies] = useState<BacktestStrategy[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogFilter, setCatalogFilter] = useState<"all" | "builtin" | "custom">("all");
   const [indicators, setIndicators] = useState<StrategyIndicator[]>([]);
   const [operators, setOperators] = useState<string[]>(["<", "<=", ">", ">=", "==", "!="]);
   const [loading, setLoading] = useState(true);
@@ -21,6 +28,8 @@ export function StrategyLibraryPanel() {
   const [attempt, setAttempt] = useState(0);
   const auth = useAuth();
   const canQuickTest = ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
+  const canManageStrategies = canQuickTest;
+  const shouldLoadCatalog = Boolean(onSelectForBacktest) && canManageStrategies;
   const [testSymbol, setTestSymbol] = useState("BTCUSDT");
   const [testMarket, setTestMarket] = useState<"spot" | "futures">("spot");
   const [testTimeframe, setTestTimeframe] = useState("1h");
@@ -61,9 +70,38 @@ export function StrategyLibraryPanel() {
       })
       .catch((cause: unknown) => { if (!controller.signal.aborted) setError(messageFor(cause)); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    if (shouldLoadCatalog) {
+      setCatalogLoading(true); setCatalogError(null);
+      fetchBacktestStrategies(controller.signal)
+        .then((result) => {
+          if (controller.signal.aborted) return;
+          if (!Array.isArray(result.strategies)) throw new Error("Invalid strategy catalog response");
+          setCatalogStrategies(result.strategies);
+        })
+        .catch((cause: unknown) => {
+          if (!controller.signal.aborted) {
+            setCatalogStrategies([]);
+            setCatalogError(cause instanceof Error ? cause.message : "Strategy catalog could not be loaded.");
+          }
+        })
+        .finally(() => { if (!controller.signal.aborted) setCatalogLoading(false); });
+    } else {
+      setCatalogStrategies([]);
+      setCatalogLoading(false);
+    }
     return () => controller.abort();
-  }, [attempt]);
-  const canManageStrategies = canQuickTest;
+  }, [attempt, shouldLoadCatalog]);
+  const filteredCatalog = useMemo(() => {
+    const needle = catalogSearch.trim().toLowerCase();
+    return catalogStrategies.filter((strategy) => {
+      const isCustom = strategy.category === "Custom AI Strategy" || strategy.category === "Custom Strategy";
+      if (catalogFilter === "custom" && !isCustom) return false;
+      if (catalogFilter === "builtin" && isCustom) return false;
+      if (!needle) return true;
+      return [strategy.displayName, strategy.id, strategy.description, strategy.category]
+        .some((value) => (value ?? "").toLowerCase().includes(needle));
+    });
+  }, [catalogStrategies, catalogFilter, catalogSearch]);
   const conditionInput = (conditions: Array<{ indicator: string; operator: string; value: string }>): StrategyConditionInput[] =>
     conditions.map((condition) => {
       const value = condition.value.trim();
@@ -234,6 +272,20 @@ export function StrategyLibraryPanel() {
     {actionError && <div className="error-banner" role="alert"><p>{actionError}</p><button className="button button-secondary" onClick={() => setActionError(null)}>Dismiss</button></div>}
     {actionMessage && <p className="control-feedback control-success" role="status">{actionMessage}</p>}
     {canQuickTest ? <section className="panel" aria-labelledby="strategy-quick-test-config-title"><div className="panel-heading"><div><h2 id="strategy-quick-test-config-title">Quick-test configuration</h2><p>Runs a non-persisted simulation against up to the latest 1,000 stored candles. It does not create, activate, or promote a strategy.</p></div><span className="panel-counter">ADMIN / TRADER</span></div><div className="screener-control-grid"><label className="screener-control-field">Symbol<input aria-label="Quick-test symbol" value={testSymbol} maxLength={30} onChange={(event) => setTestSymbol(event.target.value)} /></label><label className="screener-control-field">Market<select aria-label="Quick-test market" value={testMarket} onChange={(event) => setTestMarket(event.target.value as "spot" | "futures")}><option value="spot">Spot</option><option value="futures">Futures</option></select></label><label className="screener-control-field">Timeframe<select aria-label="Quick-test timeframe" value={testTimeframe} onChange={(event) => setTestTimeframe(event.target.value)}>{["1m", "5m", "15m", "1h", "4h", "1d"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label></div></section> : <p className="empty-state">Strategy quick tests are restricted to admin and trader roles. This session can review saved definitions only.</p>}
+    {shouldLoadCatalog && <section className="panel" aria-labelledby="strategy-catalog-title" aria-busy={catalogLoading}>
+      <div className="panel-heading"><div><h2 id="strategy-catalog-title">Strategy catalog</h2><p>Browse backend-registered strategies. Selecting one opens Backtest Studio with it preselected; no simulation starts automatically.</p></div><span className="panel-counter">{catalogStrategies.length} STRATEGIES</span></div>
+      <div className="screener-control-grid">
+        <label className="screener-control-field">Search catalog<input aria-label="Search strategy catalog" value={catalogSearch} onChange={(event) => setCatalogSearch(event.target.value)} placeholder="Name, ID, category, or description" /></label>
+        <label className="screener-control-field">Category<select aria-label="Strategy catalog category" value={catalogFilter} onChange={(event) => setCatalogFilter(event.target.value as "all" | "builtin" | "custom")}><option value="all">All strategies</option><option value="builtin">Built-in</option><option value="custom">Custom</option></select></label>
+      </div>
+      {catalogError && <div className="error-banner" role="alert"><p>Strategy catalog could not be loaded. {catalogError}</p><button className="button button-secondary" type="button" onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={15} /> Retry</button></div>}
+      {catalogLoading ? <p className="empty-state">Loading strategy catalog…</p> : filteredCatalog.length === 0 ? <p className="empty-state">No strategies match this search and category.</p> : <div className="strategy-catalog-grid">{filteredCatalog.map((strategy) => <article className="strategy-catalog-card" key={strategy.id}>
+        <div className="panel-heading"><div><h3>{strategy.displayName || strategy.id}</h3><p>{strategy.id}</p></div><span className="panel-counter">{strategy.category || "General"}</span></div>
+        <p>{strategy.description || "No description provided."}</p>
+        <div className="strategy-param-list"><span>{(strategy.params?.length ?? 0) + (strategy.sharedParams?.length ?? 0)} parameters</span>{strategy.validated && <span>Holdout validated</span>}{strategy.isInverse && <span>Inverse variant</span>}</div>
+        <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={loading || catalogLoading} onClick={() => onSelectForBacktest?.(strategy.id)}>Use in Backtest Studio</button></div>
+      </article>)}</div>}
+    </section>}
     {canManageStrategies && <section className="panel" aria-labelledby="strategy-ai-title" aria-busy={aiBusy}>
       <div className="panel-heading"><div><h2 id="strategy-ai-title">Generate a strategy draft with AI</h2><p>Your prompt may be sent to the server-configured AI provider and may incur usage costs. The generated strategy is only a draft; it is not saved, activated, or promoted.</p></div><span className="panel-counter">DRAFT ONLY</span></div>
       <form className="screener-control-grid" onSubmit={(event) => { event.preventDefault(); void generateDraft(); }}>

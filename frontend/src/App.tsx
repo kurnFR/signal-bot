@@ -40,6 +40,7 @@ function readInitialTheme(): Theme {
 export function App() {
   const [theme, setTheme] = useState<Theme>(readInitialTheme);
   const [activeView, setActiveView] = useState<string>("Overview");
+  const [pendingBacktestStrategyId, setPendingBacktestStrategyId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarCloseButtonRef = useRef<HTMLButtonElement>(null);
@@ -74,6 +75,8 @@ export function App() {
   }, [sidebarOpen]);
 
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
+  const handleSelectStrategyForBacktest = (strategyId: string) => { setPendingBacktestStrategyId(strategyId); setActiveView("Backtest Studio"); setSidebarOpen(false); };
+  const clearPendingBacktestStrategy = () => setPendingBacktestStrategyId(null);
 
   return <div className="app-frame">
     <a className="skip-link" href="#main-content">Skip to main content</a>
@@ -132,7 +135,7 @@ export function App() {
           <span className="notice-tag">LIMITED CONTROLS</span>
         </section>
 
-        {activeView === "Overview" ? <SystemStatusPanel /> : activeView === "Market Screener" ? <><ScreenerPanel /><ScreenerControlsPanel /></> : activeView === "Paper Trading" ? <PaperTradingPanel /> : activeView === "Strategy Library" ? <StrategyLibraryPanel /> : activeView === "Wallet Tracking" ? <WalletTrackingPanel /> : activeView === "Backtest Studio" ? <BacktestStudioPanel /> : activeView === "ML Studio" ? <MLStudioPanel /> : activeView === "Research" ? <ResearchPanel /> : activeView === "News AI" ? <NewsAIPanel /> : activeView === "Master Data" ? <MasterDataPanel /> : activeView === "Settings" ? <SettingsPanel theme={theme} onToggleTheme={toggleTheme} username={auth?.user.username} role={auth?.user.role} /> : <section className="panel preview-placeholder"><div className="panel-heading"><div><h2>{activeView} migration slice</h2><p>This view remains preview-only until its routes, permissions, schemas, and side effects have been verified.</p></div><span className="panel-counter">NOT CONNECTED</span></div><p className="empty-state">No live data or controls are exposed here yet. Existing dashboard functionality remains available in the legacy application.</p></section>}
+        {activeView === "Overview" ? <SystemStatusPanel /> : activeView === "Market Screener" ? <><ScreenerPanel /><ScreenerControlsPanel /></> : activeView === "Paper Trading" ? <PaperTradingPanel /> : activeView === "Strategy Library" ? <StrategyLibraryPanel onSelectForBacktest={handleSelectStrategyForBacktest} /> : activeView === "Wallet Tracking" ? <WalletTrackingPanel /> : activeView === "Backtest Studio" ? <BacktestStudioPanel initialStrategyId={pendingBacktestStrategyId} onInitialStrategyApplied={clearPendingBacktestStrategy} /> : activeView === "ML Studio" ? <MLStudioPanel /> : activeView === "Research" ? <ResearchPanel /> : activeView === "News AI" ? <NewsAIPanel /> : activeView === "Master Data" ? <MasterDataPanel /> : activeView === "Settings" ? <SettingsPanel theme={theme} onToggleTheme={toggleTheme} username={auth?.user.username} role={auth?.user.role} /> : <section className="panel preview-placeholder"><div className="panel-heading"><div><h2>{activeView} migration slice</h2><p>This view remains preview-only until its routes, permissions, schemas, and side effects have been verified.</p></div><span className="panel-counter">NOT CONNECTED</span></div><p className="empty-state">No live data or controls are exposed here yet. Existing dashboard functionality remains available in the legacy application.</p></section>}
 
         <section className="panel" aria-labelledby="roadmap-title">
           <div className="panel-heading"><div><h2 id="roadmap-title">Migration roadmap</h2><p>Small, testable slices with legacy fallback preserved.</p></div><span className="panel-counter">04 / 05</span></div>

@@ -94,3 +94,9 @@ button:focus-visible,a:focus-visible,[tabindex="-1"]:focus-visible{outline:2px s
 .strategy-conversation-list li { min-width: 0; padding: .7rem .85rem; border: 1px solid var(--border, rgba(148, 163, 184, .2)); border-radius: .75rem; overflow-wrap: anywhere; }
 .strategy-conversation-list li strong { display: block; color: var(--text-secondary, #94a3b8); font-size: .75rem; }
 .strategy-conversation-list li p { margin: .3rem 0 0; line-height: 1.55; white-space: pre-wrap; }
+
+.strategy-catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 1rem; margin-top: 1rem; }
+.strategy-catalog-card { display: flex; min-width: 0; flex-direction: column; gap: .8rem; padding: 1rem; border: 1px solid var(--border, rgba(148, 163, 184, .2)); border-radius: 1rem; background: var(--surface-subtle, rgba(148, 163, 184, .035)); }
+.strategy-catalog-card h3 { overflow-wrap: anywhere; font-size: .95rem; font-weight: 650; }
+.strategy-catalog-card p { color: var(--text-secondary, #94a3b8); font-size: .8rem; line-height: 1.55; overflow-wrap: anywhere; }
+.strategy-catalog-card .screener-control-footer { margin-top: auto; }

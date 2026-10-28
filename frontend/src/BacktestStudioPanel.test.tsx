@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { AuthGate } from "./AuthGate";
 import { BacktestStudioPanel } from "./BacktestStudioPanel";
 
-const strategies = { strategies: [{ id: "trend_ema_v1", baseName: "trend_ema_v1", isInverse: false, displayName: "Trend EMA Crossover", category: "Trend Following", validated: false, description: "Trend strategy", params: [], sharedParams: [] }] };
+const strategies = { strategies: [{ id: "trend_ema_v1", baseName: "trend_ema_v1", isInverse: false, displayName: "Trend EMA Crossover", category: "Trend Following", validated: false, description: "Trend strategy", params: [], sharedParams: [] }, { id: "rsi_mean_reversion", baseName: "rsi_mean_reversion", isInverse: false, displayName: "RSI Mean Reversion", category: "Mean Reversion", validated: false, description: "RSI reversal strategy", params: [], sharedParams: [] }] };
 const run = { id: 42, symbol: "BTCUSDT", market: "spot", timeframe: "1h", strategy: "trend_ema_v1", dataSegment: "holdout", totalTrades: 2, winRatePct: 50, expectancyR: 0.25, profitFactor: 1.5, maxDrawdownR: 1.2, createdAt: "2026-10-26T10:00:00Z" };
 const history = { runs: [run] };
 const details = { run: { ...run, params: { TREND_EMA_FAST: 20 } }, trades: [{ direction: "LONG", entryTime: "2026-10-26T09:00:00Z", entryTimeWib: "2026-10-26 16:00:00", entryPrice: 100, exitTime: "2026-10-26T10:00:00Z", exitTimeWib: "2026-10-26 17:00:00", exitPrice: 102, exitReason: "take_profit", stopLoss: 98, takeProfit: 102, netReturnPct: 1.8, rMultiple: 1, holdingBars: 1 }] };
@@ -17,7 +17,7 @@ describe("BacktestStudioPanel", () => {
     cleanup();
     window.localStorage.clear();
     vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
-      expect(init?.method).toBe("GET");
+      expect(init?.method ?? "GET").toBe("GET");
       return Promise.resolve(responseFor(url));
     }));
   });
@@ -30,6 +30,24 @@ describe("BacktestStudioPanel", () => {
     expect(screen.getByText("Stored run parameters")).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.every((call) => call[1]?.method === "GET")).toBe(true);
   });
+  it("preselects a catalog strategy without executing a backtest", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method).toBe("GET");
+      const path = String(input);
+      if (path === "/api/auth/me") return Promise.resolve(new Response(JSON.stringify(profile), { status: 200, headers: { "content-type": "application/json" } }));
+      return Promise.resolve(responseFor(path));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onInitialStrategyApplied = vi.fn();
+    render(<AuthGate><BacktestStudioPanel initialStrategyId="rsi_mean_reversion" onInitialStrategyApplied={onInitialStrategyApplied} /></AuthGate>);
+    const strategySelect = await screen.findByRole("combobox", { name: "Backtest strategy" });
+    await waitFor(() => expect(strategySelect).toHaveValue("rsi_mean_reversion"));
+    expect(onInitialStrategyApplied).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.every((call) => call[1]?.method == null || call[1]?.method === "GET")).toBe(true);
+  });
+
   it("filters saved runs without changing server state", async () => {
     render(<BacktestStudioPanel />);
     await screen.findByText("take_profit");
