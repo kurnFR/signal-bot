@@ -630,3 +630,44 @@ test("mobile navigation close control restores focus to its opener", async ({ pa
   await expect(page.locator("#dashboard-sidebar")).not.toHaveClass(/sidebar-open/);
   await expect(page.locator(".mobile-scrim")).toHaveCount(0);
 });
+
+
+test("viewer Strategy Library exposes no strategy mutation controls or requests", async ({ page }) => {
+  const mutations: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/custom-strategy/") && request.method() !== "GET") {
+      mutations.push(request.method() + " " + url.pathname);
+    }
+  });
+
+  await mockApi(page, { role: "viewer" });
+  await page.route("**/api/custom-strategy/list", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        strategies: [{
+          name: "viewer_fixture",
+          displayName: "Viewer fixture strategy",
+          description: "Read-only fixture",
+          rationale: "Browser regression fixture",
+          longConditions: [],
+          shortConditions: [],
+          slAtrMult: 1.5,
+          riskRewardRatio: 2.5,
+        }],
+      }),
+    });
+  });
+  await signIn(page);
+  await page.getByRole("button", { name: /Strategy Library/ }).click();
+
+  await expect(page.getByRole("heading", { name: "Viewer fixture strategy" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New strategy" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Quick test" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit strategy" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Delete strategy" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Generate draft" })).toHaveCount(0);
+  expect(mutations).toEqual([]);
+});
