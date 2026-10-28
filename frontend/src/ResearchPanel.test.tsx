@@ -31,7 +31,7 @@ describe("ResearchPanel", () => {
     expect(screen.getByRole("heading", { name: "Performance by strategy" })).toBeInTheDocument();
     expect(screen.getByText("58.3%")).toBeInTheDocument();
     expect(screen.getByText("-25")).toBeInTheDocument();
-    expect(screen.getByText("125.5")).toBeInTheDocument();
+    expect(screen.getAllByText("125.5")).toHaveLength(2);
     expect(screen.getByText("Unavailable")).toBeInTheDocument();
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
     expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
