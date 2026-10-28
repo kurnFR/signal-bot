@@ -75,3 +75,13 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Exact PR-head validation:** Frontend foundation workflow, pytest, unit tests, and RetailBot accounting regression all passed on `e0e055d6a5f8c9bfd2a054b1be4accb6a86f8ac1`.
 - **Safety:** All API responses are mocked. No saved strategy files, database, workers, live trades, Telegram sends, or production deployment were touched.
 
+### PR #555 — viewer Strategy Library checkpoint documentation
+
+- **Status:** Merged.
+- **Merge commit:** `cd6714c3d5850c2121c66f910c65a45e6900233f`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/555
+- **Change:** Records PR #554's mocked viewer browser test and exact-head validation.
+- **Validation:** All five reported checks on documentation PR head `e6177fbbb12acd5aee361eafa698189e0991e025` completed successfully: unit tests, Wallet Tracker MariaDB integration, RetailBot accounting regression, and two pytest workflow runs.
+- **Safety:** Documentation only; no deployment or live side effects.
+
+
