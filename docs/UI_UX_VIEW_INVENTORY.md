@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `1e65e00465077a242d3930b66506bbb151d7dd75` (master after PR #508; static router decorator count checked, runtime route registry and endpoint-to-row parity still pending)  
+**Source baseline for reconciliation:** `abe4f28b728efe7148dd57ca4e421c77049733f4` (master after PR #509; static router decorator count checked, runtime route registry and endpoint-to-row parity still pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -503,3 +503,31 @@ This slice compares `web/routes/system_status.py`, `web/routes/settings.py`, cen
 - [ ] Add a focused response-contract test asserting that public status omits database host/port/name and raw DB error while deciding whether heartbeat `detail` should be omitted or explicitly sanitized.
 - [ ] Verify auth/session parent state and role-specific browser behavior for settings and system status.
 - [ ] Continue runtime route-registry reconciliation and legacy-to-React parity for all 13 routers; owner acceptance and production cutover gates remain open.
+
+
+
+## UIX-00 source audit slice: Telegram settings and outbound-test boundary (2026-10-28)
+
+This slice compares `web/routes/telegram_routes.py`, the central `api_security_boundary` in `web/app.py`, and the React preview's `SettingsPanel`. It is a source-level review; no Telegram message was sent and no runtime behavior changed.
+
+| Method and path | Effective access | Request / response and side effects | React preview |
+|---|---|---|---|
+| `GET /api/telegram/status` | Any authenticated role under the exact-path policy; forced-password-change accounts are blocked before handler execution. | Reads `get_telegram_config()`; returns `configured`, `chatId`, and `hasToken`. It does not return the bot token. The configured chat ID is still operational metadata and should only be displayed where appropriate. | Not called by the current React preview. |
+| `POST /api/telegram/test` | Admin only under the exact-path policy in `web/app.py`; forced-password-change accounts are blocked before handler execution. | The optional request model accepts `custom_message`, but `run_test` currently calls `test_telegram_connection()` without passing the request. The handler can send an outbound test message through the Telegram Bot API. A failed result without a bot object becomes HTTP 400; otherwise the helper result is returned. | Not called by the current React preview; Settings explicitly says Telegram testing remains in the legacy dashboard. |
+
+### Findings and migration implications
+
+- The effective permission comes from the centralized middleware, not a handler-level dependency: `GET /api/telegram/status` is authenticated read access, while `POST /api/telegram/test` is admin-only. Do not weaken the exact-path rule or expose the test action as a generic preview control without role-specific regression tests and explicit confirmation UI.
+- The `TelegramTestRequest.custom_message` field appears unused by the route implementation because the helper receives no argument. Treat custom-message support as unverified/ineffective until a focused contract test and implementation review confirm intended behavior; do not document it as a working feature.
+- Status returns `chatId` but not the token. The preview does not consume the endpoint, and its Settings page intentionally keeps Telegram controls disconnected. A future migration should decide whether chat ID visibility is necessary for each role and avoid displaying tokens or raw provider errors.
+- A successful test is an external side effect (a real outbound message). Tests for this route should mock the Telegram helper/client and must not send real messages in CI.
+- This audit does not verify every legacy Telegram UI caller, live provider configuration, provider rate limits, or browser role behavior. The React preview remains isolated from FastAPI production serving.
+
+### UIX-00 audit status update
+
+- [x] Compared Telegram status/test routes with central authentication, forced-password-change, and role policy.
+- [x] Confirmed the React Settings preview does not call Telegram status or test endpoints and clearly marks those controls as legacy/not connected.
+- [x] Recorded that the optional custom-message request field is not passed to the test helper by the current handler.
+- [ ] Add/verify focused route tests for viewer/trader/admin access, forced-password-change rejection, response redaction, and mocked outbound-test behavior.
+- [ ] Verify the legacy Telegram UI call path and decide whether `chatId` should be visible to all authenticated roles.
+- [ ] Complete runtime route-registry parity, legacy-to-React view/dialog/fetch parity, browser/device/accessibility checks, and owner acceptance before production cutover.
