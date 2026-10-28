@@ -55,9 +55,13 @@ def _legacy_static_api_paths() -> dict[str, list[str]]:
         source_text = source.read_text(encoding="utf-8")
         for match in re.finditer(r"/api/[^\s]+", source_text):
             raw_path = match.group(0).split(chr(34), 1)[0].split(chr(39), 1)[0].split(chr(96), 1)[0].rstrip("),;")
-            normalized = _normalize_path(raw_path)
             line_number = source_text.count("\n", 0, match.start()) + 1
-            paths.setdefault(normalized, []).append(f"{source.relative_to(ROOT)}:{line_number}: {raw_path}")
+            # This legacy helper is called only with the two known bot names.
+            candidates = ("screener", "retailbot2") if "${botName}" in raw_path else (None,)
+            for candidate in candidates:
+                resolved_path = raw_path.replace("${botName}", candidate) if candidate else raw_path
+                normalized = _normalize_path(resolved_path)
+                paths.setdefault(normalized, []).append(f"{source.relative_to(ROOT)}:{line_number}: {raw_path}")
     return paths
 
 
