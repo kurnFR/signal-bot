@@ -124,3 +124,13 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Coverage:** Empty experiment/model lists render intentional empty states; a temporary experiment API failure recovers through Retry into saved experiment details. Requests remain GET-only.
 - **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `074a56d9c385b552ab1fadcfb6f445569a5773df`.
 - **Safety:** Mocked API responses only; no experiment execution, model deployment, paper-trading action, Telegram message, worker change, or production deployment.
+
+
+### PR #563 — Wallet Tracking empty and recovery states
+
+- **Status:** Merged.
+- **Merge commit:** `f95bf97a145a80984db5be9c2c8afb2133213c99`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/563
+- **Coverage:** Empty tracked-wallet, token-flow, and event responses render intentional empty states; a temporary tracker-status API failure recovers after Retry. Snapshot requests remain GET-only.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `723929b178e2b7954789db79eabada21162551de`.
+- **Safety:** Mocked API responses only; no wallet settings, tracked addresses, worker, DB, trading, Telegram, or production state changed.
