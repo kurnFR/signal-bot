@@ -623,7 +623,7 @@ test("mobile navigation close control restores focus to its opener", async ({ pa
   await menuButton.click();
   await expect(menuButton).toHaveAttribute("aria-expanded", "true");
 
-  await page.getByRole("button", { name: "Close navigation" }).first().click();
+  await page.locator("#dashboard-sidebar").getByRole("button", { name: "Close navigation" }).click();
 
   await expect(menuButton).toHaveAttribute("aria-expanded", "false");
   await expect(menuButton).toBeFocused();
