@@ -671,3 +671,27 @@ test("viewer Strategy Library exposes no strategy mutation controls or requests"
   await expect(page.getByRole("button", { name: "Generate draft" })).toHaveCount(0);
   expect(mutations).toEqual([]);
 });
+
+test("reduced-motion and forced-colors preferences remain accessible in the browser", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce", forcedColors: "active" });
+  await mockApi(page);
+  await signIn(page);
+
+  const sidebar = page.locator("#dashboard-sidebar");
+  const transitionDuration = await sidebar.evaluate((element) => getComputedStyle(element).transitionDuration);
+  expect(
+    transitionDuration.split(",").every((duration) => Number.parseFloat(duration) <= 0.0001),
+    `reduced-motion should shorten transitions; got ${transitionDuration}`,
+  ).toBe(true);
+
+  const skipLink = page.getByRole("link", { name: "Skip to main content" });
+  await skipLink.focus();
+  await expect(skipLink).toBeVisible();
+  const forcedColorsStyles = await skipLink.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { borderTopStyle: style.borderTopStyle, borderTopWidth: style.borderTopWidth };
+  });
+  expect(forcedColorsStyles.borderTopStyle).toBe("solid");
+  expect(Number.parseFloat(forcedColorsStyles.borderTopWidth)).toBeGreaterThanOrEqual(2);
+});
+
