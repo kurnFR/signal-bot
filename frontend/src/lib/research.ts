@@ -8,9 +8,25 @@ export interface ResearchTrade {
   id: number; symbol: string; side: string; mode: string; entry_price: number;
   exit_price: number; realized_pnl: number; closed_at: string;
 }
+export interface ResearchStrategyStats {
+  strategy: string;
+  mode: string;
+  total_trades: number;
+  wins: number;
+  losses: number;
+  total_pnl: number;
+  last_updated: string | null;
+}
+export interface ResearchModeStats {
+  realized_pnl: number;
+  closed_count: number;
+  wins: number;
+  win_rate: number | null;
+  open_count: number;
+}
 export interface ResearchStats {
-  by_strategy: Array<Record<string, unknown>>;
-  by_mode: Record<string, unknown[]>;
+  by_strategy: ResearchStrategyStats[];
+  by_mode: Record<string, ResearchModeStats>;
 }
 export interface ResearchStrategy {
   strategy_id: string; mode: string; evaluation_enabled: boolean; paper_enabled: boolean;
