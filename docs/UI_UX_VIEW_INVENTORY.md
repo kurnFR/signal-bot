@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `d94c7f79c8cf2de02cc12ceb944d9758baf21809` (master after PR #513; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
+**Source baseline for reconciliation:** `5781fbe88c5a07e50907ff4d7c56b69115556b4c` (master after PR #526, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -38,11 +38,23 @@ This document is Antigravity's detailed baseline inventory draft for **Phase UIX
   immediately before `</body>`.
 - **CORS Configuration:** Controlled via `SIGNAL_BOT_ALLOWED_ORIGINS` (default: `http://localhost:8050,http://127.0.0.1:8050`). `allow_credentials=True`, methods `["GET", "POST", "PUT", "DELETE", "OPTIONS"]`, headers `["Authorization", "Content-Type"]`.
 
-### 2.2 Repository Tooling & Serving State (rechecked 2026-10-27)
+### 2.2 Repository Tooling & Serving State (rechecked 2026-10-28)
 - **Frontend manifests:** `frontend/package.json`, `frontend/tsconfig.json`, and `frontend/vite.config.ts` exist. The preview uses React, TypeScript, Vite, and Vitest; `npm run build` runs the TypeScript check before the production build.
 - **Lockfile:** `frontend/package-lock.json` is committed on `master` after PR #456, and the frontend workflow uses `npm ci`. Frontend workflow run #132 completed successfully on 2026-10-27, including type-check, unit tests, production build, Playwright setup, and browser smoke tests. Reproducible frontend installation is verified for that run; broader migration acceptance remains open.
 - **Host tooling:** The older note that Node.js was unavailable came from a prior host audit and is not evidence of current CI or execution-environment availability. Verify Node/npm versions in the actual environment used for any build.
 - **Serving boundary:** Modern frontend code remains isolated under `frontend/`, with build output to `frontend/dist/`. FastAPI still serves the legacy `web/static/` dashboard; do not switch routes or mount the preview before browser, parity, RBAC, accessibility, and owner-acceptance gates pass.
+
+### 2.3 React Preview Mutation Boundary (rechecked 2026-10-28)
+
+The preview is not strictly read-only: the Market Screener control editor is an intentional, role-gated mutation surface.
+
+- `ScreenerControlsPanel.tsx` calls `POST /api/research/screener/control` only when an admin or trader explicitly selects **Save changes**. Viewer sessions do not fetch the editor configuration and cannot submit changes.
+- The request changes persisted screener settings, including the Telegram alert gate and detection thresholds. It does not itself send a Telegram message or restart the worker; the running worker reads settings on its control-loop tick.
+- Backend authorization remains authoritative. UI hiding is defense in depth, not a replacement for route-level role enforcement.
+- Other React preview panels remain read-only. No trade execution, strategy promotion, backfill/feature-build worker launch, deployment, wallet-tracking control, or Telegram-send action is exposed.
+- **Safety note:** Do not point the preview at a production-connected API while experimenting with the Screener editor unless changing the live screener configuration is intended. This exception does not authorize production serving of the React preview.
+
+Browser smoke tests that navigate between views assert no incidental mutation requests; the focused `ScreenerControlsPanel` component test separately verifies the explicit save flow and viewer restrictions.
 
 ---
 
@@ -586,7 +598,7 @@ Compared `web/routes/master_data.py`, `frontend/src/lib/masterData.ts`, and `fro
 
 - [x] Corrected the inventory's coverage and job response descriptions against the route implementation.
 - [x] Recorded the deliberate read-only boundary of the React preview versus legacy backfill/build-feature controls.
-- [ ] Add focused route response-contract tests for coverage and job creation/list payloads using mocks; do not invoke real Binance fetches or feature workers.
+- [x] Added focused mocked route response-contract tests for coverage and job listing; no real Binance fetches or feature workers are invoked. Job creation is intentionally not called by this read-only test slice.
 - [ ] Decide whether backfill and feature-build controls belong in the React migration scope and, if so, implement them only with role checks, confirmation/loading/error recovery, and regression tests.
 - [ ] Verify role-specific browser behavior, all legacy callers/polling, route-to-row parity, accessibility/device behavior, and owner acceptance before production cutover.
 
@@ -676,9 +688,9 @@ Compared `web/routes/news_routes.py`, the `db/db.py` news read helpers, `fronten
 ### Migration implications and remaining gates
 
 - [x] Compared route response construction with the database read helpers and React client types.
-- [x] Identified concrete schema mismatches in all three News AI data surfaces; the current preview's labels can display missing values and its signal/event tables can render blank columns despite successful API responses.
-- [ ] Update `frontend/src/lib/news.ts` types and `NewsAIPanel.tsx` to use the actual stats, signal, event, and heartbeat/performance contracts; choose truthful KPI labels instead of inventing sentiment buckets or an overlay multiplier.
-- [ ] Add mocked API/client component tests using representative backend-shaped payloads, including null confidence/performance values and empty arrays. Tests must not require a live database or start collectors.
+- [x] Identified and corrected schema mismatches in News AI stats, signals, and events; the preview now uses backend-shaped fields and handles nullable metrics.
+- [x] Updated `frontend/src/lib/news.ts` types and `NewsAIPanel.tsx` to match the actual stats, signal, event, and heartbeat/performance contracts, with truthful operational KPI labels.
+- [x] Added mocked backend-shaped API/component tests for populated payloads and nullable confidence/performance metrics; tests do not require a live database or start collectors.
 - [ ] Reconcile any remaining legacy News AI caller/polling behavior, verify role-specific browser behavior, and complete runtime route/view/caller parity, accessibility/device checks, and owner acceptance before production cutover.
 
 The News AI contract mismatch described in the historical audit has been corrected and regression-tested. The React preview remains isolated from FastAPI production serving; this documentation update does not authorize production cutover.
