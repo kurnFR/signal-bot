@@ -89,3 +89,8 @@ button:focus-visible,a:focus-visible,[tabindex="-1"]:focus-visible{outline:2px s
   .settings-preference-control { margin-left: 3.5rem; }
   .settings-session-value { align-items: flex-start; }
 }
+
+.strategy-conversation-list { display: grid; gap: .65rem; margin: .75rem 0 0; padding-left: 1.25rem; }
+.strategy-conversation-list li { min-width: 0; padding: .7rem .85rem; border: 1px solid var(--border, rgba(148, 163, 184, .2)); border-radius: .75rem; overflow-wrap: anywhere; }
+.strategy-conversation-list li strong { display: block; color: var(--text-secondary, #94a3b8); font-size: .75rem; }
+.strategy-conversation-list li p { margin: .3rem 0 0; line-height: 1.55; white-space: pre-wrap; }
