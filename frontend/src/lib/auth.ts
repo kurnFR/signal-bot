@@ -18,8 +18,16 @@ async function authPost<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetch(path, { method: "POST", credentials: "same-origin", headers, body: body === undefined ? undefined : JSON.stringify(body) });
   let payload: unknown;
   try { payload = await response.json(); } catch { payload = null; }
+  if (response.status === 401 && path === "/api/auth/change-password") {
+    try { window.localStorage.removeItem("token"); } catch { /* Auth state still resets via the event. */ }
+    window.dispatchEvent(new Event("signal-bot:session-expired"));
+  }
   if (!response.ok) {
-    const detail = payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string" ? payload.detail.slice(0, 300) : `Authentication request failed (${response.status})`;
+    const detail = response.status === 401 && path === "/api/auth/change-password"
+      ? "Your session has expired. Sign in again to continue."
+      : payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string"
+        ? payload.detail.slice(0, 300)
+        : `Authentication request failed (${response.status})`;
     throw new AuthRequestError(response.status, detail);
   }
   if (!payload || typeof payload !== "object") throw new AuthRequestError(response.status, "Authentication service returned an invalid response");
