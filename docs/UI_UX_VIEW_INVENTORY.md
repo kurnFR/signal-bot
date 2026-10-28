@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `a6f992503d0fc0dfd69f9ccae6d1e9d91b40f8f0` (master after PR #512; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
+**Source baseline for reconciliation:** `605c41cc9805c05eeb97b934ba4654679c3eed2a` (master after PR #513; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -335,8 +335,9 @@ The following draft register lists 81 API endpoint rows across the 13 router mod
 
 - [ ] **Repository Inspection:** Recheck static serving, entrypoint, CORS, manifests, and Node/npm availability on the current source baseline.
 - [ ] **View Inventory:** 11 navigation views and 7 dialogs are mapped in the draft; reconcile conditional panels, forms, modal triggers, and error states against current source.
-- [x] **API route-count baseline:** Source inspection of all 13 routers included by `web/app.py` confirms 81 `@router` HTTP endpoint decorators, plus the app-level `GET /` route. This confirms the decorator count only; runtime route registration, handler-by-handler authorization, schemas, side effects, and caller parity remain open.
-- [x] **Available CI Evidence:** The `pytest` check passed on Antigravity commit `74d67c2`; the reported total of 116 tests and complete suite coverage have not been independently audited in this review.
+- [x] **Static API route-count baseline:** Source inspection of all 13 routers included by `web/app.py` found 81 `@router` HTTP endpoint decorators, plus app-level `GET /`. This is a decorator count, not a verified one-to-one count of runtime operations or inventory rows.
+- [x] **Available CI evidence:** Recent CI runs for PRs #511–#513 passed their reported required checks. This does not certify complete route or caller parity.
+- [ ] **Parity-test scope:** Independently inspect whether the current test suite compares every runtime operation against the inventory and detects legacy caller drift; existing tests must not be described as full inventory parity unless they actually do so.
 - [ ] **Acceptance Review Gate:** **In Review / Pending Acceptance**. UIX-00 will be marked complete only after the user/owner has reviewed and approved this baseline inventory.
 - [x] **UIX-01 foundation status:** The React/Vite preview, committed lockfile, and frontend CI are already present. PR #499 is merged, and its `Frontend foundation` workflow run #132 completed successfully, including Playwright browser smoke tests. This does not complete UIX-00 or authorize production cutover.
 - [ ] **Remaining audit scope:** Verify route methods, request/response schemas, role restrictions, forced-password guard, side effects, and route-to-view parity; complete the full accessibility/responsive/role/session browser acceptance suite.
@@ -553,7 +554,9 @@ Follow-up source review of `web/static/js/dashboard_enhancements.js` resolves pa
 - The outbound-test call path is verified, but a source search of `web/static/js/app.js`, `web/static/js/dashboard_enhancements.js`, and `web/static/index.html` found no direct `GET /api/telegram/status` caller or status-pill binding. The endpoint is registered and authenticated, but its consuming UI remains unverified; remove the claimed “Telegram status pill” mapping unless a concrete caller is found in a later audit.
 - This negative finding is scoped to the inspected legacy entry files and direct endpoint string searches; it is not proof that no indirect/dynamic caller can exist elsewhere. The React preview still does not call either Telegram endpoint.
 - The React preview still does not call either Telegram endpoint, and FastAPI continues serving `web/static/index.html`. No runtime behavior or authorization was changed.
-- Existing `tests/test_route_authorization_sweep.py` and `tests/test_frontend_api_route_parity.py` inspect `app.routes` at runtime, but the former's current assertions focus on auth/role policy and the latter checks preview GET helpers. Those tests do not by themselves prove every draft inventory row is accurate or that every legacy UI caller is cataloged.
+- `tests/test_route_authorization_sweep.py` builds operations from `app.routes` and checks authentication, role-policy behavior, forced-password blocking, and selected security invariants. It does not parse this inventory or compare every route row against it.
+- `tests/test_frontend_api_route_parity.py` statically extracts literal `getJson(...)` paths from `frontend/src/**/*.ts(x)` (excluding test/setup files), normalizes path parameters, and checks that each discovered preview GET path is a registered FastAPI GET and trader-readable. It does not discover `fetch()` calls, non-GET mutations, legacy `web/static/` callers, or inventory rows with no frontend caller. Template paths are only normalized for simple `${...}` expressions.
+- Therefore, these tests provide useful security and connected-preview read-path checks, but they are not a complete route-to-inventory or legacy-to-React parity gate. The remaining work needs a separately reviewed runtime route inventory plus source caller mapping and role-specific browser verification.
 
 ### UIX-00 audit status update
 
