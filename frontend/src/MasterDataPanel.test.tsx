@@ -68,7 +68,7 @@ describe("MasterDataPanel", () => {
     fireEvent.change(screen.getByRole("spinbutton", { name: "Backfill years" }), { target: { value: "2" } });
     fireEvent.click(screen.getByRole("button", { name: "Review backfill" }));
 
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Confirm backfill" })).toBeInTheDocument();
     expect(calls.filter((call) => call.method === "POST")).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Start backfill" }));
     expect(await screen.findByRole("status")).toHaveTextContent(/backfill job queued \(job-new\)/i);
