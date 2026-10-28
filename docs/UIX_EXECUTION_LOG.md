@@ -8,6 +8,24 @@ This log records verified execution checkpoints and keeps the next actions actio
 
 ## Latest completed checkpoint
 
+### PR #552 — preview mutation RBAC matrix
+
+- **Status:** Merged.
+- **Merge commit:** `45658d43b8d7da604ed6ab37b5e7f02b238550a8`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/552
+- **Coverage added:** server-side role policy tests for screener controls, Master Data backfill/feature-build actions, Strategy Library mutations, and backtest runs. Tests also protect fail-closed behavior for unknown mutations and authenticated read access to Telegram status.
+- **Validation:** pytest, unit tests, Wallet Tracker MariaDB integration, and RetailBot accounting regression all passed on exact PR head `dfc0e294c07049890e9019b4ce8b9345ae0288d5`.
+- **Safety:** Calls only the pure authorization helper; no API mutations, DB writes, worker actions, live trades, Telegram sends, or deployment.
+
+### PR #551 — mobile navigation close-focus regression
+
+- **Status:** Merged.
+- **Merge commit:** `ada5f5864a047685a375de66fa405243fdac5b7d`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/551
+- **Coverage added:** browser regression verifies explicit close control resets `aria-expanded`, restores focus to the menu opener, and removes the mobile sidebar and scrim.
+- **Validation:** frontend type-check, unit tests, production build, Chromium browser smoke, pytest, Wallet Tracker MariaDB integration, and RetailBot accounting regression all passed on exact PR head `cf05085d6c47bfdd4b11e151875aba38884a6acc`.
+- **Safety:** Mocked browser API only; no production deployment.
+
 ### PR #549 — primary navigation accessibility semantics
 
 - **Status:** Merged.
@@ -20,7 +38,7 @@ This log records verified execution checkpoints and keeps the next actions actio
 ### Recent merged regression slices
 
 - **PR #543** — Settings diagnostics redaction/access controls, Telegram-test cancellation, and stale-session reset. Merge: `d68ff01ebc878e850ac6d56324eba0e764592797`.
-- **PR #544** — migration execution log and acceptance gates. Merge: tracked in GitHub.
+- **PR #544** — migration execution log and acceptance gates.
 - **PR #545** — backtest promotion API boundary tests. Merge: `7d574c2aaad50c1cbcbc88cd81c8e6f4321fdcd7`.
 - **PR #546** — Master Data confirmation and viewer job-launch restrictions. Merge: `a4140b3`.
 - **PR #547** — Market Screener explicit-save mutation boundary. Merge: `a48f5013c72425625e74bb8980affa2814ac5b8b`.
