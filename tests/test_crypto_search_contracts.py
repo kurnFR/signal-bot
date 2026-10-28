@@ -72,7 +72,7 @@ class TestCryptoSearchContracts(unittest.TestCase):
         self.assertEqual(set(body["results"][0]), expected_ticker_fields)
 
     def test_search_respects_market_query_and_limit(self):
-        spot = [_ticker("ETHUSDT", "spot", 400), _ticker("ETHBTC", "spot", 900)]
+        spot = [_ticker("ETHUSDT", "spot", 900), _ticker("ETH2USDT", "spot", 400)]
         futures = [_ticker("ETHUSDT", "futures", 300), _ticker("BTCUSDT", "futures", 800)]
         with patch.object(crypto_routes, "get_spot_tickers", return_value=spot) as spot_mock, \
              patch.object(crypto_routes, "get_futures_tickers", return_value=futures) as futures_mock:
