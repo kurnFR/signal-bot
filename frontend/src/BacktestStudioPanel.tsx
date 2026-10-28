@@ -17,7 +17,8 @@ function errorMessage(cause: unknown) {
   if (cause instanceof ApiError && cause.status === 403) return "Your account cannot view backtest results.";
   return "Backtest data could not be loaded. Check API/database health, then retry.";
 }
-export function BacktestStudioPanel() {
+interface BacktestStudioPanelProps { initialStrategyId?: string | null; onInitialStrategyApplied?: () => void; }
+export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrategyApplied }: BacktestStudioPanelProps = {}) {
   const [strategies, setStrategies] = useState<BacktestStrategy[]>([]);
   const [runs, setRuns] = useState<BacktestRunSummary[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -72,6 +73,11 @@ export function BacktestStudioPanel() {
   useEffect(() => {
     if (strategies.length && !strategies.some((strategy) => strategy.id === strategyId)) setStrategyId(strategies[0].id);
   }, [strategies, strategyId]);
+  useEffect(() => {
+    if (!initialStrategyId || !strategies.some((strategy) => strategy.id === initialStrategyId)) return;
+    setStrategyId(initialStrategyId);
+    onInitialStrategyApplied?.();
+  }, [initialStrategyId, strategies, onInitialStrategyApplied]);
   const activeStrategy = strategies.find((strategy) => strategy.id === strategyId) ?? null;
   const editableParams = useMemo(() => activeStrategy ? [...activeStrategy.params, ...activeStrategy.sharedParams] : [], [activeStrategy]);
   useEffect(() => {
