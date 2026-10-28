@@ -485,3 +485,62 @@ test("an unauthenticated browser load does not request protected dashboard APIs"
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toHaveCount(0);
   expect(apiRequests).toEqual([]);
 });
+
+
+test("Master Data backfill requires browser confirmation before the mocked mutation", async ({ page }) => {
+  const backfillRequests: Array<{ method: string; body: string | null }> = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/master-data/backfill") {
+      backfillRequests.push({ method: request.method(), body: request.postData() });
+    }
+  });
+
+  await mockApi(page);
+  await signIn(page);
+  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: "Master Data", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Backfill historical data" })).toBeVisible();
+
+  await page.getByRole("textbox", { name: "Backfill symbol" }).fill("ethusdt");
+  await page.getByRole("combobox", { name: "Backfill market" }).selectOption("futures");
+  await page.getByRole("combobox", { name: "Backfill timeframe" }).selectOption("4h");
+  await page.getByRole("spinbutton", { name: "Backfill years" }).fill("2");
+  await page.getByRole("button", { name: "Review backfill" }).click();
+
+  await expect(page.getByRole("heading", { name: "Confirm backfill" })).toBeVisible();
+  expect(backfillRequests).toEqual([]);
+
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("heading", { name: "Confirm backfill" })).toHaveCount(0);
+  expect(backfillRequests).toEqual([]);
+
+  await page.getByRole("button", { name: "Review backfill" }).click();
+  await page.getByRole("button", { name: "Start backfill" }).click();
+  await expect.poll(() => backfillRequests.length).toBe(1);
+  expect(backfillRequests[0].method).toBe("POST");
+  expect(JSON.parse(backfillRequests[0].body ?? "{}")).toEqual({
+    symbol: "ETHUSDT",
+    market: "futures",
+    timeframe: "4h",
+    years: 2,
+    auto_compute_features: true,
+  });
+});
+
+test("Master Data viewer browser session cannot access job-launch controls", async ({ page }) => {
+  const mutations: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/api/master-data/") && request.method() !== "GET") {
+      mutations.push(request.method() + " " + new URL(request.url()).pathname);
+    }
+  });
+
+  await mockApi(page, { role: "viewer" });
+  await signIn(page);
+  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: "Master Data", exact: true }).click();
+
+  await expect(page.getByRole("heading", { name: "Master Data" })).toBeVisible();
+  await expect(page.getByText(/restricted to admin and trader roles/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Review backfill" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Build features" })).toHaveCount(0);
+  expect(mutations).toEqual([]);
+});
