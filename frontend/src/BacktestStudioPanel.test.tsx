@@ -17,7 +17,7 @@ describe("BacktestStudioPanel", () => {
     cleanup();
     window.localStorage.clear();
     vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
-      expect(init?.method).toBe("GET");
+      expect(init?.method ?? "GET").toBe("GET");
       return Promise.resolve(responseFor(url));
     }));
   });
@@ -45,7 +45,7 @@ describe("BacktestStudioPanel", () => {
     const strategySelect = await screen.findByRole("combobox", { name: "Backtest strategy" });
     await waitFor(() => expect(strategySelect).toHaveValue("rsi_mean_reversion"));
     expect(onInitialStrategyApplied).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls.every((call) => call[1]?.method === "GET")).toBe(true);
+    expect(fetchMock.mock.calls.every((call) => call[1]?.method == null || call[1]?.method === "GET")).toBe(true);
   });
 
   it("filters saved runs without changing server state", async () => {
