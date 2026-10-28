@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./AuthGate";
 import { Activity, BarChart3, RefreshCw, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
+import { PromotionStatusPanel } from "./PromotionStatusPanel";
 import { BacktestExecutionError, executeBacktest, fetchBacktestHistory, fetchBacktestRunDetails, fetchBacktestStrategies, type BacktestExecutionInput, type BacktestExecutionResult, type BacktestRunDetails, type BacktestRunSummary, type BacktestStrategy, type BacktestStrategyParameter } from "./lib/backtestStudio";
 
 const pct = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
@@ -142,7 +143,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
     } finally { setRunBusy(false); }
   };
   return <div className="backtest-studio-view" aria-busy={loading || detailLoading || runBusy}>
-    <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>Backtest Studio</strong><p>Running a backtest performs a simulation and requests persistence of the result. Only admin/trader roles can run one, and every run requires explicit review and confirmation. Auto-promotion policy and Telegram settings remain unavailable here.</p></div><span className="panel-counter">CONFIRMED RUNS</span></section>
+    <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>Backtest Studio</strong><p>Running a backtest performs a simulation and requests persistence of the result. Only admin/trader roles can run one, and every run requires explicit review and confirmation. Promotion policy and recent decisions are visible below in read-only form; policy editing, activation, and Telegram actions remain unavailable.</p></div><span className="panel-counter">CONFIRMED RUNS</span></section>
     {error && <div className="api-error" role="alert"><div><strong>Unable to load Backtest Studio</strong><p>{error}</p></div><button className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}><RefreshCw size={15} /> Retry</button></div>}
     {runError && <div className="api-error" role="alert"><div><strong>Backtest run failed</strong><p>{runError}</p></div><button className="button button-secondary" onClick={() => setRunError(null)}>Dismiss</button></div>}
     {runNotice && <p className="control-feedback control-success" role="status">{runNotice}</p>}
@@ -204,6 +205,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       <p><strong>Capital / risk:</strong> {numeric.format(pendingRun.initial_capital)} / {pendingRun.risk_per_trade_pct}% per trade</p>
       <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={runBusy} onClick={() => setPendingRun(null)}>Cancel</button><button className="button button-primary" type="button" disabled={runBusy} onClick={() => void confirmRun()}>{runBusy ? "Running simulation…" : "Run backtest"}</button></div>
     </section>}
-    <p className="page-description">Backtest execution is an explicit, role-gated POST action. Auto-promotion policy, deployment, and Telegram actions remain unavailable.</p>
+    <PromotionStatusPanel />
+    <p className="page-description">Backtest execution is an explicit, role-gated POST action. Promotion policy and audit are read-only; editing, activation, and Telegram actions remain unavailable.</p>
   </div>;
 }
