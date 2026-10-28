@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { executeBacktest, fetchPromotionSnapshot, BacktestExecutionError, type PromotionPolicy, type BacktestExecutionInput } from "./backtestStudio";
+import { executeBacktest, fetchPromotionSnapshot, type PromotionPolicy, type BacktestExecutionInput } from "./backtestStudio";
 
 afterEach(() => {
   vi.unstubAllGlobals();
