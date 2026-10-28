@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `bf180f692f3ac5604fe21e709dde5bc24ba49aaf` (master after PR #538, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
+**Source baseline for reconciliation:** `574e5157a0b04280092e1e217e2b75cf437633e5` (master after PR #539, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -550,8 +550,8 @@ This slice compares `web/routes/telegram_routes.py`, the central `api_security_b
 - [x] Compared Telegram status/test routes with central authentication, forced-password-change, and role policy.
 - [x] Confirmed the React Settings preview does not call Telegram status or test endpoints and clearly marks those controls as legacy/not connected.
 - [x] Recorded that the optional custom-message request field is not passed to the test helper by the current handler.
-- [ ] Add/verify focused route tests for viewer/trader/admin access, forced-password-change rejection, response redaction, and mocked outbound-test behavior.
-- [ ] Verify the legacy Telegram UI call path and decide whether `chatId` should be visible to all authenticated roles.
+- [x] Added focused route tests for viewer/trader/admin access, forced-password-change rejection, response redaction, and mocked outbound-test behavior; CI mocks both the Telegram route helper and outbound notifier so no real message is sent.
+- [x] Verified the legacy `btn-tg-test` call path. Chose least-privilege status exposure: only admins receive `chatId`; trader/viewer responses return `chatId: null`. The test/ping endpoint remains admin-only.
 - [ ] Complete runtime route-registry parity, legacy-to-React view/dialog/fetch parity, browser/device/accessibility checks, and owner acceptance before production cutover.
 
 
