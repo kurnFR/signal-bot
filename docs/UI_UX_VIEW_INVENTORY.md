@@ -714,3 +714,12 @@ The News AI contract mismatch described in the historical audit has been correct
 - [x] Added typed read-only client contracts and mocked loading/empty/error/recovery coverage.
 - [x] Verified the preview requests remain GET-only in this slice.
 - [ ] Migrate policy editing and promotion only after side-effect consent, idempotent retry/reconciliation behavior, and role-gated browser flows are reviewed; production cutover and owner acceptance remain open.
+
+
+## UIX-00 safety audit slice: backtest auto-promotion side-effect consent (2026-10-28)
+
+- The backtest execution route evaluates the saved auto-promotion policy after simulation; when enabled, it may activate a paper strategy and optionally send a Telegram alert. The React preview must not imply a run is simulation-only without explaining those effects.
+- [x] Require a verified policy response before enabling backtest review.
+- [x] When policy is enabled, show the possible paper activation and Telegram side effects in the confirmation and require a separate acknowledgement before the run POST.
+- [x] If the policy cannot be loaded, keep run review unavailable until a successful retry.
+- [ ] Migrate policy editing and explicit promotion actions only after reviewing admin/trader authorization, Telegram consent, idempotency, and reconciliation-required recovery. Legacy dashboard remains production default pending owner acceptance.

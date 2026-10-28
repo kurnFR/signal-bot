@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { RefreshCw, ShieldCheck } from "lucide-react";
-import { fetchPromotionSnapshot, type PromotionSnapshot } from "./lib/backtestStudio";
+import { fetchPromotionSnapshot, type PromotionPolicy, type PromotionSnapshot } from "./lib/backtestStudio";
 
 const numberLabel = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 });
 function timestampLabel(value: string | null) {
@@ -9,7 +9,8 @@ function timestampLabel(value: string | null) {
   return Number.isFinite(parsed) ? new Date(parsed).toLocaleString() : value;
 }
 
-export function PromotionStatusPanel() {
+interface PromotionStatusPanelProps { onPolicyLoaded?: (policy: PromotionPolicy | null) => void; }
+export function PromotionStatusPanel({ onPolicyLoaded }: PromotionStatusPanelProps) {
   const [snapshot, setSnapshot] = useState<PromotionSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,18 +20,26 @@ export function PromotionStatusPanel() {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
+    onPolicyLoaded?.(null);
     fetchPromotionSnapshot(controller.signal)
       .then((result) => {
-        if (!controller.signal.aborted) setSnapshot(result);
+        if (!controller.signal.aborted) {
+          setSnapshot(result);
+          onPolicyLoaded?.(result.policy);
+        }
       })
       .catch(() => {
-        if (!controller.signal.aborted) setError("Promotion policy and audit could not be loaded. Check API/database health, then retry.");
+        if (!controller.signal.aborted) {
+          setSnapshot(null);
+          onPolicyLoaded?.(null);
+          setError("Promotion policy and audit could not be loaded. Check API/database health, then retry.");
+        }
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [attempt]);
+  }, [attempt, onPolicyLoaded]);
 
   return <section className="panel" aria-labelledby="promotion-status-title" aria-busy={loading}>
     <div className="panel-heading">
