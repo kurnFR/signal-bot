@@ -75,7 +75,70 @@ describe("BacktestStudioPanel", () => {
     expect(await screen.findByRole("heading", { name: "Confirm backtest run" })).toBeInTheDocument();
     expect(calls.filter((call) => call.method === "POST")).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Run backtest" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Backtest completed and saved as run #43.");
+    expect(await screen.findByText("Backtest completed and saved as run #43.")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Latest execution result" })).toBeInTheDocument();
+    await waitFor(() => expect(calls.find((call) => call.path === "/api/backtest/run" && call.method === "POST")?.body).toEqual({
+      symbol: "ETHUSDT", market: "spot", timeframe: "1h", strategy: "trend_ema_v1",
+      data_segment: "holdout", initial_capital: 7500, risk_per_trade_pct: 1.5, save_to_db: true, params: {},
+    }));
+  });
+
+  it("keeps backtest execution unavailable to viewers", async () => {
+    window.localStorage.setItem("token", "viewer-session");
+    const profile = { id: 9, username: "viewer01", email: null, role: "viewer", must_change_password: false };
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input);
+      const payload = path === "/api/auth/me" ? profile : path === "/api/backtest/strategies" ? strategies : path === "/api/backtest/history?limit=100" ? history : path === "/api/backtest/runs/42" ? details : null;
+      if (!payload) throw new Error("Unexpected endpoint: " + path);
+      return Promise.resolve(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><BacktestStudioPanel /></AuthGate>);
+
+    expect(await screen.findByText(/restricted to admin and trader roles/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review backtest run" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
+  it("requires confirmation before an admin/trader can run a saved backtest", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const newRun = { ...run, id: 43, symbol: "ETHUSDT", timeframe: "1h" };
+    const execution = {
+      runId: 43, symbol: "ETHUSDT", market: "spot", timeframe: "1h", strategy: "trend_ema_v1",
+      dataSegment: "holdout", totalCandles: 100,
+      metrics: { total_trades: 10, win_rate_pct: 60, expectancy_r: 0.2, profit_factor: 1.4, max_drawdown_r: 1.5 },
+      trades: Array.from({ length: 10 }, () => ({})),
+    };
+    let runCreated = false;
+    const calls: Array<{ path: string; method: string; body?: unknown }> = [];
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+      if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/backtest/strategies") return json(strategies);
+      if (path === "/api/backtest/history?limit=100") return json({ runs: runCreated ? [newRun, run] : [run] });
+      if (path === "/api/backtest/runs/42") return json(details);
+      if (path === "/api/backtest/runs/43") return json({ run: { ...newRun, params: {} }, trades: [] });
+      if (path === "/api/backtest/run" && method === "POST") { runCreated = true; return json(execution); }
+      throw new Error("Unexpected endpoint: " + method + " " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><BacktestStudioPanel /></AuthGate>);
+
+    expect(await screen.findByRole("heading", { name: "Run a backtest" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Backtest symbol" }), { target: { value: "ethusdt" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Backtest timeframe" }), { target: { value: "1h" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Initial capital" }), { target: { value: "7500" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Risk per trade" }), { target: { value: "1.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review backtest run" }));
+
+    expect(await screen.findByRole("heading", { name: "Confirm backtest run" })).toBeInTheDocument();
+    expect(calls.filter((call) => call.method === "POST")).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Run backtest" }));
+    expect(await screen.findByText("Backtest completed and saved as run #43.")).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Latest execution result" })).toBeInTheDocument();
     await waitFor(() => expect(calls.find((call) => call.path === "/api/backtest/run" && call.method === "POST")?.body).toEqual({
       symbol: "ETHUSDT", market: "spot", timeframe: "1h", strategy: "trend_ema_v1",
