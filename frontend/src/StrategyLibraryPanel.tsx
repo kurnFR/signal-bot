@@ -66,6 +66,7 @@ export function StrategyLibraryPanel() {
   const submitCreateStrategy = async () => {
     const normalizedName = createName.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/^_+|_+$/g, "");
     if (!normalizedName || normalizedName.length > 80) { setActionError("Enter a valid strategy name (letters, numbers, underscores; max 80 characters)."); return; }
+    if (strategies.some((strategy) => strategy.name.toLowerCase() === normalizedName)) { setActionError("That strategy name already exists. Choose a different name; the backend would replace an existing definition with the same name."); return; }
     if (!createDisplayName.trim()) { setActionError("Display name is required."); return; }
     if (longConditions.length + shortConditions.length === 0) { setActionError("Add at least one long or short entry condition."); return; }
     const sl = Number(slAtrMult), rr = Number(riskRewardRatio), activation = Number(trailActivationR), distance = Number(trailDistanceAtrMult);
