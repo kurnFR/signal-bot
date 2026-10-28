@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `d59bd93f6ba4cd36e1cbc78a405f748e49e72959` (master after PR #529, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
+**Source baseline for reconciliation:** `2e42fef2a369cd2aee21b740074e2b7a5fac8973` (master after PR #530, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -673,7 +673,7 @@ Compared `web/routes/custom_strategy.py` with the inventory and React Strategy L
 - Its successful response includes `totalCandles`, `totalTrades`, fractional `winRate` and percentage `winRatePct`, `netR`, `profitFactor`, `maxDrawdownR`, and `expectancyR`. Non-finite numeric metrics are sanitized to null where applicable.
 - The React Strategy Library only calls the list and indicator GET endpoints. It does not call AI generation, create/delete, or quick-test endpoints; all those legacy capabilities remain outside this preview. The existing inventory and role-policy notes correctly identify the prefix-wide viewer restriction, so no RBAC change is made here.
 - [x] Corrected quick-test response schema and data-window behavior.
-- [ ] Add mocked route tests for the 50-candle guard, latest-1,000 window, and null sanitization of NaN/Infinity metrics.
+- [x] Added mocked route tests for the 50-candle guard, latest-1,000 window, and null sanitization of NaN/Infinity metrics (PR #532); tests use synthetic candle frames and do not require live market data.
 - [ ] Decide whether to migrate create, delete, AI generation, and quick-test workflows before calling Strategy Library feature parity complete.
 
 
