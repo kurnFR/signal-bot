@@ -642,7 +642,7 @@ Compared `web/routes/backtest.py` with the inventory and legacy policy/audit con
 
 - [x] Corrected policy defaults/bounds, audit limit, response envelope, and readback warning behavior.
 - [x] Documented that promotion audit is a decision log, not just a list of successful deployments.
-- [ ] Add route contract tests for policy defaults/bounds and the saved-but-readback-unavailable response, plus audit pagination bounds.
+- [x] Add route contract tests for policy defaults/bounds and the saved-but-readback-unavailable response, plus audit pagination bounds (`tests/test_strategy_auto_promotion.py`).
 - [ ] Verify React promotion controls preserve admin-only writes, clear Telegram side-effect consent, and reconciliation-required states before replacing legacy Backtest Studio.
 - [ ] Continue full route/view/caller parity, role-specific browser acceptance, accessibility/device checks, and owner acceptance before production cutover.
 
@@ -704,3 +704,13 @@ Compared `web/routes/news_routes.py`, the `db/db.py` news read helpers, `fronten
 - [ ] Reconcile any remaining legacy News AI caller/polling behavior, verify role-specific browser behavior, and complete runtime route/view/caller parity, accessibility/device checks, and owner acceptance before production cutover.
 
 The News AI contract mismatch described in the historical audit has been corrected and regression-tested. The React preview remains isolated from FastAPI production serving; this documentation update does not authorize production cutover.
+
+
+## UIX-00 source audit slice: read-only promotion policy and decision audit (2026-10-28)
+
+- The React Backtest Studio now reads `GET /api/backtest/promotion-policy` and `GET /api/backtest/promotion-audit?limit=5` to show saved thresholds and recent decision records.
+- The view explicitly labels the policy as read-only and warns that the saved Telegram setting may cause an external notification if the legacy promotion workflow is run. It does not expose policy editing, strategy activation, promotion, or Telegram-send controls.
+- The audit list preserves statuses such as `reconciliation_required` and displays the decision reason, paper-config ID, and Telegram result rather than treating every record as a successful promotion.
+- [x] Added typed read-only client contracts and mocked loading/empty/error/recovery coverage.
+- [x] Verified the preview requests remain GET-only in this slice.
+- [ ] Migrate policy editing and promotion only after side-effect consent, idempotent retry/reconciliation behavior, and role-gated browser flows are reviewed; production cutover and owner acceptance remain open.
