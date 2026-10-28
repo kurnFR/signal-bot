@@ -83,6 +83,36 @@ describe("BacktestStudioPanel", () => {
     }));
   });
 
+  it("does not claim a backtest was saved when the API returns a null run ID", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const execution = {
+      runId: null, symbol: "BTCUSDT", market: "spot", timeframe: "1d", strategy: "trend_ema_v1",
+      dataSegment: "holdout", totalCandles: 80,
+      metrics: { total_trades: 3, win_rate_pct: 33.3, expectancy_r: -0.1, profit_factor: 0.8, max_drawdown_r: 2.1 },
+      trades: [{}, {}, {}],
+    };
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+      if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/backtest/strategies") return json(strategies);
+      if (path === "/api/backtest/history?limit=100") return json(history);
+      if (path === "/api/backtest/runs/42") return json(details);
+      if (path === "/api/backtest/run" && method === "POST") return json(execution);
+      throw new Error("Unexpected endpoint: " + method + " " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><BacktestStudioPanel /></AuthGate>);
+
+    expect(await screen.findByRole("heading", { name: "Strategy parameters" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Review backtest run" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Run backtest" }));
+    expect(await screen.findByText(/persistence was not confirmed/i)).toBeInTheDocument();
+    expect(screen.getByText("NOT CONFIRMED SAVED")).toBeInTheDocument();
+  });
+
   it("keeps backtest execution unavailable to viewers", async () => {
     window.localStorage.setItem("token", "viewer-session");
     const profile = { id: 9, username: "viewer01", email: null, role: "viewer", must_change_password: false };
