@@ -3,7 +3,7 @@ import { assertApiPath, getJson } from "./api";
 function validCryptoTicker(value: unknown): value is CryptoMarketTicker {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
-  return typeof item.symbol === "string" &&
+  return typeof item.symbol === "string" && typeof item.baseAsset === "string" && typeof item.quoteAsset === "string" &&
     (item.market === "spot" || item.market === "futures") &&
     ["lastPrice", "priceChangePercent", "highPrice", "lowPrice", "volume", "quoteVolume"].every((key) =>
       typeof item[key] === "number" && Number.isFinite(item[key]));
