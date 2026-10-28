@@ -45,6 +45,19 @@ class TestSystemStatusAccess(unittest.TestCase):
             body = self.client.get("/api/system/status").json()
         self.assertEqual(body["database"]["error"], "Database unavailable")
 
+    def test_public_status_redacts_heartbeat_detail_and_preserves_null_timestamp(self):
+        heartbeat = dict(FULL["heartbeats"][0], detail="collector exception: token=do-not-leak", lastBeat=None)
+        status = dict(FULL, heartbeats=[heartbeat])
+        with patch("web.app.authenticate_request", return_value=user("viewer")), \
+             patch("web.auth.authenticate_request", return_value=user("viewer")), \
+             patch("web.routes.system_status.collect_system_status", return_value=status):
+            res = self.client.get("/api/system/status")
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["heartbeats"], [{"collector": "c", "status": "ok", "lastBeat": None}])
+        self.assertNotIn("do-not-leak", res.text)
+        self.assertNotIn("detail", res.json()["heartbeats"][0])
+
     def test_detailed_status_stays_admin_only(self):
         self.assertEqual(self._get("/api/settings/status", "viewer").status_code, 403)
         self.assertEqual(self._get("/api/settings/status", "trader").status_code, 403)
