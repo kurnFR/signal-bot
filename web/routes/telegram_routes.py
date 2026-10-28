@@ -1,7 +1,7 @@
 """
 Telegram API Routes for status, testing, and alerting diagnostics.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 from notifications.telegram_notifier import (
@@ -18,11 +18,13 @@ class TelegramTestRequest(BaseModel):
 
 
 @router.get("/status")
-def get_status():
+def get_status(request: Request):
     cfg = get_telegram_config()
+    role = str(getattr(request.state, "user", {}).get("role", "")).lower()
+    # The target chat identifier is operationally sensitive; only admins may view it.
     return {
         "configured": cfg["is_configured"],
-        "chatId": cfg["chat_id"],
+        "chatId": cfg["chat_id"] if role == "admin" else None,
         "hasToken": bool(cfg["token"]),
     }
 
