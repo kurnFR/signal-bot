@@ -681,4 +681,4 @@ Compared `web/routes/news_routes.py`, the `db/db.py` news read helpers, `fronten
 - [ ] Add mocked API/client component tests using representative backend-shaped payloads, including null confidence/performance values and empty arrays. Tests must not require a live database or start collectors.
 - [ ] Reconcile any remaining legacy News AI caller/polling behavior, verify role-specific browser behavior, and complete runtime route/view/caller parity, accessibility/device checks, and owner acceptance before production cutover.
 
-This finding is a migration defect report, not a claim that the preview is already corrected. The React preview remains isolated from FastAPI production serving.
+The News AI contract mismatch described in the historical audit has been corrected and regression-tested. The React preview remains isolated from FastAPI production serving; this documentation update does not authorize production cutover.
