@@ -99,7 +99,7 @@ export async function fetchBacktestHistory(signal?: AbortSignal): Promise<Backte
   if (!isRecord(payload) || !Array.isArray(payload.runs) || !payload.runs.every(isBacktestRunSummary)) {
     throw new Error("Backtest history returned an invalid response");
   }
-  return payload as BacktestHistoryResponse;
+  return payload as unknown as BacktestHistoryResponse;
 }
 export async function fetchBacktestRunDetails(runId: number, signal?: AbortSignal): Promise<BacktestDetailsResponse> {
   if (!Number.isSafeInteger(runId) || runId < 1) throw new TypeError("Backtest run ID must be a positive integer");
@@ -109,7 +109,7 @@ export async function fetchBacktestRunDetails(runId: number, signal?: AbortSigna
       !Array.isArray(payload.trades) || !payload.trades.every(isBacktestTrade)) {
     throw new Error("Backtest run details returned an invalid response");
   }
-  return payload as BacktestDetailsResponse;
+  return payload as unknown as BacktestDetailsResponse;
 }
 
 export interface BacktestExecutionInput {
