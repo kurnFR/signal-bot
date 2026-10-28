@@ -58,6 +58,48 @@ describe("read-only strategy library", () => {
     });
   });
 
+  it("keeps AI-generated strategies as drafts until the user explicitly saves them", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const draft = {
+      status: "success", provider: "Offline Quantitative Engine", chatResponse: "Draft ready.",
+      strategy: {
+        name: "generated_v1", displayName: "Generated Strategy", description: "RSI reversal",
+        rationale: "Wait for momentum extremes.", longConditions: [{ indicator: "rsi", operator: "<", value: 25 }],
+        shortConditions: [{ indicator: "rsi", operator: ">", value: 75 }], slAtrMult: 2,
+        riskRewardRatio: 3, useTrailingStop: true, trailActivationR: 1.5, trailDistanceAtrMult: 1.2,
+      },
+    };
+    const calls: Array<{ path: string; method: string; body?: unknown }> = [];
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+      if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/custom-strategy/list") return json(payloads["/api/custom-strategy/list"]);
+      if (path === "/api/custom-strategy/indicators") return json(payloads["/api/custom-strategy/indicators"]);
+      if (path === "/api/custom-strategy/generate-ai" && method === "POST") return json(draft);
+      throw new Error("Unexpected endpoint: " + method + " " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><StrategyLibraryPanel /></AuthGate>);
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "AI strategy prompt" }), { target: { value: "Use RSI extremes with a wider stop" } });
+    expect(calls.filter((call) => call.method === "POST")).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
+    expect(await screen.findByText("Draft ready.")).toBeInTheDocument();
+    expect(screen.getByText("Offline Quantitative Engine")).toBeInTheDocument();
+    expect(calls.find((call) => call.path === "/api/custom-strategy/generate-ai" && call.method === "POST")?.body).toMatchObject({
+      prompt: "Use RSI extremes with a wider stop",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Use generated draft" }));
+    expect(screen.getByRole("textbox", { name: "Strategy name" })).toHaveValue("generated_v1");
+    expect(screen.getByRole("textbox", { name: "Strategy display name" })).toHaveValue("Generated Strategy");
+    expect(await screen.findByText(/nothing has been saved yet/i)).toBeInTheDocument();
+    expect(calls.some((call) => call.path === "/api/custom-strategy/create" && call.method === "POST")).toBe(false);
+  });
+
   it("creates a strategy only after the trader explicitly saves the form", async () => {
     window.localStorage.setItem("token", "trader-session");
     const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
@@ -137,6 +179,7 @@ describe("read-only strategy library", () => {
     expect(await screen.findByText(/restricted to admin and trader roles/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Quick test" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "New strategy" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Generate draft" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete strategy" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST" || init?.method === "DELETE")).toBe(false);
   });
