@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `1d8a662db5c8a7171753e64afc62687d138d1dc3` (master after PR #513; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
+**Source baseline for reconciliation:** `d94c7f79c8cf2de02cc12ceb944d9758baf21809` (master after PR #513; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -124,8 +124,8 @@ The following draft register lists 81 API endpoint rows across the 13 router mod
 
 | Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
 |---|---|---|---|---|---|---|---|
-| `GET /api/crypto/search` | `search_crypto`<br>`search.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `q: str`, `market: str = "spot"`, `limit: int = 20` | **200 OK:**<br>`{"query": str, "market": str, "count": int, "results": List[{"symbol": str, "baseAsset": str, "quoteAsset": str, "market": str}]}` | Queries cached Binance exchange info | Symbol search inputs (`#modal-backfill-symbol`, search inputs) |
-| `GET /api/crypto/popular` | `popular_crypto`<br>`search.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `market: str = "spot"` | **200 OK:**<br>`{"market": str, "items": List[{"symbol": str, "name": str, "volume24h": float}]}` | Reads curated benchmark pairs (BTC, ETH, SOL, BNB) | Quick-select pair tags (`#view-master-data`) |
+| `GET /api/crypto/search` | `search_crypto`<br>`search.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `q: str = ""`, `market: str = "all"`, `limit: int = 25` (1–100) | **200 OK:**<br>`{"query": str, "market": str, "count": int, "results": List[{"symbol": str, "baseAsset": str, "quoteAsset": "USDT", "market": "spot"|"futures", "lastPrice": number, "priceChangePercent": number, "highPrice": number, "lowPrice": number, "volume": number, "quoteVolume": number}]}` | Reads cached 24-hour ticker snapshots from Binance spot and/or futures endpoints; cache TTL 60s, stale cached data may be returned after provider errors | Legacy symbol-search input in backfill flow (`#modal-backfill-symbol`) |
+| `GET /api/crypto/popular` | `popular_crypto`<br>`search.py` | Authenticated (All roles) | Blocked (403 required) | **Query:** `market: str = "spot"` | **200 OK:**<br>`{"market": str, "items": List[ticker]}`; each ticker has the same fields as `/api/crypto/search` | Returns the top 15 USDT ticker rows by quote volume for futures only when `market=futures`; otherwise returns spot tickers. Uses Binance-backed 60s cache and may fall back to stale cache on provider errors | Legacy quick-select list (`#popular-coins-list`) |
 
 ---
 
@@ -585,3 +585,22 @@ Compared `web/routes/master_data.py`, `frontend/src/lib/masterData.ts`, and `fro
 - [ ] Add focused route response-contract tests for coverage and job creation/list payloads using mocks; do not invoke real Binance fetches or feature workers.
 - [ ] Decide whether backfill and feature-build controls belong in the React migration scope and, if so, implement them only with role checks, confirmation/loading/error recovery, and regression tests.
 - [ ] Verify role-specific browser behavior, all legacy callers/polling, route-to-row parity, accessibility/device behavior, and owner acceptance before production cutover.
+
+
+## UIX-00 source audit slice: Crypto search/popular contracts and provider dependency (2026-10-28)
+
+Compared `web/routes/search.py` with the legacy `web/static/js/app.js` call site and the React preview scope.
+
+- `GET /api/crypto/search` defaults to `q=""`, `market="all"`, and `limit=25` (bounded 1–100), not `market="spot"` and `limit=20`. It filters spot and/or futures USDT ticker rows by substring match on symbol/base asset and sorts the combined results by `quoteVolume`.
+- The result rows contain numeric price/change/high/low/volume fields in addition to symbol/base/quote/market metadata. The old inventory schema omitted those fields.
+- `GET /api/crypto/popular` is not a curated fixed list of BTC/ETH/SOL/BNB. It returns up to 15 highest-quote-volume USDT tickers from the selected market; any market value other than the exact string `futures` selects spot data.
+- Both handlers depend on Binance 24-hour ticker APIs (spot and futures) with independent 60-second in-memory caches and 8-second HTTP timeouts. When a request fails, the helper logs the error and returns the existing cache, which may be empty or stale. These endpoints are authenticated by the central API security boundary.
+- The inspected legacy UI calls search with an explicit `limit=20` and displays a “Querying Binance live API…” loading state. It also calls popular with `market=spot`. The React Master Data preview does not call either endpoint; it is read-only and does not currently migrate the legacy symbol search or quick-select behavior.
+
+### Migration implications and remaining gates
+
+- [x] Corrected documented defaults, result fields, provider dependency, and popular-list semantics against source.
+- [x] Distinguished legacy consumers from the disconnected React preview.
+- [ ] Add mocked provider/route tests for defaults, market selection, response schema, cache fallback, and upstream failure; tests must not depend on live Binance availability.
+- [ ] Decide whether search/quick-select belong in the React Master Data migration and add browser-level tests if migrated.
+- [ ] Continue route-to-inventory reconciliation, RBAC/browser/device/accessibility checks, and owner acceptance before production cutover.
