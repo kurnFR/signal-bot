@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "./AuthGate";
 import { BookOpen, RefreshCw, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
-import { fetchCustomStrategies, fetchStrategyIndicators, quickTestCustomStrategy, StrategyQuickTestError, type CustomStrategy, type QuickTestResult, type StrategyIndicator } from "./lib/strategyLibrary";
+import { createCustomStrategy, deleteCustomStrategy, fetchCustomStrategies, fetchStrategyIndicators, quickTestCustomStrategy, StrategyLibraryActionError, StrategyQuickTestError, type CustomStrategy, type QuickTestResult, type StrategyConditionInput, type StrategyIndicator } from "./lib/strategyLibrary";
 
 function messageFor(cause: unknown) {
   if (cause instanceof ApiError && cause.status === 401) return "Your session has expired. Sign in again to view the strategy library.";
@@ -15,6 +15,7 @@ function Conditions({ label, items }: { label: string; items?: CustomStrategy["l
 export function StrategyLibraryPanel() {
   const [strategies, setStrategies] = useState<CustomStrategy[]>([]);
   const [indicators, setIndicators] = useState<StrategyIndicator[]>([]);
+  const [operators, setOperators] = useState<string[]>(["<", "<=", ">", ">=", "==", "!="]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -26,6 +27,22 @@ export function StrategyLibraryPanel() {
   const [quickTestBusy, setQuickTestBusy] = useState<string | null>(null);
   const [quickTestError, setQuickTestError] = useState<string | null>(null);
   const [quickTestResults, setQuickTestResults] = useState<Record<string, QuickTestResult>>({});
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [createDisplayName, setCreateDisplayName] = useState("");
+  const [createDescription, setCreateDescription] = useState("");
+  const [createRationale, setCreateRationale] = useState("");
+  const [longConditions, setLongConditions] = useState([{ indicator: "rsi", operator: "<", value: "30" }]);
+  const [shortConditions, setShortConditions] = useState([{ indicator: "rsi", operator: ">", value: "70" }]);
+  const [slAtrMult, setSlAtrMult] = useState("1.5");
+  const [riskRewardRatio, setRiskRewardRatio] = useState("2.5");
+  const [useTrailingStop, setUseTrailingStop] = useState(false);
+  const [trailActivationR, setTrailActivationR] = useState("1");
+  const [trailDistanceAtrMult, setTrailDistanceAtrMult] = useState("1.5");
+  const [actionBusy, setActionBusy] = useState<"create" | "delete" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<CustomStrategy | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setError(null);
@@ -33,11 +50,60 @@ export function StrategyLibraryPanel() {
       .then(([saved, definitions]) => {
         setStrategies(Array.isArray(saved.strategies) ? saved.strategies : []);
         setIndicators(Array.isArray(definitions.indicators) ? definitions.indicators : []);
+        setOperators(Array.isArray(definitions.operators) && definitions.operators.length ? definitions.operators : ["<", "<=", ">", ">=", "==", "!="]);
       })
       .catch((cause: unknown) => { if (!controller.signal.aborted) setError(messageFor(cause)); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [attempt]);
+  const canManageStrategies = canQuickTest;
+  const conditionInput = (conditions: Array<{ indicator: string; operator: string; value: string }>): StrategyConditionInput[] =>
+    conditions.map((condition) => {
+      const value = condition.value.trim();
+      const numeric = Number(value);
+      return { indicator: condition.indicator, operator: condition.operator, value: value !== "" && Number.isFinite(numeric) ? numeric : value };
+    });
+  const submitCreateStrategy = async () => {
+    const normalizedName = createName.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/^_+|_+$/g, "");
+    if (!normalizedName || normalizedName.length > 80) { setActionError("Enter a valid strategy name (letters, numbers, underscores; max 80 characters)."); return; }
+    if (!createDisplayName.trim()) { setActionError("Display name is required."); return; }
+    if (longConditions.length + shortConditions.length === 0) { setActionError("Add at least one long or short entry condition."); return; }
+    const sl = Number(slAtrMult), rr = Number(riskRewardRatio), activation = Number(trailActivationR), distance = Number(trailDistanceAtrMult);
+    if (!Number.isFinite(sl) || sl < 0.5 || sl > 5 || !Number.isFinite(rr) || rr < 1 || rr > 6 ||
+        !Number.isFinite(activation) || activation < 0.25 || activation > 5 ||
+        !Number.isFinite(distance) || distance < 0.5 || distance > 5) {
+      setActionError("Stop-loss, risk/reward, and trailing-stop values must be within the documented ranges."); return;
+    }
+    if ([...longConditions, ...shortConditions].some((condition) => !condition.indicator || !condition.operator || !condition.value.trim())) {
+      setActionError("Every entry condition needs an indicator, operator, and value."); return;
+    }
+    setActionBusy("create"); setActionError(null); setActionMessage(null);
+    try {
+      const result = await createCustomStrategy({
+        name: normalizedName, displayName: createDisplayName.trim(),
+        description: createDescription.trim() || "Custom rule-based strategy",
+        rationale: createRationale.trim(),
+        longConditions: conditionInput(longConditions), shortConditions: conditionInput(shortConditions),
+        slAtrMult: sl, riskRewardRatio: rr, useTrailingStop,
+        trailActivationR: activation, trailDistanceAtrMult: distance,
+      });
+      setActionMessage(result.message); setShowCreateForm(false); setAttempt((value) => value + 1);
+    } catch (cause) {
+      if (cause instanceof StrategyLibraryActionError && cause.status === 403) setActionError("Your account cannot create strategies. Only admin or trader roles can perform this action.");
+      else setActionError(cause instanceof Error ? cause.message : "Strategy creation failed. Please retry.");
+    } finally { setActionBusy(null); }
+  };
+  const confirmDeleteStrategy = async () => {
+    if (!pendingDelete) return;
+    setActionBusy("delete"); setActionError(null); setActionMessage(null);
+    try {
+      const result = await deleteCustomStrategy(pendingDelete.name);
+      setActionMessage(result.message); setPendingDelete(null); setAttempt((value) => value + 1);
+    } catch (cause) {
+      if (cause instanceof StrategyLibraryActionError && cause.status === 403) setActionError("Your account cannot delete strategies. Only admin or trader roles can perform this action.");
+      else setActionError(cause instanceof Error ? cause.message : "Strategy deletion failed. Please retry.");
+    } finally { setActionBusy(null); }
+  };
   const runQuickTest = async (strategy: CustomStrategy) => {
     const normalizedSymbol = testSymbol.trim().toUpperCase();
     if (!/^[A-Z0-9._-]{1,30}$/.test(normalizedSymbol)) { setQuickTestError("Enter a valid symbol using letters, numbers, dot, underscore, or hyphen."); return; }
