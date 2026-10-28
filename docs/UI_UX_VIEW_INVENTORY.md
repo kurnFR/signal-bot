@@ -46,15 +46,16 @@ This document is Antigravity's detailed baseline inventory draft for **Phase UIX
 
 ### 2.3 React Preview Mutation Boundary (rechecked 2026-10-28)
 
-The preview is mostly read-only, with two intentional, role-gated mutation surfaces.
+The preview is mostly read-only, with three intentional, role-gated mutation surfaces.
 
 - `ScreenerControlsPanel.tsx` calls `POST /api/research/screener/control` only when an admin or trader explicitly selects **Save changes**. Viewer sessions do not fetch the editor configuration and cannot submit changes. The request changes persisted screener settings, including the Telegram alert gate and detection thresholds; it does not itself send a Telegram message or restart the worker.
 - `MasterDataPanel.tsx` allows admin/trader users to review and confirm a backfill request (`POST /api/master-data/backfill`) or feature-build request (`POST /api/master-data/build-features`). These actions can write OHLCV/features and launch background workers. Viewer sessions cannot access the controls.
+- `BacktestStudioPanel.tsx` allows admin/trader users to submit `POST /api/backtest/run` only after reviewing and confirming a run configuration. The response is shown with an explicit saved-run ID when persistence is confirmed; a null `runId` is presented as persistence not confirmed. This simulates historical trades only and does not execute live orders.
 - Backend authorization remains authoritative. UI hiding is defense in depth, not a replacement for route-level role enforcement.
-- Other React preview panels remain read-only. No trade execution, strategy promotion, deployment, wallet-tracking control, or Telegram-send action is exposed.
-- **Safety note:** Do not point the preview at a production-connected API while experimenting with either editor unless changing the live screener configuration or starting data-processing jobs is intended. This does not authorize production serving of the React preview.
+- Other React preview panels remain read-only. No strategy promotion, deployment, wallet-tracking control, or Telegram-send action is exposed.
+- **Safety note:** Do not point the preview at a production-connected API while experimenting with these controls unless changing the live screener configuration, starting data-processing jobs, or running a persisted backtest is intended. This does not authorize production serving of the React preview.
 
-Browser smoke tests that navigate between views assert no incidental mutation requests; focused component tests cover the explicit Screener save flow, Master Data job confirmation, and viewer restrictions.
+Browser smoke tests that navigate between views assert no incidental mutation requests; focused component tests cover each explicit action flow and viewer restrictions.
 
 ---
 
