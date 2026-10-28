@@ -672,10 +672,12 @@ Compared `web/routes/custom_strategy.py` with the inventory and React Strategy L
 
 - `POST /api/custom-strategy/quick-test` uses up to the latest 1,000 candles, not 500. It rejects insufficient history (<50 source candles) with HTTP 400.
 - Its successful response includes `totalCandles`, `totalTrades`, fractional `winRate` and percentage `winRatePct`, `netR`, `profitFactor`, `maxDrawdownR`, and `expectancyR`. Non-finite numeric metrics are sanitized to null where applicable.
-- The React Strategy Library only calls the list and indicator GET endpoints. It does not call AI generation, create/delete, or quick-test endpoints; all those legacy capabilities remain outside this preview. The existing inventory and role-policy notes correctly identify the prefix-wide viewer restriction, so no RBAC change is made here.
+- The React Strategy Library now reads saved definitions and indicator metadata, supports admin/trader-only quick tests (PR #530), explicit create/delete with confirmation (PR #531), and an explicit AI draft-generation action (this migration slice). AI generation can call the configured provider or the backend heuristic fallback, fills the editor only, and never saves or activates a strategy by itself. Viewer sessions cannot see or invoke these actions. Editing/replacing an existing saved definition and the legacy multi-turn AI conversation remain parity gaps.
 - [x] Corrected quick-test response schema and data-window behavior.
 - [x] Added mocked route tests for the 50-candle guard, latest-1,000 window, and null sanitization of NaN/Infinity metrics (PR #532); tests use synthetic candle frames and do not require live market data.
-- [ ] Decide whether to migrate create, delete, AI generation, and quick-test workflows before calling Strategy Library feature parity complete.
+- [x] Migrated create/delete with explicit save and delete confirmation (PR #531), and non-persisted quick tests with admin/trader gating (PR #530); quick-test contract regression tests are in PR #532.
+- [x] Added explicit AI draft generation to the React Strategy Library; generated rules fill the editor but require a separate user-initiated save and are never activated/promoted automatically.
+- [ ] Migrate editing/replacing existing saved definitions and decide whether multi-turn AI chat history is required for parity; continue role-specific browser, accessibility/device, and owner acceptance gates.
 
 
 ## UIX-00 source audit slice: News AI API contracts and preview mismatch (2026-10-28)
