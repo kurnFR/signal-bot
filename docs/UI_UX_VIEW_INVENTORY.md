@@ -746,3 +746,11 @@ The News AI contract mismatch described in the historical audit has been correct
 - [x] Add mocked auth-gate coverage for a 401 response during `PUT /api/backtest/promotion-policy`.
 - [x] Verify the stale token is cleared, the UI returns to sign-in, and the client does not report the save as verified.
 - [ ] Continue all-router request/response/RBAC and legacy caller parity; owner acceptance and production cutover remain open.
+
+
+## UIX-00 promotion-policy read contract hardening (2026-10-28)
+
+- [x] Apply the complete policy schema validator to the GET policy response used by Backtest Studio's side-effect confirmation gate.
+- [x] Reject missing booleans/thresholds and invalid numeric values instead of silently presenting malformed policy as verified.
+- [x] Add mocked contract tests for valid, missing-field, wrong-type, and invalid-number payloads.
+- [ ] Continue route-by-route request/response/RBAC and legacy caller parity review. UIX-00 acceptance and production cutover remain open.
