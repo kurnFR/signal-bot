@@ -174,3 +174,31 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Coverage:** Create and delete failures now have regression tests proving forward/inverse strategy registry entries and metadata remain unchanged when persistent storage rejects the write.
 - **Exact-head validation:** All five reported checks passed on `590e1492670c0fb7058f9a44b7cdcb34995922f3`: pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration.
 - **Safety:** Temporary files and mocked persistence failures only; no saved strategy files, live workers, trading, Telegram, or production state changed.
+
+### PR #568 — legacy dashboard route-registration parity
+
+- **Status:** Merged.
+- **Merge commit:** `61cb622971c6d0e4115bc568736df06d768600d9`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/568
+- **Coverage:** Static source inspection discovers literal API references in legacy `web/static/**/*.js` and `web/static/**/*.html` and checks that each normalized path is registered by FastAPI. This is route-registration parity only; method, schema, RBAC, polling, and behavior parity remain open.
+- **Exact-head validation:** All five reported checks passed on `62bf35c73bf3872b2d9e9bdf9f0831a70320f0b0`: pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration.
+- **Safety:** Static source inspection only; no API requests, workers, trading, Telegram, database writes, or deployment.
+
+### PR #569 — custom-strategy replacement and idempotent deletion
+
+- **Status:** Merged.
+- **Merge commit:** `0f43c0f9779aaf2ec0cf6708ad8a31b83e4289f4`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/569
+- **Coverage:** Verifies same-name saves replace rather than duplicate the persisted definition, refresh forward/inverse runners and metadata, and deletion of a name absent from persistence preserves unrelated strategies.
+- **Exact-head validation:** All five reported checks passed on `9f8f7e9990e754068d6b10565f42b0f4ca8c87bc`: pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration.
+- **Safety:** Temporary files and isolated in-memory registry entries only; no production strategy file, workers, trading, Telegram, database, or deployment.
+
+### PR #570 — AI strategy provider fallback order
+
+- **Status:** Merged.
+- **Merge commit:** `540decafea17236e9389b8c4460584eb231e1c2a`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/570
+- **Coverage:** Verifies failed primary-provider calls fall back to OpenRouter when it succeeds, and unavailable configured providers fall back to the local heuristic generator. Provider calls are mocked.
+- **Exact-head validation:** All five reported checks passed on `f32717b98f10d9e3b48e7b90371669acea3bff1e`: pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration.
+- **Safety:** No network/provider calls, strategy persistence, workers, trading, Telegram, database writes, or deployment.
+\n
