@@ -887,14 +887,6 @@ def quick_test_strategy(req: QuickTestRequest):
     params["CUSTOM_SL_ATR_MULT"] = req.strategy.slAtrMult
     params["CUSTOM_RISK_REWARD_RATIO"] = req.strategy.riskRewardRatio
 
-    trades = run_fn(test_df, params)
-    metrics = compute_metrics(trades)
-
-    r_multiples = [t["r_multiple"] for t in trades if t.get("r_multiple") is not None]
-    net_r = round(sum(r_multiples), 2)
-    win_rate_pct = metrics.get("win_rate_pct")
-    win_rate_fraction = round(win_rate_pct / 100.0, 4) if win_rate_pct is not None else 0.0
-
     import math
 
     def _clean_num(val, default=0.0):
@@ -904,6 +896,14 @@ def quick_test_strategy(req: QuickTestRequest):
             return None
         return round(float(val), 4)
 
+    trades = run_fn(test_df, params)
+    metrics = compute_metrics(trades)
+
+    r_multiples = [t["r_multiple"] for t in trades if t.get("r_multiple") is not None]
+    net_r = _clean_num(round(sum(r_multiples), 2))
+    win_rate_pct = _clean_num(metrics.get("win_rate_pct"), default=0.0)
+    win_rate_fraction = round(win_rate_pct / 100.0, 4) if win_rate_pct is not None else None
+
     return {
         "status": "success",
         "symbol": req.symbol,
@@ -912,7 +912,7 @@ def quick_test_strategy(req: QuickTestRequest):
         "totalCandles": len(test_df),
         "totalTrades": metrics.get("total_trades", len(trades)),
         "winRate": win_rate_fraction,
-        "winRatePct": win_rate_pct or 0.0,
+        "winRatePct": win_rate_pct,
         "netR": net_r,
         "profitFactor": _clean_num(metrics.get("profit_factor")),
         "maxDrawdownR": _clean_num(metrics.get("max_drawdown_r"), 0.0),
