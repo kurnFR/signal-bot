@@ -593,3 +593,22 @@ test("keyboard users can skip navigation and reach the main content", async ({ p
   await expect(page).toHaveURL(/#main-content$/);
   await expect(page.locator("#main-content")).toBeVisible();
 });
+
+
+test("primary navigation announces the selected page to assistive technology", async ({ page }) => {
+  await mockApi(page);
+  await signIn(page);
+
+  const navigation = page.getByRole("navigation", { name: "Primary navigation" });
+  const overview = navigation.getByRole("button", { name: "Overview" });
+  const screener = navigation.getByRole("button", { name: /Market Screener/ });
+
+  await expect(overview).toHaveAttribute("aria-current", "page");
+  await expect(screener).not.toHaveAttribute("aria-current", "page");
+
+  await screener.click();
+
+  await expect(page.getByRole("heading", { level: 1, name: "Market Screener" })).toBeVisible();
+  await expect(screener).toHaveAttribute("aria-current", "page");
+  await expect(overview).not.toHaveAttribute("aria-current", "page");
+});
