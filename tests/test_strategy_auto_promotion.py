@@ -615,5 +615,7 @@ def test_promotion_audit_query_contract_defaults_to_25_and_is_bounded_1_to_100()
     # verifies the public contract without invoking persistence or auth middleware.
     limit = list_promotion_audit.__defaults__[0]
     assert limit.default == 25
-    assert limit.ge == 1
-    assert limit.le == 100
+    # FastAPI/Pydantic v2 stores numeric constraints in Query.metadata.
+    metadata = limit.metadata
+    assert any(getattr(item, "ge", None) == 1 for item in metadata)
+    assert any(getattr(item, "le", None) == 100 for item in metadata)
