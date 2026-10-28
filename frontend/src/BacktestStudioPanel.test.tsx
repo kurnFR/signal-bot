@@ -210,4 +210,30 @@ describe("BacktestStudioPanel", () => {
     expect(screen.queryByRole("button", { name: "Review backtest run" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
+
+  it("recovers from a temporary history API failure after Retry using GET-only requests", async () => {
+    let recovered = false;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method ?? "GET").toBe("GET");
+      if (!recovered) {
+        return Promise.resolve(new Response(JSON.stringify({ detail: "temporary failure" }), {
+          status: 503, headers: { "content-type": "application/json" },
+        }));
+      }
+      return Promise.resolve(responseFor(String(input)));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<BacktestStudioPanel />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/check API\/database health, then retry/i);
+    expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument();
+
+    recovered = true;
+    fireEvent.click(screen.getByRole("button", { name: /Retry/i }));
+
+    expect(await screen.findByText("take_profit")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(5);
+    expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+  });
 });
