@@ -54,7 +54,7 @@ describe("SettingsPanel", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     render(<SettingsPanel theme="dark" onToggleTheme={() => undefined} username="viewer01" role="viewer" />);
-    expect(screen.getByText(/restricted to admins/i)).toBeInTheDocument();
+    expect(screen.getByText(/Telegram status and test controls are restricted to admins/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Review Telegram test" })).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
