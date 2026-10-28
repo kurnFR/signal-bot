@@ -58,6 +58,70 @@ describe("read-only strategy library", () => {
     });
   });
 
+  it("creates a strategy only after the trader explicitly saves the form", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const calls: Array<{ path: string; method: string; body?: unknown }> = [];
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+      if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/custom-strategy/list") return json(payloads["/api/custom-strategy/list"]);
+      if (path === "/api/custom-strategy/indicators") return json(payloads["/api/custom-strategy/indicators"]);
+      if (path === "/api/custom-strategy/create" && method === "POST") return json({ status: "success", name: "new_test_v1", displayName: "New Test", message: "Strategy new_test_v1 saved." });
+      throw new Error("Unexpected endpoint: " + method + " " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><StrategyLibraryPanel /></AuthGate>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "New strategy" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Strategy name" }), { target: { value: "rsi_volume_v1" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Strategy display name" }), { target: { value: "New Test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save strategy" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/already exists/i);
+    expect(calls.filter((call) => call.method === "POST" || call.method === "DELETE")).toEqual([]);
+    fireEvent.change(screen.getByRole("textbox", { name: "Strategy name" }), { target: { value: "new_test_v1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save strategy" }));
+    expect(await screen.findByText("Strategy new_test_v1 saved.")).toBeInTheDocument();
+    const request = calls.find((call) => call.path === "/api/custom-strategy/create" && call.method === "POST");
+    expect(request?.body).toMatchObject({
+      name: "new_test_v1", displayName: "New Test",
+      longConditions: [{ indicator: "rsi", operator: "<", value: 30 }],
+      shortConditions: [{ indicator: "rsi", operator: ">", value: 70 }],
+      slAtrMult: 1.5, riskRewardRatio: 2.5, useTrailingStop: false,
+    });
+  });
+
+  it("requires confirmation before deleting a saved strategy", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const calls: Array<{ path: string; method: string }> = [];
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ path, method });
+      const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+      if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/custom-strategy/list") return json(payloads["/api/custom-strategy/list"]);
+      if (path === "/api/custom-strategy/indicators") return json(payloads["/api/custom-strategy/indicators"]);
+      if (path === "/api/custom-strategy/rsi_volume_v1" && method === "DELETE") return json({ status: "success", message: "Strategy deleted." });
+      throw new Error("Unexpected endpoint: " + method + " " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><StrategyLibraryPanel /></AuthGate>);
+
+    const deleteButtons = await screen.findAllByRole("button", { name: "Delete strategy" });
+    fireEvent.click(deleteButtons[0]);
+    expect(await screen.findByRole("heading", { name: "Delete strategy?" })).toBeInTheDocument();
+    expect(calls.filter((call) => call.method === "DELETE")).toEqual([]);
+    const confirmButtons = screen.getAllByRole("button", { name: "Delete strategy" });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+    expect(await screen.findByText("Strategy deleted.")).toBeInTheDocument();
+    expect(calls.some((call) => call.path === "/api/custom-strategy/rsi_volume_v1" && call.method === "DELETE")).toBe(true);
+  });
+
   it("keeps strategy quick tests unavailable to viewers", async () => {
     window.localStorage.setItem("token", "viewer-session");
     const profile = { id: 9, username: "viewer01", email: null, role: "viewer", must_change_password: false };
@@ -72,6 +136,8 @@ describe("read-only strategy library", () => {
 
     expect(await screen.findByText(/restricted to admin and trader roles/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Quick test" })).not.toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    expect(screen.queryByRole("button", { name: "New strategy" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete strategy" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST" || init?.method === "DELETE")).toBe(false);
   });
 });
