@@ -74,6 +74,8 @@ describe("BacktestStudioPanel", () => {
       calls.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
       if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/backtest/promotion-policy") return json({ policy: promotionPolicy });
+      if (path === "/api/backtest/promotion-audit?limit=5") return json({ events: [] });
       if (path === "/api/backtest/strategies") return json(strategies);
       if (path === "/api/backtest/history?limit=100") return json({ runs: runCreated ? [newRun, run] : [run] });
       if (path === "/api/backtest/runs/42") return json(details);
@@ -116,6 +118,8 @@ describe("BacktestStudioPanel", () => {
       const method = init?.method ?? "GET";
       const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
       if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/backtest/promotion-policy") return json({ policy: promotionPolicy });
+      if (path === "/api/backtest/promotion-audit?limit=5") return json({ events: [] });
       if (path === "/api/backtest/strategies") return json(strategies);
       if (path === "/api/backtest/history?limit=100") return json(history);
       if (path === "/api/backtest/runs/42") return json(details);
@@ -137,7 +141,7 @@ describe("BacktestStudioPanel", () => {
     const profile = { id: 9, username: "viewer01", email: null, role: "viewer", must_change_password: false };
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const path = String(input);
-      const payload = path === "/api/auth/me" ? profile : path === "/api/backtest/strategies" ? strategies : path === "/api/backtest/history?limit=100" ? history : path === "/api/backtest/runs/42" ? details : null;
+      const payload = path === "/api/auth/me" ? profile : path === "/api/backtest/strategies" ? strategies : path === "/api/backtest/history?limit=100" ? history : path === "/api/backtest/runs/42" ? details : path === "/api/backtest/promotion-policy" ? { policy: promotionPolicy } : path === "/api/backtest/promotion-audit?limit=5" ? { events: [] } : null;
       if (!payload) throw new Error("Unexpected endpoint: " + path);
       return Promise.resolve(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }));
     });
@@ -167,6 +171,8 @@ describe("BacktestStudioPanel", () => {
       calls.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
       if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/backtest/promotion-policy") return json({ policy: promotionPolicy });
+      if (path === "/api/backtest/promotion-audit?limit=5") return json({ events: [] });
       if (path === "/api/backtest/strategies") return json(strategies);
       if (path === "/api/backtest/history?limit=100") return json({ runs: runCreated ? [newRun, run] : [run] });
       if (path === "/api/backtest/runs/42") return json(details);
@@ -200,7 +206,7 @@ describe("BacktestStudioPanel", () => {
     const profile = { id: 9, username: "viewer01", email: null, role: "viewer", must_change_password: false };
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const path = String(input);
-      const payload = path === "/api/auth/me" ? profile : path === "/api/backtest/strategies" ? strategies : path === "/api/backtest/history?limit=100" ? history : path === "/api/backtest/runs/42" ? details : null;
+      const payload = path === "/api/auth/me" ? profile : path === "/api/backtest/strategies" ? strategies : path === "/api/backtest/history?limit=100" ? history : path === "/api/backtest/runs/42" ? details : path === "/api/backtest/promotion-policy" ? { policy: promotionPolicy } : path === "/api/backtest/promotion-audit?limit=5" ? { events: [] } : null;
       if (!payload) throw new Error("Unexpected endpoint: " + path);
       return Promise.resolve(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }));
     });
