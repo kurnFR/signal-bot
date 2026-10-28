@@ -106,6 +106,24 @@ export class BacktestExecutionError extends Error {
   }
 }
 
+function isFiniteNullableNumber(value: unknown): value is number | null {
+  return value === null || (typeof value === "number" && Number.isFinite(value));
+}
+
+function isBacktestExecutionResult(value: unknown): value is BacktestExecutionResult {
+  if (!value || typeof value !== "object") return false;
+  const result = value as Record<string, unknown>;
+  if (!(result.runId === null || (typeof result.runId === "number" && Number.isSafeInteger(result.runId) && result.runId > 0)) ||
+      !["symbol", "market", "timeframe", "strategy", "dataSegment"].every((key) => typeof result[key] === "string" && result[key].length > 0) ||
+      typeof result.totalCandles !== "number" || !Number.isSafeInteger(result.totalCandles) || result.totalCandles < 0 ||
+      !Array.isArray(result.trades) || !result.metrics || typeof result.metrics !== "object") return false;
+
+  const metrics = result.metrics as Record<string, unknown>;
+  if (typeof metrics.total_trades !== "number" || !Number.isSafeInteger(metrics.total_trades) || metrics.total_trades < 0 ||
+      !["win_rate_pct", "expectancy_r", "profit_factor", "max_drawdown_r"].every((key) => isFiniteNullableNumber(metrics[key]))) return false;
+  return Object.values(metrics).every(isFiniteNullableNumber);
+}
+
 /** Execute one explicitly confirmed, persisted backtest for an admin/trader session. */
 export async function executeBacktest(input: BacktestExecutionInput): Promise<BacktestExecutionResult> {
   const path = "/api/backtest/run";
@@ -135,12 +153,10 @@ export async function executeBacktest(input: BacktestExecutionInput): Promise<Ba
       : `Backtest failed (${response.status})`;
     throw new BacktestExecutionError(response.status, detail);
   }
-  if (!payload || typeof payload !== "object" || !("metrics" in payload) || !payload.metrics ||
-      typeof payload.metrics !== "object" || !("trades" in payload) || !Array.isArray(payload.trades) ||
-      !("runId" in payload) || (payload.runId !== null && typeof payload.runId !== "number")) {
+  if (!isBacktestExecutionResult(payload)) {
     throw new BacktestExecutionError(response.status, "Backtest returned an invalid result payload");
   }
-  return payload as BacktestExecutionResult;
+  return payload;
 }
 
 

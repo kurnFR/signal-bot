@@ -314,8 +314,17 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `9d1d83776837c96f81292576f4dea3a9ccbbd35a`.
 - **Safety:** Mocked API responses only; no policy changes, backtests, promotion, paper activation, Telegram, or deployment.
 
-### Current PR #585 — validate promotion audit event schema
+### PR #585 — validate promotion audit event schema
 
-- Validates each audit event's required strings, nullable fields, timestamps, and paper configuration identifier before exposing it to React. This prevents malformed event fields (for example a non-string status) from crashing the audit table render.
-- Adds mocked contract tests for a valid event, invalid status type, and incomplete event.
+- **Status:** Merged.
+- **Merge commit:** `74fbbfafde18c138631587c32b116a77b672b8f0`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/585
+- **Coverage:** Validates required audit-event strings, nullable fields, timestamps, and paper configuration identifiers before passing the records to React, preventing malformed statuses/reasons from crashing the audit table.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `b19797071afeee04abc20008cf8a396626481bc9`.
+- **Safety:** Mocked reads only; no policy writes, backtests, promotion, paper activation, Telegram sends, or deployment.
+
+### Current PR #586 — validate backtest execution response contract
+
+- Validates the run ID, identifying metadata, candle count, required metrics, nullable numeric metrics, and trade array before the UI treats an execution response as a result.
+- Adds mocked contract tests for a valid result, fractional run ID, incorrectly typed metrics, and missing metadata.
 - Validation is pending on the exact PR head; do not merge until all required checks pass.

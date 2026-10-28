@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchPromotionSnapshot, type PromotionPolicy } from "./backtestStudio";
+import { executeBacktest, fetchPromotionSnapshot, type PromotionPolicy, type BacktestExecutionInput } from "./backtestStudio";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -85,5 +85,65 @@ describe("fetchPromotionSnapshot contract validation", () => {
     mockSnapshot({ ...validPolicy, max_drawdown_r: null });
 
     await expect(fetchPromotionSnapshot()).rejects.toThrow("Promotion status returned an invalid response");
+  });
+});
+
+
+const executionInput: BacktestExecutionInput = {
+  symbol: "BTCUSDT",
+  market: "spot",
+  timeframe: "1h",
+  strategy: "trend_ema_v1",
+  data_segment: "holdout",
+  initial_capital: 10000,
+  risk_per_trade_pct: 1,
+  save_to_db: true,
+  params: {},
+};
+
+function mockExecutionResult(payload: unknown) {
+  const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+    expect(init?.method).toBe("POST");
+    return Promise.resolve(new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+describe("executeBacktest response contract validation", () => {
+  const validResult = {
+    runId: 42,
+    symbol: "BTCUSDT",
+    market: "spot",
+    timeframe: "1h",
+    strategy: "trend_ema_v1",
+    dataSegment: "holdout",
+    totalCandles: 1000,
+    metrics: { total_trades: 12, win_rate_pct: 58.3, expectancy_r: 0.2, profit_factor: 1.4, max_drawdown_r: 2.1 },
+    trades: [],
+  };
+
+  it("accepts a well-formed persisted execution result", async () => {
+    mockExecutionResult(validResult);
+    await expect(executeBacktest(executionInput)).resolves.toEqual(validResult);
+  });
+
+  it("rejects a fractional run ID instead of treating it as a saved run", async () => {
+    mockExecutionResult({ ...validResult, runId: 42.5 });
+    await expect(executeBacktest(executionInput)).rejects.toMatchObject({ name: "BacktestExecutionError", message: "Backtest returned an invalid result payload" });
+  });
+
+  it("rejects incorrectly typed metrics instead of rendering invalid values", async () => {
+    mockExecutionResult({ ...validResult, metrics: { ...validResult.metrics, profit_factor: "1.4" } });
+    await expect(executeBacktest(executionInput)).rejects.toThrow("Backtest returned an invalid result payload");
+  });
+
+  it("rejects missing required execution metadata", async () => {
+    const { totalCandles: _ignored, ...incompleteResult } = validResult;
+    mockExecutionResult(incompleteResult);
+    await expect(executeBacktest(executionInput)).rejects.toThrow("Backtest returned an invalid result payload");
   });
 });

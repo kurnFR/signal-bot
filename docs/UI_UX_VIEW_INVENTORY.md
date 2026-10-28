@@ -762,3 +762,11 @@ The News AI contract mismatch described in the historical audit has been correct
 - [x] Reject malformed or incomplete events so the audit table cannot crash on unexpected backend payload types.
 - [x] Add mocked contract tests for valid and malformed event responses.
 - [ ] Continue route-by-route request/response/RBAC and legacy caller parity review. UIX-00 acceptance and production cutover remain open.
+
+
+## UIX-00 backtest execution response contract hardening (2026-10-28)
+
+- [x] Validate the execution response's run ID, required metadata, candle count, metric types, and trades array before rendering a completed run.
+- [x] Reject fractional/invalid run IDs and malformed metrics instead of accepting a loosely typed payload.
+- [x] Add mocked tests for valid and invalid execution responses.
+- [ ] Continue route-by-route request/response/RBAC and legacy caller parity review. UIX-00 acceptance and production cutover remain open.
