@@ -8,7 +8,7 @@ const user = {
   must_change_password: false,
 };
 
-async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePasswordChange?: boolean; sessionValidationUnavailable?: boolean; deniedPath?: string; loginRejected?: boolean; role?: string } = {}) {
+async function mockApi(page: Page, options: { expiredScreener?: boolean; expiredSettings?: boolean; forcePasswordChange?: boolean; sessionValidationUnavailable?: boolean; deniedPath?: string; loginRejected?: boolean; role?: string } = {}) {
   const activeUser = { ...user, role: options.role ?? user.role };
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -35,6 +35,10 @@ async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePa
       return;
     }
     if (options.expiredScreener && path.startsWith("/api/research/screener/")) {
+      await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "Not authenticated" }) });
+      return;
+    }
+    if (options.expiredSettings && path === "/api/settings/status") {
       await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "Not authenticated" }) });
       return;
     }
@@ -446,34 +450,16 @@ test("viewer Settings does not request admin diagnostics or Telegram configurati
 });
 
 test("an expired Settings read clears the stale token and returns to sign-in", async ({ page }) => {
-  let expireSettingsRead = false;
-  await page.addInitScript(() => window.localStorage.setItem("token", "stale-settings-token"));
-  await page.route("**/api/**", async (route) => {
-    const request = route.request();
-    const path = new URL(request.url()).pathname;
-    if (path === "/api/auth/me") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...user, role: "admin" }) });
-      return;
-    }
-    if (path === "/api/settings/status" && expireSettingsRead) {
-      await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "Not authenticated" }) });
-      return;
-    }
-    if (path === "/api/settings/status") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
-        database: { status: "ok", host: "db.internal", port: 3306, database: "signal_bot", tables: {}, error: null },
-        heartbeats: [], binance: { spotApi: "online", futuresApi: "online", enableFuturesConfig: true },
-      }) });
-      return;
-    }
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
-  });
-  await page.goto("/");
+  await mockApi(page, { role: "admin", expiredSettings: true });
+  await signIn(page);
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
-  expireSettingsRead = true;
   await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
   await expect(page.getByRole("alert")).toHaveText("Your session has expired. Sign in again to continue.");
+  expect(await page.evaluate(() => window.localStorage.getItem("token"))).toBeNull();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toHaveCount(0);
+});
+toHaveText("Your session has expired. Sign in again to continue.");
   expect(await page.evaluate(() => window.localStorage.getItem("token"))).toBeNull();
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toHaveCount(0);
 });
