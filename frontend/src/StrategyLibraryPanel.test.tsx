@@ -171,7 +171,7 @@ describe("read-only strategy library", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<AuthGate><StrategyLibraryPanel /></AuthGate>);
 
-    const prompt = screen.getByRole("textbox", { name: "AI strategy prompt" });
+    const prompt = await screen.findByRole("textbox", { name: "AI strategy prompt" });
     fireEvent.change(prompt, { target: { value: "Create an RSI reversal strategy" } });
     fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
     expect((await screen.findAllByText("First response.")).length).toBeGreaterThan(0);
