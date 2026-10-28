@@ -60,7 +60,6 @@ describe("NewsAIPanel", () => {
     expect(await screen.findByText("Collected events")).toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
-}
 
   it("shows empty states when stats, signals, and events load successfully with no rows", async () => {
     const emptyResponses = {
