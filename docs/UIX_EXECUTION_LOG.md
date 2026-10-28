@@ -104,3 +104,13 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Coverage:** Successful empty coverage/jobs/markets responses render explicit empty states without false API errors; temporary coverage failure recovers after Retry; requests remain GET-only.
 - **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `70aec5df24ace2039395b84c1b2afd47c2344cd5`.
 - **Safety:** Mocked responses only; no backfill or feature-build job, database write, worker action, or production deployment.
+
+
+### PR #561 — Research performance API contract and display
+
+- **Status:** Merged.
+- **Merge commit:** `7af416ef4fcd0683d988739ac417a49948bec45d`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/561
+- **Finding/fix:** The React Research client fetched `/api/research/retailbot2/stats` but used an inaccurate `by_mode` type and did not render the saved performance aggregates. The client now renders mode and strategy summaries using the actual `get_retailbot2_stats()` contract; the view inventory was corrected.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `0d63422f3188d1520e14bc327d4992b8a99e049e`.
+- **Safety:** Read-only mocked UI/API tests only; no live trading, Telegram, worker, database mutation, or production deployment.

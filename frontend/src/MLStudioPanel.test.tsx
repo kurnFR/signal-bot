@@ -47,4 +47,42 @@ describe("MLStudioPanel", () => {
     expect((await screen.findAllByText("btc-trend-test")).length).toBeGreaterThan(0);
     expect(await screen.findByText(/Raw persisted experiment contract/)).toBeInTheDocument();
   });
+
+  it("renders successful empty experiment and model lists without an API error", async () => {
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      expect(init?.method).toBe("GET");
+      const path = new URL(url, "http://localhost").pathname;
+      const payload = path.endsWith("/models") ? { models: [] } : { experiments: [] };
+      return Promise.resolve(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MLStudioPanel />);
+
+    expect(await screen.findByText("No saved ML experiments were returned.")).toBeInTheDocument();
+    expect(screen.getByText("No saved model manifests were returned.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  });
+
+  it("recovers from a temporary experiment API failure after Retry", async () => {
+    let recovered = false;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      expect(init?.method).toBe("GET");
+      const path = new URL(url, "http://localhost").pathname;
+      if (!recovered && path === "/api/ml/experiments") {
+        return Promise.resolve(new Response(JSON.stringify({ detail: "temporary failure" }), { status: 503, headers: { "content-type": "application/json" } }));
+      }
+      return Promise.resolve(response(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MLStudioPanel />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/check API and artifact-directory health, then retry/i);
+    recovered = true;
+    fireEvent.click(screen.getByRole("button", { name: /Retry/i }));
+    expect((await screen.findAllByText("btc-trend-test")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  });
+
 });
