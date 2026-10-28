@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `5781fbe88c5a07e50907ff4d7c56b69115556b4c` (master after PR #526, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
+**Source baseline for reconciliation:** `b184bbc1421dcfd1c18a8516a8defeeedaf82fb6` (master after PR #527, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -599,7 +599,7 @@ Compared `web/routes/master_data.py`, `frontend/src/lib/masterData.ts`, and `fro
 - [x] Corrected the inventory's coverage and job response descriptions against the route implementation.
 - [x] Recorded the deliberate read-only boundary of the React preview versus legacy backfill/build-feature controls.
 - [x] Added focused mocked route response-contract tests for coverage and job listing; no real Binance fetches or feature workers are invoked. Job creation is intentionally not called by this read-only test slice.
-- [ ] Decide whether backfill and feature-build controls belong in the React migration scope and, if so, implement them only with role checks, confirmation/loading/error recovery, and regression tests.
+- [x] Migrated backfill and feature-build controls into the React preview with admin/trader gating, explicit confirmation, validation, error recovery, and regression tests (PR #528). Production cutover remains blocked on the overall parity and acceptance gates.
 - [ ] Verify role-specific browser behavior, all legacy callers/polling, route-to-row parity, accessibility/device behavior, and owner acceptance before production cutover.
 
 
