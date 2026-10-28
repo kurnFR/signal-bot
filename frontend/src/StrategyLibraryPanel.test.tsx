@@ -58,6 +58,44 @@ describe("read-only strategy library", () => {
     });
   });
 
+  it("requires explicit confirmation before replacing a saved strategy definition", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const calls: Array<{ path: string; method: string; body?: unknown }> = [];
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+      if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/custom-strategy/list") return json(payloads["/api/custom-strategy/list"]);
+      if (path === "/api/custom-strategy/indicators") return json(payloads["/api/custom-strategy/indicators"]);
+      if (path === "/api/custom-strategy/create" && method === "POST") return json({ status: "success", name: "rsi_volume_v1", displayName: "RSI + Volume", message: "Strategy rsi_volume_v1 updated." });
+      throw new Error("Unexpected endpoint: " + method + " " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><StrategyLibraryPanel /></AuthGate>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit strategy" }));
+    expect(await screen.findByRole("heading", { name: "Edit saved strategy" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Strategy name" })).toHaveValue("rsi_volume_v1");
+    expect(screen.getByRole("textbox", { name: "Strategy display name" })).toHaveValue("RSI + Volume");
+    fireEvent.click(screen.getByRole("button", { name: "Review update" }));
+    expect(await screen.findByRole("heading", { name: "Confirm strategy update" })).toBeInTheDocument();
+    expect(screen.getByText(/overwrites the saved definition for rsi_volume_v1/i)).toBeInTheDocument();
+    expect(calls.filter((call) => call.path === "/api/custom-strategy/create" && call.method === "POST")).toEqual([]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm update" }));
+    expect(await screen.findByText("Strategy rsi_volume_v1 updated.")).toBeInTheDocument();
+    const request = calls.find((call) => call.path === "/api/custom-strategy/create" && call.method === "POST");
+    expect(request?.body).toMatchObject({
+      name: "rsi_volume_v1", displayName: "RSI + Volume",
+      longConditions: [{ indicator: "rsi", operator: "<", value: 30 }],
+      shortConditions: [{ indicator: "rsi", operator: ">", value: 70 }],
+      slAtrMult: 1.5, riskRewardRatio: 2.5,
+    });
+  });
+
   it("keeps AI-generated strategies as drafts until the user explicitly saves them", async () => {
     window.localStorage.setItem("token", "trader-session");
     const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
