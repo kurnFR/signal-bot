@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "./AuthGate";
 import { BookOpen, RefreshCw, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
-import { createCustomStrategy, deleteCustomStrategy, fetchCustomStrategies, fetchStrategyIndicators, generateAIStrategyDraft, quickTestCustomStrategy, StrategyLibraryActionError, StrategyQuickTestError, type AIStrategyDraftResponse, type CustomStrategy, type QuickTestResult, type StrategyConditionInput, type StrategyIndicator } from "./lib/strategyLibrary";
+import { createCustomStrategy, deleteCustomStrategy, fetchCustomStrategies, fetchStrategyIndicators, generateAIStrategyDraft, quickTestCustomStrategy, StrategyLibraryActionError, StrategyQuickTestError, type AIStrategyChatMessage, type AIStrategyDraftResponse, type CustomStrategy, type QuickTestResult, type StrategyConditionInput, type StrategyIndicator } from "./lib/strategyLibrary";
 
 function messageFor(cause: unknown) {
   if (cause instanceof ApiError && cause.status === 401) return "Your session has expired. Sign in again to view the strategy library.";
@@ -49,6 +49,7 @@ export function StrategyLibraryPanel() {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiDraft, setAiDraft] = useState<AIStrategyDraftResponse | null>(null);
+  const [aiHistory, setAiHistory] = useState<AIStrategyChatMessage[]>([]);
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setError(null);
@@ -148,11 +149,31 @@ export function StrategyLibraryPanel() {
     } finally { setActionBusy(null); }
   };
   const generateDraft = async () => {
-    if (!aiPrompt.trim()) { setAiError("Describe the strategy you want to generate."); return; }
+    const prompt = aiPrompt.trim();
+    if (!prompt) { setAiError("Describe the strategy you want to generate."); return; }
     setAiBusy(true); setAiError(null); setActionError(null); setActionMessage(null); setAiDraft(null);
     try {
-      const result = await generateAIStrategyDraft(aiPrompt.trim());
+      const currentConfig = showCreateForm && createDisplayName.trim() ? {
+        name: createName.trim() || undefined,
+        displayName: createDisplayName.trim(),
+        description: createDescription,
+        rationale: createRationale,
+        longConditions: conditionInput(longConditions),
+        shortConditions: conditionInput(shortConditions),
+        slAtrMult: Number(slAtrMult) || 1.5,
+        riskRewardRatio: Number(riskRewardRatio) || 2.5,
+        useTrailingStop,
+        trailActivationR: Number(trailActivationR) || 1,
+        trailDistanceAtrMult: Number(trailDistanceAtrMult) || 1.5,
+      } : aiDraft?.strategy;
+      const result = await generateAIStrategyDraft(prompt, aiHistory, currentConfig);
+      setAiHistory((current) => [
+        ...current,
+        { role: "user", content: prompt },
+        { role: "assistant", content: result.chatResponse || "Strategy draft generated." },
+      ]);
       setAiDraft(result);
+      setAiPrompt("");
     } catch (cause) {
       if (cause instanceof StrategyLibraryActionError && cause.status === 403) setAiError("Your account cannot generate strategy drafts. Only admin or trader roles can perform this action.");
       else setAiError(cause instanceof Error ? cause.message : "AI strategy generation failed. Please retry.");
@@ -208,6 +229,7 @@ export function StrategyLibraryPanel() {
     </section>
     {error && <div className="error-banner" role="alert"><p>{error}</p><button className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}><RefreshCw size={15} /> Retry</button></div>}
     {quickTestError && <div className="error-banner" role="alert"><p>{quickTestError}</p><button className="button button-secondary" onClick={() => setQuickTestError(null)}>Dismiss</button></div>}
+    {aiHistory.length > 0 && <div className="panel-subsection" aria-label="AI strategy conversation"><div className="panel-heading"><div><h3>Conversation history</h3><p>Follow-up prompts include earlier successful turns from this session.</p></div><button className="button button-secondary" type="button" onClick={() => setAiHistory([])} disabled={aiBusy}>Clear history</button></div><ol className="strategy-conversation-list">{aiHistory.map((message, index) => <li key={`${message.role}-${index}`}><strong>{message.role === "user" ? "You" : "AI"}</strong><p>{message.content}</p></li>)}</ol></div>}
     {aiError && <div className="error-banner" role="alert"><p>{aiError}</p><button className="button button-secondary" onClick={() => setAiError(null)}>Dismiss</button></div>}
     {actionError && <div className="error-banner" role="alert"><p>{actionError}</p><button className="button button-secondary" onClick={() => setActionError(null)}>Dismiss</button></div>}
     {actionMessage && <p className="control-feedback control-success" role="status">{actionMessage}</p>}
