@@ -72,7 +72,7 @@ class TestMasterDataReadContracts(unittest.TestCase):
         self.client = TestClient(app, raise_server_exceptions=False)
 
     def _get(self, path, role="viewer"):
-        with patch("web.app.authenticate_request", return_value=user(role)), \\
+        with patch("web.app.authenticate_request", return_value=user(role)), \
              patch("web.auth.authenticate_request", return_value=user(role)):
             return self.client.get(path)
 
@@ -114,7 +114,7 @@ class TestMasterDataReadContracts(unittest.TestCase):
             "progress": 30.0, "message": "Interrupted by a server restart",
             "created_at": 100.0, "updated_at": 150.0,
         }
-        with patch("web.routes.master_data.JOBS", {"live-1": live}), \\
+        with patch("web.routes.master_data.JOBS", {"live-1": live}), \
              patch("web.routes.master_data.job_store.list_jobs", return_value=[persisted]):
             response = self._get("/api/master-data/jobs")
 
