@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { useAuth } from "./AuthGate";
 import { Activity, BarChart3, RefreshCw, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
-import { fetchBacktestHistory, fetchBacktestRunDetails, fetchBacktestStrategies, type BacktestRunDetails, type BacktestRunSummary, type BacktestStrategy } from "./lib/backtestStudio";
+import { BacktestExecutionError, executeBacktest, fetchBacktestHistory, fetchBacktestRunDetails, fetchBacktestStrategies, type BacktestExecutionInput, type BacktestExecutionResult, type BacktestRunDetails, type BacktestRunSummary, type BacktestStrategy, type BacktestStrategyParameter } from "./lib/backtestStudio";
 
 const pct = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 const numeric = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 });
@@ -28,6 +29,21 @@ export function BacktestStudioPanel() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [filter, setFilter] = useState("");
+  const auth = useAuth();
+  const canRunBacktest = ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
+  const [symbol, setSymbol] = useState("BTCUSDT");
+  const [market, setMarket] = useState<"spot" | "futures">("spot");
+  const [timeframe, setTimeframe] = useState("1d");
+  const [strategyId, setStrategyId] = useState("");
+  const [dataSegment, setDataSegment] = useState<"full" | "train" | "holdout">("holdout");
+  const [initialCapital, setInitialCapital] = useState("5000");
+  const [riskPerTrade, setRiskPerTrade] = useState("1");
+  const [parameterValues, setParameterValues] = useState<Record<string, string | number | boolean>>({});
+  const [pendingRun, setPendingRun] = useState<BacktestExecutionInput | null>(null);
+  const [runBusy, setRunBusy] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [runNotice, setRunNotice] = useState<string | null>(null);
+  const [executionResult, setExecutionResult] = useState<BacktestExecutionResult | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setError(null);
@@ -53,6 +69,15 @@ export function BacktestStudioPanel() {
       .finally(() => { if (!controller.signal.aborted) setDetailLoading(false); });
     return () => controller.abort();
   }, [selectedId, attempt]);
+  useEffect(() => {
+    if (strategies.length && !strategies.some((strategy) => strategy.id === strategyId)) setStrategyId(strategies[0].id);
+  }, [strategies, strategyId]);
+  const activeStrategy = strategies.find((strategy) => strategy.id === strategyId) ?? null;
+  const editableParams = useMemo(() => activeStrategy ? [...activeStrategy.params, ...activeStrategy.sharedParams] : [], [activeStrategy]);
+  useEffect(() => {
+    if (!activeStrategy) return;
+    setParameterValues(Object.fromEntries(editableParams.map((parameter) => [parameter.key, parameter.default ?? (parameter.type === "bool" ? false : "")])));
+  }, [activeStrategy, editableParams]);
   const filteredRuns = useMemo(() => {
     const needle = filter.trim().toLowerCase();
     return runs.filter((run) => !needle || [run.symbol, run.market, run.timeframe, run.strategy, run.dataSegment].some((value) => value.toLowerCase().includes(needle)));
