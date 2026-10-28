@@ -84,7 +84,58 @@ export function BacktestStudioPanel() {
   }, [runs, filter]);
   const strategyNames = useMemo(() => new Map(strategies.map((strategy) => [strategy.id, strategy.displayName])), [strategies]);
   const summary = details ?? (selectedId == null ? null : runs.find((run) => run.id === selectedId) ?? null);
-  return <div className="backtest-studio-view" aria-busy={loading || detailLoading}>
+  const reviewRun = () => {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    if (!/^[A-Z0-9._-]{1,30}$/.test(normalizedSymbol)) { setRunError("Enter a valid symbol using letters, numbers, dot, underscore, or hyphen."); return; }
+    const capital = Number(initialCapital);
+    if (!Number.isFinite(capital) || capital < 100) { setRunError("Initial capital must be at least 100."); return; }
+    const risk = Number(riskPerTrade);
+    if (!Number.isFinite(risk) || risk < 0.1 || risk > 10) { setRunError("Risk per trade must be between 0.1% and 10%."); return; }
+    if (!activeStrategy) { setRunError("Select a strategy before running a backtest."); return; }
+    const params: Record<string, string | number | boolean> = {};
+    for (const parameter of editableParams) {
+      const raw = parameterValues[parameter.key] ?? parameter.default ?? (parameter.type === "bool" ? false : "");
+      if (parameter.type === "bool") params[parameter.key] = Boolean(raw);
+      else if (parameter.type === "string") {
+        const value = String(raw).trim();
+        if (!value) { setRunError(`${parameter.label || parameter.key} cannot be empty.`); return; }
+        params[parameter.key] = value;
+      } else {
+        if (String(raw).trim() === "") { setRunError(`${parameter.label || parameter.key} must be a number.`); return; }
+        const value = Number(raw);
+        if (!Number.isFinite(value) || (parameter.min != null && value < parameter.min) || (parameter.max != null && value > parameter.max)) {
+          setRunError(`${parameter.label || parameter.key} is outside its allowed range.`); return;
+        }
+        params[parameter.key] = value;
+      }
+    }
+    setRunError(null); setRunNotice(null);
+    setPendingRun({
+      symbol: normalizedSymbol, market, timeframe, strategy: strategyId,
+      data_segment: dataSegment, initial_capital: capital, risk_per_trade_pct: risk,
+      save_to_db: true, params,
+    });
+  };
+  const confirmRun = async () => {
+    if (!pendingRun) return;
+    setRunBusy(true); setRunError(null); setRunNotice(null);
+    try {
+      const result = await executeBacktest(pendingRun);
+      setExecutionResult(result);
+      setPendingRun(null);
+      setRunNotice(result.runId == null
+        ? "Backtest completed, but persistence was not confirmed (runId is null). The metrics below are from this response and may not appear in saved history."
+        : `Backtest completed and saved as run #${result.runId}.`);
+      if (result.runId != null) {
+        setSelectedId(result.runId);
+        setAttempt((value) => value + 1);
+      }
+    } catch (cause) {
+      if (cause instanceof BacktestExecutionError && cause.status === 403) setRunError("Your account cannot run backtests. Only admin or trader roles can perform this action.");
+      else setRunError(cause instanceof Error ? cause.message : "Backtest failed. Please retry.");
+    } finally { setRunBusy(false); }
+  };
+  return <div className="backtest-studio-view" aria-busy={loading || detailLoading || runBusy}>
     <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>Read-only Backtest Studio</strong><p>Review saved backtest runs, performance metrics, strategy metadata, and closed trades. Running backtests, changing parameters, auto-promotion policy, and Telegram settings are not available in this view.</p></div><span className="panel-counter">READ ONLY</span></section>
     {error && <div className="api-error" role="alert"><div><strong>Unable to load Backtest Studio</strong><p>{error}</p></div><button className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}><RefreshCw size={15} /> Retry</button></div>}
     <section className="metrics-grid" aria-label="Backtest history summary">
