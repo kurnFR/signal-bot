@@ -94,7 +94,7 @@ async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePa
     if (path === "/api/research/retailbot2/stats") return json({ by_strategy: [], by_mode: {} });
     if (path === "/api/research/retailbot2/strategies") return json({ strategies: [] });
 
-    if (path === "/api/news/stats") return json({ bullish_count: 0, bearish_count: 0, neutral_count: 0, average_confidence: 0, active_overlay_multiplier: 1 });
+    if (path === "/api/news/stats") return json({ total_events_collected: 0, events_evaluated_by_ai: 0, high_confidence_signals: 0, avg_confidence: null, trades_opened: 0, pending_signals: 0, performance: { closed_trades: 0, wins: 0, losses: 0, win_rate: null, expectancy_r: null, profit_factor: null, total_r: 0, net_pnl: 0, max_drawdown_r: 0 }, heartbeats: [] });
     if (path === "/api/news/signals") return json({ signals: [] });
     if (path === "/api/news/events") return json({ events: [] });
 
