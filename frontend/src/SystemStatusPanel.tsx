@@ -20,7 +20,7 @@ export function SystemStatusPanel() {
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [attempt]);
-  const display = (value: string | undefined) => loading && !data ? "Loading…" : value ?? "Unavailable";
+  const display = (value: string | null | undefined) => loading && !data ? "Loading…" : value ?? "Unavailable";
   const good = (value: string | undefined) => ["ok", "online"].includes((value ?? "").toLowerCase());
   return <>
     <section className="metrics-grid" aria-label="Read-only system status" aria-busy={loading}>
