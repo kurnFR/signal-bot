@@ -493,7 +493,8 @@ This slice checks the six custom-strategy handlers in `web/routes/custom_strateg
 
 - [x] Source-level request models, validation branches, response shape and side-effect boundaries reviewed for custom-strategy generate/create/delete/quick-test/list/indicators handlers.
 - [x] Confirmed the current React strategy library panel only calls list and indicator read endpoints and exposes no mutation or quick-test actions.
-- [ ] Add or verify focused tests for create replacement, delete of missing names, JSON persistence failures, generator provider fallback, and quick-test insufficient-data handling.
+- [ ] Add or verify focused tests for create replacement, delete of missing names, generator provider fallback, and quick-test insufficient-data handling.
+- [x] Added focused tests that custom-strategy create/delete persistence failures leave in-memory registries unchanged (`tests/test_custom_strategy_mutation_failures.py`).
 - [ ] Reconcile all custom-strategy routes with the runtime FastAPI route registry and verify legacy UI callers.
 - [ ] Resolve the viewer catalog policy with the owner; do not relax the prefix-wide rule without an explicit decision and narrow regression-tested policy.
 - [ ] Complete all-router route parity, role-specific browser/device/accessibility acceptance, and owner sign-off before any production route cutover.

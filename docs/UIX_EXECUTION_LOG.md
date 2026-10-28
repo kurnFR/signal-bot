@@ -154,3 +154,13 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Coverage:** A successful empty heartbeat response displays an explicit empty state; a temporary `/api/system/status` failure recovers after Retry. Requests remain GET-only.
 - **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `6eb4556770dca3d18d989743b6d5a353389752e0`.
 - **Safety:** Mocked public status responses only; no admin diagnostics or production state was accessed or changed.
+
+
+### PR #566 — Backtest route contracts
+
+- **Status:** Merged.
+- **Merge commit:** `bf8616fd992b61537550217a9de214df2f73f433`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/566
+- **Coverage:** Focused tests cover strategy-registry response field names, API defaults, rejection of fewer than 50 candles before simulation/persistence, and the explicit `runId: null` response when a mocked save fails after a successful simulation.
+- **Exact-head validation:** All five reported repository checks passed on `3b7d89f1ecde5967fef7fa4cb6e1cbe758faf5c6`: pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration.
+- **Safety:** Synthetic candle frames and mocked database persistence only; no live market-data access, database writes, worker, trading, Telegram, or production deployment.
