@@ -8,7 +8,7 @@ const user = {
   must_change_password: false,
 };
 
-async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePasswordChange?: boolean; sessionValidationUnavailable?: boolean; deniedPath?: string; loginRejected?: boolean; role?: string } = {}) {
+async function mockApi(page: Page, options: { expiredScreener?: boolean; expiredSettings?: boolean; forcePasswordChange?: boolean; sessionValidationUnavailable?: boolean; deniedPath?: string; loginRejected?: boolean; role?: string } = {}) {
   const activeUser = { ...user, role: options.role ?? user.role };
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -36,6 +36,27 @@ async function mockApi(page: Page, options: { expiredScreener?: boolean; forcePa
     }
     if (options.expiredScreener && path.startsWith("/api/research/screener/")) {
       await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "Not authenticated" }) });
+      return;
+    }
+    if (options.expiredSettings && path === "/api/settings/status") {
+      await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "Not authenticated" }) });
+      return;
+    }
+    if (path === "/api/settings/status") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        database: { status: "ok", host: "db.internal", port: 3306, database: "signal_bot", tables: { signals: 42 }, error: null },
+        heartbeats: [{ collector: "wallet-worker", status: "ok", detail: "internal-only-detail", lastBeat: "2026-10-28 05:00:00" }],
+        binance: { spotApi: "online", futuresApi: "online", enableFuturesConfig: true },
+        system: { timezone: "Asia/Jakarta (WIB UTC+7)" },
+      }) });
+      return;
+    }
+    if (path === "/api/telegram/status") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ configured: true, chatId: "-100123456789", hasToken: true }) });
+      return;
+    }
+    if (path === "/api/telegram/test" && request.method() === "POST") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, chat_id: "-100123456789" }) });
       return;
     }
     if (path === "/api/system/status") {
@@ -386,6 +407,58 @@ test("explicit sign-out revokes the session and returns to the sign-in screen", 
   }]);
 });
 
+
+test("admin Settings shows sanitized connection diagnostics and requires confirmation before Telegram test", async ({ page }) => {
+  const requests: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/settings/status" || url.pathname === "/api/telegram/status" || url.pathname === "/api/telegram/test") {
+      requests.push(request.method() + " " + url.pathname);
+    }
+  });
+  await mockApi(page, { role: "admin" });
+  await signIn(page);
+  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Detailed system diagnostics" })).toBeVisible();
+  await expect(page.getByText("db.internal")).toBeVisible();
+  await expect(page.getByText("signal_bot")).toBeVisible();
+  await expect(page.getByText("online").first()).toBeVisible();
+  await expect(page.getByText("internal-only-detail")).toHaveCount(0);
+  await expect(page.getByText("Present (hidden)")).toBeVisible();
+
+  await page.getByRole("button", { name: "Review Telegram test" }).click();
+  await expect(page.getByRole("heading", { name: "Confirm Telegram test ping" })).toBeVisible();
+  expect(requests.filter((item) => item === "POST /api/telegram/test")).toEqual([]);
+  await page.getByRole("button", { name: "Cancel test" }).click();
+  expect(requests.filter((item) => item === "POST /api/telegram/test")).toEqual([]);
+});
+
+test("viewer Settings does not request admin diagnostics or Telegram configuration", async ({ page }) => {
+  const restrictedReads: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (["/api/settings/status", "/api/telegram/status"].includes(url.pathname)) {
+      restrictedReads.push(request.method() + " " + url.pathname);
+    }
+  });
+  await mockApi(page, { role: "viewer" });
+  await signIn(page);
+  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.locator("h1")).toHaveText("Settings");
+  await expect(page.getByText(/Telegram status and test controls are restricted to admins/i)).toBeVisible();
+  expect(restrictedReads).toEqual([]);
+});
+
+test("an expired Settings read clears the stale token and returns to sign-in", async ({ page }) => {
+  await mockApi(page, { role: "admin", expiredSettings: true });
+  await signIn(page);
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveText("Your session has expired. Sign in again to continue.");
+  expect(await page.evaluate(() => window.localStorage.getItem("token"))).toBeNull();
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toHaveCount(0);
+});
 test("a rejected sign-in keeps protected content hidden and does not persist a token", async ({ page }) => {
   await mockApi(page, { loginRejected: true });
   await signIn(page);

@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `5ea515d628f59eff7203efa1907aed948d64b9c6` (master after PR #541, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
+**Source baseline for reconciliation:** `0d5567de72d6e5e41168505c1c284733e12e9be5` (master after PR #542, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -403,7 +403,7 @@ This table records the endpoints called by the currently merged React preview cl
 - [ ] Compare every legacy `web/static/index.html` view, dynamically created dialog, polling loop, and fetch call against the current route registry.
 - [ ] Verify method, request/response schema, role restriction, forced-password guard, and side effects for every endpoint; include `/api/auth/me` and all mutation paths.
 - [ ] Verify whether any component reachable from the React preview imports or calls mutation helpers outside the view's declared read-only path.
-- [ ] Add browser-level tests for login, forced password change, logout/session expiry, role differences, responsive navigation, and theme persistence.
+- [ ] Complete browser-level coverage for login, forced password change, logout/session expiry, role differences, responsive navigation, and theme persistence. Added admin diagnostics visibility, viewer no-fetch, confirmation-without-send, and expired-settings-session coverage; remaining scenarios still require audit.
 - [ ] Record unresolved discrepancies rather than silently treating draft counts or old endpoint rows as authoritative.
 - [ ] Obtain explicit owner acceptance before the inventory is marked complete or any FastAPI route cutover is proposed.
 
