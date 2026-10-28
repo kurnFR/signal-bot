@@ -112,3 +112,81 @@ export async function quickTestCustomStrategy(
   }
   return payload as QuickTestResult;
 }
+
+export interface StrategyConditionInput {
+  indicator: string;
+  operator: string;
+  value: string | number;
+}
+export interface CreateCustomStrategyInput {
+  name: string;
+  displayName: string;
+  description: string;
+  rationale: string;
+  longConditions: StrategyConditionInput[];
+  shortConditions: StrategyConditionInput[];
+  slAtrMult: number;
+  riskRewardRatio: number;
+  useTrailingStop: boolean;
+  trailActivationR: number;
+  trailDistanceAtrMult: number;
+}
+export interface StrategyMutationResult {
+  status: string;
+  name?: string;
+  displayName?: string;
+  message: string;
+}
+export class StrategyLibraryActionError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "StrategyLibraryActionError";
+  }
+}
+async function mutateStrategyLibrary(
+  path: string,
+  method: "POST" | "DELETE",
+  body?: unknown,
+): Promise<StrategyMutationResult> {
+  assertApiPath(path);
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  try {
+    const token = window.localStorage.getItem("token");
+    if (token) headers.Authorization = `Bearer ${token}`;
+  } catch {
+    // The server rejects the request if no session token is available.
+  }
+  const response = await fetch(path, {
+    method,
+    credentials: "same-origin",
+    headers,
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+  let payload: unknown;
+  try { payload = await response.json(); } catch { payload = null; }
+  if (response.status === 401) {
+    try { window.localStorage.removeItem("token"); } catch { /* Auth state still resets via the event. */ }
+    window.dispatchEvent(new Event("signal-bot:session-expired"));
+  }
+  if (!response.ok) {
+    const detail = payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string"
+      ? payload.detail.slice(0, 400)
+      : `Strategy library action failed (${response.status})`;
+    throw new StrategyLibraryActionError(response.status, detail);
+  }
+  if (!payload || typeof payload !== "object" || !("message" in payload) || typeof payload.message !== "string") {
+    throw new StrategyLibraryActionError(response.status, "Strategy library returned an invalid action response");
+  }
+  return payload as StrategyMutationResult;
+}
+export function createCustomStrategy(input: CreateCustomStrategyInput): Promise<StrategyMutationResult> {
+  return mutateStrategyLibrary("/api/custom-strategy/create", "POST", input);
+}
+export function deleteCustomStrategy(name: string): Promise<StrategyMutationResult> {
+  const normalized = name.trim().toLowerCase();
+  if (!/^[a-z0-9_]{1,80}$/.test(normalized)) {
+    return Promise.reject(new StrategyLibraryActionError(400, "Strategy name is invalid."));
+  }
+  return mutateStrategyLibrary(`/api/custom-strategy/${encodeURIComponent(normalized)}`, "DELETE");
+}
