@@ -8,14 +8,23 @@ This log records verified execution checkpoints and keeps the next actions actio
 
 ## Latest completed checkpoint
 
-### PR #543 — Settings diagnostics and session-expiry browser coverage
+### PR #549 — primary navigation accessibility semantics
 
 - **Status:** Merged.
-- **Merge commit:** `d68ff01ebc878e850ac6d56324eba0e764592797`.
-- **PR:** https://github.com/kurnFR/signal-bot/pull/543
-- **Coverage added:** admin-only system diagnostics visibility; diagnostic collector detail redaction; viewer role does not request admin diagnostics or Telegram configuration; Telegram test confirmation can be cancelled without a POST; a 401 from admin diagnostics clears the stale session and returns the browser to sign-in.
-- **Safety:** Telegram endpoint is mocked. No real Telegram message, database mutation, worker action, or deployment occurred.
-- **Exact PR-head validation:** Frontend type-check, frontend unit tests, production build, Playwright Chromium browser smoke, pytest, general unit tests, RetailBot accounting regression, and Wallet Tracker MariaDB integration all passed on `c9d31a5c0f71d2eb68644af37f389d263ba16097`.
+- **Merge commit:** `1aaa99b4835b9a4fc8e77a675928df74a043b9b4`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/549
+- **Coverage added:** Playwright verifies that the primary navigation exposes `aria-current="page"` for the active view, updates it after navigation to Market Screener, and clears it from Overview.
+- **Exact PR-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest, Screener unit tests, Wallet Tracker MariaDB integration, and RetailBot accounting regression all passed on `c72b6c85345d97346f2dfdabaed43becb1009864`.
+- **Safety:** Browser test uses the mocked API harness. No production deployment or live mutation occurred.
+
+### Recent merged regression slices
+
+- **PR #543** — Settings diagnostics redaction/access controls, Telegram-test cancellation, and stale-session reset. Merge: `d68ff01ebc878e850ac6d56324eba0e764592797`.
+- **PR #544** — migration execution log and acceptance gates. Merge: tracked in GitHub.
+- **PR #545** — backtest promotion API boundary tests. Merge: `7d574c2aaad50c1cbcbc88cd81c8e6f4321fdcd7`.
+- **PR #546** — Master Data confirmation and viewer job-launch restrictions. Merge: `a4140b3`.
+- **PR #547** — Market Screener explicit-save mutation boundary. Merge: `a48f5013c72425625e74bb8980affa2814ac5b8b`.
+- **PR #548** — keyboard skip-link focus and activation. Merge: `c4dfc8477690e49e2e407f7513bfebf64c43a63a`.
 
 ## Current migration boundary
 
