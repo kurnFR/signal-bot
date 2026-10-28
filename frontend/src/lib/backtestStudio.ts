@@ -181,7 +181,7 @@ export async function fetchPromotionSnapshot(signal?: AbortSignal): Promise<Prom
     getJson<{ policy: PromotionPolicy }>("/api/backtest/promotion-policy", signal),
     getJson<{ events: PromotionAuditEvent[] }>("/api/backtest/promotion-audit?limit=5", signal),
   ]);
-  if (!policyPayload || !policyPayload.policy || !Array.isArray(auditPayload?.events)) {
+  if (!policyPayload || !isPromotionPolicy(policyPayload.policy) || !Array.isArray(auditPayload?.events)) {
     throw new Error("Promotion status returned an invalid response");
   }
   return { policy: policyPayload.policy, events: auditPayload.events };
