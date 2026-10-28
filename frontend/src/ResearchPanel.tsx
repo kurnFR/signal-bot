@@ -54,6 +54,23 @@ export function ResearchPanel() {
       <article className="metric-card"><div className="metric-top"><span>Telegram-enabled rows</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : data?.strategies.filter((row) => row.telegram_enabled).length ?? "—"}</div><div className="metric-foot"><span>Persisted lifecycle readback</span></div></article>
     </section>
 
+    <section className="panel" aria-labelledby="research-performance-title">
+      <div className="panel-heading"><div><h2 id="research-performance-title">Performance by mode</h2><p>Realized results and open-trade counts from the saved Research stats API.</p></div><span className="panel-counter">{data ? 2 : 0} MODES</span></div>
+      {loading && !data ? <p className="empty-state">Loading performance…</p> : <div className="table-scroll"><table><thead><tr><th>Mode</th><th>Realized PnL</th><th>Closed trades</th><th>Wins</th><th>Win rate</th><th>Open trades</th></tr></thead><tbody>
+        {(["shadow", "inverse"] as const).map((mode) => {
+          const stats = data?.stats.by_mode[mode];
+          return <tr key={mode}><td>{mode}</td><td>{stats ? value(stats.realized_pnl) : "—"}</td><td>{stats ? value(stats.closed_count) : "—"}</td><td>{stats ? value(stats.wins) : "—"}</td><td>{stats?.win_rate == null ? "—" : `${value(stats.win_rate)}%`}</td><td>{stats ? value(stats.open_count) : "—"}</td></tr>;
+        })}
+      </tbody></table></div>}
+    </section>
+
+    <section className="panel" aria-labelledby="research-strategy-performance-title">
+      <div className="panel-heading"><div><h2 id="research-strategy-performance-title">Performance by strategy</h2><p>Closed-trade aggregates after report-visibility filtering.</p></div><span className="panel-counter">{data?.stats.by_strategy.length ?? 0} ROWS</span></div>
+      {loading && !data ? <p className="empty-state">Loading strategy performance…</p> : data?.stats.by_strategy.length ? <div className="table-scroll"><table><thead><tr><th>Strategy</th><th>Mode</th><th>Closed trades</th><th>Wins</th><th>Losses</th><th>Realized PnL</th><th>Last updated</th></tr></thead><tbody>
+        {data.stats.by_strategy.map((row) => <tr key={row.strategy + row.mode}><td>{row.strategy}</td><td>{row.mode}</td><td>{value(row.total_trades)}</td><td>{value(row.wins)}</td><td>{value(row.losses)}</td><td>{value(row.total_pnl)}</td><td>{dateLabel(row.last_updated)}</td></tr>)}
+      </tbody></table></div> : <p className="empty-state">No strategy performance rows returned.</p>}
+    </section>
+
     <section className="panel" aria-labelledby="research-positions-title"><div className="panel-heading"><div><h2 id="research-positions-title">Active positions</h2><p>Current open Research Bot positions from the existing API.</p></div><span className="panel-counter">{data?.positions.length ?? 0} ROWS</span></div>
       {data?.positions.length ? <div className="table-scroll"><table><thead><tr><th>Symbol</th><th>Mode</th><th>Entry</th><th>Current</th><th>Unrealized PnL</th><th>Opened</th></tr></thead><tbody>{data.positions.map((row) => <tr key={row.id}><td>{row.symbol}</td><td>{row.mode}</td><td>{value(row.entry_price)}</td><td>{value(row.current_price)}</td><td>{value(row.unrealized_pnl)}</td><td>{dateLabel(row.opened_at)}</td></tr>)}</tbody></table></div> : <p className="empty-state">{loading ? "Loading positions…" : "No active Research positions returned."}</p>}
     </section>
