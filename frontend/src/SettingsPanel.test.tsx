@@ -1,5 +1,5 @@
-import { afterEach, fireEvent, render, screen, cleanup } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, cleanup } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.localStorage.clear(); });
 import { SettingsPanel } from "./SettingsPanel";
