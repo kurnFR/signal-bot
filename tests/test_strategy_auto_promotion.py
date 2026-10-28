@@ -1,6 +1,8 @@
 from unittest.mock import patch
 
 from fastapi import HTTPException
+from pydantic import ValidationError
+import pytest
 
 from db.db import get_strategy_auto_promotion_policy, set_strategy_auto_promotion_policy
 
@@ -8,6 +10,7 @@ from web.routes.backtest import (
     _auto_promote_top_candidate,
     StrategyAutoPromotionPolicyRequest,
     get_promotion_policy,
+    list_promotion_audit,
     update_promotion_policy,
 )
 
@@ -570,3 +573,49 @@ def test_promotion_policy_put_reports_saved_when_readback_fails():
     assert response["policy"]["min_test_trades"] == 45
     assert response["policy"]["send_telegram"] is False
     assert "readback" in response["warning"].lower()
+
+
+
+def test_promotion_policy_request_defaults_are_stable():
+    request = StrategyAutoPromotionPolicyRequest()
+    assert request.dict() == {
+        "enabled": False,
+        "min_test_trades": 30,
+        "min_profit_factor": 1.2,
+        "min_expectancy_r": 0.05,
+        "max_drawdown_r": 8.0,
+        "min_rank_score": 0.1,
+        "require_holdout": True,
+        "send_telegram": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("min_test_trades", 29),
+        ("min_test_trades", 10001),
+        ("min_profit_factor", 0.99),
+        ("min_profit_factor", 10.01),
+        ("min_expectancy_r", -0.01),
+        ("min_expectancy_r", 10.01),
+        ("max_drawdown_r", 0),
+        ("max_drawdown_r", 100.01),
+        ("min_rank_score", 0.009),
+        ("min_rank_score", 1.01),
+    ],
+)
+def test_promotion_policy_request_rejects_out_of_range_thresholds(field, value):
+    with pytest.raises(ValidationError):
+        StrategyAutoPromotionPolicyRequest(**{field: value})
+
+
+def test_promotion_audit_query_contract_defaults_to_25_and_is_bounded_1_to_100():
+    # FastAPI stores Query metadata on the endpoint signature. Inspecting it
+    # verifies the public contract without invoking persistence or auth middleware.
+    limit = list_promotion_audit.__defaults__[0]
+    assert limit.default == 25
+    # FastAPI/Pydantic v2 stores numeric constraints in Query.metadata.
+    metadata = limit.metadata
+    assert any(getattr(item, "ge", None) == 1 for item in metadata)
+    assert any(getattr(item, "le", None) == 100 for item in metadata)
