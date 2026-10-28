@@ -31,12 +31,21 @@ describe("BacktestStudioPanel", () => {
     expect(vi.mocked(fetch).mock.calls.every((call) => call[1]?.method === "GET")).toBe(true);
   });
   it("preselects a catalog strategy without executing a backtest", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method).toBe("GET");
+      const path = String(input);
+      if (path === "/api/auth/me") return Promise.resolve(new Response(JSON.stringify(profile), { status: 200, headers: { "content-type": "application/json" } }));
+      return Promise.resolve(responseFor(path));
+    });
+    vi.stubGlobal("fetch", fetchMock);
     const onInitialStrategyApplied = vi.fn();
-    render(<BacktestStudioPanel initialStrategyId="rsi_mean_reversion" onInitialStrategyApplied={onInitialStrategyApplied} />);
+    render(<AuthGate><BacktestStudioPanel initialStrategyId="rsi_mean_reversion" onInitialStrategyApplied={onInitialStrategyApplied} /></AuthGate>);
     const strategySelect = await screen.findByRole("combobox", { name: "Backtest strategy" });
     await waitFor(() => expect(strategySelect).toHaveValue("rsi_mean_reversion"));
     expect(onInitialStrategyApplied).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(fetch).mock.calls.every((call) => call[1]?.method === "GET")).toBe(true);
+    expect(fetchMock.mock.calls.every((call) => call[1]?.method === "GET")).toBe(true);
   });
 
   it("filters saved runs without changing server state", async () => {
