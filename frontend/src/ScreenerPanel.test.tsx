@@ -36,4 +36,63 @@ describe("read-only Market Screener V2 panel", () => {
     render(<ScreenerPanel />);
     expect(await screen.findByRole("alert")).toHaveTextContent(/sign in through the existing dashboard/i);
   });
+
+  it("shows an explicit empty state when the API successfully returns no signals", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/screener/status")) return Promise.resolve(new Response(JSON.stringify({
+        running: false, database_ok: true, enabled: false, timeframe: "1m", symbols_monitored: 0,
+        last_beat_at: null, last_signal_at: null, last_universe_refresh: null,
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+      if (path.includes("/screener/signals")) return Promise.resolve(new Response(JSON.stringify({ signals: [] }), { status: 200, headers: { "content-type": "application/json" } }));
+      if (path.endsWith("/screener/stats")) return Promise.resolve(new Response(JSON.stringify({
+        total_signals: 0, signals_last_24h: 0, by_type_last_24h: {},
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+      throw new Error("Unexpected endpoint: " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ScreenerPanel />);
+
+    expect(await screen.findByText("No recent smart-money signals were returned.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows a recoverable API error and reloads the snapshot after Retry", async () => {
+    const successfulPayloads: Record<string, unknown> = {
+      "/api/research/screener/status": {
+        running: true, database_ok: true, enabled: true, timeframe: "1m", symbols_monitored: 12,
+        last_beat_at: null, last_signal_at: null, last_universe_refresh: null,
+      },
+      "/api/research/screener/signals?limit=50": { signals: [{
+        id: 11, symbol: "SOLUSDT", signal_type: "VOLUME_SPIKE", rvol: 2.4, volume: 10,
+        quote_volume: 5000, price: 150, price_change_pct: 0.4, volume_velocity: 1.8,
+        quality_score: 75, candle_time: null, telegram_sent: false, detected_at: "2026-10-28T10:00:00",
+      }] },
+      "/api/research/screener/stats": { total_signals: 1, signals_last_24h: 1, by_type_last_24h: { VOLUME_SPIKE: 1 } },
+    };
+    let recovered = false;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (!recovered) return Promise.resolve(new Response(JSON.stringify({ detail: "temporary failure" }), {
+        status: 503, headers: { "content-type": "application/json" },
+      }));
+      const payload = successfulPayloads[path];
+      if (payload === undefined) throw new Error("Unexpected endpoint: " + path);
+      return Promise.resolve(new Response(JSON.stringify(payload), {
+        status: 200, headers: { "content-type": "application/json" },
+      }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ScreenerPanel />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/check the API and database status, then retry/i);
+    expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument();
+
+    recovered = true;
+    fireEvent.click(screen.getByRole("button", { name: /Retry/i }));
+
+    expect(await screen.findByText("SOLUSDT")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(6);
+  });
 });
