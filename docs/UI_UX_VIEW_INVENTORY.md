@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `0d5565de756759024a9a0ea5e5d00d8fb38813e6` (master after PR #540, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
+**Source baseline for reconciliation:** `5ea515d628f59eff7203efa1907aed948d64b9c6` (master after PR #541, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -271,7 +271,7 @@ The following draft register lists 81 API endpoint rows across the 13 router mod
 
 | Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
 |---|---|---|---|---|---|---|---|
-| `GET /api/telegram/status` | `get_status`<br>`telegram_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"configured": bool, "chatId": Optional[str], "hasToken": bool}` | Checks whether Telegram bot token and chat ID are configured in environment | No direct consumer located in `web/static/js/*.js` or `web/static/index.html` during this source pass; endpoint/UI mapping remains unresolved |
+| `GET /api/telegram/status` | `get_status`<br>`telegram_routes.py` | Authenticated (all roles); `chatId` is returned only for admins and is `null` for trader/viewer | Blocked (403 required) | None | **200 OK:**<br>`{"configured": bool, "chatId": Optional[str], "hasToken": bool}` | Checks whether Telegram bot token and chat ID are configured; never returns the token | No legacy consumer was found. React Settings fetches it only for admins; non-admin UI makes no status request. PR #540 redacts `chatId` for non-admin API callers. |
 | `POST /api/telegram/test` | `run_test`<br>`telegram_routes.py` | `admin` only (`_role_allowed` enforcement) | Blocked (403 required) | **Body:** `TelegramTestRequest`<br>`{custom_message: Optional[str]}` | **200 OK:**<br>`{"success": bool, "message": str}`<br>**400:** Not configured or send failure | Sends outbound test alert via Telegram Bot API (`sendMessage`) to configured chat | "Test Telegram Connection" button (`#view-settings`) |
 
 ---
@@ -522,7 +522,7 @@ This slice compares `web/routes/system_status.py`, `web/routes/settings.py`, cen
 
 - [x] Compared system status and administrative status routes, role policy, response sanitization, and current React consumers at source level.
 - [x] Confirmed the preview uses `/api/system/status` and does not connect the Settings view to the admin-only full diagnostic endpoint.
-- [ ] Add a focused response-contract test asserting that public status omits database host/port/name and raw DB error while deciding whether heartbeat `detail` should be omitted or explicitly sanitized.
+- [x] `tests/test_system_status_access.py` verifies the public status response omits database host/port/name, raw DB error, and heartbeat `detail`, preserves a null timestamp, and uses a generic database error message.
 - [ ] Verify auth/session parent state and role-specific browser behavior for settings and system status.
 - [ ] Continue runtime route-registry reconciliation and legacy-to-React parity for all 13 routers; owner acceptance and production cutover gates remain open.
 
@@ -541,7 +541,7 @@ This slice compares `web/routes/telegram_routes.py`, the central `api_security_b
 
 - The effective permission comes from the centralized middleware, not a handler-level dependency: `GET /api/telegram/status` is authenticated read access, while `POST /api/telegram/test` is admin-only. Do not weaken the exact-path rule or expose the test action as a generic preview control without role-specific regression tests and explicit confirmation UI.
 - The `TelegramTestRequest.custom_message` field appears unused by the route implementation because the helper receives no argument. Treat custom-message support as unverified/ineffective until a focused contract test and implementation review confirm intended behavior; do not document it as a working feature.
-- Status returns `chatId` but not the token. The preview does not consume the endpoint, and its Settings page intentionally keeps Telegram controls disconnected. A future migration should decide whether chat ID visibility is necessary for each role and avoid displaying tokens or raw provider errors.
+- Status never returns the bot token. React Settings now fetches Telegram status only for admins, displays the chat ID only in that admin view, and requires explicit confirmation before a test ping. The backend also returns `chatId: null` for trader/viewer API callers (PR #540). Raw Telegram tokens and provider errors are not displayed.
 - A successful test is an external side effect (a real outbound message). Tests for this route should mock the Telegram helper/client and must not send real messages in CI.
 - This audit does not verify every legacy Telegram UI caller, live provider configuration, provider rate limits, or browser role behavior. The React preview remains isolated from FastAPI production serving.
 
@@ -582,8 +582,8 @@ Follow-up source review of `web/static/js/dashboard_enhancements.js` resolves pa
 
 - [x] Verified the legacy enhancement bundle's Telegram test trigger, authenticated POST body, loading state, success toast, error toast, and cleanup.
 - [x] Reconciled the distinction between legacy Telegram controls and the disconnected React preview.
-- [ ] Locate and verify the legacy `GET /api/telegram/status` consumer and its role-specific rendering.
-- [ ] Add/verify mocked route tests for the Telegram test handler's response and outbound helper behavior; CI must never send real Telegram messages.
+- [x] Verified no legacy `GET /api/telegram/status` consumer exists in the static UI; mapped the route into the admin-only React Settings view and tested non-admin no-fetch behavior.
+- [x] Added mocked route tests for the Telegram test handler response, outbound helper behavior, role restrictions, and forced-password-change rejection; CI never sends real Telegram messages (PR #540).
 - [ ] Finish runtime route-to-inventory row reconciliation, full legacy-to-React parity, browser/device/accessibility checks, and owner acceptance before production cutover.
 
 

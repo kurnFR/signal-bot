@@ -12,6 +12,9 @@ from web.app import app, _role_allowed
 
 
 ROOT = Path(__file__).resolve().parents[1]
+ADMIN_ONLY_FRONTEND_GETS = {
+    "/api/settings/status": "frontend/src/SettingsPanel.tsx",
+}
 GET_JSON_CALL = re.compile(
     r"""getJson(?:<[^;]*>)?\s*\(\s*(['"`])([^'"`]+)\1""",
     re.DOTALL,
@@ -77,10 +80,23 @@ class TestFrontendApiRouteParity(unittest.TestCase):
         denied = {
             path: locations
             for path, locations in frontend_paths.items()
-            if not _role_allowed("GET", path, "trader")
+            if path not in ADMIN_ONLY_FRONTEND_GETS and not _role_allowed("GET", path, "trader")
         }
         self.assertFalse(
             denied,
             "Preview GET endpoints are not readable by the trader role: "
             + repr(denied),
         )
+
+    def test_admin_only_preview_gets_have_an_explicit_component_role_gate(self):
+        frontend_paths = _frontend_get_paths()
+        for path, component_path in ADMIN_ONLY_FRONTEND_GETS.items():
+            with self.subTest(path=path):
+                self.assertIn(path, frontend_paths)
+                self.assertTrue(_role_allowed("GET", path, "admin"))
+                self.assertFalse(_role_allowed("GET", path, "trader"))
+                source = (ROOT / component_path).read_text(encoding="utf-8")
+                call_position = source.index("fetchAdminSystemStatus(controller.signal)")
+                guard_position = source.rfind("if (!isAdmin)", 0, call_position)
+                self.assertGreater(call_position, guard_position)
+                self.assertIn("return;", source[guard_position:call_position])
