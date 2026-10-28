@@ -69,7 +69,7 @@ describe("promotion policy editor", () => {
 
   it("does not expose policy writes to viewers", async () => {
     window.localStorage.setItem("token", "viewer-session");
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(input);
       if (path === "/api/auth/me") return json(profile("viewer"));
       if (path === "/api/backtest/promotion-policy") return json({ policy: basePolicy });
