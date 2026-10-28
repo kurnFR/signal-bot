@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { AuthGate } from "./AuthGate";
 import { MasterDataPanel } from "./MasterDataPanel";
 
 const responses = {
@@ -40,5 +41,57 @@ describe("MasterDataPanel", () => {
     await screen.findByText("BTCUSDT");
     fireEvent.change(screen.getByRole("textbox", { name: "Filter datasets" }), { target: { value: "ETH" } });
     expect(screen.getByText("No datasets match this filter.")).toBeInTheDocument();
+  });
+
+  it("requires an explicit confirmation before a trader can launch a backfill", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const calls: Array<{ path: string; method: string; body?: unknown }> = [];
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+      if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/master-data/coverage") return json(responses["/api/master-data/coverage"]);
+      if (path === "/api/master-data/jobs") return json(responses["/api/master-data/jobs"]);
+      if (path === "/api/master-data/backfill" && method === "POST") return json({ id: "job-new", type: "backfill", status: "queued", progress: 0, symbol: "ETHUSDT", market: "futures", timeframe: "4h" });
+      throw new Error("Unexpected endpoint: " + method + " " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><MasterDataPanel /></AuthGate>);
+
+    expect(await screen.findByRole("heading", { name: "Backfill historical data" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Backfill symbol" }), { target: { value: "ethusdt" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Backfill market" }), { target: { value: "futures" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Backfill timeframe" }), { target: { value: "4h" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Backfill years" }), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review backfill" }));
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(calls.filter((call) => call.method === "POST")).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Start backfill" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(/backfill job queued \(job-new\)/i);
+    await waitFor(() => expect(calls.find((call) => call.path === "/api/master-data/backfill" && call.method === "POST")?.body).toEqual({
+      symbol: "ETHUSDT", market: "futures", timeframe: "4h", years: 2, auto_compute_features: true,
+    }));
+  });
+
+  it("keeps job-launch controls hidden for viewers", async () => {
+    window.localStorage.setItem("token", "viewer-session");
+    const profile = { id: 9, username: "viewer01", email: null, role: "viewer", must_change_password: false };
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input);
+      const payload = path === "/api/auth/me" ? profile : responses[path as keyof typeof responses];
+      if (!payload) throw new Error("Unexpected endpoint: " + path);
+      return Promise.resolve(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><MasterDataPanel /></AuthGate>);
+
+    expect(await screen.findByText(/restricted to admin and trader roles/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review backfill" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Build features" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
 });
