@@ -884,6 +884,16 @@ def get_recent_news_events(limit=30):
         conn.close()
 
 
+def _serialize_news_heartbeat_rows(heartbeats):
+    """Normalize DB heartbeat timestamps without turning SQL NULL into 'None'."""
+    for heartbeat in heartbeats:
+        timestamp = heartbeat.get("last_beat_time")
+        heartbeat["last_beat_time"] = timestamp.isoformat(sep=" ") if isinstance(timestamp, datetime) else (
+            str(timestamp) if timestamp is not None else None
+        )
+    return heartbeats
+
+
 def get_news_overlay_stats():
     """Return dashboard KPIs for collection, AI decisions, execution and realized
     paper performance. Performance is intentionally based on CLOSED
@@ -958,9 +968,7 @@ def get_news_overlay_stats():
             )
             """
         )
-        heartbeats = cur.fetchall()
-        for h in heartbeats:
-            h["last_beat_time"] = str(h["last_beat_time"])
+        heartbeats = _serialize_news_heartbeat_rows(cur.fetchall())
         cur.close()
 
         return {
