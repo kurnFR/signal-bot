@@ -1,4 +1,4 @@
-import { getJson } from "./api";
+import { assertApiPath, getJson } from "./api";
 
 export interface CoverageRow {
   symbol: string; market: string; timeframe: string; candleCount: number;
@@ -56,7 +56,6 @@ async function postMasterDataJob(
   path: "/api/master-data/backfill" | "/api/master-data/build-features",
   body: BackfillInput | FeatureBuildInput,
 ): Promise<MasterDataJob> {
-  const { assertApiPath } = await import("./api");
   assertApiPath(path);
   const headers: Record<string, string> = { Accept: "application/json", "Content-Type": "application/json" };
   try {
