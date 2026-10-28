@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import { useAuth } from "./AuthGate";
 import { BookOpen, RefreshCw, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
-import { fetchCustomStrategies, fetchStrategyIndicators, type CustomStrategy, type StrategyIndicator } from "./lib/strategyLibrary";
+import { fetchCustomStrategies, fetchStrategyIndicators, quickTestCustomStrategy, StrategyQuickTestError, type CustomStrategy, type QuickTestResult, type StrategyIndicator } from "./lib/strategyLibrary";
 
 function messageFor(cause: unknown) {
   if (cause instanceof ApiError && cause.status === 401) return "Your session has expired. Sign in again to view the strategy library.";
@@ -17,6 +18,14 @@ export function StrategyLibraryPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const auth = useAuth();
+  const canQuickTest = ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
+  const [testSymbol, setTestSymbol] = useState("BTCUSDT");
+  const [testMarket, setTestMarket] = useState<"spot" | "futures">("spot");
+  const [testTimeframe, setTestTimeframe] = useState("1h");
+  const [quickTestBusy, setQuickTestBusy] = useState<string | null>(null);
+  const [quickTestError, setQuickTestError] = useState<string | null>(null);
+  const [quickTestResults, setQuickTestResults] = useState<Record<string, QuickTestResult>>({});
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setError(null);
@@ -29,25 +38,39 @@ export function StrategyLibraryPanel() {
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [attempt]);
+  const runQuickTest = async (strategy: CustomStrategy) => {
+    const normalizedSymbol = testSymbol.trim().toUpperCase();
+    if (!/^[A-Z0-9._-]{1,30}$/.test(normalizedSymbol)) { setQuickTestError("Enter a valid symbol using letters, numbers, dot, underscore, or hyphen."); return; }
+    setQuickTestBusy(strategy.name); setQuickTestError(null);
+    try {
+      const result = await quickTestCustomStrategy(strategy, { symbol: normalizedSymbol, market: testMarket, timeframe: testTimeframe });
+      setQuickTestResults((current) => ({ ...current, [strategy.name]: result }));
+    } catch (cause) {
+      if (cause instanceof StrategyQuickTestError && cause.status === 403) setQuickTestError("Your account cannot run strategy quick tests. Only admin or trader roles can perform this action.");
+      else setQuickTestError(cause instanceof Error ? cause.message : "Quick test failed. Please retry.");
+    } finally { setQuickTestBusy(null); }
+  };
   return <>
     <section className="metrics-grid" aria-label="Strategy library summary" aria-busy={loading}>
       <article className="metric-card"><div className="metric-top"><span>Saved custom strategies</span><span className="metric-icon"><BookOpen size={17} /></span></div><div className="metric-value">{loading && !strategies.length ? "Loading…" : strategies.length}</div><div className="metric-foot"><span>Persisted definitions</span></div></article>
       <article className="metric-card"><div className="metric-top"><span>Available indicators</span><span className="metric-icon"><ShieldCheck size={17} /></span></div><div className="metric-value">{loading && !indicators.length ? "Loading…" : indicators.length}</div><div className="metric-foot"><span>From backend metadata</span></div></article>
     </section>
     {error && <div className="error-banner" role="alert"><p>{error}</p><button className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}><RefreshCw size={15} /> Retry</button></div>}
+    {quickTestError && <div className="error-banner" role="alert"><p>{quickTestError}</p><button className="button button-secondary" onClick={() => setQuickTestError(null)}>Dismiss</button></div>}
+    {canQuickTest ? <section className="panel" aria-labelledby="strategy-quick-test-config-title"><div className="panel-heading"><div><h2 id="strategy-quick-test-config-title">Quick-test configuration</h2><p>Runs a non-persisted simulation against up to the latest 1,000 stored candles. It does not create, activate, or promote a strategy.</p></div><span className="panel-counter">ADMIN / TRADER</span></div><div className="screener-control-grid"><label className="screener-control-field">Symbol<input aria-label="Quick-test symbol" value={testSymbol} maxLength={30} onChange={(event) => setTestSymbol(event.target.value)} /></label><label className="screener-control-field">Market<select aria-label="Quick-test market" value={testMarket} onChange={(event) => setTestMarket(event.target.value as "spot" | "futures")}><option value="spot">Spot</option><option value="futures">Futures</option></select></label><label className="screener-control-field">Timeframe<select aria-label="Quick-test timeframe" value={testTimeframe} onChange={(event) => setTestTimeframe(event.target.value)}>{["1m", "5m", "15m", "1h", "4h", "1d"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label></div></section> : <p className="empty-state">Strategy quick tests are restricted to admin and trader roles. This session can review saved definitions only.</p>}
     <section className="panel" aria-labelledby="strategy-library-title">
       <div className="panel-heading"><div><h2 id="strategy-library-title">Custom strategy library</h2><p>Read-only view of saved rule definitions from the existing API.</p></div><button className="button button-secondary" onClick={() => setAttempt((n) => n + 1)} disabled={loading}><RefreshCw size={15} /> Refresh</button></div>
       {loading && !strategies.length && !error ? <p className="empty-state" role="status">Loading saved strategies…</p> : !strategies.length && !error ? <p className="empty-state">No saved custom strategies were returned by the API.</p> : <div className="strategy-library-list">{strategies.map((strategy) => <article className="strategy-library-card" key={strategy.name}>
         <div className="panel-heading"><div><h3>{strategy.displayName || strategy.name}</h3><p>{strategy.name}</p></div><span className="panel-counter">SAVED DEFINITION</span></div>
         {strategy.description && <p>{strategy.description}</p>}{strategy.rationale && <p className="strategy-rationale">{strategy.rationale}</p>}
         <div className="strategy-rule-grid"><Conditions label="Long entry conditions" items={strategy.longConditions} /><Conditions label="Short entry conditions" items={strategy.shortConditions} /></div>
-        <div className="strategy-param-list"><span>Stop loss: {strategy.slAtrMult ?? "—"} ATR</span><span>Risk/reward: {strategy.riskRewardRatio ?? "—"}:1</span><span>Trailing stop: {strategy.useTrailingStop ? "Enabled" : "Disabled"}</span></div>
+        <div className="strategy-param-list"><span>Stop loss: {strategy.slAtrMult ?? "—"} ATR</span><span>Risk/reward: {strategy.riskRewardRatio ?? "—"}:1</span><span>Trailing stop: {strategy.useTrailingStop ? "Enabled" : "Disabled"}</span></div>{canQuickTest && <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={quickTestBusy !== null || loading} onClick={() => void runQuickTest(strategy)}>{quickTestBusy === strategy.name ? "Testing…" : "Quick test"}</button></div>}{quickTestResults[strategy.name] && <section className="strategy-quick-test-result" aria-label={`Quick test result for ${strategy.name}`}><h4>Quick-test result · {quickTestResults[strategy.name].symbol} {quickTestResults[strategy.name].market} {quickTestResults[strategy.name].timeframe}</h4><div className="metrics-grid"><article className="metric-card"><div className="metric-top"><span>Candles</span></div><div className="metric-value">{quickTestResults[strategy.name].totalCandles}</div></article><article className="metric-card"><div className="metric-top"><span>Trades</span></div><div className="metric-value">{quickTestResults[strategy.name].totalTrades}</div></article><article className="metric-card"><div className="metric-top"><span>Win rate</span></div><div className="metric-value">{quickTestResults[strategy.name].winRatePct == null ? "—" : `${Number(quickTestResults[strategy.name].winRatePct).toFixed(2)}%`}</div></article><article className="metric-card"><div className="metric-top"><span>Net R</span></div><div className="metric-value">{quickTestResults[strategy.name].netR ?? "—"}</div></article><article className="metric-card"><div className="metric-top"><span>Profit factor</span></div><div className="metric-value">{quickTestResults[strategy.name].profitFactor ?? "—"}</div></article><article className="metric-card"><div className="metric-top"><span>Max drawdown</span></div><div className="metric-value">{quickTestResults[strategy.name].maxDrawdownR == null ? "—" : `${quickTestResults[strategy.name].maxDrawdownR} R`}</div></article><article className="metric-card"><div className="metric-top"><span>Expectancy</span></div><div className="metric-value">{quickTestResults[strategy.name].expectancyR ?? "—"}</div></article></div></section>}
       </article>)}</div>}
     </section>
     <section className="panel" aria-labelledby="indicator-catalog-title">
       <div className="panel-heading"><div><h2 id="indicator-catalog-title">Indicator catalog</h2><p>Definitions and descriptions provided by the backend.</p></div><span className="panel-counter">{indicators.length} INDICATORS</span></div>
       {loading && !indicators.length && !error ? <p className="empty-state" role="status">Loading indicator catalog…</p> : <div className="table-scroll"><table><thead><tr><th scope="col">Indicator</th><th scope="col">Category</th><th scope="col">Description</th><th scope="col">Default</th></tr></thead><tbody>{indicators.map((item) => <tr key={item.name}><td><strong>{item.label || item.name}</strong><div><code>{item.name}</code></div></td><td>{item.category || "—"}</td><td>{item.description || "—"}</td><td>{item.default ?? "—"}</td></tr>)}</tbody></table></div>}
     </section>
-    <p className="page-description">Safety: this migration slice only reads strategy definitions and indicator metadata. Creating, deleting, generating, quick-testing, promoting, or activating strategies remains unavailable here.</p>
+    <p className="page-description">Safety: this preview can run an explicit non-persisted quick test for admin/trader users. Creating, deleting, AI-generating, promoting, or activating strategies remains unavailable here.</p>
   </>;
 }

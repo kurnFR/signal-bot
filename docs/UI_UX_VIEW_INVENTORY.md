@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `57d3564a5b7211511f65a4fab8d70552cb12f729` (master after PR #528, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
+**Source baseline for reconciliation:** `d59bd93f6ba4cd36e1cbc78a405f748e49e72959` (master after PR #529, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -46,14 +46,15 @@ This document is Antigravity's detailed baseline inventory draft for **Phase UIX
 
 ### 2.3 React Preview Mutation Boundary (rechecked 2026-10-28)
 
-The preview is mostly read-only, with three intentional, role-gated mutation surfaces.
+The preview is mostly read-only, with three intentional, role-gated mutation surfaces and one non-persisted compute action.
 
 - `ScreenerControlsPanel.tsx` calls `POST /api/research/screener/control` only when an admin or trader explicitly selects **Save changes**. Viewer sessions do not fetch the editor configuration and cannot submit changes. The request changes persisted screener settings, including the Telegram alert gate and detection thresholds; it does not itself send a Telegram message or restart the worker.
 - `MasterDataPanel.tsx` allows admin/trader users to review and confirm a backfill request (`POST /api/master-data/backfill`) or feature-build request (`POST /api/master-data/build-features`). These actions can write OHLCV/features and launch background workers. Viewer sessions cannot access the controls.
 - `BacktestStudioPanel.tsx` allows admin/trader users to submit `POST /api/backtest/run` only after reviewing and confirming a run configuration. The response is shown with an explicit saved-run ID when persistence is confirmed; a null `runId` is presented as persistence not confirmed. This simulates historical trades only and does not execute live orders.
+- `StrategyLibraryPanel.tsx` offers an explicit admin/trader `POST /api/custom-strategy/quick-test` action. It simulates against up to 1,000 stored candles and returns metrics without saving or activating the strategy.
 - Backend authorization remains authoritative. UI hiding is defense in depth, not a replacement for route-level role enforcement.
-- Other React preview panels remain read-only. No strategy promotion, deployment, wallet-tracking control, or Telegram-send action is exposed.
-- **Safety note:** Do not point the preview at a production-connected API while experimenting with these controls unless changing the live screener configuration, starting data-processing jobs, or running a persisted backtest is intended. This does not authorize production serving of the React preview.
+- Other React preview panels remain read-only. Strategy creation/deletion/AI generation, promotion, deployment, wallet-tracking control, and Telegram-send actions are not exposed.
+- **Safety note:** Do not point the preview at a production-connected API while experimenting with these controls unless changing the live screener configuration, starting data-processing jobs, running a persisted backtest, or spending compute on a quick test is intended. This does not authorize production serving of the React preview.
 
 Browser smoke tests that navigate between views assert no incidental mutation requests; focused component tests cover each explicit action flow and viewer restrictions.
 
@@ -199,7 +200,7 @@ The following draft register lists 81 API endpoint rows across the 13 router mod
 | `POST /api/custom-strategy/generate-ai` | `generate_ai_strategy`<br>`custom_strategy.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `GenerateAIStrategyRequest`<br>`{prompt: str, history: Optional[List[dict]], currentConfig: Optional[dict]}` | **200 OK:**<br>`{"status": "success", "provider": str, "strategy": dict, "chatResponse": str}` | Queries configured LLM (OpenAI/Anthropic/heuristic fallback) to generate valid rule JSON | AI Strategy Prompt input (`#view-strategies`) |
 | `POST /api/custom-strategy/create` | `create_custom_strategy`<br>`custom_strategy.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `CustomStrategyRequest`<br>`{name: str, displayName: str, description: str, longConditions: List[dict], shortConditions: List[dict], slAtrMult: float, riskRewardRatio: float}` | **200 OK:**<br>`{"status": "success", "name": str, "displayName": str, "message": str}`<br>**400:** Invalid syntax | Validates conditions; writes strategy definition into `custom_strategies.json` | "Save Strategy" button (`#view-strategies`) |
 | `DELETE /api/custom-strategy/{name}` | `delete_custom_strategy`<br>`custom_strategy.py` | `trader`, `admin` | Blocked (403 required) | **Path:** `name: str` | **200 OK:**<br>`{"status": "success", "message": str}`<br>**404:** Not found | Removes strategy from `custom_strategies.json` | Delete button on strategy card (`#view-strategies`) |
-| `POST /api/custom-strategy/quick-test` | `quick_test_strategy`<br>`custom_strategy.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `QuickTestRequest`<br>`{strategy: CustomStrategyRequest, symbol: str, market: str, timeframe: str}` | **200 OK:**<br>`{"status": "success", "symbol": str, "market": str, "timeframe": str, "totalCandles": int, "totalTrades": int, "winRate": number, "winRatePct": number, "netR": number, "profitFactor": number|null, "maxDrawdownR": number|null, "expectancyR": number|null}`<br>**400:** Fewer than 50 source candles | Runs an in-memory simulation on the latest up to 1,000 candles; returns percentage and R-based metrics, with non-finite optional metrics sanitized to null | Legacy "Quick Test" button (`#view-strategies`); unavailable in React preview |
+| `POST /api/custom-strategy/quick-test` | `quick_test_strategy`<br>`custom_strategy.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `QuickTestRequest`<br>`{strategy: CustomStrategyRequest, symbol: str, market: str, timeframe: str}` | **200 OK:**<br>`{"status": "success", "symbol": str, "market": str, "timeframe": str, "totalCandles": int, "totalTrades": int, "winRate": number, "winRatePct": number, "netR": number, "profitFactor": number|null, "maxDrawdownR": number|null, "expectancyR": number|null}`<br>**400:** Fewer than 50 source candles | Runs an in-memory simulation on the latest up to 1,000 candles; returns percentage and R-based metrics, with non-finite optional metrics sanitized to null | Legacy "Quick Test" button (`#view-strategies`); React `StrategyLibraryPanel` Quick test action for admin/trader roles, explicit click, non-persisted |
 
 ---
 
