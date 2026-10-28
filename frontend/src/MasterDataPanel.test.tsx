@@ -170,6 +170,8 @@ describe("MasterDataPanel", () => {
     expect(await screen.findByText(/restricted to admin and trader roles/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Review backfill" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Build features" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "SOLUSDT" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use SOLUSDT in backfill form" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
 });
