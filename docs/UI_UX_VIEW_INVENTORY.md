@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `b184bbc1421dcfd1c18a8516a8defeeedaf82fb6` (master after PR #527, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
+**Source baseline for reconciliation:** `57d3564a5b7211511f65a4fab8d70552cb12f729` (master after PR #528, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -46,15 +46,16 @@ This document is Antigravity's detailed baseline inventory draft for **Phase UIX
 
 ### 2.3 React Preview Mutation Boundary (rechecked 2026-10-28)
 
-The preview is mostly read-only, with two intentional, role-gated mutation surfaces.
+The preview is mostly read-only, with three intentional, role-gated mutation surfaces.
 
 - `ScreenerControlsPanel.tsx` calls `POST /api/research/screener/control` only when an admin or trader explicitly selects **Save changes**. Viewer sessions do not fetch the editor configuration and cannot submit changes. The request changes persisted screener settings, including the Telegram alert gate and detection thresholds; it does not itself send a Telegram message or restart the worker.
 - `MasterDataPanel.tsx` allows admin/trader users to review and confirm a backfill request (`POST /api/master-data/backfill`) or feature-build request (`POST /api/master-data/build-features`). These actions can write OHLCV/features and launch background workers. Viewer sessions cannot access the controls.
+- `BacktestStudioPanel.tsx` allows admin/trader users to submit `POST /api/backtest/run` only after reviewing and confirming a run configuration. The response is shown with an explicit saved-run ID when persistence is confirmed; a null `runId` is presented as persistence not confirmed. This simulates historical trades only and does not execute live orders.
 - Backend authorization remains authoritative. UI hiding is defense in depth, not a replacement for route-level role enforcement.
-- Other React preview panels remain read-only. No trade execution, strategy promotion, deployment, wallet-tracking control, or Telegram-send action is exposed.
-- **Safety note:** Do not point the preview at a production-connected API while experimenting with either editor unless changing the live screener configuration or starting data-processing jobs is intended. This does not authorize production serving of the React preview.
+- Other React preview panels remain read-only. No strategy promotion, deployment, wallet-tracking control, or Telegram-send action is exposed.
+- **Safety note:** Do not point the preview at a production-connected API while experimenting with these controls unless changing the live screener configuration, starting data-processing jobs, or running a persisted backtest is intended. This does not authorize production serving of the React preview.
 
-Browser smoke tests that navigate between views assert no incidental mutation requests; focused component tests cover the explicit Screener save flow, Master Data job confirmation, and viewer restrictions.
+Browser smoke tests that navigate between views assert no incidental mutation requests; focused component tests cover each explicit action flow and viewer restrictions.
 
 ---
 
@@ -660,7 +661,7 @@ Compared `web/routes/backtest.py` response construction with the inventory schem
 - If saving the run fails, the route logs the persistence error and can still return simulation results with `runId=null`. UI must not imply a saved historical run exists unless the returned ID is confirmed.
 - [x] Corrected strategy-list and run response contracts from source.
 - [ ] Add mocked route contract tests for registry field names, default request values, insufficient-data errors, and simulation-success/database-save-failure behavior.
-- [ ] Preserve the read-only boundary of the React preview until run execution is explicitly migrated with role enforcement, clear persistence status, and tests.
+- [x] Migrated single-run backtest execution into the React preview with admin/trader gating, explicit confirmation, dynamic strategy/shared parameters, persistence-status messaging, and regression tests (PR #529). Run-all, policy edits, promotion, and Telegram actions remain outside this slice.
 
 
 ## UIX-00 source audit slice: Custom strategy quick-test contract (2026-10-28)
