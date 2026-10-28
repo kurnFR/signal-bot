@@ -79,6 +79,10 @@ async function mockApi(page: Page, options: { expiredScreener?: boolean; expired
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ total_signals: 0, signals_last_24h: 0, by_type_last_24h: {} }) });
       return;
     }
+    if (path === "/api/research/screener/control" && request.method() === "POST") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok", note: "Takes effect within ~60s." }) });
+      return;
+    }
     if (path === "/api/research/screener/control" && request.method() === "GET") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ enabled: true, overrides: {}, updated_at: null, tunable_fields: ["rvol_multiplier", "enable_divergence_detection"] }) });
       return;
@@ -543,4 +547,30 @@ test("Master Data viewer browser session cannot access job-launch controls", asy
   await expect(page.getByRole("button", { name: "Review backfill" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Build features" })).toHaveCount(0);
   expect(mutations).toEqual([]);
+});
+
+
+test("Market Screener saves control changes only after the explicit Save changes action", async ({ page }) => {
+  const saveRequests: Array<{ method: string; body: string | null }> = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/research/screener/control") {
+      saveRequests.push({ method: request.method(), body: request.postData() });
+    }
+  });
+
+  await mockApi(page);
+  await signIn(page);
+  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: /Market Screener/ }).click();
+  await expect(page.getByRole("heading", { name: "Screener configuration" })).toBeVisible();
+  await expect(page.getByLabel(/Telegram alerting enabled/)).toBeChecked();
+  expect(saveRequests.filter((request) => request.method === "POST")).toEqual([]);
+
+  await page.getByLabel(/Telegram alerting enabled/).uncheck();
+  expect(saveRequests.filter((request) => request.method === "POST")).toEqual([]);
+  await page.getByRole("button", { name: "Save changes" }).click();
+
+  await expect(page.getByRole("status")).toHaveText(/takes effect within ~60s/i);
+  const posts = saveRequests.filter((request) => request.method === "POST");
+  expect(posts).toHaveLength(1);
+  expect(JSON.parse(posts[0].body ?? "{}")).toEqual({ enabled: false, overrides: {} });
 });
