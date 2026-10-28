@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "./AuthGate";
-import { BookOpen, RefreshCw, ShieldCheck } from "lucide-react";
+import { BookOpen, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
 import { ApiError } from "./lib/api";
-import { createCustomStrategy, deleteCustomStrategy, fetchCustomStrategies, fetchStrategyIndicators, quickTestCustomStrategy, StrategyLibraryActionError, StrategyQuickTestError, type CustomStrategy, type QuickTestResult, type StrategyConditionInput, type StrategyIndicator } from "./lib/strategyLibrary";
+import { createCustomStrategy, deleteCustomStrategy, fetchCustomStrategies, fetchStrategyIndicators, generateCustomStrategy, quickTestCustomStrategy, StrategyLibraryActionError, StrategyQuickTestError, type CustomStrategy, type QuickTestResult, type StrategyConditionInput, type StrategyIndicator } from "./lib/strategyLibrary";
 
 function messageFor(cause: unknown) {
   if (cause instanceof ApiError && cause.status === 401) return "Your session has expired. Sign in again to view the strategy library.";
@@ -42,7 +42,7 @@ export function StrategyLibraryPanel() {
   const [actionBusy, setActionBusy] = useState<"create" | "delete" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<CustomStrategy | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<CustomStrategy | null>(null);\n  const [aiPrompt, setAiPrompt] = useState("");\n  const [aiBusy, setAiBusy] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setError(null);
@@ -63,6 +63,41 @@ export function StrategyLibraryPanel() {
       const numeric = Number(value);
       return { indicator: condition.indicator, operator: condition.operator, value: value !== "" && Number.isFinite(numeric) ? numeric : value };
     });
+  const generateStrategyDraft = async () => {
+    const prompt = aiPrompt.trim();
+    if (!prompt) { setActionError("Enter a strategy idea before generating a draft."); return; }
+    if (prompt.length > 2000) { setActionError("Keep the AI prompt to 2,000 characters or fewer."); return; }
+    setAiBusy(true); setActionError(null); setActionMessage(null);
+    try {
+      const result = await generateCustomStrategy({ prompt });
+      const draft = result.strategy;
+      const toEditorConditions = (conditions?: CustomStrategy["longConditions"]) =>
+        (conditions ?? []).map((condition) => ({
+          indicator: condition.indicator ?? "rsi",
+          operator: condition.operator ?? "<",
+          value: String(condition.value ?? ""),
+        }));
+      setCreateName(draft.name);
+      setCreateDisplayName(draft.displayName ?? draft.name);
+      setCreateDescription(draft.description ?? "Custom rule-based strategy");
+      setCreateRationale(draft.rationale ?? "");
+      setLongConditions(toEditorConditions(draft.longConditions));
+      setShortConditions(toEditorConditions(draft.shortConditions));
+      setSlAtrMult(String(draft.slAtrMult ?? 1.5));
+      setRiskRewardRatio(String(draft.riskRewardRatio ?? 2.5));
+      setUseTrailingStop(Boolean(draft.useTrailingStop));
+      setTrailActivationR(String(draft.trailActivationR ?? 1));
+      setTrailDistanceAtrMult(String(draft.trailDistanceAtrMult ?? 1.5));
+      setShowCreateForm(true);
+      setActionMessage(`AI draft generated${result.provider ? ` with ${result.provider}` : ""}. Review the rules and save explicitly; generation did not persist or activate it.`);
+    } catch (cause) {
+      if (cause instanceof StrategyLibraryActionError && cause.status === 403) {
+        setActionError("Your account cannot generate strategy drafts. Only admin or trader roles can perform this action.");
+      } else {
+        setActionError(cause instanceof Error ? cause.message : "AI strategy generation failed. Please retry.");
+      }
+    } finally { setAiBusy(false); }
+  };
   const submitCreateStrategy = async () => {
     const normalizedName = createName.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/^_+|_+$/g, "");
     if (!normalizedName || normalizedName.length > 80) { setActionError("Enter a valid strategy name (letters, numbers, underscores; max 80 characters)."); return; }
@@ -129,6 +164,15 @@ export function StrategyLibraryPanel() {
     {canQuickTest ? <section className="panel" aria-labelledby="strategy-quick-test-config-title"><div className="panel-heading"><div><h2 id="strategy-quick-test-config-title">Quick-test configuration</h2><p>Runs a non-persisted simulation against up to the latest 1,000 stored candles. It does not create, activate, or promote a strategy.</p></div><span className="panel-counter">ADMIN / TRADER</span></div><div className="screener-control-grid"><label className="screener-control-field">Symbol<input aria-label="Quick-test symbol" value={testSymbol} maxLength={30} onChange={(event) => setTestSymbol(event.target.value)} /></label><label className="screener-control-field">Market<select aria-label="Quick-test market" value={testMarket} onChange={(event) => setTestMarket(event.target.value as "spot" | "futures")}><option value="spot">Spot</option><option value="futures">Futures</option></select></label><label className="screener-control-field">Timeframe<select aria-label="Quick-test timeframe" value={testTimeframe} onChange={(event) => setTestTimeframe(event.target.value)}>{["1m", "5m", "15m", "1h", "4h", "1d"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label></div></section> : <p className="empty-state">Strategy quick tests are restricted to admin and trader roles. This session can review saved definitions only.</p>}
     {canManageStrategies && <section className="panel" aria-labelledby="strategy-create-title">
       <div className="panel-heading"><div><h2 id="strategy-create-title">Create a custom strategy</h2><p>Saving persists a rule definition to the backend strategy library. It does not activate or promote it.</p></div><button className="button button-secondary" type="button" disabled={actionBusy !== null} onClick={() => { setShowCreateForm((shown) => !shown); setActionError(null); setActionMessage(null); }}>{showCreateForm ? "Close editor" : "New strategy"}</button></div>
+      <div className="screener-control-grid" aria-label="AI strategy draft generator">
+        <label className="screener-control-field">AI strategy prompt
+          <textarea aria-label="AI strategy prompt" rows={3} maxLength={2000} value={aiPrompt} onChange={(event) => setAiPrompt(event.target.value)} placeholder="Example: mean-reversion strategy using RSI extremes with volume confirmation, 1.5 ATR stop, and 2.5 risk/reward." />
+        </label>
+        <div className="screener-control-footer">
+          <button className="button button-secondary" type="button" disabled={aiBusy || actionBusy !== null} onClick={() => void generateStrategyDraft()}><Sparkles size={15} />{aiBusy ? "Generating draft…" : "Generate draft with AI"}</button>
+          <span className="page-description">Explicit action may call the configured AI provider. It only fills the editor; saving is a separate action.</span>
+        </div>
+      </div>
       {showCreateForm && <form className="screener-control-grid" onSubmit={(event) => { event.preventDefault(); void submitCreateStrategy(); }}>
         <label className="screener-control-field">Strategy name<input aria-label="Strategy name" value={createName} maxLength={80} required onChange={(event) => setCreateName(event.target.value)} placeholder="rsi_volume_v1" /></label>
         <label className="screener-control-field">Display name<input aria-label="Strategy display name" value={createDisplayName} required onChange={(event) => setCreateDisplayName(event.target.value)} placeholder="RSI + Volume" /></label>
@@ -173,7 +217,7 @@ export function StrategyLibraryPanel() {
       <div className="panel-heading"><div><h2 id="indicator-catalog-title">Indicator catalog</h2><p>Definitions and descriptions provided by the backend.</p></div><span className="panel-counter">{indicators.length} INDICATORS</span></div>
       {loading && !indicators.length && !error ? <p className="empty-state" role="status">Loading indicator catalog…</p> : <div className="table-scroll"><table><thead><tr><th scope="col">Indicator</th><th scope="col">Category</th><th scope="col">Description</th><th scope="col">Default</th></tr></thead><tbody>{indicators.map((item) => <tr key={item.name}><td><strong>{item.label || item.name}</strong><div><code>{item.name}</code></div></td><td>{item.category || "—"}</td><td>{item.description || "—"}</td><td>{item.default ?? "—"}</td></tr>)}</tbody></table></div>}
     </section>
-    <p className="page-description">Safety: admin/trader users can explicitly quick-test, create, and delete saved definitions. Quick tests are non-persisted; create/delete changes the saved strategy library but does not activate or promote a strategy. AI generation, promotion, and activation remain unavailable here.</p>
+    <p className="page-description">Safety: admin/trader users can explicitly quick-test, create, and delete saved definitions. Quick tests are non-persisted; create/delete changes the saved strategy library but does not activate or promote a strategy. AI generation is available as an explicit draft-only action; promotion and activation remain unavailable here.</p>
     {pendingDelete && <section className="panel" aria-labelledby="strategy-delete-confirm-title"><div className="panel-heading"><div><h2 id="strategy-delete-confirm-title">Delete strategy?</h2><p>This permanently removes the saved definition and its inverse registration. It does not delete historical backtest records.</p></div></div><p><strong>{pendingDelete.displayName || pendingDelete.name}</strong> ({pendingDelete.name})</p><div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={actionBusy !== null} onClick={() => setPendingDelete(null)}>Cancel</button><button className="button button-primary" type="button" disabled={actionBusy !== null} onClick={() => void confirmDeleteStrategy()}>{actionBusy === "delete" ? "Deleting…" : "Delete strategy"}</button></div></section>}
   </>;
 }
