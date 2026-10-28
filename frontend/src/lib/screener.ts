@@ -67,6 +67,10 @@ export async function saveScreenerControl(enabled: boolean, overrides: Record<st
   const response = await fetch("/api/research/screener/control", { method: "POST", credentials: "same-origin", headers, body: JSON.stringify({ enabled, overrides }) });
   let payload: unknown;
   try { payload = await response.json(); } catch { payload = null; }
+  if (response.status === 401) {
+    try { window.localStorage.removeItem("token"); } catch { /* Session state still resets via the event. */ }
+    window.dispatchEvent(new Event("signal-bot:session-expired"));
+  }
   if (!response.ok) {
     const detail = payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string" ? payload.detail.slice(0, 300) : `Screener settings could not be saved (${response.status})`;
     throw new ScreenerControlError(response.status, detail);
