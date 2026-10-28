@@ -69,6 +69,24 @@ export function StrategyLibraryPanel() {
       const numeric = Number(value);
       return { indicator: condition.indicator, operator: condition.operator, value: value !== "" && Number.isFinite(numeric) ? numeric : value };
     });
+  const startNewStrategy = () => {
+    setEditingStrategyName(null);
+    setPendingUpdateConfirmation(false);
+    setCreateName("");
+    setCreateDisplayName("");
+    setCreateDescription("");
+    setCreateRationale("");
+    setLongConditions([{ indicator: indicators[0]?.name ?? "rsi", operator: "<", value: "30" }]);
+    setShortConditions([{ indicator: indicators[0]?.name ?? "rsi", operator: ">", value: "70" }]);
+    setSlAtrMult("1.5");
+    setRiskRewardRatio("2.5");
+    setUseTrailingStop(false);
+    setTrailActivationR("1");
+    setTrailDistanceAtrMult("1.5");
+    setShowCreateForm(true);
+    setActionError(null);
+    setActionMessage(null);
+  };
   const editSavedStrategy = (strategy: CustomStrategy) => {
     setEditingStrategyName(strategy.name);
     setPendingUpdateConfirmation(false);
@@ -203,7 +221,7 @@ export function StrategyLibraryPanel() {
       {aiDraft && <div className="panel-subsection" aria-label="Generated strategy draft"><div className="panel-heading"><div><h3>{aiDraft.strategy.displayName || aiDraft.strategy.name}</h3><p>{aiDraft.strategy.description || "Generated rule-based strategy draft"}</p></div><span className="panel-counter">{aiDraft.provider || "Configured generator"}</span></div><p>{aiDraft.chatResponse}</p><div className="strategy-rule-grid"><Conditions label="Generated long conditions" items={aiDraft.strategy.longConditions} /><Conditions label="Generated short conditions" items={aiDraft.strategy.shortConditions} /></div><div className="screener-control-footer"><button className="button button-secondary" type="button" onClick={useGeneratedDraft}>Use generated draft</button><button className="button button-secondary" type="button" onClick={() => setAiDraft(null)}>Discard draft</button></div></div>}
     </section>}
     {canManageStrategies && <section className="panel" aria-labelledby="strategy-create-title">
-      <div className="panel-heading"><div><h2 id="strategy-create-title">{editingStrategyName ? "Edit saved strategy" : "Create a custom strategy"}</h2><p>{editingStrategyName ? "Saving replaces the existing definition after confirmation. It does not activate or promote it." : "Saving persists a rule definition to the backend strategy library. It does not activate or promote it."}</p></div><button className="button button-secondary" type="button" disabled={actionBusy !== null} onClick={() => { if (showCreateForm) { setShowCreateForm(false); setEditingStrategyName(null); setPendingUpdateConfirmation(false); } else { setEditingStrategyName(null); setShowCreateForm(true); } setActionError(null); setActionMessage(null); }}>{showCreateForm ? "Close editor" : "New strategy"}</button></div>
+      <div className="panel-heading"><div><h2 id="strategy-create-title">{editingStrategyName ? "Edit saved strategy" : "Create a custom strategy"}</h2><p>{editingStrategyName ? "Saving replaces the existing definition after confirmation. It does not activate or promote it." : "Saving persists a rule definition to the backend strategy library. It does not activate or promote it."}</p></div><button className="button button-secondary" type="button" disabled={actionBusy !== null} onClick={() => { if (showCreateForm) { setShowCreateForm(false); setEditingStrategyName(null); setPendingUpdateConfirmation(false); } else { startNewStrategy(); } setActionError(null); setActionMessage(null); }}>{showCreateForm ? "Close editor" : "New strategy"}</button></div>
       {showCreateForm && <form className="screener-control-grid" onSubmit={(event) => { event.preventDefault(); void submitCreateStrategy(); }}>
         <label className="screener-control-field">Strategy name<input aria-label="Strategy name" value={createName} maxLength={80} required readOnly={editingStrategyName !== null} onChange={(event) => setCreateName(event.target.value)} placeholder="rsi_volume_v1" /></label>
         <label className="screener-control-field">Display name<input aria-label="Strategy display name" value={createDisplayName} required onChange={(event) => setCreateDisplayName(event.target.value)} placeholder="RSI + Volume" /></label>
