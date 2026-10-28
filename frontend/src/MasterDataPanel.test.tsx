@@ -138,6 +138,7 @@ describe("MasterDataPanel", () => {
       if (path === "/api/auth/me") return json(profile);
       if (path === "/api/master-data/coverage") return json(responses["/api/master-data/coverage"]);
       if (path === "/api/master-data/jobs") return json(responses["/api/master-data/jobs"]);
+      if (path === "/api/crypto/popular") return json(responses["/api/crypto/popular"]);
       if (path === "/api/master-data/build-features" && method === "POST") return json({ id: "features-new", type: "build_features", status: "queued", progress: 0, symbol: "BTCUSDT", market: "spot", timeframe: "1h" });
       throw new Error("Unexpected endpoint: " + method + " " + path);
     });
