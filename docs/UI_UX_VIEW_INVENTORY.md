@@ -731,3 +731,11 @@ The News AI contract mismatch described in the historical audit has been correct
 - [x] Saving requires a review step. Enabling automatic promotion requires acknowledgement that future qualifying backtests may activate paper strategies; enabling Telegram requires separate external-notification acknowledgement.
 - [x] The client validates the save response contract and handles `saved_readback_unavailable` without presenting the submitted values as verified. Backtest review remains disabled until a successful refresh.
 - [ ] Explicit promotion/manual activation and reconciliation actions remain unimplemented in the React preview; retain the owner-acceptance gate until retry/idempotency and recovery semantics are reviewed.
+
+
+## UIX-00 backtest policy availability gate (2026-10-28)
+
+- [x] Add integration coverage that a failed promotion-policy read disables Backtest Studio run review.
+- [x] Verify retrying the policy GET restores run review only after policy state is available.
+- [x] Assert no `POST /api/backtest/run` is sent while the policy is unavailable.
+- [ ] Continue legacy-to-React parity for all remaining routes/views/callers and retain the explicit owner-acceptance gate before any production cutover.

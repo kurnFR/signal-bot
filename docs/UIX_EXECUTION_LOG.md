@@ -277,9 +277,18 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `a4d3db1e2865715cb9a6d102863acba4a19ad301`.
 - **Safety:** Mocked requests only; no backtest, promotion, paper activation, Telegram send, or deployment.
 
-### Current PR #581 — guarded auto-promotion policy editor
+### PR #581 — guarded auto-promotion policy editor
 
-- Adds admin/trader-only editing for the saved auto-promotion thresholds and toggles; viewers retain read-only policy/audit visibility.
-- Saving requires a review step. Enabling automatic promotion requires acknowledgement of future paper-strategy activation, and enabling Telegram requires a separate external-notification acknowledgement.
-- The client distinguishes verified `status: "ok"` readback from `saved_readback_unavailable`; it does not display submitted values as authoritative and keeps backtest review disabled until a successful refresh.
+- **Status:** Merged.
+- **Merge commit:** `cfac92a8696ffc1409f7f635a0bf3698d4ac9373`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/581
+- **Feature:** Admin/trader users can edit stored thresholds and toggles through a review-before-save flow; viewers retain read-only policy/audit access. Enabling auto-promotion and Telegram requires separate acknowledgements.
+- **Readback safety:** The client distinguishes verified `status: "ok"` from `saved_readback_unavailable`; unverified submitted values are not displayed as saved and backtest review remains blocked until refresh.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `1cf862b2d2106afa1b961f35d3b6fb78c12d546f`.
+- **Safety:** Mocked responses only; policy saves, backtests, promotion, paper activation, Telegram sends, and deployment were not executed.
+
+### Current PR #582 — backtest gate when policy status is unavailable
+
+- Adds an integration regression verifying the React preview keeps backtest review disabled when the promotion policy cannot be read, then enables review only after a successful retry.
+- The test asserts no backtest POST is sent in either state.
 - Validation is pending on the exact PR head; do not merge until all required checks pass.
