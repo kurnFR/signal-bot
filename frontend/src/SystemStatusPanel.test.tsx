@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SystemStatusPanel } from "./SystemStatusPanel";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.localStorage.clear(); });
@@ -65,8 +65,7 @@ describe("read-only Overview status panel", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/status could not be loaded.*retry/i);
     recovered = true;
-    render; // retry remains an explicit user action
-    screen.getByRole("button", { name: /Retry/i }).click();
+    fireEvent.click(screen.getByRole("button", { name: /Retry/i }));
     expect(await screen.findByText("market-data")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
