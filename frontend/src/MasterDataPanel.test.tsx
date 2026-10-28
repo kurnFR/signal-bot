@@ -47,6 +47,50 @@ describe("MasterDataPanel", () => {
     expect(screen.getByText("No datasets match this filter.")).toBeInTheDocument();
   });
 
+  it("searches Binance markets and quick-selects a symbol without starting a backfill", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const pepe = { symbol: "PEPEUSDT", baseAsset: "PEPE", quoteAsset: "USDT", market: "futures", lastPrice: 0.00001, priceChangePercent: 3.25, highPrice: 0.000011, lowPrice: 0.000009, volume: 5000000000, quoteVolume: 50000 };
+    const calls: Array<{ path: string; url: string; method: string; body?: unknown }> = [];
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      const path = url.pathname;
+      const method = init?.method ?? "GET";
+      calls.push({ path, url: url.toString(), method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+      if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/master-data/coverage") return json(responses["/api/master-data/coverage"]);
+      if (path === "/api/master-data/jobs") return json(responses["/api/master-data/jobs"]);
+      if (path === "/api/crypto/popular") return json(responses["/api/crypto/popular"]);
+      if (path === "/api/crypto/search") return json({ query: url.searchParams.get("q"), market: url.searchParams.get("market"), count: 1, results: [pepe] });
+      throw new Error("Unexpected endpoint: " + method + " " + url.toString());
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><MasterDataPanel /></AuthGate>);
+
+    expect(await screen.findByRole("heading", { name: /Binance asset search/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "SOLUSDT" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Use SOLUSDT in backfill form" }));
+    expect(screen.getByRole("textbox", { name: "Backfill symbol" })).toHaveValue("SOLUSDT");
+    expect(screen.getByRole("combobox", { name: "Backfill market" })).toHaveValue("spot");
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search cryptocurrency symbols" }), { target: { value: "PEPE" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Search market" }), { target: { value: "futures" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search symbols" }));
+    expect(await screen.findByText("PEPEUSDT")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Use PEPEUSDT in backfill form" }));
+    expect(screen.getByRole("textbox", { name: "Backfill symbol" })).toHaveValue("PEPEUSDT");
+    expect(screen.getByRole("combobox", { name: "Backfill market" })).toHaveValue("futures");
+
+    const searchCall = calls.find((call) => call.path === "/api/crypto/search");
+    expect(searchCall?.method).toBe("GET");
+    const url = new URL(searchCall!.url);
+    expect(url.searchParams.get("q")).toBe("PEPE");
+    expect(url.searchParams.get("market")).toBe("futures");
+    expect(url.searchParams.get("limit")).toBe("20");
+    expect(calls.some((call) => call.method === "POST")).toBe(false);
+  });
+
   it("requires an explicit confirmation before a trader can launch a backfill", async () => {
     window.localStorage.setItem("token", "trader-session");
     const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
