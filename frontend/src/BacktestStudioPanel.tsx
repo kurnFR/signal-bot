@@ -169,7 +169,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
           return <label className="screener-control-field" key={parameter.key}>{parameter.label}<input aria-label={parameter.label} type="number" min={parameter.min} max={parameter.max} step={parameter.step ?? 1} value={String(value)} onChange={(event) => setParameterValues((current) => ({ ...current, [parameter.key]: event.target.value }))} /></label>;
         })}</div> : <p className="empty-state">No adjustable parameters for this strategy.</p>}
       </div>}
-      <div className="screener-control-footer"><button className="button button-primary" type="button" disabled={loading || runBusy || !strategies.length || !promotionPolicy} onClick={reviewRun}>Review backtest run</button></div>
+      <div className="screener-control-footer"><button className="button button-primary" type="button" disabled={loading || runBusy || !strategies.length || !activeStrategy || !promotionPolicy} onClick={reviewRun}>Review backtest run</button></div>
     </section> : <p className="empty-state">Backtest execution is restricted to admin and trader roles. This session can review saved results only.</p>}
     {executionResult && <section className="panel" aria-labelledby="backtest-latest-result-title">
       <div className="panel-heading"><div><h2 id="backtest-latest-result-title">Latest execution result</h2><p>{executionResult.symbol} · {executionResult.market} · {executionResult.timeframe} · {executionResult.dataSegment}</p></div><span className="panel-counter">{executionResult.runId == null ? "NOT CONFIRMED SAVED" : `RUN #${executionResult.runId}`}</span></div>
