@@ -42,4 +42,40 @@ describe("expired session during forced password change", () => {
     expect(window.localStorage.getItem("token")).toBeNull();
     expect(screen.queryByText("Protected dashboard")).not.toBeInTheDocument();
   });
+  
+  it("clears all password fields before a user signs in again after session expiry", async () => {
+    window.localStorage.setItem("token", "expired-session-token");
+    const profile = {
+      id: 4,
+      username: "trader01",
+      email: null,
+      role: "trader",
+      must_change_password: true,
+    };
+    const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json(profile))
+      .mockResolvedValueOnce(json({ detail: "Not authenticated" }, 401))
+      .mockResolvedValueOnce(json({ token: "fresh-session-token", user: profile }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AuthGate><div>Protected dashboard</div></AuthGate>);
+    expect(await screen.findByRole("heading", { name: "Change your password" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Current password"), { target: { value: "old-password-secret" } });
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "new-password-secret-123" } });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "new-password-secret-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "trader01" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "login-password" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByRole("heading", { name: "Change your password" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Current password")).toHaveValue("");
+    expect(screen.getByLabelText("New password")).toHaveValue("");
+    expect(screen.getByLabelText("Confirm new password")).toHaveValue("");
+  });
 });
