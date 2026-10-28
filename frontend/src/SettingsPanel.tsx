@@ -17,7 +17,7 @@ function PreferenceRow({ icon, title, description, children }: { icon: ReactNode
   return <div className="settings-preference-row"><div className="settings-preference-icon" aria-hidden="true">{icon}</div><div className="settings-preference-copy"><strong>{title}</strong><p>{description}</p></div><div className="settings-preference-control">{children}</div></div>;
 }
 
-/** Only local UI preferences and safe session metadata; server configuration stays on the legacy dashboard. */
+/** Admin-only diagnostics are rendered without raw database errors or secrets; remaining server settings stay on the legacy dashboard. */
 export function SettingsPanel({ theme, onToggleTheme, username, role }: SettingsPanelProps) {
   const isAdmin = (role ?? "").toLowerCase() === "admin";
   const [telegramStatus, setTelegramStatus] = useState<TelegramStatus | null>(null);
@@ -103,7 +103,7 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
     } finally { setTelegramTestBusy(false); }
   };
   return <div className="settings-view">
-    <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>Workspace preferences</strong><p>This preview exposes local appearance preferences, basic session identity, admin-only system diagnostics, and a confirmed Telegram test control. Raw database errors, bot tokens, user administration, and API credentials remain hidden.</p></div><span className="panel-counter">SAFE PREVIEW</span></section>
+    <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>Workspace preferences</strong><p>This preview exposes local appearance preferences, session identity, admin-only system diagnostics, and a confirmed Telegram test control. Detailed connection metadata is restricted to admins; raw database errors, bot tokens, API credentials, and user administration remain hidden.</p></div><span className="panel-counter">SAFE PREVIEW</span></section>
     <section className="panel" aria-labelledby="settings-appearance-title">
       <div className="panel-heading"><div><h2 id="settings-appearance-title">Appearance</h2><p>Personalize the dashboard without changing backend configuration.</p></div><span className="panel-counter">LOCAL PREFERENCE</span></div>
       <PreferenceRow icon={theme === "dark" ? <Moon size={19} /> : <Sun size={19} />} title="Color theme" description={theme === "dark" ? "Dark theme is active. Your preference is saved in this browser when storage is available." : "Light theme is active. Your preference is saved in this browser when storage is available."}>
