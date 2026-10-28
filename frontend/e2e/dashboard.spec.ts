@@ -446,6 +446,7 @@ test("viewer Settings does not request admin diagnostics or Telegram configurati
 });
 
 test("an expired Settings read clears the stale token and returns to sign-in", async ({ page }) => {
+  let expireSettingsRead = false;
   await page.addInitScript(() => window.localStorage.setItem("token", "stale-settings-token"));
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -454,14 +455,22 @@ test("an expired Settings read clears the stale token and returns to sign-in", a
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...user, role: "admin" }) });
       return;
     }
-    if (path === "/api/settings/status") {
+    if (path === "/api/settings/status" && expireSettingsRead) {
       await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "Not authenticated" }) });
+      return;
+    }
+    if (path === "/api/settings/status") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        database: { status: "ok", host: "db.internal", port: 3306, database: "signal_bot", tables: {}, error: null },
+        heartbeats: [], binance: { spotApi: "online", futuresApi: "online", enableFuturesConfig: true },
+      }) });
       return;
     }
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
   });
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+  expireSettingsRead = true;
   await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
   await expect(page.getByRole("alert")).toHaveText("Your session has expired. Sign in again to continue.");
