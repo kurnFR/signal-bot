@@ -694,4 +694,4 @@ test("reduced-motion and forced-colors preferences remain accessible in the brow
   expect(forcedColorsStyles.borderTopStyle).toBe("solid");
   expect(Number.parseFloat(forcedColorsStyles.borderTopWidth)).toBeGreaterThanOrEqual(2);
 });
-\n
+
