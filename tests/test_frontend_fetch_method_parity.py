@@ -1,8 +1,8 @@
-"""Check that literal API fetch calls in the React preview use registered HTTP methods.
+"""Check that React preview API fetches use registered FastAPI HTTP methods.
 
-This complements GET-helper path checks: direct fetch calls also carry POST/DELETE
-requests and must not drift away from the mounted FastAPI route methods.
-The test inspects source and app route metadata only; it sends no requests.
+The source scan covers literal fetch paths, local path constants passed to fetch,
+and paths supplied to shared mutation helpers. It inspects source and route metadata
+only; it sends no requests and does not start the application lifespan.
 """
 from pathlib import Path
 import re
@@ -12,8 +12,14 @@ from web.app import app
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FETCH_PATH = re.compile(r"""fetch\s*\(\s*(['"`])([^'"`]+)\1""")
+FETCH_CALL = re.compile(
+    r"""fetch\s*\(\s*(?:(['"`])([^'"`]+)\1|([A-Za-z_$][\w$]*))\s*,\s*\{"""
+)
 METHOD = re.compile(r"""\bmethod\s*:\s*(['"])(GET|POST|PUT|PATCH|DELETE)\1""", re.IGNORECASE)
+FUNCTION_BOUNDARY = re.compile(r"""(?:async\s+)?function\b|=>\s*\{""")
+MUTATION_HELPERS = {
+    "postMasterDataJob": "POST",
+}
 
 
 def _normalize_path(path: str) -> str:
@@ -23,6 +29,22 @@ def _normalize_path(path: str) -> str:
     return path
 
 
+def _add_request(
+    requests: dict[tuple[str, str], list[str]],
+    method: str,
+    raw_path: str,
+    source: Path,
+    text: str,
+    position: int,
+) -> None:
+    if not raw_path.startswith("/api/"):
+        return
+    line = text.count("\n", 0, position) + 1
+    requests.setdefault((method.upper(), _normalize_path(raw_path)), []).append(
+        f"{source.relative_to(ROOT)}:{line}: {method.upper()} {raw_path}"
+    )
+
+
 def _frontend_fetch_requests() -> dict[tuple[str, str], list[str]]:
     requests: dict[tuple[str, str], list[str]] = {}
     source_root = ROOT / "frontend" / "src"
@@ -30,20 +52,42 @@ def _frontend_fetch_requests() -> dict[tuple[str, str], list[str]]:
         if ".test." in source.name or source.name == "setup.ts":
             continue
         text = source.read_text(encoding="utf-8")
-        for match in FETCH_PATH.finditer(text):
-            raw_path = match.group(2)
-            if not raw_path.startswith("/api/"):
-                continue
-            # The method option is near the beginning of the fetch options object.
-            # Fetch defaults to GET when no method is provided.
-            options_prefix = text[match.end():match.end() + 300]
+        assignments: dict[str, list[tuple[int, str]]] = {}
+        for name_match in re.finditer(r"""\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(['"`])(/api/[^'"`]+)\2""", text):
+            assignments.setdefault(name_match.group(1), []).append((name_match.start(), name_match.group(3)))
+
+        for match in FETCH_CALL.finditer(text):
+            literal_path, variable = match.group(2), match.group(3)
+            options_prefix = text[match.end():match.end() + 350]
             method_match = METHOD.search(options_prefix)
             method = method_match.group(2).upper() if method_match else "GET"
-            normalized = _normalize_path(raw_path)
-            line = text.count("\n", 0, match.start()) + 1
-            requests.setdefault((method, normalized), []).append(
-                f"{source.relative_to(ROOT)}:{line}: {method} {raw_path}"
-            )
+            raw_path = literal_path
+            if variable:
+                scope_matches = list(FUNCTION_BOUNDARY.finditer(text, 0, match.start()))
+                scope_start = scope_matches[-1].start() if scope_matches else 0
+                candidates = [
+                    (position, value)
+                    for position, value in assignments.get(variable, [])
+                    if scope_start < position < match.start()
+                ]
+                if not candidates:
+                    continue
+                raw_path = max(candidates, key=lambda item: item[0])[1]
+            _add_request(requests, method, raw_path, source, text, match.start())
+
+        # Shared helpers receive endpoint literals at their call sites; the HTTP
+        # method is fixed by the helper implementation, not by fetch()'s argument.
+        for helper, method in MUTATION_HELPERS.items():
+            for match in re.finditer(
+                rf"""{helper}\s*\(\s*(['"`])(/api/[^'"`]+)\1""",
+                text,
+            ):
+                _add_request(requests, method, match.group(2), source, text, match.start())
+        for match in re.finditer(
+            r"""mutateStrategyLibrary\s*\(\s*(['"`])(/api/[^'"`]+)\1\s*,\s*(['"])(POST|DELETE)\3""",
+            text,
+        ):
+            _add_request(requests, match.group(4), match.group(2), source, text, match.start())
     return requests
 
 
@@ -64,7 +108,7 @@ class TestFrontendFetchMethodParity(unittest.TestCase):
         self.assertGreaterEqual(
             len(requests),
             8,
-            "Expected to discover direct preview API fetch calls, including mutations",
+            "Expected to discover preview fetch paths, local path constants, and mutation helper call sites",
         )
         registered = _registered_api_methods()
         missing = {
