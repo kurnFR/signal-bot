@@ -574,3 +574,22 @@ test("Market Screener saves control changes only after the explicit Save changes
   expect(posts).toHaveLength(1);
   expect(JSON.parse(posts[0].body ?? "{}")).toEqual({ enabled: false, overrides: {} });
 });
+
+
+test("keyboard users can skip navigation and reach the main content", async ({ page }) => {
+  await mockApi(page);
+  await signIn(page);
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+
+  // Start from the document rather than relying on whichever control handled sign-in.
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
+  await page.keyboard.press("Tab");
+  const skipLink = page.getByRole("link", { name: "Skip to main content" });
+  await expect(skipLink).toBeFocused();
+
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/#main-content$/);
+  await expect(page.locator("#main-content")).toBeVisible();
+});
