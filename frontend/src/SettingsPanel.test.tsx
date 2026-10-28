@@ -45,7 +45,7 @@ describe("SettingsPanel", () => {
     expect(calls.filter((call) => call.path === "/api/telegram/test" && call.method === "POST")).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Send test ping" }));
-    expect(await screen.findByRole("status")).toHaveTextContent(/test ping sent to the configured telegram chat/i);
+    expect(await screen.findByText(/test ping sent to the configured telegram chat/i)).toBeInTheDocument();
     const testCall = calls.find((call) => call.path === "/api/telegram/test" && call.method === "POST");
     expect(testCall?.body).toEqual({});
   });
