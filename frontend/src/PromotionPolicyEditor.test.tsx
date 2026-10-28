@@ -109,4 +109,29 @@ describe("promotion policy editor", () => {
     expect(screen.getByText(/Editing and backtest review stay disabled/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit policy" })).not.toBeInTheDocument();
   });
+  
+  it("clears an expired session when saving the policy returns 401", async () => {
+    window.localStorage.setItem("token", "expired-admin-session");
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      if (path === "/api/auth/me") return json(profile("admin"));
+      if (path === "/api/backtest/promotion-policy" && method === "GET") return json({ policy: basePolicy });
+      if (path === "/api/backtest/promotion-audit?limit=5") return json({ events: [] });
+      if (path === "/api/backtest/promotion-policy" && method === "PUT") return json({ detail: "Not authenticated" }, 401);
+      return json({ detail: "Unexpected API request" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AuthGate><PromotionStatusPanel /></AuthGate>);
+    await screen.findByText("DISABLED");
+    fireEvent.click(screen.getByRole("button", { name: "Edit policy" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review policy changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save promotion policy" }));
+
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("token")).toBeNull();
+    expect(screen.queryByText("Promotion policy saved and verified by readback.")).not.toBeInTheDocument();
+  });
+
 });
