@@ -258,9 +258,19 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `5716e070f78592960f163c1a8e5cb66b20995e33`.
 - **Safety:** Mocked authentication only; no credentials were submitted to a live server.
 
-### Current PR #579 — read-only promotion policy and audit
+### PR #579 — read-only promotion policy and audit
 
-- Adds typed GET-only access to the saved auto-promotion policy and the five most recent promotion decisions.
-- Displays the stored thresholds and explicitly warns that the legacy workflow's Telegram setting may cause an external notification. Reconciliation-required and other non-success audit states remain visible.
-- Policy editing, activation, promotion, and Telegram-send actions remain unavailable in the preview. All such side-effecting migration work still requires explicit confirmation of the interaction and reconciliation design.
+- **Status:** Merged.
+- **Merge commit:** `14e7a8c3f326bb2f1ce4119ddd70d731002622f8`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/579
+- **Coverage/feature:** Added typed GET-only access to the saved auto-promotion policy and five most recent decision records. The panel displays thresholds, clearly calls out the Telegram side-effect setting, and preserves reconciliation-required and other non-success statuses.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `cbec75695484e4ce61dcc4e87af68c8ae383eb15`.
+- **Safety:** GET-only client and mocked responses; no policy writes, strategy activation, promotion, Telegram sends, or deployment. Policy editing and promotion actions remain unavailable.
+
+
+### Current PR #580 — backtest auto-promotion side-effect consent
+
+- The backend evaluates its saved auto-promotion policy when a backtest run completes. The React preview now waits for a verified policy response before enabling run review.
+- When promotion is enabled, the confirmation explicitly warns that a paper strategy may be activated and that a Telegram alert may be sent if configured. A separate acknowledgement is required before the POST run can proceed.
+- If policy status cannot be verified, the preview does not allow a backtest run, avoiding an unreviewed side effect.
 - Validation is pending on the exact PR head; do not merge until all required checks pass.
