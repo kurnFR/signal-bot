@@ -401,6 +401,7 @@ This table records the endpoints called by the currently merged React preview cl
 ### Still required before accepting UIX-00
 
 - [ ] Compare every legacy `web/static/index.html` view, dynamically created dialog, polling loop, and fetch call against the current route registry.
+- [x] Added a source-to-runtime parity test for literal API references in `web/static/**/*.js` and `web/static/**/*.html`; this validates route registration, not request method, payload schema, or complete UI behavior.
 - [ ] Verify method, request/response schema, role restriction, forced-password guard, and side effects for every endpoint; include `/api/auth/me` and all mutation paths.
 - [ ] Verify whether any component reachable from the React preview imports or calls mutation helpers outside the view's declared read-only path.
 - [ ] Complete browser-level coverage for login, forced password change, logout/session expiry, role differences, responsive navigation, and theme persistence. Added admin diagnostics visibility, viewer no-fetch, confirmation-without-send, and expired-settings-session coverage; remaining scenarios still require audit.
