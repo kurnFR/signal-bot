@@ -18,7 +18,9 @@ const validPolicy: PromotionPolicy = {
 };
 
 function mockSnapshot(policy: unknown, events: unknown = []) {
+  const methods: Array<string | undefined> = [];
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    methods.push(init?.method);
     const path = String(input);
     const payload = path.includes("promotion-policy") ? { policy } : { events };
     return Promise.resolve(new Response(JSON.stringify(payload), {
@@ -27,17 +29,17 @@ function mockSnapshot(policy: unknown, events: unknown = []) {
     }));
   });
   vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
+  return { fetchMock, methods };
 }
 
 describe("fetchPromotionSnapshot contract validation", () => {
   it("returns the complete verified policy and audit events", async () => {
     const events = [{ decision_hash: "abc", status: "promoted" }];
-    const fetchMock = mockSnapshot(validPolicy, events);
+    const { fetchMock, methods } = mockSnapshot(validPolicy, events);
 
     await expect(fetchPromotionSnapshot()).resolves.toEqual({ policy: validPolicy, events });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+    expect(methods).toEqual(["GET", "GET"]);
   });
 
   it("rejects an enabled policy that omits the Telegram side-effect flag", async () => {
