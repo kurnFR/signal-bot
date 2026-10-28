@@ -36,7 +36,7 @@ describe("read-only promotion status", () => {
 
     expect(await screen.findByText("No promotion decisions have been recorded.")).toBeInTheDocument();
     expect(screen.getByText("DISABLED")).toBeInTheDocument();
-    expect(screen.getByText(/Telegram alert setting: Enabled/)).toBeInTheDocument();
+    expect(screen.getByText("Enabled", { exact: true })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.every(([, init]) => (init as RequestInit).method === "GET")).toBe(true);
