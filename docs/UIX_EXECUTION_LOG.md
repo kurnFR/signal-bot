@@ -114,3 +114,13 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Finding/fix:** The React Research client fetched `/api/research/retailbot2/stats` but used an inaccurate `by_mode` type and did not render the saved performance aggregates. The client now renders mode and strategy summaries using the actual `get_retailbot2_stats()` contract; the view inventory was corrected.
 - **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `0d63422f3188d1520e14bc327d4992b8a99e049e`.
 - **Safety:** Read-only mocked UI/API tests only; no live trading, Telegram, worker, database mutation, or production deployment.
+
+
+### PR #562 — ML Studio empty and recovery states
+
+- **Status:** Merged.
+- **Merge commit:** `273ec8bf612b90a0a81b9489641677bfac4aab7d`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/562
+- **Coverage:** Empty experiment/model lists render intentional empty states; a temporary experiment API failure recovers through Retry into saved experiment details. Requests remain GET-only.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `074a56d9c385b552ab1fadcfb6f445569a5773df`.
+- **Safety:** Mocked API responses only; no experiment execution, model deployment, paper-trading action, Telegram message, worker change, or production deployment.
