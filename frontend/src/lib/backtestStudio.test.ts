@@ -133,8 +133,7 @@ describe("executeBacktest response contract validation", () => {
 
   it("rejects a fractional run ID instead of treating it as a saved run", async () => {
     mockExecutionResult({ ...validResult, runId: 42.5 });
-    await expect(executeBacktest(executionInput)).rejects.toBeInstanceOf(BacktestExecutionError);
-    await expect(executeBacktest(executionInput)).rejects.toThrow("Backtest returned an invalid result payload");
+    await expect(executeBacktest(executionInput)).rejects.toMatchObject({ name: "BacktestExecutionError", message: "Backtest returned an invalid result payload" });
   });
 
   it("rejects incorrectly typed metrics instead of rendering invalid values", async () => {
