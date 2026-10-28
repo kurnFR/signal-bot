@@ -186,7 +186,7 @@ The following draft register lists 81 API endpoint rows across the 13 router mod
 | `POST /api/custom-strategy/generate-ai` | `generate_ai_strategy`<br>`custom_strategy.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `GenerateAIStrategyRequest`<br>`{prompt: str, history: Optional[List[dict]], currentConfig: Optional[dict]}` | **200 OK:**<br>`{"status": "success", "provider": str, "strategy": dict, "chatResponse": str}` | Queries configured LLM (OpenAI/Anthropic/heuristic fallback) to generate valid rule JSON | AI Strategy Prompt input (`#view-strategies`) |
 | `POST /api/custom-strategy/create` | `create_custom_strategy`<br>`custom_strategy.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `CustomStrategyRequest`<br>`{name: str, displayName: str, description: str, longConditions: List[dict], shortConditions: List[dict], slAtrMult: float, riskRewardRatio: float}` | **200 OK:**<br>`{"status": "success", "name": str, "displayName": str, "message": str}`<br>**400:** Invalid syntax | Validates conditions; writes strategy definition into `custom_strategies.json` | "Save Strategy" button (`#view-strategies`) |
 | `DELETE /api/custom-strategy/{name}` | `delete_custom_strategy`<br>`custom_strategy.py` | `trader`, `admin` | Blocked (403 required) | **Path:** `name: str` | **200 OK:**<br>`{"status": "success", "message": str}`<br>**404:** Not found | Removes strategy from `custom_strategies.json` | Delete button on strategy card (`#view-strategies`) |
-| `POST /api/custom-strategy/quick-test` | `quick_test_strategy`<br>`custom_strategy.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `QuickTestRequest`<br>`{strategy: CustomStrategyRequest, symbol: str, market: str, timeframe: str}` | **200 OK:**<br>`{"status": "success", "symbol": str, "trades": int, "winRate": float, "profitFactor": float}` | Executes fast in-memory simulation against recent 500 candles | "Quick Test" button (`#view-strategies`) |
+| `POST /api/custom-strategy/quick-test` | `quick_test_strategy`<br>`custom_strategy.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `QuickTestRequest`<br>`{strategy: CustomStrategyRequest, symbol: str, market: str, timeframe: str}` | **200 OK:**<br>`{"status": "success", "symbol": str, "market": str, "timeframe": str, "totalCandles": int, "totalTrades": int, "winRate": number, "winRatePct": number, "netR": number, "profitFactor": number|null, "maxDrawdownR": number|null, "expectancyR": number|null}`<br>**400:** Fewer than 50 source candles | Runs an in-memory simulation on the latest up to 1,000 candles; returns percentage and R-based metrics, with non-finite optional metrics sanitized to null | Legacy "Quick Test" button (`#view-strategies`); unavailable in React preview |
 
 ---
 
@@ -645,3 +645,15 @@ Compared `web/routes/backtest.py` response construction with the inventory schem
 - [x] Corrected strategy-list and run response contracts from source.
 - [ ] Add mocked route contract tests for registry field names, default request values, insufficient-data errors, and simulation-success/database-save-failure behavior.
 - [ ] Preserve the read-only boundary of the React preview until run execution is explicitly migrated with role enforcement, clear persistence status, and tests.
+
+
+## UIX-00 source audit slice: Custom strategy quick-test contract (2026-10-28)
+
+Compared `web/routes/custom_strategy.py` with the inventory and React Strategy Library client.
+
+- `POST /api/custom-strategy/quick-test` uses up to the latest 1,000 candles, not 500. It rejects insufficient history (<50 source candles) with HTTP 400.
+- Its successful response includes `totalCandles`, `totalTrades`, fractional `winRate` and percentage `winRatePct`, `netR`, `profitFactor`, `maxDrawdownR`, and `expectancyR`. Non-finite numeric metrics are sanitized to null where applicable.
+- The React Strategy Library only calls the list and indicator GET endpoints. It does not call AI generation, create/delete, or quick-test endpoints; all those legacy capabilities remain outside this preview. The existing inventory and role-policy notes correctly identify the prefix-wide viewer restriction, so no RBAC change is made here.
+- [x] Corrected quick-test response schema and data-window behavior.
+- [ ] Add mocked route tests for the 50-candle guard, latest-1,000 window, and null sanitization of NaN/Infinity metrics.
+- [ ] Decide whether to migrate create, delete, AI generation, and quick-test workflows before calling Strategy Library feature parity complete.
