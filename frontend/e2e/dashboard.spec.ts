@@ -459,11 +459,6 @@ test("an expired Settings read clears the stale token and returns to sign-in", a
   expect(await page.evaluate(() => window.localStorage.getItem("token"))).toBeNull();
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toHaveCount(0);
 });
-toHaveText("Your session has expired. Sign in again to continue.");
-  expect(await page.evaluate(() => window.localStorage.getItem("token"))).toBeNull();
-  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toHaveCount(0);
-});
-
 test("a rejected sign-in keeps protected content hidden and does not persist a token", async ({ page }) => {
   await mockApi(page, { loginRejected: true });
   await signIn(page);
