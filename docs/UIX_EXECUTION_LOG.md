@@ -65,3 +65,13 @@ This log records verified execution checkpoints and keeps the next actions actio
 - Use one independently reviewable slice per PR.
 - Merge only when every required check is green on the exact PR head.
 - Never deploy, switch FastAPI routes, change production data, restart workers, execute trades, or send live Telegram messages as part of frontend migration without explicit approval.
+
+### PR #554 — viewer Strategy Library mutation boundary
+
+- **Status:** Merged.
+- **Merge commit:** `a9fd2c3e42edeb0bb10e722c22ecc2fc6fbbbafc`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/554
+- **Coverage added:** Playwright renders a mocked saved strategy for a viewer and verifies that create, quick-test, edit, delete, and AI-draft controls are absent. It also records custom-strategy requests and asserts that opening the view causes no non-GET request.
+- **Exact PR-head validation:** Frontend foundation workflow, pytest, unit tests, and RetailBot accounting regression all passed on `e0e055d6a5f8c9bfd2a054b1be4accb6a86f8ac1`.
+- **Safety:** All API responses are mocked. No saved strategy files, database, workers, live trades, Telegram sends, or production deployment were touched.
+
