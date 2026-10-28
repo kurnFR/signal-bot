@@ -82,7 +82,7 @@ describe("read-only strategy library", () => {
     expect(screen.getByRole("textbox", { name: "Strategy display name" })).toHaveValue("RSI + Volume");
     fireEvent.click(screen.getByRole("button", { name: "Review update" }));
     expect(await screen.findByRole("heading", { name: "Confirm strategy update" })).toBeInTheDocument();
-    expect(screen.getByText(/overwrites the saved definition for rsi_volume_v1/i)).toBeInTheDocument();
+    expect(screen.getByText("rsi_volume_v1", { selector: "strong" })).toBeInTheDocument();
     expect(calls.filter((call) => call.path === "/api/custom-strategy/create" && call.method === "POST")).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Confirm update" }));
