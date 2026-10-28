@@ -722,4 +722,12 @@ The News AI contract mismatch described in the historical audit has been correct
 - [x] Require a verified policy response before enabling backtest review.
 - [x] When policy is enabled, show the possible paper activation and Telegram side effects in the confirmation and require a separate acknowledgement before the run POST.
 - [x] If the policy cannot be loaded, keep run review unavailable until a successful retry.
-- [ ] Migrate policy editing and explicit promotion actions only after reviewing admin/trader authorization, Telegram consent, idempotency, and reconciliation-required recovery. Legacy dashboard remains production default pending owner acceptance.
+- [x] Migrate policy editing with admin/trader authorization, explicit auto-promotion/Telegram acknowledgements, and truthful saved-but-readback-unavailable handling. [ ] Explicit promotion/manual activation and reconciliation actions remain open pending side-effect review and owner acceptance. Legacy dashboard remains production default.
+
+
+## UIX-00 policy editing slice (2026-10-28)
+
+- [x] React preview exposes policy editing only to admin/trader roles; viewers retain read-only policy/audit visibility.
+- [x] Saving requires a review step. Enabling automatic promotion requires acknowledgement that future qualifying backtests may activate paper strategies; enabling Telegram requires separate external-notification acknowledgement.
+- [x] The client validates the save response contract and handles `saved_readback_unavailable` without presenting the submitted values as verified. Backtest review remains disabled until a successful refresh.
+- [ ] Explicit promotion/manual activation and reconciliation actions remain unimplemented in the React preview; retain the owner-acceptance gate until retry/idempotency and recovery semantics are reviewed.
