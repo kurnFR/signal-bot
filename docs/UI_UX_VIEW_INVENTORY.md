@@ -3,7 +3,7 @@
 **Document Version:** 1.2.0  
 **Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
-**Source baseline for reconciliation:** `d9652a6d500a97fe3f24051bded8c50faa2a205c` (master after PR #506; source-level route decorator count checked on 2026-10-27, runtime route registry and endpoint-to-row parity still pending)  
+**Source baseline for reconciliation:** `fd160f4d41898c82539e136b88283996d5e7570c` (master after PR #507; static router decorator count checked, runtime route registry and endpoint-to-row parity still pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
 **Modernization Plan Reference:** [`docs/UI_UX_MODERNIZATION_PLAN.md`](UI_UX_MODERNIZATION_PLAN.md)  
 
@@ -444,3 +444,35 @@ The role hierarchy in Section 3 describes `viewer` as read-only for dashboards a
 - The React preview's catalog client calls both GET endpoints. Since viewers receive 403, this can surface as a catalog loading failure unless the view gates access or presents a deliberate restricted state. Client visibility is not server authorization.
 - Regression coverage for the current viewer 403 behavior was merged in PR #505. This documentation change does not resolve the product/security decision or alter authorization.
 - Still not verified by this slice: full response payload examples from live runtime, catalog behavior across browser roles, all custom-strategy mutation request validation, and full legacy-to-React view parity.
+
+
+## UIX-00 source audit slice: custom-strategy mutation and quick-test boundary (2026-10-28)
+
+This slice checks the six custom-strategy handlers in `web/routes/custom_strategy.py` against the centralized policy in `web/app.py`. It records source-level behavior and does not change runtime code or decide whether viewers should eventually read the catalog.
+
+| Method and path | Request / validation | Effective access | Side effects and response behavior | React preview status |
+|---|---|---|---|---|
+| `POST /api/custom-strategy/generate-ai` | `GenerateAIStrategyRequest`: required `prompt`; optional `history: List[Dict[str,str]]` and `currentConfig: Dict[str,Any]`. Handler trims prompt and returns HTTP 400 when empty. Uses at most the last six history messages, normalizes generated indicator/operator/value fields and clamps stop-loss/RR fields. | Admin/trader only under the prefix-wide policy; forced-password-change accounts are blocked before handler execution. | Generation is draft-only: attempts configured 9Router, OpenRouter, then Anthropic providers and falls back to a local heuristic if no usable parsed response. Returns `status`, provider label, normalized `strategy`, and `chatResponse`. Handler does not persist the strategy or register it in the runtime registry. Prompt/history/current draft may be sent to the configured external LLM provider; this is a data-boundary consideration for product documentation. | Not called by the current React `StrategyLibraryPanel`; the panel is read-only and only fetches list/indicators. |
+| `POST /api/custom-strategy/create` | `CustomStrategyRequest`: name/displayName, description/rationale, long/short condition lists, SL ATR multiplier 0.5–5.0, risk/reward 1.0–6.0, trailing stop settings and bounded trailing parameters. Each condition requires indicator, operator and value. Name is normalized to lowercase alphanumeric/underscore characters; empty normalized name returns HTTP 400. | Admin/trader only; forced-password-change blocked. | Replaces any saved entry with the same normalized name, writes the JSON file first, then registers normal and inverse strategy runners and metadata in memory. A file-write failure is intended to leave the in-memory registry unchanged. Success returns status, normalized name, display name and message. | No create call in the current React preview; creation is explicitly out of scope for its read-only catalog panel. |
+| `DELETE /api/custom-strategy/{name}` | Path name is stripped and lowercased. No explicit 404 branch is present in the handler. | Admin/trader only; forced-password-change blocked. | Removes matching saved definitions from the JSON file, removes normal/inverse runners and metadata from in-memory registries, and returns success/message even if the name did not exist. Persistence write errors may still fail the request. | No delete call in the current React preview. |
+| `POST /api/custom-strategy/quick-test` | `QuickTestRequest` wraps a `CustomStrategyRequest` plus symbol (default `BTCUSDT`), market (default `spot`) and timeframe (default `1h`). Fetches closed-candle data; returns HTTP 400 if fewer than 50 rows are available. Simulates at most the latest 1,000 candles. | Admin/trader only; forced-password-change blocked. | Reads market data/features and computes in-memory trade metrics. Returns symbol/market/timeframe, candle/trade counts, win rate, net R, profit factor, max drawdown R and expectancy R. It does not save the strategy or backtest result. Non-finite metrics are cleaned before response. | No quick-test call in the current React preview. |
+| `GET /api/custom-strategy/list` | No request body; reads the saved strategy JSON file and returns `{"strategies": [...]}`. Read/parse exceptions are logged; handler returns the initialized/partially loaded list rather than surfacing a dedicated error. | Admin/trader only under the current prefix rule; forced-password-change blocked. | File-backed read. | Called by `fetchCustomStrategies` in the read-only React catalog panel. |
+| `GET /api/custom-strategy/indicators` | No request body; returns indicator definitions and supported operators (`<`, `<=`, `>`, `>=`, `==`). | Admin/trader only under the current prefix rule; forced-password-change blocked. | Static metadata response; no write side effect. | Called by `fetchStrategyIndicators` in the read-only React catalog panel. |
+
+### Contract and migration implications
+
+- `CustomStrategyRequest` constrains SL ATR and risk/reward values through Pydantic field bounds. The source declares bounds for trailing activation/distance as well. The request model does not itself establish that every indicator/operator combination is semantically valid; generator normalization and the strategy runner determine further handling.
+- `generate-ai` is a generation step, not a save/activate step. The UI must distinguish generated draft, quick-test result, and persisted strategy so users do not assume generation automatically activates a strategy.
+- `create` persists to the configured JSON file before mutating the in-memory `STRATEGIES` and `STRATEGY_METADATA` registries. A same-name create replaces the saved definition. `delete` removes both normal and inverse runners, but the handler's response does not distinguish a missing name from a successfully deleted one.
+- The current React preview deliberately exposes only the list and indicator reads. No create, delete, AI-generation, quick-test, promotion, or activation controls are present in `StrategyLibraryPanel`. The legacy UI call graph and full end-to-end parity for these actions remain to be independently audited.
+- Effective access for all six paths follows the prefix-wide `ADMIN_OR_TRADER_PREFIXES` rule in `web/app.py`; the existing regression test records viewer 403 behavior for the two GET endpoints. No authorization policy was changed by this documentation slice.
+- These are source-inspection findings, not live API contract tests. Still outstanding: runtime route-registry comparison, tests for request edge cases and file-write failures, role-specific browser acceptance, legacy UI parity, and owner decision on viewer catalog access.
+
+### UIX-00 audit status after this slice
+
+- [x] Source-level request models, validation branches, response shape and side-effect boundaries reviewed for custom-strategy generate/create/delete/quick-test/list/indicators handlers.
+- [x] Confirmed the current React strategy library panel only calls list and indicator read endpoints and exposes no mutation or quick-test actions.
+- [ ] Add or verify focused tests for create replacement, delete of missing names, JSON persistence failures, generator provider fallback, and quick-test insufficient-data handling.
+- [ ] Reconcile all custom-strategy routes with the runtime FastAPI route registry and verify legacy UI callers.
+- [ ] Resolve the viewer catalog policy with the owner; do not relax the prefix-wide rule without an explicit decision and narrow regression-tested policy.
+- [ ] Complete all-router route parity, role-specific browser/device/accessibility acceptance, and owner sign-off before any production route cutover.
