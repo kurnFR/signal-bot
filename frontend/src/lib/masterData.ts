@@ -18,7 +18,7 @@ export interface MasterDataSnapshot {
   summary: CoverageSummary; coverage: CoverageRow[]; jobs: MasterDataJob[];
 }
 
-/** Read-only dataset coverage and job status. No backfill or feature-build actions. */
+/** Read dataset coverage and job status; explicit job mutations are defined separately below. */
 export async function fetchMasterDataSnapshot(signal?: AbortSignal): Promise<MasterDataSnapshot> {
   const [coverage, jobs] = await Promise.all([
     getJson<{ summary: CoverageSummary; coverage: CoverageRow[] }>("/api/master-data/coverage", signal),
