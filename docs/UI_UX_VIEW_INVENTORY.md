@@ -739,3 +739,10 @@ The News AI contract mismatch described in the historical audit has been correct
 - [x] Verify retrying the policy GET restores run review only after policy state is available.
 - [x] Assert no `POST /api/backtest/run` is sent while the policy is unavailable.
 - [ ] Continue legacy-to-React parity for all remaining routes/views/callers and retain the explicit owner-acceptance gate before any production cutover.
+
+
+## UIX-00 policy-save session recovery (2026-10-28)
+
+- [x] Add mocked auth-gate coverage for a 401 response during `PUT /api/backtest/promotion-policy`.
+- [x] Verify the stale token is cleared, the UI returns to sign-in, and the client does not report the save as verified.
+- [ ] Continue all-router request/response/RBAC and legacy caller parity; owner acceptance and production cutover remain open.
