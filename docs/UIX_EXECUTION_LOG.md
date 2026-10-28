@@ -144,3 +144,13 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Coverage/feature:** Added a read-only per-strategy performance table from the existing `GET /api/paper/metrics` `byStrategy` payload, including closed trades, wins/losses, win rate, cumulative R, expectancy, and net PnL. The view inventory now records this consumer.
 - **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `54268976c9c4b09290ed736042c0d4e7b3ddb6ea`.
 - **Safety:** Read-only metrics display; no orders, positions, configs, workers, database writes, Telegram messages, or production deployment.
+
+
+### PR #565 — system status empty and recovery states
+
+- **Status:** Merged.
+- **Merge commit:** `e9fb9117bc7f60c0af71f14f84958d0124b2d16b`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/565
+- **Coverage:** A successful empty heartbeat response displays an explicit empty state; a temporary `/api/system/status` failure recovers after Retry. Requests remain GET-only.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest, unit tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `6eb4556770dca3d18d989743b6d5a353389752e0`.
+- **Safety:** Mocked public status responses only; no admin diagnostics or production state was accessed or changed.

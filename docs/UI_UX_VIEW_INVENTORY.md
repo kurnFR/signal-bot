@@ -663,7 +663,7 @@ Compared `web/routes/backtest.py` response construction with the inventory schem
 - Request defaults are material: market spot, timeframe 1d, strategy `confluence_ensemble_v1`, full data segment, $5,000 initial capital, 1% risk per trade, and database persistence enabled. The route requires at least 50 source candles and at least 30 candles in the selected segment. Insufficient data returns HTTP 400 with a detail message; no simulation is run.
 - If saving the run fails, the route logs the persistence error and can still return simulation results with `runId=null`. UI must not imply a saved historical run exists unless the returned ID is confirmed.
 - [x] Corrected strategy-list and run response contracts from source.
-- [ ] Add mocked route contract tests for registry field names, default request values, insufficient-data errors, and simulation-success/database-save-failure behavior.
+- [x] Added mocked route contract tests for registry field names, default request values, fewer-than-50-candle rejection, and simulation-success/database-save-failure behavior (`tests/test_backtest_route_contracts.py`).
 - [x] Migrated single-run backtest execution into the React preview with admin/trader gating, explicit confirmation, dynamic strategy/shared parameters, persistence-status messaging, and regression tests (PR #529). Run-all, policy edits, promotion, and Telegram actions remain outside this slice.
 
 
