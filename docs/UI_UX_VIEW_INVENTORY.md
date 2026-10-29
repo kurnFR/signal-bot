@@ -818,4 +818,13 @@ The News AI contract mismatch described in the historical audit has been correct
 - Backend source review found that wallet status telemetry, tracked-wallet timestamps, token-flow aggregates, and swap-event fields were named differently from the preview's TypeScript interfaces and JSX.
 - Update the preview to consume the registered route's real serializer fields (`last_cycle_at`, `first_flagged_at`, pair/buy/sell/net flow values, and swap `block_time`/`usd_value`).
 - Validate response envelopes and row types before rendering, with malformed payload regressions.
-- Exact-head CI and runtime/browser parity remain pending; production legacy dashboard is unchanged.
+- [x] Exact-head frontend and backend checks passed. The changes are present on `master` at commit `4ef356ae08f6f5ebfa683d4c93ee3a655c93801f`; PR #594's metadata still reports open after a merge-operation timeout and needs reconciliation.
+- Production legacy dashboard is unchanged.
+
+
+## UIX-00 Research API runtime contract reconciliation (PR #595, pending)
+
+- Align open-position rows with the actual API serializer (`side`, `stop_price`, `target_price`, `strategy`, `confluence_score`, `entry_time`) rather than unreturned current-price/unrealized-PnL fields.
+- Align closed trades with `net_pnl`, `exit_reason`, `entry_time`, and `exit_time`.
+- Validate each positions/trades row, mode and strategy statistics, and strict lifecycle boolean fields before rendering.
+- Exact-head CI and runtime parity remain pending; all requests remain GET-only.
