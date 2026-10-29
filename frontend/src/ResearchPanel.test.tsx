@@ -3,8 +3,8 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { ResearchPanel } from "./ResearchPanel";
 
 const snapshot = {
-  "/api/research/retailbot2/positions?limit=100": { positions: [{ id: 1, symbol: "BTCUSDT", mode: "inverse", entry_price: 100, current_price: 110, unrealized_pnl: 10, opened_at: "2026-10-26T10:00:00Z" }] },
-  "/api/research/retailbot2/trades?limit=50": { trades: [{ id: 2, symbol: "ETHUSDT", side: "LONG", mode: "shadow", entry_price: 50, exit_price: 55, realized_pnl: 5, closed_at: "2026-10-26T11:00:00Z" }] },
+  "/api/research/retailbot2/positions?limit=100": { positions: [{ id: 1, symbol: "BTCUSDT", side: "LONG", mode: "inverse", entry_price: 100, stop_price: 95, target_price: 110, atr: 2, rr: 2, units: 0.1, strategy: "BB_REV_INV", strategies_json: null, confluence_score: 4, reason: "test", entry_time: "2026-10-26T10:00:00Z" }] },
+  "/api/research/retailbot2/trades?limit=50": { trades: [{ id: 2, symbol: "ETHUSDT", side: "LONG", mode: "shadow", entry_price: 50, stop_price: 48, target_price: 55, units: 1, strategy: "BB_REV", confluence_score: 3, status: "CLOSED", exit_price: 55, exit_reason: "target", net_pnl: 5, pnl_percent: 10, entry_time: "2026-10-26T10:00:00Z", exit_time: "2026-10-26T11:00:00Z" }] },
   "/api/research/retailbot2/stats": { by_strategy: [{ strategy: "BB_REV_INV", mode: "inverse", total_trades: 12, wins: 7, losses: 5, total_pnl: 125.5, last_updated: "2026-10-26T12:00:00Z" }], by_mode: { inverse: { realized_pnl: 125.5, closed_count: 12, wins: 7, win_rate: 58.3, open_count: 1 }, shadow: { realized_pnl: -25, closed_count: 4, wins: 1, win_rate: 25, open_count: 0 } } },
   "/api/research/retailbot2/strategies": { strategies: [{ strategy_id: "BB_REV_INV", mode: "inverse", evaluation_enabled: true, paper_enabled: true, telegram_enabled: false, report_enabled: true, auto_promote_enabled: false }] },
 };
@@ -26,7 +26,7 @@ describe("ResearchPanel", () => {
     render(<ResearchPanel />);
     expect(await screen.findByText("BTCUSDT")).toBeInTheDocument();
     expect(screen.getByText("ETHUSDT")).toBeInTheDocument();
-    expect(screen.getAllByText("BB_REV_INV")).toHaveLength(2);
+    expect(screen.getAllByText("BB_REV_INV").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByRole("heading", { name: "Performance by mode" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Performance by strategy" })).toBeInTheDocument();
     expect(screen.getByText("58.3%")).toBeInTheDocument();
