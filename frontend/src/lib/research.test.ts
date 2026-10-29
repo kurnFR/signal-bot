@@ -51,7 +51,7 @@ describe("Research response contracts", () => {
 
   it("rejects trades with malformed PnL fields", async () => {
     installFetch({
-      "/api/research/retailbot2/trades?limit=50": { trades: [{ ...((responses["/api/research/retailbot2/trades"] as { trades: unknown[] }).trades[0] as object), net_pnl: "5" }] },
+      "/api/research/retailbot2/trades?limit=50": { trades: [{ id: 2, symbol: "ETHUSDT", side: "LONG", mode: "shadow", entry_price: 50, stop_price: 48, target_price: 55, units: 1, strategy: "BB_REV", confluence_score: 3, status: "CLOSED", exit_price: 55, exit_reason: "target", net_pnl: "5", pnl_percent: 10, entry_time: "2026-10-26T10:00:00Z", exit_time: "2026-10-26T11:00:00Z" }] },
     });
     await expect(fetchResearchSnapshot()).rejects.toThrow(/trades returned an invalid response/i);
   });
