@@ -401,3 +401,16 @@ This log records verified execution checkpoints and keeps the next actions actio
 - Compared `web/routes/wallet_routes.py`, `wallet_tracker/store.py`, and the React client. Found stale frontend expectations for health telemetry, tracked-wallet timestamps, token-flow aggregation fields, and swap-event payload fields.
 - Aligns the preview with the real serializer and validates metadata/settings/status plus tracked wallet, position, flow, and event rows.
 - No wallet settings/tracking mutation or worker action is called.
+
+
+### PR #594 — Wallet Tracking runtime contract reconciliation
+
+- **Exact-head validation:** frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, Wallet Tracker MariaDB integration, and RetailBot accounting regression passed.
+- **Repository state:** the change set is present on `master` at `4ef356ae08f6f5ebfa683d4c93ee3a655c93801f`. The merge action timed out and GitHub's PR metadata still reports #594 as open; treat that metadata as unresolved rather than claiming the PR status is finalized.
+- **Coverage:** aligned status telemetry, tracked-wallet timestamps, token-flow fields, and swap-event fields to the actual backend serializers; validated response envelopes and rows.
+
+### PR #595 — Research runtime contract reconciliation
+
+- **Status:** Open; exact-head CI pending.
+- Aligns open-position and closed-trade tables with the fields actually returned by `web/routes/research_routes.py` and the DB helpers.
+- Adds fail-closed validation for positions, trades, performance stats, and lifecycle booleans. Mocked responses only; no RetailBot execution or mutation.
