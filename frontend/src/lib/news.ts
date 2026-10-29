@@ -102,7 +102,8 @@ function validPerformance(value: unknown): value is NewsPerformance {
       !nullableFiniteNumber(value.expectancy_r) || !nullableFiniteNumber(value.profit_factor) ||
       !isFiniteNumber(value.total_r) || !isFiniteNumber(value.net_pnl) ||
       !isFiniteNumber(value.max_drawdown_r)) return false;
-  return value.win_rate === null || (value.win_rate >= 0 && value.win_rate <= 100);
+  const winRate = value.win_rate;
+  return winRate === null || (isFiniteNumber(winRate) && winRate >= 0 && winRate <= 100);
 }
 function validHeartbeat(value: unknown): value is NewsHeartbeat {
   return isRecord(value) && isNonEmptyString(value.collector_name) &&
@@ -115,7 +116,8 @@ function validStats(value: unknown): value is NewsStats {
       !nullableFiniteNumber(value.avg_confidence) || !isCount(value.trades_opened) ||
       !isCount(value.pending_signals) || !validPerformance(value.performance) ||
       !Array.isArray(value.heartbeats) || !value.heartbeats.every(validHeartbeat)) return false;
-  return value.avg_confidence === null || (value.avg_confidence >= 0 && value.avg_confidence <= 100);
+  const avgConfidence = value.avg_confidence;
+  return avgConfidence === null || (isFiniteNumber(avgConfidence) && avgConfidence >= 0 && avgConfidence <= 100);
 }
 function validNewsSignal(value: unknown): value is NewsSignal {
   if (!isRecord(value) || !isCount(value.id) || !isNonEmptyString(value.symbol) ||
@@ -131,7 +133,8 @@ function validNewsSignal(value: unknown): value is NewsSignal {
       !nullableString(value.country) || !nullableString(value.impact) ||
       !nullableString(value.scheduled_at) || !nullableNewsValue(value.actual_value) ||
       !nullableNewsValue(value.forecast_value) || !nullableNewsValue(value.previous_value)) return false;
-  return value.confidence === null || (value.confidence >= 0 && value.confidence <= 100);
+  const confidence = value.confidence;
+  return confidence === null || (isFiniteNumber(confidence) && confidence >= 0 && confidence <= 100);
 }
 function validNewsEvent(value: unknown): value is NewsEvent {
   return isRecord(value) && isCount(value.id) &&
