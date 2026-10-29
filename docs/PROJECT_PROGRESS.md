@@ -882,3 +882,10 @@ Reproducible frontend installation is already configured: `frontend/package-lock
 - Validate persisted control envelope types, finite numeric/boolean overrides, and membership of override keys in the server-declared tunable-field list.
 - Validate successful save responses include both `status: "ok"` and a non-empty `note`.
 - Add malformed control and save-response regressions. Exact-head CI is pending; no actual control mutation is performed by tests.
+
+
+### UIX-00 ML Studio response contract hardening — 2026-10-29 (PR #598)
+
+- Validate experiment summaries (identity, threshold, nullable diagnostics, win-rate bounds, counts, and file timestamp), saved model manifests/eligibility, and detail identity against the requested experiment ID.
+- Add malformed summary, model eligibility, and mismatched detail regressions.
+- Exact-head CI is pending. ML Studio remains read-only; experiment execution and model-to-paper deployment are not invoked.
