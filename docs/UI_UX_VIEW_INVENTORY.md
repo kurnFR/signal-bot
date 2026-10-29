@@ -869,24 +869,32 @@ The historical audit notes above are chronological. Use this latest ledger for c
 - **PR #598:** merged — `5564c958dc4f791ebeb7c3f89a4f22a92ffa490c`.
 - **PR #599:** merged — `b7a223781f8e2401812df3fd8a0c52e3a0e4a188`.
 
-## UIX-00 News AI runtime contract validation (PR #599, pending)
+## UIX-00 News AI runtime contract validation (PR #599, merged)
 
 - Validates stats, nested paper-performance metrics, collector heartbeats, signal rows, and event rows.
 - Preserves valid empty collections but rejects malformed envelopes and rows.
 - Preview remains GET-only. Production collectors, AI calls, paper execution, Telegram sends, and deployment remain outside this UI migration task.
 
 
-## UIX-00 public system-status response validation (PR #600, pending)
+## UIX-00 public system-status response validation (PR #600, merged — `b102845b71fada5228e1dde7f944db6c86905c57`)
 
 - Runtime-validates the public `GET /api/system/status` envelope, table-count values, collector heartbeat rows, nullable fields, and Binance connectivity/configuration values.
 - Keeps valid empty heartbeats and null timestamps/counts supported; rejects malformed payloads before the React view renders them.
 - New adapter tests mock HTTP only. This is read-only and does not access the admin-only diagnostics endpoint or trigger any worker, market-data, paper/live trading, or Telegram side effect.
-- [ ] Exact-head CI and review; legacy `web/static/` remains the production default until migration parity and owner acceptance are complete.
+- [x] Exact-head frontend and backend CI passed; legacy `web/static/` remains the production default until migration parity and owner acceptance are complete.
 
 
-## UIX-00 admin system-diagnostics response validation (PR #601, pending)
+## UIX-00 admin system-diagnostics response validation (PR #601, merged — `10bf6b70ff86c5844e7424ceb24bce5eae80ff2b`)
 
 - Validates the admin-only `GET /api/settings/status` payload before diagnostics render: connection metadata shape, nonnegative table counts, heartbeat details/timestamps, Binance status, and optional system metadata.
 - [x] Keep the endpoint admin-only; this change only validates responses and does not change authorization.
 - [x] Add mocked tests for malformed port, table-count, heartbeat, Binance, and system metadata fields.
-- [ ] Exact-head CI and review. Never expose the admin endpoint to viewer/trader roles or log connection details in public status.
+- [x] Exact-head frontend and backend CI passed. Never expose the admin endpoint to viewer/trader roles or log connection details in public status.
+
+
+## UIX-00 Telegram test-result response validation (PR #602, pending)
+
+- Validates the actual `test_telegram_connection()` response: required boolean `success`, optional bot identity strings, nullable chat ID/error, and optional note string.
+- Documents HTTP 400 `detail` responses separately from successful helper results. Corrects stale statements about the React Settings consumer; the preview already has an admin-only confirmed test-ping workflow.
+- All adapter tests mock the HTTP response. No Telegram message is sent by CI.
+- [ ] Exact-head CI and review. Keep the endpoint admin-only and preserve explicit confirmation because a successful call can send a real external message.
