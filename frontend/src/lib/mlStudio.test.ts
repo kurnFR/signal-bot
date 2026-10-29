@@ -65,7 +65,7 @@ describe("ML Studio response contracts", () => {
   });
 
   it("rejects path traversal and malformed experiment IDs before making a request", () => {
-    expect(() => fetchMLExperimentDetails("../outside")).toThrow(/invalid ml experiment id/i);
-    expect(() => fetchMLExperimentDetails("bad/id")).toThrow(/invalid ml experiment id/i);
+    await expect(fetchMLExperimentDetails("../outside")).rejects.toThrow(/invalid ml experiment id/i);
+    await expect(fetchMLExperimentDetails("bad/id")).rejects.toThrow(/invalid ml experiment id/i);
   });
 });
