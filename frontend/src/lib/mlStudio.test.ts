@@ -64,7 +64,7 @@ describe("ML Studio response contracts", () => {
     await expect(fetchMLExperimentDetails("btc-trend-test")).rejects.toThrow(/details returned an invalid response/i);
   });
 
-  it("rejects path traversal and malformed experiment IDs before making a request", () => {
+  it("rejects path traversal and malformed experiment IDs before making a request", async () => {
     await expect(fetchMLExperimentDetails("../outside")).rejects.toThrow(/invalid ml experiment id/i);
     await expect(fetchMLExperimentDetails("bad/id")).rejects.toThrow(/invalid ml experiment id/i);
   });
