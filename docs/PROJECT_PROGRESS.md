@@ -809,7 +809,7 @@ This section supersedes older UI/UX statements in this document that describe th
 - **Remaining UIX work:** compare every inventory row to effective runtime routes and RBAC; add Playwright/browser smoke coverage; perform screen-reader, contrast, zoom/reflow, forced-colors and real-mobile checks; obtain explicit owner acceptance before any route cutover.
 - **Safety boundary:** no production deployment, DB changes, worker restarts, backfills, paper execution, model deployment, or Telegram actions were performed by these preview PRs. Legacy dashboard remains the default.
 
-Next recommended work is reproducible frontend installs (lockfile plus `npm ci`), then runtime route/RBAC reconciliation and browser-level parity/accessibility coverage. Strategy-promotion and Telegram policy changes remain separately scoped, server-authorized work with explicit persistence, eligibility, accounting, audit, and stop/hide regression tests.
+Reproducible frontend installation is already configured: `frontend/package-lock.json` is tracked and `.github/workflows/frontend.yml` uses `npm ci`. Next priority is runtime route/RBAC reconciliation and browser-level parity/accessibility coverage. Strategy-promotion and Telegram policy changes remain separately scoped, server-authorized work with explicit persistence, eligibility, accounting, audit, and stop/hide regression tests.
 
 
 ### UIX-00 paper-trading row contract audit — 2026-10-29 (PR #590)
@@ -817,5 +817,21 @@ Next recommended work is reproducible frontend installs (lockfile plus `npm ci`)
 - Compared the React fields consumed by Paper Trading with the serializer output from `paper/engine.py`, the durable order rows from `paper/orders.py`, and risk diagnostics from `paper/circuit_breaker.py`.
 - Added fail-closed validation for each position, config, order, and closed-trade row before any of those rows reach the view. Required identifiers/text, configuration booleans, timestamps, and finite numeric fields are checked; optional nullable numeric/text fields remain nullable.
 - Added mocked regression cases for malformed position IDs, non-boolean config flags, infinite order price, and non-finite closed-trade PnL.
-- [ ] Verify exact PR-head frontend type-check/unit tests/build and all backend regression workflows before merge.
+- [x] Verified exact PR-head frontend type-check, unit tests, production build, Playwright browser smoke tests, pytest, unit tests, Wallet Tracker MariaDB integration, and RetailBot paper-accounting workflows; all passed.
+- [x] Merged PR #590 as `04c4ebffe45bf72f21d81be9d6cabe0d0f1267c8`.
 - [ ] Continue runtime route/RBAC parity, browser/device accessibility, and owner acceptance. React preview remains isolated; legacy dashboard remains production default. No production or paper-engine actions were performed.
+
+
+### UIX-00 Strategy Library row contract audit — 2026-10-29 (PR #591)
+
+- [x] Validate saved custom-strategy rows, optional condition arrays, finite numeric settings, and indicator metadata before passing API data to the React view.
+- [x] Add malformed saved-strategy and indicator-row regressions; the UI shows a recoverable load error rather than consuming invalid rows.
+- [x] Exact-head frontend type-check, unit tests, production build, Playwright browser smoke tests, pytest (two runs), unit tests, Wallet Tracker MariaDB integration, and RetailBot paper-accounting checks passed.
+- [x] Merged PR #591 as `7e2a3fc7a27b5b7af51eb8c267e5386719b3983d`.
+- [ ] Continue validating mutation result contracts and route/RBAC parity; all strategy mutations remain server-authorized. Legacy dashboard remains production default.
+
+### UIX-00 Master Data snapshot row contract audit — 2026-10-29 (PR #592)
+
+- Validate coverage summary counts, each coverage row, and every Master Data job row before rendering.
+- Add regressions for malformed coverage summary values and non-numeric job progress; invalid snapshots fail closed rather than being converted into partial empty datasets.
+- Exact-head CI is pending. No backfill or feature-build jobs are started by this read-contract change.
