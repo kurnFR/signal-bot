@@ -855,7 +855,7 @@ Reproducible frontend installation is already configured: `frontend/package-lock
 - Align the React view and fixtures with the backend's actual tracked-wallet, position, token-flow, status, and swap-event schemas.
 - Add fail-closed validation for metadata, settings, status, and each row collection. Invalid responses should show the existing recoverable API error rather than render undefined fields.
 - [x] Exact-head frontend type-check, unit tests, production build, Playwright smoke tests, pytest (two runs), unit-tests, Wallet Tracker MariaDB integration, and RetailBot paper-accounting checks passed.
-- [x] Wallet Tracking changes are present on `master` at commit `4ef356ae08f6f5ebfa683d4c93ee3a655c93801f`; the PR metadata endpoint still reports #594 as open after the merge operation timed out, so its status requires reconciliation.
+- [x] Wallet Tracking changes are present on `master` at commit `4ef356ae08f6f5ebfa683d4c93ee3a655c93801f`; PR #594 was closed after the merge operation timed out, and GitHub does not report it as a merged PR despite the code being on `master`.
 - All calls remain GET-only; no wallet tracking/settings mutations or worker actions are invoked.
 
 
@@ -863,4 +863,13 @@ Reproducible frontend installation is already configured: `frontend/package-lock
 
 - Source review found that Research preview fixtures and interfaces expected `current_price`, `unrealized_pnl`, `opened_at`, `realized_pnl`, and `closed_at`, while the registered route returns ledger fields such as `stop_price`, `target_price`, `strategy`, `entry_time`, `net_pnl`, `exit_reason`, and `exit_time`.
 - Align the React tables with the actual RetailBot2 serializer fields and validate positions, closed trades, performance aggregates, and lifecycle rows before rendering.
-- Exact-head CI is pending. This is read-only response validation; no RetailBot execution, strategy setting change, paper trade, Telegram send, or deployment is performed.
+- [x] Exact-head frontend type-check, unit tests, production build, Playwright smoke tests, pytest (two runs), unit-tests, Wallet Tracker MariaDB integration, and RetailBot paper-accounting checks passed.
+- [x] Merged PR #595 as `8dbee6e4a2bb04b434b9b687e7f58a52a5e9615b`.
+- This is read-only response validation; no RetailBot execution, strategy setting change, paper trade, Telegram send, or deployment was performed.
+
+
+### UIX-00 Screener snapshot response contracts — 2026-10-29 (PR #596)
+
+- Validate worker status, signal row IDs/labels/finite numeric metrics, nullable timestamps, Telegram flags, and signal-count aggregates before rendering.
+- Add mocked regressions for valid backend-shaped snapshots and malformed signal/stat fields.
+- Exact-head CI is pending. The preview continues to use only GET endpoints; no screener control endpoint is called.

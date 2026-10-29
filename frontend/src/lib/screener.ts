@@ -35,13 +35,59 @@ export interface ScreenerStats {
 
 export interface ScreenerSnapshot { status: ScreenerStatus; signals: ScreenerSignal[]; stats: ScreenerStats }
 
-/** Read-only snapshot. No screener control endpoint is called from this module. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+function isNonEmptyString(value: unknown): value is string {
+  return isString(value) && value.trim().length > 0;
+}
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+function isCount(value: unknown): value is number {
+  return isFiniteNumber(value) && Number.isInteger(value) && value >= 0;
+}
+function nullableString(value: unknown): boolean {
+  return value === null || isString(value);
+}
+function validScreenerStatus(value: unknown): value is ScreenerStatus {
+  if (!isRecord(value) || typeof value.running !== "boolean" ||
+      typeof value.database_ok !== "boolean" || typeof value.enabled !== "boolean" ||
+      !isNonEmptyString(value.timeframe) || !isCount(value.symbols_monitored) ||
+      !nullableString(value.last_beat_at) || !nullableString(value.last_signal_at) ||
+      !nullableString(value.last_universe_refresh)) return false;
+  return value.pid === undefined || value.pid === null || isCount(value.pid);
+}
+function validScreenerSignal(value: unknown): value is ScreenerSignal {
+  return isRecord(value) && isCount(value.id) && isNonEmptyString(value.symbol) &&
+    isNonEmptyString(value.signal_type) &&
+    ["rvol", "volume", "quote_volume", "price", "price_change_pct", "volume_velocity", "quality_score"]
+      .every((key) => isFiniteNumber(value[key])) &&
+    nullableString(value.candle_time) && typeof value.telegram_sent === "boolean" &&
+    isNonEmptyString(value.detected_at);
+}
+function validScreenerStats(value: unknown): value is ScreenerStats {
+  return isRecord(value) && isCount(value.total_signals) &&
+    isCount(value.signals_last_24h) && isRecord(value.by_type_last_24h) &&
+    Object.values(value.by_type_last_24h).every(isCount);
+}
+
+/** Read-only snapshot. Reject malformed backend rows instead of rendering partial or misleading metrics. */
 export async function fetchScreenerSnapshot(signal?: AbortSignal): Promise<ScreenerSnapshot> {
   const [status, signalPayload, stats] = await Promise.all([
-    getJson<ScreenerStatus>("/api/research/screener/status", signal),
-    getJson<{ signals: ScreenerSignal[] }>("/api/research/screener/signals?limit=50", signal),
-    getJson<ScreenerStats>("/api/research/screener/stats", signal),
+    getJson<unknown>("/api/research/screener/status", signal),
+    getJson<unknown>("/api/research/screener/signals?limit=50", signal),
+    getJson<unknown>("/api/research/screener/stats", signal),
   ]);
+  if (!validScreenerStatus(status)) throw new Error("Screener status returned an invalid response");
+  if (!isRecord(signalPayload) || !Array.isArray(signalPayload.signals) ||
+      !signalPayload.signals.every(validScreenerSignal)) {
+    throw new Error("Screener signals returned an invalid response");
+  }
+  if (!validScreenerStats(stats)) throw new Error("Screener stats returned an invalid response");
   return { status, signals: signalPayload.signals, stats };
 }
 

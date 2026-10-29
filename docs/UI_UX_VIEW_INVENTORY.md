@@ -827,4 +827,12 @@ The News AI contract mismatch described in the historical audit has been correct
 - Align open-position rows with the actual API serializer (`side`, `stop_price`, `target_price`, `strategy`, `confluence_score`, `entry_time`) rather than unreturned current-price/unrealized-PnL fields.
 - Align closed trades with `net_pnl`, `exit_reason`, `entry_time`, and `exit_time`.
 - Validate each positions/trades row, mode and strategy statistics, and strict lifecycle boolean fields before rendering.
-- Exact-head CI and runtime parity remain pending; all requests remain GET-only.
+- [x] Exact-head frontend and backend checks passed; PR #595 merged as `8dbee6e4a2bb04b434b9b687e7f58a52a5e9615b`.
+- All requests remain GET-only.
+
+
+## UIX-00 Screener snapshot contract hardening (PR #596, pending)
+
+- Validates the effective screener status shape, signal rows, finite metrics, and aggregate count maps before rendering.
+- Tests cover valid snapshots and malformed signal/stat payloads.
+- Exact-head CI remains pending; the Market Screener V2 preview does not call screener control endpoints.
