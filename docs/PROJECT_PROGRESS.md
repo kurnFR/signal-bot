@@ -888,4 +888,13 @@ Reproducible frontend installation is already configured: `frontend/package-lock
 
 - Validate experiment summaries (identity, threshold, nullable diagnostics, win-rate bounds, counts, and file timestamp), saved model manifests/eligibility, and detail identity against the requested experiment ID.
 - Add malformed summary, model eligibility, and mismatched detail regressions.
-- Exact-head CI is pending. ML Studio remains read-only; experiment execution and model-to-paper deployment are not invoked.
+- [x] Exact-head frontend type-check, unit tests, production build, Playwright smoke tests, pytest (two runs), unit-tests, Wallet Tracker MariaDB integration, and RetailBot paper-accounting checks passed.
+- [x] Merged PR #598 as `5564c958dc4f791ebeb7c3f89a4f22a92ffa490c`.
+- ML Studio remains read-only; experiment execution and model-to-paper deployment were not invoked.
+
+
+### UIX-00 News AI snapshot response contracts — 2026-10-29 (PR #599)
+
+- Validate News AI stats and nested performance/heartbeat rows, nullable confidence and numeric event values, signal booleans/IDs, and event row IDs before rendering.
+- Empty signal/event collections remain valid; malformed payloads fail closed instead of silently turning invalid arrays into empty lists.
+- Exact-head CI is pending. All calls remain GET-only; collectors, AI inference, paper execution, and Telegram sends are not invoked.
