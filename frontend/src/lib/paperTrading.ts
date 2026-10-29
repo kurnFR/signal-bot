@@ -21,6 +21,50 @@ function validMetricRow(value: unknown): boolean {
   if (!isRecord(value) || typeof value.strategy !== "string") return false;
   return ["totalTrades", "wins", "losses", "winRatePct", "cumulativeR", "expectancyR", "netPnl"].every((key) => finite(value[key]));
 }
+
+function positiveId(value: unknown): boolean {
+  return Number.isSafeInteger(value) && (value as number) > 0;
+}
+function requiredText(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function nullableText(value: unknown): boolean {
+  return value === null || typeof value === "string";
+}
+function optionalNullableFinite(record: Record<string, unknown>, key: string): boolean {
+  return !(key in record) || nullableFinite(record[key]);
+}
+function validPosition(value: unknown): boolean {
+  if (!isRecord(value) || !positiveId(value.id)) return false;
+  if (!["symbol", "market", "timeframe", "strategy_name", "direction", "status"].every((key) => requiredText(value[key]))) return false;
+  if (!["entry_price", "current_price", "quantity", "allocated_capital"].every((key) => finite(value[key]))) return false;
+  if (!["stop_loss", "take_profit", "unrealized_pnl_pct", "unrealized_r"].every((key) => nullableFinite(value[key]))) return false;
+  return optionalNullableFinite(value, "entry_time") &&
+    nullableText(value.last_update_time);
+}
+function validConfig(value: unknown): boolean {
+  return isRecord(value) && positiveId(value.id) &&
+    ["symbol", "market", "timeframe", "strategy_name", "created_at"].every((key) => requiredText(value[key])) &&
+    typeof value.is_active === "boolean" &&
+    finite(value.allocated_capital) && finite(value.risk_per_trade_pct) &&
+    typeof value.telegram_enabled === "boolean" && typeof value.report_enabled === "boolean";
+}
+function validOrder(value: unknown): boolean {
+  if (!isRecord(value) || !positiveId(value.id)) return false;
+  if (!["symbol", "market", "timeframe", "side", "order_type", "status", "created_at"].every((key) => requiredText(value[key]))) return false;
+  if (!optionalNullableFinite(value, "price") || !optionalNullableFinite(value, "quantity")) return false;
+  return (!("filled_at" in value) || nullableText(value.filled_at)) &&
+    (!("state_reason" in value) || nullableText(value.state_reason));
+}
+function validTrade(value: unknown): boolean {
+  if (!isRecord(value) || !positiveId(value.id)) return false;
+  if (!["symbol", "market", "timeframe", "strategy_name", "direction", "exit_reason", "entry_time_wib", "exit_time_wib"].every((key) => typeof value[key] === "string")) return false;
+  return ["entry_price", "exit_price", "net_pnl", "net_return_pct", "r_multiple"].every((key) => finite(value[key]));
+}
+function validRows(value: unknown, key: string, validator: (row: unknown) => boolean): boolean {
+  return isRecord(value) && Array.isArray(value[key]) && value[key].every(validator);
+}
+
 function validMetrics(value: unknown): value is PaperMetrics {
   if (!isRecord(value) || !Array.isArray(value.byStrategy)) return false;
   return ["totalTrades", "wins", "losses", "winRatePct", "cumulativeR", "expectancyR", "netPnl"].every((key) => finite(value[key])) &&
@@ -44,10 +88,10 @@ export async function fetchPaperTradingSnapshot(signal?: AbortSignal): Promise<P
     getJson<{ metrics: PaperMetrics }>("/api/paper/metrics", signal),
     getJson<PaperCircuitBreaker>("/api/paper/circuit-breakers", signal),
   ]);
-  if (!isRecord(positions) || !Array.isArray(positions.positions) ||
-      !isRecord(configs) || !Array.isArray(configs.configs) ||
-      !isRecord(orders) || !Array.isArray(orders.orders) ||
-      !isRecord(trades) || !Array.isArray(trades.trades) ||
+  if (!validRows(positions, "positions", validPosition) ||
+      !validRows(configs, "configs", validConfig) ||
+      !validRows(orders, "orders", validOrder) ||
+      !validRows(trades, "trades", validTrade) ||
       !isRecord(metrics) || !validMetrics(metrics.metrics) || !validBreaker(breaker)) {
     throw new Error("Paper trading API returned an invalid response; risk status is not verified");
   }
