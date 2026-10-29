@@ -445,3 +445,16 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Status:** Open; exact-head CI pending.
 - Validates GET control snapshots against the declared tunable-field contract and validates successful POST response metadata.
 - All regression tests mock HTTP responses; no control setting is actually saved.
+
+
+### PR #597 — Screener control response contracts
+
+- **Status:** Merged. Merge commit: `d576c65d3613e9cfb12e43cfa503797ee8dd992c`.
+- Validates persisted control fields, finite numeric/boolean overrides, declared tunable keys, and successful save response notes.
+- Exact-head frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, Wallet Tracker MariaDB integration, and RetailBot accounting regression passed. Tests used mocks only.
+
+### PR #598 — ML Studio response contracts
+
+- **Status:** Open; exact-head CI pending.
+- Validates experiment summary rows, saved model eligibility/weight flags, and detail identity; invalid model metadata fails closed before it can be counted as eligible.
+- Tests use mocked GET responses only. No experiment run or paper deployment is invoked.

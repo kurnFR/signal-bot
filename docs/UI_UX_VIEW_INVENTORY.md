@@ -843,4 +843,12 @@ The News AI contract mismatch described in the historical audit has been correct
 
 - Validates the persisted control envelope, finite numeric/boolean overrides, and server-declared tunable field keys.
 - Validates save responses contain `status: "ok"` and a non-empty explanatory note.
-- Exact-head CI pending. Server-side RBAC and validation remain authoritative; no control save is executed by tests.
+- [x] Exact-head frontend and backend checks passed; PR #597 merged as `d576c65d3613e9cfb12e43cfa503797ee8dd992c`.
+- Server-side RBAC and validation remain authoritative; no control save is executed by tests.
+
+
+## UIX-00 ML Studio response contract hardening (PR #598, pending)
+
+- Validates experiment summaries and safe IDs, model manifest identity/eligibility/weight flags, and details identity before rendering.
+- Adds mocked tests for malformed numeric summary fields, invalid eligibility booleans, and mismatched experiment detail IDs.
+- Exact-head CI pending; the preview remains GET-only and does not launch experiments or deploy models.
