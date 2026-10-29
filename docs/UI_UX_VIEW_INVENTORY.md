@@ -882,3 +882,11 @@ The historical audit notes above are chronological. Use this latest ledger for c
 - Keeps valid empty heartbeats and null timestamps/counts supported; rejects malformed payloads before the React view renders them.
 - New adapter tests mock HTTP only. This is read-only and does not access the admin-only diagnostics endpoint or trigger any worker, market-data, paper/live trading, or Telegram side effect.
 - [ ] Exact-head CI and review; legacy `web/static/` remains the production default until migration parity and owner acceptance are complete.
+
+
+## UIX-00 admin system-diagnostics response validation (PR #601, pending)
+
+- Validates the admin-only `GET /api/settings/status` payload before diagnostics render: connection metadata shape, nonnegative table counts, heartbeat details/timestamps, Binance status, and optional system metadata.
+- [x] Keep the endpoint admin-only; this change only validates responses and does not change authorization.
+- [x] Add mocked tests for malformed port, table-count, heartbeat, Binance, and system metadata fields.
+- [ ] Exact-head CI and review. Never expose the admin endpoint to viewer/trader roles or log connection details in public status.
