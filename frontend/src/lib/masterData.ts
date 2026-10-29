@@ -76,16 +76,64 @@ export interface MasterDataSnapshot {
   summary: CoverageSummary; coverage: CoverageRow[]; jobs: MasterDataJob[];
 }
 
-/** Read dataset coverage and job status; explicit job mutations are defined separately below. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+function isCount(value: unknown): value is number {
+  return isFiniteNumber(value) && Number.isInteger(value) && value >= 0;
+}
+function validCoverageSummary(value: unknown): value is CoverageSummary {
+  return isRecord(value) && isCount(value.totalCandles) &&
+    isCount(value.distinctSymbols) && isCount(value.coverageEntries);
+}
+function validCoverageRow(value: unknown): value is CoverageRow {
+  if (!isRecord(value) || !isNonEmptyString(value.symbol) || !isNonEmptyString(value.market) ||
+      !isNonEmptyString(value.timeframe) || !isCount(value.candleCount) ||
+      !isCount(value.featureCount) || typeof value.hasFeatures !== "boolean") return false;
+  return ["minOpenTime", "maxCloseTime", "startDate", "endDate"].every((key) =>
+    value[key] === null || typeof value[key] === "string");
+}
+function validJobTimestamp(value: unknown): boolean {
+  return typeof value === "string" || isFiniteNumber(value);
+}
+function validMasterDataJob(value: unknown): value is MasterDataJob {
+  if (!isRecord(value) || !isNonEmptyString(value.type) || !isNonEmptyString(value.symbol) ||
+      !isNonEmptyString(value.market) || !isNonEmptyString(value.timeframe) ||
+      !isNonEmptyString(value.status) || !isFiniteNumber(value.progress) ||
+      value.progress < 0 || value.progress > 100) return false;
+  for (const key of ["id", "job_id"] as const) {
+    if (value[key] !== undefined && typeof value[key] !== "string") return false;
+  }
+  if (value.message !== undefined && typeof value.message !== "string") return false;
+  if (value.error !== undefined && value.error !== null && typeof value.error !== "string") return false;
+  if (value.created_at !== undefined && !validJobTimestamp(value.created_at)) return false;
+  if (value.updated_at !== undefined && !validJobTimestamp(value.updated_at)) return false;
+  return value.candles_fetched === undefined || isCount(value.candles_fetched);
+}
+
+/** Read dataset coverage and job status; malformed rows fail closed before rendering. */
 export async function fetchMasterDataSnapshot(signal?: AbortSignal): Promise<MasterDataSnapshot> {
   const [coverage, jobs] = await Promise.all([
-    getJson<{ summary: CoverageSummary; coverage: CoverageRow[] }>("/api/master-data/coverage", signal),
-    getJson<{ jobs: MasterDataJob[] }>("/api/master-data/jobs", signal),
+    getJson<unknown>("/api/master-data/coverage", signal),
+    getJson<unknown>("/api/master-data/jobs", signal),
   ]);
+  if (!isRecord(coverage) || !validCoverageSummary(coverage.summary) ||
+      !Array.isArray(coverage.coverage) || !coverage.coverage.every(validCoverageRow)) {
+    throw new Error("Master Data coverage returned an invalid response");
+  }
+  if (!isRecord(jobs) || !Array.isArray(jobs.jobs) || !jobs.jobs.every(validMasterDataJob)) {
+    throw new Error("Master Data jobs returned an invalid response");
+  }
   return {
     summary: coverage.summary,
-    coverage: Array.isArray(coverage.coverage) ? coverage.coverage : [],
-    jobs: Array.isArray(jobs.jobs) ? jobs.jobs : [],
+    coverage: coverage.coverage,
+    jobs: jobs.jobs,
   };
 }
 
