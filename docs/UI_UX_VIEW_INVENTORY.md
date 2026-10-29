@@ -835,4 +835,12 @@ The News AI contract mismatch described in the historical audit has been correct
 
 - Validates the effective screener status shape, signal rows, finite metrics, and aggregate count maps before rendering.
 - Tests cover valid snapshots and malformed signal/stat payloads.
-- Exact-head CI remains pending; the Market Screener V2 preview does not call screener control endpoints.
+- [x] Exact-head frontend and backend checks passed; PR #596 merged as `163c87ba606b49c86438c8af344069bfba3ee269`.
+- The Market Screener V2 snapshot preview does not call screener control endpoints.
+
+
+## UIX-00 Screener control contract hardening (PR #597, pending)
+
+- Validates the persisted control envelope, finite numeric/boolean overrides, and server-declared tunable field keys.
+- Validates save responses contain `status: "ok"` and a non-empty explanatory note.
+- Exact-head CI pending. Server-side RBAC and validation remain authoritative; no control save is executed by tests.
