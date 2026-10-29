@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AuthGate } from "./AuthGate";
 import { MasterDataPanel } from "./MasterDataPanel";
+import { fetchMasterDataSnapshot } from "./lib/masterData";
 
 const responses = {
   "/api/master-data/coverage": {
@@ -222,4 +223,28 @@ describe("MasterDataPanel", () => {
     expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
   });
 
+
+  it("rejects malformed coverage summary and rows instead of silently rendering partial data", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      const body = path === "/api/master-data/coverage"
+        ? { summary: { totalCandles: "1200", distinctSymbols: 2, coverageEntries: 1 }, coverage: [] }
+        : responses["/api/master-data/jobs"];
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchMasterDataSnapshot()).rejects.toThrow(/coverage returned an invalid response/i);
+  });
+
+  it("rejects malformed job rows instead of treating them as valid status", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      const body = path === "/api/master-data/jobs"
+        ? { jobs: [{ id: "job-1", type: "backfill", symbol: "BTCUSDT", market: "spot", timeframe: "1h", status: "completed", progress: "100" }] }
+        : responses["/api/master-data/coverage"];
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchMasterDataSnapshot()).rejects.toThrow(/jobs returned an invalid response/i);
+  });
 });
