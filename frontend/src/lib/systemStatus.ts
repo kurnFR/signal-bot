@@ -69,15 +69,31 @@ export interface AdminSystemStatusResponse {
   binance: SystemStatusResponse["binance"];
   system?: { timezone?: string };
 }
+function isAdminSystemStatus(value: unknown): value is AdminSystemStatusResponse {
+  if (!isRecord(value) || !isRecord(value.database) ||
+      !isNonEmptyString(value.database.status) || !isNonEmptyString(value.database.host) ||
+      !(typeof value.database.port === "number" && Number.isFinite(value.database.port) ||
+        isNonEmptyString(value.database.port)) ||
+      !isNonEmptyString(value.database.database) || !isTableCounts(value.database.tables) ||
+      !(value.database.error === null || typeof value.database.error === "string") ||
+      !Array.isArray(value.heartbeats) || !value.heartbeats.every((heartbeat) =>
+        isRecord(heartbeat) && isNonEmptyString(heartbeat.collector) &&
+        isNonEmptyString(heartbeat.status) &&
+        (heartbeat.detail === undefined || heartbeat.detail === null || typeof heartbeat.detail === "string") &&
+        (heartbeat.lastBeat === null || typeof heartbeat.lastBeat === "string")) ||
+      !isRecord(value.binance) ||
+      !isNonEmptyString(value.binance.spotApi) ||
+      !isNonEmptyString(value.binance.futuresApi) ||
+      typeof value.binance.enableFuturesConfig !== "boolean") return false;
+  return value.system === undefined ||
+    (isRecord(value.system) &&
+      (value.system.timezone === undefined || typeof value.system.timezone === "string"));
+}
+
 /** Admin-only diagnostic endpoint; callers must gate this helper by role. */
 export async function fetchAdminSystemStatus(signal?: AbortSignal): Promise<AdminSystemStatusResponse> {
-  const status = await getJson<AdminSystemStatusResponse>("/api/settings/status", signal);
-  if (!status || !status.database || typeof status.database.status !== "string" ||
-      typeof status.database.host !== "string" ||
-      !(typeof status.database.port === "number" || typeof status.database.port === "string") ||
-      typeof status.database.database !== "string" ||
-      !status.database.tables || typeof status.database.tables !== "object" ||
-      !Array.isArray(status.heartbeats) || !status.binance) {
+  const status = await getJson<unknown>("/api/settings/status", signal);
+  if (!isAdminSystemStatus(status)) {
     throw new Error("Admin system status returned an invalid response");
   }
   return status;
