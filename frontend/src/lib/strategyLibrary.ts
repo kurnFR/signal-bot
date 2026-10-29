@@ -68,7 +68,7 @@ export async function fetchCustomStrategies(signal?: AbortSignal): Promise<Strat
   if (!isRecord(response) || !Array.isArray(response.strategies) || !response.strategies.every(validCustomStrategy)) {
     throw new Error("Strategy library returned an invalid response");
   }
-  return response as StrategyLibraryResponse;
+  return response as unknown as StrategyLibraryResponse;
 }
 export async function fetchStrategyIndicators(signal?: AbortSignal): Promise<StrategyIndicatorsResponse> {
   const response = await getJson<unknown>("/api/custom-strategy/indicators", signal);
@@ -77,7 +77,7 @@ export async function fetchStrategyIndicators(signal?: AbortSignal): Promise<Str
       !response.operators.every((operator) => typeof operator === "string")) {
     throw new Error("Strategy indicators returned an invalid response");
   }
-  return response as StrategyIndicatorsResponse;
+  return response as unknown as StrategyIndicatorsResponse;
 }
 
 export interface QuickTestResult {
