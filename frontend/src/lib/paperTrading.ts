@@ -50,12 +50,13 @@ function validConfig(value: unknown): boolean {
     typeof value.telegram_enabled === "boolean" && typeof value.report_enabled === "boolean";
 }
 function validOrder(value: unknown): boolean {
-  if (!isRecord(value) || !positiveId(value.id)) return false;
-  if (!["symbol", "market", "timeframe", "side", "order_type", "status", "created_at"].every((key) => requiredText(value[key]))) return false;
-  if (!optionalNullableFinite(value, "price") || !optionalNullableFinite(value, "quantity")) return false;
-  return (!("filled_at" in value) || nullableText(value.filled_at)) &&
-    (!("state_reason" in value) || nullableText(value.state_reason));
+  if (!isRecord(value) || !positiveId(value.id) || !positiveId(value.config_id)) return false;
+  if (!["symbol", "market", "timeframe", "strategy_name", "direction", "status", "created_at"].every((key) => requiredText(value[key]))) return false;
+  if (!["signal_open_time", "entry_time"].every((key) => finite(value[key]))) return false;
+  if (!["requested_entry_price", "stop_loss", "take_profit", "atr_at_signal", "ml_probability", "fill_price"].every((key) => nullableFinite(value[key]))) return false;
+  return nullableText(value.state_reason) && nullableText(value.filled_at);
 }
+
 function validTrade(value: unknown): boolean {
   if (!isRecord(value) || !positiveId(value.id)) return false;
   if (!["symbol", "market", "timeframe", "strategy_name", "direction", "exit_reason", "entry_time_wib", "exit_time_wib"].every((key) => typeof value[key] === "string")) return false;
