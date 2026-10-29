@@ -56,7 +56,7 @@ function nullableString(value: unknown): boolean {
 function validScreenerStatus(value: unknown): value is ScreenerStatus {
   if (!isRecord(value) || typeof value.running !== "boolean" ||
       typeof value.database_ok !== "boolean" || typeof value.enabled !== "boolean" ||
-      !nullableString(value.timeframe) || !isCount(value.symbols_monitored) ||
+      !isNonEmptyString(value.timeframe) || !isCount(value.symbols_monitored) ||
       !nullableString(value.last_beat_at) || !nullableString(value.last_signal_at) ||
       !nullableString(value.last_universe_refresh)) return false;
   return value.pid === undefined || value.pid === null || isCount(value.pid);
