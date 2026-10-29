@@ -485,3 +485,16 @@ This log records verified execution checkpoints and keeps the next actions actio
 - Valid empty heartbeat lists and nullable table counts/timestamps remain supported. Malformed envelopes, rows, table counts, error values, and Binance configuration fail closed with a readable adapter error.
 - New tests mock all HTTP responses; the public status client remains GET-only. No admin diagnostics, production state, collectors, trading, or Telegram are touched.
 - Exact-head CI pending; do not merge until all required checks pass.
+
+
+### PR #600 — public system-status response contract
+
+- **Status:** Merged. Merge commit: `b102845b71fada5228e1dde7f944db6c86905c57`.
+- Exact-head frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `e289a01b034871a2eb2ff019af297da4f5a8ed65`.
+- Runtime validation protects the public Overview status panel from malformed database/table/heartbeat/Binance payloads while preserving valid empty collections and nullable values.
+
+### Current PR #601 — admin system-diagnostics response contract
+
+- Extends runtime validation to the admin-only `GET /api/settings/status` payload, including database host/port/name, table counts, heartbeat detail/timestamp fields, Binance status, and optional system metadata.
+- Tests mock responses and assert malformed diagnostic payloads fail closed. This does not broaden access to the admin-only endpoint or perform any production diagnostics.
+- Exact-head CI pending; do not merge until all required checks pass.
