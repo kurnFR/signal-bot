@@ -1,8 +1,8 @@
 import { getJson } from "./api";
 
-export interface PaperPosition { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; direction: string; entry_price: number; current_price: number; stop_loss: number | null; take_profit: number | null; quantity: number; unrealized_pnl_pct: number | null; unrealized_r: number | null; allocated_capital: number; status: string; last_update_time: string | null }
+export interface PaperPosition { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; direction: string; entry_price: number; current_price: number; stop_loss: number | null; take_profit: number | null; quantity: number; unrealized_pnl_pct: number | null; unrealized_r: number | null; allocated_capital: number; status: string; last_update_time: number }
 export interface PaperConfig { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; is_active: boolean; allocated_capital: number; risk_per_trade_pct: number; telegram_enabled: boolean; report_enabled: boolean; created_at: string }
-export interface PaperOrder { id: number; symbol: string; market: string; timeframe: string; side: string; order_type: string; status: string; quantity?: number; price?: number | null; created_at: string; filled_at?: string | null; state_reason?: string | null }
+export interface PaperOrder { id: number; config_id: number; symbol: string; market: string; timeframe: string; strategy_name: string; signal_open_time: number; entry_time: number; direction: string; requested_entry_price: number; stop_loss: number; take_profit: number; atr_at_signal: number; ml_model_id: string | null; ml_probability: number | null; status: string; state_reason: string | null; fill_price: number | null; position_id: number | null; created_at: string; updated_at: string; filled_at: string | null; terminal_at: string | null }
 export interface PaperTrade { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; direction: string; entry_price: number; exit_price: number; net_pnl: number; net_return_pct: number; r_multiple: number; exit_reason: string; entry_time_wib: string; exit_time_wib: string }
 export interface PaperMetrics { totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number; byStrategy: Array<{ strategy: string; totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number }> }
 export interface PaperCircuitBreaker { status: string; emergency_stop_active: boolean; emergency_stop_reason: string | null; active_positions: number; max_concurrent_positions: number; today_realized_pnl_usd: number | null; max_daily_loss_usd: number; open_notional_usd: number | null; max_total_notional_usd: number; can_open_new_position: boolean; message: string }
@@ -21,6 +21,47 @@ function validMetricRow(value: unknown): boolean {
   if (!isRecord(value) || typeof value.strategy !== "string") return false;
   return ["totalTrades", "wins", "losses", "winRatePct", "cumulativeR", "expectancyR", "netPnl"].every((key) => finite(value[key]));
 }
+
+function positiveId(value: unknown): boolean {
+  return Number.isSafeInteger(value) && (value as number) > 0;
+}
+function requiredText(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function nullableText(value: unknown): boolean {
+  return value === null || typeof value === "string";
+}
+function validPosition(value: unknown): boolean {
+  if (!isRecord(value) || !positiveId(value.id)) return false;
+  if (!["symbol", "market", "timeframe", "strategy_name", "direction", "status"].every((key) => requiredText(value[key]))) return false;
+  if (!["entry_price", "current_price", "quantity", "allocated_capital"].every((key) => finite(value[key]))) return false;
+  if (!["stop_loss", "take_profit", "unrealized_pnl_pct", "unrealized_r"].every((key) => nullableFinite(value[key]))) return false;
+  return finite(value.entry_time) && finite(value.last_update_time);
+}
+function validConfig(value: unknown): boolean {
+  return isRecord(value) && positiveId(value.id) &&
+    ["symbol", "market", "timeframe", "strategy_name", "created_at"].every((key) => requiredText(value[key])) &&
+    typeof value.is_active === "boolean" &&
+    finite(value.allocated_capital) && finite(value.risk_per_trade_pct) &&
+    typeof value.telegram_enabled === "boolean" && typeof value.report_enabled === "boolean";
+}
+function validOrder(value: unknown): boolean {
+  if (!isRecord(value) || !positiveId(value.id) || !positiveId(value.config_id)) return false;
+  if (!["symbol", "market", "timeframe", "strategy_name", "direction", "status", "created_at"].every((key) => requiredText(value[key]))) return false;
+  if (!["signal_open_time", "entry_time"].every((key) => finite(value[key]))) return false;
+  if (!["requested_entry_price", "stop_loss", "take_profit", "atr_at_signal", "ml_probability", "fill_price"].every((key) => nullableFinite(value[key]))) return false;
+  return nullableText(value.state_reason) && nullableText(value.filled_at);
+}
+
+function validTrade(value: unknown): boolean {
+  if (!isRecord(value) || !positiveId(value.id)) return false;
+  if (!["symbol", "market", "timeframe", "strategy_name", "direction", "exit_reason", "entry_time_wib", "exit_time_wib"].every((key) => typeof value[key] === "string")) return false;
+  return ["entry_price", "exit_price", "net_pnl", "net_return_pct", "r_multiple"].every((key) => finite(value[key]));
+}
+function validRows(value: unknown, key: string, validator: (row: unknown) => boolean): boolean {
+  return isRecord(value) && Array.isArray(value[key]) && value[key].every(validator);
+}
+
 function validMetrics(value: unknown): value is PaperMetrics {
   if (!isRecord(value) || !Array.isArray(value.byStrategy)) return false;
   return ["totalTrades", "wins", "losses", "winRatePct", "cumulativeR", "expectancyR", "netPnl"].every((key) => finite(value[key])) &&
@@ -44,10 +85,10 @@ export async function fetchPaperTradingSnapshot(signal?: AbortSignal): Promise<P
     getJson<{ metrics: PaperMetrics }>("/api/paper/metrics", signal),
     getJson<PaperCircuitBreaker>("/api/paper/circuit-breakers", signal),
   ]);
-  if (!isRecord(positions) || !Array.isArray(positions.positions) ||
-      !isRecord(configs) || !Array.isArray(configs.configs) ||
-      !isRecord(orders) || !Array.isArray(orders.orders) ||
-      !isRecord(trades) || !Array.isArray(trades.trades) ||
+  if (!validRows(positions, "positions", validPosition) ||
+      !validRows(configs, "configs", validConfig) ||
+      !validRows(orders, "orders", validOrder) ||
+      !validRows(trades, "trades", validTrade) ||
       !isRecord(metrics) || !validMetrics(metrics.metrics) || !validBreaker(breaker)) {
     throw new Error("Paper trading API returned an invalid response; risk status is not verified");
   }

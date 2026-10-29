@@ -810,3 +810,12 @@ This section supersedes older UI/UX statements in this document that describe th
 - **Safety boundary:** no production deployment, DB changes, worker restarts, backfills, paper execution, model deployment, or Telegram actions were performed by these preview PRs. Legacy dashboard remains the default.
 
 Next recommended work is reproducible frontend installs (lockfile plus `npm ci`), then runtime route/RBAC reconciliation and browser-level parity/accessibility coverage. Strategy-promotion and Telegram policy changes remain separately scoped, server-authorized work with explicit persistence, eligibility, accounting, audit, and stop/hide regression tests.
+
+
+### UIX-00 paper-trading row contract audit — 2026-10-29 (PR #590)
+
+- Compared the React fields consumed by Paper Trading with the serializer output from `paper/engine.py`, the durable order rows from `paper/orders.py`, and risk diagnostics from `paper/circuit_breaker.py`.
+- Added fail-closed validation for each position, config, order, and closed-trade row before any of those rows reach the view. Required identifiers/text, configuration booleans, timestamps, and finite numeric fields are checked; optional nullable numeric/text fields remain nullable.
+- Added mocked regression cases for malformed position IDs, non-boolean config flags, infinite order price, and non-finite closed-trade PnL.
+- [ ] Verify exact PR-head frontend type-check/unit tests/build and all backend regression workflows before merge.
+- [ ] Continue runtime route/RBAC parity, browser/device accessibility, and owner acceptance. React preview remains isolated; legacy dashboard remains production default. No production or paper-engine actions were performed.

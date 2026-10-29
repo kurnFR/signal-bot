@@ -786,4 +786,4 @@ The News AI contract mismatch described in the historical audit has been correct
 - [x] Reject non-finite performance metrics and malformed metric rows before rendering.
 - [x] Validate circuit-breaker status booleans, reason/message fields, counters, limits, and nullable PnL/notional values; malformed safety status is treated as unverified.
 - [x] Add mocked contract tests for valid empty datasets and malformed risk, metrics, and envelope payloads.
-- [ ] Continue row-by-row verification of individual position/config/order/trade fields against database serializers and API response contracts. UIX-00 acceptance and production cutover remain open.
+- [x] Compared the frontend-consumed position/config/order/trade fields with `paper/engine.py` serializers and `paper/orders.py` order rows; React now rejects malformed row IDs, labels, booleans, timestamps, and non-finite numeric values (PR #590). Exact PR-head CI and runtime/browser parity remain pending. UIX-00 acceptance and production cutover remain open.
