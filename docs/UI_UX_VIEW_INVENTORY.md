@@ -892,9 +892,17 @@ The historical audit notes above are chronological. Use this latest ledger for c
 - [x] Exact-head frontend and backend CI passed. Never expose the admin endpoint to viewer/trader roles or log connection details in public status.
 
 
-## UIX-00 Telegram test-result response validation (PR #602, pending)
+## UIX-00 Telegram test-result response validation (PR #602, merged — `ac195488376a362bb78e3419028c93041d53cefe`)
 
 - Validates the actual `test_telegram_connection()` response: required boolean `success`, optional bot identity strings, nullable chat ID/error, and optional note string.
 - Documents HTTP 400 `detail` responses separately from successful helper results. Corrects stale statements about the React Settings consumer; the preview already has an admin-only confirmed test-ping workflow.
 - All adapter tests mock the HTTP response. No Telegram message is sent by CI.
-- [ ] Exact-head CI and review. Keep the endpoint admin-only and preserve explicit confirmation because a successful call can send a real external message.
+- [x] Exact-head frontend and backend CI passed. Keep the endpoint admin-only and preserve explicit confirmation because a successful call can send a real external message.
+
+
+## UIX-00 authentication profile response validation (PR #603, pending)
+
+- Validates `POST /api/auth/login` before persisting its token and validates `GET /api/auth/me` before the auth gate trusts user identity, role, or forced-password-change state.
+- Allowed roles are the existing `admin`, `trader`, and `viewer` values; malformed IDs, usernames, email values, role names, boolean flags, or tokens fail closed.
+- Tests mock responses only and use synthetic credentials. No live account or session is accessed.
+- [ ] Exact-head CI and review. Backend authentication and RBAC remain authoritative; this change adds client-side response validation, not a security boundary substitute.
