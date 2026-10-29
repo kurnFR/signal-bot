@@ -31,11 +31,53 @@ export interface StrategyIndicatorsResponse {
   indicators: StrategyIndicator[];
   operators: string[];
 }
-export function fetchCustomStrategies(signal?: AbortSignal) {
-  return getJson<StrategyLibraryResponse>("/api/custom-strategy/list", signal);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
-export function fetchStrategyIndicators(signal?: AbortSignal) {
-  return getJson<StrategyIndicatorsResponse>("/api/custom-strategy/indicators", signal);
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+function validCondition(value: unknown): value is StrategyCondition {
+  if (!isRecord(value)) return false;
+  return (value.indicator === undefined || typeof value.indicator === "string") &&
+    (value.operator === undefined || typeof value.operator === "string") &&
+    (value.value === undefined || typeof value.value === "string" || isFiniteNumber(value.value));
+}
+function validCustomStrategy(value: unknown): value is CustomStrategy {
+  if (!isRecord(value) || typeof value.name !== "string" || !value.name.trim()) return false;
+  for (const key of ["displayName", "description", "rationale"] as const) {
+    if (value[key] !== undefined && typeof value[key] !== "string") return false;
+  }
+  for (const key of ["longConditions", "shortConditions"] as const) {
+    if (value[key] !== undefined && (!Array.isArray(value[key]) || !value[key].every(validCondition))) return false;
+  }
+  for (const key of ["slAtrMult", "riskRewardRatio", "trailActivationR", "trailDistanceAtrMult"] as const) {
+    if (value[key] !== undefined && !isFiniteNumber(value[key])) return false;
+  }
+  return value.useTrailingStop === undefined || typeof value.useTrailingStop === "boolean";
+}
+function validStrategyIndicator(value: unknown): value is StrategyIndicator {
+  if (!isRecord(value) || typeof value.name !== "string" || !value.name.trim()) return false;
+  for (const key of ["label", "category", "description", "type"] as const) {
+    if (value[key] !== undefined && typeof value[key] !== "string") return false;
+  }
+  return value.default === undefined || isFiniteNumber(value.default);
+}
+export async function fetchCustomStrategies(signal?: AbortSignal): Promise<StrategyLibraryResponse> {
+  const response = await getJson<unknown>("/api/custom-strategy/list", signal);
+  if (!isRecord(response) || !Array.isArray(response.strategies) || !response.strategies.every(validCustomStrategy)) {
+    throw new Error("Strategy library returned an invalid response");
+  }
+  return response as unknown as StrategyLibraryResponse;
+}
+export async function fetchStrategyIndicators(signal?: AbortSignal): Promise<StrategyIndicatorsResponse> {
+  const response = await getJson<unknown>("/api/custom-strategy/indicators", signal);
+  if (!isRecord(response) || !Array.isArray(response.indicators) ||
+      !response.indicators.every(validStrategyIndicator) || !Array.isArray(response.operators) ||
+      !response.operators.every((operator) => typeof operator === "string")) {
+    throw new Error("Strategy indicators returned an invalid response");
+  }
+  return response as unknown as StrategyIndicatorsResponse;
 }
 
 export interface QuickTestResult {

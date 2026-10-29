@@ -313,4 +313,36 @@ describe("read-only strategy library", () => {
     expect(screen.queryByRole("button", { name: "Delete strategy" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST" || init?.method === "DELETE")).toBe(false);
   });
+
+  it("fails closed when saved strategy rows are malformed", async () => {
+    const malformed: Record<string, unknown> = {
+      ...payloads,
+      "/api/custom-strategy/list": { strategies: [{ name: 42, longConditions: "not-an-array" }] },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input);
+      return Promise.resolve(new Response(JSON.stringify(malformed[path]), {
+        status: 200, headers: { "content-type": "application/json" },
+      }));
+    }));
+    render(<StrategyLibraryPanel />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be loaded/i);
+    expect(screen.queryByRole("heading", { name: "RSI + Volume" })).not.toBeInTheDocument();
+  });
+
+  it("fails closed when indicator metadata contains malformed rows", async () => {
+    const malformed: Record<string, unknown> = {
+      ...payloads,
+      "/api/custom-strategy/indicators": { indicators: [{ name: "", label: "Must not render", default: Number.NaN }], operators: ["<"] },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input);
+      return Promise.resolve(new Response(JSON.stringify(malformed[path]), {
+        status: 200, headers: { "content-type": "application/json" },
+      }));
+    }));
+    render(<StrategyLibraryPanel />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be loaded/i);
+    expect(screen.queryByText("Must not render")).not.toBeInTheDocument();
+  });
 });
