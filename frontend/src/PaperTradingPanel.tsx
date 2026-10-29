@@ -5,7 +5,7 @@ import { fetchPaperTradingSnapshot, type PaperTradingSnapshot } from "./lib/pape
 
 const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 });
-function dateLabel(value: string | null | undefined) { if (!value) return "—"; const parsed = Date.parse(value); return Number.isFinite(parsed) ? new Date(parsed).toLocaleString() : value; }
+function dateLabel(value: string | number | null | undefined) { if (value == null || value === "") return "—"; const parsed = typeof value === "number" ? value : Date.parse(value); return Number.isFinite(parsed) ? new Date(parsed).toLocaleString() : String(value); }
 function pnlClass(value: number | null | undefined) { return value == null || value === 0 ? "" : value > 0 ? "paper-positive" : "paper-negative"; }
 
 export function PaperTradingPanel() {
