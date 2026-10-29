@@ -332,9 +332,18 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `416f1e1ad0daa99194ace991d9261ac4d738416b`.
 - **Safety:** Mocked responses only; no backtest, policy write, promotion, paper activation, Telegram send, live trade, or deployment.
 
-### Current PR #587 — validate backtest history and detail response contracts
+### PR #587 — validate backtest history and detail response contracts
 
-- Adds runtime validation for persisted history summaries and individual run details, including nullable performance metrics, parameter containers, closed-trade strings/timestamps/numeric fields, and holding-bar counts.
-- Malformed payloads fail with a recoverable contract error instead of being treated as typed data by the UI.
-- Adds mocked contract tests for valid, malformed, and incomplete history/detail payloads.
+- **Status:** Merged.
+- **Merge commit:** `e19256a78f82be61160568141a882600413a876e`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/587
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `c0ece2695e7c8f026d730191ad8fb548222041be`.
+- **Coverage:** Validates saved history summaries and individual run details, including nullable performance metrics, parameter containers, closed-trade strings/timestamps/numeric fields, and holding-bar counts. Mocked tests cover valid and malformed/incomplete payloads.
+- **Safety:** Mocked API responses only; no backtest, promotion, strategy activation, Telegram send, or deployment.
+
+### Current PR #589 — paper trading response contract validation
+
+- Validates the response envelopes for positions, configs, orders, trades, and metrics, plus finite numeric metric values and the circuit-breaker safety fields.
+- Malformed or unverified circuit-breaker data is rejected instead of being rendered as a trustworthy risk state.
+- Adds mocked contract tests for a valid empty snapshot, malformed risk status, non-finite metrics, and missing response envelopes.
 - Validation is pending on the exact PR head; do not merge until all required checks pass.

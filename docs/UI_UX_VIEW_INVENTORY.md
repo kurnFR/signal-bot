@@ -778,3 +778,12 @@ The News AI contract mismatch described in the historical audit has been correct
 - [x] Validate run detail metadata, params container, and closed trade field types/numeric ranges before rendering.
 - [x] Add mocked contract tests for valid payloads, malformed summary metrics/IDs, incomplete details, and invalid trade fields/arrays.
 - [ ] Continue route-by-route request/response/RBAC parity for remaining React API clients and legacy callers. UIX-00 acceptance and production cutover remain open.
+
+
+## UIX-00 paper trading response and risk-status contract validation (2026-10-29)
+
+- [x] Validate response envelopes for positions, paper configs, orders, trades, and performance metrics.
+- [x] Reject non-finite performance metrics and malformed metric rows before rendering.
+- [x] Validate circuit-breaker status booleans, reason/message fields, counters, limits, and nullable PnL/notional values; malformed safety status is treated as unverified.
+- [x] Add mocked contract tests for valid empty datasets and malformed risk, metrics, and envelope payloads.
+- [ ] Continue row-by-row verification of individual position/config/order/trade fields against database serializers and API response contracts. UIX-00 acceptance and production cutover remain open.
