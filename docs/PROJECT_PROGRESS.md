@@ -844,4 +844,14 @@ Reproducible frontend installation is already configured: `frontend/package-lock
 - Validates quick-test result labels, non-negative integer counts, and nullable finite metrics.
 - Validates nested AI-generated strategy drafts and optional mutation response metadata.
 - Adds focused mocked library-level tests for valid and malformed saved strategies, indicator metadata, quick-test results, AI drafts, and mutation responses.
-- Exact-head CI is pending. All tests use mocked HTTP responses; no strategy action was executed.
+- [x] Exact-head frontend type-check, unit tests, production build, Playwright smoke tests, pytest (two runs), unit-tests, Wallet Tracker MariaDB integration, and RetailBot paper-accounting checks passed.
+- [x] Merged PR #593 as `8618132398aa4139f6740c09f043b569a9f20ee8`.
+- All tests use mocked HTTP responses; no strategy action was executed.
+
+
+### UIX-00 Wallet Tracking API parity and row validation — 2026-10-29 (PR #594)
+
+- Source comparison found real serializer mismatches in the preview: tracked-wallet creation timestamps, token-flow pair/amount fields, event timestamp/pair/USD fields, and status telemetry did not match `wallet_tracker/store.py` and `web/routes/wallet_routes.py`.
+- Align the React view and fixtures with the backend's actual tracked-wallet, position, token-flow, status, and swap-event schemas.
+- Add fail-closed validation for metadata, settings, status, and each row collection. Invalid responses should show the existing recoverable API error rather than render undefined fields.
+- Exact-head CI is pending. All calls remain GET-only; no wallet tracking/settings mutations or worker actions are invoked.
