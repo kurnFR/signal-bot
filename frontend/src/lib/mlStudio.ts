@@ -56,16 +56,16 @@ function nullableFiniteNumber(value: unknown): boolean {
   return value === null || isFiniteNumber(value);
 }
 function validExperimentSummary(value: unknown): value is MLExperimentSummary {
-  return isRecord(value) && isNonEmptyString(value.experiment_id) && SAFE_ML_ID.test(value.experiment_id) &&
-    isNonEmptyString(value.symbol) && isNonEmptyString(value.market) && isNonEmptyString(value.timeframe) &&
-    isNonEmptyString(value.strategy) && isNonEmptyString(value.winner_model) &&
-    isFiniteNumber(value.threshold) && value.threshold >= 0 && value.threshold <= 1 &&
-    nullableFiniteNumber(value.roc_auc) && nullableFiniteNumber(value.brier_score) &&
-    ["baseline_test_r", "baseline_test_win_rate", "ml_test_r", "ml_test_win_rate"]
-      .every((key) => isFiniteNumber(value[key])) &&
-    value.baseline_test_win_rate >= 0 && value.baseline_test_win_rate <= 100 &&
-    value.ml_test_win_rate >= 0 && value.ml_test_win_rate <= 100 &&
-    isCount(value.ml_test_trades) && isCount(value.dataset_rows) && isFiniteNumber(value.file_mtime);
+  if (!isRecord(value) || !isNonEmptyString(value.experiment_id) || !SAFE_ML_ID.test(value.experiment_id) ||
+      !isNonEmptyString(value.symbol) || !isNonEmptyString(value.market) || !isNonEmptyString(value.timeframe) ||
+      !isNonEmptyString(value.strategy) || !isNonEmptyString(value.winner_model) ||
+      !isFiniteNumber(value.threshold) || value.threshold < 0 || value.threshold > 1 ||
+      !nullableFiniteNumber(value.roc_auc) || !nullableFiniteNumber(value.brier_score) ||
+      !isFiniteNumber(value.baseline_test_r) || !isFiniteNumber(value.baseline_test_win_rate) ||
+      !isFiniteNumber(value.ml_test_r) || !isFiniteNumber(value.ml_test_win_rate) ||
+      !isCount(value.ml_test_trades) || !isCount(value.dataset_rows) || !isFiniteNumber(value.file_mtime)) return false;
+  return value.baseline_test_win_rate >= 0 && value.baseline_test_win_rate <= 100 &&
+    value.ml_test_win_rate >= 0 && value.ml_test_win_rate <= 100;
 }
 function validModelManifest(value: unknown): value is MLModelManifest {
   if (!isRecord(value) || !isNonEmptyString(value.model_id) || !SAFE_ML_ID.test(value.model_id) ||
