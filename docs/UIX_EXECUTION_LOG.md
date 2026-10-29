@@ -510,5 +510,5 @@ This log records verified execution checkpoints and keeps the next actions actio
 
 - Adds runtime validation for optional bot identity, chat ID, error, and note fields returned by `test_telegram_connection()`. Keeps the actual backend contract: `success`, optional `bot`, optional `chat_id`, optional `error`, optional `note`; HTTP 400 returns a `detail` error.
 - Updates the route inventory because its earlier `{success, message}` response description did not match the implementation.
-- All tests mock the response; no Telegram request is sent. The React preview does not add a new test-ping control, and the legacy admin action remains governed by its current authorization and confirmation behavior.
+- All tests mock the response; no Telegram request is sent. This PR adds response validation only; the existing React Settings control remains admin-only and requires explicit confirmation, while the legacy admin action remains governed by its current authorization.
 - Exact-head CI pending; do not merge until all required checks pass.
