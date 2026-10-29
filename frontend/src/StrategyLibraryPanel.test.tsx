@@ -315,7 +315,7 @@ describe("read-only strategy library", () => {
   });
 
   it("fails closed when saved strategy rows are malformed", async () => {
-    const malformed = {
+    const malformed: Record<string, unknown> = {
       ...payloads,
       "/api/custom-strategy/list": { strategies: [{ name: 42, longConditions: "not-an-array" }] },
     };
@@ -331,7 +331,7 @@ describe("read-only strategy library", () => {
   });
 
   it("fails closed when indicator metadata contains malformed rows", async () => {
-    const malformed = {
+    const malformed: Record<string, unknown> = {
       ...payloads,
       "/api/custom-strategy/indicators": { indicators: [{ name: "", default: Number.NaN }], operators: ["<"] },
     };
