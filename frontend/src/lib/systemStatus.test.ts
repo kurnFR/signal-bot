@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchSystemStatus } from "./systemStatus";
+import { fetchAdminSystemStatus, fetchSystemStatus } from "./systemStatus";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -37,5 +37,36 @@ describe("system status response contract", () => {
   ])("rejects %s before the UI can render it", async (_label, payload) => {
     stubPayload(payload);
     await expect(fetchSystemStatus()).rejects.toThrow("System status returned an invalid response");
+  });
+});
+
+
+const validAdminPayload = {
+  database: { status: "ok", host: "db.internal", port: 3306, database: "signal_bot", tables: { signals: 10, trades: 3 }, error: null },
+  heartbeats: [{ collector: "market-data", status: "ok", detail: "last poll completed", lastBeat: "2026-10-28 12:00:00" }],
+  binance: { spotApi: "online", futuresApi: "offline", enableFuturesConfig: true },
+  system: { timezone: "Asia/Jakarta (WIB UTC+7)" },
+};
+
+describe("admin system status response contract", () => {
+  it("accepts a complete admin diagnostic payload", async () => {
+    stubPayload(validAdminPayload);
+    await expect(fetchAdminSystemStatus()).resolves.toMatchObject({
+      database: { status: "ok", host: "db.internal", port: 3306, database: "signal_bot" },
+      heartbeats: [{ collector: "market-data", status: "ok", detail: "last poll completed" }],
+      system: { timezone: "Asia/Jakarta (WIB UTC+7)" },
+    });
+  });
+
+  it.each([
+    ["invalid database port", { ...validAdminPayload, database: { ...validAdminPayload.database, port: null } }],
+    ["invalid database table counts", { ...validAdminPayload, database: { ...validAdminPayload.database, tables: { signals: "ten" } } }],
+    ["invalid heartbeat details", { ...validAdminPayload, heartbeats: [{ ...validAdminPayload.heartbeats[0], detail: 42 }] }],
+    ["invalid heartbeat timestamp", { ...validAdminPayload, heartbeats: [{ ...validAdminPayload.heartbeats[0], lastBeat: false }] }],
+    ["invalid Binance configuration", { ...validAdminPayload, binance: { ...validAdminPayload.binance, enableFuturesConfig: "true" } }],
+    ["invalid system metadata", { ...validAdminPayload, system: { timezone: 7 } }],
+  ])("rejects %s", async (_label, payload) => {
+    stubPayload(payload);
+    await expect(fetchAdminSystemStatus()).rejects.toThrow("Admin system status returned an invalid response");
   });
 });
