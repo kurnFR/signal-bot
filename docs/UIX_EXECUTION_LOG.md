@@ -414,3 +414,21 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Status:** Open; exact-head CI pending.
 - Aligns open-position and closed-trade tables with the fields actually returned by `web/routes/research_routes.py` and the DB helpers.
 - Adds fail-closed validation for positions, trades, performance stats, and lifecycle booleans. Mocked responses only; no RetailBot execution or mutation.
+
+
+### PR #595 — Research runtime contract reconciliation
+
+- **Status:** Merged. Merge commit: `8dbee6e4a2bb04b434b9b687e7f58a52a5e9615b`.
+- Aligns active position and closed-trade tables to actual RetailBot2 serializer fields; validates positions, trades, stats, and strict lifecycle flags.
+- Exact-head frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, Wallet Tracker MariaDB integration, and RetailBot accounting regression passed.
+
+### PR #594 — merge metadata reconciliation
+
+- The Wallet Tracking change set is on `master` at `4ef356ae08f6f5ebfa683d4c93ee3a655c93801f` and its exact-head CI passed.
+- The merge operation timed out and GitHub continued reporting the PR as open; it was closed to prevent an already-landed change from remaining as an open PR. GitHub records it as closed, not merged. No code was reverted.
+
+### PR #596 — Screener snapshot response contracts
+
+- **Status:** Open; exact-head CI pending.
+- Validates screener status, persisted signal rows, and stats counts using the backend's actual response fields.
+- Mocked tests only; the preview continues to call GET endpoints only and does not invoke screener control.
