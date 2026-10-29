@@ -333,7 +333,7 @@ describe("read-only strategy library", () => {
   it("fails closed when indicator metadata contains malformed rows", async () => {
     const malformed: Record<string, unknown> = {
       ...payloads,
-      "/api/custom-strategy/indicators": { indicators: [{ name: "", default: Number.NaN }], operators: ["<"] },
+      "/api/custom-strategy/indicators": { indicators: [{ name: "", label: "Must not render", default: Number.NaN }], operators: ["<"] },
     };
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const path = String(input);
@@ -343,6 +343,6 @@ describe("read-only strategy library", () => {
     }));
     render(<StrategyLibraryPanel />);
     expect(await screen.findByRole("alert")).toHaveTextContent(/could not be loaded/i);
-    expect(screen.queryByRole("heading", { name: "Indicator catalog" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Must not render")).not.toBeInTheDocument();
   });
 });
