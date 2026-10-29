@@ -55,7 +55,20 @@ export async function sendTelegramTestPing(): Promise<TelegramTestResult> {
       : `Telegram test failed (${response.status})`;
     throw new TelegramActionError(response.status, detail);
   }
-  if (!payload || typeof payload !== "object" || !("success" in payload) || typeof payload.success !== "boolean") {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) ||
+      !("success" in payload) || typeof payload.success !== "boolean") {
+    throw new TelegramActionError(response.status, "Telegram test returned an invalid response");
+  }
+  const result = payload as Record<string, unknown>;
+  if (result.bot !== undefined && (
+      !result.bot || typeof result.bot !== "object" || Array.isArray(result.bot) ||
+      (("username" in result.bot) && typeof result.bot.username !== "string") ||
+      (("first_name" in result.bot) && typeof result.bot.first_name !== "string"))) {
+    throw new TelegramActionError(response.status, "Telegram test returned an invalid response");
+  }
+  if ((result.chat_id !== undefined && result.chat_id !== null && typeof result.chat_id !== "string") ||
+      (result.error !== undefined && result.error !== null && typeof result.error !== "string") ||
+      (result.note !== undefined && typeof result.note !== "string")) {
     throw new TelegramActionError(response.status, "Telegram test returned an invalid response");
   }
   return payload as TelegramTestResult;
