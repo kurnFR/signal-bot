@@ -66,7 +66,7 @@ describe("fetchPaperTradingSnapshot response contracts", () => {
     const cases: Array<[string, unknown]> = [
       ["/api/paper/positions", { positions: [{ id: "1", symbol: "BTCUSDT", market: "spot", timeframe: "1h", strategy_name: "s", direction: "LONG", entry_price: 10, current_price: 11, stop_loss: null, take_profit: null, quantity: 1, unrealized_pnl_pct: 1, unrealized_r: 1, allocated_capital: 100, status: "OPEN", last_update_time: null }] }],
       ["/api/paper/configs", { configs: [{ id: 1, symbol: "BTCUSDT", market: "spot", timeframe: "1h", strategy_name: "s", is_active: "yes", allocated_capital: 100, risk_per_trade_pct: 1, telegram_enabled: false, report_enabled: true, created_at: "now" }] }],
-      ["/api/paper/orders?limit=20", { orders: [{ id: 1, symbol: "BTCUSDT", market: "spot", timeframe: "1h", side: "BUY", order_type: "MARKET", status: "PENDING", price: Number.POSITIVE_INFINITY, created_at: "now", filled_at: null, state_reason: null }] }],
+      ["/api/paper/orders?limit=20", { orders: [{ id: 1, symbol: "BTCUSDT", market: "spot", timeframe: "1h", side: "BUY", order_type: "MARKET", status: "PENDING", requested_entry_price: Number.POSITIVE_INFINITY, created_at: "now", filled_at: null, state_reason: null }] }],
       ["/api/paper/trades?limit=20", { trades: [{ id: 1, symbol: "BTCUSDT", market: "spot", timeframe: "1h", strategy_name: "s", direction: "LONG", entry_price: 10, exit_price: 11, net_pnl: Number.NaN, net_return_pct: 1, r_multiple: 1, exit_reason: "target", entry_time_wib: "now", exit_time_wib: "later" }] }],
     ];
     for (const [badPath, badPayload] of cases) {
@@ -95,9 +95,11 @@ describe("fetchPaperTradingSnapshot response contracts", () => {
         ml_model_id: null, telegram_enabled: false, report_enabled: true, created_at: "2026-10-29T02:00:00",
       }] },
       "/api/paper/orders?limit=20": { orders: [{
-        id: 5, symbol: "BTCUSDT", market: "spot", timeframe: "1h", side: "BUY",
-        order_type: "MARKET", status: "PENDING", quantity: 2, price: null,
-        created_at: "2026-10-29T02:00:00", filled_at: null, state_reason: null,
+        id: 5, config_id: 4, symbol: "BTCUSDT", market: "spot", timeframe: "1h", strategy_name: "s",
+        direction: "LONG", signal_open_time: 1793239200, entry_time: 1793239200,
+        requested_entry_price: 100, stop_loss: 95, take_profit: 110, atr_at_signal: 2,
+        ml_model_id: null, ml_probability: null, status: "PENDING", state_reason: null,
+        fill_price: null, position_id: null, created_at: "2026-10-29T02:00:00", filled_at: null,
       }] },
       "/api/paper/trades?limit=20": { trades: [{
         id: 6, position_id: 3, symbol: "BTCUSDT", market: "spot", timeframe: "1h",
