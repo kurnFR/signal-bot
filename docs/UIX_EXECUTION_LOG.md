@@ -498,3 +498,30 @@ This log records verified execution checkpoints and keeps the next actions actio
 - Extends runtime validation to the admin-only `GET /api/settings/status` payload, including database host/port/name, table counts, heartbeat detail/timestamp fields, Binance status, and optional system metadata.
 - Tests mock responses and assert malformed diagnostic payloads fail closed. This does not broaden access to the admin-only endpoint or perform any production diagnostics.
 - Exact-head CI pending; do not merge until all required checks pass.
+
+
+### PR #601 — admin system-diagnostics response contract
+
+- **Status:** Merged. Merge commit: `10bf6b70ff86c5844e7424ceb24bce5eae80ff2b`.
+- Exact-head frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `7613753a0e6f936a63c9178c72f39f7a10f14e34`.
+- Validates the admin-only diagnostics response without changing endpoint authorization.
+
+### Current PR #602 — Telegram test-result response contract
+
+- Adds runtime validation for optional bot identity, chat ID, error, and note fields returned by `test_telegram_connection()`. Keeps the actual backend contract: `success`, optional `bot`, optional `chat_id`, optional `error`, optional `note`; HTTP 400 returns a `detail` error.
+- Updates the route inventory because its earlier `{success, message}` response description did not match the implementation.
+- All tests mock the response; no Telegram request is sent. This PR adds response validation only; the existing React Settings control remains admin-only and requires explicit confirmation, while the legacy admin action remains governed by its current authorization.
+- Exact-head CI pending; do not merge until all required checks pass.
+
+
+### PR #601 — admin system-diagnostics response contract (status reconciliation)
+
+- **Status:** Merged. Merge commit: `10bf6b70ff86c5844e7424ceb24bce5eae80ff2b`.
+- Exact-head frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `7613753a0e6f936a63c9178c72f39f7a10f14e34`.
+
+### Current PR #602 — Telegram test-result response contract
+
+- Adds runtime validation for optional bot identity, chat ID, error, and note fields returned by `test_telegram_connection()`. The documented success contract now matches the backend; HTTP 400 returns `detail`.
+- Reconciles stale route inventory notes about the React Settings caller and preserves the existing admin-only explicit confirmation workflow.
+- All tests mock HTTP responses; no Telegram message is sent. No role policy or production behavior is changed.
+- Exact-head CI pending; do not merge until all required checks pass.

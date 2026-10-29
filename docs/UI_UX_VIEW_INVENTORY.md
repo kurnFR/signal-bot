@@ -272,7 +272,7 @@ The following draft register lists 81 API endpoint rows across the 13 router mod
 | Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
 |---|---|---|---|---|---|---|---|
 | `GET /api/telegram/status` | `get_status`<br>`telegram_routes.py` | Authenticated (all roles); `chatId` is returned only for admins and is `null` for trader/viewer | Blocked (403 required) | None | **200 OK:**<br>`{"configured": bool, "chatId": Optional[str], "hasToken": bool}` | Checks whether Telegram bot token and chat ID are configured; never returns the token | No legacy consumer was found. React Settings fetches it only for admins; non-admin UI makes no status request. PR #540 redacts `chatId` for non-admin API callers. |
-| `POST /api/telegram/test` | `run_test`<br>`telegram_routes.py` | `admin` only (`_role_allowed` enforcement) | Blocked (403 required) | **Body:** `TelegramTestRequest`<br>`{custom_message: Optional[str]}` | **200 OK:**<br>`{"success": bool, "message": str}`<br>**400:** Not configured or send failure | Sends outbound test alert via Telegram Bot API (`sendMessage`) to configured chat | "Test Telegram Connection" button (`#view-settings`) |
+| `POST /api/telegram/test` | `run_test`<br>`telegram_routes.py` | `admin` only (`_role_allowed` enforcement) | Blocked (403 required) | **Body:** `TelegramTestRequest`<br>`{custom_message: Optional[str]}` | **200 OK:**<br>`{"success": bool, "bot"?: {"username"?: str, "first_name"?: str}, "chat_id"?: Optional[str], "error"?: Optional[str], "note"?: str}`<br>**400:** `{"detail": str}` when no bot is available or the test fails before a bot result | Sends outbound test alert via Telegram Bot API (`sendMessage`) to configured chat | "Test Telegram Connection" button (`#view-settings`) |
 
 ---
 
@@ -536,16 +536,16 @@ This slice compares `web/routes/telegram_routes.py`, the central `api_security_b
 
 | Method and path | Effective access | Request / response and side effects | React preview |
 |---|---|---|---|
-| `GET /api/telegram/status` | Any authenticated role under the exact-path policy; forced-password-change accounts are blocked before handler execution. | Reads `get_telegram_config()`; returns `configured`, `chatId`, and `hasToken`. It does not return the bot token. The configured chat ID is still operational metadata and should only be displayed where appropriate. | Not called by the current React preview. |
-| `POST /api/telegram/test` | Admin only under the exact-path policy in `web/app.py`; forced-password-change accounts are blocked before handler execution. | The optional request model accepts `custom_message`, but `run_test` currently calls `test_telegram_connection()` without passing the request. The handler can send an outbound test message through the Telegram Bot API. A failed result without a bot object becomes HTTP 400; otherwise the helper result is returned. | Not called by the current React preview; Settings explicitly says Telegram testing remains in the legacy dashboard. |
+| `GET /api/telegram/status` | Any authenticated role under the exact-path policy; forced-password-change accounts are blocked before handler execution. | Reads `get_telegram_config()`; returns `configured`, `chatId`, and `hasToken`. It does not return the bot token. The configured chat ID is still operational metadata and should only be displayed where appropriate. | React Settings fetches it for admins only; trader/viewer UI makes no status request. |
+| `POST /api/telegram/test` | Admin only under the exact-path policy in `web/app.py`; forced-password-change accounts are blocked before handler execution. | The optional request model accepts `custom_message`, but `run_test` currently calls `test_telegram_connection()` without passing the request. The handler can send an outbound test message through the Telegram Bot API. A failed result without a bot object becomes HTTP 400; otherwise the helper result is returned. The successful helper response uses `success`, optional `bot`, `chat_id`, `error`, and `note` fields; it does not promise a `message` field. | React Settings exposes a confirmed admin-only test-ping workflow; legacy dashboard also has a concrete caller. |
 
 ### Findings and migration implications
 
-- The effective permission comes from the centralized middleware, not a handler-level dependency: `GET /api/telegram/status` is authenticated read access, while `POST /api/telegram/test` is admin-only. Do not weaken the exact-path rule or expose the test action as a generic preview control without role-specific regression tests and explicit confirmation UI.
+- The effective permission comes from the centralized middleware, not a handler-level dependency: `GET /api/telegram/status` is authenticated read access, while `POST /api/telegram/test` is admin-only. Do not weaken the exact-path rule or remove the existing admin-only gate and explicit confirmation UI.
 - The `TelegramTestRequest.custom_message` field appears unused by the route implementation because the helper receives no argument. Treat custom-message support as unverified/ineffective until a focused contract test and implementation review confirm intended behavior; do not document it as a working feature.
 - Status never returns the bot token. React Settings now fetches Telegram status only for admins, displays the chat ID only in that admin view, and requires explicit confirmation before a test ping. The backend also returns `chatId: null` for trader/viewer API callers (PR #540). Raw Telegram tokens and provider errors are not displayed.
 - A successful test is an external side effect (a real outbound message). Tests for this route should mock the Telegram helper/client and must not send real messages in CI.
-- This audit does not verify every legacy Telegram UI caller, live provider configuration, provider rate limits, or browser role behavior. The React preview remains isolated from FastAPI production serving.
+- This audit does not verify every legacy Telegram UI caller, live provider configuration, provider rate limits, or browser role behavior. The React preview remains isolated from FastAPI production serving, but its Settings client does call these APIs when rendered for an admin.
 
 ### UIX-00 audit status update
 
@@ -572,10 +572,10 @@ Follow-up source review of `web/static/js/dashboard_enhancements.js` resolves pa
 
 ### Reconciled scope
 
-- The previous statement that Telegram testing remains in the legacy dashboard is accurate for the current React preview, but the legacy enhancement bundle does have a concrete caller for `POST /api/telegram/test`.
-- The outbound-test call path is verified, but a source search of `web/static/js/app.js`, `web/static/js/dashboard_enhancements.js`, and `web/static/index.html` found no direct `GET /api/telegram/status` caller or status-pill binding. The endpoint is registered and authenticated, but its consuming UI remains unverified; remove the claimed “Telegram status pill” mapping unless a concrete caller is found in a later audit.
-- This negative finding is scoped to the inspected legacy entry files and direct endpoint string searches; it is not proof that no indirect/dynamic caller can exist elsewhere. The React preview still does not call either Telegram endpoint.
-- The React preview still does not call either Telegram endpoint, and FastAPI continues serving `web/static/index.html`. No runtime behavior or authorization was changed.
+- Reconciled: both the React Settings preview and the legacy enhancement bundle have a concrete caller for `POST /api/telegram/test`; the React preview requires an explicit confirmation and is not the production dashboard.
+- The outbound-test call path is verified. The legacy files inspected do not show a direct `GET /api/telegram/status` caller, while React Settings does call it for admins. Keep the legacy status-pill mapping unverified unless a concrete legacy caller is found.
+- This negative finding is scoped to the inspected legacy entry files and direct endpoint string searches; it is not proof that no indirect/dynamic legacy caller can exist elsewhere. React Settings calls both endpoints for admins.
+- React Settings calls the status endpoint and can submit the confirmed test-ping action for admins; FastAPI still serves `web/static/index.html` as the production dashboard. This response-contract change does not alter authorization.
 - `tests/test_route_authorization_sweep.py` builds operations from `app.routes` and checks authentication, role-policy behavior, forced-password blocking, and selected security invariants. It does not parse this inventory or compare every route row against it.
 - `tests/test_frontend_api_route_parity.py` statically extracts literal `getJson(...)` paths from `frontend/src/**/*.ts(x)` (excluding test/setup files), normalizes path parameters, and checks that each discovered preview GET path is a registered FastAPI GET and trader-readable. It does not discover `fetch()` calls, non-GET mutations, legacy `web/static/` callers, or inventory rows with no frontend caller. Template paths are only normalized for simple `${...}` expressions.
 - Therefore, these tests provide useful security and connected-preview read-path checks, but they are not a complete route-to-inventory or legacy-to-React parity gate. The remaining work needs a separately reviewed runtime route inventory plus source caller mapping and role-specific browser verification.
@@ -869,24 +869,32 @@ The historical audit notes above are chronological. Use this latest ledger for c
 - **PR #598:** merged — `5564c958dc4f791ebeb7c3f89a4f22a92ffa490c`.
 - **PR #599:** merged — `b7a223781f8e2401812df3fd8a0c52e3a0e4a188`.
 
-## UIX-00 News AI runtime contract validation (PR #599, pending)
+## UIX-00 News AI runtime contract validation (PR #599, merged)
 
 - Validates stats, nested paper-performance metrics, collector heartbeats, signal rows, and event rows.
 - Preserves valid empty collections but rejects malformed envelopes and rows.
 - Preview remains GET-only. Production collectors, AI calls, paper execution, Telegram sends, and deployment remain outside this UI migration task.
 
 
-## UIX-00 public system-status response validation (PR #600, pending)
+## UIX-00 public system-status response validation (PR #600, merged — `b102845b71fada5228e1dde7f944db6c86905c57`)
 
 - Runtime-validates the public `GET /api/system/status` envelope, table-count values, collector heartbeat rows, nullable fields, and Binance connectivity/configuration values.
 - Keeps valid empty heartbeats and null timestamps/counts supported; rejects malformed payloads before the React view renders them.
 - New adapter tests mock HTTP only. This is read-only and does not access the admin-only diagnostics endpoint or trigger any worker, market-data, paper/live trading, or Telegram side effect.
-- [ ] Exact-head CI and review; legacy `web/static/` remains the production default until migration parity and owner acceptance are complete.
+- [x] Exact-head frontend and backend CI passed; legacy `web/static/` remains the production default until migration parity and owner acceptance are complete.
 
 
-## UIX-00 admin system-diagnostics response validation (PR #601, pending)
+## UIX-00 admin system-diagnostics response validation (PR #601, merged — `10bf6b70ff86c5844e7424ceb24bce5eae80ff2b`)
 
 - Validates the admin-only `GET /api/settings/status` payload before diagnostics render: connection metadata shape, nonnegative table counts, heartbeat details/timestamps, Binance status, and optional system metadata.
 - [x] Keep the endpoint admin-only; this change only validates responses and does not change authorization.
 - [x] Add mocked tests for malformed port, table-count, heartbeat, Binance, and system metadata fields.
-- [ ] Exact-head CI and review. Never expose the admin endpoint to viewer/trader roles or log connection details in public status.
+- [x] Exact-head frontend and backend CI passed. Never expose the admin endpoint to viewer/trader roles or log connection details in public status.
+
+
+## UIX-00 Telegram test-result response validation (PR #602, pending)
+
+- Validates the actual `test_telegram_connection()` response: required boolean `success`, optional bot identity strings, nullable chat ID/error, and optional note string.
+- Documents HTTP 400 `detail` responses separately from successful helper results. Corrects stale statements about the React Settings consumer; the preview already has an admin-only confirmed test-ping workflow.
+- All adapter tests mock the HTTP response. No Telegram message is sent by CI.
+- [ ] Exact-head CI and review. Keep the endpoint admin-only and preserve explicit confirmation because a successful call can send a real external message.
