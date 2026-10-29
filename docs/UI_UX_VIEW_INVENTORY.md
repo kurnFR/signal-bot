@@ -852,3 +852,25 @@ The News AI contract mismatch described in the historical audit has been correct
 - Validates experiment summaries and safe IDs, model manifest identity/eligibility/weight flags, and details identity before rendering.
 - Adds mocked tests for malformed numeric summary fields, invalid eligibility booleans, and mismatched experiment detail IDs.
 - Exact-head CI pending; the preview remains GET-only and does not launch experiments or deploy models.
+
+
+## Current PR state ledger (refreshed 2026-10-29)
+
+The historical audit notes above are chronological. Use this latest ledger for current merge state:
+
+- **PR #590:** merged — `04c4ebffe45bf72f21d81be9d6cabe0d0f1267c8`.
+- **PR #591:** merged — `7e2a3fc7a27b5b7af51eb8c267e5386719b3983d`.
+- **PR #592:** merged — `6ee6d336f71f8365cad914fd61dd003a882f5ae8`.
+- **PR #593:** merged — `8618132398aa4139f6740c09f043b569a9f20ee8`.
+- **PR #594:** **closed, not marked merged by GitHub** after the merge operation timed out. Its code is present on `master` at `4ef356ae08f6f5ebfa683d4c93ee3a655c93801f`; exact-head checks passed and no code was reverted.
+- **PR #595:** merged — `8dbee6e4a2bb04b434b9b687e7f58a52a5e9615b`.
+- **PR #596:** merged — `163c87ba606b49c86438c8af344069bfba3ee269`.
+- **PR #597:** merged — `d576c65d3613e9cfb12e43cfa503797ee8dd992c`.
+- **PR #598:** merged — `5564c958dc4f791ebeb7c3f89a4f22a92ffa490c`.
+- **PR #599:** open; exact-head CI pending.
+
+## UIX-00 News AI runtime contract validation (PR #599, pending)
+
+- Validates stats, nested paper-performance metrics, collector heartbeats, signal rows, and event rows.
+- Preserves valid empty collections but rejects malformed envelopes and rows.
+- Preview remains GET-only. Production collectors, AI calls, paper execution, Telegram sends, and deployment remain outside this UI migration task.
