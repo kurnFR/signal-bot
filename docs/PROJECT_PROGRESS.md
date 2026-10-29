@@ -834,4 +834,14 @@ Reproducible frontend installation is already configured: `frontend/package-lock
 
 - Validate coverage summary counts, each coverage row, and every Master Data job row before rendering.
 - Add regressions for malformed coverage summary values and non-numeric job progress; invalid snapshots fail closed rather than being converted into partial empty datasets.
-- Exact-head CI is pending. No backfill or feature-build jobs are started by this read-contract change.
+- [x] Exact-head frontend type-check, unit tests, production build, Playwright smoke tests, pytest (two runs), unit-tests, Wallet Tracker MariaDB integration, and RetailBot paper-accounting checks passed.
+- [x] Merged PR #592 as `6ee6d336f71f8365cad914fd61dd003a882f5ae8`.
+- No backfill or feature-build jobs are started by this read-contract change.
+
+
+### UIX-00 Strategy Library action-response hardening — 2026-10-29 (PR #593)
+
+- Validates quick-test result labels, non-negative integer counts, and nullable finite metrics.
+- Validates nested AI-generated strategy drafts and optional mutation response metadata.
+- Adds focused mocked library-level tests for valid and malformed saved strategies, indicator metadata, quick-test results, AI drafts, and mutation responses.
+- Exact-head CI is pending. All tests use mocked HTTP responses; no strategy action was executed.
