@@ -101,6 +101,16 @@ export class StrategyQuickTestError extends Error {
     this.name = "StrategyQuickTestError";
   }
 }
+function validNullableFiniteNumber(value: unknown): boolean {
+  return value === null || isFiniteNumber(value);
+}
+function validQuickTestResult(value: unknown): value is QuickTestResult {
+  if (!isRecord(value) || !isNonEmptyString(value.status) || !isNonEmptyString(value.symbol) ||
+      !isNonEmptyString(value.market) || !isNonEmptyString(value.timeframe) ||
+      !isCount(value.totalCandles) || !isCount(value.totalTrades)) return false;
+  return ["winRate", "winRatePct", "netR", "profitFactor", "maxDrawdownR", "expectancyR"]
+    .every((key) => validNullableFiniteNumber(value[key]));
+}
 
 export async function quickTestCustomStrategy(
   strategy: CustomStrategy,
@@ -148,11 +158,10 @@ export async function quickTestCustomStrategy(
       : `Quick test failed (${response.status})`;
     throw new StrategyQuickTestError(response.status, detail);
   }
-  if (!payload || typeof payload !== "object" || !("totalTrades" in payload) || typeof payload.totalTrades !== "number" ||
-      !("totalCandles" in payload) || typeof payload.totalCandles !== "number") {
+  if (!validQuickTestResult(payload)) {
     throw new StrategyQuickTestError(response.status, "Quick test returned an invalid result payload");
   }
-  return payload as QuickTestResult;
+  return payload;
 }
 
 export interface StrategyConditionInput {
@@ -217,10 +226,13 @@ async function mutateStrategyLibrary(
       : `Strategy library action failed (${response.status})`;
     throw new StrategyLibraryActionError(response.status, detail);
   }
-  if (!payload || typeof payload !== "object" || !("message" in payload) || typeof payload.message !== "string") {
+  if (!isRecord(payload) || typeof payload.message !== "string" ||
+      (payload.status !== undefined && typeof payload.status !== "string") ||
+      (payload.name !== undefined && typeof payload.name !== "string") ||
+      (payload.displayName !== undefined && typeof payload.displayName !== "string")) {
     throw new StrategyLibraryActionError(response.status, "Strategy library returned an invalid action response");
   }
-  return payload as StrategyMutationResult;
+  return payload as unknown as StrategyMutationResult;
 }
 export function createCustomStrategy(input: CreateCustomStrategyInput): Promise<StrategyMutationResult> {
   return mutateStrategyLibrary("/api/custom-strategy/create", "POST", input);
@@ -275,10 +287,9 @@ export async function generateAIStrategyDraft(
       : `AI strategy generation failed (${response.status})`;
     throw new StrategyLibraryActionError(response.status, detail);
   }
-  if (!payload || typeof payload !== "object" || !("strategy" in payload) || !payload.strategy ||
-      typeof payload.strategy !== "object" || !("name" in payload.strategy) || typeof payload.strategy.name !== "string" ||
-      !("chatResponse" in payload) || typeof payload.chatResponse !== "string") {
+  if (!isRecord(payload) || !isNonEmptyString(payload.status) || !isNonEmptyString(payload.provider) ||
+      !validCustomStrategy(payload.strategy) || typeof payload.chatResponse !== "string") {
     throw new StrategyLibraryActionError(response.status, "AI generator returned an invalid strategy draft");
   }
-  return payload as AIStrategyDraftResponse;
+  return payload as unknown as AIStrategyDraftResponse;
 }
