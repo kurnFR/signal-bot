@@ -387,3 +387,17 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Status:** Open; exact-head CI pending.
 - Validates quick-test result metrics/counts, nested AI strategy draft rows, and optional mutation response metadata.
 - All regression tests use mocked HTTP responses; no strategy quick-test, AI generation, create/delete action, or deployment was performed.
+
+
+### PR #593 — Strategy Library action-response contracts
+
+- **Status:** Merged. Merge commit: `8618132398aa4139f6740c09f043b569a9f20ee8`.
+- Validates quick-test count/metric fields, nested AI strategy draft payloads, and optional mutation result metadata.
+- Exact-head frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, Wallet Tracker MariaDB integration, and RetailBot accounting regression passed. Tests used mocked responses only.
+
+### PR #594 — Wallet Tracking runtime contract reconciliation
+
+- **Status:** In progress; exact-head CI pending.
+- Compared `web/routes/wallet_routes.py`, `wallet_tracker/store.py`, and the React client. Found stale frontend expectations for health telemetry, tracked-wallet timestamps, token-flow aggregation fields, and swap-event payload fields.
+- Aligns the preview with the real serializer and validates metadata/settings/status plus tracked wallet, position, flow, and event rows.
+- No wallet settings/tracking mutation or worker action is called.

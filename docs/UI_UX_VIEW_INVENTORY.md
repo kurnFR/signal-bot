@@ -809,4 +809,13 @@ The News AI contract mismatch described in the historical audit has been correct
 
 - Validates quick-test counts/metrics, nested AI-generated strategy drafts, and optional mutation response metadata.
 - Mocked tests cover valid payloads and malformed quick-test, AI draft, and mutation responses.
-- Exact-head CI is pending; no strategy action or side effect was executed.
+- [x] Exact-head frontend and backend checks passed; PR #593 merged as `8618132398aa4139f6740c09f043b569a9f20ee8`.
+- No strategy action or side effect was executed.
+
+
+## UIX-00 Wallet Tracking runtime contract reconciliation (PR #594, pending)
+
+- Backend source review found that wallet status telemetry, tracked-wallet timestamps, token-flow aggregates, and swap-event fields were named differently from the preview's TypeScript interfaces and JSX.
+- Update the preview to consume the registered route's real serializer fields (`last_cycle_at`, `first_flagged_at`, pair/buy/sell/net flow values, and swap `block_time`/`usd_value`).
+- Validate response envelopes and row types before rendering, with malformed payload regressions.
+- Exact-head CI and runtime/browser parity remain pending; production legacy dashboard is unchanged.
