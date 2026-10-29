@@ -313,13 +313,13 @@ def get_paper_trades(limit: int = 50) -> List[Dict[str, Any]]:
         cur.execute(
             """
             SELECT
-                id, position_id, symbol, market, timeframe, strategy_name,
-                direction, entry_time, entry_time_wib, entry_price,
-                exit_time, exit_time_wib, exit_price, exit_reason,
-                stop_loss, take_profit, quantity, notional_value,
-                gross_pnl, entry_fee, exit_fee, funding_pnl, net_pnl,
-                allocated_capital, risk_per_trade_pct, risk_amount,
-                net_return_pct, r_multiple, holding_bars, created_at
+                t.id, t.position_id, t.symbol, t.market, t.timeframe, t.strategy_name,
+                t.direction, t.entry_time, t.entry_time_wib, t.entry_price,
+                t.exit_time, t.exit_time_wib, t.exit_price, t.exit_reason,
+                t.stop_loss, t.take_profit, t.quantity, t.notional_value,
+                t.gross_pnl, t.entry_fee, t.exit_fee, t.funding_pnl, t.net_pnl,
+                t.allocated_capital, t.risk_per_trade_pct, t.risk_amount,
+                t.net_return_pct, t.r_multiple, t.holding_bars, t.created_at
             FROM paper_trades t
             LEFT JOIN paper_positions p ON p.id = t.position_id
             LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name
