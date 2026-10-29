@@ -75,4 +75,48 @@ describe("fetchPaperTradingSnapshot response contracts", () => {
     }
   });
 
+
+  it("accepts populated rows matching the backend serializers", async () => {
+    const populated: Record<string, unknown> = {
+      "/api/paper/positions": { positions: [{
+        id: 3, symbol: "BTCUSDT", market: "spot", timeframe: "1h", strategy_name: "s",
+        direction: "LONG", entry_time: "2026-10-29T02:00:00", entry_time_wib: "2026-10-29 09:00:00",
+        entry_price: 100, current_price: 101, stop_loss: 95, take_profit: 110,
+        current_stop: 96, trailing_active: false, trail_activation_r: 1,
+        trail_distance_atr_mult: 2, initial_risk: 5, allocated_capital: 1000,
+        risk_per_trade_pct: 1, risk_amount: 10, stop_distance: 5, quantity: 2,
+        notional_value: 202, entry_fee: 0.1, unrealized_pnl_pct: 1,
+        unrealized_r: 0.2, holding_bars: 1, max_hold_bars: 20,
+        status: "OPEN", last_update_time: "2026-10-29T02:01:00",
+      }] },
+      "/api/paper/configs": { configs: [{
+        id: 4, symbol: "BTCUSDT", market: "spot", timeframe: "1h", strategy_name: "s",
+        is_active: true, allocated_capital: 1000, risk_per_trade_pct: 1,
+        ml_model_id: null, telegram_enabled: false, report_enabled: true, created_at: "2026-10-29T02:00:00",
+      }] },
+      "/api/paper/orders?limit=20": { orders: [{
+        id: 5, symbol: "BTCUSDT", market: "spot", timeframe: "1h", side: "BUY",
+        order_type: "MARKET", status: "PENDING", quantity: 2, price: null,
+        created_at: "2026-10-29T02:00:00", filled_at: null, state_reason: null,
+      }] },
+      "/api/paper/trades?limit=20": { trades: [{
+        id: 6, position_id: 3, symbol: "BTCUSDT", market: "spot", timeframe: "1h",
+        strategy_name: "s", direction: "LONG", entry_time: "2026-10-29T02:00:00",
+        entry_time_wib: "2026-10-29 09:00:00", entry_price: 100,
+        exit_time: "2026-10-29T03:00:00", exit_time_wib: "2026-10-29 10:00:00",
+        exit_price: 101, exit_reason: "target", stop_loss: 95, take_profit: 110,
+        quantity: 2, notional_value: 202, gross_pnl: 2, entry_fee: 0.1,
+        exit_fee: 0.1, funding_pnl: 0, net_pnl: 1.8, allocated_capital: 1000,
+        risk_per_trade_pct: 1, risk_amount: 10, net_return_pct: 0.18,
+        r_multiple: 0.2, holding_bars: 1, created_at: "2026-10-29T03:00:00",
+      }] },
+    };
+    getJson.mockImplementation((path: string) => Promise.resolve(populated[path] ?? validResponses[path]));
+    const result = await fetchPaperTradingSnapshot();
+    expect(result.positions).toHaveLength(1);
+    expect(result.configs).toHaveLength(1);
+    expect(result.orders).toHaveLength(1);
+    expect(result.trades).toHaveLength(1);
+  });
+
 });
