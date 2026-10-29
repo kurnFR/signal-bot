@@ -39,7 +39,7 @@ function validPosition(value: unknown): boolean {
   if (!["symbol", "market", "timeframe", "strategy_name", "direction", "status"].every((key) => requiredText(value[key]))) return false;
   if (!["entry_price", "current_price", "quantity", "allocated_capital"].every((key) => finite(value[key]))) return false;
   if (!["stop_loss", "take_profit", "unrealized_pnl_pct", "unrealized_r"].every((key) => nullableFinite(value[key]))) return false;
-  return optionalNullableFinite(value, "entry_time") &&
+  return nullableText(value.entry_time) &&
     nullableText(value.last_update_time);
 }
 function validConfig(value: unknown): boolean {
