@@ -323,8 +323,18 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `b19797071afeee04abc20008cf8a396626481bc9`.
 - **Safety:** Mocked reads only; no policy writes, backtests, promotion, paper activation, Telegram sends, or deployment.
 
-### Current PR #586 — validate backtest execution response contract
+### PR #586 — validate backtest execution response contract
 
-- Validates the run ID, identifying metadata, candle count, required metrics, nullable numeric metrics, and trade array before the UI treats an execution response as a result.
-- Adds mocked contract tests for a valid result, fractional run ID, incorrectly typed metrics, and missing metadata.
+- **Status:** Merged.
+- **Merge commit:** `e74bbce48a7ce7bfe3da2da69ba74118116cd72b`.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/586
+- **Coverage:** Validates run ID, identifying metadata, candle count, required metrics, nullable numeric metrics, and trade array before accepting an execution response.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `416f1e1ad0daa99194ace991d9261ac4d738416b`.
+- **Safety:** Mocked responses only; no backtest, policy write, promotion, paper activation, Telegram send, live trade, or deployment.
+
+### Current PR #587 — validate backtest history and detail response contracts
+
+- Adds runtime validation for persisted history summaries and individual run details, including nullable performance metrics, parameter containers, closed-trade strings/timestamps/numeric fields, and holding-bar counts.
+- Malformed payloads fail with a recoverable contract error instead of being treated as typed data by the UI.
+- Adds mocked contract tests for valid, malformed, and incomplete history/detail payloads.
 - Validation is pending on the exact PR head; do not merge until all required checks pass.

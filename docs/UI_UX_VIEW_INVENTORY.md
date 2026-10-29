@@ -770,3 +770,11 @@ The News AI contract mismatch described in the historical audit has been correct
 - [x] Reject fractional/invalid run IDs and malformed metrics instead of accepting a loosely typed payload.
 - [x] Add mocked tests for valid and invalid execution responses.
 - [ ] Continue route-by-route request/response/RBAC and legacy caller parity review. UIX-00 acceptance and production cutover remain open.
+
+
+## UIX-00 backtest history/detail response contract hardening (2026-10-29)
+
+- [x] Validate every saved run summary before rendering the history list, including integer identifiers/counts, required identifying strings, nullable finite metrics, and creation timestamp string.
+- [x] Validate run detail metadata, params container, and closed trade field types/numeric ranges before rendering.
+- [x] Add mocked contract tests for valid payloads, malformed summary metrics/IDs, incomplete details, and invalid trade fields/arrays.
+- [ ] Continue route-by-route request/response/RBAC parity for remaining React API clients and legacy callers. UIX-00 acceptance and production cutover remain open.

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { executeBacktest, fetchPromotionSnapshot, type PromotionPolicy, type BacktestExecutionInput } from "./backtestStudio";
+import { executeBacktest, fetchBacktestHistory, fetchBacktestRunDetails, fetchPromotionSnapshot, type PromotionPolicy, type BacktestExecutionInput } from "./backtestStudio";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -145,5 +145,58 @@ describe("executeBacktest response contract validation", () => {
     const { totalCandles: _ignored, ...incompleteResult } = validResult;
     mockExecutionResult(incompleteResult);
     await expect(executeBacktest(executionInput)).rejects.toThrow("Backtest returned an invalid result payload");
+  });
+});
+
+
+const validRun = { id: 42, symbol: "BTCUSDT", market: "spot", timeframe: "1h", strategy: "trend_ema_v1", dataSegment: "holdout", totalTrades: 2, winRatePct: 50, expectancyR: 0.25, profitFactor: 1.5, maxDrawdownR: 1.2, createdAt: "2026-10-26T10:00:00Z" };
+const validTrade = { direction: "LONG", entryTime: "2026-10-26T09:00:00Z", entryTimeWib: "2026-10-26 16:00:00", entryPrice: 100, exitTime: "2026-10-26T10:00:00Z", exitTimeWib: "2026-10-26 17:00:00", exitPrice: 102, exitReason: "take_profit", stopLoss: 98, takeProfit: 102, netReturnPct: 1.8, rMultiple: 1, holdingBars: 1 };
+
+function mockGet(payload: unknown) {
+  const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+    expect(init?.method ?? "GET").toBe("GET");
+    return Promise.resolve(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+describe("backtest history response contract validation", () => {
+  it("accepts valid persisted run summaries and nullable metrics", async () => {
+    mockGet({ runs: [validRun, { ...validRun, id: 43, winRatePct: null, expectancyR: null, profitFactor: null, maxDrawdownR: null }] });
+    await expect(fetchBacktestHistory()).resolves.toEqual({ runs: [validRun, { ...validRun, id: 43, winRatePct: null, expectancyR: null, profitFactor: null, maxDrawdownR: null }] });
+  });
+
+  it("rejects malformed run summaries instead of passing invalid values to the UI", async () => {
+    mockGet({ runs: [{ ...validRun, id: 42.5, totalTrades: "2" }] });
+    await expect(fetchBacktestHistory()).rejects.toThrow("Backtest history returned an invalid response");
+  });
+
+  it("rejects a non-array history envelope", async () => {
+    mockGet({ runs: { id: 42 } });
+    await expect(fetchBacktestHistory()).rejects.toThrow("Backtest history returned an invalid response");
+  });
+});
+
+describe("backtest run detail response contract validation", () => {
+  it("accepts valid run metadata, parameters, and closed trades", async () => {
+    const payload = { run: { ...validRun, params: { TREND_EMA_FAST: 20 } }, trades: [validTrade] };
+    mockGet(payload);
+    await expect(fetchBacktestRunDetails(42)).resolves.toEqual(payload);
+  });
+
+  it("rejects malformed trade numeric fields", async () => {
+    mockGet({ run: { ...validRun, params: {} }, trades: [{ ...validTrade, entryPrice: "100" }] });
+    await expect(fetchBacktestRunDetails(42)).rejects.toThrow("Backtest run details returned an invalid response");
+  });
+
+  it("rejects missing run metadata and invalid parameter containers", async () => {
+    mockGet({ run: { id: 42, params: [] }, trades: [] });
+    await expect(fetchBacktestRunDetails(42)).rejects.toThrow("Backtest run details returned an invalid response");
+  });
+
+  it("rejects invalid trade arrays", async () => {
+    mockGet({ run: { ...validRun, params: null }, trades: { items: [] } });
+    await expect(fetchBacktestRunDetails(42)).rejects.toThrow("Backtest run details returned an invalid response");
   });
 });

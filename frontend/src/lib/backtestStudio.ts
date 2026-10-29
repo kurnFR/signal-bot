@@ -57,15 +57,59 @@ export interface BacktestHistoryResponse { runs: BacktestRunSummary[] }
 export interface BacktestStrategiesResponse { strategies: BacktestStrategy[] }
 export interface BacktestDetailsResponse { run: BacktestRunDetails; trades: BacktestTrade[] }
 
-export function fetchBacktestStrategies(signal?: AbortSignal) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isBacktestRunSummary(value: unknown): value is BacktestRunSummary {
+  if (!isRecord(value)) return false;
+  return isPositiveSafeInteger(value.id) &&
+    ["symbol", "market", "timeframe", "strategy", "dataSegment", "createdAt"].every((key) => isNonEmptyString(value[key])) &&
+    isNonNegativeSafeInteger(value.totalTrades) &&
+    ["winRatePct", "expectancyR", "profitFactor", "maxDrawdownR"].every((key) => isFiniteNullableNumber(value[key]));
+}
+
+function isBacktestTrade(value: unknown): value is BacktestTrade {
+  if (!isRecord(value)) return false;
+  return ["direction", "entryTimeWib", "exitTimeWib", "exitReason"].every((key) => typeof value[key] === "string") &&
+    (value.entryTime === null || typeof value.entryTime === "string") &&
+    (value.exitTime === null || typeof value.exitTime === "string") &&
+    ["entryPrice", "exitPrice", "stopLoss", "takeProfit", "netReturnPct"].every((key) => typeof value[key] === "number" && Number.isFinite(value[key])) &&
+    isFiniteNullableNumber(value.rMultiple) &&
+    isNonNegativeSafeInteger(value.holdingBars);
+}
+
+export async function fetchBacktestStrategies(signal?: AbortSignal): Promise<BacktestStrategiesResponse> {
   return getJson<BacktestStrategiesResponse>("/api/backtest/strategies", signal);
 }
-export function fetchBacktestHistory(signal?: AbortSignal) {
-  return getJson<BacktestHistoryResponse>("/api/backtest/history?limit=100", signal);
+export async function fetchBacktestHistory(signal?: AbortSignal): Promise<BacktestHistoryResponse> {
+  const payload = await getJson<unknown>("/api/backtest/history?limit=100", signal);
+  if (!isRecord(payload) || !Array.isArray(payload.runs) || !payload.runs.every(isBacktestRunSummary)) {
+    throw new Error("Backtest history returned an invalid response");
+  }
+  return payload as unknown as BacktestHistoryResponse;
 }
-export function fetchBacktestRunDetails(runId: number, signal?: AbortSignal) {
+export async function fetchBacktestRunDetails(runId: number, signal?: AbortSignal): Promise<BacktestDetailsResponse> {
   if (!Number.isSafeInteger(runId) || runId < 1) throw new TypeError("Backtest run ID must be a positive integer");
-  return getJson<BacktestDetailsResponse>(`/api/backtest/runs/${runId}`, signal);
+  const payload = await getJson<unknown>(`/api/backtest/runs/${runId}`, signal);
+  if (!isRecord(payload) || !isBacktestRunSummary(payload.run) ||
+      !isRecord(payload.run) || !(payload.run.params === null || isRecord(payload.run.params)) ||
+      !Array.isArray(payload.trades) || !payload.trades.every(isBacktestTrade)) {
+    throw new Error("Backtest run details returned an invalid response");
+  }
+  return payload as unknown as BacktestDetailsResponse;
 }
 
 export interface BacktestExecutionInput {
