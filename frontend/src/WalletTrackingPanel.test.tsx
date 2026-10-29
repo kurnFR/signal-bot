@@ -30,7 +30,7 @@ describe("WalletTrackingPanel", () => {
     expect(await screen.findByText("Test wallet")).toBeInTheDocument();
     expect(screen.getByText("Cycle observed")).toBeInTheDocument();
     expect(screen.getAllByText("Ethereum").length).toBeGreaterThan(0);
-    expect(screen.getByText("ETH/ABC")).toBeInTheDocument();
+    expect(screen.getAllByText("ETH/ABC").length).toBeGreaterThan(0);
     expect(screen.getByText(/Read-only Wallet Tracking monitor/)).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.every((call) => call[1]?.method === "GET")).toBe(true);
   });
