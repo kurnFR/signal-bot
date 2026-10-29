@@ -800,4 +800,13 @@ The News AI contract mismatch described in the historical audit has been correct
 
 - Validate coverage summary integer counts and each coverage row's labels, counts, flags, and nullable date fields.
 - Validate every job row's required labels/status, progress range, timestamps, optional messages/errors, and fetched-candle count.
-- Reject malformed snapshot responses rather than silently substituting empty arrays. Exact-head CI and runtime route parity remain pending.
+- Reject malformed snapshot responses rather than silently substituting empty arrays.
+- [x] Exact-head frontend and backend regression checks passed; PR #592 merged as `6ee6d336f71f8365cad914fd61dd003a882f5ae8`.
+- [ ] Runtime route parity and owner acceptance remain open.
+
+
+## UIX-00 Strategy Library action-response hardening (PR #593, pending)
+
+- Validates quick-test counts/metrics, nested AI-generated strategy drafts, and optional mutation response metadata.
+- Mocked tests cover valid payloads and malformed quick-test, AI draft, and mutation responses.
+- Exact-head CI is pending; no strategy action or side effect was executed.
