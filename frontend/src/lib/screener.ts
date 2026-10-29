@@ -102,8 +102,18 @@ export class ScreenerControlError extends Error {
   constructor(readonly status: number, message: string) { super(message); this.name = "ScreenerControlError"; }
 }
 
-export function fetchScreenerControl(signal?: AbortSignal): Promise<ScreenerControlResponse> {
-  return getJson<ScreenerControlResponse>("/api/research/screener/control", signal);
+export async function fetchScreenerControl(signal?: AbortSignal): Promise<ScreenerControlResponse> {
+  const payload = await getJson<unknown>("/api/research/screener/control", signal);
+  if (!isRecord(payload) || typeof payload.enabled !== "boolean" || !isRecord(payload.overrides) ||
+      !nullableString(payload.updated_at) || !Array.isArray(payload.tunable_fields) ||
+      !payload.tunable_fields.every(isNonEmptyString)) {
+    throw new Error("Screener control returned an invalid response");
+  }
+  const tunable = new Set(payload.tunable_fields);
+  const overridesValid = Object.entries(payload.overrides).every(([key, value]) =>
+    tunable.has(key) && (typeof value === "boolean" || isFiniteNumber(value)));
+  if (!overridesValid) throw new Error("Screener control returned an invalid response");
+  return payload as unknown as ScreenerControlResponse;
 }
 
 /** The only non-read-only request in the screener feature; its path is fixed and server-authorized. */
@@ -121,6 +131,8 @@ export async function saveScreenerControl(enabled: boolean, overrides: Record<st
     const detail = payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string" ? payload.detail.slice(0, 300) : `Screener settings could not be saved (${response.status})`;
     throw new ScreenerControlError(response.status, detail);
   }
-  if (!payload || typeof payload !== "object" || !("status" in payload) || payload.status !== "ok") throw new ScreenerControlError(response.status, "Screener returned an invalid save response");
-  return payload as ScreenerControlSaveResult;
+  if (!isRecord(payload) || payload.status !== "ok" || !isNonEmptyString(payload.note)) {
+    throw new ScreenerControlError(response.status, "Screener returned an invalid save response");
+  }
+  return payload as unknown as ScreenerControlSaveResult;
 }
