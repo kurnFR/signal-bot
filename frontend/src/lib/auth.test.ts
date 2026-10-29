@@ -24,6 +24,7 @@ describe("authentication response contracts", () => {
 
   it.each([
     ["non-positive user ID", { ...validUser, id: 0 }],
+    ["string user ID", { ...validUser, id: "4" }],
     ["empty username", { ...validUser, username: " " }],
     ["unknown role", { ...validUser, role: "superuser" }],
     ["invalid email", { ...validUser, email: 7 }],
