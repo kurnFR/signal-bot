@@ -786,4 +786,18 @@ The News AI contract mismatch described in the historical audit has been correct
 - [x] Reject non-finite performance metrics and malformed metric rows before rendering.
 - [x] Validate circuit-breaker status booleans, reason/message fields, counters, limits, and nullable PnL/notional values; malformed safety status is treated as unverified.
 - [x] Add mocked contract tests for valid empty datasets and malformed risk, metrics, and envelope payloads.
-- [x] Compared the frontend-consumed position/config/order/trade fields with `paper/engine.py` serializers and `paper/orders.py` order rows; React now rejects malformed row IDs, labels, booleans, timestamps, and non-finite numeric values (PR #590). Exact PR-head CI and runtime/browser parity remain pending. UIX-00 acceptance and production cutover remain open.
+- [x] Compared the frontend-consumed position/config/order/trade fields with `paper/engine.py` serializers and `paper/orders.py` order rows; React now rejects malformed row IDs, labels, booleans, timestamps, and non-finite numeric values (PR #590). Exact PR-head CI passed and PR #590 is merged; runtime/browser parity remains pending. UIX-00 acceptance and production cutover remain open.
+
+
+## UIX-00 Strategy Library row contract hardening (PR #591, merged 2026-10-29)
+
+- [x] Validate each saved custom-strategy row and optional conditions/settings before rendering.
+- [x] Validate indicator names, optional descriptive metadata, finite defaults, and operator arrays.
+- [x] Exact-head frontend and backend regression checks passed; PR #591 merged as `7e2a3fc7a27b5b7af51eb8c267e5386719b3983d`.
+- [ ] Validate remaining quick-test, AI draft, and mutation response contracts; continue runtime route/RBAC and legacy-caller parity review.
+
+## UIX-00 Master Data snapshot contract hardening (PR #592, pending)
+
+- Validate coverage summary integer counts and each coverage row's labels, counts, flags, and nullable date fields.
+- Validate every job row's required labels/status, progress range, timestamps, optional messages/errors, and fetched-candle count.
+- Reject malformed snapshot responses rather than silently substituting empty arrays. Exact-head CI and runtime route parity remain pending.

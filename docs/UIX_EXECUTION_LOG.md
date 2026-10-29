@@ -1,6 +1,6 @@
 # UI/UX Migration Execution Log
 
-**Updated:** 2026-10-28  
+**Updated:** 2026-10-29  
 **Status:** In progress — React preview only; legacy dashboard remains the production default.  
 **Deployment:** None. Do not mount the preview in FastAPI or change production serving without explicit owner approval.
 
@@ -53,7 +53,7 @@ This log records verified execution checkpoints and keeps the next actions actio
 
 ## Next execution queue
 
-1. **Reconcile inventory against runtime routes and roles.** Compare each row in `docs/UI_UX_VIEW_INVENTORY.md` with effective FastAPI routes, HTTP methods, auth/RBAC, polling, error/empty states, and side effects. Record discrepancies and evidence; do not rely on a static decorator count alone.
+1. **Reconcile inventory against runtime routes and roles.** Compare each row in `docs/UI_UX_VIEW_INVENTORY.md` with effective FastAPI routes, HTTP methods, auth/RBAC, polling, error/empty states, and side effects. Record discrepancies and evidence; do not rely on a static decorator count alone. The npm lockfile plus `npm ci` gate is already implemented.
 2. **Close the browser-flow gaps.** Expand Playwright beyond smoke coverage to verify migrated-view navigation and role-gated requests, loading/error/empty behavior, refresh/session recovery, and narrow viewport behavior. Keep all mutation endpoints mocked unless a separately reviewed test explicitly requires otherwise.
 3. **Accessibility acceptance.** Track keyboard/focus, screen-reader semantics, zoom/reflow, contrast, reduced motion, and forced-colors checks for each migrated view and both themes.
 4. **Feature parity review.** Review Market Screener V2, Master Data, and Settings view-by-view; keep all unverified controls clearly non-functional or absent rather than implying they work.
@@ -347,3 +347,29 @@ This log records verified execution checkpoints and keeps the next actions actio
 - Malformed or unverified circuit-breaker data is rejected instead of being rendered as a trustworthy risk state.
 - Adds mocked contract tests for a valid empty snapshot, malformed risk status, non-finite metrics, and missing response envelopes.
 - Validation is pending on the exact PR head; do not merge until all required checks pass.
+
+
+## Latest checkpoints — 2026-10-29
+
+### PR #590 — Paper Trading row contracts
+
+- **Status:** Merged. Merge commit: `04c4ebffe45bf72f21d81be9d6cabe0d0f1267c8`.
+- Added fail-closed row validation for positions, configs, orders, and closed trades; fixtures now match the backend ledger serializer fields.
+- Exact-head frontend type-check, unit tests, production build, Playwright smoke tests, pytest (two runs), unit-tests, Wallet Tracker MariaDB integration, and RetailBot paper-accounting checks passed.
+
+### PR #591 — Strategy Library row contracts
+
+- **Status:** Merged. Merge commit: `7e2a3fc7a27b5b7af51eb8c267e5386719b3983d`.
+- Validates saved strategy rows, condition arrays, finite numeric settings, indicator metadata, and operator arrays.
+- Exact-head frontend type-check, unit tests, production build, Playwright smoke tests, pytest (two runs), unit-tests, Wallet Tracker MariaDB integration, and RetailBot paper-accounting checks passed. One test assertion was corrected to match the actual panel's persistent section heading; the final exact-head run is green.
+
+### PR #592 — Master Data snapshot rows
+
+- **Status:** Open; exact-head CI pending.
+- Validates coverage summary counts, coverage rows, and job status rows; malformed snapshots are rejected instead of silently becoming partial empty datasets.
+- No backfill or feature-build job is started by these changes.
+
+### Reproducible frontend install status
+
+- `frontend/package-lock.json` is tracked and `.github/workflows/frontend.yml` uses `npm ci --no-audit --no-fund`; this is no longer an open migration blocker.
+- The next priority remains runtime route/RBAC reconciliation against the effective FastAPI registry, then browser/device/accessibility evidence and explicit owner acceptance.
