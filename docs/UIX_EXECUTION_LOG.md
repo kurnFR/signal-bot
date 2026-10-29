@@ -525,3 +525,17 @@ This log records verified execution checkpoints and keeps the next actions actio
 - Reconciles stale route inventory notes about the React Settings caller and preserves the existing admin-only explicit confirmation workflow.
 - All tests mock HTTP responses; no Telegram message is sent. No role policy or production behavior is changed.
 - Exact-head CI pending; do not merge until all required checks pass.
+
+
+### PR #602 — Telegram test-result response contract
+
+- **Status:** Merged. Merge commit: `ac195488376a362bb78e3419028c93041d53cefe`.
+- Exact-head frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `38e7a03b2e6f931945a7e9fdcc46b1e232bf7b05`.
+- Runtime validation now matches the Telegram helper's optional response fields; route inventory notes distinguish HTTP 400 `detail` responses from successful helper results. Tests were mocked and sent no real message.
+
+### Current PR #603 — authentication user-profile response contract
+
+- Validates login session payloads and `GET /api/auth/me` profiles before storing a token or using profile role/password-change flags.
+- Rejects malformed IDs, usernames, email values, unknown roles, non-boolean forced-password-change flags, and invalid/empty tokens.
+- Auth gate profile reads use the same validator after initial sign-in and password changes. Tests use mocked responses; no real credentials or sessions are used.
+- Exact-head CI pending; do not merge until all required checks pass.
