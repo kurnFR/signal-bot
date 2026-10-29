@@ -373,3 +373,17 @@ This log records verified execution checkpoints and keeps the next actions actio
 
 - `frontend/package-lock.json` is tracked and `.github/workflows/frontend.yml` uses `npm ci --no-audit --no-fund`; this is no longer an open migration blocker.
 - The next priority remains runtime route/RBAC reconciliation against the effective FastAPI registry, then browser/device/accessibility evidence and explicit owner acceptance.
+
+
+### PR #592 — Master Data snapshot row contracts
+
+- **Status:** Merged. Merge commit: `6ee6d336f71f8365cad914fd61dd003a882f5ae8`.
+- Validates coverage summary counts, each dataset coverage row, and every job status row before rendering.
+- Exact-head frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, Wallet Tracker MariaDB integration, and RetailBot accounting regression passed.
+- No backfill or feature-build job was started.
+
+### PR #593 — Strategy Library action-response contracts
+
+- **Status:** Open; exact-head CI pending.
+- Validates quick-test result metrics/counts, nested AI strategy draft rows, and optional mutation response metadata.
+- All regression tests use mocked HTTP responses; no strategy quick-test, AI generation, create/delete action, or deployment was performed.
