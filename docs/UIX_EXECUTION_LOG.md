@@ -458,3 +458,16 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Status:** Open; exact-head CI pending.
 - Validates experiment summary rows, saved model eligibility/weight flags, and detail identity; invalid model metadata fails closed before it can be counted as eligible.
 - Tests use mocked GET responses only. No experiment run or paper deployment is invoked.
+
+
+### PR #598 — ML Studio response contracts
+
+- **Status:** Merged. Merge commit: `5564c958dc4f791ebeb7c3f89a4f22a92ffa490c`.
+- Validates experiment summaries, safe identities, model manifest eligibility/weight flags, and details identity.
+- Final exact-head frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, Wallet Tracker MariaDB integration, and RetailBot accounting regression passed. An async test assertion was corrected before the green run.
+
+### PR #599 — News AI snapshot response contracts
+
+- **Status:** Open; exact-head CI pending.
+- Validates aggregate stats, nested performance/heartbeat rows, signal fields, event IDs, nullable confidence, and numeric event values.
+- Valid empty collections are preserved. Invalid responses fail closed; all calls remain GET-only and do not invoke collectors, AI, paper execution, or Telegram.
