@@ -1,6 +1,6 @@
 import { getJson } from "./api";
 
-export interface PaperPosition { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; direction: string; entry_price: number; current_price: number; stop_loss: number | null; take_profit: number | null; quantity: number; unrealized_pnl_pct: number | null; unrealized_r: number | null; allocated_capital: number; status: string; last_update_time: string | null }
+export interface PaperPosition { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; direction: string; entry_price: number; current_price: number; stop_loss: number | null; take_profit: number | null; quantity: number; unrealized_pnl_pct: number | null; unrealized_r: number | null; allocated_capital: number; status: string; last_update_time: number }
 export interface PaperConfig { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; is_active: boolean; allocated_capital: number; risk_per_trade_pct: number; telegram_enabled: boolean; report_enabled: boolean; created_at: string }
 export interface PaperOrder { id: number; symbol: string; market: string; timeframe: string; side: string; order_type: string; status: string; quantity?: number; price?: number | null; created_at: string; filled_at?: string | null; state_reason?: string | null }
 export interface PaperTrade { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; direction: string; entry_price: number; exit_price: number; net_pnl: number; net_return_pct: number; r_multiple: number; exit_reason: string; entry_time_wib: string; exit_time_wib: string }
@@ -39,8 +39,7 @@ function validPosition(value: unknown): boolean {
   if (!["symbol", "market", "timeframe", "strategy_name", "direction", "status"].every((key) => requiredText(value[key]))) return false;
   if (!["entry_price", "current_price", "quantity", "allocated_capital"].every((key) => finite(value[key]))) return false;
   if (!["stop_loss", "take_profit", "unrealized_pnl_pct", "unrealized_r"].every((key) => nullableFinite(value[key]))) return false;
-  return nullableText(value.entry_time) &&
-    nullableText(value.last_update_time);
+  return finite(value.entry_time) && finite(value.last_update_time);
 }
 function validConfig(value: unknown): boolean {
   return isRecord(value) && positiveId(value.id) &&
