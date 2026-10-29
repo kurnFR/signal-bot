@@ -37,6 +37,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
+function isCount(value: unknown): value is number {
+  return isFiniteNumber(value) && Number.isInteger(value) && value >= 0;
+}
 function validCondition(value: unknown): value is StrategyCondition {
   if (!isRecord(value)) return false;
   return (value.indicator === undefined || typeof value.indicator === "string") &&
