@@ -80,14 +80,14 @@ describe("fetchPaperTradingSnapshot response contracts", () => {
     const populated: Record<string, unknown> = {
       "/api/paper/positions": { positions: [{
         id: 3, symbol: "BTCUSDT", market: "spot", timeframe: "1h", strategy_name: "s",
-        direction: "LONG", entry_time: "2026-10-29T02:00:00", entry_time_wib: "2026-10-29 09:00:00",
+        direction: "LONG", entry_time: 1793239200000, entry_time_wib: "2026-10-29 09:00:00",
         entry_price: 100, current_price: 101, stop_loss: 95, take_profit: 110,
         current_stop: 96, trailing_active: false, trail_activation_r: 1,
         trail_distance_atr_mult: 2, initial_risk: 5, allocated_capital: 1000,
         risk_per_trade_pct: 1, risk_amount: 10, stop_distance: 5, quantity: 2,
         notional_value: 202, entry_fee: 0.1, unrealized_pnl_pct: 1,
         unrealized_r: 0.2, holding_bars: 1, max_hold_bars: 20,
-        status: "OPEN", last_update_time: "2026-10-29T02:01:00",
+        status: "OPEN", last_update_time: 1793239260000,
       }] },
       "/api/paper/configs": { configs: [{
         id: 4, symbol: "BTCUSDT", market: "spot", timeframe: "1h", strategy_name: "s",
