@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchScreenerSnapshot, saveScreenerControl } from "./screener";
+import { fetchScreenerControl, fetchScreenerSnapshot, saveScreenerControl, ScreenerControlError } from "./screener";
 
 describe("Screener control session handling", () => {
   afterEach(() => {
@@ -68,5 +68,32 @@ describe("Screener snapshot response contracts", () => {
   it("rejects malformed stats counts instead of rendering strings", async () => {
     installSnapshot({ "/api/research/screener/stats": { total_signals: 25, signals_last_24h: "4", by_type_last_24h: {} } });
     await expect(fetchScreenerSnapshot()).rejects.toThrow(/stats returned an invalid response/i);
+  });
+});
+
+describe("Screener control response contracts", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("rejects non-finite or non-numeric saved overrides", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      enabled: true, overrides: { rvol_multiplier: "8" }, updated_at: null,
+      tunable_fields: ["rvol_multiplier"],
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    await expect(fetchScreenerControl()).rejects.toThrow(/control returned an invalid response/i);
+  });
+
+  it("rejects persisted override keys that are not declared tunable", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      enabled: true, overrides: { unknown_override: 8 }, updated_at: null,
+      tunable_fields: ["rvol_multiplier"],
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    await expect(fetchScreenerControl()).rejects.toThrow(/control returned an invalid response/i);
+  });
+
+  it("rejects a successful-looking save response without its note contract", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "ok" }), {
+      status: 200, headers: { "content-type": "application/json" },
+    })));
+    await expect(saveScreenerControl(true, {})).rejects.toBeInstanceOf(ScreenerControlError);
   });
 });

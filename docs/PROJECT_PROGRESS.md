@@ -872,4 +872,13 @@ Reproducible frontend installation is already configured: `frontend/package-lock
 
 - Validate worker status, signal row IDs/labels/finite numeric metrics, nullable timestamps, Telegram flags, and signal-count aggregates before rendering.
 - Add mocked regressions for valid backend-shaped snapshots and malformed signal/stat fields.
-- Exact-head CI is pending. The preview continues to use only GET endpoints; no screener control endpoint is called.
+- [x] Exact-head frontend type-check, unit tests, production build, Playwright smoke tests, pytest (two runs), unit-tests, Wallet Tracker MariaDB integration, and RetailBot paper-accounting checks passed.
+- [x] Merged PR #596 as `163c87ba606b49c86438c8af344069bfba3ee269`.
+- The preview snapshot continues to use only GET endpoints; no screener control endpoint is called from the read-only Market Screener panel.
+
+
+### UIX-00 Screener control response hardening — 2026-10-29 (PR #597)
+
+- Validate persisted control envelope types, finite numeric/boolean overrides, and membership of override keys in the server-declared tunable-field list.
+- Validate successful save responses include both `status: "ok"` and a non-empty `note`.
+- Add malformed control and save-response regressions. Exact-head CI is pending; no actual control mutation is performed by tests.

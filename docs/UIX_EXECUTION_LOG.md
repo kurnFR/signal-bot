@@ -432,3 +432,16 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Status:** Open; exact-head CI pending.
 - Validates screener status, persisted signal rows, and stats counts using the backend's actual response fields.
 - Mocked tests only; the preview continues to call GET endpoints only and does not invoke screener control.
+
+
+### PR #596 — Screener snapshot response contracts
+
+- **Status:** Merged. Merge commit: `163c87ba606b49c86438c8af344069bfba3ee269`.
+- Validates status heartbeat/database flags, signal IDs/labels/finite metrics, nullable timestamps, Telegram status, and signal count maps.
+- Exact-head frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, Wallet Tracker MariaDB integration, and RetailBot accounting regression passed.
+
+### PR #597 — Screener control response contracts
+
+- **Status:** Open; exact-head CI pending.
+- Validates GET control snapshots against the declared tunable-field contract and validates successful POST response metadata.
+- All regression tests mock HTTP responses; no control setting is actually saved.
