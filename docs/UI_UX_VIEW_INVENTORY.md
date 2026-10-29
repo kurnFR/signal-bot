@@ -867,10 +867,18 @@ The historical audit notes above are chronological. Use this latest ledger for c
 - **PR #596:** merged — `163c87ba606b49c86438c8af344069bfba3ee269`.
 - **PR #597:** merged — `d576c65d3613e9cfb12e43cfa503797ee8dd992c`.
 - **PR #598:** merged — `5564c958dc4f791ebeb7c3f89a4f22a92ffa490c`.
-- **PR #599:** open; exact-head CI pending.
+- **PR #599:** merged — `b7a223781f8e2401812df3fd8a0c52e3a0e4a188`.
 
 ## UIX-00 News AI runtime contract validation (PR #599, pending)
 
 - Validates stats, nested paper-performance metrics, collector heartbeats, signal rows, and event rows.
 - Preserves valid empty collections but rejects malformed envelopes and rows.
 - Preview remains GET-only. Production collectors, AI calls, paper execution, Telegram sends, and deployment remain outside this UI migration task.
+
+
+## UIX-00 public system-status response validation (PR #600, pending)
+
+- Runtime-validates the public `GET /api/system/status` envelope, table-count values, collector heartbeat rows, nullable fields, and Binance connectivity/configuration values.
+- Keeps valid empty heartbeats and null timestamps/counts supported; rejects malformed payloads before the React view renders them.
+- New adapter tests mock HTTP only. This is read-only and does not access the admin-only diagnostics endpoint or trigger any worker, market-data, paper/live trading, or Telegram side effect.
+- [ ] Exact-head CI and review; legacy `web/static/` remains the production default until migration parity and owner acceptance are complete.

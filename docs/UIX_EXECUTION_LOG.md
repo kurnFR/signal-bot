@@ -471,3 +471,17 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Status:** Open; exact-head CI pending.
 - Validates aggregate stats, nested performance/heartbeat rows, signal fields, event IDs, nullable confidence, and numeric event values.
 - Valid empty collections are preserved. Invalid responses fail closed; all calls remain GET-only and do not invoke collectors, AI, paper execution, or Telegram.
+
+
+### PR #599 — News AI snapshot response contracts (status reconciliation)
+
+- **Status:** Merged. Exact PR head: `b7a223781f8e2401812df3fd8a0c52e3a0e4a188`.
+- Exact-head frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed.
+- The earlier pending entry above is a chronological checkpoint; this entry records the final merge state.
+
+### Current PR #600 — public system-status response contract
+
+- Adds runtime validation for `GET /api/system/status` before Overview renders database status, table counts, collector heartbeats, and Binance connectivity.
+- Valid empty heartbeat lists and nullable table counts/timestamps remain supported. Malformed envelopes, rows, table counts, error values, and Binance configuration fail closed with a readable adapter error.
+- New tests mock all HTTP responses; the public status client remains GET-only. No admin diagnostics, production state, collectors, trading, or Telegram are touched.
+- Exact-head CI pending; do not merge until all required checks pass.
