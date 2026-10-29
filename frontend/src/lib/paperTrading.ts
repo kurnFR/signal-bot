@@ -31,9 +31,6 @@ function requiredText(value: unknown): value is string {
 function nullableText(value: unknown): boolean {
   return value === null || typeof value === "string";
 }
-function optionalNullableFinite(record: Record<string, unknown>, key: string): boolean {
-  return !(key in record) || nullableFinite(record[key]);
-}
 function validPosition(value: unknown): boolean {
   if (!isRecord(value) || !positiveId(value.id)) return false;
   if (!["symbol", "market", "timeframe", "strategy_name", "direction", "status"].every((key) => requiredText(value[key]))) return false;
