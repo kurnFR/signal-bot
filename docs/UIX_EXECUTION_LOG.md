@@ -323,8 +323,18 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed on `b19797071afeee04abc20008cf8a396626481bc9`.
 - **Safety:** Mocked reads only; no policy writes, backtests, promotion, paper activation, Telegram sends, or deployment.
 
-### Current PR #586 — validate backtest execution response contract
+### PR #586 — validate backtest execution response contract
 
-- Validates the run ID, identifying metadata, candle count, required metrics, nullable numeric metrics, and trade array before the UI treats an execution response as a result.
-- Adds mocked contract tests for a valid result, fractional run ID, incorrectly typed metrics, and missing metadata.
+- **Status:** Merged.
+- **PR:** https://github.com/kurnFR/signal-bot/pull/586
+- **Merged head:** `416f1e1ad0daa99194ace991d9261ac4d738416b`.
+- **Exact-head validation:** Frontend type-check, unit tests, production build, Chromium browser smoke, pytest (two runs), unit-tests, paper-accounting, and Wallet Tracker MariaDB integration passed.
+- **Coverage:** Validates the run ID, identifying metadata, candle count, required metrics, nullable numeric metrics, and trade array before the UI treats an execution response as a result. Mocked contract tests cover valid and malformed payloads.
+- **Safety:** Mocked API responses only; no backtest, strategy activation, promotion, Telegram send, or deployment.
+
+### Current PR #587 — paper trading response contract validation
+
+- Validates the response envelopes for positions, configs, orders, trades, and metrics, plus finite numeric metric values and the circuit-breaker safety fields.
+- Malformed or unverified circuit-breaker data is rejected instead of being rendered as a trustworthy risk state.
+- Adds mocked contract tests for a valid empty snapshot, malformed risk status, non-finite metrics, and missing response envelopes.
 - Validation is pending on the exact PR head; do not merge until all required checks pass.
