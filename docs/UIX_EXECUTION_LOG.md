@@ -588,3 +588,13 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Coverage added:** Two unit tests in tests/test_screener.py mock both the database connection and telegram.send() to verify the notification occurs only for alert-gate state transitions.
 - **Safety:** The tests use an in-memory notification collector; they do not connect to MariaDB or send Telegram messages.
 - **Pending:** Owner must run PYTHONPATH="$PWD" python -m pytest -q tests/test_screener.py and report the result. Hosted CI remains unavailable/unverified due the repository's reported Actions quota exhaustion.
+
+### PR #604 — owner-run Screener regression tests + RetailBot Research API audit (2026-10-30)
+
+- **Screener test result:** Owner reports `PYTHONPATH="$PWD" python -m pytest -q tests/test_screener.py` => **29 passed in 0.52s**. This includes the two mocked `reload_control()` notification regression tests; no live Telegram or DB connection is used by those tests.
+- **Research preview:** `frontend/src/ResearchPanel.tsx` and `frontend/src/lib/research.ts` implement a read-only snapshot consumer; the React panel does not call Research lifecycle/control POST endpoints.
+- **Research API finding:** GET `/api/research/retailbot2/trades`, `/stats`, and `/strategies` call `_ensure_retailbot2_strategy_lifecycle_table()` and commit after `CREATE TABLE IF NOT EXISTS`. They are therefore not strictly read-only at the DB layer and may initialize schema / require DDL privileges. Positions GET does not call this helper.
+- **Worker lifecycle:** persisted settings refresh on first access and every 15 seconds. A failed refresh fails closed for evaluation, paper entries, and Telegram. `paper_enabled` gates new paper entries; `telegram_enabled` is copied to each trade and gates entry/exit Telegram notifications. `auto_promote_enabled` remains unavailable/fail-closed.
+- **Authorization:** lifecycle and RetailBot control mutations are admin/trader-only; authenticated GETs are allowed, subject to the forced-password-change guard.
+- **Recommended follow-up:** move lifecycle table creation to migrations/startup and keep GET helpers SELECT-only. This is recorded as a finding, not changed in this acceptance-only documentation pass.
+- **Safety:** source inspection only; no live API, database, worker, lifecycle mutation, paper trade, or Telegram action was performed.
