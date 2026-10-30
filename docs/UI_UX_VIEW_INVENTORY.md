@@ -1039,3 +1039,13 @@ All findings above are source-level only. No API calls, user changes, password c
 - **Backend validation gap:** `BackfillRequest` and `FeatureBuildRequest` accept unconstrained strings for symbol, market, and timeframe. Client-side restrictions are not a substitute for server validation. In particular, non-`spot` market values fall through to the Futures endpoint in the backfill worker. Add backend allowlists and format checks.
 - **Job-message disclosure risk:** job failure paths persist raw `str(exception)` in the public job message, while GET job history/detail is readable by all authenticated roles and the React view renders the message. Replace client-visible exception strings with stable sanitized errors and retain detail in server logs.
 - No endpoints or external providers were called and no jobs/data were changed during this source audit.
+
+
+## Verified Follow-up Audit — Strategy Library and System Status (PR #604)
+
+- Strategy Library React view reads saved definitions and indicator metadata. Admin/trader users can request an AI-generated draft, run an in-memory quick simulation, and explicitly create/update/delete saved definitions. Save/delete writes `custom_strategies.json` and updates the web-process strategy registry; these operations do not activate paper trading or send Telegram.
+- All `/api/custom-strategy*` routes, including GET catalog/list, are admin/trader-only. Viewer access is denied at the middleware boundary.
+- AI generation can transmit the prompt, up to six recent history messages, and current draft context to configured external LLM providers/fallbacks. The request schema has no explicit prompt/history size limits. This should be treated as an outbound data/cost boundary, not an offline operation.
+- Quick test reads stored OHLCV/features and simulates up to 1,000 candles in memory; it does not persist trades or activate strategies. Backend symbol/market/timeframe fields are plain strings despite the narrower React controls.
+- Public and admin system-status GET routes share a collector that queries DB metadata/heartbeats and probes Binance Spot/Futures. The public serializer strips host/database/raw error details; the admin route is restricted and exposes connection metadata/raw DB error to admins.
+- No LLM, simulation, strategy mutation, status endpoint, or outbound Binance request was invoked during this audit.
