@@ -3,18 +3,18 @@
 **Repository:** `kurnFR/signal-bot`  
 **Source baseline:** `eeaf8843d140701f88623a22aa925353e7e2e2d2` (`master`, 2026-10-30)  
 **Review branch:** `feat/uix-final-acceptance-pass`  
-**Report status:** **NOT ACCEPTED — owner/server validation remains outstanding**  
+**Report status:** **NOT ACCEPTED — automated owner-run checks pass; live/server and manual acceptance remain outstanding**  
 **Production status:** React/Vite remains an isolated preview. FastAPI continues to serve `web/static/` as the production dashboard. This work does not authorize deployment, production DB mutation, worker restart, live trading, or Telegram messages.
 
 ## Executive decision
 
-The migration has substantial implementation and regression coverage, but the available evidence does **not** justify declaring it production-ready or fully accepted. Remaining acceptance evidence depends on running the preview against the owner's actual server/data, testing on real browsers/devices and assistive technology, and obtaining owner sign-off. GitHub Actions quota is exhausted, so this branch cannot receive fresh hosted CI evidence during the current quota block. No local tests were run by the development agent, as requested; the owner will run them after delivery.
+The migration has substantial implementation and regression coverage. The owner has now run the frontend foundation checks, the complete Chromium Playwright suite, and the full backend pytest suite successfully on PR head `cc98744df4e1cd104ef60fd23bcc4f36a708f52e`. The 12 skipped backend tests are all opt-in MariaDB integration tests and remain outstanding. Remaining acceptance evidence depends on isolated MariaDB integration, live-server read-only API/data comparison, manual accessibility and real-device/browser checks, mutation/RBAC verification in an isolated environment, and owner sign-off. GitHub Actions quota is exhausted, so fresh hosted CI evidence remains unavailable.
 
 ## Acceptance matrix
 
 | Workstream | Evidence at review | Status | Required closure evidence |
 |---|---|---|---|
-| Responsive layouts | Existing Playwright coverage checks all nine read-only domain views at 320px. This branch adds a 375/768/1024/1440px matrix for all 11 navigation views in both persisted themes. | Automated coverage authored; execution pending | Owner runs browser suite; inspect real phone/tablet/desktop; verify 200% and 400% zoom/reflow and landscape. |
+| Responsive layouts | Owner-run Chromium Playwright suite passed all 28 tests, including the 375/768/1024/1440px matrix for all 11 navigation views in both persisted themes. | Automated Chromium suite passed; manual acceptance pending | Inspect real phone/tablet/desktop; verify 200% and 400% zoom/reflow and landscape. |
 | Keyboard/accessibility | Existing browser tests cover skip-link activation, active-page announcement, mobile focus restoration, Escape dismissal, reduced motion, and forced-colors focus visibility. | Partial automated coverage; manual acceptance pending | Keyboard-only pass for every view/dialog, screen-reader pass, visible focus and accessible-name review, both-theme contrast, 200%/400% zoom. |
 | Browser compatibility | Playwright config targets Desktop Chrome/Chromium only. | Partial | Run Chromium, Firefox and WebKit; then current Chrome/Firefox/Safari/Edge on supported real devices. |
 | API response contracts | Domain adapters have runtime validators and mocked contract tests for Paper Trading, Backtest, ML Studio, Research, News AI, Screener, Strategy Library, Wallet Tracking, system status, diagnostics and Telegram. This branch adds strict login and `/api/auth/me` validation against the backend serializer. | Broad source/mock coverage; live parity pending | Compare every view to actual FastAPI responses on the owner server; retain timestamped redacted samples and verify nullable/empty/permission/error variants. |
@@ -31,24 +31,25 @@ Allowed roles are `admin`, `trader`, and `viewer`. This client validation is def
 
 ## Owner-run validation procedure
 
-Run from `frontend/` in the environment that can reach the intended FastAPI API:
+Owner-run frontend validation on PR head `cc98744df4e1cd104ef60fd23bcc4f36a708f52e` (2026-10-30):
 
-```bash
-npm ci --no-audit --no-fund
-npm run typecheck
-npm test
-npm run build
-npx playwright install chromium
-npx playwright test
+```text
+npm ci --no-audit --no-fund     PASS (233 packages)
+npm run typecheck               PASS
+npm test                        PASS (30 files, 191 tests)
+npm run build                   PASS
+Playwright 1.64.1 Chromium      PASS (28 tests, 49.5s; official noble container)
 ```
 
-Then run the repository's required backend gates in the configured test environment:
+The browser suite was run in `mcr.microsoft.com/playwright:v1.64.1-noble` because the owner's Ubuntu 20.04 host is not supported by the Playwright 1.64.1 Chromium installer.
+
+Backend validation from the repository root:
 
 ```bash
-pytest -q
+PYTHONPATH="$PWD" python -m pytest -q
 ```
 
-Also run the existing unit-test, Wallet Tracker MariaDB integration, and RetailBot paper-accounting workflows using the repository's documented test configuration. Record exact commit SHA and command outcomes; do not report skipped/unstarted tests as passed.
+Result: **745 passed, 12 skipped, 0 failed** (8.19s; 7 deprecation warnings). Collection-only check: **757 tests collected, 0 collection errors**. The 12 skips are opt-in MariaDB tests: durable state (2), migrations (3), paper orders (4), and Wallet Tracker (3). These were intentionally not enabled because no disposable MariaDB test database has yet been confirmed. The isolated migration/accounting subset separately passed **15/15**. RetailBot paper-accounting unit coverage is included in the full pytest result; this is not a substitute for the skipped paper-order MariaDB integration. Record these as owner-run results, not hosted CI.
 
 ### Live-data comparison (read-only)
 
@@ -75,4 +76,4 @@ Also run the existing unit-test, Wallet Tracker MariaDB integration, and RetailB
 - [ ] All discovered defects are fixed and revalidated.
 - [ ] Owner explicitly accepted the migration and approved a separate production cutover plan.
 
-**Current acceptance result: NOT ACCEPTED / VALIDATION PENDING.**
+**Current acceptance result: NOT ACCEPTED / VALIDATION PENDING.** Automated frontend and backend checks are green, but MariaDB integration, live-server parity, manual accessibility/device checks, isolated mutation/RBAC verification, and explicit owner sign-off remain open.
