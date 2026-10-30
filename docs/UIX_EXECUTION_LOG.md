@@ -581,3 +581,10 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Reconciliation:** The 81 effective runtime method/path identities match the 81 static route identities derived from the 13 routers registered by `web/app.py`; no missing or unexpected API route identity was reported.
 - **Scope boundary:** This closes runtime route identity reconciliation only. Per-route dependency injection, role and forced-password behavior, request/response schemas, polling, side effects, legacy UI callers, live response parity, manual accessibility/device checks, isolated mutation/RBAC verification and owner sign-off remain open.
 - **Safety:** Read-only import/inventory only; no app lifespan, API mutation, database write, worker restart, Telegram send, trade or deployment was triggered.
+
+### PR #604 — Market Screener control notification side-effect audit (2026-10-30)
+
+- **Finding:** POST /api/research/screener/control persists a soft-control record. On the next Screen/screening.py::reload_control() poll, changing enabled emits an asynchronous Telegram ENABLED/PAUSED status notification. Threshold-only changes do not emit this status notification. The endpoint does not start, stop, or restart the worker.
+- **Coverage added:** Two unit tests in tests/test_screener.py mock both the database connection and telegram.send() to verify the notification occurs only for alert-gate state transitions.
+- **Safety:** The tests use an in-memory notification collector; they do not connect to MariaDB or send Telegram messages.
+- **Pending:** Owner must run PYTHONPATH="$PWD" python -m pytest -q tests/test_screener.py and report the result. Hosted CI remains unavailable/unverified due the repository's reported Actions quota exhaustion.
