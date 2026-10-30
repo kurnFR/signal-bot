@@ -477,6 +477,34 @@ This slice is verified against the current source files `web/app.py`, `web/route
 - The frontend preview remains isolated: `web/app.py` still serves `web/static/index.html` from `GET /` and mounts `web/static/` at `/static`. No deployment, production route cutover, or process-control behavior is introduced by this audit.
 - This slice does not establish that every legacy fetch/dialog is mapped, nor does it independently prove live database initialization, runtime worker health, screen-reader conformance, real-device acceptance, or owner approval.
 
+### UIX-00 source audit slice: RetailBot Research API boundary (2026-10-30)
+
+This slice verifies the React Research read path, FastAPI Research handlers, shared DB serializers, RetailBot2 lifecycle worker, and route authorization source. It is not a live DB/API exercise.
+
+| Endpoint | Effective behavior and side effects | React preview use |
+|---|---|---|
+| `GET /api/research/retailbot2/positions?limit=100` | Reads OPEN rows from `rdt_trades`; no lifecycle-table initialization in this helper. Decimal values and `entry_time` are normalized for JSON. | `fetchResearchSnapshot()` |
+| `GET /api/research/retailbot2/trades?limit=50` | Calls `_ensure_retailbot2_strategy_lifecycle_table()` (`CREATE TABLE IF NOT EXISTS`) and commits before selecting CLOSED rows. Filters rows using `report_enabled`; this is a schema-initializing GET, not strictly read-only at the DB layer. | `fetchResearchSnapshot()` |
+| `GET /api/research/retailbot2/stats` | Also creates the lifecycle table if missing and commits before aggregate SELECTs. Closed-trade aggregates honor `report_enabled`; open-position counts are not filtered by report visibility. Schema initialization is a DB side effect on GET. | `fetchResearchSnapshot()` |
+| `GET /api/research/retailbot2/strategies` | Calls the same lifecycle-table ensure helper and commits, then reads persisted settings. Registry is built from `StrategyID` plus inverse variants and historical-only composite rows. Auto-promotion is forced false in readback. | `fetchResearchSnapshot()` |
+| `GET /api/research/retailbot2/control` | Reads `bot_control` state without lifecycle DDL in the helper. | Not called by current React Research snapshot. |
+| `POST /api/research/retailbot2/strategies` | Admin/trader only; strict JSON booleans; validates registered strategy/mode pair; rejects historical composite execution flags and rejects `auto_promote_enabled=true`. Persists lifecycle settings; worker refreshes approximately every 15 seconds. Paper/Telegram effects are applied by worker, not synchronously by the route. | Not called by current React Research panel; legacy dashboard has lifecycle controls. |
+| `POST /api/research/retailbot2/control` | Admin/trader only; validates overrides then updates the `bot_control` row. Worker polls control state; no OS process start/stop/restart. | Not called by current React Research panel. |
+
+#### Confirmed worker lifecycle behavior
+
+- `_get_strategy_lifecycle()` reloads persisted flags on first use and then at a 15-second interval. If the DB refresh fails, it fails closed for evaluation, paper entries, and Telegram while leaving report visibility enabled; it does not reuse stale promotion decisions.
+- `_open_trade()` checks `paper_enabled` before creating a paper trade and copies the selected strategy/mode's `telegram_enabled` flag into the trade. Entry Telegram is sent only when that flag is true; close notifications use the persisted per-trade flag.
+- `evaluation_enabled` gates whether the strategy/mode signal is evaluated. Historical `COMPOSITE` rows are non-executable even if legacy DB flags say otherwise. `auto_promote_enabled` is not implemented and remains forced off.
+- Current React `ResearchPanel` is read-only and explicitly says lifecycle changes remain in the legacy dashboard. Its snapshot validates the four GET payloads before rendering. It does not call either POST endpoint.
+- Authorization source in `web/app.py` places `/api/research/retailbot2/control` and `/api/research/retailbot2/strategies` under the admin/trader mutation policy; GET is available to authenticated roles. Forced-password-change middleware blocks these APIs before role policy.
+
+#### Acceptance finding and follow-up
+
+- **Finding:** three Research GET data paths (`trades`, `stats`, `strategies`) call a helper that executes `CREATE TABLE IF NOT EXISTS rdt_strategy_lifecycle` and then `conn.commit()`. This may be a no-op when the table exists, but the GET handlers are not strictly read-only and can require DDL privileges / initialize schema. Do not claim a fully read-only API boundary for these endpoints.
+- **Recommendation:** move lifecycle-table creation to the explicit migration/startup path and make the GET helpers SELECT-only. This is a maintainability/security boundary recommendation, not an automatic change; it needs a separate implementation PR and migration review.
+- **Safety:** no live API calls, database connection, worker execution, lifecycle mutation, paper-trade creation, or Telegram message was triggered during this source audit.
+
 ### UIX-00 audit status after this slice
 
 - [x] Focused Market Screener status/signals/stats/control handlers and their central method/role/password gates checked against source.
