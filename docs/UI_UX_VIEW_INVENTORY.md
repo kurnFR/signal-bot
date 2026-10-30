@@ -527,6 +527,15 @@ This is a source-level review of the React snapshot consumers, FastAPI route mod
 
 - This source review does not verify every paper engine helper's DB side effects, order transition state machine, worker timing, or live payload data. Those remain separate contract and mutation/RBAC test gates.
 
+### UIX-00 source audit slice: Backtest Studio execution and promotion boundary (2026-10-30)
+
+- React `BacktestStudioPanel` uses `POST /api/backtest/run` for one explicitly configured simulation and uses GET history/run detail/promotion-policy/audit endpoints. `savePromotionPolicy()` calls `PUT /api/backtest/promotion-policy`; it persists thresholds/flags and reads them back, but does not itself run a backtest, activate a paper config, or send Telegram.
+- `POST /api/backtest/run` validates the strategy against `STRATEGIES`, reads closed OHLCV/features, runs a historical simulation, and persists the run/trades when `save_to_db=true`. It does not call `_auto_promote_top_candidate()` and does not send Telegram. This is a consequential persisted research write, but not a live order.
+- Separate `POST /api/backtest/run-all` runs the strategy tournament, computes rankings and AI insight, then calls `_auto_promote_top_candidate()`. Promotion is policy-gated and requires train-based selection; if holdout is required, it separately evaluates the selected winner on holdout. It records a decision claim/audit row, may activate a paper config, and may send a deployment Telegram alert. Partial/uncertain outcomes are surfaced as reconciliation-required states rather than silently retried.
+- **Important preview parity gap:** the React Backtest Studio call path inspected here does not call `/api/backtest/run-all`; therefore the tournament auto-promotion workflow is not currently initiated by the React preview. Do not imply that a normal React `/run` action performs automatic promotion. Confirm whether the product expects a dedicated explicit tournament action in the new UI before adding one.
+- `PUT /api/backtest/promotion-policy` is a persistent configuration mutation and is under the trader/admin `/api/backtest` mutation boundary. `GET /api/backtest/promotion-audit` is read-only. All backtest mutation endpoints are blocked for forced-password-change sessions.
+- **Safety:** source inspection only; no backtest was executed, no promotion policy changed, no paper config activated, no promotion audit row written, and no Telegram alert sent.
+
 ### UIX-00 audit status after this slice
 
 - [x] Focused Market Screener status/signals/stats/control handlers and their central method/role/password gates checked against source.
