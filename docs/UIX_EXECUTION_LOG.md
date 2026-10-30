@@ -550,3 +550,17 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Still open:** Isolated MariaDB integration; read-only live-server/API parity; real-device/browser and manual accessibility checks (keyboard, screen reader, contrast, zoom/reflow); isolated mutation/RBAC persistence/audit checks; owner sign-off.
 - **Safety:** No production deployment, DB mutation, worker restart, live trade, Telegram send, or production credential/session access. React remains preview-only; legacy `web/static/` remains production default.
 - **Decision:** Automated checks are green, but acceptance remains **NOT ACCEPTED** and PR #604 must remain unmerged until the remaining gates close.
+
+
+### PR #604 — isolated MariaDB integration completion (2026-10-30)
+
+- **Status:** Open, draft, unmerged. Application code tested at `cc98744df4e1cd104ef60fd23bcc4f36a708f52e`; later PR commits are documentation-only.
+- Owner provisioned dedicated disposable database `signal_bot_test` on the existing remote MariaDB server at `192.168.1.30:3306`. The application database `crypto_signals` was not used for integration tests.
+- Paper-order integration: **4 passed**.
+- Wallet-tracker + durable-state integration: first run had 10 passed / 2 failed because fresh test DB lacked `login_attempts`; applied all 20 repository migrations to `signal_bot_test`, then reran: **12 passed**.
+- Migration integration: **22 passed**.
+- Total across integration commands: **38 passed**. This includes tests also exercised by the regular suite; do not add 38 as unique tests to the original 745 count. The original 12 skipped MariaDB tests are now all exercised successfully.
+- Combined backend evidence: original full suite **745 passed, 12 skipped** plus successful execution of all 12 previously skipped MariaDB cases; original collection was **757 tests**, with no known integration skips remaining.
+- **Remaining acceptance gates:** read-only live-server/API parity, real-device/browser and manual accessibility checks, isolated mutation/RBAC persistence and audit checks, defect closure, and explicit owner sign-off.
+- **Safety:** all integration/migration commands explicitly targeted `signal_bot_test`; no production DB test, deployment, worker restart, live trade, Telegram send, or production credential/session access.
+- **Decision:** acceptance remains **NOT ACCEPTED**; PR #604 remains unmerged.
