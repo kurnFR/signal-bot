@@ -1,6 +1,6 @@
 import { getJson } from "./api";
 
-export interface AuthUser { id: number; username: string; email: string | null; role: string; must_change_password: boolean }
+export interface AuthUser { id: number; username: string; email: string | null; role: "admin" | "trader" | "viewer"; must_change_password: boolean }
 export interface LoginResult { token: string; user: AuthUser }
 export class AuthRequestError extends Error {
   constructor(readonly status: number, message: string) { super(message); this.name = "AuthRequestError"; }
