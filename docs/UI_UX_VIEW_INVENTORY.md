@@ -505,6 +505,28 @@ This slice verifies the React Research read path, FastAPI Research handlers, sha
 - **Recommendation:** move lifecycle-table creation to the explicit migration/startup path and make the GET helpers SELECT-only. This is a maintainability/security boundary recommendation, not an automatic change; it needs a separate implementation PR and migration review.
 - **Safety:** no live API calls, database connection, worker execution, lifecycle mutation, paper-trade creation, or Telegram message was triggered during this source audit.
 
+### UIX-00 source audit slice: Paper Trading + Wallet Tracking preview boundaries (2026-10-30)
+
+This is a source-level review of the React snapshot consumers, FastAPI route modules, and wallet store read helpers. It does not call the live API or DB.
+
+#### Paper Trading preview
+
+- `PaperTradingPanel.tsx` and `frontend/src/lib/paperTrading.ts` issue only GET requests for positions, configs, orders, trades, metrics, and circuit-breaker status. No POST/PUT/DELETE action is exposed by this React panel. Payload validators reject malformed rows and treat invalid breaker data as an unavailable/unverified safety state.
+- `web/routes/paper_routes.py` exposes separate mutation endpoints for order cancellation, config updates, manual position close, sync/evaluate, deployment, emergency stop, and breaker reset. These are not called by the React snapshot helper. The mutation prefix is restricted to trader/admin by `web/app.py`; GET endpoints remain available to authenticated roles, subject to forced-password-change guard.
+- Important side-effect distinction for future UI work: `POST /api/paper/deploy` persists/activates a config, may send a deployment Telegram alert when requested, and immediately invokes paper evaluation. `POST /api/paper/sync` runs sync/evaluation. These are consequential actions and must never be treated as passive refreshes. Emergency-stop and reset endpoints mutate the circuit-breaker state.
+
+#### Wallet Tracking preview
+
+- `frontend/src/lib/walletTracking.ts` builds its snapshot exclusively from GET `/api/wallets/meta`, `/settings`, `/status`, `/tracked`, `/positions`, `/token-flow`, and `/events`; the React snapshot consumer has no mutation call.
+- Those GET handlers read persisted settings/status, tracked wallets, positions, swaps/events and derived token flow. `get_settings()` is a SELECT with environment fallback; `get_status()` runs SELECTs only. No write is present in these inspected request read helpers.
+- `wallet_tracker.store.ensure_tables()` does perform CREATE TABLE, ALTER TABLE, and an INSERT IGNORE cursor initialization, but `web/app.py` calls it during application startup, not from these GET handlers. This is a startup schema/bootstrap side effect and must remain explicit in operational documentation; it is not a per-refresh API mutation.
+- Wallet mutation routes include PUT `/api/wallets/settings`, POST `/api/wallets/tracked`, POST `/api/wallets/tracked/toggle`, and DELETE `/api/wallets/tracked`; these are covered by the `/api/wallets` trader/admin mutation prefix. Settings validation normalizes supported chains/token addresses, checks threshold relationships, and preserves an existing Birdeye key when a masked value is submitted. The settings GET response masks the key and returns only a boolean presence flag.
+- **Safety boundary:** do not call the settings PUT, wallet tracking POST/DELETE, paper deployment/sync/close/cancel, or circuit-breaker mutations as part of preview acceptance. The reviewed React panels do not expose these actions.
+
+#### Remaining verification
+
+- This source review does not verify every paper engine helper's DB side effects, order transition state machine, worker timing, or live payload data. Those remain separate contract and mutation/RBAC test gates.
+
 ### UIX-00 audit status after this slice
 
 - [x] Focused Market Screener status/signals/stats/control handlers and their central method/role/password gates checked against source.
