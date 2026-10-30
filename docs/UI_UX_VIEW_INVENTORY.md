@@ -107,6 +107,53 @@ HTTP 403 Forbidden
 
 The following draft register lists 81 API endpoint rows across the 13 router modules included in `web/app.py`. Static source inspection found 81 `@router` HTTP endpoint decorators across those modules, plus the app-level `GET /` route. The remaining audit is to compare every row and effective prefix/method/path with FastAPI's runtime route registry, account for mounted/static and framework routes, and verify handler contracts, RBAC, forced-password behavior, polling, and side effects. Do not treat the inventory as accepted until that mapping and owner review are recorded.
 
+### Static route-decorator reconciliation — 2026-10-30
+
+A source-level comparison was performed against the exact PR branch for all 13 modules imported and registered by `web/app.py`:
+
+- `auth_routes.py`: 10 route decorators
+- `paper_routes.py`: 13
+- `search.py`: 2
+- `master_data.py`: 5
+- `backtest.py`: 9
+- `settings.py`: 1
+- `system_status.py`: 1
+- `custom_strategy.py`: 6
+- `telegram_routes.py`: 2
+- `ml_routes.py`: 5
+- `news_routes.py`: 3
+- `research_routes.py`: 12
+- `wallet_routes.py`: 12
+- **Total: 81 API route decorators.** The app also declares `GET /` outside the routers and mounts `/static`.
+
+The primary route register contains 81 endpoint definitions. The whole document contains 97 endpoint-table rows because later source-audit slices intentionally repeat 15 endpoint rows with deeper handler/consumer details; one further screener row includes the query string `?limit=50`. After stripping query parameters and collapsing the supplemental repeats, there are exactly 81 unique method/path identities. Every one matches a registered router decorator after applying its `APIRouter(prefix=...)`; no missing or extra API method/path was found in this static comparison.
+
+This verifies source decorator-to-inventory parity only. It does **not** yet prove the effective runtime `app.routes` registry, dependency injection, route ordering, or live API behavior. The runtime registry check remains an owner-run gate. Role-policy source inspection confirms the documented prefix/method policy, including the intentionally stricter current `admin|trader` restriction on both GET catalog routes under `/api/custom-strategy`; the owner decision on whether viewers should read that catalog remains open.
+
+For a read-only runtime registry dump on the owner's server (imports the FastAPI app but does not start its lifespan or issue API requests), run:
+
+```bash
+PYTHONPATH="$PWD" python - <<'PY'
+from fastapi.routing import APIRoute
+from web.app import app
+
+rows = []
+for route in app.routes:
+    if not isinstance(route, APIRoute):
+        continue
+    for method in sorted((route.methods or set()) - {"HEAD", "OPTIONS"}):
+        rows.append((method, route.path, route.name))
+
+for method, path, name in sorted(rows):
+    print(f"{method:7} {path:55} {name}")
+
+print(f"\nAPI route-method entries: {len(rows)}")
+PY
+```
+
+Compare the printed API route-method entries with the 81 source-level method/path identities above. Do not run any mutation endpoint as part of this check.
+
+
 ### 4.1 Authentication & User Administration (`auth_routes.py`)
 
 | Endpoint | Handler & Source | Role Restriction | Forced-Password Guard | Request Contract | Response Contract | Consequential Side Effects | Consuming UI Component |
