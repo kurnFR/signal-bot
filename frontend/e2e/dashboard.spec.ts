@@ -326,7 +326,14 @@ test("all domain preview views remain read-only during browser navigation", asyn
   ];
 
   for (const view of views) {
-    await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: view, exact: true }).click();
+    const navigation = page.getByRole("navigation", { name: "Primary navigation" });
+        const navigationItem = navigation.getByRole("button", {
+          // The visible V2 badge is included in this button's accessible name.
+          name: view === "Market Screener" ? /^Market Screener(?: V2)?$/ : view,
+        });
+        await expect(navigation).toBeVisible();
+        await expect(navigationItem, `${view} navigation item must be available at `${width}px in `${theme} theme`).toBeVisible();
+        await navigationItem.click();
     await expect(page.locator("h1")).toHaveText(view);
   }
 
