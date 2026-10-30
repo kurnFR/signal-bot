@@ -598,3 +598,11 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Authorization:** lifecycle and RetailBot control mutations are admin/trader-only; authenticated GETs are allowed, subject to the forced-password-change guard.
 - **Recommended follow-up:** move lifecycle table creation to migrations/startup and keep GET helpers SELECT-only. This is recorded as a finding, not changed in this acceptance-only documentation pass.
 - **Safety:** source inspection only; no live API, database, worker, lifecycle mutation, paper trade, or Telegram action was performed.
+
+### PR #604 — Paper Trading and Wallet Tracking preview boundary audit (2026-10-30)
+
+- **Paper preview:** React Paper Trading snapshot requests only GET endpoints for positions/configs/orders/trades/metrics/circuit-breaker state; no mutation is called by this panel. The backend separately exposes cancel, config update, manual close, sync/evaluate, deploy, emergency-stop and reset actions under the trader/admin mutation boundary.
+- **Consequential paper actions:** deploy persists/activates a config, can send Telegram, and immediately runs evaluation; sync runs evaluation; manual close and cancel mutate ledger/order state; emergency-stop/reset change risk controls. Do not use these as acceptance smoke tests.
+- **Wallet preview:** React wallet snapshot uses only GET endpoints. Inspected GET helpers read settings/status/tracked wallets/positions/events. `ensure_tables()` is DDL/DML but is called from app startup lifespan, not the inspected GET request handlers.
+- **Wallet mutations:** settings PUT, track/toggle POST, and untrack DELETE are trader/admin-only. Settings GET masks Birdeye credentials.
+- **Safety:** source inspection only; no live API/database calls, settings changes, wallet tracking changes, paper actions, Telegram sends, or worker execution occurred.
