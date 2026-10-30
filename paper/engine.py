@@ -522,16 +522,40 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
     finally:
         conn.close()
 
+    # Gated by telegram_enabled: only send trade closure alert if enabled for this strategy
+    send_close_alert = False
     try:
-        from notifications.telegram_notifier import send_trade_close_alert
-        send_trade_close_alert(
-            symbol=pos["symbol"], strategy_name=pos["strategy_name"], direction=direction,
-            entry_price=entry_price, exit_price=float(exit_price), exit_reason=exit_reason,
-            net_return_pct=accounting["return_pct_on_entry_notional"],
-            r_multiple=accounting["r_multiple"] or 0.0, holding_bars=pos.get("holding_bars", 0),
-        )
-    except Exception as tel_err:
-        logger.warning("Telegram trade close alert failed: %s", tel_err)
+        conn_cfg = get_pool().get_connection()
+        try:
+            cur_cfg = conn_cfg.cursor(dictionary=True)
+            cur_cfg.execute(
+                """
+                SELECT telegram_enabled FROM paper_configs
+                WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
+                LIMIT 1
+                """,
+                (pos["symbol"], pos["market"], pos["timeframe"], pos["strategy_name"]),
+            )
+            cfg_row = cur_cfg.fetchone()
+            cur_cfg.close()
+            if cfg_row and cfg_row.get("telegram_enabled"):
+                send_close_alert = True
+        finally:
+            conn_cfg.close()
+    except Exception as exc:
+        logger.warning("Could not check telegram_enabled for close alert: %s", exc)
+
+    if send_close_alert:
+        try:
+            from notifications.telegram_notifier import send_trade_close_alert
+            send_trade_close_alert(
+                symbol=pos["symbol"], strategy_name=pos["strategy_name"], direction=direction,
+                entry_price=entry_price, exit_price=float(exit_price), exit_reason=exit_reason,
+                net_return_pct=accounting["return_pct_on_entry_notional"],
+                r_multiple=accounting["r_multiple"] or 0.0, holding_bars=pos.get("holding_bars", 0),
+            )
+        except Exception as tel_err:
+            logger.warning("Telegram trade close alert failed: %s", tel_err)
     return True
 
 

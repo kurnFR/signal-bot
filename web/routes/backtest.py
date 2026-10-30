@@ -167,7 +167,183 @@ STRATEGY_METADATA = {
             {"key": "VOL_BREAKOUT_MIN_MARGIN_PCT", "label": "Min Breakout Margin (%)", "type": "float", "default": 0.15, "min": 0.05, "max": 1.0, "step": 0.05},
             {"key": "VOL_BREAKOUT_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 3.0, "min": 1.5, "max": 5.0, "step": 0.5},
         ]
-    }
+    },
+    "BB_REV": {
+        "displayName": "Bollinger Band Reversion (Retail)",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Fades price reaching outer Bollinger Bands expecting mean reversion. Classic retail behavior vulnerable to strong trends.",
+        "params": [
+            {"key": "BB_PERIOD", "label": "BB Period", "type": "int", "default": 20, "min": 10, "max": 50, "step": 1},
+            {"key": "BB_STD", "label": "BB Std Dev", "type": "float", "default": 2.0, "min": 1.0, "max": 3.5, "step": 0.1},
+            {"key": "BB_PROXIMITY_PCT", "label": "Proximity Threshold (%)", "type": "float", "default": 0.3, "factor": 100, "min": 0.05, "max": 1.0, "step": 0.05},
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
+    "BB_REV_INV": {
+        "displayName": "Inverse Bollinger Band Reversion",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Inverts BB_REV. Takes opposite side of retail crowd when price reaches Bollinger Bands to ride momentum breakouts.",
+        "params": [
+            {"key": "BB_PERIOD", "label": "BB Period", "type": "int", "default": 20, "min": 10, "max": 50, "step": 1},
+            {"key": "BB_STD", "label": "BB Std Dev", "type": "float", "default": 2.0, "min": 1.0, "max": 3.5, "step": 0.1},
+            {"key": "BB_PROXIMITY_PCT", "label": "Proximity Threshold (%)", "type": "float", "default": 0.3, "factor": 100, "min": 0.05, "max": 1.0, "step": 0.05},
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
+    "DBL_PAT": {
+        "displayName": "Double Top / Double Bottom (Retail)",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Enters classic retail double top (short) or double bottom (long) formations.",
+        "params": [
+            {"key": "PATTERN_LOOKBACK", "label": "Lookback Bars", "type": "int", "default": 60, "min": 20, "max": 120, "step": 5},
+            {"key": "PATTERN_TOLERANCE", "label": "Pivot Tolerance (%)", "type": "float", "default": 0.2, "factor": 100, "min": 0.05, "max": 1.0, "step": 0.05},
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
+    "DBL_PAT_INV": {
+        "displayName": "Inverse Double Pattern",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Inverts DBL_PAT. Anticipates retail stop hunts and false breakout traps at double top and bottom levels.",
+        "params": [
+            {"key": "PATTERN_LOOKBACK", "label": "Lookback Bars", "type": "int", "default": 60, "min": 20, "max": 120, "step": 5},
+            {"key": "PATTERN_TOLERANCE", "label": "Pivot Tolerance (%)", "type": "float", "default": 0.2, "factor": 100, "min": 0.05, "max": 1.0, "step": 0.05},
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
+    "RSI_CTR": {
+        "displayName": "RSI Counter-Trend (Retail)",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Fades overbought/oversold RSI extremes without overall trend filter.",
+        "params": [
+            {"key": "RSI_PERIOD", "label": "RSI Period", "type": "int", "default": 14, "min": 7, "max": 30, "step": 1},
+            {"key": "RSI_OVERSOLD", "label": "RSI Oversold Level", "type": "int", "default": 35, "min": 20, "max": 45, "step": 1},
+            {"key": "RSI_OVERBOUGHT", "label": "RSI Overbought Level", "type": "int", "default": 65, "min": 55, "max": 80, "step": 1},
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
+    "RSI_CTR_INV": {
+        "displayName": "Inverse RSI Counter-Trend",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Inverts RSI_CTR. Follows strong trend momentum when RSI pushes into extreme territory.",
+        "params": [
+            {"key": "RSI_PERIOD", "label": "RSI Period", "type": "int", "default": 14, "min": 7, "max": 30, "step": 1},
+            {"key": "RSI_OVERSOLD", "label": "RSI Oversold Level", "type": "int", "default": 35, "min": 20, "max": 45, "step": 1},
+            {"key": "RSI_OVERBOUGHT", "label": "RSI Overbought Level", "type": "int", "default": 65, "min": 55, "max": 80, "step": 1},
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
+    "MA_WHIP": {
+        "displayName": "MA Crossover Whipsaw (Retail)",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Enters on fast/slow EMA crossovers. Prone to severe whipsaws during ranging markets.",
+        "params": [
+            {"key": "MA_FAST", "label": "Fast EMA Period", "type": "int", "default": 9, "min": 3, "max": 20, "step": 1},
+            {"key": "MA_SLOW", "label": "Slow EMA Period", "type": "int", "default": 21, "min": 15, "max": 50, "step": 1},
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
+    "MA_WHIP_INV": {
+        "displayName": "Inverse MA Crossover Whipsaw",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Inverts MA_WHIP. Capitalizes on retail whipsaws by fading late MA crosses.",
+        "params": [
+            {"key": "MA_FAST", "label": "Fast EMA Period", "type": "int", "default": 9, "min": 3, "max": 20, "step": 1},
+            {"key": "MA_SLOW", "label": "Slow EMA Period", "type": "int", "default": 21, "min": 15, "max": 50, "step": 1},
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
+    "SR_TRAP": {
+        "displayName": "S/R Bounce Trap (Retail)",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Buys support and sells resistance blindly without higher-timeframe trend context.",
+        "params": [
+            {"key": "SR_LOOKBACK", "label": "S/R Lookback Bars", "type": "int", "default": 50, "min": 20, "max": 100, "step": 5},
+            {"key": "SR_TOUCH_THRESHOLD", "label": "Touch Threshold (%)", "type": "float", "default": 0.15, "factor": 100, "min": 0.05, "max": 0.5, "step": 0.05},
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
+    "SR_TRAP_INV": {
+        "displayName": "Inverse S/R Bounce Trap",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Inverts SR_TRAP. Trades breakdown continuations when support fails and breakout continuations when resistance breaks.",
+        "params": [
+            {"key": "SR_LOOKBACK", "label": "S/R Lookback Bars", "type": "int", "default": 50, "min": 20, "max": 100, "step": 5},
+            {"key": "SR_TOUCH_THRESHOLD", "label": "Touch Threshold (%)", "type": "float", "default": 0.15, "factor": 100, "min": 0.05, "max": 0.5, "step": 0.05},
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
+    "MACD_DIV": {
+        "displayName": "MACD Divergence (Retail)",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Fades trends based on MACD histogram divergences.",
+        "params": [
+            {"key": "MACD_FAST", "label": "MACD Fast Period", "type": "int", "default": 12, "min": 5, "max": 20, "step": 1},
+            {"key": "MACD_SLOW", "label": "MACD Slow Period", "type": "int", "default": 26, "min": 20, "max": 40, "step": 1},
+            {"key": "DIVERGENCE_LOOKBACK", "label": "Divergence Lookback", "type": "int", "default": 30, "min": 15, "max": 60, "step": 5},
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
+    "MACD_DIV_INV": {
+        "displayName": "Inverse MACD Divergence",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Inverts MACD_DIV. Exploits false divergence signals in strong trending markets.",
+        "params": [
+            {"key": "MACD_FAST", "label": "MACD Fast Period", "type": "int", "default": 12, "min": 5, "max": 20, "step": 1},
+            {"key": "MACD_SLOW", "label": "MACD Slow Period", "type": "int", "default": 26, "min": 20, "max": 40, "step": 1},
+            {"key": "DIVERGENCE_LOOKBACK", "label": "Divergence Lookback", "type": "int", "default": 30, "min": 15, "max": 60, "step": 5},
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
+    "SPIKE_FADE": {
+        "displayName": "Spike Fade (Retail)",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Fades large volatility expansion candles anticipating immediate mean reversion.",
+        "params": [
+            {"key": "SPIKE_ATR_MULTIPLIER", "label": "Spike ATR Multiple", "type": "float", "default": 2.5, "min": 1.5, "max": 4.0, "step": 0.25},
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
+    "SPIKE_FADE_INV": {
+        "displayName": "Inverse Spike Fade",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Inverts SPIKE_FADE. Rides high-momentum breakout candles rather than fading them.",
+        "params": [
+            {"key": "SPIKE_ATR_MULTIPLIER", "label": "Spike ATR Multiple", "type": "float", "default": 2.5, "min": 1.5, "max": 4.0, "step": 0.25},
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
+    "COMPOSITE": {
+        "displayName": "Composite Retail Trap Bot",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Combines signals from all retail strategies; trades when majority consensus triggers.",
+        "params": [
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
+    "COMPOSITE_INV": {
+        "displayName": "Inverse Composite Retail Trap Bot",
+        "category": "RetailBot2 (Research)",
+        "validated": False,
+        "description": "Inverts composite retail consensus. Takes opposite side of combined retail signals.",
+        "params": [
+            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+        ]
+    },
 }
 
 SHARED_EXECUTION_PARAMS = [
@@ -561,19 +737,37 @@ def _auto_promote_top_candidate(
 @router.get("/strategies")
 def list_strategies():
     results = []
+    seen = set()
     for name in STRATEGIES.keys():
-        is_inverse = name.startswith("inverse_")
-        base_name = name[8:] if is_inverse else name
-        meta = STRATEGY_METADATA.get(base_name, {})
-        display_name = ("Inverse: " if is_inverse else "") + meta.get("displayName", name)
+        if name in seen:
+            continue
+        seen.add(name)
+        is_inverse = (
+            name.startswith("inverse_")
+            or name.endswith("_INV")
+            or name.endswith("_INV_inverse")
+        )
+        if name.endswith("_INV_inverse"):
+            base_name = name[:-12]
+        elif name.endswith("_INV"):
+            base_name = name[:-4]
+        elif name.startswith("inverse_"):
+            base_name = name[8:]
+        else:
+            base_name = name
+
+        meta = STRATEGY_METADATA.get(name) or STRATEGY_METADATA.get(base_name, {})
+        display_name = meta.get("displayName") or (("Inverse: " if is_inverse else "") + meta.get("displayName", name))
+        category = meta.get("category", "Other")
+        desc = meta.get("description") or (("Opposite direction counterpart of " + base_name) if is_inverse else "")
         results.append({
             "id": name,
             "baseName": base_name,
             "isInverse": is_inverse,
             "displayName": display_name,
-            "category": meta.get("category", "Other"),
+            "category": category,
             "validated": meta.get("validated", False),
-            "description": ("Opposite direction counterpart of " + base_name) if is_inverse else meta.get("description", ""),
+            "description": desc,
             "params": meta.get("params", []),
             "sharedParams": SHARED_EXECUTION_PARAMS,
         })

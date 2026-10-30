@@ -84,6 +84,34 @@ def list_configs():
     return {"configs": configs}
 
 
+
+def _sync_retailbot2_lifecycle(strategy_name: str, is_active: bool, telegram_enabled: Optional[bool], report_enabled: Optional[bool]):
+    """If strategy is in RetailBot2, keep rdt_strategy_lifecycle in sync with paper config."""
+    from backtest.strategies.retailbot2_strategies import RETAILBOT2_STRATEGY_NAMES
+    cleaned = strategy_name.strip()
+    if cleaned not in RETAILBOT2_STRATEGY_NAMES:
+        return
+    mode = "inverse" if (cleaned.endswith("_INV") or cleaned.startswith("inverse_")) else "shadow"
+    strat_id = cleaned if not cleaned.startswith("inverse_") else (cleaned[8:] + "_INV")
+    if strat_id == "DBL_PAT_INV_inverse":
+        strat_id = "DBL_PAT_INV"
+    elif strat_id == "BB_REV_INV_inverse":
+        strat_id = "BB_REV_INV"
+    try:
+        from db.db import set_retailbot2_strategy_lifecycle_setting, get_retailbot2_strategy_lifecycle_settings
+        existing_rows = get_retailbot2_strategy_lifecycle_settings()
+        existing = next((r for r in existing_rows if r.get("strategy_id") == strat_id and r.get("mode") == mode), {})
+        lifecycle_settings = {
+            "evaluation_enabled": True,
+            "paper_enabled": bool(is_active),
+            "telegram_enabled": bool(telegram_enabled) if telegram_enabled is not None else bool(existing.get("telegram_enabled", False)),
+            "report_enabled": bool(report_enabled) if report_enabled is not None else bool(existing.get("report_enabled", True)),
+            "auto_promote_enabled": False,
+        }
+        set_retailbot2_strategy_lifecycle_setting(strat_id, mode, lifecycle_settings)
+    except Exception as exc:
+        logging.getLogger("web.paper_routes").warning("Could not sync RetailBot2 lifecycle: %s", exc)
+
 @router.post("/configs")
 def update_config(req: PaperConfigRequest):
     if not math.isfinite(req.allocated_capital) or not math.isfinite(req.risk_per_trade_pct):
@@ -110,6 +138,12 @@ def update_config(req: PaperConfigRequest):
         req.ml_model_id.strip() if req.ml_model_id else None,
         telegram_enabled=req.telegram_enabled,
         report_enabled=req.report_enabled,
+    )
+    _sync_retailbot2_lifecycle(
+        req.strategy_name.strip(),
+        req.is_active,
+        req.telegram_enabled,
+        req.report_enabled,
     )
     return res
 
@@ -189,6 +223,12 @@ def deploy_strategy(req: DeployStrategyRequest):
         allocated_capital=req.allocated_capital,
         risk_per_trade_pct=req.risk_per_trade_pct,
         ml_model_id=req.ml_model_id.strip() if req.ml_model_id else None,
+        telegram_enabled=req.send_telegram,
+        report_enabled=True,
+    )
+    _sync_retailbot2_lifecycle(
+        strategy_name,
+        is_active=True,
         telegram_enabled=req.send_telegram,
         report_enabled=True,
     )
