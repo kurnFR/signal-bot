@@ -109,3 +109,30 @@ Safety boundary: integration tests and migrations targeted `signal_bot_test`; no
 All 13 router modules imported by `web/app.py` were inspected on the PR branch. Their route decorators total **81 API method/path entries**, and all 81 match the primary route register after applying router prefixes. The apparent 97-row count across the entire inventory is explained by supplemental audit sections that repeat 15 routes for deeper handler/consumer notes plus one query-string form of the screener signals GET route; normalized unique method/path identities total 81. No static route decorator is missing from or extra to the primary inventory.
 
 The owner subsequently ran the documented read-only `app.routes` dump on 2026-10-30. It reported **81 API route-method entries**, matching the 81 static method/path identities; no missing or unexpected runtime API route identity was reported. This closes the effective runtime route-registry count and identity reconciliation gate. Full per-route dependency injection, role/forced-password behavior, payload schemas, side effects, legacy UI callers, polling and live behavior remain subject to further review. The current custom-strategy viewer GET restriction is explicitly documented and remains a product/security decision, not an automatic code change.
+
+
+## Source audit disposition — 2026-10-30
+
+A source-level review now covers all 13 router modules registered by `web/app.py`, the React consumers in the migration preview, and the central authentication middleware. The following findings remain open; none was changed as part of this documentation-only pass:
+
+| Finding | Risk / impact | Recommended closure |
+|---|---|---|
+| Research GET handlers initialize lifecycle schema with DDL and commit | A nominal read can require DDL privileges and mutate schema. | Move schema creation into migrations/startup; make GET paths SELECT-only. |
+| ML list GET handlers create artifact directories | GET is not filesystem-side-effect-free. | Create directories at startup or on explicit write paths. |
+| User delete lacks audit event; admin create/reset use weaker password policy; user-list response omits documented `must_change_password` | Incomplete audit trail and inconsistent admin-created credentials/API contract. | Add delete audit, unify password policy, reconcile response model and UI contract. |
+| `log_audit()` swallows persistence failures | Security-sensitive actions can succeed without durable audit evidence. | Durable outbox/retry or propagate audit persistence failure for protected operations. |
+| Token revocation lookup fails open on store errors | A revoked token may be accepted during partial revocation-store failure. | Make revocation storage required or fail closed. |
+| Durable login throttling falls back to per-process memory | Cross-worker brute-force limits are weakened when DB limiter is unavailable. | Expose degraded state and use shared/fail-closed fallback. |
+| Master Data request fields lack backend symbol/market/timeframe constraints | Direct callers can bypass React controls; unexpected market strings select Futures path. | Add strict server-side allowlists and symbol/timeframe validation. |
+| Master Data job errors expose raw exception text to authenticated readers | Provider/DB/internal details may be disclosed. | Persist stable public error codes; keep full exceptions in server logs. |
+| Strategy AI prompt/history have no explicit request-size bounds | Oversized requests and unintended provider data/cost exposure. | Enforce prompt/history/draft size limits and document provider data flow. |
+| Backtest Studio preview does not expose `/run-all` tournament workflow | UI cannot invoke existing tournament auto-promotion flow; adding it could activate paper config/send Telegram. | Product decision and separate confirmation/safety design required. |
+| System status and market search make outbound Binance probes/requests | Read-like UI activity has external network dependencies and latency. | Label diagnostics and search behavior; consider cache/timeout/refresh controls. |
+
+Additional verified boundaries: Paper Trading and Wallet Tracking preview panels use GET snapshots; their consequential mutation endpoints remain separate. News AI uses persisted-data GET handlers. Strategy Library mutations change a JSON definition file and in-process registry, not paper deployment. Master Data backfill/feature-build launches background jobs and writes data. Telegram test and ML paper deployment were not invoked.
+
+### Current CI evidence clarification
+
+The latest documentation head `bba348159a3e8a4fea5eb0b274890734a5e250a5` is associated with four failed GitHub Actions runs: unit tests + MariaDB integration, RetailBot accounting, frontend foundation, and pytest. GitHub returned job-level failure conclusions but no step metadata or usable logs; prior log retrieval returned 404 `BlobNotFound`. The failure cause is unknown. The repository previously reported its Actions quota exhausted (2,000/2,000 minutes). Do not treat these results as proof of a code regression or as successful CI. Owner-run test evidence recorded above remains distinct and valid for the exact tested application commit.
+
+**Acceptance remains NOT ACCEPTED.** In addition to the existing live-server, accessibility/device, isolated mutation/RBAC and owner sign-off gates, all findings in the table require remediation or explicit risk acceptance. The PR remains open/unmerged.
