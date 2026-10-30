@@ -564,3 +564,12 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Remaining acceptance gates:** read-only live-server/API parity, real-device/browser and manual accessibility checks, isolated mutation/RBAC persistence and audit checks, defect closure, and explicit owner sign-off.
 - **Safety:** all integration/migration commands explicitly targeted `signal_bot_test`; no production DB test, deployment, worker restart, live trade, Telegram send, or production credential/session access.
 - **Decision:** acceptance remains **NOT ACCEPTED**; PR #604 remains unmerged.
+
+
+### PR #604 — static route inventory reconciliation (2026-10-30)
+
+- Inspected all 13 router modules imported by `web/app.py`; source decorators total **81 API method/path entries**.
+- Compared the effective router prefixes and every method/path with the primary route register in `docs/UI_UX_VIEW_INVENTORY.md`: all 81 matched, with no missing or extra static route identity.
+- Clarified that the document's 97 endpoint-table rows include 15 repeated supplemental source-audit entries and one query-string variant (`GET /api/research/screener/signals?limit=50`); normalized unique method/path identities are 81.
+- Reviewed the central `_role_allowed` policy in `web/app.py`; the existing custom-strategy viewer GET 403 behavior is recorded as an unresolved product/security decision and was not changed.
+- **Still pending:** owner-run read-only dump of the effective runtime `app.routes` registry, full per-route dependency/schema/side-effect review, live API/data parity, manual accessibility/device checks, isolated mutation/RBAC acceptance, and owner sign-off.
