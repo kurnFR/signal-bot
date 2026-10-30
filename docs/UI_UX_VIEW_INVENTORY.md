@@ -139,7 +139,7 @@ from web.app import app
 
 rows = []
 for route in app.routes:
-    if not isinstance(route, APIRoute):
+    if not isinstance(route, APIRoute) or not route.path.startswith("/api/"):
         continue
     for method in sorted((route.methods or set()) - {"HEAD", "OPTIONS"}):
         rows.append((method, route.path, route.name))
