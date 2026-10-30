@@ -1014,3 +1014,18 @@ The historical audit notes above are chronological. Use this latest ledger for c
 - Allowed roles are the existing `admin`, `trader`, and `viewer` values; malformed IDs, usernames, email values, role names, boolean flags, or tokens fail closed.
 - Tests mock responses only and use synthetic credentials. No real account or session is used.
 - [ ] Owner-run frontend tests and browser acceptance on exact PR head. GitHub Actions quota is exhausted; backend authentication and RBAC remain authoritative.
+
+
+## Verified Follow-up Audit — Authentication, Settings, Telegram, and ML (PR #604)
+
+Source review on `feat/uix-final-acceptance-pass` confirms:
+
+| Area | React preview behavior | Backend boundary / side effect | Acceptance note |
+| --- | --- | --- | --- |
+| Authentication | Existing auth gate handles login, profile, logout, and forced password change | Login is public; all other API routes require authentication. Logout revokes the token and writes an audit event. Password change updates the password hash and forced-change flag, then audits. | Keep server-side role and forced-password-change checks authoritative. |
+| User management | Not connected; explicit legacy UI placeholder | All `/api/users*` endpoints are admin-only. Create/reset/update audit; delete currently does not. Create/reset do not apply the stronger self-service common-password/variety policy. GET user list omits `must_change_password`, contrary to the earlier inventory row. | Do not migrate until deletion audit and response/password policy contracts are reconciled. |
+| Settings diagnostics | Admin-only fetch from Settings panel | `GET /api/settings/status` reads MariaDB metadata/heartbeats and probes Binance Spot/Futures over HTTP. | Diagnostic request has external network activity; not a passive read. |
+| Telegram | Admin-only status display; explicit confirmation before test | Status GET hides chat ID from non-admins. Test POST is admin-only and may send a real Telegram message when chat ID is configured. | Never use test endpoint for acceptance smoke tests. |
+| ML Studio | GET-only experiment/model/artifact inspection | List GETs may create missing `ml_results/` or `ml_models/` directories. Experiment POST executes and persists a tournament. Deploy POST activates paper config, optionally sends Telegram, then runs paper sync/evaluation. | Keep mutation controls out of preview; consider removing directory creation from GET handlers. |
+
+All findings above are source-level only. No API calls, user changes, password changes, diagnostic probes, Telegram sends, ML executions, paper activation, or database mutations were performed.
