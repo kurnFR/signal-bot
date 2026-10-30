@@ -75,7 +75,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     setBusy(true);
     try {
       await changePassword(oldPassword, newPassword);
-      const profile = await getJson<AuthUser>("/api/auth/me");
+      const profile = await fetchAuthUser();
       setUser(profile); setOldPassword(""); setNewPassword(""); setConfirmPassword("");
       setScreen(profile.must_change_password ? "password-change" : "authenticated");
     } catch (cause) {
