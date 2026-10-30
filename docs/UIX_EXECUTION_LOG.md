@@ -573,3 +573,11 @@ This log records verified execution checkpoints and keeps the next actions actio
 - Clarified that the document's 97 endpoint-table rows include 15 repeated supplemental source-audit entries and one query-string variant (`GET /api/research/screener/signals?limit=50`); normalized unique method/path identities are 81.
 - Reviewed the central `_role_allowed` policy in `web/app.py`; the existing custom-strategy viewer GET 403 behavior is recorded as an unresolved product/security decision and was not changed.
 - **Still pending:** owner-run read-only dump of the effective runtime `app.routes` registry, full per-route dependency/schema/side-effect review, live API/data parity, manual accessibility/device checks, isolated mutation/RBAC acceptance, and owner sign-off.
+
+### PR #604 — owner-run runtime API route registry reconciliation (2026-10-30)
+
+- **Result:** PASS — owner ran the documented read-only FastAPI `app.routes` inventory command.
+- **Observed:** 81 API route-method entries.
+- **Reconciliation:** The 81 effective runtime method/path identities match the 81 static route identities derived from the 13 routers registered by `web/app.py`; no missing or unexpected API route identity was reported.
+- **Scope boundary:** This closes runtime route identity reconciliation only. Per-route dependency injection, role and forced-password behavior, request/response schemas, polling, side effects, legacy UI callers, live response parity, manual accessibility/device checks, isolated mutation/RBAC verification and owner sign-off remain open.
+- **Safety:** Read-only import/inventory only; no app lifespan, API mutation, database write, worker restart, Telegram send, trade or deployment was triggered.
