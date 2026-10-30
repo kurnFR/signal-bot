@@ -525,3 +525,14 @@ This log records verified execution checkpoints and keeps the next actions actio
 - Reconciles stale route inventory notes about the React Settings caller and preserves the existing admin-only explicit confirmation workflow.
 - All tests mock HTTP responses; no Telegram message is sent. No role policy or production behavior is changed.
 - Exact-head CI pending; do not merge until all required checks pass.
+
+
+## Final migration acceptance pass — 2026-10-30 (branch: feat/uix-final-acceptance-pass)
+
+- Work is based on current master baseline `eeaf8843d140701f88623a22aa925353e7e2e2d2`.
+- Added strict runtime validation for login session payloads and `GET /api/auth/me` profiles, matching the actual serializer in `web/routes/auth_routes.py`: positive safe-integer ID, non-empty username, nullable string email, role in `admin|trader|viewer`, boolean `must_change_password`, and non-empty string token. The auth gate reuses the validator for session restoration and after password change.
+- Added mocked auth contract cases for valid and malformed profiles/tokens. No real credentials or sessions are used.
+- Added a Playwright responsive matrix for all 11 preview navigation views at 375, 768, 1024 and 1440 CSS pixels in both persisted themes. Existing 320px mobile, keyboard/focus, Escape, reduced-motion, forced-colors and mutation-boundary tests remain.
+- **No tests were run by the development agent**, per owner instruction. GitHub Actions quota is exhausted; fresh hosted CI evidence is unavailable. Owner-run validation is required after delivery.
+- Added `docs/UIX_FINAL_MIGRATION_ACCEPTANCE.md` with evidence matrix, live-data procedure, mutation/RBAC test plan, limitations and explicit sign-off checklist.
+- **Acceptance remains NOT ACCEPTED** until owner-run tests, real-server data comparison, real-device/accessibility checks, isolated mutation verification and explicit owner sign-off are recorded. React remains preview-only; no deployment or production side effects occurred.
