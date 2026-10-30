@@ -66,7 +66,7 @@ app = FastAPI(
     version="2.0.0",
 )
 
-_raw_origins = os.getenv("SIGNAL_BOT_ALLOWED_ORIGINS", "http://localhost:8050,http://127.0.0.1:8050")
+_raw_origins = os.getenv("SIGNAL_BOT_ALLOWED_ORIGINS", "http://localhost:8050,http://127.0.0.1:8050,http://localhost:5173,http://127.0.0.1:5173")
 ALLOWED_ORIGINS = [origin.strip() for origin in _raw_origins.split(",") if origin.strip()]
 
 app.add_middleware(
@@ -183,9 +183,21 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+FRONTEND_DIST_DIR = os.path.join(BASE_DIR, "frontend", "dist")
+if os.path.exists(FRONTEND_DIST_DIR):
+    app.mount("/modern", StaticFiles(directory=FRONTEND_DIST_DIR, html=True), name="modern")
+    assets_dir = os.path.join(FRONTEND_DIST_DIR, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend_assets")
+
 
 @app.get("/")
 def serve_index():
+    if os.getenv("SIGNAL_BOT_USE_MODERN_UI", "0").lower() in ("1", "true", "yes"):
+        modern_index = os.path.join(FRONTEND_DIST_DIR, "index.html")
+        if os.path.exists(modern_index):
+            return FileResponse(modern_index)
+
     index_path = os.path.join(STATIC_DIR, "index.html")
     if not os.path.exists(index_path):
         return {"message": "Crypto Signal Bot API is running."}
