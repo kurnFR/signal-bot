@@ -536,3 +536,17 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **No tests were run by the development agent**, per owner instruction. GitHub Actions quota is exhausted; fresh hosted CI evidence is unavailable. Owner-run validation is required after delivery.
 - Added `docs/UIX_FINAL_MIGRATION_ACCEPTANCE.md` with evidence matrix, live-data procedure, mutation/RBAC test plan, limitations and explicit sign-off checklist.
 - **Acceptance remains NOT ACCEPTED** until owner-run tests, real-server data comparison, real-device/accessibility checks, isolated mutation verification and explicit owner sign-off are recorded. React remains preview-only; no deployment or production side effects occurred.
+
+
+### PR #604 — final migration acceptance: owner-run automated validation (2026-10-30)
+
+- **Status:** Open, draft, unmerged. Exact tested PR head: `cc98744df4e1cd104ef60fd23bcc4f36a708f52e`.
+- **Frontend install:** `npm ci --no-audit --no-fund` passed (233 packages).
+- **Frontend checks:** `npm run typecheck` passed; `npm test` passed (30 test files, 191 tests); `npm run build` passed.
+- **Browser E2E:** Full Playwright 1.64.1 Chromium suite passed: 28 tests, 49.5 seconds. Executed in `mcr.microsoft.com/playwright:v1.64.1-noble` because the Ubuntu 20.04 host is unsupported by the Playwright Chromium installer. The responsive acceptance matrix passed as part of the full suite.
+- **Backend:** `PYTHONPATH="$PWD" python -m pytest -q` passed: 745 passed, 12 skipped, 0 failed (8.19 seconds; 7 deprecation warnings). Full collection reported 757 tests collected without collection errors. The 15-test migration/accounting subset also passed.
+- **Skipped integration gates:** 2 durable-state MariaDB, 3 migration MariaDB, 4 paper-orders disposable MariaDB, and 3 Wallet Tracker disposable MariaDB tests. They remain pending until a disposable test database is provisioned and verified; do not enable them against production.
+- **Hosted CI:** No fresh GitHub Actions evidence; owner reports Actions quota exhausted.
+- **Still open:** Isolated MariaDB integration; read-only live-server/API parity; real-device/browser and manual accessibility checks (keyboard, screen reader, contrast, zoom/reflow); isolated mutation/RBAC persistence/audit checks; owner sign-off.
+- **Safety:** No production deployment, DB mutation, worker restart, live trade, Telegram send, or production credential/session access. React remains preview-only; legacy `web/static/` remains production default.
+- **Decision:** Automated checks are green, but acceptance remains **NOT ACCEPTED** and PR #604 must remain unmerged until the remaining gates close.
