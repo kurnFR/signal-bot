@@ -606,3 +606,11 @@ This log records verified execution checkpoints and keeps the next actions actio
 - **Wallet preview:** React wallet snapshot uses only GET endpoints. Inspected GET helpers read settings/status/tracked wallets/positions/events. `ensure_tables()` is DDL/DML but is called from app startup lifespan, not the inspected GET request handlers.
 - **Wallet mutations:** settings PUT, track/toggle POST, and untrack DELETE are trader/admin-only. Settings GET masks Birdeye credentials.
 - **Safety:** source inspection only; no live API/database calls, settings changes, wallet tracking changes, paper actions, Telegram sends, or worker execution occurred.
+
+### PR #604 — Backtest Studio execution and auto-promotion boundary audit (2026-10-30)
+
+- React Backtest Studio calls POST `/api/backtest/run` for a single simulation and GET endpoints for history/run details/promotion state. Policy save uses PUT `/api/backtest/promotion-policy` and persists policy only.
+- Single-run `/api/backtest/run` can persist backtest run/trade history when `save_to_db=true`; it does not invoke auto-promotion or Telegram.
+- Separate `/api/backtest/run-all` runs the tournament and calls `_auto_promote_top_candidate()`. Under policy gates it can write promotion audit state, activate a paper config, and send a Telegram deployment alert. Train selection plus separate holdout validation is required when configured.
+- **Parity gap:** React preview does not currently call `/api/backtest/run-all`; the tournament auto-promotion workflow is therefore not triggered by the current React Backtest Studio path. Product decision needed before introducing a dedicated UI action.
+- **Safety:** no backtest, policy update, promotion, paper config activation, audit write, or Telegram alert was triggered during this source audit.
