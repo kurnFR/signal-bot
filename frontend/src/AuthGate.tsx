@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Activity, ShieldCheck } from "lucide-react";
-import { ApiError, getJson } from "./lib/api";
-import { AuthRequestError, changePassword, login, logout, type AuthUser } from "./lib/auth";
+import { ApiError } from "./lib/api";
+import { AuthRequestError, changePassword, fetchAuthUser, login, logout, type AuthUser } from "./lib/auth";
 
 interface AuthContextValue { user: AuthUser; logout: () => Promise<void> }
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -38,7 +38,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     let token: string | null = null;
     try { token = window.localStorage.getItem("token"); } catch { token = null; }
     if (!token) { setScreen("login"); return () => { active = false; }; }
-    getJson<AuthUser>("/api/auth/me").then((profile) => {
+    fetchAuthUser().then((profile) => {
       if (!active) return;
       setUser(profile);
       setScreen(profile.must_change_password ? "password-change" : "authenticated");
