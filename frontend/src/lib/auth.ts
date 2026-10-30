@@ -1,3 +1,5 @@
+import { getJson } from "./api";
+
 export interface AuthUser { id: number; username: string; email: string | null; role: string; must_change_password: boolean }
 export interface LoginResult { token: string; user: AuthUser }
 export class AuthRequestError extends Error {
@@ -22,7 +24,6 @@ export async function fetchAuthUser(signal?: AbortSignal): Promise<AuthUser> {
   }
   return payload;
 }
-import { getJson } from "./api";
 function tokenFromStorage(): string | null {
   try { return window.localStorage.getItem("token"); } catch { return null; }
 }
