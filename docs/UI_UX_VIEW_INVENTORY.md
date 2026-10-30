@@ -1029,3 +1029,13 @@ Source review on `feat/uix-final-acceptance-pass` confirms:
 | ML Studio | GET-only experiment/model/artifact inspection | List GETs may create missing `ml_results/` or `ml_models/` directories. Experiment POST executes and persists a tournament. Deploy POST activates paper config, optionally sends Telegram, then runs paper sync/evaluation. | Keep mutation controls out of preview; consider removing directory creation from GET handlers. |
 
 All findings above are source-level only. No API calls, user changes, password changes, diagnostic probes, Telegram sends, ML executions, paper activation, or database mutations were performed.
+
+
+## Verified Follow-up Audit — News AI and Master Data (PR #604)
+
+- News AI React view is GET-only (`/api/news/stats`, `/api/news/signals`, `/api/news/events`). The route handlers call DB read helpers only; they do not start collectors, AI inference, paper execution, or Telegram. All authenticated roles can read these endpoints; signal/event limits are clamped in the DB helpers.
+- Master Data snapshot GETs read coverage and job history. Market search/popular endpoints may call Binance Spot/Futures on cache miss or after the 60-second process-local cache expires; they also update that in-memory cache. Therefore the UI's "read-only" label means no trading/data mutation, not zero external network activity.
+- Master Data POST backfill/feature-build routes start daemon threads and persist job state. Backfill fetches and upserts OHLCV and can build features; feature-build writes feature data. React uses admin/trader role gating and an explicit confirmation step.
+- **Backend validation gap:** `BackfillRequest` and `FeatureBuildRequest` accept unconstrained strings for symbol, market, and timeframe. Client-side restrictions are not a substitute for server validation. In particular, non-`spot` market values fall through to the Futures endpoint in the backfill worker. Add backend allowlists and format checks.
+- **Job-message disclosure risk:** job failure paths persist raw `str(exception)` in the public job message, while GET job history/detail is readable by all authenticated roles and the React view renders the message. Replace client-visible exception strings with stable sanitized errors and retain detail in server logs.
+- No endpoints or external providers were called and no jobs/data were changed during this source audit.
