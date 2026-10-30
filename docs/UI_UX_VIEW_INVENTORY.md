@@ -1,7 +1,7 @@
 # Signal Bot UI/UX Comprehensive View & API Inventory (UIX-00)
 
 **Document Version:** 1.2.0  
-**Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
+**Status:** In review — owner-run runtime API route registry reconciliation passed (81 method/path entries match static source); full per-route contract/side-effect review and owner acceptance remain pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
 **Source baseline for reconciliation:** `0d5567de72d6e5e41168505c1c284733e12e9be5` (master after PR #542, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
@@ -128,7 +128,7 @@ A source-level comparison was performed against the exact PR branch for all 13 m
 
 The primary route register contains 81 endpoint definitions. The whole document contains 97 endpoint-table rows because later source-audit slices intentionally repeat 15 endpoint rows with deeper handler/consumer details; one further screener row includes the query string `?limit=50`. After stripping query parameters and collapsing the supplemental repeats, there are exactly 81 unique method/path identities. Every one matches a registered router decorator after applying its `APIRouter(prefix=...)`; no missing or extra API method/path was found in this static comparison.
 
-This verifies source decorator-to-inventory parity only. It does **not** yet prove the effective runtime `app.routes` registry, dependency injection, route ordering, or live API behavior. The runtime registry check remains an owner-run gate. Role-policy source inspection confirms the documented prefix/method policy, including the intentionally stricter current `admin|trader` restriction on both GET catalog routes under `/api/custom-strategy`; the owner decision on whether viewers should read that catalog remains open.
+The owner subsequently ran the documented read-only runtime registry dump on 2026-10-30. It reported **81 API route-method entries**, matching the 81 static method/path identities after applying router prefixes; no missing or unexpected runtime API route identity was reported. This closes runtime route identity reconciliation, but does not by itself verify dependency injection behavior, route ordering beyond the registered identities, request/response schemas, per-route side effects, legacy UI callers, or live API data. Role-policy source inspection confirms the documented prefix/method policy, including the intentionally stricter current `admin|trader` restriction on both GET catalog routes under `/api/custom-strategy`; the owner decision on whether viewers should read that catalog remains open.
 
 For a read-only runtime registry dump on the owner's server (imports the FastAPI app but does not start its lifespan or issue API requests), run:
 
@@ -573,7 +573,8 @@ This slice compares `web/routes/system_status.py`, `web/routes/settings.py`, cen
 - [x] Confirmed the preview uses `/api/system/status` and does not connect the Settings view to the admin-only full diagnostic endpoint.
 - [x] `tests/test_system_status_access.py` verifies the public status response omits database host/port/name, raw DB error, and heartbeat `detail`, preserves a null timestamp, and uses a generic database error message.
 - [ ] Verify auth/session parent state and role-specific browser behavior for settings and system status.
-- [ ] Continue runtime route-registry reconciliation and legacy-to-React parity for all 13 routers; owner acceptance and production cutover gates remain open.
+- [x] Owner-run read-only FastAPI `app.routes` registry reported 81 API method/path entries, matching the 81 static route identities.
+- [ ] Complete per-route dependency, role/forced-password, request/response schema, side-effect and legacy-to-React caller verification for all 13 routers; owner acceptance and production cutover gates remain open.
 
 
 
