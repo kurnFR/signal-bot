@@ -8,7 +8,7 @@
 
 ## Executive decision
 
-The migration has substantial implementation and regression coverage. The owner has now run the frontend foundation checks, the complete Chromium Playwright suite, and the full backend pytest suite successfully on PR head `cc98744df4e1cd104ef60fd23bcc4f36a708f52e`. The 12 skipped backend tests are all opt-in MariaDB integration tests and remain outstanding. Remaining acceptance evidence depends on isolated MariaDB integration, live-server read-only API/data comparison, manual accessibility and real-device/browser checks, mutation/RBAC verification in an isolated environment, and owner sign-off. GitHub Actions quota is exhausted, so fresh hosted CI evidence remains unavailable.
+The migration has substantial implementation and regression coverage. The owner-run frontend foundation checks, complete Chromium Playwright suite, and full backend pytest suite passed on tested application commit `cc98744df4e1cd104ef60fd23bcc4f36a708f52e`. The original backend run reported 745 passed and 12 skipped; all 12 skipped MariaDB integration tests have since passed against the dedicated remote `signal_bot_test` database in separately executed integration groups (paper orders 4/4, wallet tracker plus durable state 12/12, migrations 22/22). Combined with the original full-suite result, the 757-test collected backend inventory is now covered with no known skipped integration gate. Remaining acceptance evidence depends on live-server read-only API/data comparison, manual accessibility and real-device/browser checks, isolated mutation/RBAC verification, and owner sign-off. GitHub Actions quota is exhausted, so fresh hosted CI evidence remains unavailable.
 
 ## Acceptance matrix
 
@@ -49,7 +49,7 @@ Backend validation from the repository root:
 PYTHONPATH="$PWD" python -m pytest -q
 ```
 
-Result: **745 passed, 12 skipped, 0 failed** (8.19s; 7 deprecation warnings). Collection-only check: **757 tests collected, 0 collection errors**. The 12 skips are opt-in MariaDB tests: durable state (2), migrations (3), paper orders (4), and Wallet Tracker (3). These were intentionally not enabled because no disposable MariaDB test database has yet been confirmed. The isolated migration/accounting subset separately passed **15/15**. RetailBot paper-accounting unit coverage is included in the full pytest result; this is not a substitute for the skipped paper-order MariaDB integration. Record these as owner-run results, not hosted CI.
+Result: **745 passed, 12 skipped, 0 failed** (8.19s; 7 deprecation warnings). Collection-only check: **757 tests collected, 0 collection errors**. The 12 skips were opt-in MariaDB tests: durable state (2), migrations (3), paper orders (4), and Wallet Tracker (3). On 2026-10-30 the owner provisioned the dedicated remote `signal_bot_test` database on `192.168.1.30:3306` and ran the groups separately: paper orders **4 passed**; wallet tracker plus durable state **12 passed** after applying 20 migrations to `signal_bot_test`; migration integration **22 passed**. Thus all 12 tests skipped in the original full run have now been exercised successfully; combined with the original full-suite run, the 757-test collected backend inventory has coverage with no known remaining skipped integration gate. The migration command reported all 20 migrations applied. The isolated migration/accounting subset separately passed **15/15**. RetailBot paper-accounting unit coverage is included in the full pytest result. These are owner-run results, not hosted CI.
 
 ### Live-data comparison (read-only)
 
@@ -69,7 +69,7 @@ Result: **745 passed, 12 skipped, 0 failed** (8.19s; 7 deprecation warnings). Co
 
 ## Sign-off
 
-- [ ] Owner completed frontend and backend test commands on the exact PR head.
+- [x] Owner completed frontend and backend automated test commands; application code tested at `cc98744df4e1cd104ef60fd23bcc4f36a708f52e`, with later commits documentation-only. Original backend run: 745 passed / 12 skipped; all 12 MariaDB skips subsequently passed in isolated integration runs against `signal_bot_test`.
 - [ ] Owner completed real-server read-only data comparison.
 - [ ] Owner completed real-device/browser and manual accessibility checks.
 - [ ] Owner verified mutation/RBAC workflows in an isolated test environment.
@@ -77,3 +77,28 @@ Result: **745 passed, 12 skipped, 0 failed** (8.19s; 7 deprecation warnings). Co
 - [ ] Owner explicitly accepted the migration and approved a separate production cutover plan.
 
 **Current acceptance result: NOT ACCEPTED / VALIDATION PENDING.** Automated frontend and backend checks are green, but MariaDB integration, live-server parity, manual accessibility/device checks, isolated mutation/RBAC verification, and explicit owner sign-off remain open.
+
+
+## MariaDB integration completion — 2026-10-30
+
+The owner confirmed a dedicated disposable database named `signal_bot_test` on the existing remote MariaDB server (host `192.168.1.30`, port `3306`). The application database `crypto_signals` was not used for these integration runs.
+
+Owner-run commands and results:
+
+```text
+MYSQL_DATABASE=signal_bot_test PAPER_ORDERS_MARIADB_TESTS=1   PYTHONPATH="$PWD" python -m pytest -q tests/test_paper_orders_mariadb.py
+4 passed in 0.30s
+
+MYSQL_DATABASE=signal_bot_test WALLET_TRACKER_MARIADB_TESTS=1   PYTHONPATH="$PWD" python -m pytest -q   tests/test_wallet_tracker_mariadb.py tests/test_durable_state.py
+Initial run: 10 passed, 2 failed because login_attempts was not yet migrated.
+After applying MYSQL_DATABASE=signal_bot_test PYTHONPATH="$PWD" python -m db.migrate:
+  20 migrations applied.
+Rerun: 12 passed in 0.53s
+
+MYSQL_DATABASE=signal_bot_test WALLET_TRACKER_MARIADB_TESTS=1   PYTHONPATH="$PWD" python -m pytest -q tests/test_migrate.py
+22 passed in 3.91s
+```
+
+The initial durable-state failures were caused by the missing `login_attempts` table in the fresh disposable database; applying the repository migrations resolved them. The successful rerun passed both durable-state tests. Total integration command output: 38 passed across the three groups. The 38 count includes tests that also run in the regular suite; it is not an additional unique-test count. The 12 tests skipped by the original backend suite are now all covered by successful opt-in MariaDB runs.
+
+Safety boundary: integration tests and migrations targeted `signal_bot_test`; no test command intentionally targeted `crypto_signals`. No production deployment, worker restart, live trade, Telegram send, or production data mutation was performed.
