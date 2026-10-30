@@ -5,6 +5,24 @@ export class AuthRequestError extends Error {
 }
 
 const AUTH_PATHS = new Set(["/api/auth/login", "/api/auth/logout", "/api/auth/change-password"]);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function isAuthUser(value: unknown): value is AuthUser {
+  return isRecord(value) && Number.isSafeInteger(value.id) && (value.id as number) > 0 &&
+    typeof value.username === "string" && value.username.trim().length > 0 &&
+    (value.email === null || typeof value.email === "string") &&
+    typeof value.role === "string" && ["admin", "trader", "viewer"].includes(value.role) &&
+    typeof value.must_change_password === "boolean";
+}
+export async function fetchAuthUser(signal?: AbortSignal): Promise<AuthUser> {
+  const payload = await getJson<unknown>("/api/auth/me", signal);
+  if (!isAuthUser(payload)) {
+    throw new AuthRequestError(502, "Authentication service returned an invalid user profile");
+  }
+  return payload;
+}
+import { getJson } from "./api";
 function tokenFromStorage(): string | null {
   try { return window.localStorage.getItem("token"); } catch { return null; }
 }
@@ -35,15 +53,18 @@ async function authPost<T>(path: string, body?: unknown): Promise<T> {
 }
 
 export async function login(username: string, password: string): Promise<LoginResult> {
-  const result = await authPost<LoginResult>("/api/auth/login", { username, password });
-  if (!result.token || !result.user || typeof result.user.id !== "number") throw new AuthRequestError(502, "Authentication service returned an invalid session");
+  const payload = await authPost<unknown>("/api/auth/login", { username, password });
+  if (!isRecord(payload) || typeof payload.token !== "string" || !payload.token.trim() || !isAuthUser(payload.user)) {
+    throw new AuthRequestError(502, "Authentication service returned an invalid session");
+  }
+  const result: LoginResult = { token: payload.token, user: payload.user };
   try { window.localStorage.setItem("token", result.token); } catch { throw new AuthRequestError(500, "Session storage is unavailable in this browser"); }
   return result;
 }
 
 export async function logout(): Promise<void> {
   try { if (tokenFromStorage()) await authPost("/api/auth/logout"); } finally {
-    try { window.localStorage.removeItem("token"); } catch { /* Clear in-memory session even when storage is restricted. */ }
+    try { window.localStorage.removeItem("token"); } catch { /* Clear in-memory session even when server revocation fails. */ }
   }
 }
 
