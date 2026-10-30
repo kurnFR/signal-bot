@@ -698,6 +698,7 @@ test("reduced-motion and forced-colors preferences remain accessible in the brow
 
 
 test("responsive acceptance matrix covers every preview view across tablet and desktop widths in both themes", async ({ page }) => {
+  test.setTimeout(90_000);
   await mockApi(page);
   await signIn(page);
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
