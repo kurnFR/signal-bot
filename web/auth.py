@@ -254,30 +254,29 @@ _login_attempts: Dict[str, list[float]] = {}
 RATE_LIMIT_MAX_ATTEMPTS = 5
 RATE_LIMIT_WINDOW_SECONDS = 300  # 5 minutes
 
-# Durable backend (table `login_attempts`, migration 013). It is shared by every web
-# worker and survives restarts. Enabled by the app at startup; unit tests and tools
-# that never call enable_durable_rate_limit() keep the in-memory behaviour.
+# Durable backend (table `login_attempts`, migration 013). Once enabled by the
+# application, shared storage is mandatory and failures never fall back to memory.
 _durable_rate_limit = False
 _durable_rate_limit_degraded = False
 
 
+class RateLimitBackendUnavailable(RuntimeError):
+    """Shared login-rate-limit storage cannot currently enforce the policy."""
+
+
 def is_rate_limiter_durable() -> bool:
-    """Returns True if the rate limiter is configured to use the shared database."""
     return _durable_rate_limit
 
 
 def get_rate_limiter_health() -> Dict[str, Any]:
-    """Exposes rate limiter backend status and whether it has degraded to local memory."""
-    return {
-        "durable_enabled": _durable_rate_limit,
-        "degraded": _durable_rate_limit_degraded,
-        "mode": "database" if (_durable_rate_limit and not _durable_rate_limit_degraded) else "in-memory",
-    }
+    mode = "in-memory" if not _durable_rate_limit else ("unavailable" if _durable_rate_limit_degraded else "database")
+    return {"durable_enabled": _durable_rate_limit, "degraded": _durable_rate_limit_degraded, "mode": mode}
 
 
 def enable_durable_rate_limit() -> bool:
-    """Switch the limiter to the database if the table exists. Returns True if enabled."""
-    global _durable_rate_limit
+    global _durable_rate_limit, _durable_rate_limit_degraded
+    _durable_rate_limit = True
+    _durable_rate_limit_degraded = True
     try:
         conn = get_pool().get_connection()
         try:
@@ -287,11 +286,10 @@ def enable_durable_rate_limit() -> bool:
             cur.close()
         finally:
             conn.close()
-        _durable_rate_limit = True
+        _durable_rate_limit_degraded = False
     except Exception as exc:
-        _durable_rate_limit = False
-        logger.warning("Durable login rate limiting unavailable, using in-memory limiter: %s", exc)
-    return _durable_rate_limit
+        logger.error("Shared login rate limiting unavailable; login will fail closed: %s", exc)
+    return not _durable_rate_limit_degraded
 
 
 def _db_count_attempts(key: str, now: float) -> int:
@@ -299,10 +297,7 @@ def _db_count_attempts(key: str, now: float) -> int:
     try:
         cur = conn.cursor()
         cur.execute("DELETE FROM login_attempts WHERE attempted_at < %s", (now - RATE_LIMIT_WINDOW_SECONDS,))
-        cur.execute(
-            "SELECT COUNT(*) FROM login_attempts WHERE rate_key = %s AND attempted_at >= %s",
-            (key, now - RATE_LIMIT_WINDOW_SECONDS),
-        )
+        cur.execute("SELECT COUNT(*) FROM login_attempts WHERE rate_key = %s AND attempted_at >= %s", (key, now - RATE_LIMIT_WINDOW_SECONDS))
         count = int(cur.fetchone()[0])
         conn.commit()
         cur.close()
@@ -312,20 +307,24 @@ def _db_count_attempts(key: str, now: float) -> int:
 
 
 def check_login_rate_limit(key: str) -> bool:
-    """Returns True if within rate limit, False if locked out."""
+    global _durable_rate_limit_degraded
     now = time.time()
     if _durable_rate_limit:
         try:
-            return _db_count_attempts(key, now) < RATE_LIMIT_MAX_ATTEMPTS
+            count = _db_count_attempts(key, now)
+            _durable_rate_limit_degraded = False
+            return count < RATE_LIMIT_MAX_ATTEMPTS
         except Exception as exc:
-            logger.warning("Login rate-limit store error, falling back to memory: %s", exc)
+            _durable_rate_limit_degraded = True
+            logger.error("Shared login rate-limit check failed; refusing login: %s", exc)
+            raise RateLimitBackendUnavailable("Shared login rate-limit storage is unavailable") from exc
     attempts = [t for t in _login_attempts.get(key, []) if now - t < RATE_LIMIT_WINDOW_SECONDS]
     _login_attempts[key] = attempts
     return len(attempts) < RATE_LIMIT_MAX_ATTEMPTS
 
 
 def record_failed_login(key: str) -> int:
-    """Records a failed login attempt and returns the current count within the window."""
+    global _durable_rate_limit_degraded
     now = time.time()
     if _durable_rate_limit:
         try:
@@ -337,9 +336,13 @@ def record_failed_login(key: str) -> int:
                 cur.close()
             finally:
                 conn.close()
-            return _db_count_attempts(key, now)
+            count = _db_count_attempts(key, now)
+            _durable_rate_limit_degraded = False
+            return count
         except Exception as exc:
-            logger.warning("Login rate-limit store error, falling back to memory: %s", exc)
+            _durable_rate_limit_degraded = True
+            logger.error("Shared login rate-limit write failed; refusing login: %s", exc)
+            raise RateLimitBackendUnavailable("Shared login rate-limit storage is unavailable") from exc
     attempts = [t for t in _login_attempts.get(key, []) if now - t < RATE_LIMIT_WINDOW_SECONDS]
     attempts.append(now)
     _login_attempts[key] = attempts
@@ -347,6 +350,7 @@ def record_failed_login(key: str) -> int:
 
 
 def reset_login_attempts(key: str) -> None:
+    global _durable_rate_limit_degraded
     _login_attempts.pop(key, None)
     if _durable_rate_limit:
         try:
@@ -358,8 +362,11 @@ def reset_login_attempts(key: str) -> None:
                 cur.close()
             finally:
                 conn.close()
+            _durable_rate_limit_degraded = False
         except Exception as exc:
-            logger.warning("Login rate-limit reset error: %s", exc)
+            _durable_rate_limit_degraded = True
+            logger.error("Shared login rate-limit reset failed; refusing login: %s", exc)
+            raise RateLimitBackendUnavailable("Shared login rate-limit storage is unavailable") from exc
 
 
 # ============================================================================
