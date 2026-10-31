@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 import time
 import unittest
 from unittest.mock import MagicMock, patch
@@ -6,7 +8,7 @@ from unittest.mock import MagicMock, patch
 from web import auth, job_store
 
 
-class TestRateLimitFallback(unittest.TestCase):
+class TestRateLimitFailClosed(unittest.TestCase):
     def setUp(self):
         auth._login_attempts.clear()
         auth._durable_rate_limit = False
@@ -35,6 +37,21 @@ class TestRateLimitFallback(unittest.TestCase):
             self.assertFalse(auth.enable_durable_rate_limit())
         self.assertTrue(auth._durable_rate_limit)
         self.assertTrue(auth.get_rate_limiter_health()["degraded"])
+        self.assertEqual(auth.get_rate_limiter_health()["mode"], "unavailable")
+
+    def test_runtime_recovery_restores_database_mode(self):
+        auth._durable_rate_limit = True
+        auth._durable_rate_limit_degraded = True
+        with patch("web.auth._db_count_attempts", return_value=0):
+            self.assertTrue(auth.check_login_rate_limit("k"))
+        self.assertFalse(auth.get_rate_limiter_health()["degraded"])
+        self.assertEqual(auth.get_rate_limiter_health()["mode"], "database")
+
+    def test_malformed_database_count_fails_closed(self):
+        auth._durable_rate_limit = True
+        with patch("web.auth._db_count_attempts", side_effect=TypeError("malformed count")):
+            with self.assertRaises(auth.RateLimitBackendUnavailable):
+                auth.check_login_rate_limit("k")
         self.assertEqual(auth.get_rate_limiter_health()["mode"], "unavailable")
 
 
@@ -96,6 +113,33 @@ class TestDurableStateOnMariaDB(unittest.TestCase):
         self.assertFalse(auth.check_login_rate_limit("it-key"))
         auth.reset_login_attempts("it-key")
         self.assertTrue(auth.check_login_rate_limit("it-key"))
+
+    def test_lockout_is_enforced_in_a_separate_worker_process(self):
+        for _ in range(auth.RATE_LIMIT_MAX_ATTEMPTS):
+            auth.record_failed_login("it-key")
+        script = (
+            "from web import auth; "
+            "assert auth.enable_durable_rate_limit(); "
+            "assert not auth.check_login_rate_limit('it-key')"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=os.getcwd(),
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        auth.reset_login_attempts("it-key")
+
+    def test_runtime_storage_recovery_reenables_login_checks(self):
+        with patch("web.auth.get_pool", side_effect=RuntimeError("temporary outage")):
+            with self.assertRaises(auth.RateLimitBackendUnavailable):
+                auth.check_login_rate_limit("it-key")
+        self.assertEqual(auth.get_rate_limiter_health()["mode"], "unavailable")
+        self.assertTrue(auth.check_login_rate_limit("it-key"))
+        self.assertEqual(auth.get_rate_limiter_health()["mode"], "database")
 
     def test_job_round_trip_and_restart_interruption(self):
         jid = f"it{int(time.time()) % 100000}"
