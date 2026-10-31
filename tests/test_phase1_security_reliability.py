@@ -17,6 +17,7 @@ from web.auth import (
     record_failed_login,
     reset_login_attempts,
     _login_attempts,
+    RateLimitBackendUnavailable,
 )
 
 
@@ -208,6 +209,21 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         self.assertIn("durable_enabled", health)
         self.assertIn("degraded", health)
         self.assertIn("mode", health)
+
+    def test_login_returns_503_when_shared_rate_limiter_is_unavailable(self):
+        with patch(
+            "web.routes.auth_routes.check_login_rate_limit",
+            side_effect=RateLimitBackendUnavailable("database unavailable"),
+        ):
+            response = self.client.post(
+                "/api/auth/login",
+                json={"username": "trader", "password": "not-the-password"},
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json()["detail"],
+            "Login protection is temporarily unavailable. Please retry shortly.",
+        )
 
 
 if __name__ == "__main__":
