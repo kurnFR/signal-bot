@@ -41,7 +41,9 @@ export function assertApiPath(path: string): void {
 function readAuthToken(): string | null {
   try {
     const token = window.localStorage.getItem("token");
-    return token && token.trim() ? token : null;
+    if (!token) return null;
+    const trimmed = token.trim();
+    return trimmed.length > 0 ? trimmed : null;
   } catch {
     return null;
   }

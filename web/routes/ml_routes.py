@@ -52,7 +52,8 @@ class DeployMLToPaperRequest(BaseModel):
 @router.get("/experiments")
 def list_experiments() -> Dict[str, Any]:
     """List all completed ML tournaments and experiment results."""
-    ML_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    if not ML_RESULTS_DIR.exists():
+        return {"experiments": []}
     results: List[Dict[str, Any]] = []
 
     for file in sorted(ML_RESULTS_DIR.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True):
@@ -112,7 +113,8 @@ def get_experiment_details(experiment_id: str) -> Dict[str, Any]:
 @router.get("/models")
 def list_saved_models() -> Dict[str, Any]:
     """List trained model artifacts eligible for paper trading."""
-    ML_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    if not ML_MODELS_DIR.exists():
+        return {"models": []}
     models: List[Dict[str, Any]] = []
 
     models_root = ML_MODELS_DIR.resolve()
@@ -397,7 +399,8 @@ def train_rl_trading_agent(req: RLTrainRequest):
 def list_rl_models():
     """List trained reinforcement learning models and performance audits."""
     rl_dir = Path("ml_models") / "rl"
-    rl_dir.mkdir(parents=True, exist_ok=True)
+    if not rl_dir.exists():
+        return {"models": []}
     models = []
     for audit_file in sorted(rl_dir.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True):
         try:

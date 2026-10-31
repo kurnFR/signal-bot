@@ -22,7 +22,8 @@ class TestAuthSecurity(unittest.TestCase):
             mode = stat.S_IMODE(os.stat(path).st_mode)
             second = _load_or_create_secret(path)
 
-            self.assertEqual(mode, 0o600)
+            if os.name != "nt":
+                self.assertEqual(mode, 0o600)
             self.assertEqual(len(first), 64)
             self.assertEqual(second, first)
 
@@ -41,7 +42,8 @@ class TestAuthSecurity(unittest.TestCase):
             loaded = _load_or_create_secret(path)
 
             self.assertEqual(loaded, "existing-secret")
-            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+            if os.name != "nt":
+                self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
 
     def test_login_rate_limiting(self):
         key = "test_ip:test_user"

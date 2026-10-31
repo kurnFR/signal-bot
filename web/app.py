@@ -54,6 +54,8 @@ async def lifespan(app: FastAPI):
         from paper.retailbot2 import DatabaseManager, BotConfig
         cfg = BotConfig()
         DatabaseManager(cfg, logger)
+        from db.db import ensure_retailbot2_lifecycle_table
+        ensure_retailbot2_lifecycle_table()
     except Exception as e:
         logger.warning(f"Could not initialize retailbot2 tables on startup: {e}")
     yield

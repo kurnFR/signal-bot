@@ -260,8 +260,8 @@ class CustomStrategyRequest(BaseModel):
 
 
 class GenerateAIStrategyRequest(BaseModel):
-    prompt: str = Field(..., json_schema_extra={"example": "Create a momentum strategy that buys when RSI < 35 and volume is 2x average, short when RSI > 65 with 1.5 ATR stop and 2.5 RR"})
-    history: Optional[List[Dict[str, str]]] = Field(default=None)
+    prompt: str = Field(..., min_length=3, max_length=5000, json_schema_extra={"example": "Create a momentum strategy that buys when RSI < 35 and volume is 2x average, short when RSI > 65 with 1.5 ATR stop and 2.5 RR"})
+    history: Optional[List[Dict[str, str]]] = Field(default=None, max_length=50)
     currentConfig: Optional[Dict[str, Any]] = Field(default=None)
 
 

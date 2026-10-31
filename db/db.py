@@ -1027,8 +1027,6 @@ def get_retailbot2_recent_trades(limit=50):
     conn = get_retailbot2_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        _ensure_retailbot2_strategy_lifecycle_table(cur)
-        conn.commit()
         cur.execute("""
             SELECT t.id, t.symbol, t.side, t.mode, t.entry_price, t.stop_price, t.target_price,
                    t.units, t.strategy, t.confluence_score, t.status, t.exit_price,
@@ -1062,8 +1060,6 @@ def get_retailbot2_stats():
     conn = get_retailbot2_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        _ensure_retailbot2_strategy_lifecycle_table(cur)
-        conn.commit()
         cur.execute("""
             SELECT t.strategy, t.mode,
                    COUNT(*) AS total_trades,
@@ -1251,22 +1247,36 @@ def _retailbot2_lifecycle_flag(value):
     return False
 
 
+def ensure_retailbot2_lifecycle_table():
+    """Ensure lifecycle table exists during server startup or migration."""
+    conn = get_retailbot2_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        _ensure_retailbot2_strategy_lifecycle_table(cur)
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
+
+
 def get_retailbot2_strategy_lifecycle_settings():
     """Read UI-managed strategy settings. An empty table is valid and means
     worker defaults apply; no promotion is implicitly enabled."""
     conn = get_retailbot2_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        _ensure_retailbot2_strategy_lifecycle_table(cur)
-        conn.commit()
-        cur.execute("""
-            SELECT strategy_id, mode, evaluation_enabled, paper_enabled,
-                   telegram_enabled, report_enabled, auto_promote_enabled,
-                   updated_at
-            FROM rdt_strategy_lifecycle
-            ORDER BY strategy_id, mode
-        """)
-        rows = cur.fetchall()
+        try:
+            cur.execute("""
+                SELECT strategy_id, mode, evaluation_enabled, paper_enabled,
+                       telegram_enabled, report_enabled, auto_promote_enabled,
+                       updated_at
+                FROM rdt_strategy_lifecycle
+                ORDER BY strategy_id, mode
+            """)
+            rows = cur.fetchall()
+        except Exception as exc:
+            logger.debug("rdt_strategy_lifecycle query defaulted to empty: %s", exc)
+            rows = []
         cur.close()
         for row in rows:
             for key in ("evaluation_enabled", "paper_enabled", "telegram_enabled",

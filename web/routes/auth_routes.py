@@ -13,7 +13,7 @@ from web.auth import (
     hash_password, verify_password, create_access_token,
     get_current_user, require_admin, revoke_token,
     check_login_rate_limit, record_failed_login, reset_login_attempts,
-    log_audit, _token_from_request
+    log_audit, log_audit_cursor, _token_from_request
 )
 from fastapi import Request
 
@@ -164,7 +164,14 @@ def login(req: LoginRequest, request: Request):
 def logout(request: Request, current_user: dict = Depends(get_current_user)):
     token = _token_from_request(request)
     if token:
-        revoke_token(token)
+        try:
+            revoke_token(token)
+        except Exception as exc:
+            logger.error("Failed to revoke session token during logout: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail="Server error: failed to revoke session token. Please retry.",
+            )
     client_ip = request.client.host if request.client else "unknown"
     log_audit("LOGOUT", current_user["username"], current_user["id"], None, client_ip)
     return {"status": "success", "message": "Successfully logged out"}
@@ -249,7 +256,7 @@ def list_users(admin: dict = Depends(require_admin)):
         cur = conn.cursor(dictionary=True)
         cur.execute(
             """
-            SELECT id, username, email, role, is_active, created_at, updated_at
+            SELECT id, username, email, role, is_active, must_change_password, created_at, updated_at
             FROM users
             ORDER BY id ASC
             """
@@ -258,6 +265,7 @@ def list_users(admin: dict = Depends(require_admin)):
         cur.close()
         for u in users:
             u["is_active"] = bool(u["is_active"])
+            u["must_change_password"] = bool(u.get("must_change_password", 0))
             u["created_at"] = str(u["created_at"])
             u["updated_at"] = str(u["updated_at"])
         return {"users": users}
@@ -280,6 +288,7 @@ def create_user(req: CreateUserRequest, admin: dict = Depends(require_admin)):
         raise HTTPException(status_code=400, detail=f"Role must be one of: {', '.join(allowed_roles)}")
 
     clean_email = req.email.strip().lower() if req.email else None
+    _validate_new_password(req.password, clean_username)
     new_hash = hash_password(req.password)
 
     conn = get_pool().get_connection()
@@ -327,6 +336,7 @@ def reset_user_password(user_id: int, req: ResetPasswordRequest, admin: dict = D
         if not target:
             raise HTTPException(status_code=404, detail="Target user not found")
 
+        _validate_new_password(req.new_password, target["username"])
         new_hash = hash_password(req.new_password)
         cur.execute(
             "UPDATE users SET password_hash = %s, must_change_password = 1, updated_at = NOW() WHERE id = %s",
@@ -397,6 +407,13 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
             raise HTTPException(status_code=404, detail="User not found")
 
         cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+        log_audit_cursor(
+            cur,
+            "USER_DELETED",
+            admin["username"],
+            admin["id"],
+            {"deleted_user": target["username"], "deleted_id": user_id},
+        )
         conn.commit()
         cur.close()
         return {"status": "success", "message": f"User '{target['username']}' deleted"}

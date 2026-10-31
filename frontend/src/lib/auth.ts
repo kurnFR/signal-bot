@@ -37,7 +37,7 @@ async function authPost<T>(path: string, body?: unknown): Promise<T> {
 export async function login(username: string, password: string): Promise<LoginResult> {
   const result = await authPost<LoginResult>("/api/auth/login", { username, password });
   if (!result.token || !result.user || typeof result.user.id !== "number") throw new AuthRequestError(502, "Authentication service returned an invalid session");
-  try { window.localStorage.setItem("token", result.token); } catch { throw new AuthRequestError(500, "Session storage is unavailable in this browser"); }
+  try { window.localStorage.setItem("token", result.token.trim()); } catch { throw new AuthRequestError(500, "Session storage is unavailable in this browser"); }
   return result;
 }
 

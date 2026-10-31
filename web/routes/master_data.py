@@ -4,7 +4,7 @@ import threading
 import logging
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
 from db.db import get_pool, upsert_ohlcv, fetch_ohlcv_df
@@ -15,6 +15,13 @@ from web import job_store
 
 router = APIRouter(prefix="/api/master-data", tags=["master-data"])
 logger = logging.getLogger("web.master_data")
+
+VALID_MARKETS = {"spot", "futures"}
+VALID_TIMEFRAMES = {
+    "1m", "3m", "5m", "15m", "30m",
+    "1h", "2h", "4h", "6h", "8h", "12h",
+    "1d", "3d", "1w", "1M"
+}
 
 # Live job state (this process) mirrored to the database by web.job_store.
 JOBS = {}
@@ -28,17 +35,49 @@ def _persist(job_id: str) -> None:
 
 
 class BackfillRequest(BaseModel):
-    symbol: str = Field(..., json_schema_extra={"example": "BTCUSDT"})
+    symbol: str = Field(..., min_length=2, max_length=20, json_schema_extra={"example": "BTCUSDT"})
     market: str = Field("spot", json_schema_extra={"example": "spot"})  # spot or futures
     timeframe: str = Field("1h", json_schema_extra={"example": "1h"})   # 1m, 5m, 15m, 1h, 4h, 1d
     years: float = Field(1.0, ge=0.01, le=10.0, json_schema_extra={"example": 1.0})
     auto_compute_features: bool = Field(True, json_schema_extra={"example": True})
 
+    @field_validator("market")
+    @classmethod
+    def validate_market(cls, v: str) -> str:
+        clean = v.strip().lower()
+        if clean not in VALID_MARKETS:
+            raise ValueError(f"Market must be one of: {sorted(VALID_MARKETS)}")
+        return clean
+
+    @field_validator("timeframe")
+    @classmethod
+    def validate_timeframe(cls, v: str) -> str:
+        clean = v.strip()
+        if clean not in VALID_TIMEFRAMES:
+            raise ValueError(f"Timeframe must be one of: {sorted(VALID_TIMEFRAMES)}")
+        return clean
+
 
 class FeatureBuildRequest(BaseModel):
-    symbol: str = Field(..., json_schema_extra={"example": "BTCUSDT"})
+    symbol: str = Field(..., min_length=2, max_length=20, json_schema_extra={"example": "BTCUSDT"})
     market: str = Field("spot", json_schema_extra={"example": "spot"})
     timeframe: str = Field("1h", json_schema_extra={"example": "1h"})
+
+    @field_validator("market")
+    @classmethod
+    def validate_market(cls, v: str) -> str:
+        clean = v.strip().lower()
+        if clean not in VALID_MARKETS:
+            raise ValueError(f"Market must be one of: {sorted(VALID_MARKETS)}")
+        return clean
+
+    @field_validator("timeframe")
+    @classmethod
+    def validate_timeframe(cls, v: str) -> str:
+        clean = v.strip()
+        if clean not in VALID_TIMEFRAMES:
+            raise ValueError(f"Timeframe must be one of: {sorted(VALID_TIMEFRAMES)}")
+        return clean
 
 
 def _run_backfill_job(job_id: str, symbol: str, market: str, timeframe: str, years: float, auto_compute_features: bool):
@@ -113,7 +152,7 @@ def _run_backfill_job(job_id: str, symbol: str, market: str, timeframe: str, yea
         logger.exception(f"Backfill job {job_id} failed: {e}")
         with JOBS_LOCK:
             JOBS[job_id]["status"] = "failed"
-            JOBS[job_id]["message"] = f"Job failed: {str(e)}"
+            JOBS[job_id]["message"] = f"Backfill failed ({type(e).__name__}). Check server logs for details."
             JOBS[job_id]["updated_at"] = time.time()
             _persist(job_id)
 
@@ -137,7 +176,7 @@ def _run_features_job(job_id: str, symbol: str, market: str, timeframe: str):
         logger.exception(f"Feature job {job_id} failed: {e}")
         with JOBS_LOCK:
             JOBS[job_id]["status"] = "failed"
-            JOBS[job_id]["message"] = f"Failed to compute features: {str(e)}"
+            JOBS[job_id]["message"] = f"Failed to compute features ({type(e).__name__}). Check server logs for details."
             JOBS[job_id]["updated_at"] = time.time()
             _persist(job_id)
 

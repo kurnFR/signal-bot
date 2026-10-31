@@ -165,62 +165,86 @@ def verify_access_token(token: str) -> Optional[Dict[str, Any]]:
 _revoked_tokens_cache = set()
 
 
+def _decode_token_payload_unverified(token: str) -> Optional[Dict[str, Any]]:
+    """Decode JWT payload without verifying signature (for reading exp during revocation)."""
+    if not token or "." not in token:
+        return None
+    try:
+        payload_b64 = token.split(".", 1)[0]
+        pad = payload_b64 + "=" * (-len(payload_b64) % 4)
+        return json.loads(base64.urlsafe_b64decode(pad.encode("utf-8")).decode("utf-8"))
+    except Exception:
+        return None
+
+
 def revoke_token(token: str) -> None:
-    """Revokes an active token and blacklists it across the server."""
+    """Revokes an active token and blacklists it across the server.
+    
+    Raises RuntimeError if persistent revocation storage fails so callers know
+    revocation could not be durably recorded across workers.
+    """
     if not token:
         return
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     _revoked_tokens_cache.add(token_hash)
-    payload = verify_access_token(token)
+    payload = _decode_token_payload_unverified(token)
     exp = payload.get("exp", int(time.time()) + TOKEN_EXPIRY_SECONDS) if payload else int(time.time()) + TOKEN_EXPIRY_SECONDS
     exp_dt = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(exp))
 
-    conn = get_pool().get_connection()
     try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO revoked_tokens (token_hash, expires_at)
-            VALUES (%s, %s)
-            ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at)
-            """,
-            (token_hash, exp_dt),
-        )
-        conn.commit()
-        cur.close()
-        logger.info("Token %s... revoked and blacklisted", token_hash[:8])
+        conn = get_pool().get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO revoked_tokens (token_hash, expires_at)
+                VALUES (%s, %s)
+                ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at)
+                """,
+                (token_hash, exp_dt),
+            )
+            conn.commit()
+            cur.close()
+            logger.info("Token %s... revoked and blacklisted", token_hash[:8])
+        finally:
+            conn.close()
     except Exception as exc:
         logger.error("Failed to persist revoked token: %s", exc)
-    finally:
-        conn.close()
+        raise RuntimeError(f"Failed to persist revoked token to database: {exc}") from exc
 
 
 def is_token_revoked(token: str) -> bool:
-    """Check if token was revoked via database lookup and in-memory cache."""
+    """Check if token was revoked via database lookup and in-memory cache.
+    
+    Fails closed: if revocation status cannot be verified due to a database or
+    connection error, the token is treated as revoked (True) to prevent
+    unauthorized access.
+    """
     if not token:
         return True
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     if token_hash in _revoked_tokens_cache:
         return True
 
-    conn = get_pool().get_connection()
     try:
-        cur = conn.cursor(dictionary=True)
-        cur.execute(
-            "SELECT token_hash FROM revoked_tokens WHERE token_hash = %s AND expires_at > UTC_TIMESTAMP()",
-            (token_hash,),
-        )
-        row = cur.fetchone()
-        cur.close()
-        if row:
-            _revoked_tokens_cache.add(token_hash)
-            return True
-        return False
+        conn = get_pool().get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute(
+                "SELECT token_hash FROM revoked_tokens WHERE token_hash = %s AND expires_at > UTC_TIMESTAMP()",
+                (token_hash,),
+            )
+            row = cur.fetchone()
+            cur.close()
+            if row:
+                _revoked_tokens_cache.add(token_hash)
+                return True
+            return False
+        finally:
+            conn.close()
     except Exception as exc:
-        logger.error("Error checking token revocation: %s", exc)
-        return False
-    finally:
-        conn.close()
+        logger.error("Error checking token revocation from storage; failing closed: %s", exc)
+        return True
 
 
 # ============================================================================
@@ -234,6 +258,21 @@ RATE_LIMIT_WINDOW_SECONDS = 300  # 5 minutes
 # worker and survives restarts. Enabled by the app at startup; unit tests and tools
 # that never call enable_durable_rate_limit() keep the in-memory behaviour.
 _durable_rate_limit = False
+_durable_rate_limit_degraded = False
+
+
+def is_rate_limiter_durable() -> bool:
+    """Returns True if the rate limiter is configured to use the shared database."""
+    return _durable_rate_limit
+
+
+def get_rate_limiter_health() -> Dict[str, Any]:
+    """Exposes rate limiter backend status and whether it has degraded to local memory."""
+    return {
+        "durable_enabled": _durable_rate_limit,
+        "degraded": _durable_rate_limit_degraded,
+        "mode": "database" if (_durable_rate_limit and not _durable_rate_limit_degraded) else "in-memory",
+    }
 
 
 def enable_durable_rate_limit() -> bool:
@@ -326,32 +365,54 @@ def reset_login_attempts(key: str) -> None:
 # ============================================================================
 # Audit Logging (Immutable System Action History)
 # ============================================================================
-def log_audit(
+def log_audit_cursor(
+    cur,
     action: str,
     username: str,
     user_id: Optional[int] = None,
     details: Optional[Dict[str, Any]] = None,
     ip_address: Optional[str] = None,
 ) -> None:
-    """Records an administrative, security, or trading action in audit_logs."""
+    """Records an action in audit_logs using an existing open database cursor."""
+    details_json = json.dumps(details) if details else None
+    cur.execute(
+        """
+        INSERT INTO audit_logs (user_id, username, action, details, ip_address)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        (user_id, username, action, details_json, ip_address),
+    )
+
+
+def log_audit(
+    action: str,
+    username: str,
+    user_id: Optional[int] = None,
+    details: Optional[Dict[str, Any]] = None,
+    ip_address: Optional[str] = None,
+    raise_on_error: bool = False,
+) -> bool:
+    """Records an administrative, security, or trading action in audit_logs.
+    
+    Returns True if successfully written. If raise_on_error is True, raises
+    RuntimeError on database persistence failure so security-critical operations
+    do not proceed silently without an audit trail.
+    """
     try:
         conn = get_pool().get_connection()
         try:
             cur = conn.cursor()
-            details_json = json.dumps(details) if details else None
-            cur.execute(
-                """
-                INSERT INTO audit_logs (user_id, username, action, details, ip_address)
-                VALUES (%s, %s, %s, %s, %s)
-                """,
-                (user_id, username, action, details_json, ip_address),
-            )
+            log_audit_cursor(cur, action, username, user_id, details, ip_address)
             conn.commit()
             cur.close()
+            return True
         finally:
             conn.close()
     except Exception as exc:
         logger.error("Failed to write audit log (%s by %s): %s", action, username, exc)
+        if raise_on_error:
+            raise RuntimeError(f"Critical audit logging failed for {action}: {exc}") from exc
+        return False
 
 
 def _token_from_request(request: Request) -> Optional[str]:
