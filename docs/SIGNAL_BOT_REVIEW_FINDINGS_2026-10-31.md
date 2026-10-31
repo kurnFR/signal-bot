@@ -253,3 +253,103 @@ Start a dedicated **P0/P1 remediation pass**:
 7. Update this document with evidence, commit/PR references, and explicit status for every finding.
 
 **Final recommendation:** continue from PR #604 as an acceptance and reliability milestone. Do not declare production readiness or perform a production frontend cutover until the security, API, integration, accessibility, and owner-approval gates are closed.
+
+
+---
+
+## 10. Re-review addendum — 2026-10-31 (current master vs PR #604)
+
+**This section supersedes the original “remediation not yet completed” status above.** The original review described the PR branch as it existed before the latest master commits. The current source was re-read on 2026-10-31.
+
+### 10.1 Repository and PR state
+
+- Current `master`: `aa837012cecfc6d10e0d25e049f64439ec278fbd`
+- PR #604 head: `c85b49940fc7b3d971488d986efc86d5ce6a6891`
+- PR #604 remains open and draft.
+- Current master contains six commits beyond the PR's recorded base `eeaf8843d140701f88623a22aa925353e7e2e2d2`.
+- A compare of current master against the PR head reports the histories have diverged (master is six commits ahead; the PR branch has 46 commits not present in current master). **Do not merge PR #604 as-is.** First reconcile its unique commits and current-master changes; check for duplicate, obsolete, or conflicting work.
+- The latest master commit is `aa837012`, titled “fix(security): resolve P0/P1 review findings for token revocation, durable audit logging, and GET purity”. Its diff includes meaningful fixes, but the commit title overstates closure in at least two areas noted below.
+
+### 10.2 Finding disposition on current master
+
+| Previous finding | Current disposition | Evidence / remaining gap |
+|---|---|---|
+| Token revocation lookup failed open | **Fixed in source; focused tests added; hosted CI not green** | `is_token_revoked()` now returns revoked on storage errors. `revoke_token()` raises if persistence fails and logout returns HTTP 503 rather than reporting success. Multi-worker integration verification is still required. |
+| Revocation persistence failure could be reported as logout success | **Fixed in source; focused test added** | Logout catches revocation persistence errors and returns 503. Verify client retry/session behavior and real multi-worker behavior. |
+| Audit writes silently swallowed | **Partially fixed; still open** | `log_audit()` now returns success/failure and supports `raise_on_error`; user deletion writes the audit row in the same transaction as deletion. However, no production call site was found using `raise_on_error=True`. Login, logout, password change, user create/reset/update and other callers still use the default best-effort behavior or write after the main transaction. A failed audit write can therefore still be silently non-fatal for important actions. |
+| Login throttling falls back to process-local memory | **Still open — P0/P1 security gap** | Current master still falls back to `_login_attempts` when durable DB rate-limit operations fail. The new health fields are not updated by those fallback paths, and the added test checks only that health keys exist; it does not prove cross-worker throttling or degraded-state accuracy. |
+| Research GET initializes lifecycle schema | **Fixed in source; test added** | DDL/commit removed from read helpers; table initialization moved to explicit startup initialization. Verify startup failure is surfaced and migration ordering is deterministic. |
+| ML list GET creates artifact directories | **Fixed in source; tests added** | Experiment/model/RL list handlers now return empty collections when directories do not exist instead of creating them. |
+| User deletion lacks audit history | **Fixed in source; test added** | Delete and audit insert share one DB transaction. |
+| Admin create/reset password policy weaker than self-service | **Fixed in source; tests added** | Admin create and reset now call the common password validator against the target username. |
+| GET /api/users omits `must_change_password` | **Fixed in source; test added** | Query and response now include the boolean field. |
+| Master Data market/timeframe validation | **Partially fixed; tests added** | Market and timeframe are validated server-side and symbol length is bounded. Symbol syntax/allowed exchange symbol validation should be strengthened using trusted exchange metadata or a strict symbol contract. |
+| Job exception details exposed to readers | **Partially fixed** | Backfill/feature job paths in the latest diff replace raw exception text with generic messages. Audit every job type and persisted historical job message before calling this closed. |
+| Strategy AI prompt/history unbounded | **Partially fixed** | Prompt length is capped and history count is capped. Individual history message sizes and `currentConfig` size/depth are not yet bounded; add total request-byte and per-field limits. |
+| Frontend token whitespace normalization | **Fixed in source** | API token read trims whitespace and login stores the trimmed token. Add/retain regression tests for persisted legacy tokens with whitespace. |
+
+**Important distinction:** “Fixed in source” means the inspected current-master implementation contains the intended change. It does not mean the full acceptance suite passed, production behavior was verified, or the risk is certified closed.
+
+### 10.3 Current CI and release gate
+
+The latest four GitHub Actions runs on current master commit `aa837012` are all reported as failed:
+
+- [Test](https://github.com/kurnFR/signal-bot/actions/runs/41186444819)
+- [RetailBot accounting regression](https://github.com/kurnFR/signal-bot/actions/runs/41186444831)
+- [tests](https://github.com/kurnFR/signal-bot/actions/runs/41186444805)
+- [Frontend foundation](https://github.com/kurnFR/signal-bot/actions/runs/41186444811)
+
+The available job metadata exposes job-level failure but no usable step-level diagnostics. The cause is **unknown**; do not label it an application regression, quota issue, or environment issue without logs. Current master is therefore **not green and not merge/release-ready**.
+
+The new focused security and API-purity tests are useful, but they are not a substitute for green full CI, MariaDB integration, multi-worker tests, and real-server acceptance.
+
+### 10.4 Remaining P0/P1 remediation
+
+1. **Replace rate-limit fallback with a deliberate shared-backend failure policy.** Do not silently downgrade to per-process memory. If the shared store is unavailable, return a controlled service-unavailable response for login or use a separately designed shared backend. Expose accurate degraded health state and test two independent app workers against the same store.
+2. **Make required audit events part of the protected transaction.** Use `log_audit_cursor()` with the business transaction for DB-backed actions; for cross-system actions, use a durable outbox. Explicitly define which events may be best-effort. Add failure-injection tests proving critical actions do not succeed without their required audit record.
+3. **Complete request bounds.** Bound total AI request size, each history message, history content, and `currentConfig`; constrain Master Data symbols and ML experiment identifiers/parameters at the API boundary.
+4. **Finish operational job safety.** Ensure every public job status/message is sanitized, internal exception detail stays in protected logs, jobs survive process restarts, duplicate submissions are controlled, and job ownership/authorization is enforced.
+5. **Validate security behavior under multiple workers.** Test login throttling, logout/revocation, role changes, disabled users, and session invalidation with separate worker processes—not only mocks or one TestClient process.
+
+### 10.5 Professional / commercial-readiness roadmap
+
+A polished dashboard is not yet a sellable SaaS product. Before charging customers, Signal Bot needs clear product boundaries, safe operations, customer isolation, and supportable releases.
+
+#### P0 — Trust and capital protection
+- Central risk policy: max exposure, max open positions, per-strategy allocation, max daily loss, drawdown stop, correlation/concentration checks, and an emergency pause.
+- Separate research, paper trading, and live execution with unmistakable labels and permission boundaries.
+- Market-data freshness checks, stale-price blocking, exchange/API outage handling, idempotent order processing, duplicate-alert prevention, and recovery after restart.
+- Backtest integrity: out-of-sample and walk-forward validation, realistic fees/slippage, no look-ahead leakage, survivorship/data-quality checks, and reproducible datasets/configuration.
+- Explicit user approval for any future live-trading capability. No profitability guarantees or misleading “AI accuracy” claims.
+
+#### P1 — SaaS foundations
+- Decide deployment model: single-tenant self-hosted first, or multi-tenant hosted SaaS. Do not claim multi-tenancy until database, cache, files, jobs, wallets, secrets, and API authorization are tenant-isolated.
+- Customer onboarding wizard: connect read-only exchange keys first, configure markets/timeframes, choose screener presets, test Telegram, and explain paper-vs-live modes.
+- Secure credential vault/encryption, key rotation, least privilege, secret redaction, optional MFA, session/device management, and a documented recovery flow.
+- Backup/restore and migration tooling with tested rollback; health checks, structured logs, metrics, alerting, and operational runbooks.
+- Versioned API contracts, release notes, upgrade checks, support diagnostics, and clear retention/export/delete controls.
+
+#### P2 — Paid-user experience
+- Role-aware workspace, saved screener presets, custom columns/layouts, watchlists, and exportable performance reports.
+- Strategy comparison with trade count, expectancy, profit factor, drawdown, exposure, fees/slippage, and out-of-sample/forward-paper results—not win rate alone.
+- Alert-quality analytics that connect each alert to subsequent price movement and strategy outcome, with deduplication and configurable delivery policies.
+- Unified event timeline for signals, wallet activity, paper trades, strategy changes, jobs, and admin actions.
+- Guided empty states, searchable help, onboarding checklist, in-app diagnostics, clear timestamps/data freshness, and accessible responsive components.
+
+#### P3 — Commercial operations
+- Define buyer persona and pricing metric (per user, workspace, monitored wallet, or feature tier); avoid pricing until infrastructure cost and data-provider constraints are understood.
+- Terms, privacy policy, risk disclosures, support/SLA boundaries, incident response, data retention, and jurisdiction-specific legal review.
+- Market-data/exchange API terms and redistribution rights must be reviewed before offering customer-facing market data.
+- Customer acceptance tests, staging environment, release/rollback process, and a documented support escalation path.
+
+### 10.6 Recommended next sequence
+
+1. Fix shared rate-limit degradation behavior and add multi-worker tests.
+2. Make critical audit events transactionally durable; enumerate every audit call site and classify its required guarantee.
+3. Finish AI/ML/Master Data request bounds and job-status redaction.
+4. Diagnose the failed master GitHub Actions runs from actual step logs; rerun all required checks until green.
+5. Reconcile PR #604 with current master; do not merge the stale/diverged branch wholesale.
+6. Complete staging API/RBAC/mutation acceptance, accessibility and browser matrix, backup/restore rehearsal, and owner sign-off.
+7. Only then prioritize paid-product onboarding, workspace configuration, analytics, packaging, and commercial/legal readiness.
+
+**Current decision:** several previous P1 findings have been corrected in current master, but shared login rate limiting and complete audit durability remain open. All current-master hosted workflows are failing, the PR branch has diverged, and production acceptance is incomplete. Keep React migration preview-only; no deployment or live-trading authorization is implied.
