@@ -10,9 +10,11 @@ class TestRateLimitFallback(unittest.TestCase):
     def setUp(self):
         auth._login_attempts.clear()
         auth._durable_rate_limit = False
+        auth._durable_rate_limit_degraded = False
 
     def tearDown(self):
         auth._durable_rate_limit = False
+        auth._durable_rate_limit_degraded = False
         auth._login_attempts.clear()
 
     def test_db_failure_fails_closed_without_touching_process_local_counter(self):
