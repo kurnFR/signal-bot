@@ -288,7 +288,7 @@ def enable_durable_rate_limit() -> bool:
             conn.close()
         _durable_rate_limit_degraded = False
     except Exception as exc:
-        logger.error("Shared login rate limiting unavailable; login will fail closed: %s", exc)
+        logger.error("Shared login rate limiting unavailable at startup (%s); login will fail closed", type(exc).__name__)
     return not _durable_rate_limit_degraded
 
 
@@ -316,7 +316,7 @@ def check_login_rate_limit(key: str) -> bool:
             return count < RATE_LIMIT_MAX_ATTEMPTS
         except Exception as exc:
             _durable_rate_limit_degraded = True
-            logger.error("Shared login rate-limit check failed; refusing login: %s", exc)
+            logger.error("Shared login rate-limit check failed; refusing login (%s)", type(exc).__name__)
             raise RateLimitBackendUnavailable("Shared login rate-limit storage is unavailable") from exc
     attempts = [t for t in _login_attempts.get(key, []) if now - t < RATE_LIMIT_WINDOW_SECONDS]
     _login_attempts[key] = attempts
@@ -341,7 +341,7 @@ def record_failed_login(key: str) -> int:
             return count
         except Exception as exc:
             _durable_rate_limit_degraded = True
-            logger.error("Shared login rate-limit write failed; refusing login: %s", exc)
+            logger.error("Shared login rate-limit write failed; refusing login (%s)", type(exc).__name__)
             raise RateLimitBackendUnavailable("Shared login rate-limit storage is unavailable") from exc
     attempts = [t for t in _login_attempts.get(key, []) if now - t < RATE_LIMIT_WINDOW_SECONDS]
     attempts.append(now)
@@ -365,7 +365,7 @@ def reset_login_attempts(key: str) -> None:
             _durable_rate_limit_degraded = False
         except Exception as exc:
             _durable_rate_limit_degraded = True
-            logger.error("Shared login rate-limit reset failed; refusing login: %s", exc)
+            logger.error("Shared login rate-limit reset failed; refusing login (%s)", type(exc).__name__)
             raise RateLimitBackendUnavailable("Shared login rate-limit storage is unavailable") from exc
 
 
