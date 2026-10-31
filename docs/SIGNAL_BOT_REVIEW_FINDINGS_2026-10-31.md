@@ -353,3 +353,191 @@ A polished dashboard is not yet a sellable SaaS product. Before charging custome
 7. Only then prioritize paid-product onboarding, workspace configuration, analytics, packaging, and commercial/legal readiness.
 
 **Current decision:** several previous P1 findings have been corrected in current master, but shared login rate limiting and complete audit durability remain open. All current-master hosted workflows are failing, the PR branch has diverged, and production acceptance is incomplete. Keep React migration preview-only; no deployment or live-trading authorization is implied.
+
+---
+
+## 11. Master execution tracker — living checklist
+
+**Tracking rule:** this is the operational checklist for the next engineering passes. Update the status and evidence in this section after each PR/commit. Do not mark an item complete from code inspection alone if it requires a test, CI run, staging verification, or owner decision.
+
+### Status legend
+
+- [ ] Not started
+- [~] In progress / implemented but evidence incomplete
+- [x] Complete with evidence recorded
+- [!] Blocked
+- [—] Deferred by product decision
+
+### 11.1 Immediate release blockers
+
+- [ ] **CI-01 — Diagnose current master workflow failures.**
+  - [ ] Obtain failing step logs for Test.
+  - [ ] Obtain failing step logs for RetailBot accounting regression.
+  - [ ] Obtain failing step logs for tests.
+  - [ ] Obtain failing step logs for Frontend foundation.
+  - [ ] Classify each root cause as code, dependency, environment, workflow configuration, or external service.
+  - [ ] Fix the root cause on a dedicated branch and rerun the exact failed jobs.
+  - [ ] Run the complete required suite; record run URLs and commit SHA.
+  - Evidence baseline: master aa837012; run IDs listed in §10.3.
+- [ ] **PR-01 — Reconcile PR #604 with current master.**
+  - [ ] Review its 46 unique commits and classify each as required, already superseded, obsolete, or conflicting.
+  - [ ] Rebase/cherry-pick only the required work onto a fresh branch from current master.
+  - [ ] Resolve conflicts and inspect the final diff for unintended changes.
+  - [ ] Run frontend, backend, API contract, and integration acceptance on the reconciled branch.
+  - [ ] Close or supersede the stale draft only after its useful work is accounted for.
+  - Guardrail: do not merge PR #604 as-is.
+
+### 11.2 P0 security and reliability
+
+- [~] **SEC-01 — Token revocation fails closed.**
+  - [x] Source behavior changed to reject tokens when revocation storage cannot be checked.
+  - [x] Logout reports failure when persistent revocation cannot be written.
+  - [x] Focused failure-injection tests added.
+  - [ ] Add multi-process/multi-worker integration test against shared MariaDB.
+  - [ ] Verify token revocation after restart and from a different worker.
+  - [ ] Verify frontend behavior for logout HTTP 503 and safe retry.
+  - Closure evidence required: focused tests + multi-worker integration + green CI.
+- [ ] **SEC-02 — Shared login rate limiting (highest-priority open security item).**
+  - [ ] Trace every durable-store error path and every process-local fallback.
+  - [ ] Decide and document fail-closed behavior when shared storage is unavailable (recommended: controlled 503; do not silently weaken protection).
+  - [ ] Ensure all application workers use the same shared counters and lockout window.
+  - [ ] Ensure health state accurately reports normal/degraded/unavailable mode.
+  - [ ] Add tests for store timeout, connection failure, malformed response, recovery, and concurrent requests.
+  - [ ] Add two-worker integration test proving a threshold reached on worker A is enforced on worker B.
+  - [ ] Verify no secrets, passwords, or raw credentials enter logs/metrics.
+  - Closure evidence required: multi-worker test + operational health signal + green CI.
+- [~] **SEC-03 — Durable audit events.**
+  - [x] Audit helper now exposes failure and supports raising on error.
+  - [x] User deletion writes its audit record in the same DB transaction.
+  - [ ] Inventory all audit call sites and label each event mandatory or best-effort.
+  - [ ] Make login/security-sensitive/admin mutations fail safely if a mandatory audit record cannot be persisted.
+  - [ ] Use the same transaction via cursor helper for DB-backed operations.
+  - [ ] Use a durable outbox for events that cross transaction boundaries.
+  - [ ] Add failure-injection tests for user create/update/delete, password reset/change, role/activation changes, login failures, logout, and token revocation.
+  - [ ] Confirm audit records contain actor, action, target, timestamp, outcome, and safe metadata.
+  - Closure evidence required: call-site matrix + atomicity/failure tests + green CI.
+- [ ] **SEC-04 — Multi-worker authorization acceptance.**
+  - [ ] Verify disabled-user access is rejected immediately.
+  - [ ] Verify role changes invalidate or update existing authorization as designed.
+  - [ ] Verify revoked sessions are rejected across workers.
+  - [ ] Verify admin-only APIs reject trader/viewer roles server-side.
+  - [ ] Verify session expiry and clock-skew behavior.
+  - [ ] Record test results using isolated test data only.
+
+### 11.3 P1 API, validation, and operational safety
+
+- [~] **API-01 — GET endpoint purity.**
+  - [x] Research read helpers no longer create lifecycle schema.
+  - [x] ML list endpoints no longer create missing directories.
+  - [ ] Confirm lifecycle schema is installed through a versioned migration or controlled startup migration.
+  - [ ] Make startup schema failure visible and prevent a misleading healthy state.
+  - [ ] Scan all GET handlers for DDL, mkdir, writes, commits, worker starts, or hidden network mutations.
+  - [ ] Add route-level regression coverage for any remaining side effects.
+- [~] **API-02 — Request validation and resource limits.**
+  - [x] Master Data market/timeframe allowlists added; symbol length bounded.
+  - [x] Strategy AI prompt length and history count bounded.
+  - [ ] Validate symbols against a strict supported-symbol contract or trusted exchange metadata.
+  - [ ] Bound each history message length and total serialized request bytes.
+  - [ ] Bound currentConfig size, nesting depth, and allowed keys.
+  - [ ] Validate ML experiment IDs, artifact paths, and training parameters.
+  - [ ] Add request timeout and concurrency limits for expensive AI/ML operations.
+  - [ ] Test oversized, malformed, unknown, and adversarial payloads.
+- [~] **OPS-01 — Job status and lifecycle safety.**
+  - [x] Some backfill/feature job errors now return sanitized messages.
+  - [ ] Audit every job type for raw exception leakage.
+  - [ ] Ensure protected logs retain stack traces while public APIs expose safe error codes.
+  - [ ] Verify job ownership and role authorization on create/read/cancel.
+  - [ ] Prevent duplicate submissions and enforce per-user/system concurrency limits.
+  - [ ] Persist job state and verify restart recovery.
+  - [ ] Add timeout, cancellation, retry, and terminal-state tests.
+- [ ] **OPS-02 — Production operational baseline.**
+  - [ ] Add readiness/liveness checks that test real dependencies without mutating state.
+  - [ ] Add structured logs with request/job correlation IDs and secret redaction.
+  - [ ] Add metrics for API latency/errors, DB pool saturation, queue depth, worker heartbeat, alert delivery, and stale market data.
+  - [ ] Define actionable alerts and escalation/runbook steps.
+  - [ ] Test backup and restore using a non-production environment.
+
+### 11.4 Frontend and product quality
+
+- [ ] **UX-01 — Frontend acceptance.**
+  - [ ] Run current frontend unit/component tests, TypeScript checks, and production build.
+  - [ ] Test each major view at desktop, tablet, and mobile widths.
+  - [ ] Test table overflow, dialogs, charts, forms, menus, and keyboard navigation individually.
+  - [ ] Add Firefox and WebKit coverage where supported.
+  - [ ] Complete keyboard-only, focus, screen-reader, contrast, and zoom checks.
+  - [ ] Verify loading, empty, stale, offline, permission-denied, and server-error states.
+  - [ ] Verify login expiry, logout failure, and session recovery behavior.
+- [ ] **UX-02 — Professional product consistency.**
+  - [ ] Establish a documented design system: typography, spacing, colors, surfaces, borders, focus, status, and responsive breakpoints.
+  - [ ] Standardize page headers, filters, data tables, charts, empty states, confirmations, and notifications.
+  - [ ] Provide data freshness timestamps and source attribution for market/portfolio data.
+  - [ ] Add accessible labels, predictable focus management, and consistent error language.
+  - [ ] Preserve existing workflows and verify feature parity before any production UI cutover.
+
+### 11.5 Trading product capabilities
+
+- [ ] **TRD-01 — Central Risk Management Center.**
+  - [ ] Define exposure, position, leverage, daily-loss, drawdown, and concentration limits.
+  - [ ] Define strategy-level and account-level risk budgets.
+  - [ ] Add emergency pause/kill switch with role restrictions and audit trail.
+  - [ ] Block actions on stale prices, missing market data, or breached limits.
+  - [ ] Test boundary conditions and restart/recovery behavior in paper mode.
+- [ ] **TRD-02 — Strategy Lifecycle Management.**
+  - [ ] Define Research → Backtest → Out-of-sample validation → Paper trading → Approved → Monitoring → Retired.
+  - [ ] Require minimum trade count and out-of-sample/walk-forward evidence.
+  - [ ] Include fees, slippage, drawdown, exposure, and regime sensitivity.
+  - [ ] Separate strategy evaluation from Telegram alert activation and live execution permission.
+  - [ ] Require explicit authorized promotion and preserve versioned approval history.
+- [ ] **TRD-03 — Alert Quality Analytics.**
+  - [ ] Track alert generation, delivery, deduplication, acknowledgement, and subsequent outcome.
+  - [ ] Measure precision/false positives, expectancy, adverse excursion, and missed/duplicate alerts.
+  - [ ] Separate paper outcomes from live outcomes.
+  - [ ] Make alert thresholds configurable and auditable.
+- [ ] **TRD-04 — Unified Event Timeline and System Health.**
+  - [ ] Correlate signals, strategy changes, wallet events, paper trades, jobs, API errors, and admin actions.
+  - [ ] Display worker heartbeat, queue status, data freshness, and exchange connectivity.
+  - [ ] Provide filters, time ranges, export, and safe diagnostics.
+
+### 11.6 Commercial readiness
+
+- [ ] **BIZ-01 — Product and customer definition.**
+  - [ ] Choose initial customer segment and primary use case.
+  - [ ] Decide self-hosted single-tenant versus hosted multi-tenant delivery.
+  - [ ] Define what is research-only, paper-only, and potentially live; default new customers to safe paper/read-only modes.
+  - [ ] Validate customer demand before building broad feature tiers.
+- [ ] **BIZ-02 — Tenant/security foundations (required before hosted multi-tenant SaaS).**
+  - [ ] Enforce tenant scope in every database query, cache key, file/object path, job, wallet, and API authorization check.
+  - [ ] Add tenant-isolation tests proving one customer cannot read or mutate another customer's data.
+  - [ ] Encrypt customer credentials and sensitive data at rest; support rotation and revocation.
+  - [ ] Implement least-privilege roles, optional MFA, session/device management, and account recovery.
+- [ ] **BIZ-03 — Onboarding and paid-user experience.**
+  - [ ] Build guided setup for markets, timeframes, watchlists, screener presets, and notification test.
+  - [ ] Provide saved workspaces, custom columns, reports, and clear usage limits.
+  - [ ] Add in-app help, diagnostics, export, retention, and account deletion workflows.
+  - [ ] Make pricing/plan entitlements server-enforced, not frontend-only.
+- [ ] **BIZ-04 — Commercial operations and governance.**
+  - [ ] Define pricing against actual infrastructure and data-provider costs.
+  - [ ] Review exchange and market-data licensing/redistribution rights.
+  - [ ] Prepare terms, privacy, risk disclosures, retention policy, support boundaries, and incident response.
+  - [ ] Define release cadence, staging, migrations, rollback, backup/restore, and customer support escalation.
+  - [ ] Obtain jurisdiction-specific legal review before commercial launch.
+
+### 11.7 Acceptance gates — do not skip
+
+- [ ] **GATE-01:** all P0 security findings closed with regression and multi-worker evidence.
+- [ ] **GATE-02:** all required GitHub Actions checks green on the exact candidate commit.
+- [ ] **GATE-03:** isolated MariaDB integration and RetailBot accounting regression green.
+- [ ] **GATE-04:** API contract, RBAC, and mutation tests pass against a running staging instance.
+- [ ] **GATE-05:** frontend responsive, cross-browser, and accessibility acceptance complete.
+- [ ] **GATE-06:** backup/restore and operational runbooks tested.
+- [ ] **GATE-07:** product scope, data rights, support, and legal/commercial review complete.
+- [ ] **GATE-08:** owner explicitly approves release and any production cutover separately.
+
+### 11.8 Progress log
+
+| Date | Commit / PR | Work completed | Verification | Remaining |
+|---|---|---|---|---|
+| 2026-10-31 | master aa837012 | Token revocation failure handling; audit helper improvements; user deletion audit; GET purity; several validation and response fixes | Focused tests added; latest four master workflows failed | Shared rate limiting, full audit durability, multi-worker verification, CI diagnosis |
+| 2026-10-31 | [PR #605](https://github.com/kurnFR/signal-bot/pull/605) | Re-review disposition and commercial roadmap recorded; this living checklist added | Markdown fetched back from GitHub and key sections verified | Execute SEC-02 and CI-01 first |
+
+**Next execution task:** SEC-02 — shared login rate limiting. Before editing, inspect the current implementation and tests on the latest master, reproduce the fallback behavior, then implement the smallest fail-safe change with cross-worker regression coverage. Do not mix unrelated UI or commercial features into this security PR.
