@@ -264,3 +264,154 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
     except Exception as exc:
         logger.error("Failed to deploy ML model to paper (%s)", type(exc).__name__)
         raise HTTPException(status_code=500, detail="ML model deployment failed; check server logs for diagnostics")
+
+
+# =====================================================================
+# Continuous Online Retraining & Walk-Forward Inference (FreqAI/Qlib)
+# =====================================================================
+
+class MLWalkForwardRequest(BaseModel):
+    symbol: str = Field("BTCUSDT", json_schema_extra={"example": "BTCUSDT"})
+    market: str = Field("spot", json_schema_extra={"example": "spot"})
+    timeframe: str = Field("1h", json_schema_extra={"example": "1h"})
+    strategy_name: str = Field("trend_ema_v1", json_schema_extra={"example": "trend_ema_v1"})
+    model_type: str = Field("hist_gradient_boosting", json_schema_extra={"example": "hist_gradient_boosting"})
+    n_folds: int = Field(4, ge=2, le=10)
+    expanding: bool = Field(False)
+
+
+class RegisterRetrainRequest(BaseModel):
+    symbol: str = Field("BTCUSDT", json_schema_extra={"example": "BTCUSDT"})
+    market: str = Field("spot", json_schema_extra={"example": "spot"})
+    timeframe: str = Field("1h", json_schema_extra={"example": "1h"})
+    strategy_name: str = Field("trend_ema_v1", json_schema_extra={"example": "trend_ema_v1"})
+    model_type: str = Field("hist_gradient_boosting", json_schema_extra={"example": "hist_gradient_boosting"})
+    auto_promote: bool = Field(True)
+
+
+@router.post("/walk-forward")
+def execute_ml_walk_forward(req: MLWalkForwardRequest):
+    """Run rolling/expanding walk-forward ML evaluation with concept drift tracking."""
+    from db.db import fetch_ohlcv_with_features_df
+    from ml.dataset import build_signal_dataset, SHARED_FEATURE_COLUMNS
+    from ml.walk_forward_engine import run_ml_walk_forward
+
+    df = fetch_ohlcv_with_features_df(req.symbol, req.market, req.timeframe, closed_only=True)
+    if len(df) < 100:
+        raise HTTPException(status_code=400, detail="Insufficient candles for ML walk-forward")
+
+    strat_fn = STRATEGIES.get(req.strategy_name)
+    if not strat_fn:
+        raise HTTPException(status_code=400, detail=f"Strategy '{req.strategy_name}' not found")
+
+    trades = strat_fn(df, {"symbol": req.symbol, "market": req.market, "timeframe": req.timeframe})
+    dataset = build_signal_dataset(df, trades)
+    if len(dataset) < 40:
+        raise HTTPException(status_code=400, detail=f"Strategy produced only {len(dataset)} signals, need >= 40 for walk-forward")
+
+    try:
+        result = run_ml_walk_forward(
+            dataset=dataset,
+            feature_columns=SHARED_FEATURE_COLUMNS,
+            model_type=req.model_type,
+            n_folds=req.n_folds,
+            expanding=req.expanding,
+        )
+        return {
+            "symbol": req.symbol,
+            "market": req.market,
+            "timeframe": req.timeframe,
+            "strategy": req.strategy_name,
+            **result,
+        }
+    except Exception as exc:
+        logger.error("ML walk-forward execution failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Walk-forward analysis failed: {exc}")
+
+
+@router.get("/retraining/status")
+def get_continuous_retraining_status():
+    """Retrieve status, schedule, and drift audit of online continuous retraining."""
+    from ml.online_retrainer import get_retraining_status
+    return get_retraining_status()
+
+
+@router.post("/retraining/register")
+def register_retrain_model(req: RegisterRetrainRequest):
+    """Register a strategy pipeline for continuous automated retraining."""
+    from ml.online_retrainer import register_model_for_retraining
+    return register_model_for_retraining(
+        symbol=req.symbol,
+        market=req.market,
+        timeframe=req.timeframe,
+        strategy_name=req.strategy_name,
+        model_type=req.model_type,
+        auto_promote=req.auto_promote,
+    )
+
+
+@router.post("/retraining/trigger")
+def trigger_continuous_retraining(background_tasks: BackgroundTasks, force: bool = True):
+    """Trigger online retraining cycle across registered models."""
+    from ml.online_retrainer import execute_retraining_cycle
+    background_tasks.add_task(execute_retraining_cycle, force=force)
+    return {
+        "status": "queued",
+        "message": "Continuous online retraining cycle started in background.",
+    }
+
+
+# =====================================================================
+# Reinforcement Learning Trading Environment & Agents (FinRL-style)
+# =====================================================================
+
+class RLTrainRequest(BaseModel):
+    symbol: str = Field("BTCUSDT", json_schema_extra={"example": "BTCUSDT"})
+    market: str = Field("spot", json_schema_extra={"example": "spot"})
+    timeframe: str = Field("1h", json_schema_extra={"example": "1h"})
+    agent_type: str = Field("dqn", json_schema_extra={"example": "dqn"})  # "dqn" or "policy_gradient"
+    episodes: int = Field(10, ge=1, le=50)
+    reward_type: str = Field("sharpe", json_schema_extra={"example": "sharpe"})  # "sharpe", "sortino", "pnl"
+
+
+@router.post("/rl/train")
+def train_rl_trading_agent(req: RLTrainRequest):
+    """Train a reinforcement learning agent with FinRL-style discrete action space."""
+    from ml.rl.runner import train_rl_model
+    try:
+        res = train_rl_model(
+            symbol=req.symbol,
+            market=req.market,
+            timeframe=req.timeframe,
+            agent_type=req.agent_type,
+            episodes=req.episodes,
+            reward_type=req.reward_type,
+        )
+        return res
+    except Exception as exc:
+        logger.error("RL training failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"RL training error: {exc}")
+
+
+@router.get("/rl/models")
+def list_rl_models():
+    """List trained reinforcement learning models and performance audits."""
+    rl_dir = Path("ml_models") / "rl"
+    rl_dir.mkdir(parents=True, exist_ok=True)
+    models = []
+    for audit_file in sorted(rl_dir.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(audit_file.read_text(encoding="utf-8"))
+            models.append({
+                "model_id": data.get("model_id"),
+                "symbol": data.get("symbol"),
+                "market": data.get("market"),
+                "timeframe": data.get("timeframe"),
+                "agent_type": data.get("agent_type"),
+                "episodes": data.get("episodes"),
+                "reward_type": data.get("reward_type"),
+                "out_of_sample_metrics": data.get("out_of_sample_metrics"),
+            })
+        except Exception:
+            continue
+    return {"models": models}

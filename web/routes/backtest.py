@@ -908,6 +908,53 @@ def execute_backtest(req: BacktestRunRequest):
 MIN_TRADES_FOR_RANK = 10  # minimum total_trades for a strategy to be ranked
 
 
+class WalkForwardBacktestRequest(BaseModel):
+    symbol: str = "BTCUSDT"
+    market: str = "spot"
+    timeframe: str = "1h"
+    strategy: str = "trend_ema_v1"
+    rolling: bool = True
+    folds: int = 4
+    train_window_bars: int = 500
+    test_window_bars: int = 150
+    step_bars: int = 100
+    params: dict = {}
+
+
+@router.post("/walk-forward")
+def execute_walk_forward_backtest(req: WalkForwardBacktestRequest):
+    """Run rolling or fixed-fold walk-forward analysis with Walk-Forward Efficiency (WFE)."""
+    from backtest.walk_forward import run_rolling_walk_forward, run_walk_forward
+
+    if req.rolling:
+        try:
+            return run_rolling_walk_forward(
+                symbol=req.symbol,
+                market=req.market,
+                timeframe=req.timeframe,
+                strategy_name=req.strategy,
+                train_window_bars=req.train_window_bars,
+                test_window_bars=req.test_window_bars,
+                step_bars=req.step_bars,
+                overrides=req.params,
+            )
+        except Exception as exc:
+            logger.error("Rolling walk-forward failed: %s", exc)
+            raise HTTPException(status_code=400, detail=str(exc))
+    else:
+        res = run_walk_forward(
+            symbol=req.symbol,
+            market=req.market,
+            timeframe=req.timeframe,
+            strategy_name=req.strategy,
+            n_folds=req.folds,
+            overrides=req.params,
+        )
+        if not res:
+            raise HTTPException(status_code=400, detail="Walk-forward analysis produced no folds or failed")
+        return res
+
+
 class RunAllStrategiesRequest(BaseModel):
     symbol: str = "BTCUSDT"
     market: str = "spot"
