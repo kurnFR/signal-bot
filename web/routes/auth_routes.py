@@ -13,7 +13,7 @@ from web.auth import (
     hash_password, verify_password, create_access_token,
     get_current_user, require_admin, revoke_token,
     check_login_rate_limit, record_failed_login, reset_login_attempts,
-    log_audit, log_audit_cursor, _token_from_request
+    log_audit, log_audit_cursor, _token_from_request, RateLimitBackendUnavailable
 )
 from fastapi import Request
 
@@ -110,7 +110,13 @@ def login(req: LoginRequest, request: Request):
 
     client_ip = request.client.host if request.client else "unknown"
     rate_key = f"{client_ip}:{username}"
-    if not check_login_rate_limit(rate_key):
+    try:
+        within_rate_limit = check_login_rate_limit(rate_key)
+    except RateLimitBackendUnavailable as exc:
+        logger.error("Login blocked because shared rate limiting is unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
+
+    if not within_rate_limit:
         log_audit("LOGIN_RATE_LIMITED", username, None, {"ip": client_ip}, client_ip)
         raise HTTPException(
             status_code=429,
@@ -133,16 +139,28 @@ def login(req: LoginRequest, request: Request):
         cur.close()
 
         if not user or not user["is_active"]:
-            failed_count = record_failed_login(rate_key)
+            try:
+                failed_count = record_failed_login(rate_key)
+            except RateLimitBackendUnavailable as exc:
+                logger.error("Login failure could not be recorded in shared rate-limit storage: %s", exc)
+                raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
             log_audit("LOGIN_FAILED", username, None, {"attempt": failed_count, "reason": "user_not_found_or_inactive"}, client_ip)
             raise HTTPException(status_code=401, detail="Invalid username or password")
 
         if not verify_password(req.password, user["password_hash"]):
-            failed_count = record_failed_login(rate_key)
+            try:
+                failed_count = record_failed_login(rate_key)
+            except RateLimitBackendUnavailable as exc:
+                logger.error("Login failure could not be recorded in shared rate-limit storage: %s", exc)
+                raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
             log_audit("LOGIN_FAILED", username, user["id"], {"attempt": failed_count, "reason": "bad_password"}, client_ip)
             raise HTTPException(status_code=401, detail="Invalid username or password")
 
-        reset_login_attempts(rate_key)
+        try:
+            reset_login_attempts(rate_key)
+        except RateLimitBackendUnavailable as exc:
+            logger.error("Login blocked because shared rate-limit reset failed: %s", exc)
+            raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
         token = create_access_token(user["id"], user["username"], user["role"])
         log_audit("LOGIN_SUCCESS", user["username"], user["id"], {"role": user["role"]}, client_ip)
 
