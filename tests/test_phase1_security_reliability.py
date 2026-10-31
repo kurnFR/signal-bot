@@ -225,6 +225,49 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
             "Login protection is temporarily unavailable. Please retry shortly.",
         )
 
+    def test_login_returns_503_when_failed_attempt_cannot_be_persisted(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = {
+            "id": 22, "username": "trader", "email": None,
+            "password_hash": "hash", "role": "trader", "is_active": 1,
+            "must_change_password": 0,
+        }
+        mock_conn.cursor.return_value = mock_cur
+        with patch("web.routes.auth_routes.check_login_rate_limit", return_value=True), \
+             patch("web.routes.auth_routes.get_pool") as mock_pool, \
+             patch("web.routes.auth_routes.verify_password", return_value=False), \
+             patch("web.routes.auth_routes.record_failed_login", side_effect=RateLimitBackendUnavailable("database unavailable")):
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            response = self.client.post(
+                "/api/auth/login",
+                json={"username": "trader", "password": "wrong-password"},
+            )
+        self.assertEqual(response.status_code, 503)
+        mock_conn.close.assert_called_once()
+
+    def test_login_does_not_issue_token_when_counter_reset_fails(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = {
+            "id": 22, "username": "trader", "email": None,
+            "password_hash": "hash", "role": "trader", "is_active": 1,
+            "must_change_password": 0,
+        }
+        mock_conn.cursor.return_value = mock_cur
+        with patch("web.routes.auth_routes.check_login_rate_limit", return_value=True), \
+             patch("web.routes.auth_routes.get_pool") as mock_pool, \
+             patch("web.routes.auth_routes.verify_password", return_value=True), \
+             patch("web.routes.auth_routes.reset_login_attempts", side_effect=RateLimitBackendUnavailable("database unavailable")):
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            response = self.client.post(
+                "/api/auth/login",
+                json={"username": "trader", "password": "correct-password"},
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("token", response.json())
+        mock_conn.close.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
