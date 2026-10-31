@@ -15,18 +15,25 @@ class TestRateLimitFallback(unittest.TestCase):
         auth._durable_rate_limit = False
         auth._login_attempts.clear()
 
-    def test_db_failure_falls_back_to_memory_and_still_locks_out(self):
+    def test_db_failure_fails_closed_without_touching_process_local_counter(self):
         auth._durable_rate_limit = True
         with patch("web.auth.get_pool", side_effect=RuntimeError("db down")):
-            for _ in range(auth.RATE_LIMIT_MAX_ATTEMPTS):
-                self.assertTrue(auth.check_login_rate_limit("k"))
+            with self.assertRaises(auth.RateLimitBackendUnavailable):
+                auth.check_login_rate_limit("k")
+            with self.assertRaises(auth.RateLimitBackendUnavailable):
                 auth.record_failed_login("k")
-            self.assertFalse(auth.check_login_rate_limit("k"))
+            with self.assertRaises(auth.RateLimitBackendUnavailable):
+                auth.reset_login_attempts("k")
+        self.assertEqual(auth._login_attempts, {})
+        self.assertTrue(auth.get_rate_limiter_health()["degraded"])
+        self.assertEqual(auth.get_rate_limiter_health()["mode"], "unavailable")
 
-    def test_enable_returns_false_and_stays_in_memory_without_table(self):
+    def test_enable_failure_keeps_shared_backend_required_and_marks_unavailable(self):
         with patch("web.auth.get_pool", side_effect=RuntimeError("no db")):
             self.assertFalse(auth.enable_durable_rate_limit())
-        self.assertFalse(auth._durable_rate_limit)
+        self.assertTrue(auth._durable_rate_limit)
+        self.assertTrue(auth.get_rate_limiter_health()["degraded"])
+        self.assertEqual(auth.get_rate_limiter_health()["mode"], "unavailable")
 
 
 class TestJobStoreUnit(unittest.TestCase):
