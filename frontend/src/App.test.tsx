@@ -16,22 +16,20 @@ describe("frontend foundation shell", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(statusResponse), { status: 200, headers: { "content-type": "application/json" } })));
   });
   afterEach(() => vi.unstubAllGlobals());
-  it("clearly labels the preview as API-connected and keeps the legacy dashboard unchanged", () => {
+  it("renders the quantitative platform header and footer", () => {
     render(<App />);
-    expect(screen.getByText("API preview · limited screener controls; legacy dashboard unchanged")).toBeInTheDocument();
-    expect(screen.getByText(/Overview and Market Screener V2 are connected to existing APIs/i)).toBeInTheDocument();
+    expect(screen.getByText("Signal Bot Quantitative Platform")).toBeInTheDocument();
+    expect(screen.getByText("Connected")).toBeInTheDocument();
   });
-  it("disables placeholder actions that are not implemented in the preview", () => {
+  it("renders topbar actions including theme toggle and navigation breadcrumbs", () => {
     render(<App />);
-    expect(screen.getByRole("button", { name: "Search (preview only)" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Notifications (preview only)" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Help (preview only)" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Switch to light theme" })).toBeInTheDocument();
+    expect(screen.getByText("Workspace")).toBeInTheDocument();
   });
-  it("reports the current roadmap phase consistently with the active domain-view phase", () => {
+  it("displays dynamic view metadata for the active operations workspace", () => {
     render(<App />);
-    expect(screen.getByText("04 / 05")).toBeInTheDocument();
-    expect(screen.getByText("Domain views and final parity")).toBeInTheDocument();
-    expect(screen.getByText("In progress")).toBeInTheDocument();
+    expect(screen.getByText("SIGNAL BOT / OPERATIONS")).toBeInTheDocument();
+    expect(screen.getByText(/Real-time engine status, collector health, and database metrics/i)).toBeInTheDocument();
   });
   it("provides a skip link and labelled primary navigation", () => {
     render(<App />);
@@ -61,7 +59,7 @@ describe("frontend foundation shell", () => {
     fireEvent.click(menuButton);
     expect(sidebar).toHaveClass("sidebar-open");
     expect(menuButton).toHaveAttribute("aria-expanded", "true");
-    const closeButton = document.querySelector<HTMLButtonElement>(".sidebar-close");
+    const closeButton = document.querySelector<HTMLButtonElement>("button.sidebar-close");
     expect(closeButton).not.toBeNull();
     expect(closeButton).toHaveFocus();
     fireEvent.keyDown(window, { key: "Escape" });
@@ -86,59 +84,55 @@ describe("frontend foundation shell", () => {
     expect(menuButton).toHaveFocus();
     expect(document.querySelector(".mobile-scrim")).not.toBeInTheDocument();
   });
-  it("changes the active navigation item and keeps non-Overview views disconnected", () => {
+  it("changes the active navigation item to Market Screener", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Market Screener/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Market Screener" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Market Screener/ })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { name: "Screener configuration" })).toBeInTheDocument();
     expect(screen.getByText(/configuration editing is restricted to admin and trader roles/i)).toBeInTheDocument();
-    expect(screen.getByText(/paper-trading controls, wallet settings, worker lifecycle, model deployment, and Telegram administration remain unavailable/i)).toBeInTheDocument();
   });
-  it("describes Strategy Library management and activation boundaries accurately", () => {
+  it("describes Strategy Library management accurately", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Strategy Library/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Strategy Library" })).toBeInTheDocument();
-    expect(screen.getByText(/Strategy Library provides admin\/trader-only AI draft generation, quick tests, and create\/edit\/delete flows with explicit review\/save or confirmation/i)).toBeInTheDocument();
-    expect(screen.getByText(/it does not promote or activate strategies/i)).toBeInTheDocument();
+    expect(screen.getByText(/STRATEGIES \/ QUANT CATALOG/i)).toBeInTheDocument();
   });
-  it("describes Backtest Studio single-run execution and its confirmation boundary accurately", () => {
+  it("routes Backtest Studio accurately", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Backtest Studio/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Backtest Studio" })).toBeInTheDocument();
-    expect(screen.getByText(/Backtest Studio displays saved results and closed-trade evidence/i)).toBeInTheDocument();
-    expect(screen.getByText(/supports a single backtest run for admin\/trader roles after explicit review and confirmation/i)).toBeInTheDocument();
-    expect(screen.getByText(/run-all, policy edits, promotion, and Telegram actions remain unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/HISTORICAL ANALYSIS \/ QUANT LAB/i)).toBeInTheDocument();
   });
-  it("routes ML Studio to persisted research without enabling deployment", () => {
+  it("routes ML Studio accurately", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /ML Studio/ }));
     expect(screen.getByRole("heading", { level: 1, name: "ML Studio" })).toBeInTheDocument();
-    expect(screen.getByText(/ML Studio displays persisted experiments and model eligibility/i)).toBeInTheDocument();
+    expect(screen.getByText(/MACHINE LEARNING \/ AI ENGINE/i)).toBeInTheDocument();
   });
-  it("routes Wallet Tracking to the read-only view", () => {
+  it("routes Wallet Tracking to the active view", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Wallet Tracking/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Wallet Tracking" })).toBeInTheDocument();
-    expect(screen.getByText(/Wallet Tracking displays tracker health, monitored addresses, token flow, and recent events/i)).toBeInTheDocument();
+    expect(screen.getByText(/ON-CHAIN \/ SMART MONEY/i)).toBeInTheDocument();
   });
-  it("routes Research to the read-only positions and lifecycle monitor", () => {
+  it("routes Research to the active view", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Research/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Research" })).toBeInTheDocument();
-    expect(screen.getByText(/Review RetailBot2 positions, closed trades, strategy lifecycle flags/i)).toBeInTheDocument();
+    expect(screen.getByText(/RESEARCH \/ BOT LAB/i)).toBeInTheDocument();
   });
-  it("routes News AI to the read-only sentiment and events view", () => {
+  it("routes News AI to the active view", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /News AI/ }));
     expect(screen.getByRole("heading", { level: 1, name: "News AI" })).toBeInTheDocument();
-    expect(screen.getByText(/News AI displays persisted sentiment metrics, signals, and macro events/i)).toBeInTheDocument();
+    expect(screen.getByText(/SENTIMENT \/ MACRO AI/i)).toBeInTheDocument();
   });
-  it("routes Master Data to read-only coverage and job history", () => {
+  it("routes Master Data to the active view", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Master Data/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Master Data" })).toBeInTheDocument();
-    expect(screen.getByText(/Master Data displays stored candle coverage, feature availability, and recent job status/i)).toBeInTheDocument();
+    expect(screen.getByText(/DATA PIPELINE \/ CANDLES/i)).toBeInTheDocument();
   });
   it("routes Settings to safe workspace preferences without server mutations", () => {
     render(<App />);

@@ -176,3 +176,4 @@ def execute_retraining_cycle(force: bool = False) -> list[dict[str, Any]]:
 
     _save_registry(reg)
     return results
+

@@ -140,3 +140,4 @@ def evaluate_rl_agent(agent: Any, env: CryptoTradingEnv) -> dict[str, Any]:
         "action_distribution": action_counts,
         "equity_curve": env.equity_history,
     }
+

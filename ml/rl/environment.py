@@ -253,3 +253,4 @@ class CryptoTradingEnv(gym.Env):
 
         # Default: normalized step return
         return float(step_return * 100.0)
+

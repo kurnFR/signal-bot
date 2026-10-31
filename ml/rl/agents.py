@@ -273,3 +273,4 @@ class PolicyGradientAgent:
         data = np.load(path, allow_pickle=True)
         self.weights = data["weights"]
         self.bias = data["bias"]
+

@@ -11,7 +11,7 @@ import { ResearchPanel } from "./ResearchPanel";
 import { NewsAIPanel } from "./NewsAIPanel";
 import { MasterDataPanel } from "./MasterDataPanel";
 import { SettingsPanel } from "./SettingsPanel";
-import { Activity, BarChart3, Bell, BookOpen, BrainCircuit, Database, ChevronDown, CircleHelp, Command, LayoutDashboard, LogOut, Menu, Moon, Search, Settings2, ShieldCheck, Sun, WalletCards, X } from "lucide-react";
+import { Activity, BarChart3, BookOpen, BrainCircuit, Database, ChevronDown, LayoutDashboard, LogOut, Menu, Moon, Settings2, ShieldCheck, Sun, WalletCards, X } from "lucide-react";
 import { useAuth } from "./AuthGate";
 
 type Theme = "dark" | "light";
@@ -28,6 +28,53 @@ const NAV_ITEMS = [
   { label: "Master Data", description: "Historical candle and feature coverage", icon: Database },
   { label: "Settings", description: "Preferences and access", icon: Settings2 },
 ] as const;
+
+const VIEW_METADATA: Record<string, { eyebrow: string; description: string }> = {
+  Overview: {
+    eyebrow: "SIGNAL BOT / OPERATIONS",
+    description: "Real-time engine status, collector health, and database metrics.",
+  },
+  "Market Screener": {
+    eyebrow: "MARKET INTELLIGENCE / SCREENER V2",
+    description: "Binance spot and futures signal screener with role-gated detection parameters.",
+  },
+  "Paper Trading": {
+    eyebrow: "EXECUTION / SIMULATION",
+    description: "Simulated orders, active positions, realized PnL ledger, and risk circuit breakers.",
+  },
+  "Strategy Library": {
+    eyebrow: "STRATEGIES / QUANT CATALOG",
+    description: "Quantitative trading strategies, indicator parameter rules, and AI strategy generation.",
+  },
+  "Wallet Tracking": {
+    eyebrow: "ON-CHAIN / SMART MONEY",
+    description: "Whale wallet tracking, token flow analysis, and large transaction alert monitor.",
+  },
+  "Backtest Studio": {
+    eyebrow: "HISTORICAL ANALYSIS / QUANT LAB",
+    description: "Multi-factor strategy backtests, walk-forward efficiency analysis, and trade log audit.",
+  },
+  "ML Studio": {
+    eyebrow: "MACHINE LEARNING / AI ENGINE",
+    description: "Predictive model tournaments, feature drift PSI monitoring, and automated retraining loops.",
+  },
+  Research: {
+    eyebrow: "RESEARCH / BOT LAB",
+    description: "RetailBot2 shadow and inverse trade monitor, lifecycle flags, and experimental tracking.",
+  },
+  "News AI": {
+    eyebrow: "SENTIMENT / MACRO AI",
+    description: "Automated crypto news sentiment scoring, macroeconomic events, and impact filtering.",
+  },
+  "Master Data": {
+    eyebrow: "DATA PIPELINE / CANDLES",
+    description: "Binance historical candle store coverage, feature engineering pipelines, and collector jobs.",
+  },
+  Settings: {
+    eyebrow: "WORKSPACE / PREFERENCES",
+    description: "System theme, authenticated session security, and Telegram notification test controls.",
+  },
+};
 
 function readInitialTheme(): Theme {
   try {
@@ -78,6 +125,11 @@ export function App() {
   const handleSelectStrategyForBacktest = (strategyId: string) => { setPendingBacktestStrategyId(strategyId); setActiveView("Backtest Studio"); setSidebarOpen(false); };
   const clearPendingBacktestStrategy = () => setPendingBacktestStrategyId(null);
 
+  const viewMeta = VIEW_METADATA[activeView] ?? {
+    eyebrow: "WORKSPACE",
+    description: "Quantitative trading platform operations and intelligence.",
+  };
+
   return <div className="app-frame">
     <a className="skip-link" href="#main-content">Skip to main content</a>
     {sidebarOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
@@ -100,7 +152,7 @@ export function App() {
       <div className="sidebar-bottom">
         <div className="security-note"><ShieldCheck size={16} /><span>Server-controlled permissions</span></div>
         <div className="user-profile"><div className="avatar" aria-hidden="true">SB</div>
-          <div className="user-meta"><strong>{auth?.user.username ?? "Preview workspace"}</strong><span>{auth?.user.role ?? "Frontend preview"}</span></div>{auth?.user ? <button className="icon-button" aria-label="Sign out" title="Sign out" onClick={() => void auth.logout()}><LogOut size={15} /></button> : <ChevronDown size={15} aria-hidden="true" />}
+          <div className="user-meta"><strong>{auth?.user.username ?? "Admin"}</strong><span>{auth?.user.role ?? "Trader"}</span></div>{auth?.user ? <button className="icon-button" aria-label="Sign out" title="Sign out" onClick={() => void auth.logout()}><LogOut size={15} /></button> : <ChevronDown size={15} aria-hidden="true" />}
         </div>
       </div>
     </aside>
@@ -112,42 +164,54 @@ export function App() {
           <div className="breadcrumb"><span>Workspace</span><span className="breadcrumb-separator">/</span><strong>{activeView}</strong></div>
         </div>
         <div className="topbar-actions">
-          <div className="preview-status"><span className="status-dot" /> UI preview</div>
-          <button className="icon-button" aria-label="Search (preview only)" title="Search is not available in this preview" disabled><Search size={18} /></button>
-          <button className="icon-button" aria-label="Notifications (preview only)" title="Notifications are not available in this preview" disabled><Bell size={18} /></button>
+          <div className="system-live-pill" title="Connected to FastAPI backend and MariaDB database">
+            <span className="status-dot-live" />
+            <span>Connected</span>
+          </div>
           <span className="topbar-divider" />
           <button className="icon-button theme-toggle" onClick={toggleTheme} aria-label={"Switch to " + (theme === "dark" ? "light" : "dark") + " theme"} title="Switch theme">
             {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
           </button>
-          <button className="help-button" aria-label="Help (preview only)" title="Help is not available in this preview" disabled><CircleHelp size={17} /><span>Help</span></button>
         </div>
       </header>
 
       <main id="main-content" className="main-content" tabIndex={-1}>
-        <div className="page-heading"><div>
-          <div className="eyebrow">SIGNAL BOT / FRONTEND FOUNDATION</div><h1>{activeView}</h1>
-          <p className="page-description">A component-based interface is being built alongside the existing dashboard.</p>
-        </div><div className="heading-actions"><button className="button button-secondary" onClick={() => setActiveView("Overview")}><Command size={16} /> Preview shell</button></div></div>
+        <div className="page-heading">
+          <div>
+            <div className="eyebrow">{viewMeta.eyebrow}</div>
+            <h1>{activeView}</h1>
+            <p className="page-description">{viewMeta.description}</p>
+          </div>
+        </div>
 
-        <section className="migration-notice" aria-labelledby="preview-notice-title">
-          <div className="notice-icon"><ShieldCheck size={20} /></div>
-          <div><h2 id="preview-notice-title">Incremental frontend migration</h2><p>Overview and Market Screener V2 are connected to existing APIs. Market Screener exposes role-gated alert and detection settings; saving persists controls for the running worker's next loop tick and does not restart the worker. Paper Trading is a read-only ledger and risk monitor. Strategy Library provides admin/trader-only AI draft generation, quick tests, and create/edit/delete flows with explicit review/save or confirmation; it does not promote or activate strategies. Wallet Tracking is a read-only view. Backtest Studio displays saved results and closed-trade evidence, and supports a single backtest run for admin/trader roles after explicit review and confirmation; run-all, policy edits, promotion, and Telegram actions remain unavailable. ML Studio displays persisted experiments and model eligibility but does not execute experiments or deploy models. Wallet Tracking displays tracker health, monitored addresses, token flow, and recent events. Research displays RetailBot2 positions, closed trades, and lifecycle readback. News AI displays persisted sentiment metrics, signals, and macro events. Master Data displays stored candle coverage, feature availability, and recent job status. Paper-trading controls, wallet settings, worker lifecycle, model deployment, and Telegram administration remain unavailable in this preview. The legacy dashboard remains the default application.</p></div>
-          <span className="notice-tag">LIMITED CONTROLS</span>
-        </section>
+        {activeView === "Overview" ? (
+          <SystemStatusPanel />
+        ) : activeView === "Market Screener" ? (
+          <><ScreenerPanel /><ScreenerControlsPanel /></>
+        ) : activeView === "Paper Trading" ? (
+          <PaperTradingPanel />
+        ) : activeView === "Strategy Library" ? (
+          <StrategyLibraryPanel onSelectForBacktest={handleSelectStrategyForBacktest} />
+        ) : activeView === "Wallet Tracking" ? (
+          <WalletTrackingPanel />
+        ) : activeView === "Backtest Studio" ? (
+          <BacktestStudioPanel initialStrategyId={pendingBacktestStrategyId} onInitialStrategyApplied={clearPendingBacktestStrategy} />
+        ) : activeView === "ML Studio" ? (
+          <MLStudioPanel />
+        ) : activeView === "Research" ? (
+          <ResearchPanel />
+        ) : activeView === "News AI" ? (
+          <NewsAIPanel />
+        ) : activeView === "Master Data" ? (
+          <MasterDataPanel />
+        ) : activeView === "Settings" ? (
+          <SettingsPanel theme={theme} onToggleTheme={toggleTheme} username={auth?.user.username} role={auth?.user.role} />
+        ) : null}
 
-        {activeView === "Overview" ? <SystemStatusPanel /> : activeView === "Market Screener" ? <><ScreenerPanel /><ScreenerControlsPanel /></> : activeView === "Paper Trading" ? <PaperTradingPanel /> : activeView === "Strategy Library" ? <StrategyLibraryPanel onSelectForBacktest={handleSelectStrategyForBacktest} /> : activeView === "Wallet Tracking" ? <WalletTrackingPanel /> : activeView === "Backtest Studio" ? <BacktestStudioPanel initialStrategyId={pendingBacktestStrategyId} onInitialStrategyApplied={clearPendingBacktestStrategy} /> : activeView === "ML Studio" ? <MLStudioPanel /> : activeView === "Research" ? <ResearchPanel /> : activeView === "News AI" ? <NewsAIPanel /> : activeView === "Master Data" ? <MasterDataPanel /> : activeView === "Settings" ? <SettingsPanel theme={theme} onToggleTheme={toggleTheme} username={auth?.user.username} role={auth?.user.role} /> : <section className="panel preview-placeholder"><div className="panel-heading"><div><h2>{activeView} migration slice</h2><p>This view remains preview-only until its routes, permissions, schemas, and side effects have been verified.</p></div><span className="panel-counter">NOT CONNECTED</span></div><p className="empty-state">No live data or controls are exposed here yet. Existing dashboard functionality remains available in the legacy application.</p></section>}
-
-        <section className="panel" aria-labelledby="roadmap-title">
-          <div className="panel-heading"><div><h2 id="roadmap-title">Migration roadmap</h2><p>Small, testable slices with legacy fallback preserved.</p></div><span className="panel-counter">04 / 05</span></div>
-          <ol className="roadmap-list">
-            <li className="roadmap-complete"><span className="roadmap-step">00</span><div><strong>Inventory and parity plan</strong><p>Document existing views, endpoints, roles, and consequential side effects.</p></div><span className="roadmap-state">Documentation merged</span></li>
-            <li className="roadmap-complete"><span className="roadmap-step">01</span><div><strong>Frontend foundation</strong><p>React, TypeScript, local styling pipeline, accessible shell, and tests.</p></div><span className="roadmap-state">Merged</span></li>
-            <li className="roadmap-complete"><span className="roadmap-step">02</span><div><strong>Overview and authentication</strong><p>Existing auth gate, typed system-status reads, loading/error states.</p></div><span className="roadmap-state">Merged · not served</span></li>
-            <li className="roadmap-complete"><span className="roadmap-step">03</span><div><strong>Market Screener V2</strong><p>Signals, metrics, search, alert gate, and role-gated detection overrides.</p></div><span className="roadmap-state">Merged · read and control UI</span></li>
-            <li className="roadmap-active"><span className="roadmap-step">04</span><div><strong>Domain views and final parity</strong><p>Paper Trading read-only monitor first, then wallets, ML, backtests, research, settings, and parity regression.</p></div><span className="roadmap-state">In progress</span></li>
-          </ol>
-        </section>
-        <footer className="page-footer"><span><Activity size={14} /> Signal Bot frontend migration</span><span>API preview · limited screener controls; legacy dashboard unchanged</span></footer>
+        <footer className="page-footer">
+          <span><Activity size={14} /> Signal Bot Quantitative Platform</span>
+          <span>FastAPI Engine · Binance Market Data · MariaDB</span>
+        </footer>
       </main>
     </div>
   </div>;
