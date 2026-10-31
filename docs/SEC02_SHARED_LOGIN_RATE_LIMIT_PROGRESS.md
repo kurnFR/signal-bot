@@ -35,6 +35,15 @@ The durable limiter in `web/auth.py` fell back to the process-local `_login_atte
 - [ ] All required GitHub Actions checks green on the final PR head.
 - [ ] Review final diff and obtain explicit release approval before merge.
 
+## Code-review notes — 2026-11-01
+
+- Startup wiring was inspected: `web.app.lifespan` calls `enable_durable_rate_limit()` before yielding control to serve requests. If its DB probe fails, the durable-required flag remains enabled and login requests fail closed.
+- Migration registration was inspected: migration `013_login_attempts` creates the shared table with a `(rate_key, attempted_at)` index. The table stores epoch timestamps as `DOUBLE`, matching the current query parameters.
+- Login route handling was inspected: limiter read, failed-attempt write, and successful-login reset failures map to generic HTTP 503 responses. Token creation occurs only after a successful shared reset.
+- **Concurrency race remains an acceptance blocker:** the current request flow performs a shared count check, verifies the password, and only then inserts a failed-attempt row. Two or more concurrent requests for the same key can all observe a count below the threshold before any of them inserts its failure. The sequential separate-process test does not prove a strict concurrent cap. Add a cross-process concurrency test and make attempt admission atomic before treating SEC-02 as complete.
+- The current MariaDB integration test is opt-in only when `WALLET_TRACKER_MARIADB_TESTS=1`. It inherits the process environment, so before running it, explicitly confirm that the configured database is the isolated `signal_bot_test` database and not production `crypto_signals`.
+- No repository runtime or SSH/remote-shell connection is available in this review session. Therefore no local pytest or MariaDB command has been executed here; tests remain authored, not verified.
+
 ## CI evidence
 
 Two PR-head commits were checked during this work:
