@@ -98,6 +98,7 @@ class TestDurableStateOnMariaDB(unittest.TestCase):
 
     def setUp(self):
         auth._durable_rate_limit = False
+        auth._durable_rate_limit_degraded = False
         auth._login_attempts.clear()
         self.assertTrue(auth.enable_durable_rate_limit(), "login_attempts table missing; run python -m db.migrate")
         auth.reset_login_attempts("it-key")
@@ -105,6 +106,7 @@ class TestDurableStateOnMariaDB(unittest.TestCase):
     def tearDown(self):
         auth.reset_login_attempts("it-key")
         auth._durable_rate_limit = False
+        auth._durable_rate_limit_degraded = False
 
     def test_lockout_is_shared_through_the_database_not_process_memory(self):
         for _ in range(auth.RATE_LIMIT_MAX_ATTEMPTS):
