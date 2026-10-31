@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./AuthGate";
-import { Activity, BarChart3, RefreshCw, ShieldCheck } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, RefreshCw, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
 import { PromotionStatusPanel } from "./PromotionStatusPanel";
 import { BacktestExecutionError, executeBacktest, fetchBacktestHistory, fetchBacktestRunDetails, fetchBacktestStrategies, type BacktestExecutionInput, type BacktestExecutionResult, type BacktestRunDetails, type BacktestRunSummary, type BacktestStrategy, type BacktestStrategyParameter, type PromotionPolicy } from "./lib/backtestStudio";
@@ -18,6 +18,54 @@ function errorMessage(cause: unknown) {
   if (cause instanceof ApiError && cause.status === 403) return "Your account cannot view backtest results.";
   return "Backtest data could not be loaded. Check API/database health, then retry.";
 }
+
+type SortDirection = "asc" | "desc";
+type RunSortField = "id" | "symbol" | "market" | "dataSegment" | "totalTrades" | "winRatePct" | "profitFactor" | "expectancyR" | "maxDrawdownR" | "createdAt";
+type TradeSortField = "direction" | "entryTimeWib" | "entryPrice" | "exitTimeWib" | "exitPrice" | "netReturnPct" | "rMultiple" | "exitReason" | "holdingBars";
+
+interface TableSortHeaderProps<T extends string> {
+  field: T;
+  currentField: T;
+  direction: SortDirection;
+  label: string;
+  onSort: (field: T) => void;
+}
+
+function TableSortHeader<T extends string>({
+  field,
+  currentField,
+  direction,
+  label,
+  onSort,
+}: TableSortHeaderProps<T>) {
+  const isActive = field === currentField;
+  return (
+    <th
+      scope="col"
+      aria-sort={isActive ? (direction === "asc" ? "ascending" : "descending") : "none"}
+    >
+      <button
+        type="button"
+        className={"table-sort-button" + (isActive ? " is-active" : "")}
+        onClick={() => onSort(field)}
+        title={`Sort by ${label} (${isActive && direction === "asc" ? "descending" : "ascending"})`}
+        aria-label={`Sort by ${label}`}
+      >
+        <span>{label}</span>
+        {isActive ? (
+          direction === "asc" ? (
+            <ArrowUp size={13} className="sort-icon-active" aria-hidden="true" />
+          ) : (
+            <ArrowDown size={13} className="sort-icon-active" aria-hidden="true" />
+          )
+        ) : (
+          <ArrowUpDown size={12} className="sort-icon-idle" aria-hidden="true" />
+        )}
+      </button>
+    </th>
+  );
+}
+
 interface BacktestStudioPanelProps { initialStrategyId?: string | null; onInitialStrategyApplied?: () => void; }
 export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrategyApplied }: BacktestStudioPanelProps = {}) {
   const [strategies, setStrategies] = useState<BacktestStrategy[]>([]);
@@ -31,6 +79,10 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
   const [detailError, setDetailError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [filter, setFilter] = useState("");
+  const [sortField, setSortField] = useState<RunSortField>("id");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [tradeSortField, setTradeSortField] = useState<TradeSortField>("entryTimeWib");
+  const [tradeSortDirection, setTradeSortDirection] = useState<SortDirection>("asc");
   const auth = useAuth();
   const canRunBacktest = ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
   const [symbol, setSymbol] = useState("BTCUSDT");
@@ -48,6 +100,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
   const [executionResult, setExecutionResult] = useState<BacktestExecutionResult | null>(null);
   const [promotionPolicy, setPromotionPolicy] = useState<PromotionPolicy | null>(null);
   const [promotionSideEffectAcknowledged, setPromotionSideEffectAcknowledged] = useState(false);
+
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setError(null);
@@ -62,6 +115,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [attempt]);
+
   useEffect(() => {
     if (selectedId == null) { setDetails(null); setTrades([]); return; }
     const controller = new AbortController();
@@ -73,26 +127,113 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       .finally(() => { if (!controller.signal.aborted) setDetailLoading(false); });
     return () => controller.abort();
   }, [selectedId, attempt]);
+
   useEffect(() => {
     if (strategies.length && !strategies.some((strategy) => strategy.id === strategyId)) setStrategyId(strategies[0].id);
   }, [strategies, strategyId]);
+
   useEffect(() => {
     if (!initialStrategyId || !strategies.some((strategy) => strategy.id === initialStrategyId)) return;
     setStrategyId(initialStrategyId);
     onInitialStrategyApplied?.();
   }, [initialStrategyId, strategies, onInitialStrategyApplied]);
+
   const activeStrategy = strategies.find((strategy) => strategy.id === strategyId) ?? null;
   const editableParams = useMemo(() => activeStrategy ? [...activeStrategy.params, ...activeStrategy.sharedParams] : [], [activeStrategy]);
   useEffect(() => {
     if (!activeStrategy) return;
     setParameterValues(Object.fromEntries(editableParams.map((parameter) => [parameter.key, parameter.default ?? (parameter.type === "bool" ? false : "")])));
   }, [activeStrategy, editableParams]);
-  const filteredRuns = useMemo(() => {
-    const needle = filter.trim().toLowerCase();
-    return runs.filter((run) => !needle || [run.symbol, run.market, run.timeframe, run.strategy, run.dataSegment].some((value) => value.toLowerCase().includes(needle)));
-  }, [runs, filter]);
+
   const strategyNames = useMemo(() => new Map(strategies.map((strategy) => [strategy.id, strategy.displayName])), [strategies]);
+
+  const handleSort = (field: RunSortField) => {
+    if (sortField === field) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      if (field === "symbol" || field === "market" || field === "dataSegment") {
+        setSortDirection("asc");
+      } else {
+        setSortDirection("desc");
+      }
+    }
+  };
+
+  const handleTradeSort = (field: TradeSortField) => {
+    if (tradeSortField === field) {
+      setTradeSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setTradeSortField(field);
+      setTradeSortDirection(field === "netReturnPct" || field === "rMultiple" ? "desc" : "asc");
+    }
+  };
+
+  const sortedRuns = useMemo(() => {
+    const needle = filter.trim().toLowerCase();
+    const filtered = runs.filter((run) => !needle || [run.symbol, run.market, run.timeframe, run.strategy, run.dataSegment].some((value) => value.toLowerCase().includes(needle)));
+
+    return [...filtered].sort((a, b) => {
+      let aVal: unknown = a[sortField];
+      let bVal: unknown = b[sortField];
+
+      if (sortField === "createdAt") {
+        aVal = a.createdAt ? Date.parse(a.createdAt) : 0;
+        bVal = b.createdAt ? Date.parse(b.createdAt) : 0;
+      } else if (sortField === "symbol") {
+        const aName = strategyNames.get(a.strategy) ?? a.strategy;
+        const bName = strategyNames.get(b.strategy) ?? b.strategy;
+        aVal = `${a.symbol} ${aName}`.toLowerCase();
+        bVal = `${b.symbol} ${bName}`.toLowerCase();
+      } else if (sortField === "market") {
+        aVal = `${a.market} ${a.timeframe}`.toLowerCase();
+        bVal = `${b.market} ${b.timeframe}`.toLowerCase();
+      }
+
+      if (aVal == null && bVal == null) return 0;
+      if (aVal == null) return 1;
+      if (bVal == null) return -1;
+
+      let cmp = 0;
+      if (typeof aVal === "number" && typeof bVal === "number") {
+        cmp = aVal - bVal;
+      } else {
+        cmp = String(aVal).localeCompare(String(bVal));
+      }
+
+      return sortDirection === "asc" ? cmp : -cmp;
+    });
+  }, [runs, filter, sortField, sortDirection, strategyNames]);
+
+  const sortedTrades = useMemo(() => {
+    return [...trades].sort((a, b) => {
+      let aVal: unknown = a[tradeSortField];
+      let bVal: unknown = b[tradeSortField];
+
+      if (tradeSortField === "entryTimeWib" || tradeSortField === "exitTimeWib") {
+        const aStr = a[tradeSortField];
+        const bStr = b[tradeSortField];
+        aVal = aStr ? Date.parse(aStr.replace(" ", "T")) : 0;
+        bVal = bStr ? Date.parse(bStr.replace(" ", "T")) : 0;
+      }
+
+      if (aVal == null && bVal == null) return 0;
+      if (aVal == null) return 1;
+      if (bVal == null) return -1;
+
+      let cmp = 0;
+      if (typeof aVal === "number" && typeof bVal === "number") {
+        cmp = aVal - bVal;
+      } else {
+        cmp = String(aVal).localeCompare(String(bVal));
+      }
+
+      return tradeSortDirection === "asc" ? cmp : -cmp;
+    });
+  }, [trades, tradeSortField, tradeSortDirection]);
+
   const summary = details ?? (selectedId == null ? null : runs.find((run) => run.id === selectedId) ?? null);
+
   const reviewRun = () => {
     const normalizedSymbol = symbol.trim().toUpperCase();
     if (!/^[A-Z0-9._-]{1,30}$/.test(normalizedSymbol)) { setRunError("Enter a valid symbol using letters, numbers, dot, underscore, or hyphen."); return; }
@@ -125,6 +266,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       save_to_db: true, params,
     });
   };
+
   const confirmRun = async () => {
     if (!pendingRun || !promotionPolicy || (promotionPolicy.enabled && !promotionSideEffectAcknowledged)) return;
     setRunBusy(true); setRunError(null); setRunNotice(null);
@@ -145,6 +287,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       else setRunError(cause instanceof Error ? cause.message : "Backtest failed. Please retry.");
     } finally { setRunBusy(false); }
   };
+
   return <div className="backtest-studio-view" aria-busy={loading || detailLoading || runBusy}>
     <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>Backtest Studio</strong><p>Running a backtest performs a simulation and requests persistence of the result. Only admin/trader roles can run one, and every run requires explicit review and confirmation. Promotion policy and recent decisions are visible below in read-only form; policy editing, activation, and Telegram actions remain unavailable.</p></div><span className="panel-counter">CONFIRMED RUNS</span></section>
     {error && <div className="api-error" role="alert"><div><strong>Unable to load Backtest Studio</strong><p>{error}</p></div><button className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}><RefreshCw size={15} /> Retry</button></div>}
@@ -189,9 +332,20 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       <article className="metric-card"><div className="metric-top"><span>Selected expectancy</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{summary?.expectancyR == null ? "—" : `${numeric.format(summary.expectancyR)} R`}</div><div className="metric-foot"><span>Average R per trade</span></div></article>
     </section>
     <section className="panel" aria-labelledby="backtest-history-title">
-      <div className="panel-heading"><div><h2 id="backtest-history-title">Saved backtest runs</h2><p>Newest first. Select a run to inspect its stored metrics and trades.</p></div><button className="button button-secondary" onClick={() => setAttempt((n) => n + 1)} disabled={loading}><RefreshCw size={15} /> Refresh</button></div>
+      <div className="panel-heading"><div><h2 id="backtest-history-title">Saved backtest runs</h2><p>Click any column header to sort ascending or descending. Select a run to inspect its stored metrics and trades.</p></div><button className="button button-secondary" onClick={() => setAttempt((n) => n + 1)} disabled={loading}><RefreshCw size={15} /> Refresh</button></div>
       <div className="backtest-filter"><label htmlFor="backtest-run-filter">Filter history</label><input id="backtest-run-filter" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Symbol, strategy, market, timeframe…" /></div>
-      {loading && !runs.length ? <p className="empty-state" role="status">Loading saved runs…</p> : filteredRuns.length ? <div className="table-scroll"><table><thead><tr><th scope="col">Run</th><th scope="col">Symbol / strategy</th><th scope="col">Market</th><th scope="col">Segment</th><th scope="col">Trades</th><th scope="col">Win rate</th><th scope="col">Profit factor</th><th scope="col">Expectancy</th><th scope="col">Max drawdown</th><th scope="col">Created</th></tr></thead><tbody>{filteredRuns.map((run) => <tr key={run.id} className={selectedId === run.id ? "backtest-row-selected" : ""}><td><button className="backtest-run-select" aria-pressed={selectedId === run.id} onClick={() => setSelectedId(run.id)}>#{run.id}</button></td><td><strong>{run.symbol}</strong><div>{strategyNames.get(run.strategy) ?? run.strategy}</div><code>{run.strategy}</code></td><td>{run.market} · {run.timeframe}</td><td>{run.dataSegment}</td><td>{run.totalTrades}</td><td>{run.winRatePct == null ? "—" : `${pct.format(run.winRatePct)}%`}</td><td>{moneyish(run.profitFactor)}</td><td>{run.expectancyR == null ? "—" : `${numeric.format(run.expectancyR)} R`}</td><td>{run.maxDrawdownR == null ? "—" : `${numeric.format(run.maxDrawdownR)} R`}</td><td>{dateLabel(run.createdAt)}</td></tr>)}</tbody></table></div> : <p className="empty-state">{runs.length ? "No saved runs match this filter." : "No saved backtest runs were returned."}</p>}
+      {loading && !runs.length ? <p className="empty-state" role="status">Loading saved runs…</p> : sortedRuns.length ? <div className="table-scroll"><table><thead><tr>
+        <TableSortHeader field="id" currentField={sortField} direction={sortDirection} label="Run" onSort={handleSort} />
+        <TableSortHeader field="symbol" currentField={sortField} direction={sortDirection} label="Symbol / strategy" onSort={handleSort} />
+        <TableSortHeader field="market" currentField={sortField} direction={sortDirection} label="Market" onSort={handleSort} />
+        <TableSortHeader field="dataSegment" currentField={sortField} direction={sortDirection} label="Segment" onSort={handleSort} />
+        <TableSortHeader field="totalTrades" currentField={sortField} direction={sortDirection} label="Trades" onSort={handleSort} />
+        <TableSortHeader field="winRatePct" currentField={sortField} direction={sortDirection} label="Win rate" onSort={handleSort} />
+        <TableSortHeader field="profitFactor" currentField={sortField} direction={sortDirection} label="Profit factor" onSort={handleSort} />
+        <TableSortHeader field="expectancyR" currentField={sortField} direction={sortDirection} label="Expectancy" onSort={handleSort} />
+        <TableSortHeader field="maxDrawdownR" currentField={sortField} direction={sortDirection} label="Max drawdown" onSort={handleSort} />
+        <TableSortHeader field="createdAt" currentField={sortField} direction={sortDirection} label="Created" onSort={handleSort} />
+      </tr></thead><tbody>{sortedRuns.map((run) => <tr key={run.id} className={selectedId === run.id ? "backtest-row-selected" : ""}><td><button className="backtest-run-select" aria-pressed={selectedId === run.id} onClick={() => setSelectedId(run.id)}>#{run.id}</button></td><td><strong>{run.symbol}</strong><div>{strategyNames.get(run.strategy) ?? run.strategy}</div><code>{run.strategy}</code></td><td>{run.market} · {run.timeframe}</td><td>{run.dataSegment}</td><td>{run.totalTrades}</td><td>{run.winRatePct == null ? "—" : `${pct.format(run.winRatePct)}%`}</td><td>{moneyish(run.profitFactor)}</td><td>{run.expectancyR == null ? "—" : `${numeric.format(run.expectancyR)} R`}</td><td>{run.maxDrawdownR == null ? "—" : `${numeric.format(run.maxDrawdownR)} R`}</td><td>{dateLabel(run.createdAt)}</td></tr>)}</tbody></table></div> : <p className="empty-state">{runs.length ? "No saved runs match this filter." : "No saved backtest runs were returned."}</p>}
     </section>
     <section className="panel" aria-labelledby="backtest-run-details-title">
       <div className="panel-heading"><div><h2 id="backtest-run-details-title">Run details and closed trades</h2><p>Stored execution outcomes; values are displayed as returned by the API.</p></div><span className="panel-counter">{trades.length} TRADES</span></div>
@@ -199,7 +353,17 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       {detailLoading ? <p className="empty-state" role="status">Loading selected run details…</p> : details ? <>
         <div className="paper-risk-grid"><div><span>Run</span><strong>#{details.id} · {details.symbol}</strong></div><div><span>Strategy</span><strong>{strategyNames.get(details.strategy) ?? details.strategy}</strong></div><div><span>Market / timeframe</span><strong>{details.market} · {details.timeframe}</strong></div><div><span>Data segment</span><strong>{details.dataSegment}</strong></div><div><span>Win rate</span><strong>{details.winRatePct == null ? "—" : `${pct.format(details.winRatePct)}%`}</strong></div><div><span>Profit factor</span><strong>{moneyish(details.profitFactor)}</strong></div><div><span>Expectancy</span><strong>{details.expectancyR == null ? "—" : `${numeric.format(details.expectancyR)} R`}</strong></div><div><span>Max drawdown</span><strong>{details.maxDrawdownR == null ? "—" : `${numeric.format(details.maxDrawdownR)} R`}</strong></div></div>
         {details.params && <details className="backtest-params"><summary>Stored run parameters</summary><pre>{JSON.stringify(details.params, null, 2)}</pre></details>}
-        {trades.length ? <div className="table-scroll"><table><thead><tr><th scope="col">Direction</th><th scope="col">Entry time (WIB)</th><th scope="col">Entry</th><th scope="col">Exit time (WIB)</th><th scope="col">Exit</th><th scope="col">Net return</th><th scope="col">R multiple</th><th scope="col">Exit reason</th><th scope="col">Holding bars</th></tr></thead><tbody>{trades.map((trade, index) => <tr key={trade.entryTimeWib + index}><td>{trade.direction}</td><td>{trade.entryTimeWib}</td><td>{moneyish(trade.entryPrice)}</td><td>{trade.exitTimeWib}</td><td>{moneyish(trade.exitPrice)}</td><td className={trade.netReturnPct > 0 ? "paper-positive" : trade.netReturnPct < 0 ? "paper-negative" : ""}>{pct.format(trade.netReturnPct)}%</td><td>{trade.rMultiple == null ? "—" : `${numeric.format(trade.rMultiple)} R`}</td><td>{trade.exitReason}</td><td>{trade.holdingBars}</td></tr>)}</tbody></table></div> : <p className="empty-state">No closed trades were stored for this run.</p>}
+        {sortedTrades.length ? <div className="table-scroll"><table><thead><tr>
+          <TableSortHeader field="direction" currentField={tradeSortField} direction={tradeSortDirection} label="Direction" onSort={handleTradeSort} />
+          <TableSortHeader field="entryTimeWib" currentField={tradeSortField} direction={tradeSortDirection} label="Entry time (WIB)" onSort={handleTradeSort} />
+          <TableSortHeader field="entryPrice" currentField={tradeSortField} direction={tradeSortDirection} label="Entry" onSort={handleTradeSort} />
+          <TableSortHeader field="exitTimeWib" currentField={tradeSortField} direction={tradeSortDirection} label="Exit time (WIB)" onSort={handleTradeSort} />
+          <TableSortHeader field="exitPrice" currentField={tradeSortField} direction={tradeSortDirection} label="Exit" onSort={handleTradeSort} />
+          <TableSortHeader field="netReturnPct" currentField={tradeSortField} direction={tradeSortDirection} label="Net return" onSort={handleTradeSort} />
+          <TableSortHeader field="rMultiple" currentField={tradeSortField} direction={tradeSortDirection} label="R multiple" onSort={handleTradeSort} />
+          <TableSortHeader field="exitReason" currentField={tradeSortField} direction={tradeSortDirection} label="Exit reason" onSort={handleTradeSort} />
+          <TableSortHeader field="holdingBars" currentField={tradeSortField} direction={tradeSortDirection} label="Holding bars" onSort={handleTradeSort} />
+        </tr></thead><tbody>{sortedTrades.map((trade, index) => <tr key={trade.entryTimeWib + index}><td>{trade.direction}</td><td>{trade.entryTimeWib}</td><td>{moneyish(trade.entryPrice)}</td><td>{trade.exitTimeWib}</td><td>{moneyish(trade.exitPrice)}</td><td className={trade.netReturnPct > 0 ? "paper-positive" : trade.netReturnPct < 0 ? "paper-negative" : ""}>{pct.format(trade.netReturnPct)}%</td><td>{trade.rMultiple == null ? "—" : `${numeric.format(trade.rMultiple)} R`}</td><td>{trade.exitReason}</td><td>{trade.holdingBars}</td></tr>)}</tbody></table></div> : <p className="empty-state">No closed trades were stored for this run.</p>}
       </> : <p className="empty-state">{selectedId == null ? "Select a saved run to inspect its details." : "Run details are not available."}</p>}
     </section>
     {pendingRun && <section className="panel" aria-labelledby="backtest-confirm-title">

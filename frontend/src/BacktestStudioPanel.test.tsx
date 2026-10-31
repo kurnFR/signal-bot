@@ -247,4 +247,37 @@ describe("BacktestStudioPanel", () => {
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(5);
     expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
   });
+
+  it("sorts saved backtest runs ascending and descending when table headers are clicked", async () => {
+    const runA = { ...run, id: 10, symbol: "AAAUSDT", totalTrades: 5, winRatePct: 40 };
+    const runB = { ...run, id: 20, symbol: "ZZZUSDT", totalTrades: 50, winRatePct: 80 };
+    const customHistory = { runs: [runA, runB] };
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/backtest/history?limit=100") return Promise.resolve(new Response(JSON.stringify(customHistory), { status: 200, headers: { "content-type": "application/json" } }));
+      return Promise.resolve(responseFor(path));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<BacktestStudioPanel />);
+
+    expect(await screen.findByText("#10")).toBeInTheDocument();
+    expect(await screen.findByText("#20")).toBeInTheDocument();
+
+    const winRateHeader = screen.getByRole("button", { name: "Sort by Win rate" });
+    fireEvent.click(winRateHeader);
+    let runButtons = screen.getAllByRole("button", { name: /#\d+/ });
+    expect(runButtons[0]).toHaveTextContent("#20");
+    expect(runButtons[1]).toHaveTextContent("#10");
+
+    fireEvent.click(winRateHeader);
+    runButtons = screen.getAllByRole("button", { name: /#\d+/ });
+    expect(runButtons[0]).toHaveTextContent("#10");
+    expect(runButtons[1]).toHaveTextContent("#20");
+
+    const symbolHeader = screen.getByRole("button", { name: "Sort by Symbol / strategy" });
+    fireEvent.click(symbolHeader);
+    runButtons = screen.getAllByRole("button", { name: /#\d+/ });
+    expect(runButtons[0]).toHaveTextContent("#10");
+    expect(runButtons[1]).toHaveTextContent("#20");
+  });
 });

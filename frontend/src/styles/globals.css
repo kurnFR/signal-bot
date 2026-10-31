@@ -120,3 +120,5 @@ button:focus-visible,a:focus-visible,[tabindex="-1"]:focus-visible{outline:2px s
 .settings-telegram-status > div { display: flex; min-width: 0; flex-direction: column; gap: .35rem; padding: .85rem; border: 1px solid var(--border, rgba(148, 163, 184, .2)); border-radius: .8rem; }
 .settings-telegram-status > div span { color: var(--text-secondary, #94a3b8); font-size: .75rem; }
 .settings-telegram-status > div strong { overflow-wrap: anywhere; font-size: .85rem; font-variant-numeric: tabular-nums; }
+
+.table-sort-button{display:inline-flex;align-items:center;gap:6px;padding:2px 0;border:0;background:transparent;color:inherit;font:inherit;font-size:inherit;font-weight:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer;white-space:nowrap;user-select:none;transition:color 120ms ease}.table-sort-button:hover{color:var(--color-text)}.table-sort-button:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px;border-radius:4px}.table-sort-button.is-active{color:var(--color-accent)}.sort-icon-idle{opacity:.35;transition:opacity 120ms ease}.table-sort-button:hover .sort-icon-idle{opacity:.8}.sort-icon-active{color:var(--color-accent)}
