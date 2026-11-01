@@ -297,7 +297,10 @@ def _db_count_attempts(key: str, now: float) -> int:
     try:
         cur = conn.cursor()
         cur.execute("DELETE FROM login_attempts WHERE attempted_at < %s", (now - RATE_LIMIT_WINDOW_SECONDS,))
-        cur.execute("SELECT COUNT(*) FROM login_attempts WHERE rate_key = %s AND attempted_at >= %s", (key, now - RATE_LIMIT_WINDOW_SECONDS))
+        cur.execute(
+            "SELECT COUNT(*) FROM login_attempts WHERE rate_key = %s AND attempted_at >= %s",
+            (key, now - RATE_LIMIT_WINDOW_SECONDS),
+        )
         count = int(cur.fetchone()[0])
         conn.commit()
         cur.close()
@@ -306,20 +309,22 @@ def _db_count_attempts(key: str, now: float) -> int:
         conn.close()
 
 
-def admit_login_attempt(key: str) -> tuple[bool, int, bool]:
-    """Atomically reserve a login attempt in shared storage.
+def _login_rate_lock_name(key: str) -> str:
+    return "sb_login:" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:55]
 
-    Returns (allowed, current_count, reserved). In durable mode the reservation
-    is inserted before password verification while holding a per-key MariaDB
-    advisory lock, preventing concurrent workers from all passing the same
-    pre-check. In memory-only test/tool mode, callers retain the legacy
-    check-then-record behavior and reserved is False.
+
+def admit_login_attempt(key: str) -> tuple[bool, int, Optional[int]]:
+    """Atomically reserve a shared login attempt before password verification.
+
+    Returns (allowed, current_count, reservation_id). A durable reservation starts
+    as pending and is finalized after password verification. Pending reservations
+    count toward the threshold, including across workers and process restarts.
     """
     global _durable_rate_limit_degraded
     if not _durable_rate_limit:
-        return check_login_rate_limit(key), 0, False
+        return check_login_rate_limit(key), 0, None
 
-    lock_name = "sb_login:" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:55]
+    lock_name = _login_rate_lock_name(key)
     now = time.time()
     conn = None
     cur = None
@@ -346,15 +351,18 @@ def admit_login_attempt(key: str) -> tuple[bool, int, bool]:
         if count >= RATE_LIMIT_MAX_ATTEMPTS:
             conn.commit()
             _durable_rate_limit_degraded = False
-            return False, count, True
+            return False, count, None
 
         cur.execute(
-            "INSERT INTO login_attempts (rate_key, attempted_at) VALUES (%s, %s)",
+            "INSERT INTO login_attempts (rate_key, attempted_at, attempt_state) VALUES (%s, %s, 'pending')",
             (key, now),
         )
+        reservation_id = int(cur.lastrowid or 0)
+        if reservation_id <= 0:
+            raise RuntimeError("Database did not return a login reservation id")
         conn.commit()
         _durable_rate_limit_degraded = False
-        return True, count + 1, True
+        return True, count + 1, reservation_id
     except Exception as exc:
         _durable_rate_limit_degraded = True
         logger.error("Atomic shared login admission failed; refusing login (%s)", type(exc).__name__)
@@ -372,6 +380,92 @@ def admit_login_attempt(key: str) -> tuple[bool, int, bool]:
                     _durable_rate_limit_degraded = True
                     release_failed = True
                     logger.error("Could not explicitly release login admission lock (%s)", type(exc).__name__)
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        if release_failed:
+            raise RateLimitBackendUnavailable("Shared login rate-limit storage is unavailable")
+
+
+def finalize_login_attempt(key: str, reservation_id: int, *, success: bool) -> int:
+    """Finalize one pending reservation without disturbing other in-flight logins.
+
+    On failure, only this reservation becomes a counted failed attempt. On success,
+    prior completed failures and this request's reservation are removed, while
+    concurrent pending reservations remain counted.
+    """
+    global _durable_rate_limit_degraded
+    if not _durable_rate_limit:
+        raise RateLimitBackendUnavailable("Durable login reservation is not enabled")
+    if not reservation_id:
+        raise RateLimitBackendUnavailable("Login reservation is missing")
+
+    lock_name = _login_rate_lock_name(key)
+    now = time.time()
+    conn = None
+    cur = None
+    lock_acquired = False
+    release_failed = False
+    failed_count = 0
+    try:
+        conn = get_pool().get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT GET_LOCK(%s, %s)", (lock_name, 5))
+        lock_row = cur.fetchone()
+        if not lock_row or int(lock_row[0] or 0) != 1:
+            raise RuntimeError("Could not acquire shared login finalization lock")
+        lock_acquired = True
+
+        cur.execute(
+            "DELETE FROM login_attempts WHERE rate_key = %s AND attempted_at < %s",
+            (key, now - RATE_LIMIT_WINDOW_SECONDS),
+        )
+        if success:
+            cur.execute(
+                "DELETE FROM login_attempts WHERE rate_key = %s AND attempt_state = 'failed'",
+                (key,),
+            )
+            cur.execute(
+                "DELETE FROM login_attempts WHERE id = %s AND rate_key = %s AND attempt_state = 'pending'",
+                (reservation_id, key),
+            )
+        else:
+            cur.execute(
+                "UPDATE login_attempts SET attempt_state = 'failed' "
+                "WHERE id = %s AND rate_key = %s AND attempt_state = 'pending'",
+                (reservation_id, key),
+            )
+            cur.execute(
+                "SELECT COUNT(*) FROM login_attempts WHERE rate_key = %s AND attempted_at >= %s",
+                (key, now - RATE_LIMIT_WINDOW_SECONDS),
+            )
+            failed_count = int(cur.fetchone()[0])
+        conn.commit()
+        _durable_rate_limit_degraded = False
+        return failed_count
+    except Exception as exc:
+        _durable_rate_limit_degraded = True
+        logger.error("Shared login reservation finalization failed (%s)", type(exc).__name__)
+        raise RateLimitBackendUnavailable("Shared login rate-limit storage is unavailable") from exc
+    finally:
+        if cur is not None:
+            if lock_acquired:
+                try:
+                    cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                    release_row = cur.fetchone()
+                    if not release_row or int(release_row[0] or 0) != 1:
+                        _durable_rate_limit_degraded = True
+                        raise RateLimitBackendUnavailable("Shared login finalization lock release could not be confirmed")
+                except Exception as exc:
+                    _durable_rate_limit_degraded = True
+                    release_failed = True
+                    logger.error("Could not explicitly release login finalization lock (%s)", type(exc).__name__)
             try:
                 cur.close()
             except Exception:
@@ -410,7 +504,10 @@ def record_failed_login(key: str) -> int:
             conn = get_pool().get_connection()
             try:
                 cur = conn.cursor()
-                cur.execute("INSERT INTO login_attempts (rate_key, attempted_at) VALUES (%s, %s)", (key, now))
+                cur.execute(
+                    "INSERT INTO login_attempts (rate_key, attempted_at, attempt_state) VALUES (%s, %s, 'failed')",
+                    (key, now),
+                )
                 conn.commit()
                 cur.close()
             finally:
