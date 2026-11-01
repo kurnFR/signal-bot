@@ -281,7 +281,7 @@ def enable_durable_rate_limit() -> bool:
         conn = get_pool().get_connection()
         try:
             cur = conn.cursor()
-            cur.execute("SELECT 1 FROM login_attempts LIMIT 1")
+            cur.execute("SELECT attempt_state FROM login_attempts LIMIT 1")
             cur.fetchall()
             cur.close()
         finally:
