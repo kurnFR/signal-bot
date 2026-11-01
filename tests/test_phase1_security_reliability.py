@@ -233,7 +233,7 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
             "must_change_password": 0,
         }
         mock_conn.cursor.return_value = mock_cur
-        with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 0, False)), \
+        with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 0, None)), \
              patch("web.routes.auth_routes.get_pool") as mock_pool, \
              patch("web.routes.auth_routes.verify_password", return_value=False), \
              patch("web.routes.auth_routes.record_failed_login", side_effect=RateLimitBackendUnavailable("database unavailable")):
