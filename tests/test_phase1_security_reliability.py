@@ -245,6 +245,30 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         mock_conn.close.assert_called_once()
 
+    def test_failed_password_finalizes_its_durable_reservation(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = {
+            "id": 22, "username": "trader", "email": None,
+            "password_hash": "hash", "role": "trader", "is_active": 1,
+            "must_change_password": 0,
+        }
+        mock_conn.cursor.return_value = mock_cur
+        with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 1, 22)), \
+             patch("web.routes.auth_routes.get_pool") as mock_pool, \
+             patch("web.routes.auth_routes.verify_password", return_value=False), \
+             patch("web.routes.auth_routes.finalize_login_attempt", return_value=2) as finalize, \
+             patch("web.routes.auth_routes.record_failed_login", side_effect=AssertionError("must use reservation")):
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            response = self.client.post(
+                "/api/auth/login",
+                json={"username": "trader", "password": "wrong-password"},
+            )
+        self.assertEqual(response.status_code, 401)
+        finalize.assert_called_once_with(
+            "testclient:trader", 22, success=False
+        )
+
     def test_login_does_not_issue_token_when_counter_reset_fails(self):
         mock_conn = MagicMock()
         mock_cur = MagicMock()
