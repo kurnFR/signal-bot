@@ -78,6 +78,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("016_paper_orders", "migrate_paper_orders.sql", "Durable paper order lifecycle ledger"),
     Migration("017_paper_order_telegram", "migrate_paper_order_telegram.sql", "Persist paper-order Telegram preference"),
     Migration("018_strategy_auto_promotion", "migrate_strategy_auto_promotion.sql", "Configurable winner promotion and paper Telegram controls"),
+    Migration("019_login_attempt_state", "migrate_login_attempt_state.sql", "Track pending login reservations separately from failed attempts"),
 )
 
 
