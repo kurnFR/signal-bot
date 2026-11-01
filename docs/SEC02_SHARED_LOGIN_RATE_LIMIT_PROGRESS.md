@@ -120,3 +120,23 @@ This final probe refinement is committed on head `6e51fc98eedb7604ebe20de1fb7f12
 - [ ] Confirm operational monitoring exposes the limiter `unavailable` state; the helper alone is not yet a confirmed external health signal.
 - [ ] Obtain explicit release approval before merge. PR #606 remains draft and unmerged.
 - [ ] Local verification on the user's machine remains outstanding; CI is isolated and does not touch production.
+
+
+## Final-head CI acceptance — 2026-11-01, head `4a718877df922329c393dcacac3d9e2636d5530a`
+
+The startup-schema probe refinement and its regression test passed the complete CI matrix:
+
+- **Test** workflow run 4445: **810 passed, 16 skipped, 6 warnings** (3.87s).
+- **tests** workflow run 1647:
+  - Unit-tests job: success.
+  - MariaDB integration job: **35 passed** (3.70s), including the opt-in durable login tests, cross-process contention, and successful-login/sibling-pending interleaving.
+- **RetailBot accounting regression** workflow run 1640: success.
+
+The full-suite workflow applied migrations and seeded only its ephemeral `signal_bot_test` database. The integration workflow applied migrations to its ephemeral `wallet_tracker_test` database. No production database or deployment was involved.
+
+The final startup probe verifies the `attempt_state` column, and the missing-migration unit test passed within the 810-test full suite. CI acceptance is green on head `4a71887`.
+
+Remaining before release:
+- Local rerun on the user's machine is recommended but not yet reported.
+- Confirm the external monitoring path exposes the helper's `unavailable` state; the helper alone is not a confirmed external health signal.
+- Complete final diff review and obtain explicit release approval. PR #606 remains draft and unmerged.
