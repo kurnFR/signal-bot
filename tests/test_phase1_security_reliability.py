@@ -209,6 +209,25 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         self.assertIn("degraded", health)
         self.assertIn("mode", health)
 
+    def test_login_rate_limit_key_is_case_insensitive_like_username_lookup(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = None
+        mock_conn.cursor.return_value = mock_cur
+
+        with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 0, None)) as admit, \\
+             patch("web.routes.auth_routes.get_pool") as mock_pool, \\
+             patch("web.routes.auth_routes.log_audit"):
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            response = self.client.post(
+                "/api/auth/login",
+                json={"username": "AdMiN", "password": "wrong-password"},
+            )
+
+        self.assertEqual(response.status_code, 401)
+        admit.assert_called_once_with("testclient:admin")
+        mock_conn.close.assert_called_once()
+
     def test_login_returns_503_when_shared_rate_limiter_is_unavailable(self):
         with patch(
             "web.routes.auth_routes.admit_login_attempt",
