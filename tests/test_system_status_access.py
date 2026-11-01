@@ -21,9 +21,9 @@ class TestSystemStatusAccess(unittest.TestCase):
         self.client = TestClient(app, raise_server_exceptions=False)
 
     def _get(self, path, role):
-        with patch("web.app.authenticate_request", return_value=user(role)), \\
-             patch("web.auth.authenticate_request", return_value=user(role)), \\
-             patch("web.routes.system_status.collect_system_status", return_value=FULL), \\
+        with patch("web.app.authenticate_request", return_value=user(role)), \
+             patch("web.auth.authenticate_request", return_value=user(role)), \
+             patch("web.routes.system_status.collect_system_status", return_value=FULL), \
              patch("web.routes.settings.collect_system_status", return_value=FULL):
             return self.client.get(path)
 
@@ -41,8 +41,8 @@ class TestSystemStatusAccess(unittest.TestCase):
 
     def test_error_text_is_generic_when_database_is_down(self):
         down = dict(FULL, database=dict(FULL["database"], status="error"))
-        with patch("web.app.authenticate_request", return_value=user("viewer")), \\
-             patch("web.auth.authenticate_request", return_value=user("viewer")), \\
+        with patch("web.app.authenticate_request", return_value=user("viewer")), \
+             patch("web.auth.authenticate_request", return_value=user("viewer")), \
              patch("web.routes.system_status.collect_system_status", return_value=down):
             body = self.client.get("/api/system/status").json()
         self.assertEqual(body["database"]["error"], "Database unavailable")
@@ -50,8 +50,8 @@ class TestSystemStatusAccess(unittest.TestCase):
     def test_public_status_redacts_heartbeat_detail_and_preserves_null_timestamp(self):
         heartbeat = dict(FULL["heartbeats"][0], detail="collector exception: token=do-not-leak", lastBeat=None)
         status = dict(FULL, heartbeats=[heartbeat])
-        with patch("web.app.authenticate_request", return_value=user("viewer")), \\
-             patch("web.auth.authenticate_request", return_value=user("viewer")), \\
+        with patch("web.app.authenticate_request", return_value=user("viewer")), \
+             patch("web.auth.authenticate_request", return_value=user("viewer")), \
              patch("web.routes.system_status.collect_system_status", return_value=status):
             res = self.client.get("/api/system/status")
 
