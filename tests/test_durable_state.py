@@ -52,16 +52,58 @@ class TestRateLimitFailClosed(unittest.TestCase):
         conn, cur = MagicMock(), MagicMock()
         conn.cursor.return_value = cur
         cur.fetchone.side_effect = [(1,), (2,), (1,)]
+        cur.lastrowid = 123
         with patch("web.auth.get_pool") as pool:
             pool.return_value.get_connection.return_value = conn
             allowed, count, reserved = auth.admit_login_attempt("concurrent-key")
-        self.assertEqual((allowed, count, reserved), (True, 3, True))
+        self.assertEqual((allowed, count, reserved), (True, 3, 123))
         sql_calls = [call.args[0] for call in cur.execute.call_args_list]
         self.assertIn("SELECT GET_LOCK(%s, %s)", sql_calls)
         self.assertTrue(any("INSERT INTO login_attempts" in sql for sql in sql_calls))
         self.assertIn("SELECT RELEASE_LOCK(%s)", sql_calls)
         conn.commit.assert_called_once()
         conn.close.assert_called_once()
+
+    def test_successful_login_finalization_preserves_other_pending_reservations(self):
+        auth._durable_rate_limit = True
+        conn, cur = MagicMock(), MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.side_effect = [(1,), (1,)]
+        with patch("web.auth.get_pool") as pool:
+            pool.return_value.get_connection.return_value = conn
+            self.assertEqual(auth.finalize_login_attempt("same-key", 101, success=True), 0)
+        sql_calls = [call.args[0] for call in cur.execute.call_args_list]
+        self.assertIn(
+            "DELETE FROM login_attempts WHERE rate_key = %s AND attempt_state = 'failed'",
+            sql_calls,
+        )
+        self.assertIn(
+            "DELETE FROM login_attempts WHERE id = %s AND rate_key = %s AND attempt_state = 'pending'",
+            sql_calls,
+        )
+        self.assertFalse(any(
+            sql.strip() == "DELETE FROM login_attempts WHERE rate_key = %s"
+            for sql in sql_calls
+        ))
+        conn.commit.assert_called_once()
+        conn.close.assert_called_once()
+
+    def test_failed_login_finalization_converts_only_its_own_reservation(self):
+        auth._durable_rate_limit = True
+        conn, cur = MagicMock(), MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.side_effect = [(1,), (3,), (1,)]
+        with patch("web.auth.get_pool") as pool:
+            pool.return_value.get_connection.return_value = conn
+            self.assertEqual(auth.finalize_login_attempt("same-key", 202, success=False), 3)
+        sql_calls = [call.args[0] for call in cur.execute.call_args_list]
+        self.assertTrue(any(
+            "UPDATE login_attempts SET attempt_state = 'failed'" in sql
+            and "WHERE id = %s AND rate_key = %s AND attempt_state = 'pending'" in sql
+            for sql in sql_calls
+        ))
+        self.assertFalse(any("DELETE FROM login_attempts WHERE rate_key = %s AND attempt_state = 'failed'" in sql for sql in sql_calls))
+        conn.commit.assert_called_once()
 
     def test_atomic_admission_lock_timeout_fails_closed(self):
         auth._durable_rate_limit = True
