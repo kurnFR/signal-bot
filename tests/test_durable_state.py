@@ -51,7 +51,7 @@ class TestRateLimitFailClosed(unittest.TestCase):
         auth._durable_rate_limit = True
         conn, cur = MagicMock(), MagicMock()
         conn.cursor.return_value = cur
-        cur.fetchone.side_effect = [(1,), (2,)]
+        cur.fetchone.side_effect = [(1,), (2,), (1,)]
         with patch("web.auth.get_pool") as pool:
             pool.return_value.get_connection.return_value = conn
             allowed, count, reserved = auth.admit_login_attempt("concurrent-key")
@@ -67,7 +67,7 @@ class TestRateLimitFailClosed(unittest.TestCase):
         auth._durable_rate_limit = True
         conn, cur = MagicMock(), MagicMock()
         conn.cursor.return_value = cur
-        cur.fetchone.side_effect = [(1,), (auth.RATE_LIMIT_MAX_ATTEMPTS,)]
+        cur.fetchone.side_effect = [(1,), (auth.RATE_LIMIT_MAX_ATTEMPTS,), (1,)]
         with patch("web.auth.get_pool") as pool:
             pool.return_value.get_connection.return_value = conn
             allowed, count, reserved = auth.admit_login_attempt("locked-key")
@@ -169,8 +169,10 @@ class TestDurableStateOnMariaDB(unittest.TestCase):
         script = """
 import json
 from concurrent.futures import ThreadPoolExecutor
+import time
 from web import auth
 assert auth.enable_durable_rate_limit()
+time.sleep(1)  # allow the sibling worker process to start before contention
 def attempt(_):
     return auth.admit_login_attempt('it-concurrent')[0]
 with ThreadPoolExecutor(max_workers=5) as pool:
