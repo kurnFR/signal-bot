@@ -189,6 +189,7 @@ class TestDurableStateOnMariaDB(unittest.TestCase):
     def tearDown(self):
         auth.reset_login_attempts("it-key")
         auth.reset_login_attempts("it-concurrent")
+        auth.reset_login_attempts("it-finalize")
         auth._durable_rate_limit = False
         auth._durable_rate_limit_degraded = False
 
@@ -258,6 +259,21 @@ print(json.dumps({"allowed": allowed}))
                     process.kill()
                     process.wait()
             auth.reset_login_attempts("it-concurrent")
+
+    def test_successful_login_finalization_preserves_sibling_pending_attempt(self):
+        auth.reset_login_attempts("it-finalize")
+        allowed_a, _, reservation_a = auth.admit_login_attempt("it-finalize")
+        allowed_b, _, reservation_b = auth.admit_login_attempt("it-finalize")
+        self.assertTrue(allowed_a and allowed_b)
+        self.assertIsNotNone(reservation_a)
+        self.assertIsNotNone(reservation_b)
+
+        auth.finalize_login_attempt("it-finalize", reservation_a, success=True)
+        failed_count = auth.finalize_login_attempt("it-finalize", reservation_b, success=False)
+
+        self.assertEqual(failed_count, 1)
+        self.assertEqual(auth._db_count_attempts("it-finalize", time.time()), 1)
+        auth.reset_login_attempts("it-finalize")
 
     def test_runtime_storage_recovery_reenables_login_checks(self):
         with patch("web.auth.get_pool", side_effect=RuntimeError("temporary outage")):
