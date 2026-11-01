@@ -269,7 +269,7 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
             "testclient:trader", 22, success=False
         )
 
-    def test_login_does_not_issue_token_when_counter_reset_fails(self):
+    def test_login_does_not_issue_token_when_reservation_finalization_fails(self):
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_cur.fetchone.return_value = {
