@@ -306,6 +306,77 @@ def _db_count_attempts(key: str, now: float) -> int:
         conn.close()
 
 
+def admit_login_attempt(key: str) -> tuple[bool, int, bool]:
+    """Atomically reserve a login attempt in shared storage.
+
+    Returns (allowed, current_count, reserved). In durable mode the reservation
+    is inserted before password verification while holding a per-key MariaDB
+    advisory lock, preventing concurrent workers from all passing the same
+    pre-check. In memory-only test/tool mode, callers retain the legacy
+    check-then-record behavior and reserved is False.
+    """
+    global _durable_rate_limit_degraded
+    if not _durable_rate_limit:
+        return check_login_rate_limit(key), 0, False
+
+    lock_name = "sb_login:" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:55]
+    now = time.time()
+    conn = None
+    cur = None
+    lock_acquired = False
+    try:
+        conn = get_pool().get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT GET_LOCK(%s, %s)", (lock_name, 5))
+        lock_row = cur.fetchone()
+        if not lock_row or int(lock_row[0] or 0) != 1:
+            raise RuntimeError("Could not acquire shared login admission lock")
+        lock_acquired = True
+
+        cur.execute(
+            "DELETE FROM login_attempts WHERE rate_key = %s AND attempted_at < %s",
+            (key, now - RATE_LIMIT_WINDOW_SECONDS),
+        )
+        cur.execute(
+            "SELECT COUNT(*) FROM login_attempts WHERE rate_key = %s AND attempted_at >= %s",
+            (key, now - RATE_LIMIT_WINDOW_SECONDS),
+        )
+        count = int(cur.fetchone()[0])
+        if count >= RATE_LIMIT_MAX_ATTEMPTS:
+            conn.commit()
+            _durable_rate_limit_degraded = False
+            return False, count, True
+
+        cur.execute(
+            "INSERT INTO login_attempts (rate_key, attempted_at) VALUES (%s, %s)",
+            (key, now),
+        )
+        conn.commit()
+        _durable_rate_limit_degraded = False
+        return True, count + 1, True
+    except Exception as exc:
+        _durable_rate_limit_degraded = True
+        logger.error("Atomic shared login admission failed; refusing login (%s)", type(exc).__name__)
+        raise RateLimitBackendUnavailable("Shared login rate-limit storage is unavailable") from exc
+    finally:
+        if cur is not None:
+            if lock_acquired:
+                try:
+                    cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                    cur.fetchone()
+                except Exception as exc:
+                    logger.warning("Could not explicitly release login admission lock (%s)", type(exc).__name__)
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def check_login_rate_limit(key: str) -> bool:
     global _durable_rate_limit_degraded
     now = time.time()
