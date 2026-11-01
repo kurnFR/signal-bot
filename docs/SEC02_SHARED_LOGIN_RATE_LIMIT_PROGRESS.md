@@ -4,7 +4,7 @@
 **Repository:** `kurnFR/signal-bot`  
 **Branch:** `fix/security-shared-login-rate-limit`  
 **Pull request:** [#606](https://github.com/kurnFR/signal-bot/pull/606)  
-**Status:** In progress — do not merge until required CI and isolated MariaDB acceptance pass.
+**Status:** Implementation and automated acceptance complete; PR remains draft pending final diff review and explicit release approval.
 
 ## Finding confirmed on master
 
@@ -28,14 +28,14 @@ The durable limiter in `web/auth.py` fell back to the process-local `_login_atte
 
 ## Acceptance checklist
 
-- [ ] Rerun focused auth and durable-state unit tests on the final PR head.
-- [ ] Rerun full pytest suite on the final PR head.
-- [ ] Run RetailBot accounting regression on the final PR head.
-- [ ] Run the full opt-in MariaDB integration class against isolated `signal_bot_test`, never production `crypto_signals`.
-- [ ] Verify separate-process worker B enforces attempts recorded by worker A.
-- [ ] Verify shared-storage recovery restores login checks and health state.
-- [ ] Confirm operational monitoring can observe limiter unavailable state; helper-only health reporting is not yet a confirmed external health signal.
-- [ ] All required GitHub Actions checks green on the final PR head.
+- [x] Focused auth, durable-state, and status endpoint tests passed on the final PR head (user-confirmed).
+- [x] Full pytest suite passed on the final PR head (user-confirmed; CI: 810 passed, 16 skipped).
+- [x] RetailBot accounting regression passed on the final PR head (CI: 36 accounting/parity tests passed; regression workflow successful).
+- [x] Full opt-in MariaDB integration passed in isolated CI database (35 passed); production `crypto_signals` was not accessed.
+- [x] Cross-process contention and sibling-reservation interleaving tests passed in MariaDB CI.
+- [x] Shared-storage recovery and fail-closed behavior covered by passing unit/API/integration tests.
+- [x] Public authenticated `/api/system/status` and admin `/api/settings/status` now expose sanitized `loginRateLimiter.mode` and `degraded` state.
+- [x] All required GitHub Actions checks green on final PR head `fee81622444145f8e3540fef1a30eb8ab3d9d881`.
 - [ ] Review final diff and obtain explicit release approval before merge.
 
 ## Code-review notes — 2026-11-01
@@ -140,3 +140,21 @@ Remaining before release:
 - Local rerun on the user's machine is recommended but not yet reported.
 - Confirm the external monitoring path exposes the helper's `unavailable` state; the helper alone is not a confirmed external health signal.
 - Complete final diff review and obtain explicit release approval. PR #606 remains draft and unmerged.
+
+
+## Final verification — 2026-11-01, head `fee81622444145f8e3540fef1a30eb8ab3d9d881`
+
+User confirmed that all local tests passed after updating to the current branch head. Exact local per-suite counts were not supplied, so this records the confirmation without inventing totals.
+
+GitHub Actions independently completed successfully on this exact head:
+
+- **Test** workflow run 4455: full suite **810 passed, 16 skipped, 6 warnings** (5.58s).
+- **tests** workflow run 1651:
+  - Unit-tests job: success; screener/wallet batch **105 passed**.
+  - MariaDB integration job: **35 passed** (4.85s), including `TestDurableStateOnMariaDB`, cross-process login contention, and sibling-reservation interleaving.
+- **Frontend foundation** workflow run 366: **27 passed** (33.2s).
+- **RetailBot accounting regression** workflow run 1644: paper accounting/parity batch **36 passed**; screener regression batch **27 passed**; job success.
+
+The public authenticated status endpoint now exposes only the limiter mode and degraded boolean, not DB connection details or raw backend errors. The regression test asserts that the unavailable state is visible. Frontend status typing accepts and validates this optional telemetry.
+
+All test and CI acceptance gates are green. Remaining release gate is a final human diff review and explicit approval to merge. PR #606 remains draft and unmerged. No deployment, production DB access, live workers, trades, or Telegram sends were performed.
