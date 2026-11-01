@@ -47,6 +47,34 @@ class TestRateLimitFailClosed(unittest.TestCase):
         self.assertFalse(auth.get_rate_limiter_health()["degraded"])
         self.assertEqual(auth.get_rate_limiter_health()["mode"], "database")
 
+    def test_atomic_admission_reserves_attempt_under_database_lock(self):
+        auth._durable_rate_limit = True
+        conn, cur = MagicMock(), MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.side_effect = [(1,), (2,)]
+        with patch("web.auth.get_pool") as pool:
+            pool.return_value.get_connection.return_value = conn
+            allowed, count, reserved = auth.admit_login_attempt("concurrent-key")
+        self.assertEqual((allowed, count, reserved), (True, 3, True))
+        sql_calls = [call.args[0] for call in cur.execute.call_args_list]
+        self.assertIn("SELECT GET_LOCK(%s, %s)", sql_calls)
+        self.assertTrue(any("INSERT INTO login_attempts" in sql for sql in sql_calls))
+        self.assertIn("SELECT RELEASE_LOCK(%s)", sql_calls)
+        conn.commit.assert_called_once()
+        conn.close.assert_called_once()
+
+    def test_atomic_admission_denies_when_threshold_reached(self):
+        auth._durable_rate_limit = True
+        conn, cur = MagicMock(), MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.side_effect = [(1,), (auth.RATE_LIMIT_MAX_ATTEMPTS,)]
+        with patch("web.auth.get_pool") as pool:
+            pool.return_value.get_connection.return_value = conn
+            allowed, count, reserved = auth.admit_login_attempt("locked-key")
+        self.assertEqual((allowed, count, reserved), (False, auth.RATE_LIMIT_MAX_ATTEMPTS, True))
+        self.assertFalse(any("INSERT INTO login_attempts" in call.args[0] for call in cur.execute.call_args_list))
+        self.assertIn("SELECT RELEASE_LOCK(%s)", [call.args[0] for call in cur.execute.call_args_list])
+
     def test_malformed_database_count_fails_closed(self):
         auth._durable_rate_limit = True
         with patch("web.auth._db_count_attempts", side_effect=TypeError("malformed count")):
@@ -105,6 +133,7 @@ class TestDurableStateOnMariaDB(unittest.TestCase):
 
     def tearDown(self):
         auth.reset_login_attempts("it-key")
+        auth.reset_login_attempts("it-concurrent")
         auth._durable_rate_limit = False
         auth._durable_rate_limit_degraded = False
 
@@ -134,6 +163,44 @@ class TestDurableStateOnMariaDB(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         auth.reset_login_attempts("it-key")
+
+    def test_concurrent_worker_processes_cannot_exceed_shared_attempt_limit(self):
+        auth.reset_login_attempts("it-concurrent")
+        script = """
+import json
+from concurrent.futures import ThreadPoolExecutor
+from web import auth
+assert auth.enable_durable_rate_limit()
+def attempt(_):
+    return auth.admit_login_attempt('it-concurrent')[0]
+with ThreadPoolExecutor(max_workers=5) as pool:
+    allowed = sum(pool.map(attempt, range(5)))
+print(json.dumps({"allowed": allowed}))
+"""
+        processes = [
+            subprocess.Popen(
+                [sys.executable, "-c", script],
+                cwd=os.getcwd(),
+                env=os.environ.copy(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for _ in range(2)
+        ]
+        results = []
+        try:
+            for process in processes:
+                stdout, stderr = process.communicate(timeout=45)
+                self.assertEqual(process.returncode, 0, stderr)
+                results.append(int(__import__("json").loads(stdout)["allowed"]))
+            self.assertEqual(sum(results), auth.RATE_LIMIT_MAX_ATTEMPTS)
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+            auth.reset_login_attempts("it-concurrent")
 
     def test_runtime_storage_recovery_reenables_login_checks(self):
         with patch("web.auth.get_pool", side_effect=RuntimeError("temporary outage")):
