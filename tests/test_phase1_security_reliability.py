@@ -254,10 +254,10 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
             "must_change_password": 0,
         }
         mock_conn.cursor.return_value = mock_cur
-        with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 0, False)), \
+        with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 1, 22)), \
              patch("web.routes.auth_routes.get_pool") as mock_pool, \
              patch("web.routes.auth_routes.verify_password", return_value=True), \
-             patch("web.routes.auth_routes.reset_login_attempts", side_effect=RateLimitBackendUnavailable("database unavailable")):
+             patch("web.routes.auth_routes.finalize_login_attempt", side_effect=RateLimitBackendUnavailable("database unavailable")):
             mock_pool.return_value.get_connection.return_value = mock_conn
             response = self.client.post(
                 "/api/auth/login",
