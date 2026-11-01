@@ -74,3 +74,19 @@ Fix committed on 2026-11-01:
 - No live deployment or production worker was started.
 - No live trade or Telegram notification was triggered.
 - PR #606 remains draft and unmerged.
+
+
+## Additional concurrency review — 2026-11-01
+
+A second-order race was found after introducing pre-verification reservations: the previous successful-login reset deleted every row for a rate key, including reservations belonging to concurrent requests that had not yet completed password verification. A sibling bad-password request could therefore disappear from the limiter count.
+
+The branch now distinguishes reservation lifecycle states:
+
+- Migration `019_login_attempt_state` adds `attempt_state` with existing rows defaulting to `failed`; new admission rows are `pending`.
+- A failed password converts only its own pending row to `failed`.
+- A successful password deletes completed `failed` rows and only its own pending row. Other concurrent `pending` rows remain counted.
+- Admission and finalization use the same per-key MariaDB advisory lock, serializing state transitions across workers.
+- The login route uses `finalize_login_attempt()` for durable requests. The legacy full reset remains only for in-memory mode and explicit test/maintenance cleanup.
+- Added unit tests for preserving sibling pending reservations and converting only the request's own reservation; added an opt-in MariaDB interleaving test and an API route regression test.
+
+**Verification required:** apply migration 019 to the isolated test database before running the MariaDB integration class. No test result yet verifies this latest lifecycle implementation. The current PR-head GitHub Actions runs have started; their final results are pending.
