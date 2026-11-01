@@ -110,7 +110,9 @@ def login(req: LoginRequest, request: Request):
         raise HTTPException(status_code=400, detail="Username and password are required")
 
     client_ip = request.client.host if request.client else "unknown"
-    rate_key = f"{client_ip}:{username}"
+    # Usernames are matched case-insensitively by the users table collation.
+    # Normalize the limiter key too, so capitalization cannot create new buckets.
+    rate_key = f"{client_ip}:{username.casefold()}"
     try:
         within_rate_limit, _, reservation_id = admit_login_attempt(rate_key)
     except RateLimitBackendUnavailable as exc:
