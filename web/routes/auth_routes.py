@@ -12,7 +12,7 @@ from db.db import get_pool
 from web.auth import (
     hash_password, verify_password, create_access_token,
     get_current_user, require_admin, revoke_token,
-    admit_login_attempt,
+    admit_login_attempt, finalize_login_attempt,
     record_failed_login, reset_login_attempts,
     log_audit, log_audit_cursor, _token_from_request, RateLimitBackendUnavailable
 )
@@ -112,7 +112,7 @@ def login(req: LoginRequest, request: Request):
     client_ip = request.client.host if request.client else "unknown"
     rate_key = f"{client_ip}:{username}"
     try:
-        within_rate_limit, reserved_count, was_reserved = admit_login_attempt(rate_key)
+        within_rate_limit, reserved_count, reservation_id = admit_login_attempt(rate_key)
     except RateLimitBackendUnavailable as exc:
         logger.error("Login blocked because shared rate limiting is unavailable: %s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
@@ -141,7 +141,8 @@ def login(req: LoginRequest, request: Request):
 
         if not user or not user["is_active"]:
             try:
-                failed_count = reserved_count if was_reserved else record_failed_login(rate_key)
+                failed_count = (finalize_login_attempt(rate_key, reservation_id, success=False)
+                            if reservation_id is not None else record_failed_login(rate_key))
             except RateLimitBackendUnavailable as exc:
                 logger.error("Login failure could not be recorded in shared rate-limit storage: %s", type(exc).__name__)
                 raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
@@ -158,7 +159,10 @@ def login(req: LoginRequest, request: Request):
             raise HTTPException(status_code=401, detail="Invalid username or password")
 
         try:
-            reset_login_attempts(rate_key)
+            if reservation_id is not None:
+                finalize_login_attempt(rate_key, reservation_id, success=True)
+            else:
+                reset_login_attempts(rate_key)
         except RateLimitBackendUnavailable as exc:
             logger.error("Login blocked because shared rate-limit reset failed (%s)", type(exc).__name__)
             raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
