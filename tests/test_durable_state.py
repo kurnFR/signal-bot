@@ -39,6 +39,21 @@ class TestRateLimitFailClosed(unittest.TestCase):
         self.assertTrue(auth.get_rate_limiter_health()["degraded"])
         self.assertEqual(auth.get_rate_limiter_health()["mode"], "unavailable")
 
+    def test_enable_requires_reservation_state_schema(self):
+        conn, cur = MagicMock(), MagicMock()
+        conn.cursor.return_value = cur
+        cur.execute.side_effect = RuntimeError("unknown column attempt_state")
+        with patch("web.auth.get_pool") as pool:
+            pool.return_value.get_connection.return_value = conn
+            self.assertFalse(auth.enable_durable_rate_limit())
+        self.assertEqual(
+            cur.execute.call_args.args[0],
+            "SELECT attempt_state FROM login_attempts LIMIT 1",
+        )
+        self.assertTrue(auth._durable_rate_limit)
+        self.assertEqual(auth.get_rate_limiter_health()["mode"], "unavailable")
+        conn.close.assert_called_once()
+
     def test_runtime_recovery_restores_database_mode(self):
         auth._durable_rate_limit = True
         auth._durable_rate_limit_degraded = True
