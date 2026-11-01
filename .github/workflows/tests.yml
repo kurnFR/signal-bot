@@ -68,5 +68,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install mysql-connector-python==9.1.0 python-dotenv==1.0.1 pytest==8.3.5
 
-      - name: Run MariaDB concurrency and paper-order recovery tests
-        run: python -m pytest -q tests/test_wallet_tracker_mariadb.py tests/test_paper_orders_mariadb.py tests/test_migrate.py
+      - name: Apply migrations to isolated MariaDB
+        run: python -m db.migrate
+
+      - name: Run MariaDB concurrency, durable login, and paper-order recovery tests
+        run: >-
+          python -m pytest -q
+          tests/test_wallet_tracker_mariadb.py
+          tests/test_paper_orders_mariadb.py
+          tests/test_durable_state.py::TestDurableStateOnMariaDB
+          tests/test_migrate.py
