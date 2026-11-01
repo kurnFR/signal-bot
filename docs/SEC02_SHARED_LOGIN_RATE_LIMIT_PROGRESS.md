@@ -87,3 +87,16 @@ GitHub returned `404 BlobNotFound` when downloading each job log, and the job-st
 - Durable login requests reserve before password verification. A failed password does not insert a second row; a successful login clears the reservations for that key before token creation.
 - In-memory unit/tool mode retains the previous check-then-record behavior.
 - Local test evidence received from the user predates these changes. No tests have been executed against this new implementation in this session.
+
+
+## Local test evidence — 2026-11-01, after atomic admission
+
+The user reported:
+
+- Focused batch: 28 passed, 5 skipped (1.81s).
+- MariaDB batch: 5 passed (2.50s).
+- Full suite: 805 passed, 15 skipped, 1 failed (8.82s).
+- The only failure was `test_recent_closed_trade_rows_respect_strategy_report_visibility`. The implementation executes one joined SELECT with the exact strategy/mode LEFT JOIN and `COALESCE(l.report_enabled, TRUE) = TRUE`; the test incorrectly expected a separate schema-creation query followed by the SELECT.
+
+The test was updated to assert the actual one-query contract and to verify the join and visibility predicate on that query. **This assertion-only correction has not yet been rerun.** The full suite is not yet green.
+
