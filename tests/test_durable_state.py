@@ -63,6 +63,19 @@ class TestRateLimitFailClosed(unittest.TestCase):
         conn.commit.assert_called_once()
         conn.close.assert_called_once()
 
+    def test_atomic_admission_lock_timeout_fails_closed(self):
+        auth._durable_rate_limit = True
+        conn, cur = MagicMock(), MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.return_value = (0,)
+        with patch("web.auth.get_pool") as pool:
+            pool.return_value.get_connection.return_value = conn
+            with self.assertRaises(auth.RateLimitBackendUnavailable):
+                auth.admit_login_attempt("busy-key")
+        self.assertFalse(any("INSERT INTO login_attempts" in call.args[0] for call in cur.execute.call_args_list))
+        self.assertTrue(auth.get_rate_limiter_health()["degraded"])
+        conn.close.assert_called_once()
+
     def test_atomic_admission_denies_when_threshold_reached(self):
         auth._durable_rate_limit = True
         conn, cur = MagicMock(), MagicMock()
