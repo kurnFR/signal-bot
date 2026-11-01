@@ -13,7 +13,6 @@ from web.auth import (
     log_audit,
     log_audit_cursor,
     get_rate_limiter_health,
-    check_login_rate_limit,
     record_failed_login,
     reset_login_attempts,
     _login_attempts,
@@ -212,7 +211,7 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
 
     def test_login_returns_503_when_shared_rate_limiter_is_unavailable(self):
         with patch(
-            "web.routes.auth_routes.check_login_rate_limit",
+            "web.routes.auth_routes.admit_login_attempt",
             side_effect=RateLimitBackendUnavailable("database unavailable"),
         ):
             response = self.client.post(
@@ -255,7 +254,7 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
             "must_change_password": 0,
         }
         mock_conn.cursor.return_value = mock_cur
-        with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 0, false)), \
+        with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 0, False)), \
              patch("web.routes.auth_routes.get_pool") as mock_pool, \
              patch("web.routes.auth_routes.verify_password", return_value=True), \
              patch("web.routes.auth_routes.reset_login_attempts", side_effect=RateLimitBackendUnavailable("database unavailable")):
