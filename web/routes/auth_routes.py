@@ -12,7 +12,7 @@ from db.db import get_pool
 from web.auth import (
     hash_password, verify_password, create_access_token,
     get_current_user, require_admin, revoke_token,
-    check_login_rate_limit, admit_login_attempt, is_rate_limiter_durable,
+    admit_login_attempt,
     record_failed_login, reset_login_attempts,
     log_audit, log_audit_cursor, _token_from_request, RateLimitBackendUnavailable
 )
