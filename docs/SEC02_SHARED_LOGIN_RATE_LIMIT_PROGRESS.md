@@ -21,20 +21,19 @@ The durable limiter in `web/auth.py` fell back to the process-local `_login_atte
 - [x] Health helper distinguishes `in-memory` (unit/tool mode), `database`, and `unavailable`.
 - [x] Security documentation no longer promises an in-memory fallback.
 - [x] Regression tests authored for startup failure, runtime check/write/reset failure, malformed count result, recovery, API 503, and separate-process MariaDB enforcement.
+- [x] Per-key MariaDB advisory-lock admission with atomic count-and-reserve before password verification.
+- [x] Unit coverage for successful reservation, threshold denial, and lock timeout fail-closed behavior.
+- [x] Opt-in two-process contention integration test: two independent workers each issue five concurrent admissions against the same key; expected total admitted equals the configured maximum.
+- [x] Added the missing pinned Gymnasium dependency after CI test collection exposed its absence.
 
 ## Acceptance checklist
 
-- [ ] Run focused auth and durable-state unit tests locally.
-- [ ] Run full pytest suite.
-- [ ] Run RetailBot accounting regression.
-- [ ] Run opt-in MariaDB integration suite against an isolated test database.
+- [ ] Rerun focused auth and durable-state unit tests on the final PR head.
+- [ ] Rerun full pytest suite on the final PR head.
+- [ ] Run RetailBot accounting regression on the final PR head.
+- [ ] Run the full opt-in MariaDB integration class against isolated `signal_bot_test`, never production `crypto_signals`.
 - [ ] Verify separate-process worker B enforces attempts recorded by worker A.
 - [ ] Verify shared-storage recovery restores login checks and health state.
-- [x] Implement per-key MariaDB advisory-lock admission with atomic count-and-reserve before password verification.
-- [x] Add unit coverage for successful reservation, threshold denial, and lock timeout fail-closed behavior.
-- [x] Add an opt-in two-process contention integration test; it starts two independent workers, each issuing five concurrent admissions against the same key, and expects exactly the configured maximum to be admitted.
-- [ ] Run the new focused tests and the full local suite after the atomic-admission change.
-- [ ] Run the expanded MariaDB integration class, including the new two-process contention test.
 - [ ] Confirm operational monitoring can observe limiter unavailable state; helper-only health reporting is not yet a confirmed external health signal.
 - [ ] All required GitHub Actions checks green on the final PR head.
 - [ ] Review final diff and obtain explicit release approval before merge.
@@ -43,34 +42,31 @@ The durable limiter in `web/auth.py` fell back to the process-local `_login_atte
 
 - Startup wiring was inspected: `web.app.lifespan` calls `enable_durable_rate_limit()` before yielding control to serve requests. If its DB probe fails, the durable-required flag remains enabled and login requests fail closed.
 - Migration registration was inspected: migration `013_login_attempts` creates the shared table with a `(rate_key, attempted_at)` index. The table stores epoch timestamps as `DOUBLE`, matching the current query parameters.
-- Login route handling was inspected: limiter read, failed-attempt write, and successful-login reset failures map to generic HTTP 503 responses. Token creation occurs only after a successful shared reset.
-- The original count-check/record-after-password flow had a concurrency race. The current branch replaces the login route's pre-check with `admit_login_attempt()`: it takes a per-key MariaDB advisory lock, counts unexpired attempts, and inserts a reservation before password verification. The lock is explicitly released and release failure is treated as unavailable. This design still requires the newly added cross-process contention test to pass against MariaDB before acceptance.
-- The current MariaDB integration test is opt-in only when `WALLET_TRACKER_MARIADB_TESTS=1`. It inherits the process environment, so before running it, explicitly confirm that the configured database is the isolated `signal_bot_test` database and not production `crypto_signals`.
-- No repository runtime or SSH/remote-shell connection is available in this review session. Therefore no local pytest or MariaDB command has been executed here; tests remain authored, not verified.
+- Login route handling was inspected: limiter admission, failed-attempt write, and successful-login reset failures map to generic HTTP 503 responses. Token creation occurs only after a successful shared reset.
+- The count-check/record-after-password flow had a concurrency race. The current branch replaces the login route's pre-check with `admit_login_attempt()`: it takes a per-key MariaDB advisory lock, counts unexpired attempts, and inserts a reservation before password verification. The lock is explicitly released and release failure is treated as unavailable. Cross-process MariaDB contention acceptance remains required.
+- The MariaDB integration test is opt-in only when `WALLET_TRACKER_MARIADB_TESTS=1`. Before running it, explicitly confirm that the configured database is isolated `signal_bot_test`, not production `crypto_signals`.
+- No repository runtime or SSH/remote-shell connection is available in this review session. No local pytest or MariaDB command has been executed here.
 
-## Local test evidence — user-reported, before atomic-admission changes
+## Local test evidence — user-reported, 2026-11-01
 
-The user reported the following successful run on the previous branch state:
-
-- Focused auth/durable-state files: 20 passed, 2 skipped, one non-critical Starlette/AnyIO deprecation warning (2.91s).
-- MariaDB-filtered run: 2 passed, 7 deselected (0.40s).
-
-These results predate the atomic-admission implementation and do **not** verify the current branch head. The full MariaDB integration class must be rerun after the new contention test is included.
+- Focused batch after atomic admission: 28 passed, 5 skipped (1.81s).
+- MariaDB batch: 5 passed (2.50s); exact test selection and database target still need confirmation before treating this as the full isolated integration acceptance.
+- Full suite: 805 passed, 15 skipped, 1 failed (8.82s). The failure was `test_recent_closed_trade_rows_respect_strategy_report_visibility`; production code correctly executes one joined SELECT, while the test expected a separate schema-creation query.
+- The assertion-only test correction was committed in `0221f2bd6dbc557c9c12c0d254e8ebc4c99259da`. The corrected isolated test and full suite have not yet been rerun by the user.
 
 ## CI evidence
 
-Two PR-head commits were checked during this work:
+On PR head `a0cfe5acc70da38dce249d60edbdeb210a55d195`:
 
-- Commit `52c16a7ee6bb4b2aaa93d563b245ae26fef9edad`: Test, tests, and RetailBot accounting regression workflows failed.
-- Commit `9466ff78edfff7e48321bd50f8fc9362cce438a9`: the same three workflows failed again.
+- `tests` workflow: success.
+- `RetailBot accounting regression` workflow: success.
+- `Test` workflow: failed during test collection, before test execution. `tests/test_ai_advanced_features.py` imports `ml.rl.environment`, which imports `gymnasium`; CI failed with `ModuleNotFoundError: No module named 'gymnasium'`.
+- The CI log was retrieved and the failure cause is confirmed. This was a missing declared project dependency, not a failure in the SEC-02 test assertions.
 
-For the later run set:
+Fix committed on 2026-11-01:
 
-- Test: run `41208345410`, job `124557941461` — failed.
-- tests: run `41208345395`, jobs `124557941258` and `124557941447` — failed.
-- RetailBot accounting regression: run `41208345405`, job `124557941319` — failed.
-
-GitHub returned `404 BlobNotFound` when downloading each job log, and the job-step summaries were empty. The failure cause is therefore **unknown**. Do not classify these failures as code, environment, or workflow failures until usable logs are obtained.
+- Commit `be7306baec5916b4e54a50008c366e606848011b` adds `gymnasium==1.0.0` to `requirements.txt`.
+- CI has not yet been verified on this new head. Recheck all workflows after the dependency change.
 
 ## Guardrails observed
 
@@ -78,25 +74,3 @@ GitHub returned `404 BlobNotFound` when downloading each job log, and the job-st
 - No live deployment or production worker was started.
 - No live trade or Telegram notification was triggered.
 - PR #606 remains draft and unmerged.
-
-
-## Atomic admission implementation — 2026-11-01
-
-- New `web.auth.admit_login_attempt()` performs durable admission under a per-key MariaDB `GET_LOCK` lock. The lock name is a fixed prefix plus a truncated SHA-256 digest, staying within MariaDB's 64-character lock-name limit.
-- The attempt row is inserted while the lock is held. A request is denied once the shared count reaches `RATE_LIMIT_MAX_ATTEMPTS`; database, lock-acquisition, or lock-release failures fail closed with HTTP 503 through the login route.
-- Durable login requests reserve before password verification. A failed password does not insert a second row; a successful login clears the reservations for that key before token creation.
-- In-memory unit/tool mode retains the previous check-then-record behavior.
-- Local test evidence received from the user predates these changes. No tests have been executed against this new implementation in this session.
-
-
-## Local test evidence — 2026-11-01, after atomic admission
-
-The user reported:
-
-- Focused batch: 28 passed, 5 skipped (1.81s).
-- MariaDB batch: 5 passed (2.50s).
-- Full suite: 805 passed, 15 skipped, 1 failed (8.82s).
-- The only failure was `test_recent_closed_trade_rows_respect_strategy_report_visibility`. The implementation executes one joined SELECT with the exact strategy/mode LEFT JOIN and `COALESCE(l.report_enabled, TRUE) = TRUE`; the test incorrectly expected a separate schema-creation query followed by the SELECT.
-
-The test was updated to assert the actual one-query contract and to verify the join and visibility predicate on that query. **This assertion-only correction has not yet been rerun.** The full suite is not yet green.
-
