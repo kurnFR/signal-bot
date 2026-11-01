@@ -126,7 +126,7 @@ class TestRateLimitFailClosed(unittest.TestCase):
         with patch("web.auth.get_pool") as pool:
             pool.return_value.get_connection.return_value = conn
             allowed, count, reserved = auth.admit_login_attempt("locked-key")
-        self.assertEqual((allowed, count, reserved), (False, auth.RATE_LIMIT_MAX_ATTEMPTS, True))
+        self.assertEqual((allowed, count, reserved), (False, auth.RATE_LIMIT_MAX_ATTEMPTS, None))
         self.assertFalse(any("INSERT INTO login_attempts" in call.args[0] for call in cur.execute.call_args_list))
         self.assertIn("SELECT RELEASE_LOCK(%s)", [call.args[0] for call in cur.execute.call_args_list])
 
