@@ -90,3 +90,33 @@ The branch now distinguishes reservation lifecycle states:
 - Added unit tests for preserving sibling pending reservations and converting only the request's own reservation; added an opt-in MariaDB interleaving test and an API route regression test.
 
 **Verification required:** apply migration 019 to the isolated test database before running the MariaDB integration class. No test result yet verifies this latest lifecycle implementation. The current PR-head GitHub Actions runs have started; their final results are pending.
+
+
+## CI verification — 2026-11-01, head `30c9f13369a30a860ef37039d95fec30c8f51871`
+
+The following GitHub Actions checks completed successfully on the code immediately before the final startup-schema probe refinement:
+
+- **Test** workflow run 4439: full suite **809 passed, 16 skipped, 6 warnings** (3.69s). The job used an ephemeral MariaDB service, applied all migrations, and seeded an ephemeral admin identity for authenticated API tests.
+- **tests** workflow run 1644: unit-tests job passed; MariaDB integration job passed with **35 passed** (3.21s), including the durable login integration class and the new reservation interleaving test.
+- **RetailBot accounting regression** workflow run 1637: passed.
+
+The earlier CI failures were addressed:
+- Missing `gymnasium` was declared in `requirements.txt`.
+- Full-suite CI now has an isolated MariaDB service and applies migrations before tests.
+- Auth API tests now have a disposable admin row in the test database.
+- The RetailBot DB-config test explicitly sets `MYSQL_DATABASE=crypto_signals`, so it tests the intended config behavior while the CI suite itself uses `signal_bot_test`.
+- The MariaDB integration job installs the complete project requirements, including FastAPI.
+
+## Final startup-schema guard — 2026-11-01
+
+After the green run above, the startup health probe was tightened to query `attempt_state` rather than merely checking that `login_attempts` exists. This makes startup report `unavailable` if migration 019 has not been applied, instead of reporting a healthy database backend that would fail on the first reservation insert. A unit regression test covers the missing-column case.
+
+This final probe refinement is committed on head `6e51fc98eedb7604ebe20de1fb7f12fe5045b25c`; **the green CI results above do not yet verify this final commit**. Wait for the new head's workflows before considering SEC-02 CI acceptance complete.
+
+## Remaining release gates
+
+- [ ] Confirm all required workflows green on final head `6e51fc9` or its descendant.
+- [ ] Confirm the current final diff, including migration 019 and workflow changes.
+- [ ] Confirm operational monitoring exposes the limiter `unavailable` state; the helper alone is not yet a confirmed external health signal.
+- [ ] Obtain explicit release approval before merge. PR #606 remains draft and unmerged.
+- [ ] Local verification on the user's machine remains outstanding; CI is isolated and does not touch production.
