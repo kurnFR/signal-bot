@@ -324,6 +324,7 @@ def admit_login_attempt(key: str) -> tuple[bool, int, bool]:
     conn = None
     cur = None
     lock_acquired = False
+    release_failed = False
     try:
         conn = get_pool().get_connection()
         cur = conn.cursor()
@@ -367,12 +368,10 @@ def admit_login_attempt(key: str) -> tuple[bool, int, bool]:
                     if not release_row or int(release_row[0] or 0) != 1:
                         _durable_rate_limit_degraded = True
                         raise RateLimitBackendUnavailable("Shared login admission lock release could not be confirmed")
-                except RateLimitBackendUnavailable:
-                    raise
                 except Exception as exc:
                     _durable_rate_limit_degraded = True
+                    release_failed = True
                     logger.error("Could not explicitly release login admission lock (%s)", type(exc).__name__)
-                    raise RateLimitBackendUnavailable("Shared login rate-limit storage is unavailable") from exc
             try:
                 cur.close()
             except Exception:
@@ -382,6 +381,8 @@ def admit_login_attempt(key: str) -> tuple[bool, int, bool]:
                 conn.close()
             except Exception:
                 pass
+        if release_failed:
+            raise RateLimitBackendUnavailable("Shared login rate-limit storage is unavailable")
 
 
 def check_login_rate_limit(key: str) -> bool:
