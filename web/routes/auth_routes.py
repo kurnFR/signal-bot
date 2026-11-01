@@ -160,7 +160,7 @@ def login(req: LoginRequest, request: Request):
         try:
             reset_login_attempts(rate_key)
         except RateLimitBackendUnavailable as exc:
-            logger.error("Login blocked because shared rate-limit reset failed: %s", exc)
+            logger.error("Login blocked because shared rate-limit reset failed (%s)", type(exc).__name__)
             raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
         token = create_access_token(user["id"], user["username"], user["role"])
         log_audit("LOGIN_SUCCESS", user["username"], user["id"], {"role": user["role"]}, client_ip)
