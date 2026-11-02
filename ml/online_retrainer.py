@@ -99,6 +99,9 @@ def _public_audit_entry(entry: Any) -> dict[str, Any]:
         "baseline_test_r",
         "ml_test_r",
         "status",
+        "auto_promote_requested",
+        "auto_promote_applied",
+        "promotion_status",
     )
     public_entry = {field: entry[field] for field in safe_fields if field in entry}
     if public_entry.get("status") == "failed":
@@ -175,7 +178,10 @@ def execute_retraining_cycle(force: bool = False) -> list[dict[str, Any]]:
                 "threshold": exp_res["experiment"]["threshold"],
                 "baseline_test_r": exp_res["experiment"]["baseline_test_metrics"].get("total_outcome_r"),
                 "ml_test_r": exp_res["experiment"]["ml_test_metrics"].get("total_outcome_r"),
-                "status": "retrained_and_promoted",
+                "status": "retrained",
+                "auto_promote_requested": cfg.get("auto_promote") is True,
+                "auto_promote_applied": False,
+                "promotion_status": "not_implemented" if cfg.get("auto_promote") is True else "disabled",
             }
             _append_audit_log(audit_entry)
 
