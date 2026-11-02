@@ -368,7 +368,7 @@
                                 <option value="futures">Futures Only</option>
                             </select>
                             <div class="relative">
-                                <input type="text" id="search-crypto-input" aria-label="Search cryptocurrency symbols" placeholder="Search symbol (e.g. SOL, PEPE, SUI)..." 
+                                <input type="text" id="search-crypto-input" aria-label="Search cryptocurrency symbols" maxlength="80" placeholder="Search symbol (e.g. SOL, PEPE, SUI)..." 
                                     onkeydown="if(event.key === 'Enter') App.handleSearchCrypto()"
                                     class="w-64 text-xs bg-slate-800 text-slate-100 placeholder-slate-500 rounded-lg pl-3 pr-8 py-2 border border-slate-700 font-mono focus:outline-none focus:border-sky-500">
                                 <button type="button" aria-label="Search cryptocurrency" onclick="App.handleSearchCrypto()" class="absolute right-2.5 top-2.5 text-slate-400 hover:text-white">
