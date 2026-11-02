@@ -41,7 +41,7 @@ SUPPORTED_RL_REWARDS = {"pnl", "sharpe", "sortino"}
 class MLBaseRequest(BaseModel):
     symbol: str = Field("BTCUSDT", min_length=1, max_length=24)
     market: str = Field("spot", min_length=1, max_length=10)
-    timeframe: str = Field("1h", min_length=1, max_length=3)
+    timeframe: str = Field("1h", min_length=1, max_length=5)
 
     @field_validator("symbol")
     @classmethod
