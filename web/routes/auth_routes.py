@@ -165,7 +165,7 @@ def login(req: LoginRequest, request: Request):
         cur = conn.cursor(dictionary=True)
         cur.execute(
             """
-            SELECT id, username, email, password_hash, role, is_active, must_change_password
+            SELECT id, username, email, password_hash, role, is_active, must_change_password, session_version
             FROM users
             WHERE username = %s
             """,
@@ -236,7 +236,10 @@ def login(req: LoginRequest, request: Request):
     except RateLimitBackendUnavailable as exc:
         logger.error("Login blocked because shared rate-limit reset failed (%s)", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
-    token = create_access_token(user["id"], user["username"], user["role"])
+    token = create_access_token(
+        user["id"], user["username"], user["role"],
+        session_version=int(user.get("session_version", 0)),
+    )
     _write_required_audit("LOGIN_SUCCESS", user["username"], user["id"], {"role": user["role"]}, client_ip)
 
     return {
@@ -461,7 +464,7 @@ def reset_user_password(user_id: int, req: ResetPasswordRequest, admin: dict = D
         _validate_new_password(req.new_password, target["username"])
         new_hash = hash_password(req.new_password)
         cur.execute(
-            "UPDATE users SET password_hash = %s, must_change_password = 1, updated_at = NOW() WHERE id = %s",
+            "UPDATE users SET password_hash = %s, must_change_password = 1, session_version = session_version + 1, updated_at = NOW() WHERE id = %s",
             (new_hash, user_id)
         )
         _commit_with_audit(
@@ -503,6 +506,8 @@ def update_user(user_id: int, req: UpdateUserRequest, admin: dict = Depends(requ
             params.append(1 if req.is_active else 0)
 
         if updates:
+            # Role/active-state changes invalidate previously issued sessions.
+            updates.append("session_version = session_version + 1")
             updates.append("updated_at = NOW()")
             params.append(user_id)
             cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = %s", tuple(params))
