@@ -688,13 +688,13 @@ def log_audit(
 
 
 def _token_from_request(request: Request) -> Optional[str]:
-    """Extract bearer token first, then the legacy auth cookie."""
+    """Extract the bearer token; browser cookies are not an authentication mechanism."""
     auth_header = request.headers.get("Authorization", "")
     if auth_header.lower().startswith("bearer "):
         token = auth_header[7:].strip()
         if token:
             return token
-    return request.cookies.get("auth_token")
+    return None
 
 
 def authenticate_request(request: Request) -> Dict[str, Any]:
@@ -741,7 +741,7 @@ def get_current_user(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer)
 ) -> Dict[str, Any]:
-    """FastAPI dependency. Uses the supplied bearer credentials or request cookie."""
+    """FastAPI dependency. Uses the supplied bearer credentials."""
     if credentials:
         token = credentials.credentials
         request.state.auth_token = token
