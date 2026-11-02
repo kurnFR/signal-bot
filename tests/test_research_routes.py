@@ -399,6 +399,17 @@ class TestResearchRoutes(unittest.TestCase):
         self.assertEqual(data["symbols_monitored"], 247)
         self.assertEqual(data["timeframe"], "5m")
 
+    @patch("web.routes.research_routes.get_screener_control")
+    @patch("web.routes.research_routes.get_screener_status")
+    def test_screener_status_returns_500_when_control_schema_is_unavailable(self, mock_status, mock_control):
+        mock_control.side_effect = RuntimeError("screener_control table missing")
+        mock_status.return_value = {"running": False, "database_ok": True}
+
+        response = self.client.get("/api/research/screener/status", headers=self.headers)
+
+        self.assertEqual(response.status_code, 500)
+        mock_status.assert_not_called()
+
     def test_screener_control_accepts_boolean_overrides(self):
         res = self.client.post(
             "/api/research/screener/control",
