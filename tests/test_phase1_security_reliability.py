@@ -225,8 +225,36 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
                     )
 
         self.assertEqual(response.status_code, 401)
-        admit.assert_called_once_with("testclient:admin")
+        admit.assert_called_once_with("testclient:unknown:admin")
         mock_conn.close.assert_called_once()
+
+    def test_database_collation_equivalent_usernames_share_account_rate_limit(self):
+        account = {
+            "id": 42, "username": "cafe", "email": None,
+            "password_hash": "hash", "role": "trader", "is_active": 1,
+            "must_change_password": 0,
+        }
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = account
+        mock_conn.cursor.return_value = mock_cur
+
+        with patch("web.routes.auth_routes.get_pool") as mock_pool:
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 1, 101)) as admit:
+                with patch("web.routes.auth_routes.verify_password", return_value=False):
+                    with patch("web.routes.auth_routes.finalize_login_attempt", return_value=1):
+                        for spelling in ("café", "cafe"):
+                            response = self.client.post(
+                                "/api/auth/login",
+                                json={"username": spelling, "password": "wrong-password"},
+                            )
+                            self.assertEqual(response.status_code, 401)
+
+        self.assertEqual(
+            [call.args[0] for call in admit.call_args_list],
+            ["testclient:user:42", "testclient:user:42"],
+        )
 
     def test_login_returns_503_when_shared_rate_limiter_is_unavailable(self):
         with patch(
@@ -285,7 +313,7 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 401)
         finalize.assert_called_once_with(
-            "testclient:trader", 22, success=False
+            "testclient:user:22", 22, success=False
         )
 
     def test_login_does_not_issue_token_when_reservation_finalization_fails(self):
