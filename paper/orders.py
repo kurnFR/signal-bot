@@ -152,11 +152,11 @@ def transition_order(
     position_id: int | None = None,
     actor_user_id: int | None = None,
 ) -> bool:
-    """Atomically transition PENDING to one terminal state using compare-and-set.
+    """Atomically transition PENDING to one terminal state under a row lock.
 
-    Returns True when this worker performed the transition. A concurrent or
-    repeated transition raises OrderTransitionConflict instead of overwriting
-    the state that won the race.
+    Lock the order by its primary key before changing status. This matches the
+    lock order used by fill_pending_order and avoids secondary-index/primary-key
+    lock inversion when cancellation races with a fill.
     """
     target = str(target_status).upper()
     if target not in ORDER_STATUSES or target not in ALLOWED_TRANSITIONS["PENDING"]:
@@ -173,8 +173,17 @@ def transition_order(
         raise OrderValidationError("actor_user_id must be positive")
 
     conn = get_pool().get_connection()
+    cur = None
     try:
-        cur = conn.cursor()
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT status FROM paper_orders WHERE id=%s FOR UPDATE",
+            (int(order_id),),
+        )
+        current = cur.fetchone()
+        if not current or str(current.get("status", "")).upper() != "PENDING":
+            raise OrderTransitionConflict(f"order {order_id} is missing or no longer PENDING")
+
         cur.execute(
             """
             UPDATE paper_orders
@@ -182,20 +191,25 @@ def transition_order(
                 state_changed_by_user_id=%s,
                 filled_at=CASE WHEN %s='FILLED' THEN CURRENT_TIMESTAMP ELSE NULL END,
                 terminal_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
-            WHERE id=%s AND status='PENDING'
+            WHERE id=%s
             """,
             (
                 target, reason, fill_price, position_id, actor_user_id, target, int(order_id),
             ),
         )
         if cur.rowcount != 1:
-            conn.rollback()
             raise OrderTransitionConflict(f"order {order_id} is missing or no longer PENDING")
         conn.commit()
-        cur.close()
         return True
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
 
 
 def list_orders(*, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
