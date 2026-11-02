@@ -15,7 +15,7 @@ from web.auth import (
     admit_login_attempt, finalize_login_attempt,
     record_failed_login, reset_login_attempts,
     log_audit, log_audit_cursor, _token_from_request, RateLimitBackendUnavailable,
-    revoke_token_cursor, cache_revoked_token
+    revoke_token_cursor, cache_revoked_token, cleanup_expired_revocations
 )
 from fastapi import Request
 
@@ -285,6 +285,7 @@ def logout(request: Request, current_user: dict = Depends(get_current_user)):
         )
         if token:
             cache_revoked_token(token)
+            cleanup_expired_revocations()
         return {"status": "success", "message": "Successfully logged out"}
     except HTTPException:
         raise
