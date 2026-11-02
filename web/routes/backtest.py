@@ -418,10 +418,10 @@ def list_promotion_audit(limit: int = Query(25, ge=1, le=100)):
 
 
 class BacktestRunRequest(BaseModel):
-    symbol: str = Field(..., json_schema_extra={"example": "BTCUSDT"})
-    market: str = Field("spot", json_schema_extra={"example": "spot"})
-    timeframe: str = Field("1d", json_schema_extra={"example": "1d"})
-    strategy: str = Field("confluence_ensemble_v1", json_schema_extra={"example": "confluence_ensemble_v1"})
+    symbol: str = Field(..., max_length=20, json_schema_extra={"example": "BTCUSDT"})
+    market: str = Field("spot", max_length=7, json_schema_extra={"example": "spot"})
+    timeframe: str = Field("1d", max_length=10, json_schema_extra={"example": "1d"})
+    strategy: str = Field("confluence_ensemble_v1", max_length=50, json_schema_extra={"example": "confluence_ensemble_v1"})
     data_segment: str = Field("full", json_schema_extra={"example": "full"})  # train, holdout, full
     initial_capital: float = Field(5000.0, ge=100.0)
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
