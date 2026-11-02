@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Wallet Tracking migration (on-chain smart-money accumulation / distribution)
--- Safe to run multiple times (CREATE TABLE IF NOT EXISTS). Runtime startup uses
--- wallet_tracker.store.ensure_tables() only for read-only schema verification.
+-- Safe to run multiple times (CREATE TABLE IF NOT EXISTS). The same DDL is also
+-- applied automatically by wallet_tracker.store.ensure_tables().
 -- Wallet columns use utf8mb4_bin: Solana addresses are case-sensitive.
 -- ============================================================================
 
