@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { AuthGate } from "./AuthGate";
+import { AuthGate, useAuth } from "./AuthGate";
 import { getJson } from "./lib/api";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.localStorage.clear(); });
@@ -18,6 +18,37 @@ describe("React authentication gate", () => {
     expect(window.localStorage.getItem("token")).toBe("issued-session-token");
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/login", expect.objectContaining({ method: "POST", credentials: "same-origin" }));
   });
+  it("keeps the session active and offers retry when server logout fails", async () => {
+    window.localStorage.setItem("token", "active-session-token");
+    const user = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json(user))
+      .mockResolvedValueOnce(json({ detail: "Service unavailable" }, 503))
+      .mockResolvedValueOnce(json({ status: "success" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    function ProtectedContent() {
+      const auth = useAuth();
+      return <div><span>Protected dashboard</span><button onClick={() => void auth?.logout()}>Sign out</button></div>;
+    }
+
+    render(<AuthGate><ProtectedContent /></AuthGate>);
+    expect(await screen.findByText("Protected dashboard")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/server could not confirm session revocation/i);
+    expect(window.localStorage.getItem("token")).toBe("active-session-token");
+    expect(screen.getByText("Protected dashboard")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry sign out" }));
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("token")).toBeNull();
+  });
+
   it("requires password change before rendering protected children", async () => {
     window.localStorage.setItem("token", "existing-session-token");
     const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: true };
