@@ -6,7 +6,7 @@ import logging
 import tempfile
 from typing import List, Dict, Any, Optional, Union
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 import requests
 from backtest.strategies import STRATEGIES
@@ -24,6 +24,18 @@ from web.routes.backtest import STRATEGY_METADATA
 
 router = APIRouter(prefix="/api/custom-strategy", tags=["custom-strategy"])
 logger = logging.getLogger("web.custom_strategy")
+
+VALID_SYMBOL_PATTERN = re.compile(r"^[A-Z0-9]{2,20}$")
+VALID_MARKETS = {"spot", "futures"}
+VALID_TIMEFRAMES = {
+    "1m", "3m", "5m", "15m", "30m",
+    "1h", "2h", "4h", "6h", "8h", "12h",
+    "1d", "3d", "1w", "1M",
+}
+MAX_AI_HISTORY_MESSAGES = 6
+MAX_AI_HISTORY_MESSAGE_CHARS = 2_000
+MAX_AI_CURRENT_CONFIG_CHARS = 8_000
+MAX_AI_CONTEXT_CHARS = 16_000
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CUSTOM_FILE = os.path.join(BASE_DIR, "custom_strategies.json")
@@ -264,12 +276,63 @@ class GenerateAIStrategyRequest(BaseModel):
     history: Optional[List[Dict[str, str]]] = Field(default=None, max_length=50)
     currentConfig: Optional[Dict[str, Any]] = Field(default=None)
 
+    @field_validator("history")
+    @classmethod
+    def bound_history(cls, history):
+        if history is None:
+            return None
+        # The generation handler consumes only the newest six messages.
+        bounded = history[-MAX_AI_HISTORY_MESSAGES:]
+        for message in bounded:
+            if len(message.get("content", "")) > MAX_AI_HISTORY_MESSAGE_CHARS:
+                raise ValueError("Each AI history message must be at most 2000 characters")
+        return bounded
+
+    @field_validator("currentConfig")
+    @classmethod
+    def bound_current_config(cls, current_config):
+        if current_config is not None and len(json.dumps(current_config, separators=(",", ":"), ensure_ascii=True)) > MAX_AI_CURRENT_CONFIG_CHARS:
+            raise ValueError("Current strategy configuration is too large")
+        return current_config
+
+    @model_validator(mode="after")
+    def bound_total_ai_context(self):
+        history_chars = sum(len(message.get("content", "")) for message in (self.history or []))
+        config_chars = len(json.dumps(self.currentConfig, separators=(",", ":"), ensure_ascii=True)) if self.currentConfig is not None else 0
+        if len(self.prompt) + history_chars + config_chars > MAX_AI_CONTEXT_CHARS:
+            raise ValueError("AI strategy context exceeds the 16000-character limit")
+        return self
+
 
 class QuickTestRequest(BaseModel):
     strategy: CustomStrategyRequest
     symbol: str = Field("BTCUSDT")
     market: str = Field("spot")
     timeframe: str = Field("1h")
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, symbol):
+        normalized = symbol.strip().upper()
+        if not VALID_SYMBOL_PATTERN.fullmatch(normalized):
+            raise ValueError("Symbol must contain only 2-20 letters or digits")
+        return normalized
+
+    @field_validator("market")
+    @classmethod
+    def validate_market(cls, market):
+        normalized = market.strip().lower()
+        if normalized not in VALID_MARKETS:
+            raise ValueError("Market must be one of: spot, futures")
+        return normalized
+
+    @field_validator("timeframe")
+    @classmethod
+    def validate_timeframe(cls, timeframe):
+        normalized = timeframe.strip()
+        if normalized not in VALID_TIMEFRAMES:
+            raise ValueError("Unsupported timeframe")
+        return normalized
 
 
 def _eval_condition(row, prev_row, cond: dict) -> bool:
