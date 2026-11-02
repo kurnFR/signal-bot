@@ -111,7 +111,7 @@ Login attempt reservation/finalization remains its own shared-rate-limit operati
 
 ## Follow-up CI result and current gate (2026-11-02)
 
-- Latest tested code candidate: `9ccba6d67272e31d9ad616bf89a3f462d712cb76`. The branch then received a documentation-only update; PR metadata reports latest branch head `c8c40c6e06065cda03d2ce40498ae004ff8f5421`.
+- Latest previously tested code candidate: `9ccba6d67272e31d9ad616bf89a3f462d712cb76`. A subsequent hardening patch is now on the branch and requires fresh CI.
 - GitHub Actions completed successfully for the follow-up code candidate:
   - Full pytest run [41379936285](https://github.com/kurnFR/signal-bot/actions/runs/41379936285): **822 passed, 17 skipped, 6 warnings**; the workflow collected 839 items and completed in 3.63s.
   - Unit/screener job [41379936269](https://github.com/kurnFR/signal-bot/actions/runs/41379936269): **105 passed**.
@@ -119,8 +119,19 @@ Login attempt reservation/finalization remains its own shared-rate-limit operati
   - RetailBot accounting/parity [41379936264](https://github.com/kurnFR/signal-bot/actions/runs/41379936264): **36 passed**; screener regression: **27 passed**.
 - The workflow jobs completed successfully. MariaDB integration used the isolated `signal_bot_test` service; no production database was accessed.
 - The tested follow-up is the inactive-account audit identity correction: known inactive accounts retain their resolved database user ID in `LOGIN_FAILED`; unknown usernames retain null.
-- Current PR comparison: **8 commits ahead, 0 behind**, merge base `823b5d2837383839c5c9acd0e0dacce62a602a25`. Changed-file scope remains four files.
+- Current PR comparison before the latest hardening commits was **8 commits ahead, 0 behind**, merge base `823b5d2837383839c5c9acd0e0dacce62a602a25`. Changed-file scope remains four files.
 - Review inspection after the follow-up found **no submitted reviews and no inline review threads**. The PR remains draft, open, and unmerged.
 - The frontend workflow remains path-filtered and was not triggered because this PR changes no frontend files. Frontend validation was green on the post-SEC-02 master run, not rerun specifically for SEC-03.
 - Remaining gate: obtain an independent security review and explicit release approval. Green CI is necessary but does not substitute for that review.
 - No merge, deployment, production worker, live trade, or Telegram send was performed.
+
+
+## Additional connection-acquisition hardening (2026-11-02)
+
+- Focused review found that the password-change and admin mutation routes acquired their DB connection before entering their route error-handling block. If pool acquisition failed, the mutation did not proceed, but the API could return an unhandled HTTP 500 instead of the controlled 503 used by other mandatory security-storage paths.
+- Added `_get_required_connection()` to map connection-acquisition failures to the generic security-storage HTTP 503 response without exposing database exception details.
+- Routed security/admin DB endpoints through the helper and added a regression test for admin user creation when DB connection acquisition fails.
+- Code commit: `e2298d3726ef3437612ecc256fdbe502ae2637a3`.
+- Regression-test commit: `ecabf92732420495def77e5d1f1862f19f18a05e`.
+- Fresh CI for this candidate has **not yet appeared in GitHub Actions** at the time of this update. Do not treat the previous 822-pass result as validation of these latest code/test changes.
+- The PR remains draft and unmerged. Require green CI on the latest code head before any release consideration.
