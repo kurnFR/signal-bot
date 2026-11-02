@@ -14,6 +14,7 @@ router = APIRouter(prefix="/api/system", tags=["system"])
 def get_public_system_status():
     full = collect_system_status()
     db = full.get("database", {})
+    limiter = full.get("loginRateLimiter", {})
     return {
         "database": {
             "status": db.get("status", "error"),
@@ -30,4 +31,8 @@ def get_public_system_status():
             if isinstance(heartbeat, dict)
         ],
         "binance": full.get("binance", {}),
+        "loginRateLimiter": {
+            "mode": limiter.get("mode", "unknown"),
+            "degraded": bool(limiter.get("degraded", True)),
+        },
     }

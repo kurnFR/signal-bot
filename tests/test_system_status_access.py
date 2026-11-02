@@ -8,7 +8,8 @@ from web.app import app
 FULL = {"database": {"status": "ok", "host": "10.1.2.3", "port": 3306, "database": "secretdb", "user": "u",
                      "tables": {"ohlcv": 5}, "error": "Access denied for user u@10.1.2.3"},
         "heartbeats": [{"collector": "c", "status": "ok", "detail": "", "lastBeat": "now"}],
-        "binance": {"spotApi": "online", "futuresApi": "online", "enableFuturesConfig": True}}
+        "binance": {"spotApi": "online", "futuresApi": "online", "enableFuturesConfig": True},
+        "loginRateLimiter": {"mode": "unavailable", "degraded": True}}
 
 
 def user(role):
@@ -32,6 +33,7 @@ class TestSystemStatusAccess(unittest.TestCase):
             self.assertEqual(res.status_code, 200, role)
             body = res.json()
             self.assertEqual(body["database"]["status"], "ok")
+            self.assertEqual(body["loginRateLimiter"], {"mode": "unavailable", "degraded": True})
             text = res.text
             for secret in ("10.1.2.3", "secretdb", "3306", "Access denied"):
                 self.assertNotIn(secret, text)

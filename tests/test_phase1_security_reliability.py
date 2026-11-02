@@ -13,10 +13,10 @@ from web.auth import (
     log_audit,
     log_audit_cursor,
     get_rate_limiter_health,
-    check_login_rate_limit,
     record_failed_login,
     reset_login_attempts,
     _login_attempts,
+    RateLimitBackendUnavailable,
 )
 
 
@@ -208,6 +208,153 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         self.assertIn("durable_enabled", health)
         self.assertIn("degraded", health)
         self.assertIn("mode", health)
+
+    def test_login_rate_limit_key_is_case_insensitive_like_username_lookup(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = None
+        mock_conn.cursor.return_value = mock_cur
+
+        events = MagicMock()
+        with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 0, None)) as admit:
+            with patch("web.routes.auth_routes.get_pool") as mock_pool:
+                with patch("web.routes.auth_routes.log_audit"):
+                    mock_pool.return_value.get_connection.return_value = mock_conn
+                    events.attach_mock(mock_conn.close, "identity_connection_close")
+                    events.attach_mock(admit, "rate_limit_admission")
+                    response = self.client.post(
+                        "/api/auth/login",
+                        json={"username": "AdMiN", "password": "wrong-password"},
+                    )
+
+        self.assertEqual(response.status_code, 401)
+        admit.assert_called_once_with("testclient:unknown:admin")
+        mock_conn.close.assert_called_once()
+        self.assertEqual(
+            events.mock_calls[:2],
+            [unittest.mock.call.identity_connection_close(), unittest.mock.call.rate_limit_admission("testclient:unknown:admin")],
+        )
+
+    def test_database_collation_equivalent_usernames_share_account_rate_limit(self):
+        account = {
+            "id": 42, "username": "cafe", "email": None,
+            "password_hash": "hash", "role": "trader", "is_active": 1,
+            "must_change_password": 0,
+        }
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = account
+        mock_conn.cursor.return_value = mock_cur
+
+        with patch("web.routes.auth_routes.get_pool") as mock_pool:
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 1, 101)) as admit:
+                with patch("web.routes.auth_routes.verify_password", return_value=False):
+                    with patch("web.routes.auth_routes.finalize_login_attempt", return_value=1):
+                        for spelling in ("café", "cafe"):
+                            response = self.client.post(
+                                "/api/auth/login",
+                                json={"username": spelling, "password": "wrong-password"},
+                            )
+                            self.assertEqual(response.status_code, 401)
+
+        self.assertEqual(
+            [call.args[0] for call in admit.call_args_list],
+            ["testclient:user:42", "testclient:user:42"],
+        )
+
+    def test_login_returns_503_when_shared_rate_limiter_is_unavailable(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = {
+            "id": 22, "username": "trader", "email": None,
+            "password_hash": "hash", "role": "trader", "is_active": 1,
+            "must_change_password": 0,
+        }
+        mock_conn.cursor.return_value = mock_cur
+        with patch("web.routes.auth_routes.get_pool") as mock_pool:
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            with patch(
+                "web.routes.auth_routes.admit_login_attempt",
+                side_effect=RateLimitBackendUnavailable("database unavailable"),
+            ):
+                response = self.client.post(
+                    "/api/auth/login",
+                    json={"username": "trader", "password": "not-the-password"},
+                )
+        mock_conn.close.assert_called_once()
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json()["detail"],
+            "Login protection is temporarily unavailable. Please retry shortly.",
+        )
+
+    def test_login_returns_503_when_failed_attempt_cannot_be_persisted(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = {
+            "id": 22, "username": "trader", "email": None,
+            "password_hash": "hash", "role": "trader", "is_active": 1,
+            "must_change_password": 0,
+        }
+        mock_conn.cursor.return_value = mock_cur
+        with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 0, None)), \
+             patch("web.routes.auth_routes.get_pool") as mock_pool, \
+             patch("web.routes.auth_routes.verify_password", return_value=False), \
+             patch("web.routes.auth_routes.record_failed_login", side_effect=RateLimitBackendUnavailable("database unavailable")):
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            response = self.client.post(
+                "/api/auth/login",
+                json={"username": "trader", "password": "wrong-password"},
+            )
+        self.assertEqual(response.status_code, 503)
+        mock_conn.close.assert_called_once()
+
+    def test_failed_password_finalizes_its_durable_reservation(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = {
+            "id": 22, "username": "trader", "email": None,
+            "password_hash": "hash", "role": "trader", "is_active": 1,
+            "must_change_password": 0,
+        }
+        mock_conn.cursor.return_value = mock_cur
+        with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 1, 22)), \
+             patch("web.routes.auth_routes.get_pool") as mock_pool, \
+             patch("web.routes.auth_routes.verify_password", return_value=False), \
+             patch("web.routes.auth_routes.finalize_login_attempt", return_value=2) as finalize, \
+             patch("web.routes.auth_routes.record_failed_login", side_effect=AssertionError("must use reservation")):
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            response = self.client.post(
+                "/api/auth/login",
+                json={"username": "trader", "password": "wrong-password"},
+            )
+        self.assertEqual(response.status_code, 401)
+        finalize.assert_called_once_with(
+            "testclient:user:22", 22, success=False
+        )
+
+    def test_login_does_not_issue_token_when_reservation_finalization_fails(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = {
+            "id": 22, "username": "trader", "email": None,
+            "password_hash": "hash", "role": "trader", "is_active": 1,
+            "must_change_password": 0,
+        }
+        mock_conn.cursor.return_value = mock_cur
+        with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 1, 22)), \
+             patch("web.routes.auth_routes.get_pool") as mock_pool, \
+             patch("web.routes.auth_routes.verify_password", return_value=True), \
+             patch("web.routes.auth_routes.finalize_login_attempt", side_effect=RateLimitBackendUnavailable("database unavailable")):
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            response = self.client.post(
+                "/api/auth/login",
+                json={"username": "trader", "password": "correct-password"},
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("token", response.json())
+        mock_conn.close.assert_called_once()
 
 
 if __name__ == "__main__":

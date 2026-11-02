@@ -3,6 +3,7 @@ import time
 import requests
 from fastapi import APIRouter
 from db.db import get_pool
+from web.auth import get_rate_limiter_health
 from config import MYSQL_CONFIG, ENABLE_FUTURES, SPOT_KLINE_URL, FUTURES_KLINE_URL
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -57,6 +58,7 @@ def collect_system_status() -> dict:
     except Exception:
         binance_futures = "offline"
 
+    limiter_health = get_rate_limiter_health()
     return {
         "database": {
             "status": db_status,
@@ -71,6 +73,10 @@ def collect_system_status() -> dict:
             "spotApi": binance_spot,
             "futuresApi": binance_futures,
             "enableFuturesConfig": ENABLE_FUTURES,
+        },
+        "loginRateLimiter": {
+            "mode": limiter_health.get("mode", "unknown"),
+            "degraded": bool(limiter_health.get("degraded", True)),
         },
         "system": {
             "timezone": "Asia/Jakarta (WIB UTC+7)",

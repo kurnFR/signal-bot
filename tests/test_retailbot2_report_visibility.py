@@ -241,9 +241,12 @@ def test_recent_closed_trade_rows_respect_strategy_report_visibility(monkeypatch
     rows = db_module.get_retailbot2_recent_trades(limit=20)
 
     assert len(rows) == 1
-    assert len(cursor.queries) == 2
-    assert "CREATE TABLE IF NOT EXISTS rdt_strategy_lifecycle" in cursor.queries[0]
-    assert "LEFT JOIN rdt_strategy_lifecycle" in cursor.queries[1]
-    assert "SELECT t.id, t.symbol, t.side, t.mode" in cursor.queries[1]
-    assert "ON l.strategy_id = t.strategy AND l.mode = t.mode" in cursor.queries[1]
-    assert "COALESCE(l.report_enabled, TRUE) = TRUE" in cursor.queries[1]
+    # Lifecycle schema is provisioned by the migration/startup path. The
+    # recent-trades read itself is one joined query, so visibility is applied
+    # atomically with the closed-trade selection (no separate setup query).
+    assert len(cursor.queries) == 1
+    recent_query = cursor.queries[0]
+    assert "SELECT t.id, t.symbol, t.side, t.mode" in recent_query
+    assert "LEFT JOIN rdt_strategy_lifecycle" in recent_query
+    assert "ON l.strategy_id = t.strategy AND l.mode = t.mode" in recent_query
+    assert "COALESCE(l.report_enabled, TRUE) = TRUE" in recent_query

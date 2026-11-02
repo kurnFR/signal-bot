@@ -1,5 +1,10 @@
 import { getJson } from "./api";
 
+export interface LoginRateLimiterStatus {
+  mode: string;
+  degraded: boolean;
+}
+
 export interface SystemStatusResponse {
   database: {
     status: string;
@@ -16,6 +21,7 @@ export interface SystemStatusResponse {
     futuresApi: string;
     enableFuturesConfig: boolean;
   };
+  loginRateLimiter?: LoginRateLimiterStatus;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -37,6 +43,9 @@ function isPublicSystemStatus(value: unknown): value is SystemStatusResponse {
         isNonEmptyString(heartbeat.status) &&
         (heartbeat.lastBeat === null || typeof heartbeat.lastBeat === "string")) ||
       !isRecord(value.binance)) return false;
+  const limiter = value.loginRateLimiter;
+  if (limiter !== undefined &&
+      (!isRecord(limiter) || !isNonEmptyString(limiter.mode) || typeof limiter.degraded !== "boolean")) return false;
   return isNonEmptyString(value.binance.spotApi) &&
     isNonEmptyString(value.binance.futuresApi) &&
     typeof value.binance.enableFuturesConfig === "boolean";
@@ -67,6 +76,7 @@ export interface AdminSystemStatusResponse {
     lastBeat: string | null;
   }>;
   binance: SystemStatusResponse["binance"];
+  loginRateLimiter?: LoginRateLimiterStatus;
   system?: { timezone?: string };
 }
 function isAdminSystemStatus(value: unknown): value is AdminSystemStatusResponse {
@@ -85,6 +95,9 @@ function isAdminSystemStatus(value: unknown): value is AdminSystemStatusResponse
       !isNonEmptyString(value.binance.spotApi) ||
       !isNonEmptyString(value.binance.futuresApi) ||
       typeof value.binance.enableFuturesConfig !== "boolean") return false;
+  const limiter = value.loginRateLimiter;
+  if (limiter !== undefined &&
+      (!isRecord(limiter) || !isNonEmptyString(limiter.mode) || typeof limiter.degraded !== "boolean")) return false;
   return value.system === undefined ||
     (isRecord(value.system) &&
       (value.system.timezone === undefined || typeof value.system.timezone === "string"));

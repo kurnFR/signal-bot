@@ -12,8 +12,9 @@ from db.db import get_pool
 from web.auth import (
     hash_password, verify_password, create_access_token,
     get_current_user, require_admin, revoke_token,
-    check_login_rate_limit, record_failed_login, reset_login_attempts,
-    log_audit, log_audit_cursor, _token_from_request
+    admit_login_attempt, finalize_login_attempt,
+    record_failed_login, reset_login_attempts,
+    log_audit, log_audit_cursor, _token_from_request, RateLimitBackendUnavailable
 )
 from fastapi import Request
 
@@ -109,55 +110,101 @@ def login(req: LoginRequest, request: Request):
         raise HTTPException(status_code=400, detail="Username and password are required")
 
     client_ip = request.client.host if request.client else "unknown"
-    rate_key = f"{client_ip}:{username}"
-    if not check_login_rate_limit(rate_key):
-        log_audit("LOGIN_RATE_LIMITED", username, None, {"ip": client_ip}, client_ip)
-        raise HTTPException(
-            status_code=429,
-            detail="Too many failed login attempts. Account temporarily locked. Please try again in 5 minutes."
-        )
 
-    conn = get_pool().get_connection()
+    # Resolve the database identity before admission. Release this lookup
+    # connection before the limiter opens its own connection and before the
+    # expensive password hash verification runs.
+    conn = None
+    cur = None
     try:
+        conn = get_pool().get_connection()
         cur = conn.cursor(dictionary=True)
-        # 100% Parameterized query: immune to SQL injection
         cur.execute(
             """
-            SELECT id, username, email, password_hash, role, is_active, must_change_password 
-            FROM users 
+            SELECT id, username, email, password_hash, role, is_active, must_change_password
+            FROM users
             WHERE username = %s
             """,
             (username,)
         )
         user = cur.fetchone()
-        cur.close()
-
-        if not user or not user["is_active"]:
-            failed_count = record_failed_login(rate_key)
-            log_audit("LOGIN_FAILED", username, None, {"attempt": failed_count, "reason": "user_not_found_or_inactive"}, client_ip)
-            raise HTTPException(status_code=401, detail="Invalid username or password")
-
-        if not verify_password(req.password, user["password_hash"]):
-            failed_count = record_failed_login(rate_key)
-            log_audit("LOGIN_FAILED", username, user["id"], {"attempt": failed_count, "reason": "bad_password"}, client_ip)
-            raise HTTPException(status_code=401, detail="Invalid username or password")
-
-        reset_login_attempts(rate_key)
-        token = create_access_token(user["id"], user["username"], user["role"])
-        log_audit("LOGIN_SUCCESS", user["username"], user["id"], {"role": user["role"]}, client_ip)
-
-        return {
-            "token": token,
-            "user": {
-                "id": user["id"],
-                "username": user["username"],
-                "email": user["email"],
-                "role": user["role"],
-                "must_change_password": bool(user.get("must_change_password", 0)),
-            }
-        }
+    except Exception as exc:
+        logger.error("Login identity lookup failed; refusing login (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
     finally:
-        conn.close()
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                logger.warning("Could not close login identity cursor")
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                logger.warning("Could not return login identity connection to the pool")
+
+    # Unknown usernames retain a per-IP normalized bucket. Known accounts use
+    # the immutable DB identity, covering all DB-collation-equivalent spellings.
+    account_key = f"user:{user['id']}" if user else f"unknown:{username.casefold()}"
+    rate_key = f"{client_ip}:{account_key}"
+    try:
+        within_rate_limit, _, reservation_id = admit_login_attempt(rate_key)
+    except RateLimitBackendUnavailable as exc:
+        logger.error("Login blocked because shared rate limiting is unavailable: %s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
+
+    if not within_rate_limit:
+        log_audit("LOGIN_RATE_LIMITED", username, user["id"] if user else None, {"ip": client_ip}, client_ip)
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed login attempts. Account temporarily locked. Please try again in 5 minutes."
+        )
+
+    if not user or not user["is_active"]:
+        try:
+            failed_count = (
+                finalize_login_attempt(rate_key, reservation_id, success=False)
+                if reservation_id is not None else record_failed_login(rate_key)
+            )
+        except RateLimitBackendUnavailable as exc:
+            logger.error("Login failure could not be recorded in shared rate-limit storage: %s", type(exc).__name__)
+            raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
+        log_audit("LOGIN_FAILED", username, None, {"attempt": failed_count, "reason": "user_not_found_or_inactive"}, client_ip)
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    if not verify_password(req.password, user["password_hash"]):
+        try:
+            failed_count = (
+                finalize_login_attempt(rate_key, reservation_id, success=False)
+                if reservation_id is not None else record_failed_login(rate_key)
+            )
+        except RateLimitBackendUnavailable as exc:
+            logger.error("Login failure could not be recorded in shared rate-limit storage: %s", type(exc).__name__)
+            raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
+        log_audit("LOGIN_FAILED", username, user["id"], {"attempt": failed_count, "reason": "bad_password"}, client_ip)
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    try:
+        if reservation_id is not None:
+            finalize_login_attempt(rate_key, reservation_id, success=True)
+        else:
+            reset_login_attempts(rate_key)
+    except RateLimitBackendUnavailable as exc:
+        logger.error("Login blocked because shared rate-limit reset failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
+    token = create_access_token(user["id"], user["username"], user["role"])
+    log_audit("LOGIN_SUCCESS", user["username"], user["id"], {"role": user["role"]}, client_ip)
+
+    return {
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+            "email": user["email"],
+            "role": user["role"],
+            "must_change_password": bool(user.get("must_change_password", 0)),
+        }
+    }
 
 
 @router.post("/auth/logout")
