@@ -21,14 +21,14 @@ router = APIRouter(prefix="/api/paper", tags=["paper-trading"])
 
 
 class PaperConfigRequest(BaseModel):
-    symbol: str = Field(..., json_schema_extra={"example": "ETHUSDT"})
-    market: str = Field("spot", json_schema_extra={"example": "spot"})
-    timeframe: str = Field("1d", json_schema_extra={"example": "1d"})
-    strategy_name: str = Field(..., json_schema_extra={"example": "confluence_ensemble_v1"})
+    symbol: str = Field(..., max_length=20, json_schema_extra={"example": "ETHUSDT"})
+    market: str = Field("spot", max_length=7, json_schema_extra={"example": "spot"})
+    timeframe: str = Field("1d", max_length=10, json_schema_extra={"example": "1d"})
+    strategy_name: str = Field(..., max_length=50, json_schema_extra={"example": "confluence_ensemble_v1"})
     is_active: bool = Field(True)
     allocated_capital: float = Field(5000.0, ge=100.0)
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
-    ml_model_id: Optional[str] = Field(None, json_schema_extra={"example": "real-btcusdt-spot-1h-trend_ema_v1-logistic_regression-binary_positive_r"})
+    ml_model_id: Optional[str] = Field(None, max_length=100, json_schema_extra={"example": "real-btcusdt-spot-1h-trend_ema_v1-logistic_regression-binary_positive_r"})
     telegram_enabled: Optional[bool] = Field(None, description="Whether paper entry alerts should be sent to Telegram; omitted updates preserve the current preference")
     report_enabled: Optional[bool] = Field(None, description="Whether this strategy appears in per-strategy performance summaries; omitted updates preserve the current preference")
 
@@ -181,16 +181,16 @@ def sync_market_tick():
 
 
 class DeployStrategyRequest(BaseModel):
-    symbol: str = Field(..., json_schema_extra={"example": "BTCUSDT"})
-    market: str = Field("spot", json_schema_extra={"example": "spot"})
-    timeframe: str = Field("1d", json_schema_extra={"example": "1d"})
-    strategy_name: str = Field(..., json_schema_extra={"example": "confluence_ensemble_v1"})
+    symbol: str = Field(..., max_length=20, json_schema_extra={"example": "BTCUSDT"})
+    market: str = Field("spot", max_length=7, json_schema_extra={"example": "spot"})
+    timeframe: str = Field("1d", max_length=10, json_schema_extra={"example": "1d"})
+    strategy_name: str = Field(..., max_length=50, json_schema_extra={"example": "confluence_ensemble_v1"})
     allocated_capital: float = Field(5000.0, ge=100.0)
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
     send_telegram: bool = Field(True)
     rank: Optional[int] = None
     rank_score: Optional[float] = None
-    ml_model_id: Optional[str] = None
+    ml_model_id: Optional[str] = Field(None, max_length=100)
 
 
 @router.post("/deploy")
