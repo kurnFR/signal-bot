@@ -69,6 +69,11 @@ class TestRouteAuthorizationSweep(unittest.TestCase):
                 f"GET {path} is missing an explicit viewer-read policy or restriction",
             )
 
+    def test_unregistered_get_preserves_fastapi_not_found_response(self):
+        with patch("web.app.authenticate_request", return_value=_user("viewer")):
+            response = self.client.get("/api/not-registered")
+        self.assertEqual(response.status_code, 404)
+
     def test_route_table_is_not_empty(self):
         self.assertGreater(len(self.ops), 40)
 
