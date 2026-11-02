@@ -201,7 +201,7 @@ def login(req: LoginRequest, request: Request):
         except RateLimitBackendUnavailable as exc:
             logger.error("Login failure could not be recorded in shared rate-limit storage: %s", type(exc).__name__)
             raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
-        _write_required_audit("LOGIN_FAILED", username, None, {"attempt": failed_count, "reason": "user_not_found_or_inactive"}, client_ip)
+        _write_required_audit("LOGIN_FAILED", username, user["id"] if user else None, {"attempt": failed_count, "reason": "user_not_found_or_inactive"}, client_ip)
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     if not verify_password(req.password, user["password_hash"]):
