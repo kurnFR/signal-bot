@@ -85,13 +85,37 @@ def register_model_for_retraining(
     return reg["registered_models"][key]
 
 
+def _public_audit_entry(entry: Any) -> dict[str, Any]:
+    """Expose only documented audit fields; never return persisted exception text."""
+    if not isinstance(entry, dict):
+        return {}
+
+    safe_fields = (
+        "key",
+        "timestamp",
+        "new_candles_processed",
+        "winner_model",
+        "threshold",
+        "baseline_test_r",
+        "ml_test_r",
+        "status",
+    )
+    public_entry = {field: entry[field] for field in safe_fields if field in entry}
+    if public_entry.get("status") == "failed":
+        public_entry["message"] = "Retraining failed; check protected server logs."
+    return public_entry
+
+
 def get_retraining_status() -> dict[str, Any]:
     """Return status of the continuous online retraining subsystem."""
     reg = _load_registry()
     audit_history = []
     if AUDIT_LOG_PATH.exists():
         try:
-            audit_history = json.loads(AUDIT_LOG_PATH.read_text(encoding="utf-8"))[:10]
+            audit_history = [
+                _public_audit_entry(entry)
+                for entry in json.loads(AUDIT_LOG_PATH.read_text(encoding="utf-8"))[:10]
+            ]
         except Exception:
             pass
 
