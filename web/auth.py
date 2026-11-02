@@ -231,6 +231,44 @@ def _is_cached_revoked_token(token_hash: str) -> bool:
         return True
 
 
+REVOCATION_CLEANUP_LOCK_NAME = "signal_bot_revoked_expiry_cleanup"
+REVOCATION_CLEANUP_BATCH_SIZE = 1000
+
+
+def _cleanup_expired_revocations(cur) -> None:
+    """Best-effort bounded cleanup, serialized across workers by a DB advisory lock."""
+    lock_acquired = False
+    try:
+        cur.execute("SELECT GET_LOCK(%s, 0)", (REVOCATION_CLEANUP_LOCK_NAME,))
+        row = cur.fetchone()
+        if isinstance(row, dict):
+            lock_result = next(iter(row.values()), None)
+        elif isinstance(row, (tuple, list)):
+            lock_result = row[0] if row else None
+        else:
+            lock_result = row
+        if lock_result != 1:
+            return
+
+        lock_acquired = True
+        cur.execute(
+            "DELETE FROM revoked_tokens "
+            "WHERE expires_at <= UTC_TIMESTAMP() LIMIT %s",
+            (REVOCATION_CLEANUP_BATCH_SIZE,),
+        )
+    except Exception as exc:
+        # Revocation persistence is critical; cleanup is not. Never turn a
+        # successful revocation into a logout failure because pruning failed.
+        logger.warning("Expired token revocation cleanup skipped: %s", type(exc).__name__)
+    finally:
+        if lock_acquired:
+            try:
+                cur.execute("SELECT RELEASE_LOCK(%s)", (REVOCATION_CLEANUP_LOCK_NAME,))
+                cur.fetchone()
+            except Exception as exc:
+                logger.warning("Expired token cleanup lock release failed: %s", type(exc).__name__)
+
+
 def revoke_token_cursor(cur, token: str) -> str:
     """Insert a token revocation using the caller's open transaction.
 
@@ -250,6 +288,7 @@ def revoke_token_cursor(cur, token: str) -> str:
         """,
         (token_hash, exp_dt),
     )
+    _cleanup_expired_revocations(cur)
     return token_hash
 
 
