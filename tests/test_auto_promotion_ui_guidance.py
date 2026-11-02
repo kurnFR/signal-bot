@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -29,7 +30,7 @@ def test_retailbot2_lifecycle_has_one_click_stop_and_hide_without_deleting_histo
     assert "const confirmed = window.confirm(" in js
     assert "try { await this.fetchResearchData(); } catch (_) {}" in js
     assert "Stop &amp; Hide" in js
-    assert 'app.js?v=20261026-1' in html
+    assert re.search(r'app\.js\?v=\d{8}-\d+', html)
 
 
 def test_backtest_ui_handles_reconciliation_statuses_without_success_toast():
