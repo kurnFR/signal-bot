@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -53,6 +54,40 @@ def _json_default(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Write a complete result file before atomically replacing its destination."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            temp_file.write(content)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+
+        os.replace(temp_path, path)
+        temp_path = None
+
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def _candidate_to_dict(candidate: Any) -> dict[str, Any]:
@@ -126,7 +161,7 @@ def run_real_experiment(*, symbol: str = DEFAULT_SYMBOL, market: str = DEFAULT_M
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
     result_path = destination / f"{experiment_id}.json"
-    result_path.write_text(json.dumps(payload, indent=2, default=_json_default) + "\n", encoding="utf-8")
+    _atomic_write_text(result_path, json.dumps(payload, indent=2, default=_json_default) + "\n")
     logger.info("Research result saved to %s", result_path)
 
     # Persist model artifact for paper trading integration
