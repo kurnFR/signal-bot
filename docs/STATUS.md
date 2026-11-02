@@ -18,7 +18,7 @@ What exists and works today, and the known gaps. Reconciled against current `mas
 | Web and security | FastAPI app, central fail-closed authentication, three roles, token revocation, audit log, login rate limiting, random first-admin password, ML experiment path containment | [SECURITY.md](SECURITY.md) |
 | Operations | `run_all.py` supervisor with restart backoff; CI on Python 3.11 including a MariaDB integration job | `.github/workflows/` |
 
-Verified by current route-policy tests: all registered API operations require authentication except login; the viewer role is denied registered mutations; unknown/unclassified GET routes fail closed while unregistered URLs retain FastAPI's normal 404. The latest master commit `a5d52243` passed full pytest, unit tests, and RetailBot accounting regression; Wallet Tracker MariaDB integration is still running. This does not establish live-server acceptance or deployment readiness.
+Verified by current route-policy tests: all registered API operations require authentication except login; the viewer role is denied registered mutations; unknown/unclassified GET routes fail closed while unregistered URLs retain FastAPI's normal 404. The latest master commit `a5d52243` passed full pytest, unit tests, Wallet Tracker MariaDB integration, and RetailBot accounting regression (post-merge checks). This does not establish live-server acceptance or deployment readiness.
 
 ## 2. Known gaps
 
