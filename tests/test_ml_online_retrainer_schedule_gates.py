@@ -42,9 +42,7 @@ class TestOnlineRetrainerScheduleGates(unittest.TestCase):
             "symbol": "BTCUSDT", "market": "spot", "timeframe": "1h",
             "strategy_name": "trend_ema_v1",
         }}}
-        with patch.object(online_retrainer, "_load_registry", return_value=registry), \\
-             patch.object(online_retrainer, "fetch_ohlcv_with_features_df") as fetch, \\
-             patch.object(online_retrainer, "_save_registry") as save:
+        with patch.object(online_retrainer, "_load_registry", return_value=registry) as load, patch.object(online_retrainer, "fetch_ohlcv_with_features_df") as fetch, patch.object(online_retrainer, "_save_registry") as save:
             self.assertEqual(online_retrainer.execute_retraining_cycle(force=True), [])
         fetch.assert_not_called()
         save.assert_not_called()
