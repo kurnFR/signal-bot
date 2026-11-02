@@ -99,8 +99,7 @@ class TestMLRouteErrorRedaction(unittest.TestCase):
     def test_rl_training_error_response_is_generic(self):
         secret = "database-password=secret-token /srv/private/rl-cache"
         request = ml_routes.RLTrainRequest()
-        with patch("ml.rl.runner.train_rl_model", side_effect=RuntimeError(secret)), \\
-             self.assertLogs("web.ml_routes", level="ERROR"):
+        with patch("ml.rl.runner.train_rl_model", side_effect=RuntimeError(secret)), self.assertLogs("web.ml_routes", level="ERROR"):
             with self.assertRaises(HTTPException) as raised:
                 ml_routes.train_rl_trading_agent(request)
 
