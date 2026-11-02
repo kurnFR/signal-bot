@@ -298,7 +298,7 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
             self._assert_audit_failure_rolls_back(
                 lambda: auth_routes.change_password(
                     auth_routes.ChangePasswordRequest(old_password="old", new_password="Strong-New-Pass!"),
-                    request, {"id": 7, "username": "trader"},
+                    request, {"id": 7, "username": "trader", "role": "trader", "session_version": 0},
                 ), conn,
             )
 
