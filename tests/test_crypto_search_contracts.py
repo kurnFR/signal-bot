@@ -96,6 +96,24 @@ class TestCryptoSearchContracts(unittest.TestCase):
         spot_mock.assert_not_called()
         futures_mock.assert_not_called()
 
+    def test_search_rejects_query_longer_than_eighty_characters(self):
+        with patch.object(crypto_routes, "get_spot_tickers") as spot_mock, \
+             patch.object(crypto_routes, "get_futures_tickers") as futures_mock:
+            response = self._get("/api/crypto/search?q=" + ("A" * 81))
+
+        self.assertEqual(response.status_code, 422)
+        spot_mock.assert_not_called()
+        futures_mock.assert_not_called()
+
+    def test_popular_endpoint_rejects_unknown_market(self):
+        with patch.object(crypto_routes, "get_spot_tickers") as spot_mock, \
+             patch.object(crypto_routes, "get_futures_tickers") as futures_mock:
+            response = self._get("/api/crypto/popular?market=all")
+
+        self.assertEqual(response.status_code, 422)
+        spot_mock.assert_not_called()
+        futures_mock.assert_not_called()
+
     def test_popular_endpoint_returns_top_fifteen_for_requested_market(self):
         spot = [_ticker(f"COIN{i}USDT", "spot", 1000 - i) for i in range(20)]
         futures = [_ticker(f"FUT{i}USDT", "futures", 2000 - i) for i in range(18)]

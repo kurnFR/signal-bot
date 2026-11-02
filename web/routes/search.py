@@ -81,7 +81,7 @@ def get_futures_tickers():
 
 @router.get("/search")
 def search_crypto(
-    q: str = Query("", description="Symbol or keyword to search"),
+    q: str = Query("", max_length=80, description="Symbol or keyword to search (max 80 characters)"),
     market: Literal["all", "spot", "futures"] = Query("all", description="Market: spot, futures, or all"),
     limit: int = Query(25, ge=1, le=100),
 ):
@@ -110,7 +110,7 @@ def search_crypto(
 
 
 @router.get("/popular")
-def popular_crypto(market: str = Query("spot")):
+def popular_crypto(market: Literal["spot", "futures"] = Query("spot")):
     if market == "futures":
         items = get_futures_tickers()[:15]
     else:
