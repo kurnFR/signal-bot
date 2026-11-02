@@ -1641,7 +1641,7 @@ def get_strategy_auto_promotion_policy():
                     f"Invalid persisted auto-promotion policy: {key} is outside the supported range"
                 )
             policy[key] = value
-        policy["updated_at"] = str(policy["updated_at"]) if policy.get("updated_at") else None
+        policy["updated_at"] = str(policy.get("updated_at")) if policy.get("updated_at") else None
         return policy
     finally:
         conn.close()
