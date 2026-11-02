@@ -22,6 +22,18 @@ from fastapi import Request
 router = APIRouter(prefix="/api", tags=["authentication-and-users"])
 logger = logging.getLogger("web.auth_routes")
 
+def _get_required_connection():
+    """Acquire DB storage for a security-sensitive route or fail with a controlled 503."""
+    try:
+        return get_pool().get_connection()
+    except Exception as exc:
+        logger.error("Required security database connection unavailable (%s)", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="Security audit storage is temporarily unavailable. Please retry shortly.",
+        ) from exc
+
+
 def _write_required_audit(action: str, username: str, user_id: Optional[int] = None,
                           details: Optional[dict] = None, ip_address: Optional[str] = None) -> None:
     """Persist a mandatory security event before returning an auth outcome."""
@@ -149,7 +161,7 @@ def login(req: LoginRequest, request: Request):
     conn = None
     cur = None
     try:
-        conn = get_pool().get_connection()
+        conn = _get_required_connection()
         cur = conn.cursor(dictionary=True)
         cur.execute(
             """
@@ -245,7 +257,7 @@ def logout(request: Request, current_user: dict = Depends(get_current_user)):
     client_ip = request.client.host if request.client else "unknown"
     conn = None
     try:
-        conn = get_pool().get_connection()
+        conn = _get_required_connection()
         cur = conn.cursor()
         if token:
             try:
@@ -300,7 +312,7 @@ def get_current_user_profile(current_user: dict = Depends(get_current_user)):
 
 @router.post("/auth/change-password")
 def change_password(req: ChangePasswordRequest, request: Request, current_user: dict = Depends(get_current_user)):
-    conn = get_pool().get_connection()
+    conn = _get_required_connection()
     try:
         cur = conn.cursor(dictionary=True)
         # Fetch current hash using parameterized query
@@ -329,7 +341,7 @@ def change_password(req: ChangePasswordRequest, request: Request, current_user: 
 
 @router.get("/auth/audit-logs")
 def get_audit_logs(limit: int = 50, current_user: dict = Depends(require_admin)):
-    conn = get_pool().get_connection()
+    conn = _get_required_connection()
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
@@ -361,7 +373,7 @@ def get_audit_logs(limit: int = 50, current_user: dict = Depends(require_admin))
 # ============================================================================
 @router.get("/users")
 def list_users(admin: dict = Depends(require_admin)):
-    conn = get_pool().get_connection()
+    conn = _get_required_connection()
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
@@ -401,7 +413,7 @@ def create_user(req: CreateUserRequest, admin: dict = Depends(require_admin)):
     _validate_new_password(req.password, clean_username)
     new_hash = hash_password(req.password)
 
-    conn = get_pool().get_connection()
+    conn = _get_required_connection()
     try:
         cur = conn.cursor(dictionary=True)
         # Check collision using parameterized query
@@ -438,7 +450,7 @@ def create_user(req: CreateUserRequest, admin: dict = Depends(require_admin)):
 
 @router.post("/users/{user_id}/reset-password")
 def reset_user_password(user_id: int, req: ResetPasswordRequest, admin: dict = Depends(require_admin)):
-    conn = get_pool().get_connection()
+    conn = _get_required_connection()
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute("SELECT id, username FROM users WHERE id = %s", (user_id,))
@@ -467,7 +479,7 @@ def reset_user_password(user_id: int, req: ResetPasswordRequest, admin: dict = D
 
 @router.put("/users/{user_id}")
 def update_user(user_id: int, req: UpdateUserRequest, admin: dict = Depends(require_admin)):
-    conn = get_pool().get_connection()
+    conn = _get_required_connection()
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute("SELECT id, username, role, is_active FROM users WHERE id = %s", (user_id,))
@@ -509,7 +521,7 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
     if user_id == admin["id"]:
         raise HTTPException(status_code=400, detail="Cannot delete your own admin account")
 
-    conn = get_pool().get_connection()
+    conn = _get_required_connection()
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute("SELECT username FROM users WHERE id = %s", (user_id,))
