@@ -31,12 +31,15 @@ class TestPaperConfigFieldLimits(unittest.TestCase):
         )
         for change in invalid_payloads:
             with self.subTest(change=next(iter(change))):
+                payload = {
+                    "symbol": "BTCUSDT",
+                    "market": "spot",
+                    "timeframe": "1d",
+                    "strategy_name": "trend_ema_v1",
+                }
+                payload.update(change)
                 with self.assertRaises(ValidationError):
-                    PaperConfigRequest(
-                        symbol="BTCUSDT",
-                        strategy_name="trend_ema_v1",
-                        **change,
-                    )
+                    PaperConfigRequest(**payload)
 
     def test_deploy_request_bounds_symbol_and_model_id(self):
         DeployStrategyRequest(
