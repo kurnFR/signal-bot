@@ -299,12 +299,9 @@ def retailbot2_control_set(req: BotControlRequest):
 @router.get("/screener/status")
 def screener_status():
     try:
-        try:
-            control = get_screener_control()
-        except Exception:
-            # The screener creates its control table on first startup; a missing
-            # table therefore means "not started yet", not a dashboard failure.
-            control = {"enabled": True}
+        # Screener control and heartbeat state are migration-managed. Do not
+        # report a synthetic enabled state when the schema/database is unavailable.
+        control = get_screener_control()
         status = get_screener_status()
         status["enabled"] = bool(control.get("enabled", True))
         status["timeframe"] = status.get("timeframe") or os.getenv("TIMEFRAME", "1m")
@@ -312,7 +309,10 @@ def screener_status():
         return status
     except Exception as e:
         logger.error("screener_status failed (%s)", type(e).__name__)
-        raise HTTPException(status_code=500, detail="Failed to load screener status")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to load screener status; verify database connectivity and run 'python -m db.migrate'",
+        )
 
 
 @router.get("/screener/control")
