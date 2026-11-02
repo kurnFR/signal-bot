@@ -67,7 +67,7 @@ def _commit_with_audit(conn, cur, action: str, username: str,
 
 USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]{3,30}$")
 
-# Bound untrusted credential fields before database lookups and PBKDF2 work.
+# Bound untrusted credential fields before handler-level database lookups and PBKDF2 work.
 MAX_USERNAME_LENGTH = 30
 MAX_EMAIL_LENGTH = 254
 MAX_PASSWORD_LENGTH = 1024
