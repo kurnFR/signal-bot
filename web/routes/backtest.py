@@ -1257,9 +1257,9 @@ def run_all_strategies(
 
 @router.post("/ai-insight")
 def get_standalone_ai_insight(
-    symbol: str = Query("BTCUSDT"),
-    market: str = Query("spot"),
-    timeframe: str = Query("1d"),
+    symbol: str = Query("BTCUSDT", max_length=20),
+    market: str = Query("spot", max_length=7),
+    timeframe: str = Query("1d", max_length=10),
     strategy: str = Query("confluence_ensemble_v1", max_length=50),
 ):
     """Provides deep AI quantitative diagnosis for a specific strategy."""
