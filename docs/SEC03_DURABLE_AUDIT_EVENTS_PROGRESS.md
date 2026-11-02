@@ -142,3 +142,17 @@ Login attempt reservation/finalization remains its own shared-rate-limit operati
 - The first CI attempt on test commit `ecabf92732420495def77e5d1f1862f19f18a05e` failed during test collection due to a malformed escaped line continuation in the newly added test. This was a test syntax error; application tests did not execute in that workflow.
 - Corrected the test to use nested context managers in commit `209ac3df7d10f2451e26c2a12465ca78100f6946`.
 - Fresh CI workflows are running on the corrected commit. Previous green counts remain valid only for the earlier `9ccba6d` code candidate; do not claim the latest hardening has passed until the new workflows finish.
+
+
+## Corrected hardening candidate CI passed (2026-11-02)
+
+- Latest code/test candidate: `209ac3df7d10f2451e26c2a12465ca78100f6946`.
+- Latest branch head after documentation-only update: `156e1ec654187ff12216dfb26f170ff029254696`.
+- Full pytest run [41385391586](https://github.com/kurnFR/signal-bot/actions/runs/41385391586): **823 passed, 17 skipped, 6 warnings** in 5.82s. This includes the new DB connection-acquisition 503 regression.
+- Unit/screener workflow [41385391469](https://github.com/kurnFR/signal-bot/actions/runs/41385391469): **105 passed**.
+- Isolated MariaDB integration in the same workflow: **36 passed**.
+- RetailBot accounting/parity workflow [41385391576](https://github.com/kurnFR/signal-bot/actions/runs/41385391576): **36 passed**; screener regression: **27 passed**.
+- All three required workflows completed successfully on the corrected code candidate. The earlier test-collection failure was fixed before this green run.
+- No frontend files changed; frontend workflow remains path-filtered and was not triggered.
+- No production DB, deployment, workers, trades, or Telegram sends occurred.
+- The latest branch is 14 commits ahead of master and 0 behind; PR #607 remains draft/open/unmerged. Independent review and explicit user release approval remain mandatory.
