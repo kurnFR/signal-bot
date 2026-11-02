@@ -106,4 +106,21 @@ Login attempt reservation/finalization remains its own shared-rate-limit operati
 - Updated the `LOGIN_FAILED` event to include the resolved user ID for inactive accounts while keeping it null for genuinely unknown usernames.
 - Extended the unknown/inactive login audit-failure regression to assert the exact user ID passed to the audit writer for both cases.
 - Follow-up code/test commits: `681a76488f0b4749900b574dbbb0ba2dcb86b2cd`, `9ccba6d67272e31d9ad616bf89a3f462d712cb76`.
-- CI for this follow-up is pending; do not treat the earlier green run on `ddad544` as validation of these latest changes.
+- CI for this follow-up is recorded below; the earlier green run on `ddad544` did not validate these latest changes.
+
+
+## Follow-up CI result and current gate (2026-11-02)
+
+- Latest tested code candidate: `9ccba6d67272e31d9ad616bf89a3f462d712cb76`. The branch then received a documentation-only update; PR metadata reports latest branch head `c8c40c6e06065cda03d2ce40498ae004ff8f5421`.
+- GitHub Actions completed successfully for the follow-up code candidate:
+  - Full pytest run [41379936285](https://github.com/kurnFR/signal-bot/actions/runs/41379936285): **822 passed, 17 skipped, 6 warnings**; the workflow collected 839 items and completed in 3.63s.
+  - Unit/screener job [41379936269](https://github.com/kurnFR/signal-bot/actions/runs/41379936269): **105 passed**.
+  - Isolated MariaDB integration in the same workflow: **36 passed**.
+  - RetailBot accounting/parity [41379936264](https://github.com/kurnFR/signal-bot/actions/runs/41379936264): **36 passed**; screener regression: **27 passed**.
+- The workflow jobs completed successfully. MariaDB integration used the isolated `signal_bot_test` service; no production database was accessed.
+- The tested follow-up is the inactive-account audit identity correction: known inactive accounts retain their resolved database user ID in `LOGIN_FAILED`; unknown usernames retain null.
+- Current PR comparison: **8 commits ahead, 0 behind**, merge base `823b5d2837383839c5c9acd0e0dacce62a602a25`. Changed-file scope remains four files.
+- Review inspection after the follow-up found **no submitted reviews and no inline review threads**. The PR remains draft, open, and unmerged.
+- The frontend workflow remains path-filtered and was not triggered because this PR changes no frontend files. Frontend validation was green on the post-SEC-02 master run, not rerun specifically for SEC-03.
+- Remaining gate: obtain an independent security review and explicit release approval. Green CI is necessary but does not substitute for that review.
+- No merge, deployment, production worker, live trade, or Telegram send was performed.
