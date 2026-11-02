@@ -489,11 +489,12 @@ def train_rl_trading_agent(req: RLTrainRequest):
 def list_rl_models():
     """List trained RL models without following paths outside ml_models/rl."""
     models_root = ML_MODELS_DIR.resolve()
+    requested_rl_dir = models_root / "rl"
     try:
-        rl_dir = (models_root / "rl").resolve(strict=True)
+        rl_dir = requested_rl_dir.resolve(strict=True)
     except OSError:
         return {"models": []}
-    if rl_dir.parent != models_root or not rl_dir.is_dir():
+    if rl_dir != requested_rl_dir or not rl_dir.is_dir():
         logger.warning("Skipping RL model listing because its artifact directory is not contained in ml_models/")
         return {"models": []}
 
