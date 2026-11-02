@@ -80,5 +80,20 @@ export async function logout(): Promise<void> {
 }
 
 export async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
-  await authPost("/api/auth/change-password", { old_password: oldPassword, new_password: newPassword });
+  const payload = await authPost<{ token?: unknown }>(
+    "/api/auth/change-password",
+    { old_password: oldPassword, new_password: newPassword },
+  );
+  if (typeof payload.token !== "string" || !payload.token.trim()) {
+    try { window.localStorage.removeItem("token"); } catch { /* Expired session event still resets auth state. */ }
+    window.dispatchEvent(new Event("signal-bot:session-expired"));
+    throw new AuthRequestError(502, "Password changed, but a renewed session was not returned. Sign in again.");
+  }
+  try {
+    window.localStorage.setItem("token", payload.token.trim());
+  } catch {
+    try { window.localStorage.removeItem("token"); } catch { /* Continue to reset in-memory auth state. */ }
+    window.dispatchEvent(new Event("signal-bot:session-expired"));
+    throw new AuthRequestError(500, "Password changed, but the renewed session could not be stored. Sign in again.");
+  }
 }

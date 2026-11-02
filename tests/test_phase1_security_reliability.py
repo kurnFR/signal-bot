@@ -254,6 +254,36 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         mock_conn.rollback.assert_called_once()
         mock_conn.commit.assert_not_called()
 
+    def test_password_change_rotates_session_and_returns_replacement_token(self):
+        conn, cur = MagicMock(), MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.return_value = {"password_hash": "old-hash"}
+        request = MagicMock()
+        request.client.host = "127.0.0.1"
+        current_user = {
+            "id": 7, "username": "trader", "role": "trader", "session_version": 4,
+        }
+        with patch("web.routes.auth_routes.get_pool") as pool, \
+             patch("web.routes.auth_routes.verify_password", side_effect=[True, False]), \
+             patch("web.routes.auth_routes._validate_new_password"), \
+             patch("web.routes.auth_routes.hash_password", return_value="new-hash"):
+            pool.return_value.get_connection.return_value = conn
+            response = auth_routes.change_password(
+                auth_routes.ChangePasswordRequest(
+                    old_password="old", new_password="Strong-New-Pass!"
+                ),
+                request,
+                current_user,
+            )
+
+        update_sql = next(
+            call.args[0] for call in cur.execute.call_args_list
+            if "UPDATE users SET password_hash" in call.args[0]
+        )
+        self.assertIn("session_version = session_version + 1", update_sql)
+        self.assertEqual(_decode_token_payload_unverified(response["token"])["session_version"], 5)
+        conn.commit.assert_called_once()
+
     def test_password_change_rolls_back_when_audit_insert_fails(self):
         conn, cur = MagicMock(), MagicMock()
         conn.cursor.return_value = cur
@@ -268,7 +298,7 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
             self._assert_audit_failure_rolls_back(
                 lambda: auth_routes.change_password(
                     auth_routes.ChangePasswordRequest(old_password="old", new_password="Strong-New-Pass!"),
-                    request, {"id": 7, "username": "trader"},
+                    request, {"id": 7, "username": "trader", "role": "trader", "session_version": 0},
                 ), conn,
             )
 

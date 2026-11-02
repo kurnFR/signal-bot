@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchAuthUser, login, logout, AuthRequestError } from "./auth";
+import { fetchAuthUser, login, logout, changePassword, AuthRequestError } from "./auth";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -38,6 +38,24 @@ describe("authentication response contracts", () => {
     stubPayload({ token: "session-token", user: validUser });
     await expect(login("trader01", "secret")).resolves.toEqual({ token: "session-token", user: validUser });
     expect(window.localStorage.getItem("token")).toBe("session-token");
+  });
+
+  it("stores the renewed token returned by a successful password change", async () => {
+    window.localStorage.setItem("token", "temporary-session-token");
+    const fetchMock = stubPayload({ status: "success", token: "renewed-session-token" });
+    await expect(changePassword("temporary-password", "new-strong-password")).resolves.toBeUndefined();
+    expect(window.localStorage.getItem("token")).toBe("renewed-session-token");
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/change-password", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({ Authorization: "Bearer temporary-session-token" }),
+    }));
+  });
+
+  it("clears the invalidated token when password change omits the renewed token", async () => {
+    window.localStorage.setItem("token", "temporary-session-token");
+    stubPayload({ status: "success" });
+    await expect(changePassword("temporary-password", "new-strong-password")).rejects.toBeInstanceOf(AuthRequestError);
+    expect(window.localStorage.getItem("token")).toBeNull();
   });
 
   it("retains the token when server-side logout fails and clears it after a successful retry", async () => {

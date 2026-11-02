@@ -329,15 +329,24 @@ def change_password(req: ChangePasswordRequest, request: Request, current_user: 
         _validate_new_password(req.new_password, current_user["username"])
 
         new_hash = hash_password(req.new_password)
+        next_session_version = int(current_user.get("session_version", 0)) + 1
+        renewed_token = create_access_token(
+            current_user["id"], current_user["username"], current_user["role"],
+            session_version=next_session_version,
+        )
         cur.execute(
-            "UPDATE users SET password_hash = %s, must_change_password = 0, updated_at = NOW() WHERE id = %s",
+            "UPDATE users SET password_hash = %s, must_change_password = 0, session_version = session_version + 1, updated_at = NOW() WHERE id = %s",
             (new_hash, current_user["id"])
         )
         client_ip = request.client.host if request.client else "unknown"
         _commit_with_audit(
             conn, cur, "PASSWORD_CHANGED", current_user["username"], current_user["id"], None, client_ip
         )
-        return {"status": "success", "message": "Password changed successfully"}
+        return {
+            "status": "success",
+            "message": "Password changed successfully",
+            "token": renewed_token,
+        }
     finally:
         conn.close()
 
