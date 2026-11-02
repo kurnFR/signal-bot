@@ -135,3 +135,10 @@ Login attempt reservation/finalization remains its own shared-rate-limit operati
 - Regression-test commit: `ecabf92732420495def77e5d1f1862f19f18a05e`.
 - Fresh CI for this candidate has **not yet appeared in GitHub Actions** at the time of this update. Do not treat the previous 822-pass result as validation of these latest code/test changes.
 - The PR remains draft and unmerged. Require green CI on the latest code head before any release consideration.
+
+
+## CI correction for connection-acquisition regression (2026-11-02)
+
+- The first CI attempt on test commit `ecabf92732420495def77e5d1f1862f19f18a05e` failed during test collection due to a malformed escaped line continuation in the newly added test. This was a test syntax error; application tests did not execute in that workflow.
+- Corrected the test to use nested context managers in commit `209ac3df7d10f2451e26c2a12465ca78100f6946`.
+- Fresh CI workflows are running on the corrected commit. Previous green counts remain valid only for the earlier `9ccba6d` code candidate; do not claim the latest hardening has passed until the new workflows finish.
