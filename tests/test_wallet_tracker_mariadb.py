@@ -264,7 +264,7 @@ class TestMariaDBWalletAlertDigest(unittest.TestCase):
             now = store._utcnow() - timedelta(minutes=5)
             rows = []
             for index, (side, value) in enumerate((
-                ("buy", 12000), ("buy", 25000), ("sell", 9000), ("buy", 14000)
+                ("buy", 12000), ("buy", 25000), ("sell", 19000), ("buy", 14000)
             )):
                 tx_hash = "0x" + uuid.uuid4().hex + uuid.uuid4().hex
                 rows.append((
@@ -321,12 +321,12 @@ class TestMariaDBWalletAlertDigest(unittest.TestCase):
         self.assertEqual(len(digest_rows), 1)
         digest = digest_rows[0]
         self.assertEqual(digest["swap_count"], 4)
-        self.assertEqual(digest["usd_value"], 60000.0)
+        self.assertEqual(digest["usd_value"], 70000.0)
         self.assertEqual(digest["buy_usd_value"], 51000.0)
-        self.assertEqual(digest["sell_usd_value"], 9000.0)
+        self.assertEqual(digest["sell_usd_value"], 19000.0)
         message = WalletTelegramNotifier.format_message(digest)
         self.assertIn("<b>Swaps:</b> 4", message)
-        self.assertIn("$60,000.00", message)
+        self.assertIn("$70,000.00", message)
 
         self.assertTrue(store.mark_wallet_alert_attempt(digest, success=True))
         conn = self.pool.get_connection()
