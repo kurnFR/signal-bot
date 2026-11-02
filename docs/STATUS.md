@@ -1,6 +1,6 @@
 # Status
 
-What exists and works today, and the known gaps. Reconciled against current `master` on 2026-10-25; historical verification claims should still be checked against the latest CI and runtime evidence. Keep this file short: when a gap is fixed, delete the line; when you add a capability, add one row. Do not add dated reviews or history here (use pull-request descriptions).
+What exists and works today, and the known gaps. Reconciled against current `master` on 2026-11-02; historical verification claims should still be checked against the latest CI and runtime evidence. Keep this file short: when a gap is fixed, delete the line; when you add a capability, add one row. Do not add dated reviews or history here (use pull-request descriptions).
 
 ## 1. Implemented
 
@@ -18,7 +18,7 @@ What exists and works today, and the known gaps. Reconciled against current `mas
 | Web and security | FastAPI app, central fail-closed authentication, three roles, token revocation, audit log, login rate limiting, random first-admin password, ML experiment path containment | [SECURITY.md](SECURITY.md) |
 | Operations | `run_all.py` supervisor with restart backoff; CI on Python 3.11 including a MariaDB integration job | `.github/workflows/` |
 
-Verified this session: a fresh database built from the README steps boots the app and the admin login works; all 74 API operations reject unauthenticated calls except login; the viewer role can call 0 of 29 mutating operations; the paper circuit breaker allows entries on an empty database (now covered by tests).
+Verified by current route-policy tests: all registered API operations require authentication except login; the viewer role is denied registered mutations; unknown/unclassified GET routes fail closed while unregistered URLs retain FastAPI's normal 404. The latest master commit `73e97448` passed full pytest, unit tests, Wallet Tracker MariaDB integration, and RetailBot accounting regression. This does not establish live-server acceptance or deployment readiness.
 
 ## 2. Known gaps
 
@@ -31,14 +31,18 @@ Verified this session: a fresh database built from the README steps boots the ap
 - **ML runtime artifact reads and writes fail closed.** PR #266 resolves artifact paths and rejects traversal/symlink escapes; PR #267 revalidates manifest ID, eligibility flag, and test metrics before paper-runtime loading; PR #269 writes weights/manifests atomically and preserves existing artifacts; PR #271 rejects external symlinks when the reusable model store reads weights or manifests.
 - **Metric population.** `compute_metrics` now reports `scored_trades` (the population used for win rate, expectancy and profit factor) next to `total_trades`.
 - **First-login password change is enforced** by the API (every route except `/api/auth/me`, `/logout`, `/change-password` returns 403 `password_change_required`) and by a blocking dashboard dialog. New passwords must be at least 10 characters and not trivially weak.
-- **Login rate limit is durable** (`login_attempts` table, shared by all workers, survives restarts); it falls back to in-memory if the database is unavailable.
+- **Session invalidation is per-user and fail-closed.** Admin password reset, admin role/active-state changes, and self-service password changes increment `users.session_version`; older signed tokens are rejected. Password changes return a replacement token, which both React and legacy dashboard clients store (PRs #612 and #614).
+- **Logout failure is visible and retryable.** If the server cannot confirm token revocation, the frontend keeps the session and offers a retry on both the dashboard and forced-password-change screen (PRs #613 and #615).
+- **API authentication is bearer-only.** The unused `auth_token` cookie fallback was removed after repository-wide search found no cookie issuer or cookie-only client; cookie-only requests receive HTTP 401 (PR #617).
+- **Revocation cache entries expire with their tokens.** Local revoked-token cache entries are removed after token expiry, with periodic stale-entry pruning; durable MariaDB revocation remains authoritative (PR #611).
+- **Login rate limit is durable and fail-closed** (`login_attempts` table, shared by all workers, survives restarts); unavailable shared storage blocks login with HTTP 503 rather than falling back to process-local counters (PR #606).
 - **Bind address is explicit.** `run_web.py` / `web/app.py` default to `127.0.0.1`; set `SIGNAL_BOT_HOST=0.0.0.0` (or `--host`) deliberately, behind TLS and a firewall.
 - **Master-data job state is persisted** (`background_jobs` table). Jobs a previous process left `queued`/`running` are shown as `interrupted` after a restart.
 - **Migration runner.** `python -m db.migrate` (also run automatically by `run_all.py`) applies versioned, checksummed migrations under an advisory lock, distinguishes fresh installs from upgrades by checking for any existing application tables (not just `ohlcv`), and adopts hand-migrated databases. A repair migration now adds each WIB generated column in a separate statement, so a duplicate column cannot block its missing sibling. Regression coverage includes a partial database with application tables but no `ohlcv` table. Opt-in MariaDB migration tests now create per-run unique database names and only drop the database created by that test, avoiding collisions with pre-existing databases.
 - **Emergency stop is now shared across processes.** It was a Python global in the web process, so the dashboard's Emergency Stop never reached the separate paper-engine process. It is now stored in `system_flags` (migration 015) and read by the engine's circuit breaker; it survives restarts. Verified live with a second process.
 - **Status bar for every role.** `/api/system/status` (any signed-in user, no connection details) feeds the status bar; the detailed `/api/settings/status` stays admin-only and no longer returns the DB username. Viewers and traders previously saw a false "database unavailable".
 - **Dashboard fixes found by live browser testing:** data loads only after a usable sign-in (no more 401 storms for anonymous visitors); the active tab loads right after login; Settings no longer crashes on a removed element; admin user-management errors are readable toasts instead of `[object Object]` alerts; weak-password variants such as `password1234` are rejected.
-- **Route authorization sweep.** `tests/test_route_authorization_sweep.py` is generated from the live route table.
+- **Route authorization is explicit and fail-closed.** Viewer-readable GET routes are enumerated in `AUTHENTICATED_READ_PATHS`; new registered GET routes remain denied until reviewed. The route sweep checks every registered GET route's viewer decision and denies unknown GET/mutation routes (PR #610).
 
 **Still open**
 
