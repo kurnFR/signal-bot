@@ -1270,15 +1270,12 @@ def _retailbot2_lifecycle_flag(value):
 
 
 def ensure_retailbot2_lifecycle_table():
-    """Ensure lifecycle table exists during server startup or migration."""
-    conn = get_retailbot2_pool().get_connection()
-    try:
-        cur = conn.cursor()
-        _ensure_retailbot2_strategy_lifecycle_table(cur)
-        conn.commit()
-        cur.close()
-    finally:
-        conn.close()
+    """Backward-compatible alias for read-only RetailBot2 schema verification.
+
+    The schema is managed by db.migrate; this legacy entry point must never
+    issue DDL or DML during runtime startup.
+    """
+    return verify_retailbot2_schema()
 
 
 def get_retailbot2_strategy_lifecycle_settings():
