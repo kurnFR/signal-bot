@@ -10,7 +10,9 @@ from datetime import datetime, timedelta, timezone
 import fcntl
 import json
 import logging
+import os
 from pathlib import Path
+import tempfile
 from typing import Any, Iterator, Mapping
 
 from db.db import fetch_ohlcv_with_features_df
@@ -41,6 +43,42 @@ def _retraining_cycle_lock() -> Iterator[bool]:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
+def _atomic_write_json(path: Path, data: Any) -> None:
+    """Replace a JSON state file atomically so crashes cannot leave partial JSON."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            json.dump(data, temp_file, indent=2)
+            temp_file.write("\n")
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+
+        os.replace(temp_path, path)
+        temp_path = None
+
+        # Persist the directory entry as well as the file contents on POSIX.
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
 def _load_registry() -> dict[str, Any]:
     if not REGISTRY_PATH.exists():
         return {
@@ -57,12 +95,10 @@ def _load_registry() -> dict[str, Any]:
 
 
 def _save_registry(data: dict[str, Any]) -> None:
-    REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    REGISTRY_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    _atomic_write_json(REGISTRY_PATH, data)
 
 
 def _append_audit_log(entry: dict[str, Any]) -> None:
-    AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     history = []
     if AUDIT_LOG_PATH.exists():
         try:
@@ -70,7 +106,7 @@ def _append_audit_log(entry: dict[str, Any]) -> None:
         except Exception:
             history = []
     history.insert(0, entry)
-    AUDIT_LOG_PATH.write_text(json.dumps(history[:200], indent=2), encoding="utf-8")
+    _atomic_write_json(AUDIT_LOG_PATH, history[:200])
 
 
 def register_model_for_retraining(
