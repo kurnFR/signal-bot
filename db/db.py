@@ -1527,55 +1527,79 @@ _STRATEGY_AUTO_PROMOTION_DEFAULTS = {
 }
 
 
-def _ensure_strategy_auto_promotion_tables(cur):
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS strategy_auto_promotion_policy (
-            id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
-            enabled TINYINT(1) NOT NULL DEFAULT 0,
-            min_test_trades INT UNSIGNED NOT NULL DEFAULT 30,
-            min_profit_factor DECIMAL(8,4) NOT NULL DEFAULT 1.2000,
-            min_expectancy_r DECIMAL(8,4) NOT NULL DEFAULT 0.0500,
-            max_drawdown_r DECIMAL(8,4) NOT NULL DEFAULT 8.0000,
-            min_rank_score DECIMAL(8,4) NOT NULL DEFAULT 0.1000,
-            require_holdout TINYINT(1) NOT NULL DEFAULT 1,
-            send_telegram TINYINT(1) NOT NULL DEFAULT 1,
-            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB
-    """)
-    cur.execute("""
-        INSERT IGNORE INTO strategy_auto_promotion_policy
-            (id, enabled, min_test_trades, min_profit_factor, min_expectancy_r,
-             max_drawdown_r, min_rank_score, require_holdout, send_telegram)
-        VALUES (1, 0, 30, 1.2000, 0.0500, 8.0000, 0.1000, 1, 1)
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS strategy_promotion_audit (
-            decision_hash CHAR(64) NOT NULL PRIMARY KEY,
-            symbol VARCHAR(20) NOT NULL,
-            market VARCHAR(12) NOT NULL,
-            timeframe VARCHAR(10) NOT NULL,
-            data_segment VARCHAR(12) NOT NULL,
-            strategy_name VARCHAR(80) NOT NULL,
-            status VARCHAR(24) NOT NULL,
-            reason VARCHAR(500) NOT NULL,
-            metrics_json LONGTEXT NOT NULL,
-            criteria_json LONGTEXT NOT NULL,
-            paper_config_id INT NULL,
-            telegram_result VARCHAR(32) NULL,
-            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            KEY idx_strategy_promotion_audit_created (created_at),
-            KEY idx_strategy_promotion_audit_strategy (strategy_name, created_at)
-        ) ENGINE=InnoDB
-    """)
+def verify_strategy_auto_promotion_schema():
+    """Verify migration-managed auto-promotion tables without issuing DDL/DML."""
+    conn = get_pool().get_connection()
+    cur = None
+    try:
+        cur = conn.cursor(dictionary=True)
+        required_tables = ("strategy_auto_promotion_policy", "strategy_promotion_audit")
+        placeholders = ", ".join(["%s"] * len(required_tables))
+        cur.execute(
+            f"""SELECT TABLE_NAME AS table_name
+                FROM information_schema.tables
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ({placeholders})""",
+            required_tables,
+        )
+        existing = {str(row["table_name"]) for row in cur.fetchall()}
+        missing_tables = sorted(set(required_tables) - existing)
+        if missing_tables:
+            raise RuntimeError(
+                "Auto-promotion schema is missing tables "
+                f"({', '.join(missing_tables)}); run 'python -m db.migrate' before startup."
+            )
+
+        required_columns = {
+            "strategy_auto_promotion_policy": {
+                "id", "enabled", "min_test_trades", "min_profit_factor",
+                "min_expectancy_r", "max_drawdown_r", "min_rank_score",
+                "require_holdout", "send_telegram", "updated_at",
+            },
+            "strategy_promotion_audit": {
+                "decision_hash", "symbol", "market", "timeframe", "data_segment",
+                "strategy_name", "status", "reason", "metrics_json", "criteria_json",
+                "paper_config_id", "telegram_result", "created_at", "updated_at",
+            },
+        }
+        conditions = []
+        params = []
+        for table, columns in required_columns.items():
+            for column in sorted(columns):
+                conditions.append("(TABLE_NAME = %s AND COLUMN_NAME = %s)")
+                params.extend((table, column))
+        cur.execute(
+            """SELECT TABLE_NAME AS table_name, COLUMN_NAME AS column_name
+               FROM information_schema.columns
+               WHERE TABLE_SCHEMA = DATABASE() AND ("""
+            + " OR ".join(conditions)
+            + ")",
+            tuple(params),
+        )
+        actual = {(str(row["table_name"]), str(row["column_name"])) for row in cur.fetchall()}
+        missing_columns = [
+            f"{table}.{column}"
+            for table, columns in required_columns.items()
+            for column in sorted(columns)
+            if (table, column) not in actual
+        ]
+        if missing_columns:
+            raise RuntimeError(
+                "Auto-promotion schema is outdated "
+                f"({', '.join(missing_columns)}); run 'python -m db.migrate' before startup."
+            )
+    finally:
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
 
 
 def get_strategy_auto_promotion_policy():
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        _ensure_strategy_auto_promotion_tables(cur)
-        conn.commit()
         cur.execute("SELECT * FROM strategy_auto_promotion_policy WHERE id=1")
         row = cur.fetchone() or {}
         cur.close()
@@ -1663,7 +1687,6 @@ def set_strategy_auto_promotion_policy(policy):
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
-        _ensure_strategy_auto_promotion_tables(cur)
         cur.execute("""
             INSERT INTO strategy_auto_promotion_policy
                 (id, enabled, min_test_trades, min_profit_factor, min_expectancy_r,
@@ -1697,8 +1720,6 @@ def get_strategy_promotion_decision(decision_hash):
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        _ensure_strategy_auto_promotion_tables(cur)
-        conn.commit()
         cur.execute(
             "SELECT decision_hash, status, reason, paper_config_id, telegram_result "
             "FROM strategy_promotion_audit WHERE decision_hash=%s",
@@ -1717,7 +1738,6 @@ def record_strategy_promotion_decision(decision):
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
-        _ensure_strategy_auto_promotion_tables(cur)
         cur.execute("""
             INSERT IGNORE INTO strategy_promotion_audit
                 (decision_hash, symbol, market, timeframe, data_segment,
@@ -1766,7 +1786,6 @@ def get_strategy_promotion_audit(limit=25):
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        _ensure_strategy_auto_promotion_tables(cur)
         conn.commit()
         cur.execute("""
             SELECT decision_hash, symbol, market, timeframe, data_segment,
