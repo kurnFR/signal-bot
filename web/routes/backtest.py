@@ -939,8 +939,8 @@ def execute_walk_forward_backtest(req: WalkForwardBacktestRequest):
                 overrides=req.params,
             )
         except Exception as exc:
-            logger.error("Rolling walk-forward failed: %s", exc)
-            raise HTTPException(status_code=400, detail=str(exc))
+            logger.exception("Rolling walk-forward failed")
+            raise HTTPException(status_code=400, detail="Rolling walk-forward analysis failed; check server logs for diagnostics")
     else:
         res = run_walk_forward(
             symbol=req.symbol,
