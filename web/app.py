@@ -4,6 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
+from starlette.routing import Match
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -106,9 +107,84 @@ TRADER_OR_ADMIN_PREFIXES = (
     "/api/wallets",
 )
 
+# Viewer-readable GET routes are deliberately enumerated. New GET endpoints
+# remain denied until their data exposure and side effects are reviewed here.
+# Dynamic segments use FastAPI's {parameter} route-template notation.
+AUTHENTICATED_READ_PATHS = (
+    "/api/auth/me",
+    "/api/paper/positions",
+    "/api/paper/trades",
+    "/api/paper/orders",
+    "/api/paper/metrics",
+    "/api/paper/configs",
+    "/api/paper/circuit-breakers",
+    "/api/crypto/search",
+    "/api/crypto/popular",
+    "/api/master-data/coverage",
+    "/api/master-data/jobs",
+    "/api/master-data/jobs/{job_id}",
+    "/api/backtest/promotion-policy",
+    "/api/backtest/promotion-audit",
+    "/api/backtest/strategies",
+    "/api/backtest/history",
+    "/api/backtest/runs/{run_id}",
+    "/api/system/status",
+    "/api/telegram/status",
+    "/api/ml/experiments",
+    "/api/ml/experiments/{experiment_id}",
+    "/api/ml/models",
+    "/api/ml/retraining/status",
+    "/api/ml/rl/models",
+    "/api/news/stats",
+    "/api/news/signals",
+    "/api/news/events",
+    "/api/research/retailbot2/positions",
+    "/api/research/retailbot2/trades",
+    "/api/research/retailbot2/stats",
+    "/api/research/retailbot2/strategies",
+    "/api/research/retailbot2/control",
+    "/api/research/screener/signals",
+    "/api/research/screener/stats",
+    "/api/research/screener/status",
+    "/api/research/screener/control",
+    "/api/wallets/meta",
+    "/api/wallets/settings",
+    "/api/wallets/status",
+    "/api/wallets/positions",
+    "/api/wallets/token-flow",
+    "/api/wallets/events",
+    "/api/wallets/tracked",
+)
+
 
 def _is_prefix(path: str, prefixes: tuple[str, ...]) -> bool:
     return any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes)
+
+
+def _matches_route_template(path: str, templates: tuple[str, ...]) -> bool:
+    path_parts = path.strip("/").split("/")
+    for template in templates:
+        template_parts = template.strip("/").split("/")
+        if len(path_parts) != len(template_parts):
+            continue
+        if all(
+            expected == actual
+            or (expected.startswith("{") and expected.endswith("}"))
+            for actual, expected in zip(path_parts, template_parts)
+        ):
+            return True
+    return False
+
+
+def _matches_registered_api_path(scope) -> bool:
+    """Distinguish an unregistered URL (404) from a registered but denied route."""
+    for route in app.routes:
+        if not getattr(route, "path", "").startswith("/api/"):
+            continue
+        match, _ = route.matches(scope)
+        if match is not Match.NONE:
+            return True
+    return False
 
 
 def _role_allowed(method: str, path: str, role: str) -> bool:
@@ -122,21 +198,19 @@ def _role_allowed(method: str, path: str, role: str) -> bool:
         return role == "admin"
     if _is_prefix(path, ADMIN_OR_TRADER_PREFIXES):
         return role in ("admin", "trader")
-    if _is_prefix(path, TRADER_OR_ADMIN_PREFIXES):
-        if method.upper() == "GET":
-            return True
+    if _is_prefix(path, TRADER_OR_ADMIN_PREFIXES) and method.upper() != "GET":
         return role in ("admin", "trader")
-    if _is_prefix(path, RESEARCH_CONTROL_PREFIXES):
-        if method.upper() == "GET":
-            return True
+    if _is_prefix(path, RESEARCH_CONTROL_PREFIXES) and method.upper() != "GET":
         return role in ("admin", "trader")
     if path == "/api/telegram/status":
         return True
     if path == "/api/telegram/test":
         return role == "admin"
-    # Fail closed for new or unclassified mutation endpoints. A newly added
-    # POST/PUT/PATCH/DELETE route must be explicitly covered by a policy above.
-    return method.upper() == "GET"
+    # Read access is allowlisted after reviewing each route's data exposure
+    # and side effects. Unknown GET routes fail closed just like mutations.
+    if method.upper() == "GET":
+        return _matches_route_template(path, AUTHENTICATED_READ_PATHS)
+    return False
 
 
 @app.middleware("http")
@@ -155,6 +229,11 @@ async def api_security_boundary(request: Request, call_next):
                 content={"detail": "Password change required before continuing", "code": "password_change_required"},
             )
         if not _role_allowed(request.method, path, role):
+            # Preserve FastAPI's normal 404 for URLs that do not match any
+            # registered API route. Registered but unclassified GET routes
+            # remain denied by the explicit read allowlist.
+            if request.method.upper() == "GET" and not _matches_registered_api_path(request.scope):
+                return await call_next(request)
             return JSONResponse(
                 status_code=403,
                 content={"detail": "Insufficient privileges for this operation"},

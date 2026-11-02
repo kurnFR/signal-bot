@@ -47,7 +47,32 @@ class TestRouteAuthorizationSweep(unittest.TestCase):
                 _role_allowed(method, "/api/new-unclassified-control", "admin"),
                 f"unclassified {method} endpoint must fail closed",
             )
-        self.assertTrue(_role_allowed("GET", "/api/new-read-endpoint", "viewer"))
+        self.assertFalse(
+            _role_allowed("GET", "/api/new-read-endpoint", "viewer"),
+            "unclassified GET endpoints must fail closed until reviewed",
+        )
+
+    def test_every_registered_get_has_an_explicit_viewer_policy(self):
+        restricted_prefixes = (
+            "/api/users",
+            "/api/settings",
+            "/api/auth/audit-logs",
+            "/api/custom-strategy",
+        )
+        for method, path in self.ops:
+            if method != "GET":
+                continue
+            expected_viewer_access = not path.startswith(restricted_prefixes)
+            self.assertEqual(
+                _role_allowed(method, path, "viewer"),
+                expected_viewer_access,
+                f"GET {path} is missing an explicit viewer-read policy or restriction",
+            )
+
+    def test_unregistered_get_preserves_fastapi_not_found_response(self):
+        with patch("web.app.authenticate_request", return_value=_user("viewer")):
+            response = self.client.get("/api/not-registered")
+        self.assertEqual(response.status_code, 404)
 
     def test_route_table_is_not_empty(self):
         self.assertGreater(len(self.ops), 40)
