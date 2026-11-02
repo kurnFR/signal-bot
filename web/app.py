@@ -56,6 +56,11 @@ async def lifespan(app: FastAPI):
         verify_retailbot2_schema()
     except Exception as e:
         logger.warning("RetailBot2 schema verification failed; run 'python -m db.migrate': %s", e)
+    try:
+        from db.db import verify_strategy_auto_promotion_schema
+        verify_strategy_auto_promotion_schema()
+    except Exception as e:
+        logger.warning("Auto-promotion schema verification failed; run 'python -m db.migrate': %s", e)
     yield
 
 
