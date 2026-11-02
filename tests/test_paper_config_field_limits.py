@@ -3,12 +3,25 @@
 import unittest
 from unittest.mock import patch
 
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from paper.engine import set_paper_config
+from web.app import app
 from web.routes.backtest import BacktestRunRequest, RunAllStrategiesRequest, WalkForwardBacktestRequest
 from web.routes.ml_routes import DeployMLToPaperRequest
 from web.routes.paper_routes import DeployStrategyRequest, PaperConfigRequest
+
+
+def _trader():
+    return {
+        "id": 42,
+        "username": "paper-limit-test",
+        "email": None,
+        "role": "trader",
+        "is_active": 1,
+        "must_change_password": 0,
+    }
 
 
 class TestPaperConfigFieldLimits(unittest.TestCase):
@@ -87,6 +100,19 @@ class TestPaperConfigFieldLimits(unittest.TestCase):
         DeployMLToPaperRequest(model_id="m" + "x" * 99)
         with self.assertRaises(ValidationError):
             DeployMLToPaperRequest(model_id="m" + "x" * 100)
+
+    def test_backtest_query_identifiers_are_bounded_before_handlers_run(self):
+        client = TestClient(app, raise_server_exceptions=False)
+        long_symbol = "S" * 21
+        with patch("web.app.authenticate_request", return_value=_trader()), \
+             patch("web.routes.backtest.get_pool") as get_pool:
+            history = client.get(f"/api/backtest/history?symbol={long_symbol}")
+            run_all = client.post(f"/api/backtest/run-all?symbol={long_symbol}")
+            insight = client.post(f"/api/backtest/ai-insight?symbol={long_symbol}")
+        self.assertEqual(history.status_code, 422)
+        self.assertEqual(run_all.status_code, 422)
+        self.assertEqual(insight.status_code, 422)
+        get_pool.assert_not_called()
 
     def test_persistence_helper_rejects_overlong_values_before_database_access(self):
         valid = {
