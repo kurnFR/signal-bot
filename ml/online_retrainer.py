@@ -5,7 +5,7 @@ and safe model promotion gates.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 from pathlib import Path
@@ -133,6 +133,38 @@ def get_retraining_status() -> dict[str, Any]:
     }
 
 
+def _is_retraining_due(
+    cfg: Mapping[str, Any],
+    registry: Mapping[str, Any],
+    current_candles: int,
+    now: datetime,
+    force: bool = False,
+) -> bool:
+    """Apply the configured candle and minimum-interval gates to a model."""
+    if force:
+        return True
+
+    last_retrained_at = cfg.get("last_retrained_at")
+    if last_retrained_at is None:
+        return True
+    if not isinstance(last_retrained_at, str):
+        return False
+
+    try:
+        last_run = datetime.fromisoformat(last_retrained_at.replace("Z", "+00:00"))
+        if last_run.tzinfo is None:
+            last_run = last_run.replace(tzinfo=timezone.utc)
+        elapsed = now - last_run.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        logger.warning("Skipping retraining with invalid last_retrained_at value")
+        return False
+
+    interval_hours = max(0.0, float(registry.get("retrain_interval_hours", 24)))
+    min_new_candles = max(0, int(registry.get("min_new_candles", 48)))
+    new_candles = current_candles - int(cfg.get("last_candle_count", 0))
+    return elapsed >= timedelta(hours=interval_hours) and new_candles >= min_new_candles
+
+
 def execute_retraining_cycle(force: bool = False) -> list[dict[str, Any]]:
     """
     Check all registered models; if stale or forced, run retraining pipeline.
@@ -141,6 +173,11 @@ def execute_retraining_cycle(force: bool = False) -> list[dict[str, Any]]:
     reg = _load_registry()
     models = reg.get("registered_models", {})
     results = []
+
+    # A disabled registry is a hard stop; force only bypasses per-model due gates.
+    if reg.get("enabled", True) is not True:
+        logger.info("Online retraining is disabled; skipping cycle")
+        return results
 
     for key, cfg in models.items():
         symbol = cfg["symbol"]
@@ -155,8 +192,10 @@ def execute_retraining_cycle(force: bool = False) -> list[dict[str, Any]]:
             last_candles = cfg.get("last_candle_count", 0)
             new_candles = current_candles - last_candles
 
-            # Check if retrain needed
-            needs_retrain = force or (new_candles >= reg.get("min_new_candles", 48)) or (cfg.get("last_retrained_at") is None)
+            # Both configured gates must be satisfied unless this is an explicit force.
+            needs_retrain = _is_retraining_due(
+                cfg, reg, current_candles, datetime.now(timezone.utc), force=force
+            )
             if not needs_retrain:
                 continue
 
