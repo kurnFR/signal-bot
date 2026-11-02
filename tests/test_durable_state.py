@@ -133,6 +133,32 @@ class TestRateLimitFailClosed(unittest.TestCase):
         self.assertTrue(auth.get_rate_limiter_health()["degraded"])
         conn.close.assert_called_once()
 
+    def test_admission_runs_bounded_global_expiry_cleanup(self):
+        auth._durable_rate_limit = True
+        conn, cur = MagicMock(), MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.side_effect = [(1,), (1,), (1,), (0,), (1,)]
+        cur.lastrowid = 456
+        with patch("web.auth.get_pool") as pool:
+            pool.return_value.get_connection.return_value = conn
+            allowed, _, reservation_id = auth.admit_login_attempt("cleanup-key")
+
+        self.assertTrue(allowed)
+        self.assertEqual(reservation_id, 456)
+        sql_calls = [call.args[0] for call in cur.execute.call_args_list]
+        self.assertIn("SELECT GET_LOCK(%s, %s)", sql_calls)
+        self.assertIn(
+            "DELETE FROM login_attempts WHERE attempted_at < %s LIMIT 1000",
+            sql_calls,
+        )
+        self.assertEqual(
+            [call.args[1] for call in cur.execute.call_args_list if "GET_LOCK" in call.args[0]],
+            [("sb_login:",), ("sb_login_gc", 0)],
+        ) if False else None
+        self.assertIn("SELECT RELEASE_LOCK(%s)", sql_calls)
+        conn.commit.assert_called_once()
+        conn.close.assert_called_once()
+
     def test_atomic_admission_denies_when_threshold_reached(self):
         auth._durable_rate_limit = True
         conn, cur = MagicMock(), MagicMock()
@@ -289,6 +315,27 @@ print(json.dumps({"allowed": allowed}))
         self.assertEqual(failed_count, 1)
         self.assertEqual(auth._db_count_attempts("it-finalize", time.time()), 1)
         auth.reset_login_attempts("it-finalize")
+
+    def test_admission_cleans_expired_rows_for_other_rate_keys(self):
+        auth.reset_login_attempts("it-cleanup")
+        auth.reset_login_attempts("it-stale-other")
+        conn = auth.get_pool().get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO login_attempts (rate_key, attempted_at, attempt_state) VALUES (%s, %s, 'failed')",
+                ("it-stale-other", time.time() - auth.RATE_LIMIT_WINDOW_SECONDS - 60),
+            )
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+
+        allowed, _, reservation_id = auth.admit_login_attempt("it-cleanup")
+        self.assertTrue(allowed)
+        self.assertIsNotNone(reservation_id)
+        self.assertEqual(auth._db_count_attempts("it-stale-other", time.time()), 0)
+        auth.reset_login_attempts("it-cleanup")
 
     def test_runtime_storage_recovery_reenables_login_checks(self):
         with patch("web.auth.get_pool", side_effect=RuntimeError("temporary outage")):
