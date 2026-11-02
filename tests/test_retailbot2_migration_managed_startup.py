@@ -2,7 +2,9 @@
 import inspect
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
+
+from db import db as db_helpers
 
 from db.migrate import MIGRATIONS
 from paper.retailbot2 import DatabaseManager
@@ -46,6 +48,11 @@ class TestRetailBot2MigrationManagedStartup(unittest.TestCase):
         self.assertFalse(any(statement.startswith(("CREATE", "ALTER", "INSERT", "UPDATE", "DELETE")) for statement in statements))
         conn.close.assert_called_once()
         cursor.close.assert_called_once()
+
+    def test_legacy_ensure_helper_is_read_only_compatibility_alias(self):
+        with patch.object(db_helpers, "verify_retailbot2_schema") as verify:
+            db_helpers.ensure_retailbot2_lifecycle_table()
+        verify.assert_called_once_with()
 
     def test_migration_defines_all_runtime_tables_and_legacy_column(self):
         migration = Path("db/migrate_retailbot2_runtime_schema.sql").read_text(encoding="utf-8")
