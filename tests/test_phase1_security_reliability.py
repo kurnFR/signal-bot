@@ -239,6 +239,24 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
                     pool.return_value.get_connection.return_value = conn
                     self._assert_audit_failure_rolls_back(invoke, conn)
 
+    def test_security_mutation_returns_503_when_db_connection_cannot_be_acquired(self):
+        admin = {"id": 1, "username": "admin"}
+        with patch("web.routes.auth_routes.get_pool", side_effect=RuntimeError("database unavailable")), \\
+             patch("web.routes.auth_routes._validate_new_password"), \\
+             patch("web.routes.auth_routes.hash_password", return_value="hashed"):
+            with self.assertRaises(HTTPException) as ctx:
+                auth_routes.create_user(
+                    auth_routes.CreateUserRequest(
+                        username="new_trader", password="Strong-New-Pass!", role="trader"
+                    ),
+                    admin,
+                )
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(
+            ctx.exception.detail,
+            "Security audit storage is temporarily unavailable. Please retry shortly.",
+        )
+
     def test_login_does_not_issue_token_when_success_audit_fails(self):
         conn, cur = MagicMock(), MagicMock()
         conn.cursor.return_value = cur
