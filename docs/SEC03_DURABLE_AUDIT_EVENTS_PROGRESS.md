@@ -99,3 +99,11 @@ Login attempt reservation/finalization remains its own shared-rate-limit operati
 - The frontend workflow is path-filtered and did not run for SEC-03 because no frontend files changed. The post-SEC-02 master validation separately passed frontend type-check, unit tests, build, and browser smoke tests.
 - Production database, deployment, workers, trades, and Telegram sends were not used.
 - PR #607 remains draft and unmerged pending final review/approval.
+
+## Follow-up audit identity correction (2026-11-02)
+
+- Focused review found that a failed login for an inactive account recorded the username but passed a null `user_id`, even though the account lookup had resolved its database identity.
+- Updated the `LOGIN_FAILED` event to include the resolved user ID for inactive accounts while keeping it null for genuinely unknown usernames.
+- Extended the unknown/inactive login audit-failure regression to assert the exact user ID passed to the audit writer for both cases.
+- Follow-up code/test commits: `681a76488f0b4749900b574dbbb0ba2dcb86b2cd`, `9ccba6d67272e31d9ad616bf89a3f462d712cb76`.
+- CI for this follow-up is pending; do not treat the earlier green run on `ddad544` as validation of these latest changes.
