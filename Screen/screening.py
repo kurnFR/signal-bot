@@ -607,30 +607,78 @@ else:
     logger.warning("⚠️ Telegram alerts are NOT configured: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing")
 
 
-def ensure_signal_table():
-    conn=get_pool().get_connection()
+def verify_signal_schema():
+    """Verify migration-managed screener schema without issuing DDL or DML."""
+    conn = get_pool().get_connection()
+    cur = None
     try:
-        cur=conn.cursor(); cur.execute("""CREATE TABLE IF NOT EXISTS smart_money_signals (id BIGINT AUTO_INCREMENT PRIMARY KEY, symbol VARCHAR(20) NOT NULL, signal_type VARCHAR(30) NOT NULL, rvol DECIMAL(12,4) NOT NULL, volume DECIMAL(30,8) NOT NULL, quote_volume DECIMAL(20,2) NOT NULL, price DECIMAL(20,8) NOT NULL, price_change_pct DECIMAL(10,4) NOT NULL, volume_velocity DECIMAL(12,4) NOT NULL, quality_score DECIMAL(6,2) NOT NULL DEFAULT 0, candle_time VARCHAR(32) NOT NULL, telegram_sent BOOLEAN NOT NULL DEFAULT FALSE, detected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_smsig_symbol_time (symbol, detected_at), INDEX idx_smsig_type_time (signal_type, detected_at), UNIQUE KEY uq_smsig_candle (symbol, signal_type, candle_time)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
-        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS quality_score DECIMAL(6,2) NOT NULL DEFAULT 0")
-        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS direction VARCHAR(10) NOT NULL DEFAULT 'NEUTRAL'")
-        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS taker_buy_ratio DECIMAL(8,6) NULL")
-        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS htf_alignment TINYINT NOT NULL DEFAULT 0")
-        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS htf_context VARCHAR(64) NOT NULL DEFAULT 'UNAVAILABLE'")
-        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(16) NOT NULL DEFAULT 'PENDING'")
-        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS delivery_attempts INT NOT NULL DEFAULT 0")
-        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS next_attempt_at DATETIME NULL")
-        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS delivery_updated_at DATETIME NULL")
-        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS delivered_at DATETIME NULL")
-        cur.execute("ALTER TABLE smart_money_signals ADD COLUMN IF NOT EXISTS last_delivery_error VARCHAR(500) NULL")
-        cur.execute("UPDATE smart_money_signals SET delivery_status='SENT' WHERE telegram_sent=TRUE AND delivery_status='PENDING'")
-        cur.execute("UPDATE smart_money_signals SET delivered_at=detected_at WHERE telegram_sent=TRUE AND delivered_at IS NULL")
-        cur.execute("""CREATE TABLE IF NOT EXISTS screener_control (id INT PRIMARY KEY DEFAULT 1, enabled BOOLEAN NOT NULL DEFAULT TRUE, overrides_json TEXT NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, CONSTRAINT chk_screener_control_singleton CHECK (id = 1)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
-        cur.execute("""CREATE TABLE IF NOT EXISTS screener_heartbeat (id INT PRIMARY KEY DEFAULT 1, pid INT NULL, last_beat_at DATETIME NULL, timeframe VARCHAR(20) NULL, symbols_monitored INT NOT NULL DEFAULT 0, last_signal_at DATETIME NULL, last_universe_refresh_at DATETIME NULL, CONSTRAINT chk_screener_heartbeat_singleton CHECK (id = 1)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
-        cur.execute("ALTER TABLE screener_heartbeat ADD COLUMN IF NOT EXISTS timeframe VARCHAR(20) NULL")
-        cur.execute("INSERT IGNORE INTO screener_heartbeat (id) VALUES (1)")
-        cur.execute("INSERT IGNORE INTO screener_control (id,enabled,overrides_json) VALUES (1,TRUE,NULL)"); conn.commit(); cur.close(); logger.info("✅ screener persistence tables ready")
-    except Exception as e: logger.error("❌ ensure_signal_table failed: %s",e)
-    finally: conn.close()
+        cur = conn.cursor(dictionary=True)
+        required_tables = ("smart_money_signals", "screener_control", "screener_heartbeat")
+        placeholders = ", ".join(["%s"] * len(required_tables))
+        cur.execute(
+            f"""SELECT TABLE_NAME AS table_name
+                FROM information_schema.tables
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ({placeholders})""",
+            required_tables,
+        )
+        existing = {str(row["table_name"]) for row in cur.fetchall()}
+        missing_tables = sorted(set(required_tables) - existing)
+        if missing_tables:
+            raise RuntimeError(
+                "Screener schema is missing tables "
+                f"({', '.join(missing_tables)}); run 'python -m db.migrate' before startup."
+            )
+
+        required_columns = {
+            "smart_money_signals": {
+                "quality_score", "direction", "taker_buy_ratio", "htf_alignment",
+                "htf_context", "delivery_status", "delivery_attempts",
+                "next_attempt_at", "delivery_updated_at", "delivered_at",
+                "last_delivery_error", "candle_time",
+            },
+            "screener_heartbeat": {"timeframe"},
+        }
+        column_conditions = []
+        params = []
+        for table, columns in required_columns.items():
+            for column in sorted(columns):
+                column_conditions.append("(TABLE_NAME = %s AND COLUMN_NAME = %s)")
+                params.extend((table, column))
+        cur.execute(
+            """SELECT TABLE_NAME AS table_name, COLUMN_NAME AS column_name,
+                      COLUMN_TYPE AS column_type
+               FROM information_schema.columns
+               WHERE TABLE_SCHEMA = DATABASE() AND ("""
+            + " OR ".join(column_conditions)
+            + ")",
+            tuple(params),
+        )
+        rows = cur.fetchall()
+        actual = {(str(row["table_name"]), str(row["column_name"])): str(row["column_type"]).lower()
+                  for row in rows}
+        missing_columns = [
+            f"{table}.{column}"
+            for table, columns in required_columns.items()
+            for column in sorted(columns)
+            if (table, column) not in actual
+        ]
+        if missing_columns:
+            raise RuntimeError(
+                "Screener schema is outdated "
+                f"({', '.join(missing_columns)}); run 'python -m db.migrate' before startup."
+            )
+        if not actual[("smart_money_signals", "candle_time")].startswith("varchar(32)"):
+            raise RuntimeError(
+                "Screener schema requires smart_money_signals.candle_time VARCHAR(32); "
+                "run 'python -m db.migrate' before startup."
+            )
+    finally:
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
 
 _TUNABLE_CONFIG_KEYS={"rvol_multiplier","divergence_max_price_change","velocity_threshold","enable_divergence_detection","enable_velocity_detection","max_alerts_per_hour","max_alerts_per_symbol_per_hour","alert_cooldown_sec","require_confluence","min_signal_rvol","min_signal_velocity","min_quote_volume_24h","min_market_cap_usd","min_quality_score","min_alert_quality_score","max_signal_age_sec","expired_signal_retention_days","expired_signal_cleanup_interval_days"}
 
@@ -1075,7 +1123,7 @@ signal.signal(signal.SIGINT,signal_handler); signal.signal(signal.SIGTERM,signal
 def main():
     logger.info("🚀 Smart Money Volume Detector starting (EARLY WARNING MODE)...")
     logger.info(f"Config: RVOL≥{CONFIG['rvol_multiplier']}x | Divergence: ≤{CONFIG['divergence_max_price_change']}% | Velocity: ≥{CONFIG['velocity_threshold']}x | Quality≥{CONFIG.get('min_quality_score',0):.0f} | Selection window={CONFIG.get('alert_selection_window_sec',3):.1f}s | Max {CONFIG['max_alerts_per_hour']} alerts/hour")
-    ensure_signal_table(); reload_control()
+    verify_signal_schema(); reload_control()
     try:
         update_screener_heartbeat(pid=os.getpid(), timeframe=CONFIG.get("timeframe", "1m"), symbols_monitored=0)
     except Exception as e:
