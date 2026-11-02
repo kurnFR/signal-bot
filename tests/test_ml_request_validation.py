@@ -18,6 +18,13 @@ class TestMLRequestValidation(unittest.TestCase):
         self.assertEqual(RegisterRetrainRequest().timeframe, "1h")
         self.assertEqual(RLTrainRequest().agent_type, "dqn")
 
+
+    def test_common_market_fields_are_normalized(self):
+        request = RunExperimentRequest(symbol=" btcusdt ", market="SPOT", timeframe=" 1h ")
+        self.assertEqual(request.symbol, "BTCUSDT")
+        self.assertEqual(request.market, "spot")
+        self.assertEqual(request.timeframe, "1h")
+
     def test_experiment_request_rejects_invalid_symbol_market_timeframe(self):
         for payload in (
             {"symbol": "BTC-USDT"},
