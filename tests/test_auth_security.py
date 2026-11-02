@@ -1,11 +1,12 @@
 import time
 import unittest
 from unittest.mock import patch, MagicMock
+from fastapi import HTTPException
 
 from web.auth import (
     create_access_token, verify_access_token,
     check_login_rate_limit, record_failed_login, reset_login_attempts,
-    revoke_token, is_token_revoked
+    revoke_token, is_token_revoked, _token_from_request, authenticate_request
 )
 
 
@@ -44,6 +45,23 @@ class TestAuthSecurity(unittest.TestCase):
             self.assertEqual(loaded, "existing-secret")
             if os.name != "nt":
                 self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+
+    def test_legacy_auth_cookie_is_not_an_authentication_credential(self):
+        request = MagicMock()
+        request.headers.get.return_value = ""
+        request.cookies.get.return_value = "legacy-cookie-token"
+
+        self.assertIsNone(_token_from_request(request))
+        with self.assertRaises(HTTPException) as ctx:
+            authenticate_request(request)
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_bearer_authorization_remains_supported(self):
+        request = MagicMock()
+        request.headers.get.return_value = "Bearer valid-bearer-token"
+        request.cookies.get.return_value = "ignored-cookie-token"
+
+        self.assertEqual(_token_from_request(request), "valid-bearer-token")
 
     def test_login_rate_limiting(self):
         key = "test_ip:test_user"

@@ -1058,5 +1058,5 @@ All findings above are source-level only. No API calls, user changes, password c
 - **Degraded brute-force protection:** durable login throttling falls back to process-local memory on startup/query failures. Multi-worker deployments no longer share the attempt counter in this state; restart clears it. Expose degraded health and decide on a fail-closed/shared fallback.
 - **Audit write is best-effort:** `log_audit()` swallows DB errors. Sensitive actions can complete while their audit record is missing. Add durable retry/outbox or make audit persistence failure visible to the action caller.
 - Access tokens expire after 24 hours; no refresh route was found in the inspected auth router. Confirm session-lifetime policy.
-- Auth accepts bearer tokens or an `auth_token` cookie, but the inspected auth routes do not issue that cookie. If a legacy client issues it, review SameSite/CSRF; otherwise remove unused cookie auth.
+- **Cookie/CSRF:** resolved in PR #617. Repository clients use explicit bearer tokens and no cookie-setting flow exists in the repository. The legacy `auth_token` fallback is removed; cookie-only requests now receive HTTP 401, while bearer authentication remains supported.
 - No live auth action or database operation was performed.
