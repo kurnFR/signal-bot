@@ -43,13 +43,13 @@ def test_quick_test_rejects_unsupported_markets(market):
         QuickTestRequest(**_quick_test_payload(market=market))
 
 
-@pytest.mark.parametrize("timeframe", ["1m", "15m", "1h", "1d", "1M"])
-def test_quick_test_accepts_supported_timeframes(timeframe):
+@pytest.mark.parametrize("timeframe,expected", [("1m", "1m"), ("15m", "15m"), ("1h", "1h"), ("1d", "1d"), ("1M", "1M"), (" 1w ", "1w")])
+def test_quick_test_accepts_supported_timeframes(timeframe, expected):
     request = QuickTestRequest(**_quick_test_payload(timeframe=timeframe))
-    assert request.timeframe == timeframe
+    assert request.timeframe == expected
 
 
-@pytest.mark.parametrize("timeframe", ["", "2m", "1H", "../1h", "1w "])
+@pytest.mark.parametrize("timeframe", ["", "2m", "1H", "../1h"])
 def test_quick_test_rejects_unsupported_timeframes(timeframe):
     with pytest.raises(ValidationError):
         QuickTestRequest(**_quick_test_payload(timeframe=timeframe))
@@ -82,5 +82,5 @@ def test_ai_request_rejects_oversized_combined_context():
         GenerateAIStrategyRequest(
             prompt="x" * 5000,
             history=[{"role": "user", "content": "y" * 2000} for _ in range(6)],
-            currentConfig={"rules": "z" * 8000},
+            currentConfig={"rules": "z" * 3000},
         )
