@@ -5,11 +5,13 @@ and safe model promotion gates.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+import fcntl
 import json
 import logging
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 
 from db.db import fetch_ohlcv_with_features_df
 from ml.run_real_experiment import run_real_experiment
@@ -19,6 +21,24 @@ logger = logging.getLogger("ml.online_retrainer")
 
 REGISTRY_PATH = Path("ml_models") / "retraining_registry.json"
 AUDIT_LOG_PATH = Path("ml_results") / "retraining_audit.json"
+CYCLE_LOCK_PATH = Path("ml_models") / "retraining_cycle.lock"
+
+
+@contextmanager
+def _retraining_cycle_lock() -> Iterator[bool]:
+    """Acquire a non-blocking process-wide lock; the OS releases it after a crash."""
+    CYCLE_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with CYCLE_LOCK_PATH.open("a", encoding="utf-8") as lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            logger.info("Online retraining cycle already running; skipping duplicate trigger")
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def _load_registry() -> dict[str, Any]:
@@ -50,7 +70,6 @@ def _append_audit_log(entry: dict[str, Any]) -> None:
         except Exception:
             history = []
     history.insert(0, entry)
-    # Retain last 200 audit entries
     AUDIT_LOG_PATH.write_text(json.dumps(history[:200], indent=2), encoding="utf-8")
 
 
@@ -166,9 +185,17 @@ def _is_retraining_due(
 
 
 def execute_retraining_cycle(force: bool = False) -> list[dict[str, Any]]:
+    """Run at most one retraining cycle across all workers/processes."""
+    with _retraining_cycle_lock() as acquired:
+        if not acquired:
+            return []
+        return _execute_retraining_cycle_unlocked(force=force)
+
+
+def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, Any]]:
     """
     Check all registered models; if stale or forced, run retraining pipeline.
-    FreqAI/Qlib continuous inference cycle.
+    FreqAI/Qlib continuous inference cycle. Caller must hold the cycle lock.
     """
     reg = _load_registry()
     models = reg.get("registered_models", {})
@@ -192,7 +219,6 @@ def execute_retraining_cycle(force: bool = False) -> list[dict[str, Any]]:
             last_candles = cfg.get("last_candle_count", 0)
             new_candles = current_candles - last_candles
 
-            # Both configured gates must be satisfied unless this is an explicit force.
             needs_retrain = _is_retraining_due(
                 cfg, reg, current_candles, datetime.now(timezone.utc), force=force
             )
@@ -224,7 +250,6 @@ def execute_retraining_cycle(force: bool = False) -> list[dict[str, Any]]:
             }
             _append_audit_log(audit_entry)
 
-            # Update registry
             cfg["last_retrained_at"] = now_iso
             cfg["last_candle_count"] = current_candles
             cfg["last_result"] = {
@@ -245,4 +270,3 @@ def execute_retraining_cycle(force: bool = False) -> list[dict[str, Any]]:
 
     _save_registry(reg)
     return results
-
