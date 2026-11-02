@@ -156,3 +156,12 @@ Login attempt reservation/finalization remains its own shared-rate-limit operati
 - No frontend files changed; frontend workflow remains path-filtered and was not triggered.
 - No production DB, deployment, workers, trades, or Telegram sends occurred.
 - The latest branch is 14 commits ahead of master and 0 behind; PR #607 remains draft/open/unmerged. Independent review and explicit user release approval remain mandatory.
+
+
+## PR metadata synchronization (2026-11-02)
+
+- Updated PR #607's description to match the verified current branch state and latest required CI.
+- At the time of this documentation update, the branch head before this docs-only commit was `dab35df42ab19cb03f3ca53ebcb091ed2a0d53cf`; latest tested code/test candidate remains `209ac3df7d10f2451e26c2a12465ca78100f6946`.
+- The tested candidate's required CI remains green: full pytest **823 passed, 17 skipped, 6 warnings**; unit/screener **105 passed**; isolated MariaDB **36 passed**; RetailBot accounting/parity **36 passed**; screener regression **27 passed**.
+- PR comparison before this docs-only commit: **15 commits ahead, 0 behind**, based on merged SEC-02 master commit `823b5d2837383839c5c9acd0e0dacce62a602a25`.
+- The PR remains draft/open/unmerged. Independent security review and explicit release approval are still required; no deployment or production activity was performed.
