@@ -118,12 +118,24 @@ class DeployMLToPaperRequest(BaseModel):
 
 @router.get("/experiments")
 def list_experiments() -> Dict[str, Any]:
-    """List all completed ML tournaments and experiment results."""
-    if not ML_RESULTS_DIR.exists():
+    """List completed ML tournaments without following external JSON symlinks."""
+    results_root = ML_RESULTS_DIR.resolve()
+    if not results_root.is_dir():
         return {"experiments": []}
-    results: List[Dict[str, Any]] = []
 
-    for file in sorted(ML_RESULTS_DIR.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True):
+    safe_result_files = []
+    for candidate in results_root.glob("*.json"):
+        try:
+            resolved = candidate.resolve(strict=True)
+            if resolved.parent != results_root or not resolved.is_file():
+                logger.warning("Skipping experiment file outside results directory: %s", candidate.name)
+                continue
+            safe_result_files.append(resolved)
+        except (OSError, RuntimeError):
+            logger.warning("Skipping unresolved experiment file: %s", candidate.name)
+
+    results: List[Dict[str, Any]] = []
+    for file in sorted(safe_result_files, key=lambda f: f.stat().st_mtime, reverse=True):
         try:
             data = json.loads(file.read_text(encoding="utf-8"))
             exp = data.get("experiment", {})
@@ -180,19 +192,26 @@ def get_experiment_details(experiment_id: str) -> Dict[str, Any]:
 @router.get("/models")
 def list_saved_models() -> Dict[str, Any]:
     """List trained model artifacts eligible for paper trading."""
-    if not ML_MODELS_DIR.exists():
-        return {"models": []}
-    models: List[Dict[str, Any]] = []
-
     models_root = ML_MODELS_DIR.resolve()
-    for manifest_file in sorted(ML_MODELS_DIR.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True):
+    if not models_root.is_dir():
+        return {"models": []}
+
+    safe_manifest_files = []
+    for candidate in models_root.glob("*.json"):
         try:
-            safe_manifest = manifest_file.resolve()
-            if safe_manifest.parent != models_root or not safe_manifest.is_file():
-                logger.warning("Skipping model manifest outside model directory: %s", manifest_file.name)
+            resolved = candidate.resolve(strict=True)
+            if resolved.parent != models_root or not resolved.is_file():
+                logger.warning("Skipping model manifest outside model directory: %s", candidate.name)
                 continue
+            safe_manifest_files.append(resolved)
+        except (OSError, RuntimeError):
+            logger.warning("Skipping unresolved model manifest: %s", candidate.name)
+
+    models: List[Dict[str, Any]] = []
+    for safe_manifest in sorted(safe_manifest_files, key=lambda f: f.stat().st_mtime, reverse=True):
+        try:
             data = json.loads(safe_manifest.read_text(encoding="utf-8"))
-            joblib_file = (models_root / f"{manifest_file.stem}.joblib").resolve()
+            joblib_file = (models_root / f"{safe_manifest.stem}.joblib").resolve()
             data["has_weights"] = joblib_file.parent == models_root and joblib_file.is_file()
             report = paper_eligibility_report(test_metrics=data.get("test_metrics") or {})
             reasons = list(report["reasons"])
@@ -203,7 +222,7 @@ def list_saved_models() -> Dict[str, Any]:
             data["eligibility"] = {"eligible": not reasons, "reasons": reasons}
             models.append(data)
         except Exception as exc:
-            logger.warning("Failed to parse model manifest %s (%s)", manifest_file.name, type(exc).__name__)
+            logger.warning("Failed to parse model manifest %s (%s)", safe_manifest.name, type(exc).__name__)
 
     return {"models": models}
 
@@ -487,12 +506,30 @@ def train_rl_trading_agent(req: RLTrainRequest):
 
 @router.get("/rl/models")
 def list_rl_models():
-    """List trained reinforcement learning models and performance audits."""
-    rl_dir = Path("ml_models") / "rl"
-    if not rl_dir.exists():
+    """List trained RL models without following paths outside ml_models/rl."""
+    models_root = ML_MODELS_DIR.resolve()
+    requested_rl_dir = models_root / "rl"
+    try:
+        rl_dir = requested_rl_dir.resolve(strict=True)
+    except OSError:
         return {"models": []}
+    if rl_dir != requested_rl_dir or not rl_dir.is_dir():
+        logger.warning("Skipping RL model listing because its artifact directory is not contained in ml_models/")
+        return {"models": []}
+
+    safe_audit_files = []
+    for candidate in rl_dir.glob("*.json"):
+        try:
+            resolved = candidate.resolve(strict=True)
+            if resolved.parent != rl_dir or not resolved.is_file():
+                logger.warning("Skipping RL model audit outside artifact directory: %s", candidate.name)
+                continue
+            safe_audit_files.append(resolved)
+        except (OSError, RuntimeError):
+            logger.warning("Skipping unresolved RL model audit file: %s", candidate.name)
+
     models = []
-    for audit_file in sorted(rl_dir.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True):
+    for audit_file in sorted(safe_audit_files, key=lambda f: f.stat().st_mtime, reverse=True):
         try:
             data = json.loads(audit_file.read_text(encoding="utf-8"))
             models.append({
