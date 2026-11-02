@@ -525,3 +525,137 @@ This log records verified execution checkpoints and keeps the next actions actio
 - Reconciles stale route inventory notes about the React Settings caller and preserves the existing admin-only explicit confirmation workflow.
 - All tests mock HTTP responses; no Telegram message is sent. No role policy or production behavior is changed.
 - Exact-head CI pending; do not merge until all required checks pass.
+
+
+## Final migration acceptance pass — 2026-10-30 (branch: feat/uix-final-acceptance-pass)
+
+- Work is based on current master baseline `eeaf8843d140701f88623a22aa925353e7e2e2d2`.
+- Added strict runtime validation for login session payloads and `GET /api/auth/me` profiles, matching the actual serializer in `web/routes/auth_routes.py`: positive safe-integer ID, non-empty username, nullable string email, role in `admin|trader|viewer`, boolean `must_change_password`, and non-empty string token. The auth gate reuses the validator for session restoration and after password change.
+- Added mocked auth contract cases for valid and malformed profiles/tokens. No real credentials or sessions are used.
+- Added a Playwright responsive matrix for all 11 preview navigation views at 375, 768, 1024 and 1440 CSS pixels in both persisted themes. Existing 320px mobile, keyboard/focus, Escape, reduced-motion, forced-colors and mutation-boundary tests remain.
+- **No tests were run by the development agent**, per owner instruction. GitHub Actions quota is exhausted; fresh hosted CI evidence is unavailable. Owner-run validation is required after delivery.
+- Added `docs/UIX_FINAL_MIGRATION_ACCEPTANCE.md` with evidence matrix, live-data procedure, mutation/RBAC test plan, limitations and explicit sign-off checklist.
+- **Acceptance remains NOT ACCEPTED** until owner-run tests, real-server data comparison, real-device/accessibility checks, isolated mutation verification and explicit owner sign-off are recorded. React remains preview-only; no deployment or production side effects occurred.
+
+
+### PR #604 — final migration acceptance: owner-run automated validation (2026-10-30)
+
+- **Status:** Open, draft, unmerged. Exact tested PR head: `cc98744df4e1cd104ef60fd23bcc4f36a708f52e`.
+- **Frontend install:** `npm ci --no-audit --no-fund` passed (233 packages).
+- **Frontend checks:** `npm run typecheck` passed; `npm test` passed (30 test files, 191 tests); `npm run build` passed.
+- **Browser E2E:** Full Playwright 1.64.1 Chromium suite passed: 28 tests, 49.5 seconds. Executed in `mcr.microsoft.com/playwright:v1.64.1-noble` because the Ubuntu 20.04 host is unsupported by the Playwright Chromium installer. The responsive acceptance matrix passed as part of the full suite.
+- **Backend:** `PYTHONPATH="$PWD" python -m pytest -q` passed: 745 passed, 12 skipped, 0 failed (8.19 seconds; 7 deprecation warnings). Full collection reported 757 tests collected without collection errors. The 15-test migration/accounting subset also passed.
+- **Skipped integration gates:** 2 durable-state MariaDB, 3 migration MariaDB, 4 paper-orders disposable MariaDB, and 3 Wallet Tracker disposable MariaDB tests. They remain pending until a disposable test database is provisioned and verified; do not enable them against production.
+- **Hosted CI:** No fresh GitHub Actions evidence; owner reports Actions quota exhausted.
+- **Still open:** Isolated MariaDB integration; read-only live-server/API parity; real-device/browser and manual accessibility checks (keyboard, screen reader, contrast, zoom/reflow); isolated mutation/RBAC persistence/audit checks; owner sign-off.
+- **Safety:** No production deployment, DB mutation, worker restart, live trade, Telegram send, or production credential/session access. React remains preview-only; legacy `web/static/` remains production default.
+- **Decision:** Automated checks are green, but acceptance remains **NOT ACCEPTED** and PR #604 must remain unmerged until the remaining gates close.
+
+
+### PR #604 — isolated MariaDB integration completion (2026-10-30)
+
+- **Status:** Open, draft, unmerged. Application code tested at `cc98744df4e1cd104ef60fd23bcc4f36a708f52e`; later PR commits are documentation-only.
+- Owner provisioned dedicated disposable database `signal_bot_test` on the existing remote MariaDB server at `192.168.1.30:3306`. The application database `crypto_signals` was not used for integration tests.
+- Paper-order integration: **4 passed**.
+- Wallet-tracker + durable-state integration: first run had 10 passed / 2 failed because fresh test DB lacked `login_attempts`; applied all 20 repository migrations to `signal_bot_test`, then reran: **12 passed**.
+- Migration integration: **22 passed**.
+- Total across integration commands: **38 passed**. This includes tests also exercised by the regular suite; do not add 38 as unique tests to the original 745 count. The original 12 skipped MariaDB tests are now all exercised successfully.
+- Combined backend evidence: original full suite **745 passed, 12 skipped** plus successful execution of all 12 previously skipped MariaDB cases; original collection was **757 tests**, with no known integration skips remaining.
+- **Remaining acceptance gates:** read-only live-server/API parity, real-device/browser and manual accessibility checks, isolated mutation/RBAC persistence and audit checks, defect closure, and explicit owner sign-off.
+- **Safety:** all integration/migration commands explicitly targeted `signal_bot_test`; no production DB test, deployment, worker restart, live trade, Telegram send, or production credential/session access.
+- **Decision:** acceptance remains **NOT ACCEPTED**; PR #604 remains unmerged.
+
+
+### PR #604 — static route inventory reconciliation (2026-10-30)
+
+- Inspected all 13 router modules imported by `web/app.py`; source decorators total **81 API method/path entries**.
+- Compared the effective router prefixes and every method/path with the primary route register in `docs/UI_UX_VIEW_INVENTORY.md`: all 81 matched, with no missing or extra static route identity.
+- Clarified that the document's 97 endpoint-table rows include 15 repeated supplemental source-audit entries and one query-string variant (`GET /api/research/screener/signals?limit=50`); normalized unique method/path identities are 81.
+- Reviewed the central `_role_allowed` policy in `web/app.py`; the existing custom-strategy viewer GET 403 behavior is recorded as an unresolved product/security decision and was not changed.
+- **Still pending:** owner-run read-only dump of the effective runtime `app.routes` registry, full per-route dependency/schema/side-effect review, live API/data parity, manual accessibility/device checks, isolated mutation/RBAC acceptance, and owner sign-off.
+
+### PR #604 — owner-run runtime API route registry reconciliation (2026-10-30)
+
+- **Result:** PASS — owner ran the documented read-only FastAPI `app.routes` inventory command.
+- **Observed:** 81 API route-method entries.
+- **Reconciliation:** The 81 effective runtime method/path identities match the 81 static route identities derived from the 13 routers registered by `web/app.py`; no missing or unexpected API route identity was reported.
+- **Scope boundary:** This closes runtime route identity reconciliation only. Per-route dependency injection, role and forced-password behavior, request/response schemas, polling, side effects, legacy UI callers, live response parity, manual accessibility/device checks, isolated mutation/RBAC verification and owner sign-off remain open.
+- **Safety:** Read-only import/inventory only; no app lifespan, API mutation, database write, worker restart, Telegram send, trade or deployment was triggered.
+
+### PR #604 — Market Screener control notification side-effect audit (2026-10-30)
+
+- **Finding:** POST /api/research/screener/control persists a soft-control record. On the next Screen/screening.py::reload_control() poll, changing enabled emits an asynchronous Telegram ENABLED/PAUSED status notification. Threshold-only changes do not emit this status notification. The endpoint does not start, stop, or restart the worker.
+- **Coverage added:** Two unit tests in tests/test_screener.py mock both the database connection and telegram.send() to verify the notification occurs only for alert-gate state transitions.
+- **Safety:** The tests use an in-memory notification collector; they do not connect to MariaDB or send Telegram messages.
+- **Pending:** Owner must run PYTHONPATH="$PWD" python -m pytest -q tests/test_screener.py and report the result. Hosted CI remains unavailable/unverified due the repository's reported Actions quota exhaustion.
+
+### PR #604 — owner-run Screener regression tests + RetailBot Research API audit (2026-10-30)
+
+- **Screener test result:** Owner reports `PYTHONPATH="$PWD" python -m pytest -q tests/test_screener.py` => **29 passed in 0.52s**. This includes the two mocked `reload_control()` notification regression tests; no live Telegram or DB connection is used by those tests.
+- **Research preview:** `frontend/src/ResearchPanel.tsx` and `frontend/src/lib/research.ts` implement a read-only snapshot consumer; the React panel does not call Research lifecycle/control POST endpoints.
+- **Research API finding:** GET `/api/research/retailbot2/trades`, `/stats`, and `/strategies` call `_ensure_retailbot2_strategy_lifecycle_table()` and commit after `CREATE TABLE IF NOT EXISTS`. They are therefore not strictly read-only at the DB layer and may initialize schema / require DDL privileges. Positions GET does not call this helper.
+- **Worker lifecycle:** persisted settings refresh on first access and every 15 seconds. A failed refresh fails closed for evaluation, paper entries, and Telegram. `paper_enabled` gates new paper entries; `telegram_enabled` is copied to each trade and gates entry/exit Telegram notifications. `auto_promote_enabled` remains unavailable/fail-closed.
+- **Authorization:** lifecycle and RetailBot control mutations are admin/trader-only; authenticated GETs are allowed, subject to the forced-password-change guard.
+- **Recommended follow-up:** move lifecycle table creation to migrations/startup and keep GET helpers SELECT-only. This is recorded as a finding, not changed in this acceptance-only documentation pass.
+- **Safety:** source inspection only; no live API, database, worker, lifecycle mutation, paper trade, or Telegram action was performed.
+
+### PR #604 — Paper Trading and Wallet Tracking preview boundary audit (2026-10-30)
+
+- **Paper preview:** React Paper Trading snapshot requests only GET endpoints for positions/configs/orders/trades/metrics/circuit-breaker state; no mutation is called by this panel. The backend separately exposes cancel, config update, manual close, sync/evaluate, deploy, emergency-stop and reset actions under the trader/admin mutation boundary.
+- **Consequential paper actions:** deploy persists/activates a config, can send Telegram, and immediately runs evaluation; sync runs evaluation; manual close and cancel mutate ledger/order state; emergency-stop/reset change risk controls. Do not use these as acceptance smoke tests.
+- **Wallet preview:** React wallet snapshot uses only GET endpoints. Inspected GET helpers read settings/status/tracked wallets/positions/events. `ensure_tables()` is DDL/DML but is called from app startup lifespan, not the inspected GET request handlers.
+- **Wallet mutations:** settings PUT, track/toggle POST, and untrack DELETE are trader/admin-only. Settings GET masks Birdeye credentials.
+- **Safety:** source inspection only; no live API/database calls, settings changes, wallet tracking changes, paper actions, Telegram sends, or worker execution occurred.
+
+### PR #604 — Backtest Studio execution and auto-promotion boundary audit (2026-10-30)
+
+- React Backtest Studio calls POST `/api/backtest/run` for a single simulation and GET endpoints for history/run details/promotion state. Policy save uses PUT `/api/backtest/promotion-policy` and persists policy only.
+- Single-run `/api/backtest/run` can persist backtest run/trade history when `save_to_db=true`; it does not invoke auto-promotion or Telegram.
+- Separate `/api/backtest/run-all` runs the tournament and calls `_auto_promote_top_candidate()`. Under policy gates it can write promotion audit state, activate a paper config, and send a Telegram deployment alert. Train selection plus separate holdout validation is required when configured.
+- **Parity gap:** React preview does not currently call `/api/backtest/run-all`; the tournament auto-promotion workflow is therefore not triggered by the current React Backtest Studio path. Product decision needed before introducing a dedicated UI action.
+- **Safety:** no backtest, policy update, promotion, paper config activation, audit write, or Telegram alert was triggered during this source audit.
+
+
+### PR #604 — Authentication, User Management, Settings, Telegram, and ML source audit
+
+- **Scope:** Read source only on `feat/uix-final-acceptance-pass`; no live API calls or mutations.
+- **Authentication:** `/api/auth/login` is the sole public API route. Session profile reads are authenticated; logout revokes the bearer token and records an audit event; password change validates the current password, applies the stronger self-service password policy, updates the hash and forced-change flag, then records an audit event.
+- **User administration:** All `/api/users*` routes are admin-only. Create, reset, and update operations write audit events. Confirmed gaps: `DELETE /api/users/{user_id}` does not write a deletion audit event; create/reset enforce the 10-character schema minimum but do not apply the stronger common-password/variety checks used by self-service change; `GET /api/users` does not select `must_change_password`, despite the older inventory contract claiming it does. The React preview does not call user-management endpoints.
+- **Settings diagnostics:** React Settings fetches Telegram status and detailed diagnostics only for an admin. `GET /api/settings/status` reads database metadata and collector heartbeats and makes outbound Binance Spot/Futures connectivity requests. It is admin-only and diagnostic, not a passive static read.
+- **Telegram:** status GET is available to authenticated roles at the middleware boundary, with chat ID returned only when request role is admin. `POST /api/telegram/test` is admin-only and performs a real connection test; with a configured chat ID it may send a real message. React requires an explicit review/confirmation step. It was not invoked.
+- **ML Studio:** React calls only `GET /api/ml/experiments`, `GET /api/ml/models`, and `GET /api/ml/experiments/{id}`. These GET handlers read artifacts, but list handlers call `mkdir(..., exist_ok=True)` and can create missing artifact directories. `POST /api/ml/run-experiment` executes the research pipeline and persists results/artifacts. `POST /api/ml/deploy-to-paper` validates eligibility and artifacts, activates a paper configuration, optionally sends Telegram, and immediately runs paper sync/evaluation. Neither mutation is called by React preview.
+- **RBAC:** `/api/settings*` and `/api/auth/audit-logs*` are admin-only; `/api/users*` are admin-only; `/api/telegram/test` is admin-only; ML GET routes are available to all authenticated roles while ML mutations are trader/admin-only.
+- **Safety:** No endpoint was called; no user, password, settings, model, paper config, database, worker, or Telegram state was changed.
+- **Disposition:** Findings are documented for acceptance review. Do not migrate user administration or ML mutation controls into the preview until the audit-log, password-policy, and response-contract gaps are resolved or explicitly accepted.
+
+
+### PR #604 — News AI and Master Data / market-search source audit
+
+- **News AI:** React calls only `GET /api/news/stats`, `GET /api/news/signals?limit=50`, and `GET /api/news/events?limit=30`. Source route handlers call persisted-data DB helpers and return sanitized generic 500 errors; they do not start pollers, invoke AI, execute trades, or send Telegram. These routes are available to all authenticated roles. Database helpers clamp signal/event limits to 1–200.
+- **Master Data reads:** React loads `GET /api/master-data/coverage` and `GET /api/master-data/jobs`; those handlers read persisted OHLCV/features coverage and merge in-memory/persisted job state. They do not start jobs.
+- **Market search:** React calls `GET /api/crypto/search` and `GET /api/crypto/popular`. These are not guaranteed offline/cache-only reads: on cache miss/expiry the handlers make outbound Binance Spot/Futures HTTP requests (8-second timeout) and update a process-local 60-second cache.
+- **Master Data mutations:** React role-gates and requires explicit confirmation before `POST /api/master-data/backfill` or `POST /api/master-data/build-features`. The endpoints persist a queued job and start a daemon thread. Backfill fetches Binance candles and upserts OHLCV; optional feature generation writes feature rows. Feature-build runs feature generation. These are consequential DB/network/worker operations and were not called.
+- **Input validation gap:** backend `BackfillRequest` and `FeatureBuildRequest` define `symbol`, `market`, and `timeframe` as unconstrained strings. React restricts market/timeframe with controls and performs client-side symbol validation for backfill, but direct API callers can bypass it. In backfill, any market other than exact `spot` selects the Futures URL while the unvalidated market string is retained in the job/data arguments. Add server-side allowlists/format validation before treating these endpoints as production-safe.
+- **Job error exposure:** background job exception handlers place `str(exception)` in persisted job messages; GET job history/detail is available to all authenticated roles and the React panel renders those messages. Review for sensitive DB/provider details and prefer stable public error codes with detailed server-side logs.
+- **Safety:** No market-search endpoint, backfill, feature build, news endpoint, or job endpoint was invoked. No external Binance request, DB write, job thread, worker, Telegram send, or deployment occurred.
+
+
+### PR #604 — Strategy Library and system-status source audit
+
+- **Strategy Library preview:** React loads the custom strategy list and indicator catalog; admin/trader users can generate an AI draft, quick-test, create/update, and delete a saved definition. Generated drafts and quick tests are non-persisted. Create/update atomically writes `custom_strategies.json` and updates the web process strategy registry; delete rewrites the file and removes the in-process forward/inverse registry entries. These operations do not activate paper trading or send Telegram.
+- **Role boundary:** middleware applies admin/trader restriction to the entire `/api/custom-strategy` prefix, including GET list/catalog and POST draft/quick-test/create and DELETE. React only renders management/quick-test actions for admin/trader; viewers receive a restricted GET response rather than a read-only library.
+- **AI data flow:** `POST /api/custom-strategy/generate-ai` sends the user prompt, up to the last six conversation messages, and optional current draft context to the configured LLM provider/fallback chain (9Router/OpenRouter/Anthropic) when configured; otherwise it uses the local heuristic. This is an outbound third-party data flow and potential provider usage/cost, though it does not persist the draft. Prompt/history fields have no explicit length bounds in the request schema.
+- **Quick test:** `POST /api/custom-strategy/quick-test` reads stored OHLCV/features, simulates at most the latest 1,000 candles, and computes metrics in memory. It does not write trade rows or activate a strategy. Request symbol/market/timeframe are plain strings in the backend model; client restricts market to spot/futures but backend validation should be considered.
+- **System status:** both authenticated `GET /api/system/status` and admin-only `GET /api/settings/status` call the shared status collector, which reads DB metadata/heartbeats and performs outbound Binance Spot/Futures probes. The public serializer removes host/database/raw-error fields; admin serializer exposes connection metadata and raw DB error to admins.
+- **Safety:** No LLM request, quick test, create/delete, status endpoint, or Binance request was executed.
+
+
+### PR #604 — Central authentication and audit reliability review
+
+- **Current-user authorization:** middleware reloads the active user and role from the database on each request rather than trusting the role embedded in the signed token. Disabled/deleted users are rejected. The forced-password-change allowlist is limited to profile, logout and password-change endpoints.
+- **Token revocation:** revocation is checked against an in-process cache and the `revoked_tokens` table. If that table lookup fails while the users-table lookup still works, `is_token_revoked()` logs and returns `False`, so a revoked token can be accepted during that partial database/schema failure. This is a fail-open revocation check; consider failing closed or making revocation storage a required health dependency.
+- **Login rate-limit fallback:** durable rate limiting uses the shared `login_attempts` table, but startup/store failures fall back to process-local memory. In a multi-worker deployment, attempts are then not shared and restart clears them. This preserves availability but weakens brute-force protection during DB limiter failure; surface degraded status and consider fail-closed or an external shared limiter.
+- **Audit durability:** `log_audit()` catches database errors and returns without propagating them. Login, logout, password-change, user-create/update/reset, and other callers can therefore report success while the audit event was not persisted. Treat audit failure explicitly for security-sensitive actions, or provide durable outbox/retry monitoring.
+- **Session lifetime:** signed access tokens have a 24-hour expiry. There is no refresh-token endpoint in the inspected auth router. This is an operational policy choice; confirm it matches expected session exposure.
+- **Cookie/CSRF:** request authentication accepts a legacy `auth_token` cookie as well as bearer authorization. No cookie-setting flow was found in the inspected auth routes. If another legacy/static path sets this cookie, state-changing cookie-authenticated requests need CSRF protection/SameSite review; if no cookie is issued, remove the stale cookie path to avoid ambiguity.
+- **Safety:** source-only review; no tokens, credentials, auth endpoint, or database were exercised.

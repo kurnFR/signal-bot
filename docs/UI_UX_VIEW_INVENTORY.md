@@ -1,7 +1,7 @@
 # Signal Bot UI/UX Comprehensive View & API Inventory (UIX-00)
 
 **Document Version:** 1.2.0  
-**Status:** In review — Market Screener control editor is now reachable in the React preview; full route-by-route source verification and owner acceptance pending  
+**Status:** In review — owner-run runtime API route registry reconciliation passed (81 method/path entries match static source); full per-route contract/side-effect review and owner acceptance remain pending  
 **Target Architecture:** React 18+ + TypeScript + Vite + Tailwind CSS + shadcn/ui + TanStack Query v5 + TanStack Table v8  
 **Source baseline for reconciliation:** `0d5567de72d6e5e41168505c1c284733e12e9be5` (master after PR #542, 2026-10-28; runtime route-registry and frontend endpoint-parity tests exist, but complete row-by-row inventory verification and owner acceptance remain pending)  
 **Execution Brief Reference:** [`docs/UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md`](UI_UX_ANTIGRAVITY_EXECUTION_BRIEF.md)  
@@ -48,7 +48,7 @@ This document is Antigravity's detailed baseline inventory draft for **Phase UIX
 
 The preview is mostly read-only, with four intentional, role-gated mutation surfaces and one non-persisted compute action.
 
-- `ScreenerControlsPanel.tsx` calls `POST /api/research/screener/control` only when an admin or trader explicitly selects **Save changes**. Viewer sessions do not fetch the editor configuration and cannot submit changes. The request changes persisted screener settings, including the Telegram alert gate and detection thresholds; it does not itself send a Telegram message or restart the worker.
+- `ScreenerControlsPanel.tsx` calls `POST /api/research/screener/control` only when an admin or trader explicitly selects **Save changes**. Viewer sessions do not fetch the editor configuration and cannot submit changes. The request persists the Telegram alert gate and detection-threshold overrides; it does not directly send a Telegram message or restart the worker. On the worker's next `reload_control()` poll, changing the `enabled` flag triggers `telegram.send()` with an ENABLED/PAUSED status notification. Threshold-only saves do not trigger that notification. Treat an alert-gate toggle as an asynchronous Telegram side effect.
 - `MasterDataPanel.tsx` allows admin/trader users to review and confirm a backfill request (`POST /api/master-data/backfill`) or feature-build request (`POST /api/master-data/build-features`). These actions can write OHLCV/features and launch background workers. Viewer sessions cannot access the controls.
 - `BacktestStudioPanel.tsx` allows admin/trader users to submit `POST /api/backtest/run` only after reviewing and confirming a run configuration. The response is shown with an explicit saved-run ID when persistence is confirmed; a null `runId` is presented as persistence not confirmed. This simulates historical trades only and does not execute live orders.
 - `StrategyLibraryPanel.tsx` offers an explicit admin/trader `POST /api/custom-strategy/quick-test` action. It simulates against up to 1,000 stored candles and returns metrics without saving or activating the strategy.
@@ -106,6 +106,53 @@ HTTP 403 Forbidden
 ## 4. Draft Endpoint-by-Endpoint Register (81 Listed Route Rows)
 
 The following draft register lists 81 API endpoint rows across the 13 router modules included in `web/app.py`. Static source inspection found 81 `@router` HTTP endpoint decorators across those modules, plus the app-level `GET /` route. The remaining audit is to compare every row and effective prefix/method/path with FastAPI's runtime route registry, account for mounted/static and framework routes, and verify handler contracts, RBAC, forced-password behavior, polling, and side effects. Do not treat the inventory as accepted until that mapping and owner review are recorded.
+
+### Static route-decorator reconciliation — 2026-10-30
+
+A source-level comparison was performed against the exact PR branch for all 13 modules imported and registered by `web/app.py`:
+
+- `auth_routes.py`: 10 route decorators
+- `paper_routes.py`: 13
+- `search.py`: 2
+- `master_data.py`: 5
+- `backtest.py`: 9
+- `settings.py`: 1
+- `system_status.py`: 1
+- `custom_strategy.py`: 6
+- `telegram_routes.py`: 2
+- `ml_routes.py`: 5
+- `news_routes.py`: 3
+- `research_routes.py`: 12
+- `wallet_routes.py`: 12
+- **Total: 81 API route decorators.** The app also declares `GET /` outside the routers and mounts `/static`.
+
+The primary route register contains 81 endpoint definitions. The whole document contains 97 endpoint-table rows because later source-audit slices intentionally repeat 15 endpoint rows with deeper handler/consumer details; one further screener row includes the query string `?limit=50`. After stripping query parameters and collapsing the supplemental repeats, there are exactly 81 unique method/path identities. Every one matches a registered router decorator after applying its `APIRouter(prefix=...)`; no missing or extra API method/path was found in this static comparison.
+
+The owner subsequently ran the documented read-only runtime registry dump on 2026-10-30. It reported **81 API route-method entries**, matching the 81 static method/path identities after applying router prefixes; no missing or unexpected runtime API route identity was reported. This closes runtime route identity reconciliation, but does not by itself verify dependency injection behavior, route ordering beyond the registered identities, request/response schemas, per-route side effects, legacy UI callers, or live API data. Role-policy source inspection confirms the documented prefix/method policy, including the intentionally stricter current `admin|trader` restriction on both GET catalog routes under `/api/custom-strategy`; the owner decision on whether viewers should read that catalog remains open.
+
+For a read-only runtime registry dump on the owner's server (imports the FastAPI app but does not start its lifespan or issue API requests), run:
+
+```bash
+PYTHONPATH="$PWD" python - <<'PY'
+from fastapi.routing import APIRoute
+from web.app import app
+
+rows = []
+for route in app.routes:
+    if not isinstance(route, APIRoute) or not route.path.startswith("/api/"):
+        continue
+    for method in sorted((route.methods or set()) - {"HEAD", "OPTIONS"}):
+        rows.append((method, route.path, route.name))
+
+for method, path, name in sorted(rows):
+    print(f"{method:7} {path:55} {name}")
+
+print(f"\nAPI route-method entries: {len(rows)}")
+PY
+```
+
+Compare the printed API route-method entries with the 81 source-level method/path identities above. Do not run any mutation endpoint as part of this check.
+
 
 ### 4.1 Authentication & User Administration (`auth_routes.py`)
 
@@ -235,7 +282,7 @@ The following draft register lists 81 API endpoint rows across the 13 router mod
 | `GET /api/research/screener/stats` | `screener_stats`<br>`research_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"total_signals": int, "average_quality": float, "universe_count": int, "active_surges": int}` | Calculates screening quality aggregates | Screener Summary Cards (`#view-market-screener`) |
 | `GET /api/research/screener/status` | `screener_status`<br>`research_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"last_scan": str, "scanned_symbols": int, "healthy": bool}` | Returns health status of background market scanner | Health indicator pill (`#view-market-screener`) |
 | `GET /api/research/screener/control` | `screener_control_get`<br>`research_routes.py` | Authenticated (All roles) | Blocked (403 required) | None | **200 OK:**<br>`{"enabled": bool, "overrides": dict}` | Reads screener control state from `screener_control` | Screener Daemon Badge (`#view-market-screener`) |
-| `POST /api/research/screener/control` | `screener_control_set`<br>`research_routes.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `BotControlRequest`<br>`{enabled: bool, overrides: dict}` | **200 OK:**<br>`{"status": "ok", "note": str}` | Updates `screener_control` table; background scanner respects toggle | Screener Start/Stop controls (`#view-market-screener`) |
+| `POST /api/research/screener/control` | `screener_control_set`<br>`research_routes.py` | `trader`, `admin` | Blocked (403 required) | **Body:** `BotControlRequest`<br>`{enabled: bool, overrides: dict}` | **200 OK:**<br>`{"status": "ok", "note": str}` | Updates `screener_control`; worker applies on its next poll. Changing `enabled` sends an asynchronous Telegram ENABLED/PAUSED status notification; threshold-only changes do not. No process start/stop/restart occurs. | Screener configuration controls (`ScreenerControlsPanel`) |
 
 ---
 
@@ -419,15 +466,75 @@ This slice is verified against the current source files `web/app.py`, `web/route
 | `GET /api/research/screener/signals?limit=50` | `research_routes.screener_signals`; `limit` integer 1–200, default 50 | Authenticated roles including viewer; blocked if forced password change is required | Read-only query of recent smart-money signals; handler returns `{"signals": [...]}`; failures are returned as HTTP 500 with a generic message. | `ScreenerPanel` |
 | `GET /api/research/screener/stats` | `research_routes.screener_stats`; no request body | Authenticated roles including viewer; blocked if forced password change is required | Read-only aggregate of smart-money signal statistics; failures return HTTP 500 with a generic message. | `ScreenerPanel` |
 | `GET /api/research/screener/control` | `research_routes.screener_control_get`; no request body | Authenticated roles including viewer; blocked if forced password change is required | Returns persisted `enabled`, `overrides`, `updated_at`, and sorted `tunable_fields`. Unlike the status endpoint, a failed control read returns HTTP 500; the React editor currently only fetches this control payload for admin/trader. | `ScreenerControlsPanel` (admin/trader only) |
-| `POST /api/research/screener/control` | `BotControlRequest`: `enabled: bool`, `overrides: Dict[str, Any]` defaulting to empty | `api_security_boundary` allows admin/trader only; viewer is denied with HTTP 403. Forced-password guard runs before role policy. | Validates override keys against `SCREENER_TUNABLE_FIELDS`, checks boolean fields and finite numeric values, and applies configured bounds before calling `set_screener_control`. Persists a soft control record for the running worker to poll; it does not launch, terminate, or restart the process. Success returns status and an approximately 60-second/next-loop-tick note. | Explicit Save action in `ScreenerControlsPanel` |
+| `POST /api/research/screener/control` | `BotControlRequest`: `enabled: bool`, `overrides: Dict[str, Any]` defaulting to empty | `api_security_boundary` allows admin/trader only; viewer is denied with HTTP 403. Forced-password guard runs before role policy. | Validates override keys against `SCREENER_TUNABLE_FIELDS`, checks boolean fields and finite numeric values, and applies configured bounds before calling `set_screener_control`. Persists a soft control record for the running worker to poll; it does not launch, terminate, or restart the process. When the worker next runs `reload_control()`, a change to `enabled` triggers `telegram.send()` with an ENABLED/PAUSED status notification; threshold-only changes do not. Success returns status and an approximately 60-second/next-loop-tick note. | Explicit Save action in `ScreenerControlsPanel`; enabled-state changes have an asynchronous Telegram notification side effect |
 
 ### Cross-checks and known limits
 
 - The role gate is centralized in `web/app.py`. `RESEARCH_CONTROL_PREFIXES` includes `/api/research/screener/control`; GET is allowed for authenticated roles, while non-GET methods require `admin` or `trader`. The middleware rejects forced-password-change accounts on these paths before reaching the handlers.
-- The control request model accepts `enabled` and an overrides object. The override filter is an allowlist and validates known boolean toggles, rejects booleans/non-numbers where numeric values are required, rejects non-finite numbers, and applies explicit lower/upper bounds for bounded fields. The database helper/worker implementation remains the source of truth for persistence and application timing.
+- The control request model accepts `enabled` and an overrides object. The override filter is an allowlist and validates known boolean toggles, rejects booleans/non-numbers where numeric values are required, rejects non-finite numbers, and applies explicit lower/upper bounds for bounded fields. `set_screener_control()` commits the control-row update; `Screen/screening.py::reload_control()` resets tunables to environment defaults before applying stored overrides. A changed `enabled` flag also emits an asynchronous Telegram status notification.
 - The React editor exposes explicit Save and Reload actions, client-side numeric range validation, feedback states, and a viewer restriction message. Its UI role check improves usability only; the server middleware remains authoritative.
+- Added mocked regression tests `test_reload_control_sends_status_notification_when_alert_gate_changes` and `test_reload_control_does_not_notify_for_threshold_only_changes` in `tests/test_screener.py`. They replace `telegram.send` with an in-memory collector and use a fake DB connection; no real Telegram message or DB access occurs. Owner-run execution of the targeted test file is still pending. Do not run the live worker or toggle the production alert gate for acceptance.
 - The frontend preview remains isolated: `web/app.py` still serves `web/static/index.html` from `GET /` and mounts `web/static/` at `/static`. No deployment, production route cutover, or process-control behavior is introduced by this audit.
 - This slice does not establish that every legacy fetch/dialog is mapped, nor does it independently prove live database initialization, runtime worker health, screen-reader conformance, real-device acceptance, or owner approval.
+
+### UIX-00 source audit slice: RetailBot Research API boundary (2026-10-30)
+
+This slice verifies the React Research read path, FastAPI Research handlers, shared DB serializers, RetailBot2 lifecycle worker, and route authorization source. It is not a live DB/API exercise.
+
+| Endpoint | Effective behavior and side effects | React preview use |
+|---|---|---|
+| `GET /api/research/retailbot2/positions?limit=100` | Reads OPEN rows from `rdt_trades`; no lifecycle-table initialization in this helper. Decimal values and `entry_time` are normalized for JSON. | `fetchResearchSnapshot()` |
+| `GET /api/research/retailbot2/trades?limit=50` | Calls `_ensure_retailbot2_strategy_lifecycle_table()` (`CREATE TABLE IF NOT EXISTS`) and commits before selecting CLOSED rows. Filters rows using `report_enabled`; this is a schema-initializing GET, not strictly read-only at the DB layer. | `fetchResearchSnapshot()` |
+| `GET /api/research/retailbot2/stats` | Also creates the lifecycle table if missing and commits before aggregate SELECTs. Closed-trade aggregates honor `report_enabled`; open-position counts are not filtered by report visibility. Schema initialization is a DB side effect on GET. | `fetchResearchSnapshot()` |
+| `GET /api/research/retailbot2/strategies` | Calls the same lifecycle-table ensure helper and commits, then reads persisted settings. Registry is built from `StrategyID` plus inverse variants and historical-only composite rows. Auto-promotion is forced false in readback. | `fetchResearchSnapshot()` |
+| `GET /api/research/retailbot2/control` | Reads `bot_control` state without lifecycle DDL in the helper. | Not called by current React Research snapshot. |
+| `POST /api/research/retailbot2/strategies` | Admin/trader only; strict JSON booleans; validates registered strategy/mode pair; rejects historical composite execution flags and rejects `auto_promote_enabled=true`. Persists lifecycle settings; worker refreshes approximately every 15 seconds. Paper/Telegram effects are applied by worker, not synchronously by the route. | Not called by current React Research panel; legacy dashboard has lifecycle controls. |
+| `POST /api/research/retailbot2/control` | Admin/trader only; validates overrides then updates the `bot_control` row. Worker polls control state; no OS process start/stop/restart. | Not called by current React Research panel. |
+
+#### Confirmed worker lifecycle behavior
+
+- `_get_strategy_lifecycle()` reloads persisted flags on first use and then at a 15-second interval. If the DB refresh fails, it fails closed for evaluation, paper entries, and Telegram while leaving report visibility enabled; it does not reuse stale promotion decisions.
+- `_open_trade()` checks `paper_enabled` before creating a paper trade and copies the selected strategy/mode's `telegram_enabled` flag into the trade. Entry Telegram is sent only when that flag is true; close notifications use the persisted per-trade flag.
+- `evaluation_enabled` gates whether the strategy/mode signal is evaluated. Historical `COMPOSITE` rows are non-executable even if legacy DB flags say otherwise. `auto_promote_enabled` is not implemented and remains forced off.
+- Current React `ResearchPanel` is read-only and explicitly says lifecycle changes remain in the legacy dashboard. Its snapshot validates the four GET payloads before rendering. It does not call either POST endpoint.
+- Authorization source in `web/app.py` places `/api/research/retailbot2/control` and `/api/research/retailbot2/strategies` under the admin/trader mutation policy; GET is available to authenticated roles. Forced-password-change middleware blocks these APIs before role policy.
+
+#### Acceptance finding and follow-up
+
+- **Finding:** three Research GET data paths (`trades`, `stats`, `strategies`) call a helper that executes `CREATE TABLE IF NOT EXISTS rdt_strategy_lifecycle` and then `conn.commit()`. This may be a no-op when the table exists, but the GET handlers are not strictly read-only and can require DDL privileges / initialize schema. Do not claim a fully read-only API boundary for these endpoints.
+- **Recommendation:** move lifecycle-table creation to the explicit migration/startup path and make the GET helpers SELECT-only. This is a maintainability/security boundary recommendation, not an automatic change; it needs a separate implementation PR and migration review.
+- **Safety:** no live API calls, database connection, worker execution, lifecycle mutation, paper-trade creation, or Telegram message was triggered during this source audit.
+
+### UIX-00 source audit slice: Paper Trading + Wallet Tracking preview boundaries (2026-10-30)
+
+This is a source-level review of the React snapshot consumers, FastAPI route modules, and wallet store read helpers. It does not call the live API or DB.
+
+#### Paper Trading preview
+
+- `PaperTradingPanel.tsx` and `frontend/src/lib/paperTrading.ts` issue only GET requests for positions, configs, orders, trades, metrics, and circuit-breaker status. No POST/PUT/DELETE action is exposed by this React panel. Payload validators reject malformed rows and treat invalid breaker data as an unavailable/unverified safety state.
+- `web/routes/paper_routes.py` exposes separate mutation endpoints for order cancellation, config updates, manual position close, sync/evaluate, deployment, emergency stop, and breaker reset. These are not called by the React snapshot helper. The mutation prefix is restricted to trader/admin by `web/app.py`; GET endpoints remain available to authenticated roles, subject to forced-password-change guard.
+- Important side-effect distinction for future UI work: `POST /api/paper/deploy` persists/activates a config, may send a deployment Telegram alert when requested, and immediately invokes paper evaluation. `POST /api/paper/sync` runs sync/evaluation. These are consequential actions and must never be treated as passive refreshes. Emergency-stop and reset endpoints mutate the circuit-breaker state.
+
+#### Wallet Tracking preview
+
+- `frontend/src/lib/walletTracking.ts` builds its snapshot exclusively from GET `/api/wallets/meta`, `/settings`, `/status`, `/tracked`, `/positions`, `/token-flow`, and `/events`; the React snapshot consumer has no mutation call.
+- Those GET handlers read persisted settings/status, tracked wallets, positions, swaps/events and derived token flow. `get_settings()` is a SELECT with environment fallback; `get_status()` runs SELECTs only. No write is present in these inspected request read helpers.
+- `wallet_tracker.store.ensure_tables()` does perform CREATE TABLE, ALTER TABLE, and an INSERT IGNORE cursor initialization, but `web/app.py` calls it during application startup, not from these GET handlers. This is a startup schema/bootstrap side effect and must remain explicit in operational documentation; it is not a per-refresh API mutation.
+- Wallet mutation routes include PUT `/api/wallets/settings`, POST `/api/wallets/tracked`, POST `/api/wallets/tracked/toggle`, and DELETE `/api/wallets/tracked`; these are covered by the `/api/wallets` trader/admin mutation prefix. Settings validation normalizes supported chains/token addresses, checks threshold relationships, and preserves an existing Birdeye key when a masked value is submitted. The settings GET response masks the key and returns only a boolean presence flag.
+- **Safety boundary:** do not call the settings PUT, wallet tracking POST/DELETE, paper deployment/sync/close/cancel, or circuit-breaker mutations as part of preview acceptance. The reviewed React panels do not expose these actions.
+
+#### Remaining verification
+
+- This source review does not verify every paper engine helper's DB side effects, order transition state machine, worker timing, or live payload data. Those remain separate contract and mutation/RBAC test gates.
+
+### UIX-00 source audit slice: Backtest Studio execution and promotion boundary (2026-10-30)
+
+- React `BacktestStudioPanel` uses `POST /api/backtest/run` for one explicitly configured simulation and uses GET history/run detail/promotion-policy/audit endpoints. `savePromotionPolicy()` calls `PUT /api/backtest/promotion-policy`; it persists thresholds/flags and reads them back, but does not itself run a backtest, activate a paper config, or send Telegram.
+- `POST /api/backtest/run` validates the strategy against `STRATEGIES`, reads closed OHLCV/features, runs a historical simulation, and persists the run/trades when `save_to_db=true`. It does not call `_auto_promote_top_candidate()` and does not send Telegram. This is a consequential persisted research write, but not a live order.
+- Separate `POST /api/backtest/run-all` runs the strategy tournament, computes rankings and AI insight, then calls `_auto_promote_top_candidate()`. Promotion is policy-gated and requires train-based selection; if holdout is required, it separately evaluates the selected winner on holdout. It records a decision claim/audit row, may activate a paper config, and may send a deployment Telegram alert. Partial/uncertain outcomes are surfaced as reconciliation-required states rather than silently retried.
+- **Important preview parity gap:** the React Backtest Studio call path inspected here does not call `/api/backtest/run-all`; therefore the tournament auto-promotion workflow is not currently initiated by the React preview. Do not imply that a normal React `/run` action performs automatic promotion. Confirm whether the product expects a dedicated explicit tournament action in the new UI before adding one.
+- `PUT /api/backtest/promotion-policy` is a persistent configuration mutation and is under the trader/admin `/api/backtest` mutation boundary. `GET /api/backtest/promotion-audit` is read-only. All backtest mutation endpoints are blocked for forced-password-change sessions.
+- **Safety:** source inspection only; no backtest was executed, no promotion policy changed, no paper config activated, no promotion audit row written, and no Telegram alert sent.
 
 ### UIX-00 audit status after this slice
 
@@ -526,7 +633,8 @@ This slice compares `web/routes/system_status.py`, `web/routes/settings.py`, cen
 - [x] Confirmed the preview uses `/api/system/status` and does not connect the Settings view to the admin-only full diagnostic endpoint.
 - [x] `tests/test_system_status_access.py` verifies the public status response omits database host/port/name, raw DB error, and heartbeat `detail`, preserves a null timestamp, and uses a generic database error message.
 - [ ] Verify auth/session parent state and role-specific browser behavior for settings and system status.
-- [ ] Continue runtime route-registry reconciliation and legacy-to-React parity for all 13 routers; owner acceptance and production cutover gates remain open.
+- [x] Owner-run read-only FastAPI `app.routes` registry reported 81 API method/path entries, matching the 81 static route identities.
+- [ ] Complete per-route dependency, role/forced-password, request/response schema, side-effect and legacy-to-React caller verification for all 13 routers; owner acceptance and production cutover gates remain open.
 
 
 
@@ -892,9 +1000,63 @@ The historical audit notes above are chronological. Use this latest ledger for c
 - [x] Exact-head frontend and backend CI passed. Never expose the admin endpoint to viewer/trader roles or log connection details in public status.
 
 
-## UIX-00 Telegram test-result response validation (PR #602, pending)
+## UIX-00 Telegram test-result response validation (PR #602, merged — `ac195488376a362bb78e3419028c93041d53cefe`)
 
 - Validates the actual `test_telegram_connection()` response: required boolean `success`, optional bot identity strings, nullable chat ID/error, and optional note string.
 - Documents HTTP 400 `detail` responses separately from successful helper results. Corrects stale statements about the React Settings consumer; the preview already has an admin-only confirmed test-ping workflow.
 - All adapter tests mock the HTTP response. No Telegram message is sent by CI.
-- [ ] Exact-head CI and review. Keep the endpoint admin-only and preserve explicit confirmation because a successful call can send a real external message.
+- [x] Exact-head frontend and backend CI passed. Keep the endpoint admin-only and preserve explicit confirmation because a successful call can send a real external message.
+
+
+## UIX-00 authentication profile response validation (PR #604, pending owner validation)
+
+- Validates `POST /api/auth/login` before persisting its token and validates `GET /api/auth/me` before the auth gate trusts user identity, role, or forced-password-change state.
+- Allowed roles are the existing `admin`, `trader`, and `viewer` values; malformed IDs, usernames, email values, role names, boolean flags, or tokens fail closed.
+- Tests mock responses only and use synthetic credentials. No real account or session is used.
+- [ ] Owner-run frontend tests and browser acceptance on exact PR head. GitHub Actions quota is exhausted; backend authentication and RBAC remain authoritative.
+
+
+## Verified Follow-up Audit — Authentication, Settings, Telegram, and ML (PR #604)
+
+Source review on `feat/uix-final-acceptance-pass` confirms:
+
+| Area | React preview behavior | Backend boundary / side effect | Acceptance note |
+| --- | --- | --- | --- |
+| Authentication | Existing auth gate handles login, profile, logout, and forced password change | Login is public; all other API routes require authentication. Logout revokes the token and writes an audit event. Password change updates the password hash and forced-change flag, then audits. | Keep server-side role and forced-password-change checks authoritative. |
+| User management | Not connected; explicit legacy UI placeholder | All `/api/users*` endpoints are admin-only. Create/reset/update audit; delete currently does not. Create/reset do not apply the stronger self-service common-password/variety policy. GET user list omits `must_change_password`, contrary to the earlier inventory row. | Do not migrate until deletion audit and response/password policy contracts are reconciled. |
+| Settings diagnostics | Admin-only fetch from Settings panel | `GET /api/settings/status` reads MariaDB metadata/heartbeats and probes Binance Spot/Futures over HTTP. | Diagnostic request has external network activity; not a passive read. |
+| Telegram | Admin-only status display; explicit confirmation before test | Status GET hides chat ID from non-admins. Test POST is admin-only and may send a real Telegram message when chat ID is configured. | Never use test endpoint for acceptance smoke tests. |
+| ML Studio | GET-only experiment/model/artifact inspection | List GETs may create missing `ml_results/` or `ml_models/` directories. Experiment POST executes and persists a tournament. Deploy POST activates paper config, optionally sends Telegram, then runs paper sync/evaluation. | Keep mutation controls out of preview; consider removing directory creation from GET handlers. |
+
+All findings above are source-level only. No API calls, user changes, password changes, diagnostic probes, Telegram sends, ML executions, paper activation, or database mutations were performed.
+
+
+## Verified Follow-up Audit — News AI and Master Data (PR #604)
+
+- News AI React view is GET-only (`/api/news/stats`, `/api/news/signals`, `/api/news/events`). The route handlers call DB read helpers only; they do not start collectors, AI inference, paper execution, or Telegram. All authenticated roles can read these endpoints; signal/event limits are clamped in the DB helpers.
+- Master Data snapshot GETs read coverage and job history. Market search/popular endpoints may call Binance Spot/Futures on cache miss or after the 60-second process-local cache expires; they also update that in-memory cache. Therefore the UI's "read-only" label means no trading/data mutation, not zero external network activity.
+- Master Data POST backfill/feature-build routes start daemon threads and persist job state. Backfill fetches and upserts OHLCV and can build features; feature-build writes feature data. React uses admin/trader role gating and an explicit confirmation step.
+- **Backend validation gap:** `BackfillRequest` and `FeatureBuildRequest` accept unconstrained strings for symbol, market, and timeframe. Client-side restrictions are not a substitute for server validation. In particular, non-`spot` market values fall through to the Futures endpoint in the backfill worker. Add backend allowlists and format checks.
+- **Job-message disclosure risk:** job failure paths persist raw `str(exception)` in the public job message, while GET job history/detail is readable by all authenticated roles and the React view renders the message. Replace client-visible exception strings with stable sanitized errors and retain detail in server logs.
+- No endpoints or external providers were called and no jobs/data were changed during this source audit.
+
+
+## Verified Follow-up Audit — Strategy Library and System Status (PR #604)
+
+- Strategy Library React view reads saved definitions and indicator metadata. Admin/trader users can request an AI-generated draft, run an in-memory quick simulation, and explicitly create/update/delete saved definitions. Save/delete writes `custom_strategies.json` and updates the web-process strategy registry; these operations do not activate paper trading or send Telegram.
+- All `/api/custom-strategy*` routes, including GET catalog/list, are admin/trader-only. Viewer access is denied at the middleware boundary.
+- AI generation can transmit the prompt, up to six recent history messages, and current draft context to configured external LLM providers/fallbacks. The request schema has no explicit prompt/history size limits. This should be treated as an outbound data/cost boundary, not an offline operation.
+- Quick test reads stored OHLCV/features and simulates up to 1,000 candles in memory; it does not persist trades or activate strategies. Backend symbol/market/timeframe fields are plain strings despite the narrower React controls.
+- Public and admin system-status GET routes share a collector that queries DB metadata/heartbeats and probes Binance Spot/Futures. The public serializer strips host/database/raw error details; the admin route is restricted and exposes connection metadata/raw DB error to admins.
+- No LLM, simulation, strategy mutation, status endpoint, or outbound Binance request was invoked during this audit.
+
+
+## Central Authentication Reliability Review (PR #604)
+
+- Role and active-account state are reloaded from the users table on each authenticated request; token claims are not used as the final authorization source. Forced-password-change sessions are restricted to profile/logout/password-change.
+- **Fail-open revocation:** if the `revoked_tokens` lookup fails but the users lookup succeeds, the revocation helper returns false and permits the token to continue. Require reliable revocation storage or fail closed on revocation-store errors.
+- **Degraded brute-force protection:** durable login throttling falls back to process-local memory on startup/query failures. Multi-worker deployments no longer share the attempt counter in this state; restart clears it. Expose degraded health and decide on a fail-closed/shared fallback.
+- **Audit write is best-effort:** `log_audit()` swallows DB errors. Sensitive actions can complete while their audit record is missing. Add durable retry/outbox or make audit persistence failure visible to the action caller.
+- Access tokens expire after 24 hours; no refresh route was found in the inspected auth router. Confirm session-lifetime policy.
+- Auth accepts bearer tokens or an `auth_token` cookie, but the inspected auth routes do not issue that cookie. If a legacy client issues it, review SameSite/CSRF; otherwise remove unused cookie auth.
+- No live auth action or database operation was performed.
