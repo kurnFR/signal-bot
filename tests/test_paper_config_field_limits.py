@@ -6,7 +6,7 @@ from unittest.mock import patch
 from pydantic import ValidationError
 
 from paper.engine import set_paper_config
-from web.routes.backtest import BacktestRunRequest
+from web.routes.backtest import BacktestRunRequest, RunAllStrategiesRequest, WalkForwardBacktestRequest
 from web.routes.ml_routes import DeployMLToPaperRequest
 from web.routes.paper_routes import DeployStrategyRequest, PaperConfigRequest
 
@@ -58,6 +58,12 @@ class TestPaperConfigFieldLimits(unittest.TestCase):
         )
         with self.assertRaises(ValidationError):
             BacktestRunRequest(symbol="S" * 21)
+
+    def test_other_backtest_entrypoints_bound_symbol_fields(self):
+        with self.assertRaises(ValidationError):
+            WalkForwardBacktestRequest(symbol="S" * 21)
+        with self.assertRaises(ValidationError):
+            RunAllStrategiesRequest(symbol="S" * 21)
 
     def test_ml_deploy_model_id_matches_paper_config_column_width(self):
         DeployMLToPaperRequest(model_id="m" + "x" * 99)
