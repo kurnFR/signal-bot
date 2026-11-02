@@ -4,7 +4,7 @@
 **Repository:** `kurnFR/signal-bot`  
 **Branch:** `fix/security-shared-login-rate-limit`  
 **Pull request:** [#606](https://github.com/kurnFR/signal-bot/pull/606)  
-**Current code head at verification:** `587105d217bbd12a8f317f86fe9803e3ae02e0a8`  
+**Current code head at verification:** `9d6b141f0fac161a16e12bb085da7d5a0a2a0050`  
 **Release state:** CI green; draft PR; not merged or deployed.
 
 ## Finding and remediation
@@ -22,7 +22,7 @@ The original durable login limiter could fall back to process-local memory when 
 
 ## Latest CI acceptance — 2026-11-02
 
-All six check runs completed successfully on exact head `587105d217bbd12a8f317f86fe9803e3ae02e0a8`:
+All required CI workflows completed successfully on exact code head `9d6b141f0fac161a16e12bb085da7d5a0a2a0050`:
 
 | Check | Result |
 |---|---:|
@@ -35,15 +35,17 @@ All six check runs completed successfully on exact head `587105d217bbd12a8f317f8
 
 The MariaDB integration workflow applies migrations to its ephemeral `wallet_tracker_test` database. The full-suite workflow uses ephemeral `signal_bot_test`. Production `crypto_signals` was not accessed. The frontend browser smoke job installed Chromium and completed successfully.
 
-The CI run IDs are:
-- Full suite: `41368456221`
-- Unit + MariaDB integration: `41368456230`
-- RetailBot accounting: `41368456179`
-- Frontend: `41368456209`
+The latest CI run IDs are:
+- Full suite (PR event): `41377153922` — **812 passed, 16 skipped, 6 warnings**.
+- Full suite (push event): `41377148977` — **812 passed, 16 skipped, 6 warnings**.
+- Unit + MariaDB integration: `41377153619` — **105 passed** and **35 passed** respectively.
+- RetailBot accounting/parity + screener regression: `41377153529` — **36 passed** and **27 passed**.
+- Frontend: `41377153424` — type-check, unit tests, production build, and **27 Playwright browser tests passed**.
 
 ## Review notes and remaining gates
 
 - The latest branch diff was reviewed at the route, durable admission/finalization, migration, workflow, and monitoring surfaces.
+- Review found that the login route held its identity-lookup connection while acquiring the limiter connection and performing PBKDF2 verification. The route now releases the lookup cursor/connection before limiter admission; a regression test asserts this ordering. Fix/test commit: `9d6b141f0fac161a16e12bb085da7d5a0a2a0050`.
 - No unresolved inline review threads or submitted PR reviews were present at the latest review check.
 - The DB identity lookup ensures known account aliases that compare equal under the configured users-table collation share the same user-ID bucket. The regression test simulates two spellings resolving to the same ID; it is a route-level test, not a dedicated assertion against every production collation.
 - CI proves the automated suite on isolated databases. A local user rerun is not independently verified in this review session.
