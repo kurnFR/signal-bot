@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchAuthUser, login, AuthRequestError } from "./auth";
+import { fetchAuthUser, login, logout, AuthRequestError } from "./auth";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -38,6 +38,28 @@ describe("authentication response contracts", () => {
     stubPayload({ token: "session-token", user: validUser });
     await expect(login("trader01", "secret")).resolves.toEqual({ token: "session-token", user: validUser });
     expect(window.localStorage.getItem("token")).toBe("session-token");
+  });
+
+  it("retains the token when server-side logout fails and clears it after a successful retry", async () => {
+    window.localStorage.setItem("token", "active-session-token");
+    const failedFetch = stubPayload({ detail: "Service unavailable" }, 503);
+    await expect(logout()).rejects.toBeInstanceOf(AuthRequestError);
+    expect(window.localStorage.getItem("token")).toBe("active-session-token");
+    expect(failedFetch).toHaveBeenCalledWith("/api/auth/logout", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({ Authorization: "Bearer active-session-token" }),
+    }));
+
+    stubPayload({ status: "success" }, 200);
+    await expect(logout()).resolves.toBeUndefined();
+    expect(window.localStorage.getItem("token")).toBeNull();
+  });
+
+  it("clears an already-invalid token when logout receives 401", async () => {
+    window.localStorage.setItem("token", "expired-session-token");
+    stubPayload({ detail: "Session expired" }, 401);
+    await expect(logout()).resolves.toBeUndefined();
+    expect(window.localStorage.getItem("token")).toBeNull();
   });
 
   it.each([
