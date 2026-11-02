@@ -113,6 +113,56 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
                 revoke_token(token)
             self.assertIn("Failed to persist revoked token to database", str(ctx.exception))
 
+    def test_revocation_cleanup_uses_separate_committed_transaction(self):
+        token = create_access_token(user_id=10, username="trader_alice", role="trader")
+        revocation_conn, revocation_cur = MagicMock(), MagicMock()
+        cleanup_conn, cleanup_cur = MagicMock(), MagicMock()
+        revocation_conn.cursor.return_value = revocation_cur
+        cleanup_conn.cursor.return_value = cleanup_cur
+        cleanup_cur.fetchone.side_effect = [(1,), (1,)]
+
+        with patch("web.auth.get_pool") as pool:
+            pool.return_value.get_connection.side_effect = [revocation_conn, cleanup_conn]
+            revoke_token(token)
+
+        revocation_sql = [call.args[0] for call in revocation_cur.execute.call_args_list]
+        cleanup_sql = [call.args[0] for call in cleanup_cur.execute.call_args_list]
+        self.assertTrue(any("INSERT INTO revoked_tokens" in sql for sql in revocation_sql))
+        self.assertFalse(any("DELETE FROM revoked_tokens" in sql for sql in revocation_sql))
+        delete_call = next(call for call in cleanup_cur.execute.call_args_list
+                           if "DELETE FROM revoked_tokens" in call.args[0])
+        self.assertIn("LIMIT %s", delete_call.args[0])
+        self.assertEqual(delete_call.args[1], (1000,))
+        self.assertTrue(any("RELEASE_LOCK" in sql for sql in cleanup_sql))
+        revocation_conn.commit.assert_called_once()
+        cleanup_conn.commit.assert_called_once()
+        revocation_conn.close.assert_called_once()
+        cleanup_conn.close.assert_called_once()
+
+    def test_cleanup_deadlock_cannot_rollback_committed_token_revocation(self):
+        token = create_access_token(user_id=10, username="trader_alice", role="trader")
+        revocation_conn, revocation_cur = MagicMock(), MagicMock()
+        cleanup_conn, cleanup_cur = MagicMock(), MagicMock()
+        revocation_conn.cursor.return_value = revocation_cur
+        cleanup_conn.cursor.return_value = cleanup_cur
+        cleanup_cur.fetchone.side_effect = [(1,), (1,)]
+
+        def fail_cleanup_delete(sql, params=None):
+            if "DELETE FROM revoked_tokens" in sql:
+                raise RuntimeError("simulated cleanup deadlock")
+
+        cleanup_cur.execute.side_effect = fail_cleanup_delete
+        with patch("web.auth.get_pool") as pool:
+            pool.return_value.get_connection.side_effect = [revocation_conn, cleanup_conn]
+            revoke_token(token)
+
+        revocation_conn.commit.assert_called_once()
+        revocation_conn.rollback.assert_not_called()
+        cleanup_conn.rollback.assert_called_once()
+        self.assertTrue(any(
+            "RELEASE_LOCK" in call.args[0] for call in cleanup_cur.execute.call_args_list
+        ))
+
     def _logout_request(self, token):
         from starlette.requests import Request
         return Request({
@@ -227,8 +277,10 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         try:
             with patch("web.routes.auth_routes.get_pool") as pool, \
                  patch("web.routes.auth_routes.revoke_token_cursor", return_value="revoked-hash") as revoke, \
-                 patch("web.routes.auth_routes.cache_revoked_token") as cache:
+                 patch("web.routes.auth_routes.cache_revoked_token") as cache, \
+                 patch("web.routes.auth_routes.cleanup_expired_revocations") as cleanup:
                 cache.side_effect = lambda _token: self.assertTrue(mock_conn.commit.called)
+                cleanup.side_effect = lambda: self.assertTrue(mock_conn.commit.called)
                 pool.return_value.get_connection.return_value = mock_conn
                 response = self.client.post(
                     "/api/auth/logout", headers={"Authorization": f"Bearer {token}"}
@@ -241,6 +293,7 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         mock_conn.commit.assert_called_once()
         revoke.assert_called_once_with(mock_cur, token)
         cache.assert_called_once_with(token)
+        cleanup.assert_called_once_with()
         self.assertTrue(any(
             "INSERT INTO audit_logs" in call.args[0]
             for call in mock_cur.execute.call_args_list

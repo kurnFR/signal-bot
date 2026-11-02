@@ -231,6 +231,76 @@ def _is_cached_revoked_token(token_hash: str) -> bool:
         return True
 
 
+REVOCATION_CLEANUP_LOCK_NAME = "signal_bot_revoked_expiry_cleanup"
+REVOCATION_CLEANUP_BATCH_SIZE = 1000
+
+
+def cleanup_expired_revocations() -> None:
+    """Best-effort bounded cleanup on its own connection and transaction.
+
+    This must stay outside the caller's revocation/audit transaction: a cleanup
+    deadlock or statement failure must never roll back a successful revocation.
+    """
+    conn = None
+    cur = None
+    lock_attempted = False
+    try:
+        conn = get_pool().get_connection()
+        cur = conn.cursor()
+        lock_attempted = True
+        cur.execute("SELECT GET_LOCK(%s, 0)", (REVOCATION_CLEANUP_LOCK_NAME,))
+        row = cur.fetchone()
+        if isinstance(row, dict):
+            lock_result = next(iter(row.values()), None)
+        elif isinstance(row, (tuple, list)):
+            lock_result = row[0] if row else None
+        else:
+            lock_result = row
+        if lock_result != 1:
+            return
+
+        cur.execute(
+            "DELETE FROM revoked_tokens "
+            "WHERE expires_at <= UTC_TIMESTAMP() LIMIT %s",
+            (REVOCATION_CLEANUP_BATCH_SIZE,),
+        )
+        conn.commit()
+    except Exception as exc:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.warning(
+            "Expired token revocation cleanup skipped: %s", type(exc).__name__
+        )
+    finally:
+        # RELEASE_LOCK is safe even if GET_LOCK returned 0/NULL, and also covers
+        # an exception after the server acquired the lock but before fetchone().
+        if lock_attempted and cur is not None:
+            try:
+                cur.execute("SELECT RELEASE_LOCK(%s)", (REVOCATION_CLEANUP_LOCK_NAME,))
+                cur.fetchone()
+            except Exception as exc:
+                logger.warning(
+                    "Expired token cleanup lock release failed: %s", type(exc).__name__
+                )
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception as exc:
+                logger.warning(
+                    "Expired token cleanup cursor close failed: %s", type(exc).__name__
+                )
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception as exc:
+                logger.warning(
+                    "Expired token cleanup connection close failed: %s", type(exc).__name__
+                )
+
+
 def revoke_token_cursor(cur, token: str) -> str:
     """Insert a token revocation using the caller's open transaction.
 
@@ -272,6 +342,9 @@ def revoke_token(token: str) -> None:
         revoke_token_cursor(cur, token)
         conn.commit()
         cur.close()
+        conn.close()
+        conn = None
+        cleanup_expired_revocations()
         logger.info("Token %s... revoked and blacklisted", token_hash[:8])
     except Exception as exc:
         if conn is not None:
