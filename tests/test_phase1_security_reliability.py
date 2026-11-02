@@ -9,6 +9,7 @@ from web.app import app
 from web.routes import auth_routes
 from web.auth import (
     create_access_token,
+    authenticate_request,
     verify_access_token,
     is_token_revoked,
     revoke_token,
@@ -62,6 +63,48 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
             self.assertFalse(_is_cached_revoked_token(token_hash))
 
         self.assertNotIn(token_hash, _revoked_tokens_cache)
+
+    def test_authenticate_request_rejects_stale_session_version(self):
+        token = create_access_token(
+            user_id=10, username="trader_alice", role="trader", session_version=0
+        )
+        request = MagicMock()
+        request.headers.get.return_value = f"Bearer {token}"
+        request.cookies.get.return_value = None
+
+        conn, cur = MagicMock(), MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.return_value = {
+            "id": 10, "username": "trader_alice", "email": None, "role": "trader",
+            "is_active": 1, "must_change_password": 0, "session_version": 1,
+        }
+        with patch("web.auth.get_pool") as pool, patch("web.auth.is_token_revoked", return_value=False):
+            pool.return_value.get_connection.return_value = conn
+            with self.assertRaises(HTTPException) as ctx:
+                authenticate_request(request)
+
+        self.assertEqual(ctx.exception.status_code, 401)
+        self.assertIn("Session expired", ctx.exception.detail)
+        conn.close.assert_called_once()
+
+    def test_authenticate_request_accepts_matching_session_version(self):
+        token = create_access_token(
+            user_id=10, username="trader_alice", role="trader", session_version=4
+        )
+        request = MagicMock()
+        request.headers.get.return_value = f"Bearer {token}"
+        request.cookies.get.return_value = None
+
+        conn, cur = MagicMock(), MagicMock()
+        conn.cursor.return_value = cur
+        user = {
+            "id": 10, "username": "trader_alice", "email": None, "role": "trader",
+            "is_active": 1, "must_change_password": 0, "session_version": 4,
+        }
+        cur.fetchone.return_value = user
+        with patch("web.auth.get_pool") as pool, patch("web.auth.is_token_revoked", return_value=False):
+            pool.return_value.get_connection.return_value = conn
+            self.assertEqual(authenticate_request(request), user)
 
     def test_revoke_token_raises_when_persistence_fails(self):
         token = create_access_token(user_id=10, username="trader_alice", role="trader")
@@ -386,6 +429,72 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         )
         self.assertEqual(res2.status_code, 400)
         self.assertIn("Choose something less predictable", res2.json()["detail"])
+
+    def test_login_embeds_database_session_version_in_access_token(self):
+        conn, cur = MagicMock(), MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.return_value = {
+            "id": 10, "username": "trader", "email": None, "password_hash": "hash",
+            "role": "trader", "is_active": 1, "must_change_password": 0,
+            "session_version": 7,
+        }
+        request = MagicMock()
+        request.client.host = "127.0.0.1"
+        with patch("web.routes.auth_routes.get_pool") as pool, \
+             patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 1, 101)), \
+             patch("web.routes.auth_routes.finalize_login_attempt"), \
+             patch("web.routes.auth_routes.verify_password", return_value=True), \
+             patch("web.routes.auth_routes._write_required_audit"):
+            pool.return_value.get_connection.return_value = conn
+            response = auth_routes.login(
+                auth_routes.LoginRequest(username="trader", password="Strong-Pass!"),
+                request,
+            )
+
+        payload = _decode_token_payload_unverified(response["token"])
+        self.assertEqual(payload["session_version"], 7)
+        conn.close.assert_called_once()
+
+    def test_admin_role_update_increments_session_version(self):
+        conn, cur = MagicMock(), MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.return_value = {
+            "id": 8, "username": "target", "role": "trader", "is_active": 1,
+        }
+        with patch("web.routes.auth_routes.get_pool") as pool:
+            pool.return_value.get_connection.return_value = conn
+            auth_routes.update_user(
+                8, auth_routes.UpdateUserRequest(role="viewer"),
+                {"id": 1, "username": "admin"},
+            )
+
+        update_sql = next(
+            call.args[0] for call in cur.execute.call_args_list
+            if "UPDATE users SET" in call.args[0]
+        )
+        self.assertIn("session_version = session_version + 1", update_sql)
+        conn.commit.assert_called_once()
+
+    def test_admin_password_reset_increments_session_version(self):
+        conn, cur = MagicMock(), MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.return_value = {"id": 8, "username": "target"}
+        with patch("web.routes.auth_routes.get_pool") as pool, \
+             patch("web.routes.auth_routes._validate_new_password"), \
+             patch("web.routes.auth_routes.hash_password", return_value="new-hash"):
+            pool.return_value.get_connection.return_value = conn
+            auth_routes.reset_user_password(
+                8,
+                auth_routes.ResetPasswordRequest(new_password="Strong-New-Pass!"),
+                {"id": 1, "username": "admin"},
+            )
+
+        update_sql = next(
+            call.args[0] for call in cur.execute.call_args_list
+            if "UPDATE users SET password_hash" in call.args[0]
+        )
+        self.assertIn("session_version = session_version + 1", update_sql)
+        conn.commit.assert_called_once()
 
     def test_admin_reset_password_rejects_weak_passwords(self):
         admin_token = create_access_token(user_id=1, username="admin", role="admin")
