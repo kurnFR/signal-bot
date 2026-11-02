@@ -624,3 +624,74 @@ def test_durable_queue_does_not_claim_when_hourly_cap_is_full(monkeypatch):
     assert not any(q.startswith("SELECT id,symbol") for q in connection.fake_cursor.queries)
     assert connection.committed
 
+def test_reload_control_sends_status_notification_when_alert_gate_changes(monkeypatch):
+    notifications = []
+
+    class FakeCursor:
+        def execute(self, query):
+            assert "SELECT enabled,overrides_json FROM screener_control WHERE id=1" in query
+
+        def fetchone(self):
+            return {"enabled": False, "overrides_json": None}
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def cursor(self, dictionary=False):
+            assert dictionary is True
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    class FakePool:
+        def get_connection(self):
+            return FakeConnection()
+
+    monkeypatch.setattr(module, "CONFIG", module.CONFIG.copy())
+    module.CONFIG["enabled"] = True
+    monkeypatch.setattr(module, "get_pool", lambda: FakePool())
+    monkeypatch.setattr(module.telegram, "send", notifications.append)
+
+    assert module.reload_control() is False
+    assert module.CONFIG["enabled"] is False
+    assert len(notifications) == 1
+    assert "PAUSED (alerts suppressed)" in notifications[0]
+
+
+def test_reload_control_does_not_notify_for_threshold_only_changes(monkeypatch):
+    notifications = []
+
+    class FakeCursor:
+        def execute(self, query):
+            assert "SELECT enabled,overrides_json FROM screener_control WHERE id=1" in query
+
+        def fetchone(self):
+            return {"enabled": True, "overrides_json": '{"rvol_multiplier": 8.5}'}
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def cursor(self, dictionary=False):
+            assert dictionary is True
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    class FakePool:
+        def get_connection(self):
+            return FakeConnection()
+
+    monkeypatch.setattr(module, "CONFIG", module.CONFIG.copy())
+    module.CONFIG["enabled"] = True
+    monkeypatch.setattr(module, "get_pool", lambda: FakePool())
+    monkeypatch.setattr(module.telegram, "send", notifications.append)
+
+    assert module.reload_control() is False
+    assert module.CONFIG["enabled"] is True
+    assert module.CONFIG["rvol_multiplier"] == 8.5
+    assert notifications == []
+

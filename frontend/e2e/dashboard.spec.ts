@@ -695,3 +695,60 @@ test("reduced-motion and forced-colors preferences remain accessible in the brow
   expect(Number.parseFloat(forcedColorsStyles.borderTopWidth)).toBeGreaterThanOrEqual(2);
 });
 
+
+
+test("responsive acceptance matrix covers every preview view across tablet and desktop widths in both themes", async ({ page }) => {
+  test.setTimeout(90_000);
+  await mockApi(page);
+  await signIn(page);
+  await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+
+  const views = [
+    "Overview",
+    "Market Screener",
+    "Paper Trading",
+    "Strategy Library",
+    "Wallet Tracking",
+    "Backtest Studio",
+    "ML Studio",
+    "Research",
+    "News AI",
+    "Master Data",
+    "Settings",
+  ];
+  const widths = [375, 768, 1024, 1440];
+
+  for (const theme of ["dark", "light"] as const) {
+    await page.evaluate((value) => window.localStorage.setItem("signal-bot-ui-theme", value), theme);
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
+
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const view of views) {
+        const openNavigation = page.getByRole("button", { name: "Open navigation" });
+        if (await openNavigation.isVisible()) await openNavigation.click();
+        const navigation = page.getByRole("navigation", { name: "Primary navigation" });
+        const navigationItem = navigation.getByRole("button", {
+          // The visible V2 badge is included in this button's accessible name.
+          name: view === "Market Screener" ? /^Market Screener(?: V2)?$/ : view,
+        });
+        await expect(navigation).toBeVisible();
+        await expect(navigationItem, `${view} navigation item must be available at ${width}px in ${theme} theme`).toBeVisible();
+        await navigationItem.click();
+        await expect(page.locator("h1")).toHaveText(view);
+
+        const dimensions = await page.evaluate(() => ({
+          viewportWidth: document.documentElement.clientWidth,
+          documentWidth: document.documentElement.scrollWidth,
+          theme: document.documentElement.dataset.theme,
+        }));
+        expect(dimensions.theme, `${theme} theme must be active`).toBe(theme);
+        expect(
+          dimensions.documentWidth,
+          `${view} must not create page-level horizontal overflow at ${width}px in ${theme} theme`,
+        ).toBeLessThanOrEqual(dimensions.viewportWidth);
+      }
+    }
+  }
+});
