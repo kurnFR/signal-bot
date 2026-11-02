@@ -257,14 +257,25 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         )
 
     def test_login_returns_503_when_shared_rate_limiter_is_unavailable(self):
-        with patch(
-            "web.routes.auth_routes.admit_login_attempt",
-            side_effect=RateLimitBackendUnavailable("database unavailable"),
-        ):
-            response = self.client.post(
-                "/api/auth/login",
-                json={"username": "trader", "password": "not-the-password"},
-            )
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_cur.fetchone.return_value = {
+            "id": 22, "username": "trader", "email": None,
+            "password_hash": "hash", "role": "trader", "is_active": 1,
+            "must_change_password": 0,
+        }
+        mock_conn.cursor.return_value = mock_cur
+        with patch("web.routes.auth_routes.get_pool") as mock_pool:
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            with patch(
+                "web.routes.auth_routes.admit_login_attempt",
+                side_effect=RateLimitBackendUnavailable("database unavailable"),
+            ):
+                response = self.client.post(
+                    "/api/auth/login",
+                    json={"username": "trader", "password": "not-the-password"},
+                )
+        mock_conn.close.assert_called_once()
         self.assertEqual(response.status_code, 503)
         self.assertEqual(
             response.json()["detail"],
