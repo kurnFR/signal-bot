@@ -51,6 +51,37 @@ class TestAutoPromotionMigrationManagedSchema(unittest.TestCase):
         conn.commit.assert_not_called()
         conn.close.assert_called_once()
 
+    def test_policy_write_executes_only_the_policy_upsert(self):
+        conn, cursor = _db_connection()
+        with patch.object(db_helpers, "get_pool") as get_pool:
+            get_pool.return_value.get_connection.return_value = conn
+            db_helpers.set_strategy_auto_promotion_policy({
+                "enabled": True,
+                "min_test_trades": 30,
+                "min_profit_factor": 1.2,
+                "min_expectancy_r": 0.05,
+                "max_drawdown_r": 8.0,
+                "min_rank_score": 0.1,
+                "require_holdout": True,
+                "send_telegram": False,
+            })
+
+        statements = [call.args[0].lstrip().upper() for call in cursor.execute.call_args_list]
+        self.assertEqual(len(statements), 1)
+        self.assertTrue(statements[0].startswith("INSERT"))
+        conn.commit.assert_called_once()
+
+    def test_decision_read_executes_select_only(self):
+        conn, cursor = _db_connection(fetchone={"decision_hash": "a" * 64, "status": "rejected"})
+        with patch.object(db_helpers, "get_pool") as get_pool:
+            get_pool.return_value.get_connection.return_value = conn
+            db_helpers.get_strategy_promotion_decision("a" * 64)
+
+        statements = [call.args[0].lstrip().upper() for call in cursor.execute.call_args_list]
+        self.assertEqual(len(statements), 1)
+        self.assertTrue(statements[0].startswith("SELECT"))
+        conn.commit.assert_not_called()
+
     def test_promotion_decision_insert_does_not_initialize_schema(self):
         conn, cursor = _db_connection()
         cursor.rowcount = 1
