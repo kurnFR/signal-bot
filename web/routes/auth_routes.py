@@ -136,7 +136,7 @@ class ChangePasswordRequest(BaseModel):
 class CreateUserRequest(BaseModel):
     username: str = Field(..., max_length=MAX_USERNAME_LENGTH)
     email: Optional[str] = Field(None, max_length=MAX_EMAIL_LENGTH)
-    password: str = Field(..., min_length=10)
+    password: str = Field(..., min_length=10, max_length=MAX_PASSWORD_LENGTH)
     role: str = Field("trader")  # admin, trader, viewer
 
 
