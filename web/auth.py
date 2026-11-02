@@ -313,6 +313,25 @@ def _login_rate_lock_name(key: str) -> str:
     return "sb_login:" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:55]
 
 
+def _cleanup_expired_login_attempts(cur, cutoff: float) -> None:
+    """Delete a bounded batch of expired rows under one cross-worker cleanup lock."""
+    cur.execute("SELECT GET_LOCK(%s, %s)", ("sb_login_gc", 0))
+    lock_row = cur.fetchone()
+    if not lock_row or int(lock_row[0] or 0) != 1:
+        return
+
+    try:
+        cur.execute(
+            "DELETE FROM login_attempts WHERE attempted_at < %s LIMIT 1000",
+            (cutoff,),
+        )
+    finally:
+        cur.execute("SELECT RELEASE_LOCK(%s)", ("sb_login_gc",))
+        release_row = cur.fetchone()
+        if not release_row or int(release_row[0] or 0) != 1:
+            raise RuntimeError("Could not release expired login-attempt cleanup lock")
+
+
 def admit_login_attempt(key: str) -> tuple[bool, int, Optional[int]]:
     """Atomically reserve a shared login attempt before password verification.
 
@@ -339,10 +358,7 @@ def admit_login_attempt(key: str) -> tuple[bool, int, Optional[int]]:
             raise RuntimeError("Could not acquire shared login admission lock")
         lock_acquired = True
 
-        cur.execute(
-            "DELETE FROM login_attempts WHERE rate_key = %s AND attempted_at < %s",
-            (key, now - RATE_LIMIT_WINDOW_SECONDS),
-        )
+        _cleanup_expired_login_attempts(cur, now - RATE_LIMIT_WINDOW_SECONDS)
         cur.execute(
             "SELECT COUNT(*) FROM login_attempts WHERE rate_key = %s AND attempted_at >= %s",
             (key, now - RATE_LIMIT_WINDOW_SECONDS),
