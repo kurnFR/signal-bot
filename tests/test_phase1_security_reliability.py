@@ -215,10 +215,13 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         mock_cur.fetchone.return_value = None
         mock_conn.cursor.return_value = mock_cur
 
+        events = MagicMock()
         with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 0, None)) as admit:
             with patch("web.routes.auth_routes.get_pool") as mock_pool:
                 with patch("web.routes.auth_routes.log_audit"):
                     mock_pool.return_value.get_connection.return_value = mock_conn
+                    events.attach_mock(mock_conn.close, "identity_connection_close")
+                    events.attach_mock(admit, "rate_limit_admission")
                     response = self.client.post(
                         "/api/auth/login",
                         json={"username": "AdMiN", "password": "wrong-password"},
@@ -227,6 +230,10 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         admit.assert_called_once_with("testclient:unknown:admin")
         mock_conn.close.assert_called_once()
+        self.assertEqual(
+            events.mock_calls[:2],
+            [unittest.mock.call.identity_connection_close(), unittest.mock.call.rate_limit_admission("testclient:unknown:admin")],
+        )
 
     def test_database_collation_equivalent_usernames_share_account_rate_limit(self):
         account = {
