@@ -540,16 +540,15 @@ def test_policy_db_reader_rejects_invalid_persisted_numeric_values():
             "commit": lambda self: None,
         })()
         with patch("db.db.get_pool") as get_pool:
-            with patch("db.db._ensure_strategy_auto_promotion_tables"):
-                get_pool.return_value.get_connection.return_value = connection
-                try:
-                    get_strategy_auto_promotion_policy()
-                except (TypeError, ValueError) as exc:
-                    assert "invalid" in str(exc).lower() or any(
-                        key in str(exc) for key in overrides
-                    )
-                else:
-                    raise AssertionError(f"invalid persisted policy values accepted: {overrides}")
+            get_pool.return_value.get_connection.return_value = connection
+            try:
+                get_strategy_auto_promotion_policy()
+            except (TypeError, ValueError) as exc:
+                assert "invalid" in str(exc).lower() or any(
+                    key in str(exc) for key in overrides
+                )
+            else:
+                raise AssertionError(f"invalid persisted policy values accepted: {overrides}")
 
 
 
