@@ -1,7 +1,8 @@
 """Smart Money Screener schema is migration-managed, not created by startup."""
 import inspect
 import unittest
-from unittest.mock import Mock
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 from db.migrate import MIGRATIONS
 from Screen import screening
@@ -19,6 +20,14 @@ class TestScreenerMigrationManagedStartup(unittest.TestCase):
         self.assertIn("verify_signal_schema", worker_source)
         self.assertNotIn("ensure_signal_table", app_source)
         self.assertNotIn("ensure_signal_table", worker_source)
+
+    def test_migration_contains_screener_runtime_objects_and_state_backfill(self):
+        migration = Path("db/migrate_screener_runtime_schema.sql").read_text(encoding="utf-8")
+        for table in ("smart_money_signals", "screener_control", "screener_heartbeat"):
+            self.assertIn(f"CREATE TABLE IF NOT EXISTS {table}", migration)
+        for column in ("quality_score", "direction", "taker_buy_ratio", "delivery_status", "last_delivery_error"):
+            self.assertIn(f"ADD COLUMN {column}", migration)
+        self.assertIn("UPDATE smart_money_signals", migration)
 
     def test_screener_verifier_executes_only_information_schema_reads(self):
         cursor = Mock()
@@ -50,7 +59,7 @@ class TestScreenerMigrationManagedStartup(unittest.TestCase):
         ]
         conn = Mock()
         conn.cursor.return_value = cursor
-        with unittest.mock.patch.object(screening, "get_pool") as get_pool:
+        with patch.object(screening, "get_pool") as get_pool:
             get_pool.return_value.get_connection.return_value = conn
             screening.verify_signal_schema()
 
