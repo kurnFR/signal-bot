@@ -60,7 +60,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }, []);
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); setBusy(true); setError(null);
+    event.preventDefault(); setBusy(true); setError(null); setLogoutError(null);
     try {
       const result = await login(username.trim(), password);
       setUser(result.user); setPassword("");
@@ -115,6 +115,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
       <div className="auth-brand"><span className="auth-brand-icon"><Activity size={22} /></span><span><strong>Signal Bot</strong><small>QUANTITATIVE PLATFORM</small></span></div>
       <div className="auth-intro"><span className="auth-eyebrow">SECURE WORKSPACE</span><h1 id="auth-title">{screen === "password-change" ? "Change your password" : "Sign in"}</h1><p>{screen === "password-change" ? "Your account must set a new password before continuing." : "Sign in with your existing Signal Bot account to access the migration preview. Some role-gated controls can persist configuration or start background jobs when explicitly used."}</p></div>
       {error && <div className="auth-error" role="alert">{error}</div>}
+      {logoutError && <div className="auth-error" role="alert">
+        <p>{logoutError}</p>
+        <button className="auth-secondary" type="button" disabled={busy} onClick={() => void handleLogout()}>
+          Retry sign out
+        </button>
+      </div>}
       {screen === "password-change" ? <form onSubmit={handlePasswordChange} className="auth-form">
         <label>Current password<input type="password" autoComplete="current-password" value={oldPassword} onChange={(event) => setOldPassword(event.target.value)} required /></label>
         <label>New password<input type="password" autoComplete="new-password" minLength={10} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /></label>
