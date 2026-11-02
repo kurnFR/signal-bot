@@ -1260,7 +1260,7 @@ def get_standalone_ai_insight(
     symbol: str = Query("BTCUSDT"),
     market: str = Query("spot"),
     timeframe: str = Query("1d"),
-    strategy: str = Query("confluence_ensemble_v1"),
+    strategy: str = Query("confluence_ensemble_v1", max_length=50),
 ):
     """Provides deep AI quantitative diagnosis for a specific strategy."""
     from ai.insight_engine import generate_ai_insight
@@ -1298,7 +1298,7 @@ def get_standalone_ai_insight(
 def get_backtest_history(
     symbol: Optional[str] = Query(None, max_length=20),
     timeframe: Optional[str] = Query(None, max_length=10),
-    strategy: Optional[str] = None,
+    strategy: Optional[str] = Query(None, max_length=50),
     limit: int = Query(30, ge=1, le=100),
 ):
     conn = get_pool().get_connection()
