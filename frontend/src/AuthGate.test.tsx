@@ -86,7 +86,7 @@ describe("React authentication gate", () => {
     });
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(json(temporaryProfile))
-      .mockResolvedValueOnce(json({}))
+      .mockResolvedValueOnce(json({ token: "renewed-session-token" }))
       .mockResolvedValueOnce(json(activeProfile));
     vi.stubGlobal("fetch", fetchMock);
     render(<AuthGate><div>Protected dashboard</div></AuthGate>);
@@ -104,6 +104,10 @@ describe("React authentication gate", () => {
       method: "GET",
       credentials: "same-origin",
     }));
+    expect(window.localStorage.getItem("token")).toBe("renewed-session-token");
+    expect(fetchMock.mock.calls[2][1]?.headers).toEqual(
+      expect.objectContaining({ Authorization: "Bearer renewed-session-token" }),
+    );
   });
   it("clears an expired stored session and returns to sign in", async () => {
     window.localStorage.setItem("token", "expired-session-token");
