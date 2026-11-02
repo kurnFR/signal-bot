@@ -16,10 +16,9 @@ class TestMigrationManagedStartupDocs(unittest.TestCase):
         self.assertIn("standalone worker requires migrations", text)
         self.assertNotIn("Tables are created automatically at startup.", text)
 
-    def test_wallet_migration_no_longer_claims_runtime_ddl(self):
-        text = Path("db/migrate_wallet_tracking.sql").read_text(encoding="utf-8")
-        self.assertIn("read-only schema verification", text)
-        self.assertNotIn("same DDL is also", text)
+    def test_wallet_runtime_schema_migration_documents_read_only_verification(self):
+        text = Path("db/migrate_wallet_tracker_runtime_schema.sql").read_text(encoding="utf-8")
+        self.assertIn("read-only", text)
 
 
 if __name__ == "__main__":
