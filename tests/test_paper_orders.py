@@ -166,10 +166,15 @@ class TestOrderTransitions(unittest.TestCase):
         with patch("paper.orders.get_pool", return_value=type("Pool", (), {"get_connection": lambda self: conn})()):
             self.assertTrue(transition_order(17, "FILLED", fill_price=100.0, position_id=23))
         self.assertEqual(conn.commits, 1)
-        sql, params = cur.executed[0]
-        self.assertIn("WHERE id=%s AND status='PENDING'", sql)
-        self.assertEqual(params[0], "FILLED")
-        self.assertEqual(params[-1], 17)
+        self.assertEqual(len(cur.executed), 2)
+        lock_sql, lock_params = cur.executed[0]
+        self.assertIn("SELECT status FROM paper_orders WHERE id=%s FOR UPDATE", lock_sql)
+        self.assertEqual(lock_params, (17,))
+        update_sql, update_params = cur.executed[1]
+        self.assertIn("WHERE id=%s", update_sql)
+        self.assertNotIn("AND status='PENDING'", update_sql)
+        self.assertEqual(update_params[0], "FILLED")
+        self.assertEqual(update_params[-1], 17)
 
     def test_concurrent_or_terminal_transition_does_not_overwrite(self):
         cur = _Cursor(rowcount=0)
@@ -177,6 +182,17 @@ class TestOrderTransitions(unittest.TestCase):
         with patch("paper.orders.get_pool", return_value=type("Pool", (), {"get_connection": lambda self: conn})()):
             with self.assertRaises(OrderTransitionConflict):
                 cancel_pending_order(17, actor_user_id=9)
+        self.assertEqual(conn.rollbacks, 1)
+        self.assertEqual(conn.commits, 0)
+
+    def test_already_terminal_order_is_rejected_before_update(self):
+        cur = _Cursor(rowcount=1, row={"id": 17, "status": "CANCELLED"})
+        conn = _Conn(cur)
+        with patch("paper.orders.get_pool", return_value=type("Pool", (), {"get_connection": lambda self: conn})()):
+            with self.assertRaises(OrderTransitionConflict):
+                transition_order(17, "EXPIRED", reason="test")
+        self.assertEqual(len(cur.executed), 1)
+        self.assertIn("FOR UPDATE", cur.executed[0][0])
         self.assertEqual(conn.rollbacks, 1)
         self.assertEqual(conn.commits, 0)
 
