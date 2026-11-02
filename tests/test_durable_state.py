@@ -66,7 +66,7 @@ class TestRateLimitFailClosed(unittest.TestCase):
         auth._durable_rate_limit = True
         conn, cur = MagicMock(), MagicMock()
         conn.cursor.return_value = cur
-        cur.fetchone.side_effect = [(1,), (2,), (1,)]
+        cur.fetchone.side_effect = [(1,), (0,), (2,), (1,)]
         cur.lastrowid = 123
         with patch("web.auth.get_pool") as pool:
             pool.return_value.get_connection.return_value = conn
@@ -159,7 +159,7 @@ class TestRateLimitFailClosed(unittest.TestCase):
         auth._durable_rate_limit = True
         conn, cur = MagicMock(), MagicMock()
         conn.cursor.return_value = cur
-        cur.fetchone.side_effect = [(1,), (auth.RATE_LIMIT_MAX_ATTEMPTS,), (1,)]
+        cur.fetchone.side_effect = [(1,), (0,), (auth.RATE_LIMIT_MAX_ATTEMPTS,), (1,)]
         with patch("web.auth.get_pool") as pool:
             pool.return_value.get_connection.return_value = conn
             allowed, count, reserved = auth.admit_login_attempt("locked-key")
