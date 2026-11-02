@@ -64,8 +64,18 @@ export async function login(username: string, password: string): Promise<LoginRe
 }
 
 export async function logout(): Promise<void> {
-  try { if (tokenFromStorage()) await authPost("/api/auth/logout"); } finally {
-    try { window.localStorage.removeItem("token"); } catch { /* Clear in-memory session even when server revocation fails. */ }
+  const token = tokenFromStorage();
+  if (token) {
+    try {
+      await authPost("/api/auth/logout");
+    } catch (cause) {
+      // A 401 means the token is already invalid. Other failures leave server
+      // revocation unconfirmed, so retain the token to allow a safe retry.
+      if (!(cause instanceof AuthRequestError && cause.status === 401)) throw cause;
+    }
+  }
+  try { window.localStorage.removeItem("token"); } catch {
+    throw new AuthRequestError(500, "Session storage could not be cleared");
   }
 }
 

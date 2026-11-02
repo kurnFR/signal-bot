@@ -3,7 +3,7 @@ import { Activity, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
 import { AuthRequestError, changePassword, fetchAuthUser, login, logout, type AuthUser } from "./lib/auth";
 
-interface AuthContextValue { user: AuthUser; logout: () => Promise<void> }
+interface AuthContextValue { user: AuthUser; logout: () => Promise<void>; logoutError: string | null }
 const AuthContext = createContext<AuthContextValue | null>(null);
 export function useAuth() { return useContext(AuthContext); }
 
@@ -17,6 +17,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
 
   useEffect(() => {
     const handleSessionExpired = () => {
@@ -27,6 +28,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       setNewPassword("");
       setConfirmPassword("");
       setError("Your session has expired. Sign in again to continue.");
+      setLogoutError(null);
       setScreen("login");
     };
     window.addEventListener("signal-bot:session-expired", handleSessionExpired);
@@ -84,13 +86,29 @@ export function AuthGate({ children }: { children: ReactNode }) {
   };
 
   const handleLogout = useCallback(async () => {
-    try { await logout(); } catch { /* The token is cleared locally even if server revocation fails. */ }
-    setUser(null); setPassword(""); setScreen("login");
+    setLogoutError(null);
+    try {
+      await logout();
+      setUser(null); setPassword(""); setScreen("login");
+    } catch {
+      setLogoutError("The server could not confirm session revocation. You remain signed in; retry sign out when the API is available.");
+    }
   }, []);
-  const contextValue = useMemo(() => user ? ({ user, logout: handleLogout }) : null, [user, handleLogout]);
+  const contextValue = useMemo(
+    () => user ? ({ user, logout: handleLogout, logoutError }) : null,
+    [user, handleLogout, logoutError],
+  );
 
   if (screen === "checking") return <main className="auth-loading" role="status"><Activity size={20} /> Checking session…</main>;
-  if (screen === "authenticated" && user && contextValue) return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;
+  if (screen === "authenticated" && user && contextValue) return (
+    <AuthContext.Provider value={contextValue}>
+      {logoutError && <div className="api-error" role="alert">
+        <div><strong>Unable to revoke session</strong><p>{logoutError}</p></div>
+        <button className="button button-secondary" onClick={() => void handleLogout()}>Retry sign out</button>
+      </div>}
+      {children}
+    </AuthContext.Provider>
+  );
 
   return <main className="auth-page">
     <section className="auth-card" aria-labelledby="auth-title">
