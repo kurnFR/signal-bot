@@ -1176,14 +1176,10 @@ def get_smart_money_stats():
 
 # ----------------------------------------------------------------------------
 # Bot control -- read/write for the "enable + tunable params" toggle panels.
-# RetailBot's bot_control and the screener's screener_control both live in
-# the shared MYSQL_CONFIG database. Tables are self-created by their processes on startup
-# (paper/retailbot2.py's DatabaseManager._create_tables(),
-# Screen/screening.py's ensure_signal_table()) -- these helpers assume the
-# table already exists, which it will once that process has run at least
-# once. If it hasn't, these raise, and the route layer turns that into a
-# clear "control table not ready yet -- has retailbot2/screening been
-# started at least once?" error rather than a silent empty response.
+# RetailBot2's bot_control/lifecycle tables and the Screener's
+# screener_control/heartbeat/signal tables are migration-managed. The web API
+# and their workers verify schema presence at startup; these route helpers
+# assume migrations have already been applied and never create schema.
 # ----------------------------------------------------------------------------
 
 # Explicit safe-list mirrored from paper/retailbot2.py's own
@@ -1274,15 +1270,12 @@ def _retailbot2_lifecycle_flag(value):
 
 
 def ensure_retailbot2_lifecycle_table():
-    """Ensure lifecycle table exists during server startup or migration."""
-    conn = get_retailbot2_pool().get_connection()
-    try:
-        cur = conn.cursor()
-        _ensure_retailbot2_strategy_lifecycle_table(cur)
-        conn.commit()
-        cur.close()
-    finally:
-        conn.close()
+    """Backward-compatible alias for read-only RetailBot2 schema verification.
+
+    The schema is managed by db.migrate; this legacy entry point must never
+    issue DDL or DML during runtime startup.
+    """
+    return verify_retailbot2_schema()
 
 
 def get_retailbot2_strategy_lifecycle_settings():
