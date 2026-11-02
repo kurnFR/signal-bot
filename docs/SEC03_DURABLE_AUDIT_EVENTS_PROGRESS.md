@@ -2,7 +2,7 @@
 
 **Status:** In progress  
 **Branch:** `fix/security-durable-audit-events`  
-**Base:** `fix/security-shared-login-rate-limit` (stacked on draft PR #606)  
+**Base:** `master` (SEC-02 PR #606 merged)  
 **Safety:** GitHub-only. No production database, deployment, worker, trade, or Telegram activity.
 
 ## Objective
@@ -11,7 +11,7 @@ Make security-sensitive and administrative actions fail safely when their requir
 
 ## Current call-site inventory
 
-Source reviewed on the SEC-02 branch. All production call sites are in `web/routes/auth_routes.py`.
+Source reviewed on the rebased `master` line. All production call sites are in `web/routes/auth_routes.py`.
 
 | Event | Trigger | Classification | Required persistence behavior |
 |---|---|---|---|
@@ -46,7 +46,7 @@ Login attempt reservation/finalization remains its own shared-rate-limit operati
 - [x] Confirm the latest documentation head completed the same full pytest workflow successfully.
 - [x] Review PR patch, workflow triggers, and current review state.
 - [ ] Obtain final independent security review and explicit release approval.
-- [ ] After SEC-02 is approved/merged, rebase/review SEC-03 against master and rerun required CI.
+- [x] After SEC-02 merged, rebase SEC-03 changes onto `master`, preserve SEC-02 login-pool/cleanup hardening, and rerun required CI.
 
 ## Acceptance criteria
 
@@ -77,8 +77,25 @@ Login attempt reservation/finalization remains its own shared-rate-limit operati
 - No frontend files changed in SEC-03. The frontend workflow is path-filtered to `frontend/**` and its own workflow file, so it was not triggered by this PR. Frontend checks were green on the earlier SEC-02 validation, but have not been rerun on SEC-03.
 - PR review inspection found no submitted reviews and no inline review threads at the time of inspection. PR #607 remains open, draft, and unmerged.
 - Patch scope is four files: this progress document, `tests/test_phase1_security_reliability.py`, `web/auth.py`, and `web/routes/auth_routes.py`.
-- Branch is stacked on SEC-02; merge order must remain SEC-02 first, then SEC-03. PR #606 remains separate, draft, and unmerged. Do not merge either PR without explicit approval.
+- SEC-02 PR #606 was merged into `master` at `823b5d2837383839c5c9acd0e0dacce62a602a25`. SEC-03 was rebased onto that exact master commit; its merge base is now master and it is four commits ahead with no divergence.
 
 - Independent focused security review verified the `audit_logs` table is InnoDB, and reviewed the transaction boundaries in login, logout, password change, and admin user mutation routes. No blocking transaction/atomicity defect was identified in the reviewed paths; this is an implementation review, not an external penetration test or independent sign-off.
 - Review identified a missing explicit regression for audit-store failure on unknown/inactive account login. Added coverage in `d262f50`; the first hosted run failed at test collection due to an escaped line-continuation syntax error in the new test (not an application-code failure). Corrected the test using nested context managers in `7538cbac`.
 - GitHub Actions run [41376692552](https://github.com/kurnFR/signal-bot/actions/runs/41376692552) on test commit `7538cbac9a7d11a75069a43801fd10d56baa8e6b` completed successfully: MariaDB initialization, migrations, isolated admin seed, and full pytest all passed; **821 passed, 16 skipped, 6 warnings** in 4.04s.
+
+
+## Rebase and post-SEC-02 verification (2026-11-02)
+
+- SEC-02 PR #606 was explicitly approved and merged using a merge commit: `823b5d2837383839c5c9acd0e0dacce62a602a25`.
+- PR #607 was retargeted to `master`. The initial branch comparison exposed that SEC-03 had forked from an earlier SEC-02 head, so the original stacked diff was not treated as a completed rebase.
+- Reconstructed the SEC-03 changes on top of the merged master commit, preserving the later SEC-02 global expiry cleanup, early identity-connection release, and their regression coverage. For the login route, retained the SEC-02 route implementation and applied SEC-03 mandatory audit calls to its four login outcomes.
+- Rebased code head: `ddad544482cec7ca9b8ab101acae7493dd21f567`. Compare against master: **ahead 4, behind 0**, merge base `823b5d2837383839c5c9acd0e0dacce62a602a25`. Changed-file scope remains four files.
+- Exact rebased-head CI:
+  - Full pytest PR run [41379024483](https://github.com/kurnFR/signal-bot/actions/runs/41379024483): **822 passed, 17 skipped, 6 warnings**.
+  - Full pytest push run [41379019497](https://github.com/kurnFR/signal-bot/actions/runs/41379019497): **822 passed, 17 skipped, 6 warnings**.
+  - Unit tests [41379024252](https://github.com/kurnFR/signal-bot/actions/runs/41379024252): **105 passed**.
+  - MariaDB integration [41379024252](https://github.com/kurnFR/signal-bot/actions/runs/41379024252): **36 passed**.
+  - RetailBot accounting/parity and screener regression [41379024215](https://github.com/kurnFR/signal-bot/actions/runs/41379024215): **36 passed** and **27 passed**.
+- The frontend workflow is path-filtered and did not run for SEC-03 because no frontend files changed. The post-SEC-02 master validation separately passed frontend type-check, unit tests, build, and browser smoke tests.
+- Production database, deployment, workers, trades, and Telegram sends were not used.
+- PR #607 remains draft and unmerged pending final review/approval.
