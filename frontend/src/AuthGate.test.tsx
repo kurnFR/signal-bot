@@ -11,6 +11,8 @@ describe("React authentication gate", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ token: "issued-session-token", user }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     render(<AuthGate><div>Authenticated dashboard</div></AuthGate>);
+    expect(screen.getByLabelText("Username")).toHaveProperty("maxLength", 30);
+    expect(screen.getByLabelText("Password")).toHaveProperty("maxLength", 1024);
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "trader01" } });
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "correct-password" } });
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
@@ -56,6 +58,9 @@ describe("React authentication gate", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<AuthGate><div>Protected dashboard</div></AuthGate>);
     expect(await screen.findByRole("heading", { name: "Change your password" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Current password")).toHaveProperty("maxLength", 1024);
+    expect(screen.getByLabelText("New password")).toHaveProperty("maxLength", 1024);
+    expect(screen.getByLabelText("Confirm new password")).toHaveProperty("maxLength", 1024);
     expect(screen.queryByText("Protected dashboard")).not.toBeInTheDocument();
   });
   it("shows logout retry when server revocation fails during forced password change", async () => {

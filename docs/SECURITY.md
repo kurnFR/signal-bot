@@ -5,6 +5,7 @@ How access to the dashboard and API is controlled, and what to do when deploying
 ## 1. Authentication
 
 - **Passwords:** PBKDF2-HMAC-SHA256, 200,000 iterations, 16-byte random salt (`pbkdf2:sha256:<iterations>$<salt>$<hash>`), compared in constant time.
+- **Credential request bounds:** usernames are limited to 30 characters, email addresses to 254, and password fields to 1,024. Oversized fields are rejected with HTTP 422 before login's username lookup or any PBKDF2 verification/hashing.
 - **Tokens:** HMAC-SHA256-signed bearer tokens carrying user, role, per-user `session_version` and expiry; **24-hour lifetime**. The signing key is `SECRET_KEY`, generated randomly and stored in `.app_secret` (gitignored). Deleting that file invalidates every session.
 - **Session invalidation:** admin password resets, admin role/active-state changes, and self-service password changes increment the user's `session_version`. Tokens issued with an older version are rejected with HTTP 401, including sessions that would otherwise become usable again after a forced password change.
 - **Logout and revocation:** logout stores the token's SHA-256 hash in `revoked_tokens` until it would have expired, so a revoked token is rejected even after a restart.

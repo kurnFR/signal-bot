@@ -67,6 +67,11 @@ def _commit_with_audit(conn, cur, action: str, username: str,
 
 USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]{3,30}$")
 
+# Bound untrusted credential fields before handler-level database lookups and PBKDF2 work.
+MAX_USERNAME_LENGTH = 30
+MAX_EMAIL_LENGTH = 254
+MAX_PASSWORD_LENGTH = 1024
+
 
 MIN_PASSWORD_LENGTH = 10
 # Bases that stay weak with digits/symbols appended or simple leetspeak (password1234, P@ssw0rd!).
@@ -119,24 +124,24 @@ def _validate_new_password(password: str, username: str) -> None:
 # Request / Response Schemas
 # ============================================================================
 class LoginRequest(BaseModel):
-    username: str = Field(..., json_schema_extra={"example": "admin"})
-    password: str = Field(..., json_schema_extra={"example": "admin123"})
+    username: str = Field(..., max_length=MAX_USERNAME_LENGTH, json_schema_extra={"example": "admin"})
+    password: str = Field(..., max_length=MAX_PASSWORD_LENGTH, json_schema_extra={"example": "admin123"})
 
 
 class ChangePasswordRequest(BaseModel):
-    old_password: str = Field(...)
-    new_password: str = Field(..., min_length=10)
+    old_password: str = Field(..., max_length=MAX_PASSWORD_LENGTH)
+    new_password: str = Field(..., min_length=10, max_length=MAX_PASSWORD_LENGTH)
 
 
 class CreateUserRequest(BaseModel):
-    username: str = Field(...)
-    email: Optional[str] = Field(None)
-    password: str = Field(..., min_length=10)
+    username: str = Field(..., max_length=MAX_USERNAME_LENGTH)
+    email: Optional[str] = Field(None, max_length=MAX_EMAIL_LENGTH)
+    password: str = Field(..., min_length=10, max_length=MAX_PASSWORD_LENGTH)
     role: str = Field("trader")  # admin, trader, viewer
 
 
 class ResetPasswordRequest(BaseModel):
-    new_password: str = Field(..., min_length=10)
+    new_password: str = Field(..., min_length=10, max_length=MAX_PASSWORD_LENGTH)
 
 
 class UpdateUserRequest(BaseModel):
