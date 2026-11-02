@@ -449,7 +449,7 @@ def register_retrain_model(req: RegisterRetrainRequest):
 
 
 @router.post("/retraining/trigger")
-def trigger_continuous_retraining(background_tasks: BackgroundTasks, force: bool = True):
+def trigger_continuous_retraining(background_tasks: BackgroundTasks, force: bool = False):
     """Trigger online retraining cycle across registered models."""
     from ml.online_retrainer import execute_retraining_cycle
     background_tasks.add_task(execute_retraining_cycle, force=force)
