@@ -1115,100 +1115,48 @@ class DatabaseManager:
                 user=self.config.db_user,
                 password=self.config.db_password,
             )
-            self._create_tables()
+            self._verify_schema()
             self.logger.info("✅ Database pool ready")
         except Exception as e:
             self.logger.error(f"❌ DB init error: {e}")
             self.pool = None
 
-    def _create_tables(self):
+    def _verify_schema(self):
+        """Verify migration-managed RetailBot2 tables without issuing DDL/DML."""
         conn = self.get_conn()
         if not conn:
-            return
+            raise RuntimeError("RetailBot2 database connection is unavailable")
         try:
-            c = conn.cursor()
-            c.execute("""
-                CREATE TABLE IF NOT EXISTS rdt_trades (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    symbol VARCHAR(20) NOT NULL,
-                    side VARCHAR(10) NOT NULL,
-                    mode VARCHAR(10) NOT NULL DEFAULT 'shadow',
-                    entry_price DECIMAL(20,8) NOT NULL,
-                    stop_price DECIMAL(20,8) NOT NULL,
-                    target_price DECIMAL(20,8) NOT NULL,
-                    atr DECIMAL(20,8) NOT NULL,
-                    rr DECIMAL(10,2) NOT NULL,
-                    units DECIMAL(20,8) NOT NULL,
-                    strategy VARCHAR(30) NOT NULL,
-                    strategies_json TEXT NULL,
-                    telegram_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-                    confluence_score INT DEFAULT 1,
-                    reason TEXT NULL,
-                    status VARCHAR(10) DEFAULT 'OPEN',
-                    exit_price DECIMAL(20,8) NULL,
-                    exit_reason VARCHAR(20) NULL,
-                    net_pnl DECIMAL(20,8) NULL,
-                    pnl_percent DECIMAL(10,4) NULL,
-                    entry_time DATETIME,
-                    exit_time DATETIME NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_sym_status (symbol, status),
-                    INDEX idx_mode_status (mode, status),
-                    INDEX idx_strategy (strategy)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
-            c.execute("""
-                CREATE TABLE IF NOT EXISTS rdt_strategy_stats (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    strategy VARCHAR(30) NOT NULL,
-                    mode VARCHAR(10) NOT NULL,
-                    total_trades INT DEFAULT 0,
-                    wins INT DEFAULT 0,
-                    losses INT DEFAULT 0,
-                    total_pnl DECIMAL(20,8) DEFAULT 0,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uk_strat_mode (strategy, mode)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
-            c.execute("""
-                CREATE TABLE IF NOT EXISTS bot_control (
-                    id INT PRIMARY KEY DEFAULT 1,
-                    enabled BOOLEAN NOT NULL DEFAULT TRUE,
-                    overrides_json TEXT NULL,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        ON UPDATE CURRENT_TIMESTAMP,
-                    CONSTRAINT chk_bot_control_singleton CHECK (id = 1)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
-            c.execute("""
-                INSERT IGNORE INTO bot_control (id, enabled, overrides_json)
-                VALUES (1, TRUE, NULL)
-            """)
-            c.execute("""
-                CREATE TABLE IF NOT EXISTS rdt_strategy_lifecycle (
-                    strategy_id VARCHAR(64) NOT NULL,
-                    mode VARCHAR(16) NOT NULL,
-                    evaluation_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-                    paper_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-                    telegram_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-                    report_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-                    auto_promote_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    PRIMARY KEY (strategy_id, mode)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
-            # Legacy open positions have no persisted promotion decision;
-            # fail closed rather than emitting unapproved exit alerts.
-            try:
-                c.execute("ALTER TABLE rdt_trades ADD COLUMN telegram_enabled BOOLEAN NOT NULL DEFAULT FALSE")
-            except Exception as migration_error:
-                if "Duplicate column" not in str(migration_error):
-                    raise
-            conn.commit()
-            c.close()
-        except Exception as e:
-            self.logger.error(f"❌ Table create error: {e}")
+            cur = conn.cursor(dictionary=True)
+            required_tables = ("rdt_trades", "rdt_strategy_stats", "bot_control", "rdt_strategy_lifecycle")
+            placeholders = ", ".join(["%s"] * len(required_tables))
+            cur.execute(
+                f"""SELECT TABLE_NAME AS table_name
+                    FROM information_schema.tables
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME IN ({placeholders})""",
+                required_tables,
+            )
+            existing = {str(row["table_name"]) for row in cur.fetchall()}
+            missing = sorted(set(required_tables) - existing)
+            if missing:
+                raise RuntimeError(
+                    "RetailBot2 schema is missing tables "
+                    f"({', '.join(missing)}); run 'python -m db.migrate' before starting the worker."
+                )
+            cur.execute(
+                """SELECT COLUMN_NAME AS column_name
+                   FROM information_schema.columns
+                   WHERE TABLE_SCHEMA = DATABASE()
+                     AND TABLE_NAME = %s AND COLUMN_NAME = %s""",
+                ("rdt_trades", "telegram_enabled"),
+            )
+            if not cur.fetchone():
+                raise RuntimeError(
+                    "RetailBot2 schema is missing rdt_trades.telegram_enabled; "
+                    "run 'python -m db.migrate' before starting the worker."
+                )
+            cur.close()
         finally:
             conn.close()
 

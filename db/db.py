@@ -1212,20 +1212,46 @@ SCREENER_TUNABLE_FIELDS = {
 }
 
 
-def _ensure_retailbot2_strategy_lifecycle_table(cur):
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS rdt_strategy_lifecycle (
-            strategy_id VARCHAR(64) NOT NULL,
-            mode VARCHAR(16) NOT NULL,
-            evaluation_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-            paper_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-            telegram_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-            report_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-            auto_promote_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            PRIMARY KEY (strategy_id, mode)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """)
+def verify_retailbot2_schema():
+    """Verify migration-managed RetailBot2 schema without issuing DDL/DML."""
+    conn = get_retailbot2_pool().get_connection()
+    cur = None
+    try:
+        cur = conn.cursor(dictionary=True)
+        required_tables = ("rdt_trades", "rdt_strategy_stats", "bot_control", "rdt_strategy_lifecycle")
+        placeholders = ", ".join(["%s"] * len(required_tables))
+        cur.execute(
+            f"""SELECT TABLE_NAME AS table_name
+                FROM information_schema.tables
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ({placeholders})""",
+            required_tables,
+        )
+        existing = {str(row["table_name"]) for row in cur.fetchall()}
+        missing = sorted(set(required_tables) - existing)
+        if missing:
+            raise RuntimeError(
+                "RetailBot2 schema is missing tables "
+                f"({', '.join(missing)}); run 'python -m db.migrate' before startup."
+            )
+        cur.execute(
+            """SELECT COLUMN_NAME AS column_name
+               FROM information_schema.columns
+               WHERE TABLE_SCHEMA = DATABASE()
+                 AND TABLE_NAME = %s AND COLUMN_NAME = %s""",
+            ("rdt_trades", "telegram_enabled"),
+        )
+        if not cur.fetchone():
+            raise RuntimeError(
+                "RetailBot2 schema is missing rdt_trades.telegram_enabled; "
+                "run 'python -m db.migrate' before startup."
+            )
+    finally:
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
 
 
 def _retailbot2_lifecycle_flag(value):
