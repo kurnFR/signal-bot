@@ -85,8 +85,8 @@ class TestMLRouteErrorRedaction(unittest.TestCase):
         from db import db
 
         secret = "database-password=secret-token /srv/private/model-cache"
-        request = ml_routes.MLWalkForwardRequest(strategy_name="test_strategy")
-        with patch.object(db, "fetch_ohlcv_with_features_df", return_value=[None] * 100), patch.object(dataset, "build_signal_dataset", return_value=[{}] * 40), patch.object(walk_forward_engine, "run_ml_walk_forward", side_effect=RuntimeError(secret)), patch.dict(ml_routes.STRATEGIES, {"test_strategy": lambda *_: []}):
+        request = ml_routes.MLWalkForwardRequest(strategy_name="trend_ema_v1")
+        with patch.object(db, "fetch_ohlcv_with_features_df", return_value=[None] * 100), patch.object(dataset, "build_signal_dataset", return_value=[{}] * 40), patch.object(walk_forward_engine, "run_ml_walk_forward", side_effect=RuntimeError(secret)), patch.dict(ml_routes.STRATEGIES, {"trend_ema_v1": lambda *_: []}):
             with self.assertLogs("web.ml_routes", level="ERROR"):
                 with self.assertRaises(HTTPException) as raised:
                     ml_routes.execute_ml_walk_forward(request)

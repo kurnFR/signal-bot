@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ml.artifacts import paper_eligibility_report
 from ml.run_real_experiment import run_real_experiment
@@ -27,14 +27,81 @@ ML_RESULTS_DIR = Path("ml_results")
 ML_MODELS_DIR = Path("ml_models")
 
 
-class RunExperimentRequest(BaseModel):
-    symbol: str = Field("BTCUSDT", json_schema_extra={"example": "BTCUSDT"})
-    market: str = Field("spot", json_schema_extra={"example": "spot"})
-    timeframe: str = Field("1h", json_schema_extra={"example": "1h"})
-    strategy_name: str = Field("trend_ema_v1", json_schema_extra={"example": "trend_ema_v1"})
-    model_type: str = Field("all", json_schema_extra={"example": "all"})  # all, logistic_regression, random_forest, hist_gradient_boosting
-    target_type: str = Field("binary_positive_r", json_schema_extra={"example": "binary_positive_r"})
+VALID_ML_TIMEFRAMES = {
+    "1m", "3m", "5m", "15m", "30m",
+    "1h", "2h", "4h", "6h", "8h", "12h",
+    "1d", "3d", "1w", "1M",
+}
+SUPPORTED_ML_MODELS = {"logistic_regression", "random_forest", "hist_gradient_boosting"}
+SUPPORTED_EXPERIMENT_MODELS = SUPPORTED_ML_MODELS | {"all", "tournament"}
+SUPPORTED_RL_AGENTS = {"dqn", "policy_gradient"}
+SUPPORTED_RL_REWARDS = {"pnl", "sharpe", "sortino"}
+
+
+class MLBaseRequest(BaseModel):
+    symbol: str = Field("BTCUSDT", min_length=1, max_length=24)
+    market: str = Field("spot", min_length=1, max_length=10)
+    timeframe: str = Field("1h", min_length=1, max_length=5)
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if not re.fullmatch(r"[A-Z0-9]{2,20}", normalized):
+            raise ValueError("symbol must contain 2-20 ASCII letters or digits")
+        return normalized
+
+    @field_validator("market")
+    @classmethod
+    def validate_market(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"spot", "futures"}:
+            raise ValueError("market must be spot or futures")
+        return normalized
+
+    @field_validator("timeframe")
+    @classmethod
+    def validate_timeframe(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized not in VALID_ML_TIMEFRAMES:
+            raise ValueError("timeframe is unsupported")
+        return normalized
+
+
+class MLStrategyRequest(MLBaseRequest):
+    strategy_name: str = Field("trend_ema_v1", min_length=1, max_length=50)
+
+    @field_validator("strategy_name")
+    @classmethod
+    def validate_strategy_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized not in STRATEGIES:
+            raise ValueError("strategy_name must identify a registered strategy")
+        return normalized
+
+
+class RunExperimentRequest(MLStrategyRequest):
+    model_type: str = Field("all", min_length=1, max_length=30)
+    target_type: str = Field("binary_positive_r", min_length=1, max_length=40)
     min_validation_trades: int = Field(5, ge=1, le=100)
+
+    @field_validator("model_type")
+    @classmethod
+    def validate_model_type(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in SUPPORTED_EXPERIMENT_MODELS:
+            raise ValueError("model_type is unsupported")
+        return normalized
+
+    @field_validator("target_type")
+    @classmethod
+    def validate_target_type(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized not in TARGET_TYPES:
+            raise ValueError("target_type is unsupported")
+        return normalized
+
+
 
 
 _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
@@ -272,23 +339,33 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
 # Continuous Online Retraining & Walk-Forward Inference (FreqAI/Qlib)
 # =====================================================================
 
-class MLWalkForwardRequest(BaseModel):
-    symbol: str = Field("BTCUSDT", json_schema_extra={"example": "BTCUSDT"})
-    market: str = Field("spot", json_schema_extra={"example": "spot"})
-    timeframe: str = Field("1h", json_schema_extra={"example": "1h"})
-    strategy_name: str = Field("trend_ema_v1", json_schema_extra={"example": "trend_ema_v1"})
-    model_type: str = Field("hist_gradient_boosting", json_schema_extra={"example": "hist_gradient_boosting"})
+class MLWalkForwardRequest(MLStrategyRequest):
+    model_type: str = Field("hist_gradient_boosting", min_length=1, max_length=30)
     n_folds: int = Field(4, ge=2, le=10)
     expanding: bool = Field(False)
 
+    @field_validator("model_type")
+    @classmethod
+    def validate_model_type(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in SUPPORTED_ML_MODELS:
+            raise ValueError("model_type is unsupported")
+        return normalized
 
-class RegisterRetrainRequest(BaseModel):
-    symbol: str = Field("BTCUSDT", json_schema_extra={"example": "BTCUSDT"})
-    market: str = Field("spot", json_schema_extra={"example": "spot"})
-    timeframe: str = Field("1h", json_schema_extra={"example": "1h"})
-    strategy_name: str = Field("trend_ema_v1", json_schema_extra={"example": "trend_ema_v1"})
-    model_type: str = Field("hist_gradient_boosting", json_schema_extra={"example": "hist_gradient_boosting"})
+
+class RegisterRetrainRequest(MLStrategyRequest):
+    model_type: str = Field("hist_gradient_boosting", min_length=1, max_length=30)
     auto_promote: bool = Field(True)
+
+    @field_validator("model_type")
+    @classmethod
+    def validate_model_type(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in SUPPORTED_EXPERIMENT_MODELS:
+            raise ValueError("model_type is unsupported")
+        return normalized
+
+
 
 
 @router.post("/walk-forward")
@@ -367,13 +444,26 @@ def trigger_continuous_retraining(background_tasks: BackgroundTasks, force: bool
 # Reinforcement Learning Trading Environment & Agents (FinRL-style)
 # =====================================================================
 
-class RLTrainRequest(BaseModel):
-    symbol: str = Field("BTCUSDT", json_schema_extra={"example": "BTCUSDT"})
-    market: str = Field("spot", json_schema_extra={"example": "spot"})
-    timeframe: str = Field("1h", json_schema_extra={"example": "1h"})
-    agent_type: str = Field("dqn", json_schema_extra={"example": "dqn"})  # "dqn" or "policy_gradient"
+class RLTrainRequest(MLBaseRequest):
+    agent_type: str = Field("dqn", min_length=1, max_length=20)
     episodes: int = Field(10, ge=1, le=50)
-    reward_type: str = Field("sharpe", json_schema_extra={"example": "sharpe"})  # "sharpe", "sortino", "pnl"
+    reward_type: str = Field("sharpe", min_length=1, max_length=20)
+
+    @field_validator("agent_type")
+    @classmethod
+    def validate_agent_type(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in SUPPORTED_RL_AGENTS:
+            raise ValueError("agent_type is unsupported")
+        return normalized
+
+    @field_validator("reward_type")
+    @classmethod
+    def validate_reward_type(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in SUPPORTED_RL_REWARDS:
+            raise ValueError("reward_type is unsupported")
+        return normalized
 
 
 @router.post("/rl/train")
