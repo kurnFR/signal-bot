@@ -110,37 +110,49 @@ def login(req: LoginRequest, request: Request):
         raise HTTPException(status_code=400, detail="Username and password are required")
 
     client_ip = request.client.host if request.client else "unknown"
-    # Usernames are matched case-insensitively by the users table collation.
-    # Normalize the limiter key too, so capitalization cannot create new buckets.
-    rate_key = f"{client_ip}:{username.casefold()}"
-    try:
-        within_rate_limit, _, reservation_id = admit_login_attempt(rate_key)
-    except RateLimitBackendUnavailable as exc:
-        logger.error("Login blocked because shared rate limiting is unavailable: %s", type(exc).__name__)
-        raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
 
-    if not within_rate_limit:
-        log_audit("LOGIN_RATE_LIMITED", username, None, {"ip": client_ip}, client_ip)
-        raise HTTPException(
-            status_code=429,
-            detail="Too many failed login attempts. Account temporarily locked. Please try again in 5 minutes."
-        )
-
-    conn = get_pool().get_connection()
+    # Resolve the database identity before admission. The users table collation
+    # may equate spellings that Python casefold() does not; a stable user ID
+    # ensures every spelling accepted as the same account shares one bucket.
     try:
+        conn = get_pool().get_connection()
         cur = conn.cursor(dictionary=True)
-        # 100% Parameterized query: immune to SQL injection
         cur.execute(
             """
-            SELECT id, username, email, password_hash, role, is_active, must_change_password 
-            FROM users 
+            SELECT id, username, email, password_hash, role, is_active, must_change_password
+            FROM users
             WHERE username = %s
             """,
             (username,)
         )
         user = cur.fetchone()
         cur.close()
+    except Exception as exc:
+        logger.error("Login identity lookup failed; refusing login (%s)", type(exc).__name__)
+        if "conn" in locals():
+            conn.close()
+        raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
 
+    # Unknown usernames retain a per-IP normalized bucket. Known accounts use
+    # the immutable DB identity, covering all DB-collation-equivalent spellings.
+    account_key = f"user:{user['id']}" if user else f"unknown:{username.casefold()}"
+    rate_key = f"{client_ip}:{account_key}"
+    try:
+        within_rate_limit, _, reservation_id = admit_login_attempt(rate_key)
+    except RateLimitBackendUnavailable as exc:
+        logger.error("Login blocked because shared rate limiting is unavailable: %s", type(exc).__name__)
+        conn.close()
+        raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
+
+    if not within_rate_limit:
+        conn.close()
+        log_audit("LOGIN_RATE_LIMITED", username, user["id"] if user else None, {"ip": client_ip}, client_ip)
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed login attempts. Account temporarily locked. Please try again in 5 minutes."
+        )
+
+    try:
         if not user or not user["is_active"]:
             try:
                 failed_count = (
