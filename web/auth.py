@@ -120,12 +120,13 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 
-def create_access_token(user_id: int, username: str, role: str) -> str:
+def create_access_token(user_id: int, username: str, role: str, session_version: int = 0) -> str:
     now = int(time.time())
     payload = {
         "sub": user_id,
         "username": username,
         "role": role,
+        "session_version": int(session_version),
         "exp": now + TOKEN_EXPIRY_SECONDS,
         "iat": now,
     }
@@ -714,7 +715,7 @@ def authenticate_request(request: Request) -> Dict[str, Any]:
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            "SELECT id, username, email, role, is_active, must_change_password FROM users WHERE id = %s AND is_active = 1",
+            "SELECT id, username, email, role, is_active, must_change_password, session_version FROM users WHERE id = %s AND is_active = 1",
             (user_id,)
         )
         user = cur.fetchone()
@@ -724,6 +725,14 @@ def authenticate_request(request: Request) -> Dict[str, Any]:
 
     if not user:
         raise HTTPException(status_code=401, detail="User account disabled or deleted")
+
+    try:
+        token_session_version = int(payload.get("session_version", 0))
+        current_session_version = int(user.get("session_version", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Session expired or invalid token")
+    if token_session_version != current_session_version:
+        raise HTTPException(status_code=401, detail="Session expired or invalid token")
 
     return user
 
