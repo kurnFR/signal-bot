@@ -1358,7 +1358,7 @@ class TestRemainingDashboardInputLabelAssociations(unittest.TestCase):
         fields = {
             "new-user-username": "Username",
             "new-user-email": "Email",
-            "new-user-password": "Password (min 6)",
+            "new-user-password": "Password (10–1,024 chars)",
             "chg-old-pwd": "Current Password",
             "chg-new-pwd": "New Password",
             "chg-conf-pwd": "Confirm New Password",
