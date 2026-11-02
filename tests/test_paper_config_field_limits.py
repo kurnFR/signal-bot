@@ -59,14 +59,29 @@ class TestPaperConfigFieldLimits(unittest.TestCase):
             timeframe="1" * 10,
             strategy="T" * 50,
         )
-        with self.assertRaises(ValidationError):
-            BacktestRunRequest(symbol="S" * 21)
+        for change in (
+            {"symbol": "S" * 21},
+            {"market": "m" * 8},
+            {"timeframe": "t" * 11},
+            {"strategy": "T" * 51},
+        ):
+            with self.subTest(change=next(iter(change))):
+                with self.assertRaises(ValidationError):
+                    BacktestRunRequest(**change)
 
-    def test_other_backtest_entrypoints_bound_symbol_fields(self):
+    def test_other_backtest_entrypoints_bound_identifier_fields(self):
         with self.assertRaises(ValidationError):
             WalkForwardBacktestRequest(symbol="S" * 21)
         with self.assertRaises(ValidationError):
+            WalkForwardBacktestRequest(strategy="T" * 51)
+        with self.assertRaises(ValidationError):
             RunAllStrategiesRequest(symbol="S" * 21)
+        with self.assertRaises(ValidationError):
+            RunAllStrategiesRequest(market="m" * 8)
+        with self.assertRaises(ValidationError):
+            RunAllStrategiesRequest(timeframe="t" * 11)
+        with self.assertRaises(ValidationError):
+            RunAllStrategiesRequest(data_segment="d" * 11)
 
     def test_ml_deploy_model_id_matches_paper_config_column_width(self):
         DeployMLToPaperRequest(model_id="m" + "x" * 99)
