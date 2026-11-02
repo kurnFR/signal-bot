@@ -44,5 +44,20 @@ class TestBacktestErrorRedaction(unittest.TestCase):
         self.assertNotIn("secret-token", "\n".join(captured.output))
 
 
+    def test_rolling_walk_forward_error_response_is_generic(self):
+        from backtest import walk_forward
+
+        secret = "database-password=secret-token /srv/private/backtest-cache"
+        request = backtest.WalkForwardBacktestRequest(rolling=True)
+        with patch.object(walk_forward, "run_rolling_walk_forward", side_effect=RuntimeError(secret)), self.assertLogs("web.backtest", level="ERROR"):
+            with self.assertRaises(HTTPException) as raised:
+                backtest.execute_walk_forward_backtest(request)
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertEqual(raised.exception.detail, "Rolling walk-forward analysis failed; check server logs for diagnostics")
+        self.assertNotIn("secret-token", raised.exception.detail)
+        self.assertNotIn("/srv/private", raised.exception.detail)
+
+
 if __name__ == "__main__":
     unittest.main()
