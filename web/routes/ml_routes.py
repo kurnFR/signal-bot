@@ -487,12 +487,29 @@ def train_rl_trading_agent(req: RLTrainRequest):
 
 @router.get("/rl/models")
 def list_rl_models():
-    """List trained reinforcement learning models and performance audits."""
-    rl_dir = Path("ml_models") / "rl"
-    if not rl_dir.exists():
+    """List trained RL models without following paths outside ml_models/rl."""
+    models_root = ML_MODELS_DIR.resolve()
+    try:
+        rl_dir = (models_root / "rl").resolve(strict=True)
+    except OSError:
         return {"models": []}
+    if rl_dir.parent != models_root or not rl_dir.is_dir():
+        logger.warning("Skipping RL model listing because its artifact directory is not contained in ml_models/")
+        return {"models": []}
+
+    safe_audit_files = []
+    for candidate in rl_dir.glob("*.json"):
+        try:
+            resolved = candidate.resolve(strict=True)
+            if resolved.parent != rl_dir or not resolved.is_file():
+                logger.warning("Skipping RL model audit outside artifact directory: %s", candidate.name)
+                continue
+            safe_audit_files.append(resolved)
+        except (OSError, RuntimeError):
+            logger.warning("Skipping unresolved RL model audit file: %s", candidate.name)
+
     models = []
-    for audit_file in sorted(rl_dir.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True):
+    for audit_file in sorted(safe_audit_files, key=lambda f: f.stat().st_mtime, reverse=True):
         try:
             data = json.loads(audit_file.read_text(encoding="utf-8"))
             models.append({
