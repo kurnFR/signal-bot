@@ -1,5 +1,6 @@
 import json
 import unittest
+import hashlib
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from fastapi import HTTPException
@@ -12,6 +13,9 @@ from web.auth import (
     is_token_revoked,
     revoke_token,
     _revoked_tokens_cache,
+    cache_revoked_token,
+    _is_cached_revoked_token,
+    _decode_token_payload_unverified,
     log_audit,
     log_audit_cursor,
     get_rate_limiter_health,
@@ -45,6 +49,19 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
             self.assertTrue(is_token_revoked(token))
             # verify_access_token must reject the token
             self.assertIsNone(verify_access_token(token))
+
+    def test_local_revocation_cache_expires_with_signed_token(self):
+        token = create_access_token(user_id=10, username="trader_alice", role="trader")
+        payload = _decode_token_payload_unverified(token)
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+        cache_revoked_token(token)
+        self.assertTrue(_is_cached_revoked_token(token_hash))
+
+        with patch("web.auth.time.time", return_value=payload["exp"] + 1):
+            self.assertFalse(_is_cached_revoked_token(token_hash))
+
+        self.assertNotIn(token_hash, _revoked_tokens_cache)
 
     def test_revoke_token_raises_when_persistence_fails(self):
         token = create_access_token(user_id=10, username="trader_alice", role="trader")
