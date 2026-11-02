@@ -39,6 +39,17 @@ class TestAutoPromotionMigrationManagedSchema(unittest.TestCase):
         source = inspect.getsource(lifespan)
         self.assertIn("verify_strategy_auto_promotion_schema", source)
 
+    def test_missing_policy_row_uses_safe_defaults(self):
+        conn, cursor = _db_connection(fetchone=None)
+        with patch.object(db_helpers, "get_pool") as get_pool:
+            get_pool.return_value.get_connection.return_value = conn
+            policy = db_helpers.get_strategy_auto_promotion_policy()
+
+        self.assertFalse(policy["enabled"])
+        self.assertTrue(policy["require_holdout"])
+        self.assertTrue(policy["send_telegram"])
+        self.assertIsNone(policy["updated_at"])
+
     def test_policy_read_executes_select_only_and_does_not_commit(self):
         conn, cursor = _db_connection(fetchone=dict(_POLICY))
         with patch.object(db_helpers, "get_pool") as get_pool:
