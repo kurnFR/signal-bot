@@ -2,6 +2,7 @@ import time
 import uuid
 import threading
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/api/master-data", tags=["master-data"])
 logger = logging.getLogger("web.master_data")
 
 VALID_MARKETS = {"spot", "futures"}
+VALID_SYMBOL_PATTERN = re.compile(r"^[A-Z0-9]{2,20}$")
 VALID_TIMEFRAMES = {
     "1m", "3m", "5m", "15m", "30m",
     "1h", "2h", "4h", "6h", "8h", "12h",
@@ -41,6 +43,14 @@ class BackfillRequest(BaseModel):
     years: float = Field(1.0, ge=0.01, le=10.0, json_schema_extra={"example": 1.0})
     auto_compute_features: bool = Field(True, json_schema_extra={"example": True})
 
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, value: str) -> str:
+        clean = value.strip().upper()
+        if not VALID_SYMBOL_PATTERN.fullmatch(clean):
+            raise ValueError("Symbol must contain only 2-20 letters or digits")
+        return clean
+
     @field_validator("market")
     @classmethod
     def validate_market(cls, v: str) -> str:
@@ -62,6 +72,14 @@ class FeatureBuildRequest(BaseModel):
     symbol: str = Field(..., min_length=2, max_length=20, json_schema_extra={"example": "BTCUSDT"})
     market: str = Field("spot", json_schema_extra={"example": "spot"})
     timeframe: str = Field("1h", json_schema_extra={"example": "1h"})
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, value: str) -> str:
+        clean = value.strip().upper()
+        if not VALID_SYMBOL_PATTERN.fullmatch(clean):
+            raise ValueError("Symbol must contain only 2-20 letters or digits")
+        return clean
 
     @field_validator("market")
     @classmethod
@@ -135,8 +153,8 @@ def _run_backfill_job(job_id: str, symbol: str, market: str, timeframe: str, yea
                 feat_count = build_one(symbol, market, timeframe)
                 msg = f"Completed successfully: {total_rows:,} candles backfilled, {feat_count:,} features computed."
             except Exception as feat_err:
-                logger.error(f"Feature computation error for {symbol}: {feat_err}")
-                msg = f"Candles backfilled ({total_rows:,}), but feature calculation encountered an error: {feat_err}"
+                logger.exception("Feature computation failed for %s", symbol)
+                msg = f"Candles backfilled ({total_rows:,}), but feature calculation failed. Check server logs for details."
         else:
             msg = f"Backfill complete: {total_rows:,} candles stored."
 
