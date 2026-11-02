@@ -15,6 +15,7 @@ import hashlib
 import secrets
 import tempfile
 import logging
+import threading
 from typing import Optional, Dict, Any
 from fastapi import Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -162,7 +163,13 @@ def verify_access_token(token: str) -> Optional[Dict[str, Any]]:
 # ============================================================================
 # Token Revocation / Blacklisting (Server-side Session Revocation)
 # ============================================================================
-_revoked_tokens_cache = set()
+# Local revocation cache entries expire with their signed access tokens. The
+# database remains authoritative across workers; this cache is only a fast local
+# deny path and a fail-closed safeguard if a revocation write fails.
+_revoked_tokens_cache: Dict[str, float] = {}
+_revoked_tokens_cache_lock = threading.Lock()
+_revoked_tokens_cache_last_prune = 0.0
+_REVOCATION_CACHE_PRUNE_INTERVAL_SECONDS = 60
 
 
 def _decode_token_payload_unverified(token: str) -> Optional[Dict[str, Any]]:
@@ -175,6 +182,52 @@ def _decode_token_payload_unverified(token: str) -> Optional[Dict[str, Any]]:
         return json.loads(base64.urlsafe_b64decode(pad.encode("utf-8")).decode("utf-8"))
     except Exception:
         return None
+
+
+def _prune_revoked_tokens_cache_locked(now: float) -> None:
+    """Remove expired cache entries at a bounded cadence while holding the lock."""
+    global _revoked_tokens_cache_last_prune
+    if now - _revoked_tokens_cache_last_prune < _REVOCATION_CACHE_PRUNE_INTERVAL_SECONDS:
+        return
+    expired = [
+        token_hash
+        for token_hash, expires_at in _revoked_tokens_cache.items()
+        if expires_at <= now
+    ]
+    for token_hash in expired:
+        _revoked_tokens_cache.pop(token_hash, None)
+    _revoked_tokens_cache_last_prune = now
+
+
+def _remember_revoked_token(token: str) -> None:
+    if not token:
+        return
+    now = time.time()
+    payload = _decode_token_payload_unverified(token)
+    try:
+        expires_at = float(payload.get("exp")) if payload else now + TOKEN_EXPIRY_SECONDS
+    except (TypeError, ValueError):
+        expires_at = now + TOKEN_EXPIRY_SECONDS
+    if expires_at <= now:
+        return
+
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    with _revoked_tokens_cache_lock:
+        _prune_revoked_tokens_cache_locked(now)
+        _revoked_tokens_cache[token_hash] = expires_at
+
+
+def _is_cached_revoked_token(token_hash: str) -> bool:
+    now = time.time()
+    with _revoked_tokens_cache_lock:
+        _prune_revoked_tokens_cache_locked(now)
+        expires_at = _revoked_tokens_cache.get(token_hash)
+        if expires_at is None:
+            return False
+        if expires_at <= now:
+            _revoked_tokens_cache.pop(token_hash, None)
+            return False
+        return True
 
 
 def revoke_token_cursor(cur, token: str) -> str:
@@ -200,9 +253,8 @@ def revoke_token_cursor(cur, token: str) -> str:
 
 
 def cache_revoked_token(token: str) -> None:
-    """Add a token to the local deny cache after durable revocation commits."""
-    if token:
-        _revoked_tokens_cache.add(hashlib.sha256(token.encode("utf-8")).hexdigest())
+    """Cache a committed revocation until the signed token expires."""
+    _remember_revoked_token(token)
 
 
 def revoke_token(token: str) -> None:
@@ -211,7 +263,7 @@ def revoke_token(token: str) -> None:
         return
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     # Preserve fail-closed behavior on this worker if persistence subsequently fails.
-    _revoked_tokens_cache.add(token_hash)
+    _remember_revoked_token(token)
     conn = None
     try:
         conn = get_pool().get_connection()
@@ -243,7 +295,7 @@ def is_token_revoked(token: str) -> bool:
     if not token:
         return True
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    if token_hash in _revoked_tokens_cache:
+    if _is_cached_revoked_token(token_hash):
         return True
 
     try:
@@ -257,7 +309,7 @@ def is_token_revoked(token: str) -> bool:
             row = cur.fetchone()
             cur.close()
             if row:
-                _revoked_tokens_cache.add(token_hash)
+                _remember_revoked_token(token)
                 return True
             return False
         finally:
