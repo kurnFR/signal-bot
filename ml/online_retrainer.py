@@ -112,7 +112,10 @@ def get_retraining_status() -> dict[str, Any]:
     audit_history = []
     if AUDIT_LOG_PATH.exists():
         try:
-            audit_history = [\n                _public_audit_entry(entry)\n                for entry in json.loads(AUDIT_LOG_PATH.read_text(encoding="utf-8"))[:10]\n            ]
+            audit_history = [
+                _public_audit_entry(entry)
+                for entry in json.loads(AUDIT_LOG_PATH.read_text(encoding="utf-8"))[:10]
+            ]
         except Exception:
             pass
 
