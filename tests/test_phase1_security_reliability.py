@@ -278,7 +278,7 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
                 with patch("web.routes.auth_routes.get_pool") as pool:
                     with patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 1, 101)):
                         with patch("web.routes.auth_routes.finalize_login_attempt", return_value=1):
-                            with patch("web.routes.auth_routes.log_audit", side_effect=RuntimeError("audit store unavailable")):
+                            with patch("web.routes.auth_routes.log_audit", side_effect=RuntimeError("audit store unavailable")) as audit_log:
                                 pool.return_value.get_connection.return_value = conn
                                 with self.assertRaises(HTTPException) as ctx:
                                     auth_routes.login(
@@ -289,6 +289,8 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
                                         request,
                                     )
                 self.assertEqual(ctx.exception.status_code, 503)
+                audit_log.assert_called_once()
+                self.assertEqual(audit_log.call_args.args[2], user["id"] if user else None)
                 conn.close.assert_called_once()
 
     def test_failed_password_login_returns_503_when_required_audit_fails(self):
