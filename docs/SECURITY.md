@@ -5,7 +5,8 @@ How access to the dashboard and API is controlled, and what to do when deploying
 ## 1. Authentication
 
 - **Passwords:** PBKDF2-HMAC-SHA256, 200,000 iterations, 16-byte random salt (`pbkdf2:sha256:<iterations>$<salt>$<hash>`), compared in constant time.
-- **Tokens:** HMAC-SHA256-signed bearer tokens carrying user, role and expiry; **24-hour lifetime**. The signing key is `SECRET_KEY`, generated randomly and stored in `.app_secret` (gitignored). Deleting that file invalidates every session.
+- **Tokens:** HMAC-SHA256-signed bearer tokens carrying user, role, per-user `session_version` and expiry; **24-hour lifetime**. The signing key is `SECRET_KEY`, generated randomly and stored in `.app_secret` (gitignored). Deleting that file invalidates every session.
+- **Session invalidation:** admin password resets, admin role/active-state changes, and self-service password changes increment the user's `session_version`. Tokens issued with an older version are rejected with HTTP 401, including sessions that would otherwise become usable again after a forced password change.
 - **Logout and revocation:** logout stores the token's SHA-256 hash in `revoked_tokens` until it would have expired, so a revoked token is rejected even after a restart.
 - **Brute-force limit:** 5 failed logins per 5 minutes per key, then `429`. Attempts are stored in the `login_attempts` table, shared across workers and retained across restarts. If shared storage is unavailable at startup or during login, login fails closed with HTTP 503; process-local memory is not used as a fallback.
 - **Audit log:** these events are written to `audit_logs` and are admin-readable at `GET /api/auth/audit-logs`: `LOGIN_FAILED`, `LOGIN_RATE_LIMITED`, `LOGIN_SUCCESS`, `LOGOUT`, `PASSWORD_CHANGED`, `USER_CREATED`, `USER_PASSWORD_RESET`, `USER_UPDATED`.
@@ -13,7 +14,7 @@ How access to the dashboard and API is controlled, and what to do when deploying
 
 ## 2. Authorization
 
-Enforced centrally in `web/app.py` for every `/api/*` route (fail-closed): no valid token means `401`; a valid token with insufficient role means `403`. Only `POST /api/auth/login` and the static home page are public. A sweep of all 74 API operations without credentials confirmed this.
+Enforced centrally in `web/app.py` for every `/api/*` route (fail-closed): no valid token means `401`; a valid token with insufficient role means `403`. Only `POST /api/auth/login` and the static home page are public. Viewer-readable GET routes are explicitly enumerated; unclassified registered GET routes are denied until their data exposure and side effects are reviewed. A sweep of the registered API operations verifies this policy.
 
 | Role | Can do |
 |---|---|
@@ -21,7 +22,7 @@ Enforced centrally in `web/app.py` for every `/api/*` route (fail-closed): no va
 | `trader` | Everything a viewer can, plus backtests, paper configs/deploys/sync/circuit breakers, paper-order cancellation, ML runs, custom strategies, master-data backfill and feature builds, research-bot control, wallet tracking changes |
 | `admin` | Everything, plus user management (`/api/users`), `GET /api/settings/status`, the Telegram test message, and the audit log |
 
-Rules live in `ADMIN_ONLY_PREFIXES`, `ADMIN_OR_TRADER_PREFIXES`, `TRADER_OR_ADMIN_PREFIXES` and `RESEARCH_CONTROL_PREFIXES` in `web/app.py`. A new router that is not covered by a prefix list is readable by any authenticated user for all methods, so add its prefix when you add mutating routes.
+Rules live in the role-prefix policies and the `AUTHENTICATED_READ_PATHS` route-template allowlist in `web/app.py`. New GET routes remain denied until explicitly added to the reviewed read allowlist; new mutations remain denied unless covered by an explicit role policy.
 
 ## 3. Web and transport
 
