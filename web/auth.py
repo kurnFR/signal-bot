@@ -177,40 +177,60 @@ def _decode_token_payload_unverified(token: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def revoke_token(token: str) -> None:
-    """Revokes an active token and blacklists it across the server.
-    
-    Raises RuntimeError if persistent revocation storage fails so callers know
-    revocation could not be durably recorded across workers.
+def revoke_token_cursor(cur, token: str) -> str:
+    """Insert a token revocation using the caller's open transaction.
+
+    Returns the SHA-256 token hash. The caller must commit before caching it.
     """
     if not token:
-        return
+        return ""
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    _revoked_tokens_cache.add(token_hash)
     payload = _decode_token_payload_unverified(token)
     exp = payload.get("exp", int(time.time()) + TOKEN_EXPIRY_SECONDS) if payload else int(time.time()) + TOKEN_EXPIRY_SECONDS
     exp_dt = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(exp))
+    cur.execute(
+        """
+        INSERT INTO revoked_tokens (token_hash, expires_at)
+        VALUES (%s, %s)
+        ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at)
+        """,
+        (token_hash, exp_dt),
+    )
+    return token_hash
 
+
+def cache_revoked_token(token: str) -> None:
+    """Add a token to the local deny cache after durable revocation commits."""
+    if token:
+        _revoked_tokens_cache.add(hashlib.sha256(token.encode("utf-8")).hexdigest())
+
+
+def revoke_token(token: str) -> None:
+    """Persist token revocation; raise if shared storage cannot commit it."""
+    if not token:
+        return
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    # Preserve fail-closed behavior on this worker if persistence subsequently fails.
+    _revoked_tokens_cache.add(token_hash)
+    conn = None
     try:
         conn = get_pool().get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO revoked_tokens (token_hash, expires_at)
-                VALUES (%s, %s)
-                ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at)
-                """,
-                (token_hash, exp_dt),
-            )
-            conn.commit()
-            cur.close()
-            logger.info("Token %s... revoked and blacklisted", token_hash[:8])
-        finally:
-            conn.close()
+        cur = conn.cursor()
+        revoke_token_cursor(cur, token)
+        conn.commit()
+        cur.close()
+        logger.info("Token %s... revoked and blacklisted", token_hash[:8])
     except Exception as exc:
-        logger.error("Failed to persist revoked token: %s", exc)
-        raise RuntimeError(f"Failed to persist revoked token to database: {exc}") from exc
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.error("Failed to persist revoked token (%s)", type(exc).__name__)
+        raise RuntimeError("Failed to persist revoked token to database") from exc
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def is_token_revoked(token: str) -> bool:
