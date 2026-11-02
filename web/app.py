@@ -4,6 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
+from starlette.routing import Match
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -175,6 +176,17 @@ def _matches_route_template(path: str, templates: tuple[str, ...]) -> bool:
     return False
 
 
+def _matches_registered_api_path(scope) -> bool:
+    """Distinguish an unregistered URL (404) from a registered but denied route."""
+    for route in app.routes:
+        if not getattr(route, "path", "").startswith("/api/"):
+            continue
+        match, _ = route.matches(scope)
+        if match is not Match.NONE:
+            return True
+    return False
+
+
 def _role_allowed(method: str, path: str, role: str) -> bool:
     # Every authenticated role must be able to end its own session or fix its
     # own password, including accounts forced through first-login rotation.
@@ -217,6 +229,11 @@ async def api_security_boundary(request: Request, call_next):
                 content={"detail": "Password change required before continuing", "code": "password_change_required"},
             )
         if not _role_allowed(request.method, path, role):
+            # Preserve FastAPI's normal 404 for URLs that do not match any
+            # registered API route. Registered but unclassified GET routes
+            # remain denied by the explicit read allowlist.
+            if request.method.upper() == "GET" and not _matches_registered_api_path(request.scope):
+                return await call_next(request)
             return JSONResponse(
                 status_code=403,
                 content={"detail": "Insufficient privileges for this operation"},
