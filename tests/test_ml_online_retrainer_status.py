@@ -36,11 +36,7 @@ class TestOnlineRetrainerPromotionStatus(unittest.TestCase):
                         }
                     },
                 }
-                with patch.object(online_retrainer, "_load_registry", return_value=registry), \\
-                     patch.object(online_retrainer, "_save_registry"), \\
-                     patch.object(online_retrainer, "_append_audit_log") as append_audit, \\
-                     patch.object(online_retrainer, "fetch_ohlcv_with_features_df", return_value=[None] * 200), \\
-                     patch.object(online_retrainer, "run_real_experiment", return_value=experiment_result):
+                with patch.object(online_retrainer, "_load_registry", return_value=registry), patch.object(online_retrainer, "_save_registry"), patch.object(online_retrainer, "_append_audit_log") as append_audit, patch.object(online_retrainer, "fetch_ohlcv_with_features_df", return_value=[None] * 200), patch.object(online_retrainer, "run_real_experiment", return_value=experiment_result):
                     results = online_retrainer.execute_retraining_cycle(force=True)
 
                 self.assertEqual(len(results), 1)
@@ -65,8 +61,7 @@ class TestOnlineRetrainerPromotionStatus(unittest.TestCase):
                 "promotion_status": "not_implemented",
                 "error": "secret-token /srv/private/config.env",
             }]), encoding="utf-8")
-            with patch.object(online_retrainer, "_load_registry", return_value={"registered_models": {}}), \\
-                 patch.object(online_retrainer, "AUDIT_LOG_PATH", audit_path):
+            with patch.object(online_retrainer, "_load_registry", return_value={"registered_models": {}}), patch.object(online_retrainer, "AUDIT_LOG_PATH", audit_path):
                 status = online_retrainer.get_retraining_status()
 
         event = status["recent_audit"][0]
