@@ -79,19 +79,54 @@ def _atomic_write_json(path: Path, data: Any) -> None:
                 pass
 
 
+def _default_registry(*, enabled: bool = True) -> dict[str, Any]:
+    return {
+        "enabled": enabled,
+        "retrain_interval_hours": 24,
+        "min_new_candles": 48,
+        "max_drift_psi": 0.25,
+        "registered_models": {},
+    }
+
+
 def _load_registry() -> dict[str, Any]:
     if not REGISTRY_PATH.exists():
-        return {
-            "enabled": True,
-            "retrain_interval_hours": 24,
-            "min_new_candles": 48,
-            "max_drift_psi": 0.25,
-            "registered_models": {},
-        }
+        return _default_registry()
+
     try:
-        return json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {"enabled": True, "registered_models": {}}
+        registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.error("Online retraining registry is unreadable; disabling retraining until repaired")
+        return _default_registry(enabled=False)
+
+    if not isinstance(registry, dict):
+        logger.error("Online retraining registry must be a JSON object; disabling retraining")
+        return _default_registry(enabled=False)
+
+    enabled = registry.get("enabled", True)
+    models = registry.get("registered_models", {})
+    if not isinstance(enabled, bool) or not isinstance(models, dict):
+        logger.error("Online retraining registry has invalid control fields; disabling retraining")
+        return _default_registry(enabled=False)
+
+    required_model_fields = ("symbol", "market", "timeframe", "strategy_name")
+    for key, model in models.items():
+        if (
+            not isinstance(key, str)
+            or not isinstance(model, dict)
+            or any(not isinstance(model.get(field), str) or not model[field].strip()
+                   for field in required_model_fields)
+        ):
+            logger.error("Online retraining registry contains an invalid model entry; disabling retraining")
+            return _default_registry(enabled=False)
+
+    # Keep historical registries compatible while ensuring their control
+    # values have safe types before they reach scheduling arithmetic.
+    registry.setdefault("retrain_interval_hours", 24)
+    registry.setdefault("min_new_candles", 48)
+    registry.setdefault("max_drift_psi", 0.25)
+    registry["registered_models"] = models
+    return registry
 
 
 def _save_registry(data: dict[str, Any]) -> None:
