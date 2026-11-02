@@ -23,6 +23,24 @@ class TestWalletTelegramNotifier(unittest.TestCase):
             "block_time": "2026-10-13 07:53:10",
         }
 
+    def test_format_message_summarizes_multi_swap_wallet_digest(self):
+        alert = dict(
+            self.alert,
+            swap_count=4,
+            pair="2 pairs",
+            side="mixed",
+            usd_value=1260000,
+            buy_usd_value=900000,
+            sell_usd_value=360000,
+        )
+        message = WalletTelegramNotifier.format_message(alert)
+        self.assertIn("Followed Wallet ACTIVITY Digest", message)
+        self.assertIn("<b>Swaps:</b> 4", message)
+        self.assertIn("$1,260,000.00", message)
+        self.assertIn("$900,000.00", message)
+        self.assertIn("$360,000.00", message)
+        self.assertNotIn("Token amount", message)
+
     def test_format_message_contains_trade_details_and_escapes_html(self):
         message = WalletTelegramNotifier.format_message(self.alert)
         self.assertIn("Followed Wallet BUY", message)
@@ -94,23 +112,73 @@ class TestWalletTelegramNotifier(unittest.TestCase):
 
 
 class TestWalletAlertQueueControls(unittest.TestCase):
-    def test_queue_query_limits_alerts_to_one_per_wallet_and_applies_cooldown(self):
+    def test_queue_retains_every_fresh_qualifying_swap_for_later_digest(self):
         connection = MagicMock()
         cursor = connection.cursor.return_value
         cursor.fetchone.side_effect = [{"last_swap_id": 10}, {"max_id": 20}]
-        cursor.rowcount = 1
+        cursor.rowcount = 4
         pool = MagicMock()
         pool.get_connection.return_value = connection
         with patch("wallet_tracker.store.get_pool", return_value=pool):
-            queued = store.queue_new_wallet_alerts(10000, max_age_minutes=30, cooldown_minutes=10)
+            queued = store.queue_new_wallet_alerts(10000, max_age_minutes=30)
 
-        self.assertEqual(queued, 1)
+        self.assertEqual(queued, 4)
         sql, params = cursor.execute.call_args_list[2].args
-        self.assertIn("NOT EXISTS", sql)
-        self.assertIn("MIN(s2.id)", sql)
-        self.assertIn("delivery_status = 'PENDING'", sql)
+        self.assertIn("INSERT IGNORE INTO wallet_telegram_alerts", sql)
+        self.assertIn("s.id > %s AND s.id <= %s", sql)
+        self.assertIn("s.block_time >= UTC_TIMESTAMP()", sql)
+        self.assertNotIn("NOT EXISTS", sql)
+        self.assertNotIn("MIN(s2.id)", sql)
+        self.assertEqual(params, (10, 20, 10000.0, 30))
+        connection.commit.assert_called_once()
+
+    def test_pending_alerts_are_grouped_by_wallet_and_deferred_during_cooldown(self):
+        connection = MagicMock()
+        cursor = connection.cursor.return_value
+        cursor.fetchall.return_value = []
+        pool = MagicMock()
+        pool.get_connection.return_value = connection
+        with patch("wallet_tracker.store.get_pool", return_value=pool):
+            pending = store.get_pending_wallet_alerts(limit=50, cooldown_minutes=10)
+
+        self.assertEqual(pending, [])
+        sql, params = cursor.execute.call_args_list[1].args
+        self.assertIn("GROUP BY s.chain, s.wallet, t.label", sql)
+        self.assertIn("SUM(s.usd_value)", sql)
+        self.assertIn("COUNT(*) AS swap_count", sql)
+        self.assertIn("MAX(a.swap_id) AS max_swap_id", sql)
         self.assertIn("delivery_status = 'SENT'", sql)
-        self.assertEqual(params, (10, 20, 10000.0, 30, 10, 10, 20, 10000.0, 30))
+        self.assertEqual(params, (5, 10, 50))
+        connection.commit.assert_called_once()
+
+    def test_digest_delivery_updates_all_included_swaps_with_individual_retry_counts(self):
+        from datetime import datetime
+
+        connection = MagicMock()
+        cursor = connection.cursor.return_value
+        cursor.fetchall.return_value = [
+            {"swap_id": 10, "attempts": 0},
+            {"swap_id": 11, "attempts": 2},
+        ]
+        pool = MagicMock()
+        pool.get_connection.return_value = connection
+        alert = {
+            "chain": "eth", "wallet": "0x" + "a" * 40,
+            "max_swap_id": 11, "eligible_as_of": datetime(2026, 11, 2, 7, 0, 0),
+        }
+        with patch("wallet_tracker.store.get_pool", return_value=pool):
+            updated = store.mark_wallet_alert_attempt(
+                alert, success=False, error="Telegram failed", max_attempts=3,
+            )
+
+        self.assertTrue(updated)
+        self.assertEqual(cursor.execute.call_count, 3)
+        first_update = cursor.execute.call_args_list[1].args
+        second_update = cursor.execute.call_args_list[2].args
+        self.assertEqual(first_update[1][0:2], (1, "PENDING"))
+        self.assertEqual(first_update[1][-1], 10)
+        self.assertEqual(second_update[1][0:2], (3, "FAILED"))
+        self.assertEqual(second_update[1][-1], 11)
         connection.commit.assert_called_once()
 
     def test_alert_retention_deletes_only_old_terminal_rows(self):
@@ -132,22 +200,24 @@ class TestWalletAlertQueueControls(unittest.TestCase):
 
 class TestWalletTelegramDispatch(unittest.TestCase):
     @patch.object(worker.store, "get_settings", return_value={"min_trade_usd": 10000})
-    @patch.object(worker.store, "queue_new_wallet_alerts", return_value=1)
+    @patch.object(worker.store, "queue_new_wallet_alerts", return_value=4)
     @patch.object(worker.store, "get_pending_wallet_alerts", return_value=[
-        {"swap_id": 10}, {"swap_id": 11}
+        {"swap_id": 10, "max_swap_id": 11, "wallet": "wallet-a"},
+        {"swap_id": 20, "max_swap_id": 20, "wallet": "wallet-b"},
     ])
     @patch.object(worker.store, "mark_wallet_alert_attempt")
-    def test_dispatch_persists_success_and_failure(self, mark, pending, queued, settings):
+    def test_dispatch_persists_one_delivery_per_wallet_digest(self, mark, pending, queued, settings):
         notifier = MagicMock()
         notifier.configured = True
         notifier.send.side_effect = [True, False]
         sent = worker.dispatch_telegram_alerts(notifier)
         self.assertEqual(sent, 1)
-        queued.assert_called_once_with(10000, max_age_minutes=30, cooldown_minutes=10)
-        self.assertEqual(pending.call_count, 1)
+        queued.assert_called_once_with(10000, max_age_minutes=30)
+        pending.assert_called_once_with(limit=50, cooldown_minutes=10)
         self.assertEqual(mark.call_count, 2)
-        self.assertEqual(mark.call_args_list[0].args, (10,))
+        self.assertEqual(mark.call_args_list[0].args[0]["wallet"], "wallet-a")
         self.assertTrue(mark.call_args_list[0].kwargs["success"])
+        self.assertEqual(mark.call_args_list[1].args[0]["wallet"], "wallet-b")
         self.assertFalse(mark.call_args_list[1].kwargs["success"])
 
     @patch.object(worker.store, "queue_new_wallet_alerts")
