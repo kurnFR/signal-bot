@@ -11,15 +11,47 @@ from pydantic import BaseModel, Field
 from db.db import get_pool
 from web.auth import (
     hash_password, verify_password, create_access_token,
-    get_current_user, require_admin, revoke_token,
+    get_current_user, require_admin,
     admit_login_attempt, finalize_login_attempt,
     record_failed_login, reset_login_attempts,
-    log_audit, log_audit_cursor, _token_from_request, RateLimitBackendUnavailable
+    log_audit, log_audit_cursor, _token_from_request, RateLimitBackendUnavailable,
+    revoke_token_cursor, cache_revoked_token
 )
 from fastapi import Request
 
 router = APIRouter(prefix="/api", tags=["authentication-and-users"])
 logger = logging.getLogger("web.auth_routes")
+
+def _write_required_audit(action: str, username: str, user_id: Optional[int] = None,
+                          details: Optional[dict] = None, ip_address: Optional[str] = None) -> None:
+    """Persist a mandatory security event before returning an auth outcome."""
+    try:
+        log_audit(action, username, user_id, details, ip_address, raise_on_error=True)
+    except Exception as exc:
+        logger.error("Required audit write failed for %s (%s)", action, type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="Security audit storage is temporarily unavailable. Please retry shortly.",
+        )
+
+
+def _commit_with_audit(conn, cur, action: str, username: str,
+                       user_id: Optional[int] = None, details: Optional[dict] = None,
+                       ip_address: Optional[str] = None) -> None:
+    """Commit a DB mutation and its mandatory audit row atomically."""
+    try:
+        log_audit_cursor(cur, action, username, user_id, details, ip_address)
+        conn.commit()
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error("Required audit transaction failed for %s (%s)", action, type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="Security audit storage is temporarily unavailable. Please retry shortly.",
+        )
 
 USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]{3,30}$")
 
@@ -154,7 +186,7 @@ def login(req: LoginRequest, request: Request):
         raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
 
     if not within_rate_limit:
-        log_audit("LOGIN_RATE_LIMITED", username, user["id"] if user else None, {"ip": client_ip}, client_ip)
+        _write_required_audit("LOGIN_RATE_LIMITED", username, user["id"] if user else None, {"ip": client_ip}, client_ip)
         raise HTTPException(
             status_code=429,
             detail="Too many failed login attempts. Account temporarily locked. Please try again in 5 minutes."
@@ -169,7 +201,7 @@ def login(req: LoginRequest, request: Request):
         except RateLimitBackendUnavailable as exc:
             logger.error("Login failure could not be recorded in shared rate-limit storage: %s", type(exc).__name__)
             raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
-        log_audit("LOGIN_FAILED", username, None, {"attempt": failed_count, "reason": "user_not_found_or_inactive"}, client_ip)
+        _write_required_audit("LOGIN_FAILED", username, None, {"attempt": failed_count, "reason": "user_not_found_or_inactive"}, client_ip)
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     if not verify_password(req.password, user["password_hash"]):
@@ -181,7 +213,7 @@ def login(req: LoginRequest, request: Request):
         except RateLimitBackendUnavailable as exc:
             logger.error("Login failure could not be recorded in shared rate-limit storage: %s", type(exc).__name__)
             raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
-        log_audit("LOGIN_FAILED", username, user["id"], {"attempt": failed_count, "reason": "bad_password"}, client_ip)
+        _write_required_audit("LOGIN_FAILED", username, user["id"], {"attempt": failed_count, "reason": "bad_password"}, client_ip)
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     try:
@@ -193,7 +225,7 @@ def login(req: LoginRequest, request: Request):
         logger.error("Login blocked because shared rate-limit reset failed (%s)", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Login protection is temporarily unavailable. Please retry shortly.")
     token = create_access_token(user["id"], user["username"], user["role"])
-    log_audit("LOGIN_SUCCESS", user["username"], user["id"], {"role": user["role"]}, client_ip)
+    _write_required_audit("LOGIN_SUCCESS", user["username"], user["id"], {"role": user["role"]}, client_ip)
 
     return {
         "token": token,
@@ -210,18 +242,49 @@ def login(req: LoginRequest, request: Request):
 @router.post("/auth/logout")
 def logout(request: Request, current_user: dict = Depends(get_current_user)):
     token = _token_from_request(request)
-    if token:
-        try:
-            revoke_token(token)
-        except Exception as exc:
-            logger.error("Failed to revoke session token during logout: %s", exc)
-            raise HTTPException(
-                status_code=503,
-                detail="Server error: failed to revoke session token. Please retry.",
-            )
     client_ip = request.client.host if request.client else "unknown"
-    log_audit("LOGOUT", current_user["username"], current_user["id"], None, client_ip)
-    return {"status": "success", "message": "Successfully logged out"}
+    conn = None
+    try:
+        conn = get_pool().get_connection()
+        cur = conn.cursor()
+        if token:
+            try:
+                revoke_token_cursor(cur, token)
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.error("Token revocation transaction failed (%s)", type(exc).__name__)
+                raise HTTPException(
+                    status_code=503,
+                    detail="Session revocation is temporarily unavailable. Please retry shortly.",
+                )
+        _commit_with_audit(
+            conn, cur, "LOGOUT", current_user["username"], current_user["id"], None, client_ip
+        )
+        if token:
+            cache_revoked_token(token)
+        return {"status": "success", "message": "Successfully logged out"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.error("Logout audit transaction unavailable (%s)", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="Security audit storage is temporarily unavailable. Please retry shortly.",
+        )
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                logger.warning("Logout database connection close failed")
 
 
 @router.get("/auth/me")
@@ -255,10 +318,10 @@ def change_password(req: ChangePasswordRequest, request: Request, current_user: 
             "UPDATE users SET password_hash = %s, must_change_password = 0, updated_at = NOW() WHERE id = %s",
             (new_hash, current_user["id"])
         )
-        conn.commit()
-        cur.close()
         client_ip = request.client.host if request.client else "unknown"
-        log_audit("PASSWORD_CHANGED", current_user["username"], current_user["id"], None, client_ip)
+        _commit_with_audit(
+            conn, cur, "PASSWORD_CHANGED", current_user["username"], current_user["id"], None, client_ip
+        )
         return {"status": "success", "message": "Password changed successfully"}
     finally:
         conn.close()
@@ -353,11 +416,11 @@ def create_user(req: CreateUserRequest, admin: dict = Depends(require_admin)):
             """,
             (clean_username, clean_email, new_hash, clean_role)
         )
-        conn.commit()
         new_id = cur.lastrowid
-        cur.close()
-
-        log_audit("USER_CREATED", admin["username"], admin["id"], {"created_user": clean_username, "role": clean_role})
+        _commit_with_audit(
+            conn, cur, "USER_CREATED", admin["username"], admin["id"],
+            {"created_user": clean_username, "created_user_id": new_id, "role": clean_role},
+        )
 
         return {
             "status": "success",
@@ -389,10 +452,10 @@ def reset_user_password(user_id: int, req: ResetPasswordRequest, admin: dict = D
             "UPDATE users SET password_hash = %s, must_change_password = 1, updated_at = NOW() WHERE id = %s",
             (new_hash, user_id)
         )
-        conn.commit()
-        cur.close()
-
-        log_audit("USER_PASSWORD_RESET", admin["username"], admin["id"], {"target_user": target["username"], "target_id": user_id})
+        _commit_with_audit(
+            conn, cur, "USER_PASSWORD_RESET", admin["username"], admin["id"],
+            {"target_user": target["username"], "target_id": user_id},
+        )
 
         return {
             "status": "success",
@@ -431,10 +494,11 @@ def update_user(user_id: int, req: UpdateUserRequest, admin: dict = Depends(requ
             updates.append("updated_at = NOW()")
             params.append(user_id)
             cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = %s", tuple(params))
-            conn.commit()
 
-        cur.close()
-        log_audit("USER_UPDATED", admin["username"], admin["id"], {"target_user": target["username"], "role": req.role, "is_active": req.is_active})
+        _commit_with_audit(
+            conn, cur, "USER_UPDATED", admin["username"], admin["id"],
+            {"target_user": target["username"], "target_id": user_id, "role": req.role, "is_active": req.is_active},
+        )
         return {"status": "success", "message": f"User '{target['username']}' updated"}
     finally:
         conn.close()
@@ -454,14 +518,10 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
             raise HTTPException(status_code=404, detail="User not found")
 
         cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
-        log_audit_cursor(
-            cur,
-            "USER_DELETED",
-            admin["username"],
-            admin["id"],
+        _commit_with_audit(
+            conn, cur, "USER_DELETED", admin["username"], admin["id"],
             {"deleted_user": target["username"], "deleted_id": user_id},
         )
-        conn.commit()
         cur.close()
         return {"status": "success", "message": f"User '{target['username']}' deleted"}
     finally:
