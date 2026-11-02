@@ -68,8 +68,7 @@ class TestMLRouteErrorRedaction(unittest.TestCase):
                 '"status": "failed", "error": "' + secret.replace("\\", "\\\\").replace('"', '\\"') + '"}]',
                 encoding="utf-8",
             )
-            with patch.object(online_retrainer, "REGISTRY_PATH", registry), \\
-                 patch.object(online_retrainer, "AUDIT_LOG_PATH", audit):
+            with patch.object(online_retrainer, "REGISTRY_PATH", registry), patch.object(online_retrainer, "AUDIT_LOG_PATH", audit):
                 result = online_retrainer.get_retraining_status()
 
         self.assertEqual(len(result["recent_audit"]), 1)
