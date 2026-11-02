@@ -151,10 +151,6 @@ class TestRateLimitFailClosed(unittest.TestCase):
             "DELETE FROM login_attempts WHERE attempted_at < %s LIMIT 1000",
             sql_calls,
         )
-        self.assertEqual(
-            [call.args[1] for call in cur.execute.call_args_list if "GET_LOCK" in call.args[0]],
-            [("sb_login:",), ("sb_login_gc", 0)],
-        ) if False else None
         self.assertIn("SELECT RELEASE_LOCK(%s)", sql_calls)
         conn.commit.assert_called_once()
         conn.close.assert_called_once()
@@ -334,7 +330,17 @@ print(json.dumps({"allowed": allowed}))
         allowed, _, reservation_id = auth.admit_login_attempt("it-cleanup")
         self.assertTrue(allowed)
         self.assertIsNotNone(reservation_id)
-        self.assertEqual(auth._db_count_attempts("it-stale-other", time.time()), 0)
+        verify_conn = auth.get_pool().get_connection()
+        try:
+            verify_cur = verify_conn.cursor()
+            verify_cur.execute(
+                "SELECT COUNT(*) FROM login_attempts WHERE rate_key = %s",
+                ("it-stale-other",),
+            )
+            self.assertEqual(int(verify_cur.fetchone()[0]), 0)
+            verify_cur.close()
+        finally:
+            verify_conn.close()
         auth.reset_login_attempts("it-cleanup")
 
     def test_runtime_storage_recovery_reenables_login_checks(self):
