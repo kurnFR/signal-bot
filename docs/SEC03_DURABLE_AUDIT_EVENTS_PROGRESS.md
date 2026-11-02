@@ -165,3 +165,11 @@ Login attempt reservation/finalization remains its own shared-rate-limit operati
 - The tested candidate's required CI remains green: full pytest **823 passed, 17 skipped, 6 warnings**; unit/screener **105 passed**; isolated MariaDB **36 passed**; RetailBot accounting/parity **36 passed**; screener regression **27 passed**.
 - PR comparison before this docs-only commit: **15 commits ahead, 0 behind**, based on merged SEC-02 master commit `823b5d2837383839c5c9acd0e0dacce62a602a25`.
 - The PR remains draft/open/unmerged. Independent security review and explicit release approval are still required; no deployment or production activity was performed.
+
+## Final merge and post-merge verification (2026-11-02)
+
+- PR #607, **Require durable audit records for security and admin actions**, was merged into `master` at `973d29c119737e94425dcc5b67510b282284907d` on 2026-11-02.
+- GitHub check runs on that exact merge commit completed successfully: `pytest`, `unit-tests`, `wallet-tracker-mariadb-integration`, and `paper-accounting`.
+- The earlier progress entries stating that PR #607 remained draft/open/unmerged describe the pre-merge state and are superseded by this final record.
+- Current implementation requires durable audit persistence for the reviewed security/login events and commits audit rows atomically with the related logout, password, and administrative user mutations. The generic best-effort `log_audit(..., raise_on_error=False)` helper remains available for explicitly non-critical future telemetry; it is not the policy for the mandatory events listed above.
+- This records source review and hosted CI, not an external penetration test or independent third-party security certification. No production deployment or live-system operation is implied.
