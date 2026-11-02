@@ -50,9 +50,9 @@ Defined in `config.py`: symbols `BTCUSDT`, `ETHUSDT`, `BNBUSDT`; timeframes `15m
 | Security | `audit_logs`, `revoked_tokens` | `migrate_pro_trader_and_ml.sql` |
 | Paper trading | `paper_configs`, `paper_positions`, `paper_trades`, `paper_orders` | `migrate_add_users_and_paper.sql`, `migrate_p0_paper_accounting.sql`, `migrate_paper_orders.sql` and follow-ups |
 | News AI | `news_events`, `news_ai_signals` | `migrate_news_events.sql`, `migrate_news_execution.sql` |
-| Screener | `smart_money_signals`, `screener_control`, `screener_heartbeat` | `migrate_smart_money.sql` / the screener itself |
-| Research bot | `rdt_trades`, `rdt_strategy_stats`, `bot_control` | `retailbot2` at start |
-| Wallet tracking | `wallet_swaps`, `wallet_positions`, `tracked_wallets`, `wallet_tracker_settings`, `wallet_tracker_status`, `wallet_telegram_alerts`, `wallet_tracker_alert_cursor` | created automatically by the web app and worker |
+| Screener | `smart_money_signals`, `screener_control`, `screener_heartbeat` | `migrate_smart_money.sql`, `migrate_screener_runtime_schema.sql` |
+| Research bot | `rdt_trades`, `rdt_strategy_stats`, `bot_control`, `rdt_strategy_lifecycle` | `migrate_retailbot2_runtime_schema.sql` |
+| Wallet tracking | `wallet_swaps`, `wallet_positions`, `tracked_wallets`, `wallet_tracker_settings`, `wallet_tracker_status`, `wallet_telegram_alerts`, `wallet_tracker_alert_cursor` | `migrate_wallet_tracking.sql`, `migrate_wallet_tracker_runtime_schema.sql` |
 
 ## 5. Backtest and validation engine
 
