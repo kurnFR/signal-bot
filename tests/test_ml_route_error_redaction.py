@@ -50,5 +50,36 @@ class TestMLRouteErrorRedaction(unittest.TestCase):
         self.assertNotIn("secret-token", "\n".join(captured.output))
 
 
+    def test_retraining_status_redacts_persisted_exception_details(self):
+        from ml import online_retrainer
+
+        secret = "database-password=secret-token /srv/private/config.env"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            registry = root / "registry.json"
+            audit = root / "audit.json"
+            registry.write_text(
+                '{"enabled": true, "registered_models": {"BTCUSDT_spot_1h_test": {'
+                '"symbol": "BTCUSDT", "status": "active"}}}',
+                encoding="utf-8",
+            )
+            audit.write_text(
+                '[{"key": "BTCUSDT_spot_1h_test", "timestamp": "2026-11-02T00:00:00Z", '
+                '"status": "failed", "error": "' + secret.replace("\\", "\\\\").replace('"', '\\"') + '"}]',
+                encoding="utf-8",
+            )
+            with patch.object(online_retrainer, "REGISTRY_PATH", registry), \\
+                 patch.object(online_retrainer, "AUDIT_LOG_PATH", audit):
+                result = online_retrainer.get_retraining_status()
+
+        self.assertEqual(len(result["recent_audit"]), 1)
+        event = result["recent_audit"][0]
+        self.assertEqual(event["status"], "failed")
+        self.assertNotIn("error", event)
+        self.assertEqual(event["message"], "Retraining failed; check protected server logs.")
+        self.assertNotIn("secret-token", str(result))
+        self.assertNotIn("/srv/private", str(result))
+
+
 if __name__ == "__main__":
     unittest.main()
