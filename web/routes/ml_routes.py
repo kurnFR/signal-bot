@@ -368,12 +368,24 @@ def trigger_continuous_retraining(background_tasks: BackgroundTasks, force: bool
 # =====================================================================
 
 class RLTrainRequest(BaseModel):
-    symbol: str = Field("BTCUSDT", json_schema_extra={"example": "BTCUSDT"})
-    market: str = Field("spot", json_schema_extra={"example": "spot"})
-    timeframe: str = Field("1h", json_schema_extra={"example": "1h"})
-    agent_type: str = Field("dqn", json_schema_extra={"example": "dqn"})  # "dqn" or "policy_gradient"
+    symbol: str = Field(
+        "BTCUSDT",
+        min_length=2,
+        max_length=20,
+        pattern=r"^[A-Za-z0-9]{2,20}$",
+        json_schema_extra={"example": "BTCUSDT"},
+    )
+    market: str = Field("spot", max_length=7, json_schema_extra={"example": "spot"})
+    timeframe: str = Field(
+        "1h",
+        min_length=1,
+        max_length=10,
+        pattern=r"^[A-Za-z0-9]{1,10}$",
+        json_schema_extra={"example": "1h"},
+    )
+    agent_type: str = Field("dqn", max_length=32, json_schema_extra={"example": "dqn"})
     episodes: int = Field(10, ge=1, le=50)
-    reward_type: str = Field("sharpe", json_schema_extra={"example": "sharpe"})  # "sharpe", "sortino", "pnl"
+    reward_type: str = Field("sharpe", max_length=16, json_schema_extra={"example": "sharpe"})
 
 
 @router.post("/rl/train")
@@ -390,9 +402,12 @@ def train_rl_trading_agent(req: RLTrainRequest):
             reward_type=req.reward_type,
         )
         return res
-    except Exception as exc:
-        logger.error("RL training failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"RL training error: {exc}")
+    except ValueError as exc:
+        logger.warning("RL training request rejected: %s", exc)
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        logger.exception("RL training failed")
+        raise HTTPException(status_code=500, detail="RL training failed")
 
 
 @router.get("/rl/models")
