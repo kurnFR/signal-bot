@@ -58,6 +58,32 @@ describe("React authentication gate", () => {
     expect(await screen.findByRole("heading", { name: "Change your password" })).toBeInTheDocument();
     expect(screen.queryByText("Protected dashboard")).not.toBeInTheDocument();
   });
+  it("shows logout retry when server revocation fails during forced password change", async () => {
+    window.localStorage.setItem("token", "temporary-session-token");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: true };
+    const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json(profile))
+      .mockResolvedValueOnce(json({ detail: "Service unavailable" }, 503))
+      .mockResolvedValueOnce(json({ status: "success" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AuthGate><div>Protected dashboard</div></AuthGate>);
+    expect(await screen.findByRole("heading", { name: "Change your password" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/server could not confirm session revocation/i);
+    expect(window.localStorage.getItem("token")).toBe("temporary-session-token");
+    expect(screen.getByRole("heading", { name: "Change your password" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry sign out" }));
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("token")).toBeNull();
+  });
+
   it("validates password confirmation before sending a password-change request", async () => {
     window.localStorage.setItem("token", "temporary-session-token");
     const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: true };
