@@ -430,6 +430,51 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         self.assertEqual(res2.status_code, 400)
         self.assertIn("Choose something less predictable", res2.json()["detail"])
 
+    def test_login_embeds_database_session_version_in_access_token(self):
+        conn, cur = MagicMock(), MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.return_value = {
+            "id": 10, "username": "trader", "email": None, "password_hash": "hash",
+            "role": "trader", "is_active": 1, "must_change_password": 0,
+            "session_version": 7,
+        }
+        request = MagicMock()
+        request.client.host = "127.0.0.1"
+        with patch("web.routes.auth_routes.get_pool") as pool, \
+             patch("web.routes.auth_routes.admit_login_attempt", return_value=(True, 1, 101)), \
+             patch("web.routes.auth_routes.finalize_login_attempt"), \
+             patch("web.routes.auth_routes.verify_password", return_value=True), \
+             patch("web.routes.auth_routes._write_required_audit"):
+            pool.return_value.get_connection.return_value = conn
+            response = auth_routes.login(
+                auth_routes.LoginRequest(username="trader", password="Strong-Pass!"),
+                request,
+            )
+
+        payload = _decode_token_payload_unverified(response["token"])
+        self.assertEqual(payload["session_version"], 7)
+        conn.close.assert_called_once()
+
+    def test_admin_role_update_increments_session_version(self):
+        conn, cur = MagicMock(), MagicMock()
+        conn.cursor.return_value = cur
+        cur.fetchone.return_value = {
+            "id": 8, "username": "target", "role": "trader", "is_active": 1,
+        }
+        with patch("web.routes.auth_routes.get_pool") as pool:
+            pool.return_value.get_connection.return_value = conn
+            auth_routes.update_user(
+                8, auth_routes.UpdateUserRequest(role="viewer"),
+                {"id": 1, "username": "admin"},
+            )
+
+        update_sql = next(
+            call.args[0] for call in cur.execute.call_args_list
+            if "UPDATE users SET" in call.args[0]
+        )
+        self.assertIn("session_version = session_version + 1", update_sql)
+        conn.commit.assert_called_once()
+
     def test_admin_password_reset_increments_session_version(self):
         conn, cur = MagicMock(), MagicMock()
         conn.cursor.return_value = cur
