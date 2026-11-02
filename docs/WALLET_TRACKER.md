@@ -68,4 +68,4 @@ All under `/api/wallets`, authenticated; changing data requires the trader or ad
 - **Absolute thresholds.** Dollar floors favour large caps; "huge" is not relative to pool liquidity, and pools under the volume floor are skipped.
 - **Coverage.** A wallet is only visible in pools the scanner picks; its trades elsewhere are invisible.
 - **Birdeye fallback is unvalidated against the live API.** The same swap may arrive under a different wallet (owner vs transaction sender) and be counted twice, rows the parser cannot map are dropped without a warning, and only the latest 50 swaps per pool are read. Leave it off until one overlapping pool has been compared across both sources.
-- **Startup privilege.** `ensure_tables()` runs an `ALTER TABLE`, so a database user without ALTER makes the worker exit at start.
+- **Startup privilege — fixed in PR #626.** `ensure_tables()` now performs read-only schema validation. Apply versioned changes with `python -m db.migrate` before starting the app/worker; the runtime database account no longer needs CREATE or ALTER privileges for Wallet Tracker bootstrap.

@@ -1,7 +1,6 @@
 import config
 """MySQL persistence for wallet tracking. Uses the shared pool in db.db."""
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -9,9 +8,6 @@ from db.db import get_pool
 from wallet_tracker.chains import CHAINS, explorer_url, tx_url
 
 logger = logging.getLogger("wallet_tracker.store")
-
-_MIGRATION = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                          "db", "migrate_wallet_tracking.sql")
 
 
 def _utcnow():
@@ -39,36 +35,72 @@ def _clean(row, wallet_chain_keys=True):
     return row
 
 
+_REQUIRED_TABLES = (
+    "tracked_wallets",
+    "wallet_swaps",
+    "wallet_positions",
+    "wallet_tracker_status",
+    "wallet_tracker_settings",
+    "wallet_tracker_alert_cursor",
+    "wallet_telegram_alerts",
+)
+
+
 def ensure_tables():
-    with open(_MIGRATION, "r", encoding="utf-8") as fh:
-        raw = fh.read()
-    cleaned = "\n".join(l for l in raw.splitlines() if not l.strip().startswith("--"))
+    """Verify migration-managed Wallet Tracker schema without issuing DDL/DML."""
     conn = get_pool().get_connection()
+    cur = None
     try:
-        cur = conn.cursor()
-        for stmt in cleaned.split(";"):
-            stmt = stmt.strip()
-            if stmt.upper().startswith("CREATE TABLE"):
-                cur.execute(stmt)
-        # Upgrade existing installations idempotently; CREATE TABLE IF NOT EXISTS
-        # does not change an older status ENUM definition.
+        cur = conn.cursor(dictionary=True)
+        placeholders = ", ".join(["%s"] * len(_REQUIRED_TABLES))
         cur.execute(
-            "ALTER TABLE tracked_wallets MODIFY status "
-            "ENUM('ACTIVE','IGNORED','INACTIVE') NOT NULL DEFAULT 'ACTIVE'"
+            f"""SELECT TABLE_NAME AS table_name
+                FROM information_schema.tables
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ({placeholders})""",
+            _REQUIRED_TABLES,
         )
+        existing_tables = {str(row["table_name"]) for row in cur.fetchall()}
+        missing_tables = sorted(set(_REQUIRED_TABLES) - existing_tables)
+        if missing_tables:
+            raise RuntimeError(
+                "Wallet Tracker schema is missing tables "
+                f"({', '.join(missing_tables)}); run 'python -m db.migrate' "
+                "with a migration-capable database account before startup."
+            )
+
         cur.execute(
-            "ALTER TABLE wallet_tracker_settings ADD COLUMN IF NOT EXISTS "
-            "birdeye_api_key VARCHAR(255) NULL"
+            """SELECT TABLE_NAME AS table_name,
+                      COLUMN_NAME AS column_name,
+                      COLUMN_TYPE AS column_type
+               FROM information_schema.columns
+               WHERE TABLE_SCHEMA = DATABASE()
+                 AND ((TABLE_NAME = %s AND COLUMN_NAME = %s)
+                   OR (TABLE_NAME = %s AND COLUMN_NAME = %s))""",
+            ("tracked_wallets", "status", "wallet_tracker_settings", "birdeye_api_key"),
         )
-        # Start at the current high-water mark to avoid replaying historical swaps.
-        cur.execute(
-            """INSERT IGNORE INTO wallet_tracker_alert_cursor (id, last_swap_id)
-               SELECT 1, COALESCE(MAX(id), 0) FROM wallet_swaps"""
-        )
-        conn.commit()
-        cur.close()
+        columns = {
+            (str(row["table_name"]), str(row["column_name"])): str(row["column_type"])
+            for row in cur.fetchall()
+        }
+        missing_columns = []
+        status_type = columns.get(("tracked_wallets", "status"), "")
+        if "inactive" not in status_type.lower():
+            missing_columns.append("tracked_wallets.status with INACTIVE")
+        if ("wallet_tracker_settings", "birdeye_api_key") not in columns:
+            missing_columns.append("wallet_tracker_settings.birdeye_api_key")
+        if missing_columns:
+            raise RuntimeError(
+                "Wallet Tracker schema is outdated "
+                f"({', '.join(missing_columns)}); run 'python -m db.migrate' "
+                "with a migration-capable database account before startup."
+            )
     finally:
-        conn.close()
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
 
 
 # ---------------------------------------------------------------- ingestion
