@@ -418,11 +418,11 @@ def list_promotion_audit(limit: int = Query(25, ge=1, le=100)):
 
 
 class BacktestRunRequest(BaseModel):
-    symbol: str = Field(..., json_schema_extra={"example": "BTCUSDT"})
-    market: str = Field("spot", json_schema_extra={"example": "spot"})
-    timeframe: str = Field("1d", json_schema_extra={"example": "1d"})
-    strategy: str = Field("confluence_ensemble_v1", json_schema_extra={"example": "confluence_ensemble_v1"})
-    data_segment: str = Field("full", json_schema_extra={"example": "full"})  # train, holdout, full
+    symbol: str = Field(..., max_length=20, json_schema_extra={"example": "BTCUSDT"})
+    market: str = Field("spot", max_length=7, json_schema_extra={"example": "spot"})
+    timeframe: str = Field("1d", max_length=10, json_schema_extra={"example": "1d"})
+    strategy: str = Field("confluence_ensemble_v1", max_length=50, json_schema_extra={"example": "confluence_ensemble_v1"})
+    data_segment: str = Field("full", max_length=10, json_schema_extra={"example": "full"})  # train, holdout, full
     initial_capital: float = Field(5000.0, ge=100.0)
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
     save_to_db: bool = Field(True)
@@ -909,10 +909,10 @@ MIN_TRADES_FOR_RANK = 10  # minimum total_trades for a strategy to be ranked
 
 
 class WalkForwardBacktestRequest(BaseModel):
-    symbol: str = "BTCUSDT"
-    market: str = "spot"
-    timeframe: str = "1h"
-    strategy: str = "trend_ema_v1"
+    symbol: str = Field("BTCUSDT", max_length=20)
+    market: str = Field("spot", max_length=7)
+    timeframe: str = Field("1h", max_length=10)
+    strategy: str = Field("trend_ema_v1", max_length=50)
     rolling: bool = True
     folds: int = 4
     train_window_bars: int = 500
@@ -956,10 +956,10 @@ def execute_walk_forward_backtest(req: WalkForwardBacktestRequest):
 
 
 class RunAllStrategiesRequest(BaseModel):
-    symbol: str = "BTCUSDT"
-    market: str = "spot"
-    timeframe: str = "1d"
-    data_segment: str = "full"
+    symbol: str = Field("BTCUSDT", max_length=20)
+    market: str = Field("spot", max_length=7)
+    timeframe: str = Field("1d", max_length=10)
+    data_segment: str = Field("full", max_length=10)
     initial_capital: float = 5000.0
     risk_per_trade_pct: float = 1.0
 
@@ -967,10 +967,10 @@ class RunAllStrategiesRequest(BaseModel):
 @router.post("/run-all")
 def run_all_strategies(
     req: Optional[RunAllStrategiesRequest] = None,
-    symbol: Optional[str] = None,
-    market: Optional[str] = None,
-    timeframe: Optional[str] = None,
-    data_segment: Optional[str] = None,
+    symbol: Optional[str] = Query(None, max_length=20),
+    market: Optional[str] = Query(None, max_length=7),
+    timeframe: Optional[str] = Query(None, max_length=10),
+    data_segment: Optional[str] = Query(None, max_length=10),
     initial_capital: Optional[float] = None,
     risk_per_trade_pct: Optional[float] = None,
 ):
@@ -1257,10 +1257,10 @@ def run_all_strategies(
 
 @router.post("/ai-insight")
 def get_standalone_ai_insight(
-    symbol: str = Query("BTCUSDT"),
-    market: str = Query("spot"),
-    timeframe: str = Query("1d"),
-    strategy: str = Query("confluence_ensemble_v1"),
+    symbol: str = Query("BTCUSDT", max_length=20),
+    market: str = Query("spot", max_length=7),
+    timeframe: str = Query("1d", max_length=10),
+    strategy: str = Query("confluence_ensemble_v1", max_length=50),
 ):
     """Provides deep AI quantitative diagnosis for a specific strategy."""
     from ai.insight_engine import generate_ai_insight
@@ -1296,9 +1296,9 @@ def get_standalone_ai_insight(
 
 @router.get("/history")
 def get_backtest_history(
-    symbol: Optional[str] = None,
-    timeframe: Optional[str] = None,
-    strategy: Optional[str] = None,
+    symbol: Optional[str] = Query(None, max_length=20),
+    timeframe: Optional[str] = Query(None, max_length=10),
+    strategy: Optional[str] = Query(None, max_length=50),
     limit: int = Query(30, ge=1, le=100),
 ):
     conn = get_pool().get_connection()

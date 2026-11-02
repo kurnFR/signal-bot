@@ -165,6 +165,20 @@ def set_paper_config(
     if risk_per_trade_pct <= 0:
         raise ValueError("risk_per_trade_pct must be positive")
 
+    # Keep every persisted identifier within the paper_configs column widths.
+    for field_name, value, max_length in (
+        ("symbol", symbol, 20),
+        ("market", market, 7),
+        ("timeframe", timeframe, 10),
+        ("strategy_name", strategy_name, 50),
+    ):
+        if not isinstance(value, str) or len(value) > max_length:
+            raise ValueError(f"{field_name} must be a string of at most {max_length} characters")
+    if ml_model_id is not None and (
+        not isinstance(ml_model_id, str) or len(ml_model_id) > 100
+    ):
+        raise ValueError("ml_model_id must be a string of at most 100 characters")
+
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)

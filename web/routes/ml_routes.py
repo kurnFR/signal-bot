@@ -43,7 +43,7 @@ _EXPERIMENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
 
 class DeployMLToPaperRequest(BaseModel):
     # Restricted charset: the id is used to build a filesystem path.
-    model_id: str = Field(..., pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
+    model_id: str = Field(..., max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
     allocated_capital: float = Field(5000.0, ge=100.0)
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
     send_telegram: bool = Field(True)
