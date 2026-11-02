@@ -122,6 +122,7 @@ def _load_registry() -> dict[str, Any]:
 
     # Keep historical registries compatible while ensuring their control
     # values have safe types before they reach scheduling arithmetic.
+    registry["enabled"] = enabled
     registry.setdefault("retrain_interval_hours", 24)
     registry.setdefault("min_new_candles", 48)
     registry.setdefault("max_drift_psi", 0.25)
