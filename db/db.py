@@ -1358,14 +1358,16 @@ def get_retailbot2_control():
 
 
 def set_retailbot2_control(enabled, overrides):
-    """overrides is the FULL replacement dict (read-modify-write from the
-    dashboard form), pre-filtered by the caller against
-    RETAILBOT2_TUNABLE_FIELDS -- see web/routes/research_routes.py."""
+    """Persist the full dashboard control state, creating its singleton row if absent."""
     conn = get_retailbot2_pool().get_connection()
     try:
         cur = conn.cursor()
         cur.execute(
-            "UPDATE bot_control SET enabled=%s, overrides_json=%s WHERE id=1",
+            """INSERT INTO bot_control (id, enabled, overrides_json)
+               VALUES (1, %s, %s)
+               ON DUPLICATE KEY UPDATE
+                   enabled=VALUES(enabled),
+                   overrides_json=VALUES(overrides_json)""",
             (enabled, json.dumps(overrides)),
         )
         conn.commit()
@@ -1503,7 +1505,11 @@ def set_screener_control(enabled, overrides):
     try:
         cur = conn.cursor()
         cur.execute(
-            "UPDATE screener_control SET enabled=%s, overrides_json=%s WHERE id=1",
+            """INSERT INTO screener_control (id, enabled, overrides_json)
+               VALUES (1, %s, %s)
+               ON DUPLICATE KEY UPDATE
+                   enabled=VALUES(enabled),
+                   overrides_json=VALUES(overrides_json)""",
             (enabled, json.dumps(overrides)),
         )
         conn.commit()
