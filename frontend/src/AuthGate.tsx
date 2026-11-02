@@ -116,14 +116,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
       <div className="auth-intro"><span className="auth-eyebrow">SECURE WORKSPACE</span><h1 id="auth-title">{screen === "password-change" ? "Change your password" : "Sign in"}</h1><p>{screen === "password-change" ? "Your account must set a new password before continuing." : "Sign in with your existing Signal Bot account to access the migration preview. Some role-gated controls can persist configuration or start background jobs when explicitly used."}</p></div>
       {error && <div className="auth-error" role="alert">{error}</div>}
       {screen === "password-change" ? <form onSubmit={handlePasswordChange} className="auth-form">
-        <label>Current password<input type="password" autoComplete="current-password" value={oldPassword} onChange={(event) => setOldPassword(event.target.value)} required /></label>
-        <label>New password<input type="password" autoComplete="new-password" minLength={10} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /></label>
-        <label>Confirm new password<input type="password" autoComplete="new-password" minLength={10} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label>
+        <label>Current password<input type="password" autoComplete="current-password" maxLength={1024} value={oldPassword} onChange={(event) => setOldPassword(event.target.value)} required /></label>
+        <label>New password<input type="password" autoComplete="new-password" minLength={10} maxLength={1024} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /></label>
+        <label>Confirm new password<input type="password" autoComplete="new-password" minLength={10} maxLength={1024} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label>
         <button className="auth-submit" type="submit" disabled={busy}>{busy ? "Updating…" : "Change password"}</button>
         <button className="auth-secondary" type="button" disabled={busy} onClick={() => void handleLogout()}>Sign out</button>
       </form> : <form onSubmit={handleLogin} className="auth-form">
-        <label>Username<input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required /></label>
-        <label>Password<input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
+        <label>Username<input autoComplete="username" maxLength={30} value={username} onChange={(event) => setUsername(event.target.value)} required /></label>
+        <label>Password<input type="password" autoComplete="current-password" maxLength={1024} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
         <button className="auth-submit" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
       </form>}
       <p className="auth-safety"><ShieldCheck size={15} /> Authentication and permissions remain enforced by the existing server.</p>
