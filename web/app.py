@@ -42,10 +42,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Could not reconcile background jobs on startup: {e}")
     try:
-        from Screen.screening import ensure_signal_table
-        ensure_signal_table()
+        from Screen.screening import verify_signal_schema
+        verify_signal_schema()
     except Exception as e:
-        logger.warning(f"Could not initialize smart_money_signals table on startup: {e}")
+        logger.warning("Screener schema verification failed; run 'python -m db.migrate': %s", e)
     try:
         from wallet_tracker.store import ensure_tables as ensure_wallet_tables
         ensure_wallet_tables()
