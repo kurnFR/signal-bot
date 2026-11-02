@@ -1786,7 +1786,6 @@ def get_strategy_promotion_audit(limit=25):
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        conn.commit()
         cur.execute("""
             SELECT decision_hash, symbol, market, timeframe, data_segment,
                    strategy_name, status, reason, paper_config_id, telegram_result,
