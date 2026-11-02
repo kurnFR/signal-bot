@@ -36,22 +36,49 @@ class WalletTelegramNotifier:
     @staticmethod
     def format_message(alert):
         side = str(alert.get("side", "")).lower()
-        is_buy = side == "buy"
-        emoji = "🟢" if is_buy else "🔴"
-        verb = "BUY" if is_buy else "SELL"
         chain = html.escape(str(alert.get("chain_label") or alert.get("chain") or "unknown"))
         pair = html.escape(str(alert.get("pair") or "unknown pair"))
         wallet = html.escape(str(alert.get("wallet") or ""))
         label = html.escape(str(alert.get("label") or "Followed wallet"))
         usd = float(alert.get("usd_value") or 0)
-        amount = float(alert.get("token_amount") or 0)
-        price = float(alert.get("price_usd") or 0)
         tx = html.escape(str(alert.get("tx_url") or ""))
         wallet_url = html.escape(str(alert.get("explorer_url") or ""))
         when = html.escape(str(alert.get("block_time") or ""))
-        tx_line = f'<a href="{tx}">View transaction</a>' if tx.startswith("https://") else ""
+        tx_line = f'<a href="{tx}">View latest transaction</a>' if tx.startswith("https://") else ""
         wallet_line = f'<a href="{wallet_url}">View wallet</a>' if wallet_url.startswith("https://") else ""
         links = " · ".join(part for part in (tx_line, wallet_line) if part)
+
+        swap_count = max(1, int(alert.get("swap_count") or 1))
+        if swap_count > 1:
+            buy_usd = float(alert.get("buy_usd_value") or 0)
+            sell_usd = float(alert.get("sell_usd_value") or 0)
+            if buy_usd and sell_usd:
+                emoji, verb = "🔄", "ACTIVITY"
+            elif buy_usd:
+                emoji, verb = "🟢", "BUY"
+            else:
+                emoji, verb = "🔴", "SELL"
+            lines = [
+                f"{emoji} <b>Followed Wallet {verb} Digest</b> · {chain}",
+                f"<b>Swaps:</b> {swap_count}",
+                f"<b>Pairs:</b> {pair}",
+                f"<b>Total volume:</b> ${usd:,.2f}",
+                f"<b>Buy volume:</b> ${buy_usd:,.2f}",
+                f"<b>Sell volume:</b> ${sell_usd:,.2f}",
+                f"<b>Wallet:</b> <code>{wallet}</code>",
+                f"<b>Label:</b> {label}",
+            ]
+            if when:
+                lines.append(f"<b>Latest trade (UTC):</b> {when}")
+            if links:
+                lines.append(links)
+            return "\n".join(lines)
+
+        is_buy = side == "buy"
+        emoji = "🟢" if is_buy else "🔴"
+        verb = "BUY" if is_buy else "SELL"
+        amount = float(alert.get("token_amount") or 0)
+        price = float(alert.get("price_usd") or 0)
         lines = [
             f"{emoji} <b>Followed Wallet {verb}</b> · {chain}",
             f"<b>Pair:</b> {pair}",

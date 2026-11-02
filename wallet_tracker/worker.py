@@ -99,12 +99,11 @@ def dispatch_telegram_alerts(notifier=None):
     cooldown_minutes = max(1, int(config.WALLET_TRACKER_ALERT_COOLDOWN_MINUTES))
     queued = store.queue_new_wallet_alerts(
         settings["min_trade_usd"], max_age_minutes=30,
-        cooldown_minutes=cooldown_minutes,
     )
     if queued:
-        logger.info("queued %d followed-wallet Telegram alert(s)", queued)
+        logger.info("queued %d followed-wallet swap(s) for digest delivery", queued)
     sent = 0
-    for alert in store.get_pending_wallet_alerts(limit=50):
+    for alert in store.get_pending_wallet_alerts(limit=50, cooldown_minutes=cooldown_minutes):
         try:
             ok = notifier.send(alert)
         except Exception as exc:
@@ -116,12 +115,12 @@ def dispatch_telegram_alerts(notifier=None):
             error = None if ok else "Telegram API returned an unsuccessful response"
         try:
             store.mark_wallet_alert_attempt(
-                alert["swap_id"], success=ok, error=error,
+                alert, success=ok, error=error,
             )
         except Exception:
             logger.exception(
-                "could not persist wallet Telegram delivery for swap_id=%s",
-                alert.get("swap_id"),
+                "could not persist wallet Telegram digest delivery for wallet=%s",
+                alert.get("wallet"),
             )
         if ok:
             sent += 1

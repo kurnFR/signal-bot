@@ -60,7 +60,7 @@ All under `/api/wallets`, authenticated; changing data requires the trader or ad
 
 ## 6. Known limitations (verified open)
 
-- **Alert digest.** The cooldown keeps only the first swap of a burst and drops the rest. A wallet that bought $1.26M in four swaps produced one alert reporting $12,000.
+- **Alert digest — fixed in PR #625.** Every fresh qualifying swap is retained in the durable queue. At most one digest per wallet is delivered per cooldown window; the digest reports swap count, total volume, buy/sell volume, pair coverage, and the latest transaction. Swaps arriving during cooldown remain pending and are included in the next digest.
 - **Per-pool, not per-token.** The same token bought across two pools is counted separately, so a wallet can fall below the follow threshold that its combined position would pass.
 - **Stablecoin filter metadata.** Pool requests do not ask for token symbols, so the filter probably relies only on a short list of known stablecoin addresses. Unlisted stablecoins may pass.
 - **Bots and market makers.** The churn gate rejects only more than 20 trades per hour with weak directionality; bot-like wallets at 8–20 trades per hour can still score 83–90 and be followed. The tracked address is the transaction sender, which can be a bot or aggregator.
