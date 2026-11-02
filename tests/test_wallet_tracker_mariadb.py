@@ -178,6 +178,20 @@ class TestMariaDBWalletAlertDigest(unittest.TestCase):
         try:
             cur = conn.cursor()
             cur.execute(
+                """CREATE TABLE IF NOT EXISTS tracked_wallets (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    chain VARCHAR(20) NOT NULL,
+                    wallet VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+                    label VARCHAR(80) NULL,
+                    source ENUM('auto','manual') NOT NULL DEFAULT 'auto',
+                    status ENUM('ACTIVE','IGNORED','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+                    last_net_usd DECIMAL(24,2) NULL,
+                    first_flagged_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uq_tracked (chain, wallet)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"""
+            )
+            cur.execute(
                 """CREATE TABLE IF NOT EXISTS wallet_swaps (
                     id BIGINT AUTO_INCREMENT PRIMARY KEY,
                     chain VARCHAR(20) NOT NULL,

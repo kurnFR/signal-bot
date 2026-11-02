@@ -58,9 +58,9 @@ All under `/api/wallets`, authenticated; changing data requires the trader or ad
 
 `GET /meta`, `/settings`, `/status`, `/positions`, `/token-flow`, `/events`, `/tracked` · `PUT /settings` · `POST /tracked`, `/tracked/toggle` · `DELETE /tracked`, `/tracked/{id}`.
 
-## 6. Known limitations (verified open)
+## 6. Recent fixes and known limitations
 
-- **Alert digest — fixed in PR #625.** Every fresh qualifying swap is retained in the durable queue. At most one digest per wallet is delivered per cooldown window; the digest reports swap count, total volume, buy/sell volume, pair coverage, and the latest transaction. Swaps arriving during cooldown remain pending and are included in the next digest.
+- **Recently fixed — alert digest (PR #625).** Every fresh qualifying swap is retained in the durable queue. At most one digest per wallet is delivered per cooldown window; the digest reports swap count, total volume, buy/sell volume, pair coverage, and the latest transaction. Swaps arriving during cooldown remain pending and are included in the next digest.
 - **Per-pool, not per-token.** The same token bought across two pools is counted separately, so a wallet can fall below the follow threshold that its combined position would pass.
 - **Stablecoin filter metadata.** Pool requests do not ask for token symbols, so the filter probably relies only on a short list of known stablecoin addresses. Unlisted stablecoins may pass.
 - **Bots and market makers.** The churn gate rejects only more than 20 trades per hour with weak directionality; bot-like wallets at 8–20 trades per hour can still score 83–90 and be followed. The tracked address is the transaction sender, which can be a bot or aggregator.
