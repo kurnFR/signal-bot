@@ -81,6 +81,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("019_login_attempt_state", "migrate_login_attempt_state.sql", "Track pending login reservations separately from failed attempts"),
     Migration("020_user_session_version", "migrate_user_session_version.sql", "Invalidate prior sessions after password reset and account changes"),
     Migration("021_wallet_tracker_runtime_schema", "migrate_wallet_tracker_runtime_schema.sql", "Move Wallet Tracker schema upgrades out of runtime startup"),
+    Migration("022_retailbot2_runtime_schema", "migrate_retailbot2_runtime_schema.sql", "Move RetailBot2 schema upgrades out of runtime startup"),
 )
 
 
