@@ -80,5 +80,38 @@ class TestMLRouteErrorRedaction(unittest.TestCase):
         self.assertNotIn("/srv/private", str(result))
 
 
+    def test_walk_forward_error_response_is_generic(self):
+        from ml import dataset, walk_forward_engine
+        from db import db
+
+        secret = "database-password=secret-token /srv/private/model-cache"
+        request = ml_routes.MLWalkForwardRequest(strategy_name="test_strategy")
+        with patch.object(db, "fetch_ohlcv_with_features_df", return_value=[None] * 100), \\
+             patch.object(dataset, "build_signal_dataset", return_value=[{}] * 40), \\
+             patch.object(walk_forward_engine, "run_ml_walk_forward", side_effect=RuntimeError(secret)), \\
+             patch.dict(ml_routes.STRATEGIES, {"test_strategy": lambda *_: []}):
+            with self.assertLogs("web.ml_routes", level="ERROR"):
+                with self.assertRaises(HTTPException) as raised:
+                    ml_routes.execute_ml_walk_forward(request)
+
+        self.assertEqual(raised.exception.status_code, 500)
+        self.assertEqual(raised.exception.detail, "Walk-forward analysis failed; check server logs for diagnostics")
+        self.assertNotIn("secret-token", raised.exception.detail)
+        self.assertNotIn("/srv/private", raised.exception.detail)
+
+    def test_rl_training_error_response_is_generic(self):
+        secret = "database-password=secret-token /srv/private/rl-cache"
+        request = ml_routes.RLTrainRequest()
+        with patch("ml.rl.runner.train_rl_model", side_effect=RuntimeError(secret)), \\
+             self.assertLogs("web.ml_routes", level="ERROR"):
+            with self.assertRaises(HTTPException) as raised:
+                ml_routes.train_rl_trading_agent(request)
+
+        self.assertEqual(raised.exception.status_code, 500)
+        self.assertEqual(raised.exception.detail, "RL training failed; check server logs for diagnostics")
+        self.assertNotIn("secret-token", raised.exception.detail)
+        self.assertNotIn("/srv/private", raised.exception.detail)
+
+
 if __name__ == "__main__":
     unittest.main()
