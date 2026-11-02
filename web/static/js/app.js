@@ -1657,6 +1657,17 @@ const App = {
                 const detail = Array.isArray(data.detail) ? data.detail.map(d => d.msg).join("; ") : data.detail;
                 throw new Error(detail || "Password change failed");
             }
+            if (typeof data.token !== "string" || !data.token.trim()) {
+                localStorage.removeItem("token");
+                this.authToken = null;
+                this.currentUser = null;
+                this.hideForcedPasswordModal();
+                this.showLoginModal();
+                this.showToast("Password updated. Please sign in again.", "warning");
+                return;
+            }
+            this.authToken = data.token.trim();
+            localStorage.setItem("token", this.authToken);
             if (errEl) errEl.classList.add("hidden");
             if (this.currentUser) this.currentUser.must_change_password = false;
             this.hideForcedPasswordModal();
@@ -1687,6 +1698,16 @@ const App = {
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.detail || "Password change failed");
+            if (typeof data.token !== "string" || !data.token.trim()) {
+                localStorage.removeItem("token");
+                this.authToken = null;
+                this.currentUser = null;
+                this.showLoginModal();
+                this.showToast("Password updated. Please sign in again.", "warning");
+                return;
+            }
+            this.authToken = data.token.trim();
+            localStorage.setItem("token", this.authToken);
 
             this.showToast("Password updated successfully!", "success");
             document.getElementById("chg-old-pwd").value = "";
