@@ -13,6 +13,7 @@ from web.auth import (
     verify_access_token,
     is_token_revoked,
     revoke_token,
+    revoke_token_cursor,
     _revoked_tokens_cache,
     cache_revoked_token,
     _is_cached_revoked_token,
@@ -105,6 +106,35 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         with patch("web.auth.get_pool") as pool, patch("web.auth.is_token_revoked", return_value=False):
             pool.return_value.get_connection.return_value = conn
             self.assertEqual(authenticate_request(request), user)
+
+    def test_revocation_insert_prunes_expired_rows_in_bounded_batch(self):
+        cur = MagicMock()
+        cur.fetchone.side_effect = [(1,), (1,)]
+        token = create_access_token(user_id=10, username="trader_alice", role="trader")
+
+        token_hash = revoke_token_cursor(cur, token)
+
+        sql_calls = [call.args[0] for call in cur.execute.call_args_list]
+        self.assertTrue(any("DELETE FROM revoked_tokens" in sql for sql in sql_calls))
+        delete_call = next(
+            call for call in cur.execute.call_args_list
+            if "DELETE FROM revoked_tokens" in call.args[0]
+        )
+        self.assertIn("LIMIT %s", delete_call.args[0])
+        self.assertEqual(delete_call.args[1], (1000,))
+        self.assertTrue(any("RELEASE_LOCK" in sql for sql in sql_calls))
+        self.assertEqual(len(token_hash), 64)
+
+    def test_revocation_cleanup_skips_when_another_worker_holds_lock(self):
+        cur = MagicMock()
+        cur.fetchone.return_value = (0,)
+        token = create_access_token(user_id=10, username="trader_alice", role="trader")
+
+        revoke_token_cursor(cur, token)
+
+        sql_calls = [call.args[0] for call in cur.execute.call_args_list]
+        self.assertFalse(any("DELETE FROM revoked_tokens" in sql for sql in sql_calls))
+        self.assertFalse(any("RELEASE_LOCK" in sql for sql in sql_calls))
 
     def test_revoke_token_raises_when_persistence_fails(self):
         token = create_access_token(user_id=10, username="trader_alice", role="trader")
