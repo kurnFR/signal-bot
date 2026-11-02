@@ -1841,12 +1841,16 @@ const App = {
     },
 
     openResetPasswordModal(userId, username) {
-        const newPass = prompt(`Enter new password for user '${username}' (min 10 characters):`);
+        const newPass = prompt(`Enter new password for user '${username}' (10–1,024 characters):`);
         if (!newPass) return;
         this.submitResetPassword(userId, newPass);
     },
 
     async submitResetPassword(userId, newPassword) {
+        if (typeof newPassword !== "string" || newPassword.length > 1024) {
+            this.showToast("Password must be 1,024 characters or fewer.", "error");
+            return;
+        }
         try {
             const res = await fetch(`${API_BASE}/api/users/${userId}/reset-password`, {
                 method: "POST",
