@@ -327,8 +327,8 @@ def execute_ml_walk_forward(req: MLWalkForwardRequest):
             **result,
         }
     except Exception as exc:
-        logger.error("ML walk-forward execution failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Walk-forward analysis failed: {exc}")
+        logger.exception("ML walk-forward execution failed")
+        raise HTTPException(status_code=500, detail="Walk-forward analysis failed; check server logs for diagnostics")
 
 
 @router.get("/retraining/status")
@@ -391,8 +391,8 @@ def train_rl_trading_agent(req: RLTrainRequest):
         )
         return res
     except Exception as exc:
-        logger.error("RL training failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"RL training error: {exc}")
+        logger.exception("RL training failed")
+        raise HTTPException(status_code=500, detail="RL training failed; check server logs for diagnostics")
 
 
 @router.get("/rl/models")
