@@ -428,8 +428,7 @@ def get_paper_metrics() -> Dict[str, Any]:
                    AVG(t.r_multiple) AS avg_r,
                    SUM(t.net_pnl) AS net_pnl
             FROM paper_trades t
-            LEFT JOIN paper_positions p ON p.id = t.position_id
-            LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name
+            LEFT JOIN paper_configs c ON c.id = t.config_id
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE
             GROUP BY t.strategy_name, t.config_id, t.ml_generator_model_id, t.ml_model_id
             ORDER BY t.strategy_name, t.config_id
