@@ -20,7 +20,9 @@ class TestOnlineRetrainerPromotionStatus(unittest.TestCase):
         }
 
         for auto_promote in (True, False):
-            with self.subTest(auto_promote=auto_promote):
+            with self.subTest(auto_promote=auto_promote), tempfile.TemporaryDirectory() as tmp:
+                result_path = Path(tmp) / "experiment.json"
+                result_path.write_text(json.dumps(experiment_result), encoding="utf-8")
                 registry = {
                     "min_new_candles": 48,
                     "registered_models": {
@@ -36,7 +38,7 @@ class TestOnlineRetrainerPromotionStatus(unittest.TestCase):
                         }
                     },
                 }
-                with patch.object(online_retrainer, "_load_registry", return_value=registry), patch.object(online_retrainer, "_save_registry"), patch.object(online_retrainer, "_append_audit_log") as append_audit, patch.object(online_retrainer, "fetch_ohlcv_with_features_df", return_value=[None] * 200), patch.object(online_retrainer, "run_real_experiment", return_value=experiment_result):
+                with patch.object(online_retrainer, "_load_registry", return_value=registry), patch.object(online_retrainer, "_save_registry"), patch.object(online_retrainer, "_append_audit_log") as append_audit, patch.object(online_retrainer, "fetch_ohlcv_with_features_df", return_value=[None] * 200), patch.object(online_retrainer, "run_real_experiment", return_value=result_path):
                     results = online_retrainer.execute_retraining_cycle(force=True)
 
                 self.assertEqual(len(results), 1)
