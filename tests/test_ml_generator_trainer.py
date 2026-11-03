@@ -103,3 +103,11 @@ def test_training_rejects_target_columns_in_feature_schema():
             train, validation, test,
             _config(feature_columns=("feature", "long_net_return")),
         )
+
+
+def test_generator_drawdown_is_compounded_equity_drawdown():
+    from ml.generator_trainer import _trading_metrics
+
+    metrics = _trading_metrics(np.asarray([0.10, -0.10]), opportunities=2)
+
+    assert metrics["max_drawdown_pct"] == pytest.approx(10.0)
