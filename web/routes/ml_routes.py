@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ml.artifacts import (
     CURRENT_EVALUATION_PROTOCOL_VERSION,
@@ -131,12 +131,21 @@ class RunGeneratorExperimentRequest(MLBaseRequest):
             raise ValueError("model_type is unsupported")
         return normalized
 
-    @field_validator("train_fraction", "validation_fraction")
+    @field_validator(
+        "barrier_atr_multiple", "fee_rate", "slippage_rate", "min_net_return",
+        "train_fraction", "validation_fraction", "stop_atr_multiple", "risk_reward_ratio",
+    )
     @classmethod
-    def validate_split_fraction(cls, value: float) -> float:
+    def validate_finite_generator_parameters(cls, value: float) -> float:
         if not math.isfinite(value):
-            raise ValueError("split fractions must be finite")
+            raise ValueError("generator numeric parameters must be finite")
         return value
+
+    @model_validator(mode="after")
+    def validate_split_fractions(self):
+        if self.train_fraction + self.validation_fraction >= 1.0:
+            raise ValueError("train_fraction + validation_fraction must be less than one")
+        return self
 
 
 
