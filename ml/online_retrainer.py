@@ -162,6 +162,40 @@ def _load_registry() -> dict[str, Any]:
             logger.error("Online retraining registry contains an invalid model entry; disabling retraining")
             return _default_registry(enabled=False)
 
+        # Validate optional runtime fields before scheduling arithmetic or
+        # experiment dispatch can consume them. Missing fields remain valid
+        # for older registry entries.
+        last_candle_count = model.get("last_candle_count", 0)
+        if (
+            not isinstance(last_candle_count, int)
+            or isinstance(last_candle_count, bool)
+            or last_candle_count < 0
+        ):
+            logger.error("Online retraining registry contains an invalid candle checkpoint; disabling retraining")
+            return _default_registry(enabled=False)
+
+        last_retrained_at = model.get("last_retrained_at")
+        if last_retrained_at is not None:
+            if not isinstance(last_retrained_at, str):
+                logger.error("Online retraining registry contains an invalid retraining timestamp; disabling retraining")
+                return _default_registry(enabled=False)
+            try:
+                datetime.fromisoformat(last_retrained_at.replace("Z", "+00:00"))
+            except ValueError:
+                logger.error("Online retraining registry contains an invalid retraining timestamp; disabling retraining")
+                return _default_registry(enabled=False)
+
+        if "auto_promote" in model and not isinstance(model["auto_promote"], bool):
+            logger.error("Online retraining registry contains an invalid promotion flag; disabling retraining")
+            return _default_registry(enabled=False)
+
+        model_type = model.get("model_type")
+        if model_type is not None and (
+            not isinstance(model_type, str) or not model_type.strip()
+        ):
+            logger.error("Online retraining registry contains an invalid model type; disabling retraining")
+            return _default_registry(enabled=False)
+
     # Keep historical registries compatible while ensuring their control
     # values have safe types before they reach scheduling arithmetic.
     registry["enabled"] = enabled
