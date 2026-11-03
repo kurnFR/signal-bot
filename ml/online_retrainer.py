@@ -447,7 +447,10 @@ def _verify_persisted_model_artifact(model_id: str, root: str | Path | None = No
     artifact_root = MODEL_ARTIFACTS_DIR if root is None else Path(root)
     try:
         manifest_path, weights_path = resolve_model_artifact_paths(model_id, artifact_root)
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        manifest_descriptor = os.open(manifest_path, manifest_flags)
+        with os.fdopen(manifest_descriptor, "r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
     except Exception as exc:
         raise RuntimeError(f"Retrained model artifact is missing or invalid: {model_id}") from exc
 
@@ -460,11 +463,15 @@ def _verify_persisted_model_artifact(model_id: str, root: str | Path | None = No
         or any(char not in "0123456789abcdef" for char in expected_digest)
     ):
         raise RuntimeError(f"Retrained model artifact has an invalid SHA-256 digest: {model_id}")
-    if not stat.S_ISREG(weights_path.stat().st_mode):
-        raise RuntimeError(f"Retrained model weights are not a regular file: {model_id}")
 
+    try:
+        weights_descriptor = os.open(weights_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError as exc:
+        raise RuntimeError(f"Retrained model weights could not be opened safely: {model_id}") from exc
     digest = hashlib.sha256()
-    with weights_path.open("rb") as handle:
+    with os.fdopen(weights_descriptor, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise RuntimeError(f"Retrained model weights are not a regular file: {model_id}")
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     if digest.hexdigest() != expected_digest:
