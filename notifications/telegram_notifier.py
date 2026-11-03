@@ -169,10 +169,10 @@ def send_signal_alert(
         pass_badge = "✅ PASSED" if (ml_threshold is None or ml_probability >= ml_threshold) else "⚠️ GATED"
         thresh_info = f" (Threshold: {ml_threshold * 100:.1f}%)" if ml_threshold is not None else ""
         msg += f"🤖 <b>AI/ML Confidence:</b> <code>{ml_probability * 100:.1f}%</code>{thresh_info} {pass_badge}\n"
-        if ml_model_id:
-            msg += f"🧬 <b>Filter Model:</b> <code>{escape(str(ml_model_id))}</code>\n"
-        if ml_generator_model_id:
-            msg += f"🧠 <b>Signal Generator Model:</b> <code>{escape(str(ml_generator_model_id))}</code>\n"
+    if ml_model_id:
+        msg += f"🧬 <b>Filter Model:</b> <code>{escape(str(ml_model_id))}</code>\n"
+    if ml_generator_model_id:
+        msg += f"🧠 <b>Signal Generator Model:</b> <code>{escape(str(ml_generator_model_id))}</code>\n"
 
     msg += (
         f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -276,7 +276,10 @@ def send_trade_close_alert(
         f"{result_emoji} {outcome_emoji}: <b>{safe_symbol}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🧠 <b>Strategy:</b> <code>{safe_strategy}</code> ({safe_direction})\n"
-        + (f"🧬 <b>Signal Generator Model:</b> <code>{escape(str(ml_generator_model_id))}</code>\n" if ml_generator_model_id else "")
+    )
+    if ml_generator_model_id:
+        msg += f"🧬 <b>Signal Generator Model:</b> <code>{escape(str(ml_generator_model_id))}</code>\n"
+    msg += (
         f"💵 <b>Entry:</b> ${entry_price:,.4f} ➔ <b>Exit:</b> ${exit_price:,.4f}\n"
         f"📌 <b>Reason:</b> <code>{safe_exit_reason}</code>\n"
         f"⏳ <b>Holding Time:</b> {holding_bars} bars\n"
