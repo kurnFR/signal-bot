@@ -119,6 +119,7 @@ def build_generator_dataset(
         label_end_idx = entry_idx + horizon_bars - 1
         reason = "horizon_expired"
         gross_return = 0.0
+        ambiguous = False
 
         for future_idx in range(entry_idx, entry_idx + horizon_bars):
             bar = data.iloc[future_idx]
@@ -130,6 +131,7 @@ def build_generator_dataset(
                 label_exit_price = float(bar["close"])
                 reason = "ambiguous_both_barriers_same_bar"
                 target_name = "HOLD"
+                ambiguous = True
                 gross_return = 0.0
                 break
 
@@ -152,8 +154,15 @@ def build_generator_dataset(
                 break
 
         forward_return = (float(label_exit_price) - entry_price) / entry_price
-        long_net_return = forward_return - round_trip_cost
-        short_net_return = -forward_return - round_trip_cost
+        if ambiguous:
+            # The simulator resolves same-bar SL/TP ambiguity stop-first for
+            # either direction. Keep the directional validation outcomes
+            # conservative instead of using the ambiguous candle close.
+            long_net_return = (lower - entry_price) / entry_price - round_trip_cost
+            short_net_return = (entry_price - upper) / entry_price - round_trip_cost
+        else:
+            long_net_return = forward_return - round_trip_cost
+            short_net_return = -forward_return - round_trip_cost
         net_return = gross_return - round_trip_cost if target_name != "HOLD" else 0.0
         signal = {
             "open_time": int(data.at[signal_idx, "open_time"]),
