@@ -4888,18 +4888,23 @@ const App = {
             }
 
             // 2. Fetch models count
-            const modelsRes = await fetch(`${API_BASE}/api/ml/models`, {
-                headers: this.getAuthHeaders()
-            });
+            const [modelsRes, generatorModelsRes] = await Promise.all([
+                fetch(`${API_BASE}/api/ml/models`, { headers: this.getAuthHeaders() }),
+                fetch(`${API_BASE}/api/ml/generator-models`, { headers: this.getAuthHeaders() }),
+            ]);
             if (!modelsRes.ok) throw new Error(`ML models request failed: HTTP ${modelsRes.status}`);
+            if (!generatorModelsRes.ok) throw new Error(`Generator models request failed: HTTP ${generatorModelsRes.status}`);
             {
                 const md = await modelsRes.json();
+                const generatorData = await generatorModelsRes.json();
                 if (md === null || typeof md !== "object" || Array.isArray(md) ||
-                    (md.models !== undefined && !Array.isArray(md.models))) {
-                    throw new Error("Invalid ML models response");
+                    !Array.isArray(md.models) ||
+                    generatorData === null || typeof generatorData !== "object" ||
+                    Array.isArray(generatorData) || !Array.isArray(generatorData.models)) {
+                    throw new Error("Invalid ML model catalog response");
                 }
                 const modelsStat = document.getElementById("ml-stat-models");
-                if (modelsStat) modelsStat.innerText = md.models ? md.models.length : 0;
+                if (modelsStat) modelsStat.innerText = md.models.length + generatorData.models.length;
             }
 
             // 3. Fetch experiments list
