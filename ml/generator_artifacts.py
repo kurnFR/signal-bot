@@ -217,8 +217,6 @@ def load_generator_artifact(
     classes = set(np.asarray(getattr(model, "classes_", [])).tolist())
     if classes != set(GENERATOR_CLASS_MAPPING.values()):
         raise ValueError("loaded generator model does not support SHORT, HOLD, and LONG")
-    if not hasattr(model, "predict_proba"):
-        raise ValueError("loaded generator model does not expose predict_proba")
     if not callable(getattr(model, "predict_proba", None)):
         raise ValueError("loaded generator model does not expose predict_proba")
     if tuple(getattr(model, "_signal_bot_generator_feature_columns", ())) != artifact.feature_columns:
