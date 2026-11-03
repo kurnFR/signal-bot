@@ -88,3 +88,24 @@ The `auto_promote` setting is currently an audit request only: `auto_promote_app
 | `experiment.py`, `experiment_runner.py`, `result.py`, `runner.py` | Immutable experiment contract, orchestration, serializable result |
 | `artifacts.py`, `model_store.py`, `registry.py` | Versioned artifacts, validated storage, promotion registry |
 | `run_real_experiment.py` | DB-backed command-line entry point |
+
+
+## 7. Independent ML signal generator
+
+The generator is a separate ML task, not a replacement for this filter pipeline:
+
+```
+closed candles -> point-in-time shared features -> LONG / HOLD / SHORT
+              -> confidence + directional-margin policy
+              -> standalone strategy -> canonical simulator / paper engine
+```
+
+- `ml/generator_dataset.py` creates one opportunity per eligible closed candle; it does not require a technical strategy trade. Labels use next-open entry, ATR barriers, an explicit forward horizon, cost hurdle, and label-resolution timestamps.
+- `ml/generator_trainer.py` fits the multiclass estimator and train-only preprocessing. The end-to-end runner selects confidence and directional-margin thresholds through actual validation execution using `backtest.simulate`; overlapping candle opportunities are not counted as independent executed trades.
+- `ml/generator_experiment.py` evaluates the locked policy once on the untouched test partition through the same simulator, verifies non-overlapping execution, and saves a typed `signal_generator_v1` artifact with the hardened model store.
+- The dedicated research endpoint is `POST /api/ml/generator/run-experiment`. It fetches closed candles and shared features, trains a new generator, and returns its model ID, policy, validation/test metrics, and paper eligibility. This endpoint does not activate paper trading or send Telegram.
+- Generator artifacts are listed separately at `GET /api/ml/generator-models`. A generator artifact cannot be used as a legacy filter artifact, and a filter artifact cannot be used as a generator.
+- The selectable paper strategy is `ml_signal_generator_v1`; its paper config uses `ml_generator_model_id`, not the legacy `ml_model_id`. Multiple generator config instances are isolated for order identity, open positions, and performance attribution.
+- Strategy activation and Telegram alerts are independent per paper config. Telegram is off unless explicitly enabled. Disabling a strategy prevents new entries while normal exit management continues for existing positions.
+
+**Research vs paper eligibility:** label-level trainer diagnostics alone are not paper evidence. The generator paper gate requires untouched canonical simulator metrics identifying `evaluation_mode=canonical_simulator_oos`, `execution_engine=backtest.simulate`, and non-overlapping executed trades, in addition to the generator-specific trade-count, profit-factor, drawdown, and net-return requirements. Failed models remain research-only and can be inspected, but cannot be activated for paper trading. No automatic paper promotion or Telegram opt-in is performed.
