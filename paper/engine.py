@@ -687,7 +687,16 @@ def _insert_position(
             raise ValueError("generator fee assumptions differ from current paper accounting")
         if not math.isclose(float(execution["slippage_rate"]), BACKTEST_SLIPPAGE_PCT, rel_tol=0.0, abs_tol=1e-12):
             raise ValueError("generator slippage assumptions differ from current paper accounting")
-        artifact_max_hold = int(execution.get("max_hold_bars", 200))
+        raw_artifact_max_hold = execution.get("max_hold_bars", 200)
+        if (
+            isinstance(raw_artifact_max_hold, bool)
+            or not isinstance(raw_artifact_max_hold, (int, float))
+            or not math.isfinite(float(raw_artifact_max_hold))
+            or int(raw_artifact_max_hold) != raw_artifact_max_hold
+            or not 1 <= int(raw_artifact_max_hold) <= 1000
+        ):
+            raise ValueError("verified generator artifact has an invalid max-hold setting")
+        artifact_max_hold = int(raw_artifact_max_hold)
         if raw_max_hold_bars is not None and int(raw_max_hold_bars) != artifact_max_hold:
             raise ValueError("generator max-hold metadata does not match its verified artifact")
         raw_max_hold_bars = artifact_max_hold
