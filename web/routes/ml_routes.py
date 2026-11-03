@@ -108,6 +108,43 @@ _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
 _EXPERIMENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
 
 
+def _normalize_experiment_payload(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Expose stable dashboard aliases for current and legacy experiment files."""
+    if not isinstance(data, dict):
+        raise ValueError("Experiment result must be a JSON object")
+    normalized = dict(data)
+    experiment = normalized.get("experiment")
+    if not isinstance(experiment, dict):
+        return normalized
+
+    experiment = dict(experiment)
+    baseline_test = experiment.get("baseline_test_metrics")
+    if not isinstance(baseline_test, dict):
+        baseline = experiment.get("baseline_metrics")
+        baseline_test = baseline.get("test") if isinstance(baseline, dict) else {}
+    experiment["baseline_test_metrics"] = (
+        baseline_test if isinstance(baseline_test, dict) else {}
+    )
+
+    diagnostics = experiment.get("probability_diagnostics")
+    if not isinstance(diagnostics, dict):
+        validation = experiment.get("ml_validation_metrics")
+        diagnostics = (
+            validation.get("probability_diagnostics")
+            if isinstance(validation, dict) else {}
+        )
+    experiment["probability_diagnostics"] = (
+        diagnostics if isinstance(diagnostics, dict) else {}
+    )
+
+    if not experiment.get("market") and isinstance(normalized.get("market"), str):
+        experiment["market"] = normalized["market"]
+    if not normalized.get("experiment_id") and isinstance(experiment.get("experiment_id"), str):
+        normalized["experiment_id"] = experiment["experiment_id"]
+    normalized["experiment"] = experiment
+    return normalized
+
+
 class DeployMLToPaperRequest(BaseModel):
     # Restricted charset: the id is used to build a filesystem path.
     model_id: str = Field(..., max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
@@ -137,7 +174,7 @@ def list_experiments() -> Dict[str, Any]:
     results: List[Dict[str, Any]] = []
     for file in sorted(safe_result_files, key=lambda f: f.stat().st_mtime, reverse=True):
         try:
-            data = json.loads(file.read_text(encoding="utf-8"))
+            data = _normalize_experiment_payload(json.loads(file.read_text(encoding="utf-8")))
             exp = data.get("experiment", {})
             winner = data.get("winner", {})
             ml_test = exp.get("ml_test_metrics", {})
@@ -182,7 +219,7 @@ def get_experiment_details(experiment_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found")
 
     try:
-        data = json.loads(file_path.read_text(encoding="utf-8"))
+        data = _normalize_experiment_payload(json.loads(file_path.read_text(encoding="utf-8")))
         return data
     except Exception as exc:
         logger.warning("Failed to parse experiment data %s (%s)", file_path.name, type(exc).__name__)
