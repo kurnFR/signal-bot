@@ -33,6 +33,17 @@ class TestOnlineRetrainerResultPathContract(unittest.TestCase):
         self.assertEqual(loaded["experiment"]["threshold"], 0.2)
         self.assertEqual(loaded["experiment"]["baseline_test_metrics"]["total_outcome_r"], 1.0)
 
+    def test_accepts_legacy_flat_baseline_test_metrics(self):
+        payload = self._payload()
+        experiment = dict(payload["experiment"])
+        experiment["baseline_test_metrics"] = experiment["baseline_metrics"]["test"]
+        experiment.pop("baseline_metrics")
+        payload["experiment"] = experiment
+
+        loaded = online_retrainer._load_experiment_result(payload)
+
+        self.assertEqual(loaded["experiment"]["baseline_test_metrics"]["total_outcome_r"], 1.0)
+
     def test_rejects_malformed_result_payload(self):
         with tempfile.TemporaryDirectory() as tmp:
             result_path = Path(tmp) / "experiment.json"
