@@ -1917,9 +1917,63 @@ const App = {
             if (status) status.textContent = options.length
                 ? `${options.length} executable strategy variants available`
                 : "No executable strategies returned";
+            select.onchange = () => this.updatePaperGeneratorModelVisibility();
+            await this.fetchPaperGeneratorModels();
+            this.updatePaperGeneratorModelVisibility();
         } catch (error) {
             select.innerHTML = `<option value="">Strategy list unavailable</option>`;
             if (status) status.textContent = `Unable to load strategies: ${error.message || error}`;
+        }
+    },
+
+    async fetchPaperGeneratorModels() {
+        const select = document.getElementById("paper-config-generator-model");
+        const status = document.getElementById("paper-generator-model-status");
+        if (!select) return;
+        try {
+            const response = await fetch(`${API_BASE}/api/ml/generator-models`, { headers: this.getAuthHeaders() });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+            if (!Array.isArray(payload.models)) throw new Error("Invalid generator model response");
+            const previous = select.value;
+            select.innerHTML = '<option value="">Select a generator model…</option>' + payload.models.map(model => {
+                const id = this._escapeHtml(model.model_id || "");
+                const eligible = Boolean(model.eligibility && model.eligibility.eligible);
+                const label = (model.model_id || "") + (eligible ? " · Paper eligible" : " · Research only");
+                return '<option value="' + id + '" data-eligible="' + String(eligible) + '">' + this._escapeHtml(label) + '</option>';
+            }).join("");
+            if (previous && payload.models.some(model => model.model_id === previous)) select.value = previous;
+            select.onchange = () => this.updatePaperGeneratorModelVisibility();
+            if (status) status.textContent = payload.models.length
+                ? "Only eligible models can be activated for paper trading."
+                : "No generator artifacts found. Train and save a generator model first.";
+        } catch (error) {
+            select.innerHTML = '<option value="">Generator models unavailable</option>';
+            if (status) status.textContent = `Unable to load generator models: ${error.message || error}`;
+        }
+    },
+
+    updatePaperGeneratorModelVisibility() {
+        const strategy = document.getElementById("paper-config-strategy")?.value || "";
+        const field = document.getElementById("paper-generator-model-field");
+        const modelSelect = document.getElementById("paper-config-generator-model");
+        const active = document.getElementById("paper-config-active");
+        const status = document.getElementById("paper-generator-model-status");
+        const isGenerator = strategy === "ml_signal_generator_v1";
+        if (field) field.hidden = !isGenerator;
+        if (!isGenerator) {
+            if (active) active.disabled = false;
+            return;
+        }
+        const eligible = modelSelect?.selectedOptions?.[0]?.dataset?.eligible === "true";
+        if (active) {
+            active.disabled = !eligible;
+            if (!eligible) active.checked = false;
+        }
+        if (status && modelSelect?.value) {
+            status.textContent = eligible
+                ? "This model passed the paper eligibility gate. Paper activation remains your choice."
+                : "Research-only model: save it with paper evaluation disabled until it passes eligibility.";
         }
     },
 
@@ -1931,10 +1985,16 @@ const App = {
         const market = String(value("paper-config-market") || "spot").trim().toLowerCase();
         const timeframe = String(value("paper-config-timeframe") || "").trim();
         const strategyName = String(value("paper-config-strategy") || "").trim();
+        const generatorModelId = strategyName === "ml_signal_generator_v1"
+            ? String(value("paper-config-generator-model") || "").trim() : "";
         const allocatedCapital = Number(value("paper-config-capital"));
         const riskPerTradePct = Number(value("paper-config-risk"));
         if (!symbol || !strategyName || !timeframe || !["spot", "futures"].includes(market)) {
             this.showToast("Choose a valid symbol, market, timeframe, and executable strategy.", "error");
+            return;
+        }
+        if (strategyName === "ml_signal_generator_v1" && !generatorModelId) {
+            this.showToast("Select an independent ML generator model before saving this strategy.", "error");
             return;
         }
         if (!Number.isFinite(allocatedCapital) || allocatedCapital < 100 ||
@@ -1955,6 +2015,7 @@ const App = {
                     is_active: checked("paper-config-active"),
                     allocated_capital: allocatedCapital,
                     risk_per_trade_pct: riskPerTradePct,
+                    ml_generator_model_id: generatorModelId || null,
                     telegram_enabled: checked("paper-config-telegram"),
                     report_enabled: checked("paper-config-report"),
                 }),
