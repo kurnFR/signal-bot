@@ -26,6 +26,7 @@ REGISTRY_PATH = Path("ml_models") / "retraining_registry.json"
 AUDIT_LOG_PATH = Path("ml_results") / "retraining_audit.json"
 CYCLE_LOCK_PATH = Path("ml_models") / "retraining_cycle.lock"
 REGISTRY_LOCK_PATH = Path("ml_models") / "retraining_registry.lock"
+AUDIT_LOCK_PATH = Path("ml_results") / "retraining_audit.lock"
 
 
 @contextmanager
@@ -109,7 +110,7 @@ def _load_registry() -> dict[str, Any]:
 
     try:
         registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         logger.error("Online retraining registry is unreadable; disabling retraining until repaired")
         return _default_registry(enabled=False)
 
@@ -172,15 +173,35 @@ def _save_registry(data: dict[str, Any]) -> None:
     _atomic_write_json(REGISTRY_PATH, data)
 
 
-def _append_audit_log(entry: dict[str, Any]) -> None:
-    history = []
-    if AUDIT_LOG_PATH.exists():
+@contextmanager
+def _audit_log_lock() -> Iterator[None]:
+    """Serialize audit-log read/modify/write operations across processes."""
+    AUDIT_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with AUDIT_LOCK_PATH.open("a", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         try:
-            history = json.loads(AUDIT_LOG_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            history = []
-    history.insert(0, entry)
-    _atomic_write_json(AUDIT_LOG_PATH, history[:200])
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _append_audit_log(entry: dict[str, Any]) -> None:
+    """Append without losing concurrent entries or destroying unreadable history."""
+    with _audit_log_lock():
+        history: list[dict[str, Any]] = []
+        if AUDIT_LOG_PATH.exists():
+            try:
+                loaded = json.loads(AUDIT_LOG_PATH.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                logger.error("Retraining audit log is unreadable; preserving it without appending")
+                return
+            if not isinstance(loaded, list) or any(not isinstance(item, dict) for item in loaded):
+                logger.error("Retraining audit log has an invalid structure; preserving it without appending")
+                return
+            history = loaded
+
+        history.insert(0, entry)
+        _atomic_write_json(AUDIT_LOG_PATH, history[:200])
 
 
 def register_model_for_retraining(
