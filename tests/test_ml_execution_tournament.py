@@ -9,7 +9,7 @@ def _dataset(n=50):
     times = np.arange(1, n + 1, dtype=np.int64)
     x = np.linspace(-2.0, 2.0, n)
     target = (np.arange(n) % 2).astype(int)
-    return pd.DataFrame({"open_time": times, "x": x, "target": target, "outcome_r": np.where(target, 1.0, -0.5)})
+    return pd.DataFrame({"open_time": times, "exit_time": times, "x": x, "target": target, "outcome_r": np.where(target, 1.0, -0.5)})
 
 
 def test_execution_tournament_selects_threshold_from_simulator_and_tests_once():
@@ -69,6 +69,23 @@ def test_execution_tournament_selects_threshold_from_simulator_and_tests_once():
     assert "eligible_candidate_count" not in metrics
     assert result.experiment.threshold in (0.50, 0.55)
     assert result.validation_by_candidate[0]["selected_metrics"]["net_pnl"] == result.validation_by_candidate[0]["selected_metrics"]["total_outcome_r"]
+
+
+def test_execution_tournament_requires_exit_time_for_purging():
+    dataset = _dataset().drop(columns=["exit_time"])
+    candidate = Candidate("logistic_regression", {}, ("x",), (0.5,))
+
+    try:
+        run_execution_aware_tournament(
+            dataset[["open_time", "x"]], dataset, [candidate],
+            strategy_fn=lambda *_args, **_kwargs: [],
+            experiment_id="missing-exit", symbol="BTCUSDT", timeframe="1h",
+            base_strategy="trend_ema_v1",
+        )
+    except ValueError as exc:
+        assert "exit_time" in str(exc)
+    else:
+        raise AssertionError("expected missing exit_time to be rejected")
 
 
 def test_execution_tournament_rejects_candidate_with_too_few_validation_trades():

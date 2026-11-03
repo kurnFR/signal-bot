@@ -218,6 +218,7 @@ def test_ml_walk_forward_engine():
     df = _make_dummy_candles(n)
     df["target"] = np.random.choice([0, 1], size=n)
     df["outcome_r"] = np.where(df["target"] == 1, np.random.uniform(0.5, 2.5, n), -1.0)
+    df["exit_time"] = df["open_time"]
 
     res = run_ml_walk_forward(
         dataset=df,

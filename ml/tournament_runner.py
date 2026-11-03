@@ -110,6 +110,8 @@ def run_tournament(
         raise ValueError("dataset must not be empty")
     if "open_time" not in dataset.columns:
         raise ValueError("dataset must contain open_time")
+    if "exit_time" not in dataset.columns:
+        raise ValueError("dataset must contain exit_time for leakage-safe purging")
 
     split = split_by_fractions(
         dataset,

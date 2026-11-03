@@ -28,12 +28,13 @@ class TestMLEndToEndContracts(unittest.TestCase):
             "rsi": [40., 50., 60.],
         })
         trades = [
-            {"signal_open_time": 1, "direction": "LONG", "r_multiple": 1.0},
-            {"signal_open_time": 2, "direction": "SHORT", "r_multiple": -1.0},
+            {"signal_open_time": 1, "exit_time": 2, "direction": "LONG", "r_multiple": 1.0},
+            {"signal_open_time": 2, "exit_time": 3, "direction": "SHORT", "r_multiple": -1.0},
         ]
         ds = build_signal_dataset(candles, trades, params={}, feature_columns=["rsi"])
         self.assertEqual(ds["trade_index"].tolist(), [0, 1])
         self.assertEqual(ds["target"].tolist(), [1, 0])
+        self.assertEqual(ds["exit_time"].tolist(), [2, 3])
 
     def test_test_results_are_based_on_locked_probabilities(self):
         trades = [

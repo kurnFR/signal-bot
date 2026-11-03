@@ -16,6 +16,7 @@ from backtest.metrics import compute_metrics
 from ml.dataset import build_signal_dataset, SHARED_FEATURE_COLUMNS
 from ml.models import create_model
 from ml.trainer import _prepare_features, select_validation_threshold
+from ml.split import purge_overlapping_outcomes
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,12 @@ def run_ml_walk_forward(
     """
     if len(dataset) < min_train_samples * 2:
         raise ValueError(f"Dataset has only {len(dataset)} rows; need at least {min_train_samples * 2} for walk-forward")
+    if "exit_time" not in dataset.columns:
+        raise ValueError("walk-forward dataset must contain exit_time for leakage-safe purging")
+    exit_times = pd.to_numeric(dataset["exit_time"], errors="coerce")
+    open_times = pd.to_numeric(dataset["open_time"], errors="coerce")
+    if exit_times.isna().any() or open_times.isna().any() or (exit_times < open_times).any():
+        raise ValueError("walk-forward dataset contains invalid trade exit timestamps")
 
     avail_features = [c for c in feature_columns if c in dataset.columns]
     if not avail_features:
@@ -105,10 +112,20 @@ def run_ml_walk_forward(
         if len(train_part) < 20 or len(test_part) < 5:
             continue
 
-        # Split train_part into sub-train (80%) and validation (20%) for threshold selection
+        # Split train_part into sub-train (80%) and validation (20%) for
+        # threshold selection, then purge labels whose exits reach the next
+        # partition boundary. This also purges validation outcomes crossing
+        # into the OOS fold.
         val_split = max(10, int(len(train_part) * 0.80))
-        sub_train = train_part.iloc[:val_split].reset_index(drop=True)
-        sub_val = train_part.iloc[val_split:].reset_index(drop=True)
+        raw_sub_train = train_part.iloc[:val_split].reset_index(drop=True)
+        raw_sub_val = train_part.iloc[val_split:].reset_index(drop=True)
+        try:
+            purged = purge_overlapping_outcomes(raw_sub_train, raw_sub_val, test_part)
+        except ValueError:
+            continue
+        sub_train, sub_val = purged.train, purged.validation
+        if len(sub_train) < 20 or len(sub_val) < 5:
+            continue
 
         try:
             x_train, x_val, x_test, imputer, scaler = _prepare_features(
@@ -149,7 +166,7 @@ def run_ml_walk_forward(
 
         folds_summary.append({
             "fold": fold + 1,
-            "train_samples": len(train_part),
+            "train_samples": len(sub_train) + len(sub_val),
             "test_samples": len(test_part),
             "train_start_time": int(train_part.iloc[0]["open_time"]),
             "train_end_time": int(train_part.iloc[-1]["open_time"]),

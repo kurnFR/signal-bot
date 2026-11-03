@@ -16,6 +16,7 @@ class TestMLTournamentRunner(unittest.TestCase):
         outcome = np.where(target == 1, 1.0, -0.5)
         return pd.DataFrame({
             "open_time": np.arange(n),
+            "exit_time": np.arange(n),
             "feature": feature,
             "target": target,
             "outcome_r": outcome,
@@ -34,6 +35,14 @@ class TestMLTournamentRunner(unittest.TestCase):
         with self.assertRaises(ValueError):
             run_tournament(
                 self._dataset(), [], experiment_id="x", symbol="BTCUSDT",
+                timeframe="1h", base_strategy="trend_ema_v1",
+            )
+
+    def test_missing_exit_time_is_rejected(self):
+        dataset = self._dataset().drop(columns=["exit_time"])
+        with self.assertRaisesRegex(ValueError, "exit_time"):
+            run_tournament(
+                dataset, [self._candidate()], experiment_id="x", symbol="BTCUSDT",
                 timeframe="1h", base_strategy="trend_ema_v1",
             )
 
