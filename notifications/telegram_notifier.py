@@ -130,6 +130,7 @@ def send_signal_alert(
     ml_probability: Optional[float] = None,
     ml_threshold: Optional[float] = None,
     ml_model_id: Optional[str] = None,
+    ml_generator_model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Formats and dispatches an official trade entry signal alert with optional ML gating metadata."""
     safe_symbol = escape(str(symbol))
@@ -169,7 +170,9 @@ def send_signal_alert(
         thresh_info = f" (Threshold: {ml_threshold * 100:.1f}%)" if ml_threshold is not None else ""
         msg += f"🤖 <b>AI/ML Confidence:</b> <code>{ml_probability * 100:.1f}%</code>{thresh_info} {pass_badge}\n"
         if ml_model_id:
-            msg += f"🧬 <b>Filter Model:</b> <code>{ml_model_id}</code>\n"
+            msg += f"🧬 <b>Filter Model:</b> <code>{escape(str(ml_model_id))}</code>\n"
+        if ml_generator_model_id:
+            msg += f"🧠 <b>Signal Generator Model:</b> <code>{escape(str(ml_generator_model_id))}</code>\n"
 
     msg += (
         f"━━━━━━━━━━━━━━━━━━━━━\n"
@@ -249,7 +252,8 @@ def send_trade_close_alert(
     exit_reason: str,
     net_return_pct: float,
     r_multiple: float,
-    holding_bars: int
+    holding_bars: int,
+    ml_generator_model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Dispatches a trade closure notification with realized PnL."""
     is_win = r_multiple > 0
@@ -272,6 +276,7 @@ def send_trade_close_alert(
         f"{result_emoji} {outcome_emoji}: <b>{safe_symbol}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"🧠 <b>Strategy:</b> <code>{safe_strategy}</code> ({safe_direction})\n"
+        + (f"🧬 <b>Signal Generator Model:</b> <code>{escape(str(ml_generator_model_id))}</code>\n" if ml_generator_model_id else "")
         f"💵 <b>Entry:</b> ${entry_price:,.4f} ➔ <b>Exit:</b> ${exit_price:,.4f}\n"
         f"📌 <b>Reason:</b> <code>{safe_exit_reason}</code>\n"
         f"⏳ <b>Holding Time:</b> {holding_bars} bars\n"
