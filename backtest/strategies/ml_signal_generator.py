@@ -71,13 +71,27 @@ def run(df: pd.DataFrame, params: dict) -> list[dict]:
     execution_fields = {
         "stop_atr_multiple": "ML_GENERATOR_STOP_ATR_MULT",
         "risk_reward_ratio": "ML_GENERATOR_RISK_REWARD_RATIO",
-        "fee_rate": "BACKTEST_FEE_PCT",
-        "slippage_rate": "BACKTEST_SLIPPAGE_PCT",
         "max_hold_bars": "BACKTEST_MAX_HOLD_BARS",
     }
     for artifact_key, runtime_key in execution_fields.items():
         if artifact_key in execution:
             runtime_params[runtime_key] = execution[artifact_key]
+
+    # Paper accounting uses server-configured costs. Refuse to trade an
+    # artifact evaluated under different costs instead of silently changing
+    # its economics after promotion.
+    try:
+        import math
+        from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT
+        artifact_fee = float(execution["fee_rate"])
+        artifact_slippage = float(execution["slippage_rate"])
+        if not math.isclose(artifact_fee, BACKTEST_FEE_PCT, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError("generator fee assumptions differ from current paper accounting")
+        if not math.isclose(artifact_slippage, BACKTEST_SLIPPAGE_PCT, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError("generator slippage assumptions differ from current paper accounting")
+    except Exception as exc:
+        logger.error("Generator %s execution-cost contract mismatch (%s); failing closed", model_id, type(exc).__name__)
+        return []
 
     signal_df = df.copy()
     signal_df["_ml_generator_decision"] = predictions["decision"].to_numpy()
@@ -98,6 +112,7 @@ def run(df: pd.DataFrame, params: dict) -> list[dict]:
     }
     for trade in trades:
         prediction = probabilities_by_time.get(int(trade["signal_open_time"]))
+        trade["max_hold_bars"] = int(runtime_params.get("BACKTEST_MAX_HOLD_BARS", 200))
         if prediction is not None:
             trade["ml_probability"] = float(prediction["confidence"])
             trade["ml_probability_long"] = (
