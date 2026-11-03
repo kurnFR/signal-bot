@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assertApiPath, getJson } from "./api";
+import { assertApiPath, getJson, postJson } from "./api";
 
 describe("read-only same-origin API transport", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -65,8 +65,6 @@ describe("read-only same-origin API transport", () => {
     }));
     window.localStorage.setItem("token", "test-session-token");
     vi.stubGlobal("fetch", fetchMock);
-    const { postJson } = await import("./api");
-
     await expect(postJson<{ status: string }, { symbol: string }>(
       "/api/ml/generator/run-experiment",
       { symbol: "BTCUSDT" },
@@ -93,7 +91,7 @@ describe("read-only same-origin API transport", () => {
     )));
     const { postJson } = await import("./api");
 
-    await expect(postJson("/api/ml/generator/run-experiment", {})).rejects.toMatchObject({
+    await expect(postJson<{ status: string }, Record<string, never>>("/api/ml/generator/run-experiment", {})).rejects.toMatchObject({
       status: 401,
       code: "http",
     });
