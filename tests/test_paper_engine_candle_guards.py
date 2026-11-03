@@ -448,7 +448,7 @@ class TestGeneratorMaxHoldPersistence(unittest.TestCase):
 
         with patch("paper.engine.get_pool", return_value=pool), \
              patch("paper.circuit_breaker.check_exposure_limit", return_value=(True, "")), \
-             patch("ml.generator_artifacts.load_generator_artifact", return_value=(artifact, object())) as load:
+             patch("ml.generator_runtime.load_generator_predictor", return_value=(artifact, object())) as load:
             position_id = pe._insert_position(
                 _make_cfg(), trade, 100.0, CANDLE_A,
                 ml_generator_model_id="generator-recovery-test",
