@@ -14,6 +14,7 @@ import math
 import os
 from pathlib import Path
 import tempfile
+import uuid
 from typing import Any, Iterator, Mapping
 
 from db.db import fetch_ohlcv_with_features_df
@@ -27,6 +28,8 @@ AUDIT_LOG_PATH = Path("ml_results") / "retraining_audit.json"
 CYCLE_LOCK_PATH = Path("ml_models") / "retraining_cycle.lock"
 REGISTRY_LOCK_PATH = Path("ml_models") / "retraining_registry.lock"
 AUDIT_LOCK_PATH = Path("ml_results") / "retraining_audit.lock"
+RETRAINING_JOURNAL_PATH = Path("ml_results") / "retraining_journal.json"
+JOURNAL_LOCK_PATH = Path("ml_results") / "retraining_journal.lock"
 
 
 @contextmanager
@@ -185,7 +188,7 @@ def _audit_log_lock() -> Iterator[None]:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def _append_audit_log(entry: dict[str, Any]) -> None:
+def _append_audit_log(entry: dict[str, Any]) -> bool:
     """Append without losing concurrent entries or destroying unreadable history."""
     with _audit_log_lock():
         history: list[dict[str, Any]] = []
@@ -194,14 +197,18 @@ def _append_audit_log(entry: dict[str, Any]) -> None:
                 loaded = json.loads(AUDIT_LOG_PATH.read_text(encoding="utf-8"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 logger.error("Retraining audit log is unreadable; preserving it without appending")
-                return
+                return False
             if not isinstance(loaded, list) or any(not isinstance(item, dict) for item in loaded):
                 logger.error("Retraining audit log has an invalid structure; preserving it without appending")
-                return
+                return False
             history = loaded
 
+        run_id = entry.get("run_id")
+        if run_id is not None and any(item.get("run_id") == run_id for item in history):
+            return True
         history.insert(0, entry)
         _atomic_write_json(AUDIT_LOG_PATH, history[:200])
+        return True
 
 
 def register_model_for_retraining(
@@ -237,10 +244,10 @@ def register_model_for_retraining(
         return model
 
 
-def _persist_retraining_updates(updates: Mapping[str, Mapping[str, Any]]) -> None:
-    """Merge cycle results into the latest registry without resurrecting stale models."""
+def _persist_retraining_updates(updates: Mapping[str, Mapping[str, Any]]) -> bool:
+    """Merge cycle results into the latest registry; return False if state is disabled/invalid."""
     if not updates:
-        return
+        return True
 
     identity_fields = ("symbol", "market", "timeframe", "strategy_name", "registered_at")
     runtime_fields = ("last_retrained_at", "last_candle_count", "last_result")
@@ -248,9 +255,9 @@ def _persist_retraining_updates(updates: Mapping[str, Mapping[str, Any]]) -> Non
         latest = _load_registry()
         # A malformed/disabled registry is a hard stop; never replace it with
         # the cycle's older, previously valid snapshot.
-        if latest.get("enabled") is not True:
-            logger.error("Registry changed to disabled/invalid during retraining; discarding state updates")
-            return
+        if latest.get("enabled", True) is not True:
+            logger.error("Registry changed to disabled/invalid during retraining; retaining recovery journal")
+            return False
 
         latest_models = latest.get("registered_models", {})
         changed = False
@@ -269,7 +276,84 @@ def _persist_retraining_updates(updates: Mapping[str, Mapping[str, Any]]) -> Non
 
         if changed:
             _save_registry(latest)
+        return True
 
+
+@contextmanager
+def _journal_lock() -> Iterator[None]:
+    """Serialize recovery-journal updates across processes."""
+    JOURNAL_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with JOURNAL_LOCK_PATH.open("a", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _load_retraining_journal() -> dict[str, dict[str, Any]]:
+    with _journal_lock():
+        if not RETRAINING_JOURNAL_PATH.exists():
+            return {}
+        try:
+            data = json.loads(RETRAINING_JOURNAL_PATH.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Retraining recovery journal is unreadable; refusing new cycles") from exc
+        if not isinstance(data, dict) or any(
+            not isinstance(run_id, str) or not isinstance(entry, dict)
+            or not isinstance(entry.get("update"), dict)
+            or not isinstance(entry.get("audit"), dict)
+            for run_id, entry in data.items()
+        ):
+            raise RuntimeError("Retraining recovery journal has an invalid structure; refusing new cycles")
+        return data
+
+
+def _save_retraining_journal_entry(run_id: str, entry: dict[str, Any]) -> None:
+    with _journal_lock():
+        current: dict[str, Any] = {}
+        if RETRAINING_JOURNAL_PATH.exists():
+            try:
+                loaded = json.loads(RETRAINING_JOURNAL_PATH.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise RuntimeError("Retraining recovery journal is unreadable; refusing to overwrite it") from exc
+            if not isinstance(loaded, dict):
+                raise RuntimeError("Retraining recovery journal has an invalid structure; refusing to overwrite it")
+            current = loaded
+        current[run_id] = entry
+        _atomic_write_json(RETRAINING_JOURNAL_PATH, current)
+
+
+def _clear_retraining_journal_entry(run_id: str) -> None:
+    with _journal_lock():
+        if not RETRAINING_JOURNAL_PATH.exists():
+            return
+        try:
+            current = json.loads(RETRAINING_JOURNAL_PATH.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Retraining recovery journal is unreadable; refusing to clear it") from exc
+        if not isinstance(current, dict):
+            raise RuntimeError("Retraining recovery journal has an invalid structure; refusing to clear it")
+        current.pop(run_id, None)
+        if current:
+            _atomic_write_json(RETRAINING_JOURNAL_PATH, current)
+        else:
+            RETRAINING_JOURNAL_PATH.unlink(missing_ok=True)
+
+
+def _recover_completed_retraining() -> None:
+    """Finish registry/audit commits for experiments durably journaled as completed."""
+    journal = _load_retraining_journal()
+    for run_id, entry in journal.items():
+        audit = dict(entry["audit"])
+        audit["run_id"] = run_id
+        if not _persist_retraining_updates({entry["key"]: entry["update"]}):
+            logger.error("Retaining completed retraining journal entry %s while registry is disabled", run_id)
+            continue
+        if not _append_audit_log(audit):
+            logger.error("Retaining completed retraining journal entry %s because audit history is unavailable", run_id)
+            continue
+        _clear_retraining_journal_entry(run_id)
 
 
 def _load_experiment_result(result: Any) -> Mapping[str, Any]:
@@ -397,10 +481,10 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
     Check all registered models; if stale or forced, run retraining pipeline.
     FreqAI/Qlib continuous inference cycle. Caller must hold the cycle lock.
     """
+    _recover_completed_retraining()
     reg = _load_registry()
     models = reg.get("registered_models", {})
     results = []
-    runtime_updates: dict[str, dict[str, Any]] = {}
 
     # A disabled registry is a hard stop; force only bypasses per-model due gates.
     if reg.get("enabled", True) is not True:
@@ -408,6 +492,7 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
         return results
 
     for key, cfg in models.items():
+        journaled = False
         symbol = cfg["symbol"]
         market = cfg["market"]
         timeframe = cfg["timeframe"]
@@ -437,7 +522,9 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
             exp_res = _load_experiment_result(exp_result_path)
 
             now_iso = datetime.now(timezone.utc).isoformat()
+            run_id = uuid.uuid4().hex
             audit_entry = {
+                "run_id": run_id,
                 "key": key,
                 "timestamp": now_iso,
                 "new_candles_processed": new_candles,
@@ -450,9 +537,7 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
                 "auto_promote_applied": False,
                 "promotion_status": "not_implemented" if cfg.get("auto_promote") is True else "disabled",
             }
-            _append_audit_log(audit_entry)
-
-            runtime_updates[key] = {
+            update = {
                 "identity": {
                     field: cfg.get(field)
                     for field in ("symbol", "market", "timeframe", "strategy_name", "registered_at")
@@ -467,10 +552,27 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
                     },
                 },
             }
+            # Persist the completed result before touching the registry or audit.
+            # A crash after this point is recoverable without rerunning the experiment.
+            _save_retraining_journal_entry(run_id, {
+                "key": key,
+                "update": update,
+                "audit": audit_entry,
+            })
+            journaled = True
+            if not _persist_retraining_updates({key: update}):
+                continue
+            if not _append_audit_log(audit_entry):
+                logger.error("Completed retraining for %s is journaled pending audit recovery", key)
+                continue
+            _clear_retraining_journal_entry(run_id)
             results.append(audit_entry)
 
         except Exception as exc:
             logger.warning("Error retraining model %s: %s", key, exc)
+            if journaled:
+                logger.error("Completed retraining for %s remains in recovery journal", key)
+                continue
             _append_audit_log({
                 "key": key,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -478,5 +580,4 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
                 "status": "failed",
             })
 
-    _persist_retraining_updates(runtime_updates)
     return results
