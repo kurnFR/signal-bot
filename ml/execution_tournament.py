@@ -93,6 +93,8 @@ def run_execution_aware_tournament(
         raise ValueError("market_df and dataset must not be empty")
     if "open_time" not in dataset.columns or "open_time" not in market_df.columns:
         raise ValueError("market_df and dataset must contain open_time")
+    if "exit_time" not in dataset.columns:
+        raise ValueError("dataset must contain exit_time for leakage-safe purging")
     if train_fraction <= 0 or validation_fraction <= 0 or train_fraction + validation_fraction >= 1:
         raise ValueError("invalid train/validation fractions")
     if min_validation_trades < 1:
