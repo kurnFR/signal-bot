@@ -351,6 +351,33 @@ def _is_retraining_due(
     return elapsed >= timedelta(hours=interval_hours) and new_candles >= min_new_candles
 
 
+
+def _load_experiment_result(result_path: str | Path) -> dict[str, Any]:
+    """Load and validate the JSON artifact returned by run_real_experiment()."""
+    path = Path(result_path)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Experiment result artifact is unreadable: {path}") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError("Experiment result artifact must contain a JSON object")
+
+    winner = payload.get("winner")
+    experiment = payload.get("experiment")
+    if not isinstance(winner, dict) or not isinstance(winner.get("model_type"), str):
+        raise ValueError("Experiment result artifact has no valid winner model")
+    if not isinstance(experiment, dict):
+        raise ValueError("Experiment result artifact has no valid experiment metrics")
+    if not isinstance(experiment.get("baseline_test_metrics"), dict):
+        raise ValueError("Experiment result artifact has invalid baseline test metrics")
+    if not isinstance(experiment.get("ml_test_metrics"), dict):
+        raise ValueError("Experiment result artifact has invalid ML test metrics")
+    if "threshold" not in experiment:
+        raise ValueError("Experiment result artifact has no selected threshold")
+
+    return payload
+
 def execute_retraining_cycle(force: bool = False) -> list[dict[str, Any]]:
     """Run at most one retraining cycle across all workers/processes."""
     with _retraining_cycle_lock() as acquired:
@@ -394,13 +421,14 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
                 continue
 
             logger.info("Executing continuous retraining for %s (new candles: %d)", key, new_candles)
-            exp_res = run_real_experiment(
+            result_path = run_real_experiment(
                 symbol=symbol,
                 market=market,
                 timeframe=timeframe,
                 strategy_name=strategy_name,
                 model_type=model_type,
             )
+            exp_res = _load_experiment_result(result_path)
 
             now_iso = datetime.now(timezone.utc).isoformat()
             audit_entry = {
