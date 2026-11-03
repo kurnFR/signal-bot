@@ -39,7 +39,15 @@ def _artifact(model_id="gen-runtime-test-0123456789ab"):
         feature_columns=("feature",),
         class_mapping=dict(GENERATOR_CLASS_MAPPING),
         decision_policy={"min_confidence": 0.6, "min_directional_margin": 0.1},
-        label_config={"horizon_bars": 12, "barrier_atr_multiple": 1.5},
+        label_config={
+            "horizon_bars": 12,
+            "barrier_atr_multiple": 1.5,
+            "stop_atr_multiple": 2.0,
+            "risk_reward_ratio": 3.0,
+            "fee_rate": 0.001,
+            "slippage_rate": 0.0005,
+            "max_hold_bars": 5,
+        },
         data_boundaries={"train_start": 1, "validation_start": 2, "test_start": 3},
         train_metrics={"rows": 100},
         validation_metrics={"trades": 20, "total_net_return": 0.1},
@@ -111,8 +119,9 @@ def test_strategy_adapter_generates_trades_through_canonical_simulator(tmp_path)
         timeframe="1h",
         ml_generator_model_id=artifact.model_id,
         ML_GENERATOR_MODELS_DIR=str(tmp_path),
-        ML_GENERATOR_STOP_ATR_MULT=1.5,
-        ML_GENERATOR_RISK_REWARD_RATIO=2.0,
+        ML_GENERATOR_STOP_ATR_MULT=1.0,
+        ML_GENERATOR_RISK_REWARD_RATIO=1.0,
+        BACKTEST_MAX_HOLD_BARS=1,
     )
 
     trades = run(frame, params)
@@ -124,6 +133,8 @@ def test_strategy_adapter_generates_trades_through_canonical_simulator(tmp_path)
     assert trades[0]["ml_generator_model_id"] == artifact.model_id
     assert trades[0]["strategy_name"] == NAME
     assert trades[0]["ml_probability"] == 0.90
+    assert trades[0]["stop_loss"] == 102.0
+    assert trades[0]["take_profit"] == 94.0
 
 
 def test_strategy_fails_closed_without_model_id():
