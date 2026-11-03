@@ -79,6 +79,45 @@ class TestOnlineRetrainerResultPathContract(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "SHA-256"):
                 online_retrainer._verify_persisted_model_artifact("exp-retrain-verified", root)
 
+    def test_cycle_does_not_checkpoint_when_model_artifact_is_missing(self):
+        model_key = "BTCUSDT_spot_1h_trend_ema_v1"
+        model = {
+            "symbol": "BTCUSDT",
+            "market": "spot",
+            "timeframe": "1h",
+            "strategy_name": "trend_ema_v1",
+            "model_type": "hist_gradient_boosting",
+            "registered_at": "2026-01-01T00:00:00+00:00",
+            "auto_promote": False,
+            "last_retrained_at": None,
+            "last_candle_count": 0,
+        }
+        registry = {
+            "enabled": True,
+            "min_new_candles": 48,
+            "registered_models": {model_key: model},
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result_path = Path(tmp) / "experiment.json"
+            result_path.write_text(json.dumps(self._payload()), encoding="utf-8")
+            models_root = Path(tmp) / "missing_models"
+            with patch.object(online_retrainer, "MODEL_ARTIFACTS_DIR", models_root), patch.object(
+                online_retrainer, "_load_registry", return_value=registry
+            ), patch.object(
+                online_retrainer, "fetch_ohlcv_with_features_df", return_value=[None] * 200
+            ), patch.object(
+                online_retrainer, "run_real_experiment", return_value=result_path
+            ), patch.object(online_retrainer, "_append_audit_log") as append_audit, patch.object(
+                online_retrainer, "_persist_retraining_updates"
+            ) as persist:
+                results = online_retrainer._execute_retraining_cycle_unlocked(force=True)
+
+        self.assertEqual(results, [])
+        persist.assert_not_called()
+        append_audit.assert_called_once()
+        self.assertEqual(append_audit.call_args.args[0]["status"], "failed")
+
     def test_cycle_checkpoints_when_runner_returns_result_path(self):
         model_key = "BTCUSDT_spot_1h_trend_ema_v1"
         model = {
