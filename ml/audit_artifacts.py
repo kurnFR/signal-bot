@@ -14,6 +14,8 @@ import re
 import sys
 from typing import Any
 
+from ml.artifacts import read_model_manifest_file
+
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 
 
@@ -59,8 +61,8 @@ def audit_artifact_directory(directory: str | Path) -> dict[str, Any]:
         # Validate the manifest independently of its weight file so malformed
         # metadata is not misreported as merely a missing-weight condition.
         try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
+            manifest = read_model_manifest_file(manifest_path)
+        except (OSError, UnicodeError, ValueError):
             findings.append({"model_id": model_id, "status": "invalid_manifest"})
             continue
         if not isinstance(manifest, dict):

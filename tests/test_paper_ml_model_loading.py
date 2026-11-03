@@ -1,4 +1,5 @@
 """Paper runtime must deserialize the exact model bytes whose digest was checked."""
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -61,6 +62,47 @@ class TestPaperMLModelLoading(unittest.TestCase):
         self.assertIs(loaded_filter.model, loaded_model)
         self.assertEqual(loaded_filter.model_id, "paper-loader-test")
 
+
+    def test_runtime_rejects_manifest_symlink_swap_after_resolution(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside:
+            store = ModelStore(tmp)
+            artifact = ModelArtifact(
+                model_id="paper-manifest-symlink-test",
+                experiment_id="experiment-1",
+                model_type="logistic_regression",
+                base_strategy="trend_ema",
+                feature_columns=("rsi", "atr"),
+                strategy_params={},
+                model_params={},
+                threshold=0.6,
+                train_metrics={},
+                validation_metrics={},
+                test_metrics={
+                    "trade_count": 30,
+                    "profit_factor": 1.2,
+                    "max_drawdown_pct": 10.0,
+                    "net_pnl": 12.0,
+                },
+                eligible_for_paper=True,
+                evaluation_protocol_version=CURRENT_EVALUATION_PROTOCOL_VERSION,
+            )
+            store.save(artifact, {"source": "verified"})
+            manifest_path = Path(tmp) / "paper-manifest-symlink-test.json"
+            external_manifest = Path(outside) / "external.json"
+            external_manifest.write_text('{"model_id": "paper-manifest-symlink-test"}', encoding="utf-8")
+            original_open = os.open
+
+            def replace_with_symlink_then_open(path, flags, *args, **kwargs):
+                if Path(path) == manifest_path:
+                    manifest_path.unlink()
+                    manifest_path.symlink_to(external_manifest)
+                return original_open(path, flags, *args, **kwargs)
+
+            with patch("ml.artifacts.os.open", side_effect=replace_with_symlink_then_open):
+                with self.assertRaisesRegex(ValueError, "could not be opened safely"):
+                    _load_verified_ml_model(
+                        "paper-manifest-symlink-test", models_dir=tmp
+                    )
 
     def test_runtime_uses_the_manifest_that_passed_eligibility_validation(self):
         import json

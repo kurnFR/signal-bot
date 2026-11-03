@@ -442,15 +442,16 @@ def _load_experiment_result(result: Any) -> Mapping[str, Any]:
 
 def _verify_persisted_model_artifact(model_id: str, root: str | Path | None = None) -> tuple[Path, Path]:
     """Require a complete, digest-consistent model artifact before checkpointing retraining."""
-    from ml.artifacts import CURRENT_EVALUATION_PROTOCOL_VERSION, resolve_model_artifact_paths
+    from ml.artifacts import (
+        CURRENT_EVALUATION_PROTOCOL_VERSION,
+        read_model_manifest_file,
+        resolve_model_artifact_paths,
+    )
 
     artifact_root = MODEL_ARTIFACTS_DIR if root is None else Path(root)
     try:
         manifest_path, weights_path = resolve_model_artifact_paths(model_id, artifact_root)
-        manifest_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-        manifest_descriptor = os.open(manifest_path, manifest_flags)
-        with os.fdopen(manifest_descriptor, "r", encoding="utf-8") as handle:
-            manifest = json.load(handle)
+        manifest = read_model_manifest_file(manifest_path)
     except Exception as exc:
         raise RuntimeError(f"Retrained model artifact is missing or invalid: {model_id}") from exc
 

@@ -13,7 +13,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field, field_validator
 
-from ml.artifacts import CURRENT_EVALUATION_PROTOCOL_VERSION, paper_eligibility_report
+from ml.artifacts import (
+    CURRENT_EVALUATION_PROTOCOL_VERSION,
+    paper_eligibility_report,
+    read_model_manifest_file,
+)
 from ml.run_real_experiment import run_real_experiment
 from ml.dataset import TARGET_TYPES
 from backtest.strategies import STRATEGIES
@@ -247,7 +251,7 @@ def list_saved_models() -> Dict[str, Any]:
     models: List[Dict[str, Any]] = []
     for safe_manifest in sorted(safe_manifest_files, key=lambda f: f.stat().st_mtime, reverse=True):
         try:
-            data = json.loads(safe_manifest.read_text(encoding="utf-8"))
+            data = read_model_manifest_file(safe_manifest)
             joblib_file = (models_root / f"{safe_manifest.stem}.joblib").resolve()
             data["has_weights"] = joblib_file.parent == models_root and joblib_file.is_file()
             report = paper_eligibility_report(test_metrics=data.get("test_metrics") or {})
@@ -303,7 +307,7 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
         raise HTTPException(status_code=404, detail=f"ML model manifest '{req.model_id}' not found in ml_models/")
 
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest = read_model_manifest_file(manifest_path)
     except Exception as exc:
         logger.warning("Failed to parse model manifest %s (%s)", manifest_path.name, type(exc).__name__)
         raise HTTPException(status_code=500, detail="Failed to parse model manifest")
