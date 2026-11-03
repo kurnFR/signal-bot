@@ -100,3 +100,44 @@ def test_generator_simulation_boundary_does_not_depend_on_label_exit_times(monke
         assert metrics["evaluation_horizon_bars"] == 2
 
     assert boundaries == [8, 8]
+
+
+def test_generator_policy_failure_reports_validation_search_diagnostics():
+    import pytest
+    from ml.generator_trainer import (
+        GeneratorTrainingConfig,
+        _select_policy,
+    )
+
+    validation = pd.DataFrame({"open_time": [1, 2, 3]})
+    probabilities = np.asarray([
+        [0.1, 0.1, 0.8],
+        [0.1, 0.1, 0.8],
+        [0.1, 0.1, 0.8],
+    ])
+    config = GeneratorTrainingConfig(
+        model_type="hist_gradient_boosting",
+        feature_columns=("feature",),
+        min_validation_trades=10,
+        confidence_candidates=(0.5, 0.7),
+        margin_candidates=(0.1, 0.2),
+    )
+
+    def evaluator(_name, _frame, _probabilities, confidence, margin):
+        trades = 4 if confidence == 0.5 else 2
+        return {
+            "trades": trades,
+            "total_net_return": -0.01 if margin == 0.1 else -0.02,
+            "expectancy": -0.002,
+        }
+
+    with pytest.raises(ValueError) as error:
+        _select_policy(validation, probabilities, config, evaluator)
+
+    message = str(error.value)
+    assert "evaluated=4" in message
+    assert "trade_floor_candidates=0" in message
+    assert "required_trades=10" in message
+    assert "max_observed_trades=4" in message
+    assert "best_validation_candidate=" in message
+    assert "Untouched test data was not used" in message
