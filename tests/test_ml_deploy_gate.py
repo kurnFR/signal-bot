@@ -8,7 +8,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from ml.artifacts import paper_eligibility, paper_eligibility_report
+from ml.artifacts import CURRENT_EVALUATION_PROTOCOL_VERSION, paper_eligibility, paper_eligibility_report
 from web.app import app
 from web.auth import create_access_token
 
@@ -129,6 +129,7 @@ class TestDeployEndpoint(unittest.TestCase):
         manifest = {
             "model_id": model_id, "base_strategy": "trend_ema_v1", "model_type": "random_forest",
             "threshold": 0.6, "eligible_for_paper": eligible, "test_metrics": metrics,
+            "evaluation_protocol_version": CURRENT_EVALUATION_PROTOCOL_VERSION,
             "strategy_params": {"symbol": "BTCUSDT", "market": "spot", "timeframe": "1h"},
         }
         (self.models / f"{model_id}.json").write_text(json.dumps(manifest))

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ml.artifacts import ModelArtifact
+from ml.artifacts import CURRENT_EVALUATION_PROTOCOL_VERSION, ModelArtifact
 from ml.model_store import ModelStore
 from paper.engine import _load_verified_ml_model
 
@@ -31,6 +31,7 @@ class TestPaperMLModelLoading(unittest.TestCase):
                     "net_pnl": 12.0,
                 },
                 eligible_for_paper=True,
+                evaluation_protocol_version=CURRENT_EVALUATION_PROTOCOL_VERSION,
             )
             store.save(artifact, {"source": "verified"})
             weight_path = Path(tmp) / "paper-loader-test.joblib"
@@ -85,6 +86,7 @@ class TestPaperMLModelLoading(unittest.TestCase):
                     "net_pnl": 12.0,
                 },
                 eligible_for_paper=True,
+                evaluation_protocol_version=CURRENT_EVALUATION_PROTOCOL_VERSION,
             )
             store.save(artifact, {"source": "validated-manifest"})
             manifest_path = Path(tmp) / "paper-manifest-test.json"

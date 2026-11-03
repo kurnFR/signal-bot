@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from ml.artifacts import ModelArtifact
+from ml.artifacts import CURRENT_EVALUATION_PROTOCOL_VERSION, ModelArtifact
 from ml.model_store import ModelStore
 from ml.registry import ModelRegistry, RegistryEntry
 from ml.strategy import MLSignalFilter
@@ -75,6 +75,7 @@ class TestMLStrategy(unittest.TestCase):
                 "net_pnl": 100.0,
             },
             eligible_for_paper=True,
+            evaluation_protocol_version=CURRENT_EVALUATION_PROTOCOL_VERSION,
         )
 
     def _trained_store(self, root, artifact):

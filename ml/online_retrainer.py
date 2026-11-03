@@ -442,7 +442,7 @@ def _load_experiment_result(result: Any) -> Mapping[str, Any]:
 
 def _verify_persisted_model_artifact(model_id: str, root: str | Path | None = None) -> tuple[Path, Path]:
     """Require a complete, digest-consistent model artifact before checkpointing retraining."""
-    from ml.artifacts import resolve_model_artifact_paths
+    from ml.artifacts import CURRENT_EVALUATION_PROTOCOL_VERSION, resolve_model_artifact_paths
 
     artifact_root = MODEL_ARTIFACTS_DIR if root is None else Path(root)
     try:
@@ -456,6 +456,8 @@ def _verify_persisted_model_artifact(model_id: str, root: str | Path | None = No
 
     if not isinstance(manifest, dict) or manifest.get("model_id") != model_id:
         raise RuntimeError(f"Retrained model artifact manifest ID mismatch: {model_id}")
+    if manifest.get("evaluation_protocol_version") != CURRENT_EVALUATION_PROTOCOL_VERSION:
+        raise RuntimeError(f"Retrained model artifact uses an obsolete evaluation protocol: {model_id}")
     expected_digest = manifest.get("weights_sha256")
     if (
         not isinstance(expected_digest, str)

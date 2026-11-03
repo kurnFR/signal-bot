@@ -211,7 +211,7 @@ def run_real_experiment(*, symbol: str = DEFAULT_SYMBOL, market: str = DEFAULT_M
 
     # Persist model artifact for paper trading integration
     try:
-        from ml.artifacts import ModelArtifact
+        from ml.artifacts import CURRENT_EVALUATION_PROTOCOL_VERSION, ModelArtifact
         from ml.model_store import ModelStore
         models_dir = Path("ml_models")
         models_dir.mkdir(parents=True, exist_ok=True)
@@ -231,6 +231,7 @@ def run_real_experiment(*, symbol: str = DEFAULT_SYMBOL, market: str = DEFAULT_M
             validation_metrics=dict(result.experiment.ml_validation_metrics),
             test_metrics=dict(result.experiment.ml_test_metrics),
             eligible_for_paper=is_eligible,
+            evaluation_protocol_version=CURRENT_EVALUATION_PROTOCOL_VERSION,
         )
         store = ModelStore(models_dir)
         try:
