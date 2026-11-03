@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -192,8 +192,12 @@ def _evaluate_policy(frame: pd.DataFrame, probabilities: np.ndarray,
     return metrics, decisions
 
 
-def _select_policy(validation: pd.DataFrame, probabilities: np.ndarray,
-                   config: GeneratorTrainingConfig) -> tuple[GeneratorPolicy, dict[str, Any]]:
+def _select_policy(
+    validation: pd.DataFrame,
+    probabilities: np.ndarray,
+    config: GeneratorTrainingConfig,
+    policy_evaluator: Callable[[pd.DataFrame, np.ndarray, float, float], Mapping[str, Any]] | None = None,
+) -> tuple[GeneratorPolicy, dict[str, Any]]:
     if config.min_validation_trades < 1:
         raise ValueError("min_validation_trades must be positive")
     best = None
@@ -203,7 +207,15 @@ def _select_policy(validation: pd.DataFrame, probabilities: np.ndarray,
         for margin in config.margin_candidates:
             if not 0.0 < margin < 1.0:
                 raise ValueError("margin candidates must be between zero and one")
-            metrics, _ = _evaluate_policy(validation, probabilities, confidence, margin)
+            if policy_evaluator is None:
+                metrics, _ = _evaluate_policy(validation, probabilities, confidence, margin)
+            else:
+                metrics = dict(policy_evaluator(validation, probabilities, confidence, margin))
+                required_metrics = {"trades", "total_net_return", "expectancy"}
+                if not required_metrics.issubset(metrics):
+                    raise ValueError(
+                        "policy_evaluator must return trades, total_net_return, and expectancy"
+                    )
             if metrics["trades"] < config.min_validation_trades:
                 continue
             score = (
@@ -232,8 +244,16 @@ def train_generator(
     validation: pd.DataFrame,
     test: pd.DataFrame,
     config: GeneratorTrainingConfig,
+    *,
+    policy_evaluator: Callable[[pd.DataFrame, np.ndarray, float, float], Mapping[str, Any]] | None = None,
 ) -> GeneratorTrainingResult:
-    """Fit on TRAIN, select the direction policy on VALIDATION, test once."""
+    """Fit on TRAIN, select the policy on VALIDATION, and evaluate TEST once.
+
+    When supplied, policy_evaluator must execute each candidate through the
+    canonical trading simulator. The default label-level evaluator is retained
+    for isolated trainer diagnostics and must not be used to mark an artifact
+    eligible for paper trading.
+    """
     features = tuple(config.feature_columns)
     if not features or len(set(features)) != len(features):
         raise ValueError("feature_columns must be non-empty and unique")
@@ -260,13 +280,25 @@ def train_generator(
 
     train_probabilities = _class_probabilities(model, x_train)
     validation_probabilities = _class_probabilities(model, x_validation)
-    policy, validation_metrics = _select_policy(validation, validation_probabilities, config)
+    policy, validation_metrics = _select_policy(
+        validation, validation_probabilities, config, policy_evaluator
+    )
 
     # The untouched TEST set is evaluated only after the policy is locked.
     test_probabilities = _class_probabilities(model, x_test)
-    test_metrics, _ = _evaluate_policy(
-        test, test_probabilities, policy.min_confidence, policy.min_directional_margin
-    )
+    if policy_evaluator is None:
+        test_metrics, _ = _evaluate_policy(
+            test, test_probabilities, policy.min_confidence, policy.min_directional_margin
+        )
+    else:
+        test_metrics = dict(policy_evaluator(
+            test, test_probabilities, policy.min_confidence, policy.min_directional_margin
+        ))
+        required_metrics = {"trades", "total_net_return", "expectancy"}
+        if not required_metrics.issubset(test_metrics):
+            raise ValueError(
+                "policy_evaluator must return trades, total_net_return, and expectancy"
+            )
     train_metrics = {
         "rows": len(train),
         "accuracy": float((np.argmax(train_probabilities, axis=1) == train["target"].to_numpy(dtype=int)).mean()),
