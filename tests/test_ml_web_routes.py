@@ -1,4 +1,7 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -31,6 +34,57 @@ class TestMLWebRoutes(unittest.TestCase):
         data = res.json()
         self.assertIn("experiments", data)
         self.assertIsInstance(data["experiments"], list)
+
+    def test_experiment_endpoints_normalize_current_result_schema(self):
+        experiment_id = "real-btcusdt-spot-1h-test"
+        payload = {
+            "experiment_id": experiment_id,
+            "market": "spot",
+            "dataset_rows": 120,
+            "winner": {"model_type": "hist_gradient_boosting"},
+            "experiment": {
+                "experiment_id": experiment_id,
+                "symbol": "BTCUSDT",
+                "timeframe": "1h",
+                "base_strategy": "trend_ema_v1",
+                "threshold": 0.4,
+                "baseline_metrics": {
+                    "validation": {"total_outcome_r": 0.8},
+                    "test": {"total_outcome_r": 1.25, "win_rate_pct": 60.0},
+                },
+                "ml_validation_metrics": {
+                    "probability_diagnostics": {"roc_auc": 0.7, "brier_score": 0.18},
+                },
+                "ml_test_metrics": {
+                    "total_outcome_r": 1.5,
+                    "win_rate_pct": 65.0,
+                    "trade_count": 20,
+                },
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / f"{experiment_id}.json").write_text(
+                json.dumps(payload), encoding="utf-8"
+            )
+            with patch("web.routes.ml_routes.ML_RESULTS_DIR", Path(tmp)):
+                listed = self.client.get("/api/ml/experiments", headers=self.headers)
+                detail = self.client.get(
+                    f"/api/ml/experiments/{experiment_id}", headers=self.headers
+                )
+
+        self.assertEqual(listed.status_code, 200)
+        summary = listed.json()["experiments"][0]
+        self.assertEqual(summary["market"], "spot")
+        self.assertEqual(summary["baseline_test_r"], 1.25)
+        self.assertEqual(summary["roc_auc"], 0.7)
+        self.assertEqual(summary["brier_score"], 0.18)
+
+        self.assertEqual(detail.status_code, 200)
+        normalized = detail.json()["experiment"]
+        self.assertEqual(normalized["market"], "spot")
+        self.assertEqual(normalized["baseline_test_metrics"]["total_outcome_r"], 1.25)
+        self.assertEqual(normalized["probability_diagnostics"]["roc_auc"], 0.7)
 
     def test_list_models_endpoint(self):
         res = self.client.get("/api/ml/models", headers=self.headers)
