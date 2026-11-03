@@ -412,15 +412,14 @@ def get_paper_metrics() -> Dict[str, Any]:
                    AVG(t.r_multiple) AS avg_r,
                    SUM(t.net_pnl) AS net_pnl
             FROM paper_trades t
-            LEFT JOIN paper_positions p ON p.id = t.position_id
-            LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name
+            LEFT JOIN paper_configs c ON c.id = t.config_id
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE
             """
         )
         summary = cur.fetchone()
         cur.execute(
             """
-            SELECT t.strategy_name,
+            SELECT t.strategy_name, t.config_id, t.ml_generator_model_id, t.ml_model_id,
                    COUNT(*) AS total_trades,
                    SUM(CASE WHEN t.r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
                    SUM(CASE WHEN t.r_multiple <= 0 THEN 1 ELSE 0 END) AS losses,
@@ -431,8 +430,8 @@ def get_paper_metrics() -> Dict[str, Any]:
             LEFT JOIN paper_positions p ON p.id = t.position_id
             LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE
-            GROUP BY t.strategy_name
-            ORDER BY t.strategy_name
+            GROUP BY t.strategy_name, t.config_id, t.ml_generator_model_id, t.ml_model_id
+            ORDER BY t.strategy_name, t.config_id
             """
         )
         strategy_rows = cur.fetchall()
@@ -446,6 +445,9 @@ def get_paper_metrics() -> Dict[str, Any]:
             strategy_wins = int(row["wins"] or 0)
             by_strategy.append({
                 "strategy": row["strategy_name"],
+                "configId": row.get("config_id"),
+                "ml_generator_model_id": row.get("ml_generator_model_id"),
+                "ml_model_id": row.get("ml_model_id"),
                 "totalTrades": strategy_total,
                 "wins": strategy_wins,
                 "losses": int(row["losses"] or 0),
