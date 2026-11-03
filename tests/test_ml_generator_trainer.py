@@ -93,3 +93,13 @@ def test_training_rejects_missing_directional_return_columns():
 
     with pytest.raises(ValueError, match="short_net_return"):
         train_generator(train, validation, test, _config())
+
+
+def test_training_rejects_target_columns_in_feature_schema():
+    train, validation, test = _partitions()
+
+    with pytest.raises(ValueError, match="target/future metadata"):
+        train_generator(
+            train, validation, test,
+            _config(feature_columns=("feature", "long_net_return")),
+        )
