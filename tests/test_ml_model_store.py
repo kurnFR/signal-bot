@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -113,6 +114,26 @@ class TestMLModelStore(unittest.TestCase):
             (Path(d) / "store-test-v1.json").symlink_to(target)
             with self.assertRaises(ValueError):
                 store.load_manifest("store-test-v1")
+
+    def test_load_manifest_rejects_symlink_swap_after_resolution(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+            store = ModelStore(directory)
+            artifact = self.artifact()
+            store.save(artifact, {"dummy": True})
+            manifest_path = Path(directory) / f"{artifact.model_id}.json"
+            external_manifest = Path(outside) / "external.json"
+            external_manifest.write_text('{"model_id": "external"}', encoding="utf-8")
+            original_open = os.open
+
+            def replace_with_symlink_then_open(path, flags, *args, **kwargs):
+                if Path(path) == manifest_path:
+                    manifest_path.unlink()
+                    manifest_path.symlink_to(external_manifest)
+                return original_open(path, flags, *args, **kwargs)
+
+            with patch("ml.artifacts.os.open", side_effect=replace_with_symlink_then_open):
+                with self.assertRaisesRegex(ValueError, "could not be opened safely"):
+                    store.load_manifest(artifact.model_id)
 
     def test_duplicate_save_is_rejected(self):
         with tempfile.TemporaryDirectory() as d:
