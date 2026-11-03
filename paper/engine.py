@@ -329,7 +329,8 @@ def get_active_positions() -> List[Dict[str, Any]]:
                 allocated_capital, risk_per_trade_pct, risk_amount,
                 stop_distance, quantity, notional_value, entry_fee,
                 unrealized_pnl_pct, unrealized_r, holding_bars,
-                max_hold_bars, status, last_update_time
+                max_hold_bars, status, last_update_time, config_id,
+                ml_model_id, ml_generator_model_id, ml_probability
             FROM paper_positions
             WHERE status = 'OPEN'
             ORDER BY id DESC
@@ -369,10 +370,10 @@ def get_paper_trades(limit: int = 50) -> List[Dict[str, Any]]:
                 t.stop_loss, t.take_profit, t.quantity, t.notional_value,
                 t.gross_pnl, t.entry_fee, t.exit_fee, t.funding_pnl, t.net_pnl,
                 t.allocated_capital, t.risk_per_trade_pct, t.risk_amount,
-                t.net_return_pct, t.r_multiple, t.holding_bars, t.created_at
+                t.net_return_pct, t.r_multiple, t.holding_bars, t.created_at,
+                t.config_id, t.ml_generator_model_id, t.ml_model_id, t.ml_probability
             FROM paper_trades t
-            LEFT JOIN paper_positions p ON p.id = t.position_id
-            LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name
+            LEFT JOIN paper_configs c ON c.id = t.config_id
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE
             ORDER BY t.id DESC
             LIMIT %s
