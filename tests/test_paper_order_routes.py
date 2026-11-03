@@ -63,6 +63,66 @@ class TestPaperOrderRoutes(unittest.TestCase):
         self.assertFalse(save.call_args.kwargs["telegram_enabled"])
         self.assertTrue(save.call_args.kwargs["report_enabled"])
 
+
+    def test_add_generator_config_requires_typed_eligible_model_when_active(self):
+        with patch("web.app.authenticate_request", return_value=_user()), \
+             patch("ml.generator_artifacts.load_generator_artifact", return_value=(object(), object())) as load, \
+             patch("web.routes.paper_routes.set_paper_config", return_value={"status": "success"}) as save:
+            response = self.client.post("/api/paper/configs", json={
+                "symbol": "BTCUSDT", "market": "spot", "timeframe": "1h",
+                "strategy_name": "ml_signal_generator_v1", "is_active": True,
+                "ml_generator_model_id": "generator-model-1",
+                "allocated_capital": 5000, "risk_per_trade_pct": 1,
+                "telegram_enabled": False, "report_enabled": True,
+            })
+        self.assertEqual(response.status_code, 200)
+        load.assert_called_once_with("generator-model-1", require_eligible=True)
+        self.assertEqual(save.call_args.kwargs["ml_generator_model_id"], "generator-model-1")
+        self.assertIsNone(save.call_args.kwargs.get("ml_model_id"))
+
+    def test_generator_config_without_model_is_rejected(self):
+        with patch("web.app.authenticate_request", return_value=_user()), \
+             patch("web.routes.paper_routes.set_paper_config") as save:
+            response = self.client.post("/api/paper/configs", json={
+                "symbol": "BTCUSDT", "market": "spot", "timeframe": "1h",
+                "strategy_name": "ml_signal_generator_v1", "is_active": False,
+                "allocated_capital": 5000, "risk_per_trade_pct": 1,
+            })
+        self.assertEqual(response.status_code, 400)
+        save.assert_not_called()
+
+    def test_generator_config_cannot_use_legacy_filter_model(self):
+        with patch("web.app.authenticate_request", return_value=_user()), \
+             patch("web.routes.paper_routes.set_paper_config") as save:
+            response = self.client.post("/api/paper/configs", json={
+                "symbol": "BTCUSDT", "market": "spot", "timeframe": "1h",
+                "strategy_name": "ml_signal_generator_v1", "is_active": False,
+                "ml_model_id": "legacy-filter", "ml_generator_model_id": "generator-model-1",
+                "allocated_capital": 5000, "risk_per_trade_pct": 1,
+            })
+        self.assertEqual(response.status_code, 400)
+        save.assert_not_called()
+
+    def test_ineligible_generator_cannot_be_activated(self):
+        with patch("web.app.authenticate_request", return_value=_user()), \
+             patch("ml.generator_artifacts.load_generator_artifact", side_effect=ValueError("not eligible")), \
+             patch("web.routes.paper_routes.set_paper_config") as save:
+            response = self.client.post("/api/paper/configs", json={
+                "symbol": "BTCUSDT", "market": "spot", "timeframe": "1h",
+                "strategy_name": "ml_signal_generator_v1", "is_active": True,
+                "ml_generator_model_id": "research-only-model",
+                "allocated_capital": 5000, "risk_per_trade_pct": 1,
+            })
+        self.assertEqual(response.status_code, 409)
+        save.assert_not_called()
+
+    def test_generator_models_have_separate_listing_endpoint(self):
+        with patch("web.app.authenticate_request", return_value=_user("viewer")), \
+             patch("web.routes.ml_routes.list_generator_artifacts", return_value=[{"model_id": "gen-1"}]):
+            response = self.client.get("/api/ml/generator-models")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["models"], [{"model_id": "gen-1"}])
+
     def test_add_paper_config_rejects_unregistered_strategy(self):
         with patch("web.app.authenticate_request", return_value=_user()), \
              patch("web.routes.paper_routes.set_paper_config") as save:
