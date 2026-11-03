@@ -32,6 +32,7 @@ def test_generator_policy_evaluation_uses_canonical_non_overlapping_simulator():
         0.10,
         evaluation_mode="canonical_simulator_oos",
         strategy_params={"BACKTEST_MAX_HOLD_BARS": 1},
+        horizon_bars=2,
     )
 
     assert metrics["evaluation_mode"] == "canonical_simulator_oos"
@@ -57,3 +58,45 @@ def test_generator_experiment_rejects_cost_assumptions_that_differ_from_paper():
             feature_columns=("feature",),
             label_config={"fee_rate": BACKTEST_FEE_PCT + 0.001},
         )
+
+
+def test_generator_simulation_boundary_does_not_depend_on_label_exit_times(monkeypatch):
+    from ml import generator_experiment
+
+    frame = pd.DataFrame({
+        "open_time": list(range(12)),
+        "open": [100.0] * 12,
+        "high": [101.0] * 12,
+        "low": [99.0] * 12,
+        "close": [100.0] * 12,
+        "atr": [1.0] * 12,
+        "feature": [0.0] * 12,
+    })
+    probabilities = np.asarray([
+        [0.05, 0.05, 0.90],
+        [0.05, 0.05, 0.90],
+        [0.05, 0.05, 0.90],
+    ])
+    boundaries = []
+
+    def capture_simulation_boundary(simulation_frame, params, *args):
+        boundaries.append(params["_simulation_end_open_time"])
+        return []
+
+    monkeypatch.setattr(generator_experiment, "simulate", capture_simulation_boundary)
+
+    for exit_times in ([3, 5, 7], [4, 6, 8]):
+        metrics = _evaluate_partition(
+            frame,
+            pd.DataFrame({"open_time": [2, 4, 6], "exit_time": exit_times}),
+            probabilities,
+            0.60,
+            0.10,
+            evaluation_mode="canonical_simulator_oos",
+            strategy_params={},
+            horizon_bars=2,
+        )
+        assert metrics["simulation_end_open_time"] == 8
+        assert metrics["evaluation_horizon_bars"] == 2
+
+    assert boundaries == [8, 8]

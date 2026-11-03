@@ -115,24 +115,47 @@ def _evaluate_partition(
     *,
     evaluation_mode: str,
     strategy_params: Mapping[str, Any] | None,
+    horizon_bars: int,
 ) -> dict[str, Any]:
-    """Run only this partition's signals through the shared serial simulator."""
+    """Run partition signals to a fixed horizon boundary through the serial simulator.
+
+    The end boundary is based on the final signal timestamp plus the configured
+    number of bars, never on observed label exit timestamps. Label exits depend
+    on future prices and must not choose the evaluation window.
+    """
     if len(partition) != len(probabilities):
         raise ValueError("partition and generator probabilities must align")
+    if isinstance(horizon_bars, bool) or not isinstance(horizon_bars, int) or horizon_bars < 1:
+        raise ValueError("horizon_bars must be a positive integer")
+    ordered_frame = feature_frame.sort_values("open_time", kind="stable").reset_index(drop=True)
+    if ordered_frame["open_time"].duplicated().any():
+        raise ValueError("canonical evaluation frame open_time values must be unique")
     decisions = _decisions(probabilities, confidence, margin)
     decision_by_time = {
         int(open_time): int(decision)
         for open_time, decision in zip(partition["open_time"], decisions)
     }
     signal_start = int(partition["open_time"].min())
-    simulation_end = int(partition["exit_time"].max())
+    final_signal_time = int(partition["open_time"].max())
+    signal_positions = np.flatnonzero(
+        pd.to_numeric(ordered_frame["open_time"], errors="coerce").to_numpy(dtype=np.int64)
+        == final_signal_time
+    )
+    if len(signal_positions) != 1:
+        raise ValueError("canonical evaluation frame is missing the final partition signal candle")
+    end_idx = int(signal_positions[0]) + horizon_bars
+    if end_idx >= len(ordered_frame):
+        raise ValueError("canonical evaluation frame does not contain the fixed label horizon")
+    simulation_end = int(ordered_frame.iloc[end_idx]["open_time"])
+    if int(partition["exit_time"].max()) > simulation_end:
+        raise ValueError("partition label exits exceed the fixed evaluation horizon")
 
-    frame = feature_frame.loc[feature_frame["open_time"] <= simulation_end].copy()
+    frame = ordered_frame.loc[ordered_frame["open_time"] <= simulation_end].copy()
     available_times = set(pd.to_numeric(frame["open_time"], errors="coerce").astype("int64"))
     if not set(decision_by_time).issubset(available_times):
         raise ValueError("canonical evaluation frame is missing partition signal candles")
     if simulation_end not in available_times:
-        raise ValueError("canonical evaluation frame is missing label-resolution boundary")
+        raise ValueError("canonical evaluation frame is missing fixed evaluation boundary")
 
     frame["_ml_generator_decision"] = frame["open_time"].map(decision_by_time).fillna(1).astype(int)
     params = dict(BASE_PARAMS)
@@ -147,7 +170,10 @@ def _evaluate_partition(
         _short_condition,
         _stop_target,
     )
-    return _canonical_metrics(trades, len(partition), evaluation_mode)
+    metrics = _canonical_metrics(trades, len(partition), evaluation_mode)
+    metrics["simulation_end_open_time"] = simulation_end
+    metrics["evaluation_horizon_bars"] = horizon_bars
+    return metrics
 
 
 def run_generator_experiment(
@@ -233,6 +259,7 @@ def run_generator_experiment(
             margin,
             evaluation_mode=mode,
             strategy_params=effective_strategy_params,
+            horizon_bars=int(labels["horizon_bars"]),
         )
 
     training: GeneratorTrainingResult = train_generator(
