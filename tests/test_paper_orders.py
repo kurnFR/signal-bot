@@ -90,6 +90,8 @@ class TestValidateOrder(unittest.TestCase):
             validate_order(_valid_order(ml_generator_model_id=""))
         with self.assertRaises(OrderValidationError):
             validate_order(_valid_order(ml_generator_model_id="g" * 101))
+        with self.assertRaises(OrderValidationError):
+            validate_order(_valid_order(ml_model_id="filter-1", ml_generator_model_id="generator-1"))
 
     def test_rejects_invalid_direction_and_wrong_stop_geometry(self):
         with self.assertRaises(OrderValidationError):
