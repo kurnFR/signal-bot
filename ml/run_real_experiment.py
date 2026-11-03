@@ -12,6 +12,7 @@ import logging
 import os
 import sys
 import tempfile
+import uuid
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -117,6 +118,18 @@ def _result_payload(result: Any, *, dataset_rows: int, market_rows: int) -> dict
             } for item in result.validation_by_candidate]}
 
 
+def _build_experiment_id(*, symbol: str, market: str, timeframe: str,
+                         strategy_name: str, model_type: str, target_type: str) -> str:
+    """Return a unique, readable ID so repeated runs never collide on artifacts."""
+    readable = (
+        f"real-{symbol.lower()}-{market.lower()}-{timeframe}-{strategy_name}-"
+        f"{model_type}-{target_type}"
+    )
+    # Paper-config APIs cap model IDs at 100 characters. Keep the readable
+    # prefix while reserving room for a per-run suffix that prevents collisions.
+    return f"{readable[:87]}-{uuid.uuid4().hex[:12]}"
+
+
 def run_real_experiment(*, symbol: str = DEFAULT_SYMBOL, market: str = DEFAULT_MARKET,
                         timeframe: str = DEFAULT_TIMEFRAME, strategy_name: str = DEFAULT_STRATEGY,
                         model_type: str = DEFAULT_MODEL, target_type: str = DEFAULT_TARGET,
@@ -150,7 +163,10 @@ def run_real_experiment(*, symbol: str = DEFAULT_SYMBOL, market: str = DEFAULT_M
 
     candidates = build_candidates(model_grid=grid, feature_sets=[SHARED_FEATURE_COLUMNS],
                                   thresholds=DEFAULT_THRESHOLDS)
-    experiment_id = f"real-{symbol.lower()}-{market.lower()}-{timeframe}-{strategy_name}-{model_type}-{target_type}"
+    experiment_id = _build_experiment_id(
+        symbol=symbol, market=market, timeframe=timeframe,
+        strategy_name=strategy_name, model_type=model_type, target_type=target_type,
+    )
     result = run_execution_aware_tournament(
         market_df, dataset, candidates, strategy_fn=strategy_fn, base_params=params,
         experiment_id=experiment_id, symbol=symbol, timeframe=timeframe, base_strategy=strategy_name,
@@ -192,8 +208,8 @@ def run_real_experiment(*, symbol: str = DEFAULT_SYMBOL, market: str = DEFAULT_M
             store.save(artifact, result.model)
             logger.info("Persisted model artifact %s for paper trading", experiment_id)
         except FileExistsError:
-            # Deterministic experiment IDs may already have an artifact. Never
-            # overwrite existing model weights or manifests as an implicit retry.
+            # A prior run may already have an artifact. Never overwrite existing
+            # model weights or manifests as an implicit retry.
             logger.warning("Model artifact %s already exists; preserving the existing files", experiment_id)
     except Exception as exc:
         logger.warning("Could not persist model artifact: %s", exc)
