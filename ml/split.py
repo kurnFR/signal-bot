@@ -2,6 +2,8 @@
 
 Random shuffling is deliberately not supported. Boundaries are expressed as
 row fractions or absolute timestamps and every split preserves source order.
+When trade exit timestamps are present, labels crossing a partition boundary
+are purged to prevent future outcomes from leaking into earlier splits.
 """
 from dataclasses import dataclass
 
@@ -60,8 +62,9 @@ def split_by_fractions(
 ) -> TimeSeriesSplit:
     """Split a time-ordered DataFrame into train/validation/test.
 
-    The input must already be ordered by ``open_time``. No rows are shuffled.
-    The three fractions must be positive and leave a positive test fraction.
+    Rows are sorted by ``open_time`` and never shuffled. If ``exit_time`` is
+    present, train/validation labels whose outcomes cross the next boundary
+    are removed. The three fractions must leave a positive test fraction.
     """
     if not 0 < train_fraction < 1:
         raise ValueError("train_fraction must be between 0 and 1")
@@ -99,8 +102,9 @@ def split_by_timestamps(
 
     Rows before ``train_end_time`` are train; rows from train_end_time up to
     validation_end_time are validation; rows at/after validation_end_time are
-    test. This is useful when multiple timeframes must share calendar
-    boundaries, matching backtest.holdout's anti-leakage approach.
+    test. If ``exit_time`` is present, labels crossing either boundary are
+    purged. This is useful when multiple timeframes must share calendar
+    boundaries.
     """
     if validation_end_time <= train_end_time:
         raise ValueError("validation_end_time must be greater than train_end_time")
@@ -118,7 +122,7 @@ def split_by_timestamps(
     if train.empty or validation.empty or test.empty:
         raise ValueError("timestamp boundaries must produce non-empty train/validation/test splits")
 
-    return _purge_overlapping_outcomes(
+    return purge_overlapping_outcomes(
         train.reset_index(drop=True),
         validation.reset_index(drop=True),
         test.reset_index(drop=True),
