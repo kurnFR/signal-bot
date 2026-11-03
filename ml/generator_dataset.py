@@ -97,7 +97,7 @@ def build_generator_dataset(
 
     round_trip_cost = 2.0 * (float(fee_rate) + float(slippage_rate))
     rows = []
-    for signal_idx in range(0, len(data) - horizon_bars - 1):
+    for signal_idx in range(0, len(data) - horizon_bars):
         if not closed[signal_idx]:
             continue
         atr = float(data.at[signal_idx, "atr"])
