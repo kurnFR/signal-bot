@@ -156,7 +156,9 @@ export async function runMLGeneratorExperiment(
       typeof payload.eligible_for_paper !== "boolean" ||
       !isRecord(payload.decision_policy) ||
       !isFiniteNumber(payload.decision_policy.min_confidence) ||
+      payload.decision_policy.min_confidence <= 0 || payload.decision_policy.min_confidence >= 1 ||
       !isFiniteNumber(payload.decision_policy.min_directional_margin) ||
+      payload.decision_policy.min_directional_margin <= 0 || payload.decision_policy.min_directional_margin >= 1 ||
       !isCount(payload.dataset_rows) || !isCount(payload.train_rows) ||
       !isCount(payload.validation_rows) || !isCount(payload.test_rows) ||
       !isRecord(payload.validation_metrics) || !isRecord(payload.test_metrics) ||
