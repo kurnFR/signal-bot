@@ -122,7 +122,15 @@ def test_paper_eligibility_requires_untouched_test_metrics():
 
 def test_paper_eligible_artifact_cannot_bypass_eligibility_gate():
     with pytest.raises(ValueError, match="failed its test gate"):
-        _artifact(eligible_for_paper=True)
+        _artifact(
+            eligible_for_paper=True,
+            test_metrics={
+                "trades": 10,
+                "profit_factor": 0.8,
+                "max_drawdown_pct": 30.0,
+                "total_net_return": -0.1,
+            },
+        )
 
 
 def test_tampered_generator_weights_fail_digest_verification(tmp_path):
