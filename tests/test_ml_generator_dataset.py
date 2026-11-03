@@ -43,6 +43,8 @@ def test_generator_labels_long_without_any_base_strategy_trades():
     assert row["entry_time"] == 200
     assert row["exit_time"] == 200
     assert row["feature"] == 10.0
+    assert row["long_net_return"] > 0
+    assert row["short_net_return"] < 0
 
 
 def test_generator_labels_short_when_lower_barrier_is_first():
@@ -67,6 +69,8 @@ def test_same_bar_touching_both_barriers_is_conservatively_hold():
 
     assert row["target"] == GENERATOR_CLASSES["HOLD"]
     assert row["label_reason"] == "ambiguous_both_barriers_same_bar"
+    assert row["long_net_return"] < 0
+    assert row["short_net_return"] < 0
 
 
 def test_no_barrier_touch_before_horizon_is_hold_and_exit_time_is_recorded():
