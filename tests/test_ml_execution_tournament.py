@@ -71,6 +71,23 @@ def test_execution_tournament_selects_threshold_from_simulator_and_tests_once():
     assert result.validation_by_candidate[0]["selected_metrics"]["net_pnl"] == result.validation_by_candidate[0]["selected_metrics"]["total_outcome_r"]
 
 
+def test_execution_tournament_requires_exit_time_for_purging():
+    dataset = _dataset().drop(columns=["exit_time"])
+    candidate = Candidate("logistic_regression", {}, ("x",), (0.5,))
+
+    try:
+        run_execution_aware_tournament(
+            dataset[["open_time", "x"]], dataset, [candidate],
+            strategy_fn=lambda *_args, **_kwargs: [],
+            experiment_id="missing-exit", symbol="BTCUSDT", timeframe="1h",
+            base_strategy="trend_ema_v1",
+        )
+    except ValueError as exc:
+        assert "exit_time" in str(exc)
+    else:
+        raise AssertionError("expected missing exit_time to be rejected")
+
+
 def test_execution_tournament_rejects_candidate_with_too_few_validation_trades():
     dataset = _dataset()
     market = dataset[["open_time", "x"]].copy()
