@@ -14,7 +14,10 @@ class TestOnlineRetrainerResultPathContract(unittest.TestCase):
             "winner": {"model_type": "hist_gradient_boosting"},
             "experiment": {
                 "threshold": 0.2,
-                "baseline_test_metrics": {"total_outcome_r": 1.0},
+                "baseline_metrics": {
+                    "validation": {"total_outcome_r": 0.8},
+                    "test": {"total_outcome_r": 1.0},
+                },
                 "ml_test_metrics": {"total_outcome_r": 1.5},
             },
         }
@@ -28,6 +31,7 @@ class TestOnlineRetrainerResultPathContract(unittest.TestCase):
 
         self.assertEqual(loaded["winner"]["model_type"], "hist_gradient_boosting")
         self.assertEqual(loaded["experiment"]["threshold"], 0.2)
+        self.assertEqual(loaded["experiment"]["baseline_test_metrics"]["total_outcome_r"], 1.0)
 
     def test_rejects_malformed_result_payload(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -71,6 +75,7 @@ class TestOnlineRetrainerResultPathContract(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["winner_model"], "hist_gradient_boosting")
         self.assertEqual(results[0]["status"], "retrained")
+        self.assertEqual(results[0]["baseline_test_r"], 1.0)
         append_audit.assert_called_once()
         persist.assert_called_once()
         self.assertEqual(persist.call_args.args[0][model_key]["runtime"]["last_candle_count"], 200)
