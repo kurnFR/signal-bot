@@ -107,6 +107,9 @@ def test_paper_eligibility_requires_untouched_test_metrics():
         "profit_factor": 1.1,
         "max_drawdown_pct": 20.0,
         "total_net_return": 0.05,
+        "evaluation_mode": "canonical_simulator_oos",
+        "execution_engine": "backtest.simulate",
+        "non_overlapping_execution": True,
     })
     bad = generator_paper_eligibility_report({
         "trades": 10,
@@ -117,8 +120,21 @@ def test_paper_eligibility_requires_untouched_test_metrics():
 
     assert good["eligible"] is True
     assert bad["eligible"] is False
-    assert len(bad["reasons"]) == 4
+    assert len(bad["reasons"]) == 7
 
+
+
+def test_paper_eligibility_rejects_label_opportunity_metrics_without_simulator_evidence():
+    report = generator_paper_eligibility_report({
+        "trades": 100,
+        "profit_factor": 2.0,
+        "max_drawdown_pct": 5.0,
+        "total_net_return": 0.5,
+    })
+
+    assert report["eligible"] is False
+    assert any("canonical out-of-sample simulator" in reason for reason in report["reasons"])
+    assert any("non-overlapping" in reason for reason in report["reasons"])
 
 def test_paper_eligible_artifact_cannot_bypass_eligibility_gate():
     with pytest.raises(ValueError, match="failed its test gate"):
