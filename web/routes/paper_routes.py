@@ -29,6 +29,7 @@ class PaperConfigRequest(BaseModel):
     allocated_capital: float = Field(5000.0, ge=100.0)
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
     ml_model_id: Optional[str] = Field(None, max_length=100, json_schema_extra={"example": "real-btcusdt-spot-1h-trend_ema_v1-logistic_regression-binary_positive_r"})
+    ml_generator_model_id: Optional[str] = Field(None, max_length=100, description="Typed independent ML signal-generator artifact; separate from the legacy filter model")
     telegram_enabled: Optional[bool] = Field(None, description="Whether paper entry alerts should be sent to Telegram; omitted updates preserve the current preference")
     report_enabled: Optional[bool] = Field(None, description="Whether this strategy appears in per-strategy performance summaries; omitted updates preserve the current preference")
 
@@ -112,6 +113,29 @@ def _sync_retailbot2_lifecycle(strategy_name: str, is_active: bool, telegram_ena
     except Exception as exc:
         logging.getLogger("web.paper_routes").warning("Could not sync RetailBot2 lifecycle: %s", exc)
 
+def _validate_generator_config(strategy_name: str, generator_model_id: Optional[str], filter_model_id: Optional[str], is_active: bool) -> None:
+    generator_strategy = "ml_signal_generator_v1"
+    if strategy_name == generator_strategy:
+        if not generator_model_id:
+            raise HTTPException(status_code=400, detail="Select an independent ML generator model for this strategy.")
+        if filter_model_id:
+            raise HTTPException(status_code=400, detail="The independent generator cannot be combined with a legacy ML filter model.")
+        try:
+            from ml.generator_artifacts import load_generator_artifact
+            load_generator_artifact(generator_model_id, require_eligible=bool(is_active))
+        except Exception as exc:
+            logging.getLogger("web.paper_routes").warning(
+                "Generator model validation failed (%s)", type(exc).__name__
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=("Generator model is invalid or unavailable." if not is_active else
+                        "Generator model must pass the current paper-eligibility gate before activation."),
+            )
+    elif generator_model_id:
+        raise HTTPException(status_code=400, detail="ml_generator_model_id is only valid for ml_signal_generator_v1.")
+
+
 @router.post("/configs")
 def update_config(req: PaperConfigRequest):
     if not math.isfinite(req.allocated_capital) or not math.isfinite(req.risk_per_trade_pct):
@@ -127,6 +151,9 @@ def update_config(req: PaperConfigRequest):
         raise HTTPException(status_code=400, detail="market must be spot or futures")
     if req.timeframe.strip() not in {"15m", "1h", "4h", "1d"}:
         raise HTTPException(status_code=400, detail="timeframe must be one of: 15m, 1h, 4h, 1d")
+    _validate_generator_config(
+        req.strategy_name.strip(), req.ml_generator_model_id, req.ml_model_id, req.is_active
+    )
     res = set_paper_config(
         req.symbol.strip().upper(),
         req.market.strip().lower(),
@@ -138,6 +165,7 @@ def update_config(req: PaperConfigRequest):
         req.ml_model_id.strip() if req.ml_model_id else None,
         telegram_enabled=req.telegram_enabled,
         report_enabled=req.report_enabled,
+        ml_generator_model_id=req.ml_generator_model_id.strip() if req.ml_generator_model_id else None,
     )
     _sync_retailbot2_lifecycle(
         req.strategy_name.strip(),
@@ -202,6 +230,11 @@ def deploy_strategy(req: DeployStrategyRequest):
     if not req.symbol.strip() or not req.strategy_name.strip():
         raise HTTPException(status_code=400, detail="symbol and strategy_name must not be blank")
     strategy_name = req.strategy_name.strip()
+    if strategy_name == "ml_signal_generator_v1":
+        raise HTTPException(
+            status_code=400,
+            detail="Use /api/paper/configs with an explicit generator model and independent Telegram preference.",
+        )
     market = req.market.strip().lower()
     timeframe = req.timeframe.strip()
     if strategy_name not in STRATEGIES and strategy_name not in OVERLAY_STRATEGIES:
