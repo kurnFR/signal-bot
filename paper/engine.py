@@ -537,14 +537,20 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
         conn_cfg = get_pool().get_connection()
         try:
             cur_cfg = conn_cfg.cursor(dictionary=True)
-            cur_cfg.execute(
-                """
-                SELECT telegram_enabled FROM paper_configs
-                WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
-                LIMIT 1
-                """,
-                (pos["symbol"], pos["market"], pos["timeframe"], pos["strategy_name"]),
-            )
+            if pos.get("config_id") is not None:
+                cur_cfg.execute(
+                    "SELECT telegram_enabled FROM paper_configs WHERE id=%s LIMIT 1",
+                    (int(pos["config_id"]),),
+                )
+            else:
+                cur_cfg.execute(
+                    """
+                    SELECT telegram_enabled FROM paper_configs
+                    WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
+                    LIMIT 1
+                    """,
+                    (pos["symbol"], pos["market"], pos["timeframe"], pos["strategy_name"]),
+                )
             cfg_row = cur_cfg.fetchone()
             cur_cfg.close()
             if cfg_row and cfg_row.get("telegram_enabled"):
