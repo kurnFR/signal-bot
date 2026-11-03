@@ -17,7 +17,7 @@ def test_static_ml_studio_exposes_generator_training_form():
     assert "await this.fetchPaperGeneratorModels()" in app_js
     assert "/api/ml/generator-models" in app_js
     assert "generatorData.models.length" in app_js
-    assert "/static/js/app.js?v=20261103-2" in html
+    assert "/static/js/app.js?v=20261103-3" in html
 
 
 def test_static_paper_config_keeps_generator_and_telegram_controls_separate():
