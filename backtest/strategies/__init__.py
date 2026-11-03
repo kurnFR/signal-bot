@@ -57,3 +57,9 @@ from backtest.strategies.retailbot2_strategies import (
     RETAILBOT2_STRATEGIES, RETAILBOT2_STRATEGY_NAMES
 )
 STRATEGIES.update(RETAILBOT2_STRATEGIES)
+
+
+# Independent ML strategy: generates its own candle-level LONG/SHORT/HOLD
+# decisions and deliberately has no inverse wrapper or base-strategy dependency.
+from backtest.strategies import ml_signal_generator
+STRATEGIES[ml_signal_generator.NAME] = ml_signal_generator.run
