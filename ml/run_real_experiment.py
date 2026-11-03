@@ -10,6 +10,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 import uuid
@@ -120,7 +121,23 @@ def _result_payload(result: Any, *, dataset_rows: int, market_rows: int) -> dict
 
 def _build_experiment_id(*, symbol: str, market: str, timeframe: str,
                          strategy_name: str, model_type: str, target_type: str) -> str:
-    """Return a unique, readable ID so repeated runs never collide on artifacts."""
+    """Return a unique, filesystem-safe ID for one experiment run."""
+    components = {
+        "symbol": symbol,
+        "market": market,
+        "timeframe": timeframe,
+        "strategy_name": strategy_name,
+        "model_type": model_type,
+        "target_type": target_type,
+    }
+    for name, value in components.items():
+        if (
+            not isinstance(value, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", value)
+            or ".." in value
+        ):
+            raise ValueError(f"Invalid experiment identifier component: {name}")
+
     readable = (
         f"real-{symbol.lower()}-{market.lower()}-{timeframe}-{strategy_name}-"
         f"{model_type}-{target_type}"
