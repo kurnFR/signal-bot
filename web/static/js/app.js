@@ -4896,10 +4896,12 @@ const App = {
                 const md = await modelsRes.json();
                 const generatorData = await generatorModelsRes.json();
                 if (md === null || typeof md !== "object" || Array.isArray(md) ||
-                    !Array.isArray(md.models) ||
-                    generatorData === null || typeof generatorData !== "object" ||
+                    !Array.isArray(md.models)) {
+                    throw new Error("Invalid ML models response");
+                }
+                if (generatorData === null || typeof generatorData !== "object" ||
                     Array.isArray(generatorData) || !Array.isArray(generatorData.models)) {
-                    throw new Error("Invalid ML model catalog response");
+                    throw new Error("Invalid generator models response");
                 }
                 const modelsStat = document.getElementById("ml-stat-models");
                 if (modelsStat) modelsStat.innerText = md.models.length + generatorData.models.length;
