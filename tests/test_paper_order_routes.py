@@ -66,6 +66,7 @@ class TestPaperOrderRoutes(unittest.TestCase):
 
     def test_add_generator_config_requires_typed_eligible_model_when_active(self):
         with patch("web.app.authenticate_request", return_value=_user()), \
+             patch("web.routes.paper_routes.get_paper_configs", return_value=[]), \
              patch("ml.generator_artifacts.load_generator_artifact", return_value=(object(), object())) as load, \
              patch("web.routes.paper_routes.set_paper_config", return_value={"status": "success"}) as save:
             response = self.client.post("/api/paper/configs", json={
@@ -79,6 +80,28 @@ class TestPaperOrderRoutes(unittest.TestCase):
         load.assert_called_once_with("generator-model-1", require_eligible=True)
         self.assertEqual(save.call_args.kwargs["ml_generator_model_id"], "generator-model-1")
         self.assertIsNone(save.call_args.kwargs.get("ml_model_id"))
+
+
+    def test_existing_active_generator_can_disable_telegram_without_reloading_model(self):
+        existing = [{
+            "symbol": "BTCUSDT", "market": "spot", "timeframe": "1h",
+            "strategy_name": "ml_signal_generator_v1",
+            "ml_generator_model_id": "generator-model-1", "is_active": True,
+        }]
+        with patch("web.app.authenticate_request", return_value=_user()), \
+             patch("web.routes.paper_routes.get_paper_configs", return_value=existing), \
+             patch("ml.generator_artifacts.load_generator_artifact") as load, \
+             patch("web.routes.paper_routes.set_paper_config", return_value={"status": "success"}) as save:
+            response = self.client.post("/api/paper/configs", json={
+                "symbol": "BTCUSDT", "market": "spot", "timeframe": "1h",
+                "strategy_name": "ml_signal_generator_v1", "is_active": True,
+                "ml_generator_model_id": "generator-model-1",
+                "allocated_capital": 5000, "risk_per_trade_pct": 1,
+                "telegram_enabled": False, "report_enabled": True,
+            })
+        self.assertEqual(response.status_code, 200)
+        load.assert_not_called()
+        self.assertFalse(save.call_args.kwargs["telegram_enabled"])
 
     def test_generator_config_without_model_is_rejected(self):
         with patch("web.app.authenticate_request", return_value=_user()), \
@@ -105,6 +128,7 @@ class TestPaperOrderRoutes(unittest.TestCase):
 
     def test_ineligible_generator_cannot_be_activated(self):
         with patch("web.app.authenticate_request", return_value=_user()), \
+             patch("web.routes.paper_routes.get_paper_configs", return_value=[]), \
              patch("ml.generator_artifacts.load_generator_artifact", side_effect=ValueError("not eligible")), \
              patch("web.routes.paper_routes.set_paper_config") as save:
             response = self.client.post("/api/paper/configs", json={
