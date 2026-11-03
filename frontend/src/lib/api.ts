@@ -1,6 +1,6 @@
 /**
  * Same-origin JSON transport for verified API endpoints.
- * Mutations are exposed only through explicit domain helpers that call postJson.
+ * JSON mutations are restricted to a reviewed endpoint allowlist.
  */
 // Keep mutation scope explicit: this UI currently needs only generator training.
 // Add a path here only after reviewing the endpoint's authorization and side effects.
