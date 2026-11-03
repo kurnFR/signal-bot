@@ -69,6 +69,8 @@ def validate_order(order: dict[str, Any]) -> dict[str, Any]:
     if direction == "SHORT" and not target < entry < stop:
         raise OrderValidationError("SHORT order requires take_profit < entry < stop_loss")
     generator_model_id = order.get("ml_generator_model_id")
+    if order.get("ml_model_id") and generator_model_id:
+        raise OrderValidationError("an order cannot reference both an ML filter and a generator model")
     if generator_model_id is not None and (
         not isinstance(generator_model_id, str)
         or not generator_model_id.strip()
