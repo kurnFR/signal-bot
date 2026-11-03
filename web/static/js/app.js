@@ -4891,20 +4891,30 @@ const App = {
                 fetch(`${API_BASE}/api/ml/generator-models`, { headers: this.getAuthHeaders() }),
             ]);
             if (!modelsRes.ok) throw new Error(`ML models request failed: HTTP ${modelsRes.status}`);
-            if (!generatorModelsRes.ok) throw new Error(`Generator models request failed: HTTP ${generatorModelsRes.status}`);
             {
                 const md = await modelsRes.json();
-                const generatorData = await generatorModelsRes.json();
                 if (md === null || typeof md !== "object" || Array.isArray(md) ||
                     !Array.isArray(md.models)) {
                     throw new Error("Invalid ML models response");
                 }
-                if (generatorData === null || typeof generatorData !== "object" ||
-                    Array.isArray(generatorData) || !Array.isArray(generatorData.models)) {
-                    throw new Error("Invalid generator models response");
+                let generatorModelCount = 0;
+                if (generatorModelsRes.ok) {
+                    try {
+                        const generatorData = await generatorModelsRes.json();
+                        if (generatorData && typeof generatorData === "object" &&
+                            !Array.isArray(generatorData) && Array.isArray(generatorData.models)) {
+                            generatorModelCount = generatorData.models.length;
+                        } else {
+                            console.warn("Invalid generator models response; preserving legacy ML catalog.");
+                        }
+                    } catch (generatorError) {
+                        console.warn("Generator model catalog unavailable; preserving legacy ML catalog.");
+                    }
+                } else {
+                    console.warn("Generator model catalog request failed; preserving legacy ML catalog.");
                 }
                 const modelsStat = document.getElementById("ml-stat-models");
-                if (modelsStat) modelsStat.innerText = md.models.length + generatorData.models.length;
+                if (modelsStat) modelsStat.innerText = md.models.length + generatorModelCount;
             }
 
             // 3. Fetch experiments list
