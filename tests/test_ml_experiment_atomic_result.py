@@ -2,6 +2,10 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+from ml.result import ExperimentResult
+from ml.tournament import Candidate
 from unittest.mock import patch
 
 from ml import run_real_experiment
@@ -52,6 +56,47 @@ class TestMLExperimentAtomicResult(unittest.TestCase):
                 strategy_name="trend_ema_v1", model_type="logistic_regression",
                 target_type="binary_positive_r",
             )
+
+    def test_result_payload_exposes_experiment_id_at_top_level(self):
+        experiment = ExperimentResult(
+            experiment_id="real-btcusdt-spot-1h-test",
+            symbol="BTCUSDT",
+            timeframe="1h",
+            base_strategy="trend_ema_v1",
+            model_type="logistic_regression",
+            baseline_metrics={},
+            ml_validation_metrics={},
+            ml_test_metrics={},
+            threshold=0.5,
+        )
+        candidate = Candidate(
+            model_type="logistic_regression",
+            model_params={},
+            feature_columns=("rsi",),
+            threshold_candidates=(0.5,),
+        )
+        score = SimpleNamespace(
+            candidate=candidate,
+            validation_net_pnl_r=1.0,
+            validation_profit_factor=1.2,
+            validation_max_drawdown_r=0.5,
+            validation_trade_count=20,
+        )
+        result = SimpleNamespace(
+            experiment=experiment,
+            winner=candidate,
+            ranked_validation=(score,),
+            validation_by_candidate=(),
+        )
+
+        payload = run_real_experiment._result_payload(
+            result, dataset_rows=30, market_rows=1000
+        )
+
+        self.assertEqual(payload["experiment_id"], experiment.experiment_id)
+        self.assertEqual(
+            payload["experiment"]["experiment_id"], experiment.experiment_id
+        )
 
     def test_atomic_result_write_replaces_complete_file(self):
         with tempfile.TemporaryDirectory() as tmp:

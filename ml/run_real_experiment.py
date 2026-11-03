@@ -106,7 +106,8 @@ def _result_payload(result: Any, *, dataset_rows: int, market_rows: int) -> dict
                "validation_max_drawdown_r": score.validation_max_drawdown_r,
                "validation_trade_count": score.validation_trade_count}
               for score in result.ranked_validation]
-    return {"status": experiment.status, "dataset_rows": dataset_rows, "market_rows": market_rows,
+    return {"status": experiment.status, "experiment_id": experiment.experiment_id,
+            "dataset_rows": dataset_rows, "market_rows": market_rows,
             "experiment": asdict(experiment), "winner": _candidate_to_dict(result.winner),
             "ranked_validation": ranked,
             "validation_by_candidate": [{
