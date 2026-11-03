@@ -73,6 +73,23 @@ class TestMLArtifacts(unittest.TestCase):
 
 
 
+    def test_legacy_unpurged_manifest_cannot_load_for_paper(self):
+        manifest = ModelArtifact(
+            model_id="legacy-model", experiment_id="exp-legacy",
+            model_type="random_forest", base_strategy="trend_ema",
+            feature_columns=("rsi",), strategy_params={}, model_params={},
+            threshold=0.5, train_metrics={}, validation_metrics={},
+            test_metrics={"trade_count": 40, "profit_factor": 1.2,
+                          "max_drawdown_pct": 10, "net_pnl": 10},
+            eligible_for_paper=True,
+            evaluation_protocol_version=CURRENT_EVALUATION_PROTOCOL_VERSION,
+            weights_sha256="b" * 64,
+        ).manifest()
+        legacy = dict(manifest)
+        legacy.pop("evaluation_protocol_version")
+        with self.assertRaisesRegex(ValueError, "current purged exit-time protocol"):
+            load_eligible_paper_artifact(legacy, "legacy-model")
+
     def test_weight_hash_verification_detects_tampering(self):
         import hashlib
         with tempfile.TemporaryDirectory() as d:
