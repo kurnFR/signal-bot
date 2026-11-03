@@ -672,6 +672,12 @@ def _insert_position(
         return None
     entry_fee = raw_entry * size.quantity * BACKTEST_FEE_PCT
     atr = float(trade.get("atr_at_signal", 0.0) or 0.0)
+    raw_max_hold_bars = trade.get("max_hold_bars", 200)
+    if isinstance(raw_max_hold_bars, bool):
+        raise ValueError("max_hold_bars must be an integer between 1 and 1000")
+    max_hold_bars = int(raw_max_hold_bars)
+    if max_hold_bars < 1 or max_hold_bars > 1000 or max_hold_bars != raw_max_hold_bars:
+        raise ValueError("max_hold_bars must be an integer between 1 and 1000")
 
     # last_update_time = open_time of the last candle whose data has been
     # applied to this position (holding_bars, SL/TP, trailing). At insert
@@ -701,13 +707,13 @@ def _insert_position(
                 ml_model_id, ml_probability, config_id, ml_generator_model_id
             ) VALUES (
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0,1.0,1.5,%s,%s,0.0,0.0,
-                0,200,%s,'OPEN',%s,%s,%s,%s,%s,%s,%s,0.0,0.0,%s,%s,%s,%s
+                0,%s,%s,'OPEN',%s,%s,%s,%s,%s,%s,%s,0.0,0.0,%s,%s,%s,%s
             )
             """,
             (
                 cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"], direction,
                 int(candle_open_time), raw_entry, current_close, stop_loss, take_profit, stop_loss,
-                atr, size.stop_distance, last_applied_candle, cfg["allocated_capital"],
+                atr, size.stop_distance, max_hold_bars, last_applied_candle, cfg["allocated_capital"],
                 cfg["risk_per_trade_pct"], size.risk_amount, size.stop_distance,
                 size.quantity, size.notional, entry_fee, ml_model_id, ml_probability,
                 cfg.get("id"), ml_generator_model_id or cfg.get("ml_generator_model_id"),
