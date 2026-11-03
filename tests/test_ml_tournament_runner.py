@@ -38,6 +38,14 @@ class TestMLTournamentRunner(unittest.TestCase):
                 timeframe="1h", base_strategy="trend_ema_v1",
             )
 
+    def test_missing_exit_time_is_rejected(self):
+        dataset = self._dataset().drop(columns=["exit_time"])
+        with self.assertRaisesRegex(ValueError, "exit_time"):
+            run_tournament(
+                dataset, [self._candidate()], experiment_id="x", symbol="BTCUSDT",
+                timeframe="1h", base_strategy="trend_ema_v1",
+            )
+
     def test_candidate_limit_enforced(self):
         candidates = [
             self._candidate("logistic_regression", {"C": 0.5}),
