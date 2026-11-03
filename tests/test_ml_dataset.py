@@ -25,6 +25,7 @@ class TestMLDataset(unittest.TestCase):
         df = self._frame()
         trades = [{
             "signal_open_time": 2000,
+            "exit_time": 3000,
             "direction": "LONG",
             "r_multiple": 1.25,
             "net_pnl": 62.5,
@@ -42,6 +43,7 @@ class TestMLDataset(unittest.TestCase):
         df = self._frame()
         trades = [{
             "signal_open_time": 1000,
+            "exit_time": 2000,
             "direction": "SHORT",
             "r_multiple": -0.8,
             "net_pnl": -40.0,
@@ -50,9 +52,15 @@ class TestMLDataset(unittest.TestCase):
         self.assertEqual(result.iloc[0]["target"], 0)
         self.assertEqual(result.iloc[0]["signal_direction"], -1)
 
+    def test_missing_exit_time_fails_closed(self):
+        df = self._frame()
+        trades = [{"signal_open_time": 1000, "direction": "LONG", "r_multiple": 1.0}]
+        with self.assertRaisesRegex(ValueError, "exit_time"):
+            build_signal_dataset(df, trades)
+
     def test_missing_feature_row_fails_closed(self):
         df = self._frame()
-        trades = [{"signal_open_time": 9999, "direction": "LONG", "r_multiple": 1.0}]
+        trades = [{"signal_open_time": 9999, "exit_time": 10000, "direction": "LONG", "r_multiple": 1.0}]
         with self.assertRaises(ValueError):
             build_signal_dataset(df, trades)
 
