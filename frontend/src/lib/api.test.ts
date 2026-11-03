@@ -56,4 +56,50 @@ describe("read-only same-origin API transport", () => {
     await expect(getJson("/api/health")).rejects.toMatchObject({ code: "invalid-content-type" });
     await expect(getJson("/api/health")).rejects.toMatchObject({ code: "invalid-json" });
   });
+
+
+  it("posts typed JSON only to validated same-origin API paths", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"status":"saved"}', {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    window.localStorage.setItem("token", "test-session-token");
+    vi.stubGlobal("fetch", fetchMock);
+    const { postJson } = await import("./api");
+
+    await expect(postJson<{ status: string }, { symbol: string }>(
+      "/api/ml/generator/run-experiment",
+      { symbol: "BTCUSDT" },
+    )).resolves.toEqual({ status: "saved" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/ml/generator/run-experiment", expect.objectContaining({
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: "Bearer test-session-token",
+      },
+      body: JSON.stringify({ symbol: "BTCUSDT" }),
+    }));
+    await expect(postJson("/api/../static/app.js", {})).rejects.toThrow(TypeError);
+  });
+
+  it("clears an expired session on a protected JSON POST", async () => {
+    window.localStorage.setItem("token", "expired-session-token");
+    const listener = vi.fn();
+    window.addEventListener("signal-bot:session-expired", listener);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: "Not authenticated" }), { status: 401 },
+    )));
+    const { postJson } = await import("./api");
+
+    await expect(postJson("/api/ml/generator/run-experiment", {})).rejects.toMatchObject({
+      status: 401,
+      code: "http",
+    });
+    expect(window.localStorage.getItem("token")).toBeNull();
+    expect(listener).toHaveBeenCalledTimes(1);
+    window.removeEventListener("signal-bot:session-expired", listener);
+  });
+
 });
