@@ -51,6 +51,15 @@ class TestPaperMLModelLoading(unittest.TestCase):
         self.assertEqual(loaded_artifact.model_id, "paper-loader-test")
         self.assertEqual(loaded_model, {"source": "verified"})
 
+        from ml.strategy import MLSignalFilter
+        loaded_filter = MLSignalFilter.from_artifact(
+            artifact=loaded_artifact,
+            model=loaded_model,
+            base_strategy=lambda *_args, **_kwargs: [],
+        )
+        self.assertIs(loaded_filter.model, loaded_model)
+        self.assertEqual(loaded_filter.model_id, "paper-loader-test")
+
 
     def test_runtime_uses_the_manifest_that_passed_eligibility_validation(self):
         import json

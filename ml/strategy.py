@@ -60,13 +60,35 @@ class MLSignalFilter:
             raise ValueError("ML artifact feature schema does not match requested features")
 
         loaded_model = store.load(artifact, expected)
+        return cls.from_artifact(
+            artifact=artifact,
+            model=loaded_model,
+            base_strategy=base_strategy,
+        )
+
+    @classmethod
+    def from_artifact(
+        cls,
+        *,
+        artifact: ModelArtifact,
+        model: Any,
+        base_strategy: Callable,
+    ) -> "MLSignalFilter":
+        """Construct an inference-only filter from an already verified artifact/model pair."""
+        if not isinstance(artifact, ModelArtifact):
+            raise TypeError("artifact must be a ModelArtifact")
+        if model is None:
+            raise ValueError("a loaded model is required")
+        if not artifact.feature_columns:
+            raise ValueError("ML artifact feature schema must not be empty")
+
         filt = cls(
             base_strategy=base_strategy,
             model_type=artifact.model_type,
             model_params=artifact.model_params,
             threshold=artifact.threshold,
         )
-        filt.model = loaded_model
+        filt.model = model
         filt.feature_columns = tuple(artifact.feature_columns)
         filt.model_id = artifact.model_id
         filt.artifact = artifact

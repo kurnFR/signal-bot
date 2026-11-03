@@ -1049,7 +1049,11 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                             from ml.strategy import MLSignalFilter
 
                             artifact, model = _load_verified_ml_model(ml_model_id)
-                            ml_filter = MLSignalFilter(artifact=artifact, model=model, threshold=artifact.threshold)
+                            ml_filter = MLSignalFilter.from_artifact(
+                                artifact=artifact,
+                                model=model,
+                                base_strategy=STRATEGIES[strategy_name],
+                            )
 
                             # Evaluate features on current candle
                             feature_row = pd.DataFrame([latest_bar.to_dict()])
