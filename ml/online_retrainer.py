@@ -417,10 +417,25 @@ def _load_experiment_result(result: Any) -> Mapping[str, Any]:
         raise ValueError("Experiment result is missing experiment details")
     if not isinstance(experiment.get("threshold"), (int, float)):
         raise ValueError("Experiment result is missing a numeric threshold")
-    for field in ("baseline_test_metrics", "ml_test_metrics"):
-        if not isinstance(experiment.get(field), Mapping):
-            raise ValueError(f"Experiment result is missing {field}")
-    return payload
+
+    # Current execution-tournament results group baseline metrics by segment,
+    # while older integrations used a flat baseline_test_metrics field.
+    # Normalize both contracts so the retrainer consumes the actual test slice.
+    baseline_test_metrics = experiment.get("baseline_test_metrics")
+    if not isinstance(baseline_test_metrics, Mapping):
+        baseline_metrics = experiment.get("baseline_metrics")
+        if isinstance(baseline_metrics, Mapping):
+            baseline_test_metrics = baseline_metrics.get("test")
+    if not isinstance(baseline_test_metrics, Mapping):
+        raise ValueError("Experiment result is missing baseline test metrics")
+    if not isinstance(experiment.get("ml_test_metrics"), Mapping):
+        raise ValueError("Experiment result is missing ml_test_metrics")
+
+    normalized_experiment = dict(experiment)
+    normalized_experiment["baseline_test_metrics"] = baseline_test_metrics
+    normalized_payload = dict(payload)
+    normalized_payload["experiment"] = normalized_experiment
+    return normalized_payload
 
 def _public_audit_entry(entry: Any) -> dict[str, Any]:
     """Expose only documented audit fields; never return persisted exception text."""
