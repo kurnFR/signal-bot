@@ -104,7 +104,12 @@ class GeneratorArtifact:
         forbidden = sorted(set(self.feature_columns) & _FORBIDDEN_FEATURES)
         if forbidden:
             raise ValueError("feature schema contains target/future metadata: " + ", ".join(forbidden))
-        if self.class_mapping != GENERATOR_CLASS_MAPPING:
+        if (
+            not isinstance(self.class_mapping, dict)
+            or set(self.class_mapping) != set(GENERATOR_CLASS_MAPPING)
+            or any(type(value) is not int for value in self.class_mapping.values())
+            or self.class_mapping != GENERATOR_CLASS_MAPPING
+        ):
             raise ValueError("generator class mapping must be SHORT=0, HOLD=1, LONG=2")
         if not isinstance(self.decision_policy, dict):
             raise ValueError("decision_policy must be an object")
@@ -214,6 +219,15 @@ def load_generator_artifact(
         raise ValueError("loaded generator model does not support SHORT, HOLD, and LONG")
     if not hasattr(model, "predict_proba"):
         raise ValueError("loaded generator model does not expose predict_proba")
-    if not hasattr(model, "_signal_bot_generator_preprocessor"):
+    if not callable(getattr(model, "predict_proba", None)):
+        raise ValueError("loaded generator model does not expose predict_proba")
+    if tuple(getattr(model, "_signal_bot_generator_feature_columns", ())) != artifact.feature_columns:
+        raise ValueError("loaded generator model feature schema does not match its manifest")
+    preprocessor = getattr(model, "_signal_bot_generator_preprocessor", None)
+    if (
+        not isinstance(preprocessor, tuple)
+        or len(preprocessor) != 2
+        or not all(callable(getattr(item, "transform", None)) for item in preprocessor)
+    ):
         raise ValueError("loaded generator model is missing its fitted preprocessor")
     return artifact, model
