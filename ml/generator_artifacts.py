@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
 import math
+import hashlib
+import stat
 import os
 from pathlib import Path
 import re
@@ -41,6 +43,12 @@ def generator_paper_eligibility_report(
     reasons = []
     if not isinstance(test_metrics, Mapping):
         return {"eligible": False, "reasons": ["test metrics must be an object"]}
+    if test_metrics.get("evaluation_mode") != "canonical_simulator_oos":
+        reasons.append("test metrics must come from canonical out-of-sample simulator execution")
+    if test_metrics.get("execution_engine") != "backtest.simulate":
+        reasons.append("test metrics must identify the canonical backtest simulator")
+    if test_metrics.get("non_overlapping_execution") is not True:
+        reasons.append("test metrics must confirm non-overlapping executable trades")
 
     trades = test_metrics.get("trades")
     if isinstance(trades, bool) or not isinstance(trades, (int, float)) or not math.isfinite(float(trades)) or int(trades) != trades or trades < min_test_trades:
@@ -246,17 +254,26 @@ def list_generator_artifacts(directory: str | Path = "ml_models") -> list[dict[s
             artifact = GeneratorArtifact.from_manifest(manifest)
             if artifact.model_id != candidate.stem:
                 continue
+            weights_verified = False
             try:
                 _, weights_path = resolve_model_artifact_paths(artifact.model_id, root)
-                has_weights = weights_path.is_file()
+                descriptor = os.open(
+                    weights_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                )
+                with os.fdopen(descriptor, "rb") as handle:
+                    if stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                        digest = hashlib.sha256()
+                        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                            digest.update(chunk)
+                        weights_verified = digest.hexdigest() == artifact.weights_sha256
             except (OSError, ValueError, FileNotFoundError):
-                has_weights = False
+                weights_verified = False
             report = generator_paper_eligibility_report(artifact.test_metrics)
             reasons = list(report["reasons"])
             if not artifact.eligible_for_paper:
                 reasons.append("manifest is not flagged eligible_for_paper")
-            if not has_weights:
-                reasons.append("model weights are missing")
+            if not weights_verified:
+                reasons.append("model weights are missing or fail SHA-256 verification")
             results.append({
                 "model_id": artifact.model_id,
                 "experiment_id": artifact.experiment_id,
