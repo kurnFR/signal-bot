@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from ml.experiment import ExperimentResult
+from ml.result import ExperimentResult
 from ml.tournament import Candidate
 from unittest.mock import patch
 
