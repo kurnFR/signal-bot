@@ -692,7 +692,7 @@ const App = {
                     throw new Error("Invalid Wallet Tracker tracked-wallet response");
                 }
                 this._wtRenderStatus(scannerStatus, tracked.tracked.length);
-            } catch (refreshError) {
+            } catch {
                 if (status) status.innerText = `Settings saved, but status refresh failed: ${refreshError.message || refreshError}`;
             }
         } catch (e) {
@@ -4911,7 +4911,7 @@ const App = {
                         } else {
                             console.warn("Invalid generator models response; preserving legacy ML catalog.");
                         }
-                    } catch (generatorError) {
+                    } catch {
                         console.warn("Generator model catalog unavailable; preserving legacy ML catalog.");
                     }
                 } else {
