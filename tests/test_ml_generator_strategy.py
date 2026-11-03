@@ -149,3 +149,9 @@ def test_paper_mode_rejects_research_only_generator_artifact(tmp_path):
     )
 
     assert run(frame, params) == []
+
+
+def test_standalone_generator_is_registered_as_a_selectable_strategy():
+    from backtest.strategies import STRATEGIES
+
+    assert STRATEGIES[NAME] is run
