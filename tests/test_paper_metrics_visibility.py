@@ -23,7 +23,8 @@ def test_paper_metrics_headline_uses_same_report_visibility_as_strategy_rows():
 
         def fetchall(self):
             return [{
-                "strategy_name": "visible_strategy",
+                "strategy_name": "visible_strategy", "config_id": 11,
+                "ml_generator_model_id": "generator-1", "ml_model_id": None,
                 "total_trades": 2,
                 "wins": 1,
                 "losses": 1,
@@ -55,8 +56,7 @@ def test_paper_metrics_headline_uses_same_report_visibility_as_strategy_rows():
     assert len(cursor.queries) == 2
     summary_query, strategy_query = cursor.queries
     for query in (summary_query, strategy_query):
-        assert "LEFT JOIN paper_positions p ON p.id = t.position_id" in query
-        assert "LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name" in query
+        assert "LEFT JOIN paper_configs c ON c.id = t.config_id" in query
         assert "WHERE COALESCE(c.report_enabled, TRUE) = TRUE" in query
 
     assert metrics["totalTrades"] == 2
@@ -65,6 +65,8 @@ def test_paper_metrics_headline_uses_same_report_visibility_as_strategy_rows():
     assert metrics["winRatePct"] == 50.0
     assert metrics["netPnl"] == 15.0
     assert [row["strategy"] for row in metrics["byStrategy"]] == ["visible_strategy"]
+    assert metrics["byStrategy"][0]["configId"] == 11
+    assert metrics["byStrategy"][0]["ml_generator_model_id"] == "generator-1"
 
 
 
@@ -107,6 +109,5 @@ def test_recent_paper_trades_respect_report_visibility(monkeypatch):
     rows = engine.get_paper_trades(limit=20)
 
     assert len(rows) == 1
-    assert "LEFT JOIN paper_positions p ON p.id = t.position_id" in cursor.queries[0]
-    assert "LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name" in cursor.queries[0]
+    assert "LEFT JOIN paper_configs c ON c.id = t.config_id" in cursor.queries[0]
     assert "COALESCE(c.report_enabled, TRUE) = TRUE" in cursor.queries[0]

@@ -32,6 +32,7 @@ class TestPaperConfigFieldLimits(unittest.TestCase):
             timeframe="1" * 10,
             strategy_name="T" * 50,
             ml_model_id="m" * 100,
+            ml_generator_model_id="g" * 100,
         )
 
     def test_paper_config_request_rejects_values_over_database_column_widths(self):
@@ -41,6 +42,7 @@ class TestPaperConfigFieldLimits(unittest.TestCase):
             {"timeframe": "t" * 11},
             {"strategy_name": "T" * 51},
             {"ml_model_id": "m" * 101},
+            {"ml_generator_model_id": "g" * 101},
         )
         for change in invalid_payloads:
             with self.subTest(change=next(iter(change))):
@@ -128,6 +130,9 @@ class TestPaperConfigFieldLimits(unittest.TestCase):
             ("timeframe", "t" * 11),
             ("strategy_name", "T" * 51),
             ("ml_model_id", "m" * 101),
+            ("ml_generator_model_id", "g" * 101),
+            ("ml_model_id", "../unsafe"),
+            ("ml_generator_model_id", "bad/model"),
         )
         for field_name, value in invalid_values:
             with self.subTest(field=field_name):

@@ -13,6 +13,7 @@ as live execution.
 """
 import time
 import logging
+import re
 import pandas as pd
 import os
 from typing import List, Dict, Any, Optional
@@ -144,7 +145,7 @@ def get_paper_configs() -> List[Dict[str, Any]]:
             """
             SELECT id, symbol, market, timeframe, strategy_name, is_active,
                    allocated_capital, risk_per_trade_pct, ml_model_id,
-                   telegram_enabled, report_enabled, created_at
+                   ml_generator_model_id, telegram_enabled, report_enabled, created_at
             FROM paper_configs
             ORDER BY is_active DESC, symbol ASC
             """
@@ -156,6 +157,7 @@ def get_paper_configs() -> List[Dict[str, Any]]:
             r["allocated_capital"] = float(r["allocated_capital"])
             r["risk_per_trade_pct"] = float(r["risk_per_trade_pct"])
             r["ml_model_id"] = r.get("ml_model_id")
+            r["ml_generator_model_id"] = r.get("ml_generator_model_id")
             r["telegram_enabled"] = bool(r.get("telegram_enabled", False))
             r["report_enabled"] = bool(r.get("report_enabled", True))
             r["created_at"] = str(r["created_at"])
@@ -175,6 +177,7 @@ def set_paper_config(
     ml_model_id: Optional[str] = None,
     telegram_enabled: Optional[bool] = None,
     report_enabled: Optional[bool] = None,
+    ml_generator_model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     if allocated_capital <= 0:
         raise ValueError("allocated_capital must be positive")
@@ -190,10 +193,22 @@ def set_paper_config(
     ):
         if not isinstance(value, str) or len(value) > max_length:
             raise ValueError(f"{field_name} must be a string of at most {max_length} characters")
-    if ml_model_id is not None and (
-        not isinstance(ml_model_id, str) or len(ml_model_id) > 100
+    for field_name, value in (
+        ("ml_model_id", ml_model_id),
+        ("ml_generator_model_id", ml_generator_model_id),
     ):
-        raise ValueError("ml_model_id must be a string of at most 100 characters")
+        if value is not None and (
+            not isinstance(value, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", value)
+            or ".." in value
+        ):
+            raise ValueError(f"{field_name} must be a safe model identifier")
+    if ml_model_id and ml_generator_model_id:
+        raise ValueError("a paper config cannot use both an ML filter and a generator model")
+    if strategy_name == "ml_signal_generator_v1" and not ml_generator_model_id:
+        raise ValueError("ml_signal_generator_v1 requires ml_generator_model_id")
+    if strategy_name != "ml_signal_generator_v1" and ml_generator_model_id:
+        raise ValueError("ml_generator_model_id is only valid for ml_signal_generator_v1")
 
     conn = get_pool().get_connection()
     try:
@@ -205,69 +220,73 @@ def set_paper_config(
                 """
                 INSERT INTO paper_configs
                     (symbol, market, timeframe, strategy_name, is_active,
-                     allocated_capital, risk_per_trade_pct, ml_model_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                     allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     is_active = VALUES(is_active),
                     allocated_capital = VALUES(allocated_capital),
                     risk_per_trade_pct = VALUES(risk_per_trade_pct),
-                    ml_model_id = VALUES(ml_model_id)
+                    ml_model_id = VALUES(ml_model_id),
+                    ml_generator_model_id = VALUES(ml_generator_model_id)
                 """,
                 (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
-                 allocated_capital, risk_per_trade_pct, ml_model_id),
+                 allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id),
             )
         elif report_enabled is None:
             cur.execute(
                 """
                 INSERT INTO paper_configs
                     (symbol, market, timeframe, strategy_name, is_active,
-                     allocated_capital, risk_per_trade_pct, ml_model_id, telegram_enabled)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    is_active = VALUES(is_active),
-                    allocated_capital = VALUES(allocated_capital),
-                    risk_per_trade_pct = VALUES(risk_per_trade_pct),
-                    ml_model_id = VALUES(ml_model_id),
-                    telegram_enabled = VALUES(telegram_enabled)
-                """,
-                (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
-                 allocated_capital, risk_per_trade_pct, ml_model_id, bool(telegram_enabled)),
-            )
-        elif telegram_enabled is None:
-            cur.execute(
-                """
-                INSERT INTO paper_configs
-                    (symbol, market, timeframe, strategy_name, is_active,
-                     allocated_capital, risk_per_trade_pct, ml_model_id, report_enabled)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    is_active = VALUES(is_active),
-                    allocated_capital = VALUES(allocated_capital),
-                    risk_per_trade_pct = VALUES(risk_per_trade_pct),
-                    ml_model_id = VALUES(ml_model_id),
-                    report_enabled = VALUES(report_enabled)
-                """,
-                (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
-                 allocated_capital, risk_per_trade_pct, ml_model_id, bool(report_enabled)),
-            )
-        else:
-            cur.execute(
-                """
-                INSERT INTO paper_configs
-                    (symbol, market, timeframe, strategy_name, is_active,
-                     allocated_capital, risk_per_trade_pct, ml_model_id,
-                     telegram_enabled, report_enabled)
+                     allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id, telegram_enabled)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     is_active = VALUES(is_active),
                     allocated_capital = VALUES(allocated_capital),
                     risk_per_trade_pct = VALUES(risk_per_trade_pct),
                     ml_model_id = VALUES(ml_model_id),
+                    ml_generator_model_id = VALUES(ml_generator_model_id),
+                    telegram_enabled = VALUES(telegram_enabled)
+                """,
+                (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
+                 allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id, bool(telegram_enabled)),
+            )
+        elif telegram_enabled is None:
+            cur.execute(
+                """
+                INSERT INTO paper_configs
+                    (symbol, market, timeframe, strategy_name, is_active,
+                     allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id, report_enabled)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    is_active = VALUES(is_active),
+                    allocated_capital = VALUES(allocated_capital),
+                    risk_per_trade_pct = VALUES(risk_per_trade_pct),
+                    ml_model_id = VALUES(ml_model_id),
+                    ml_generator_model_id = VALUES(ml_generator_model_id),
+                    report_enabled = VALUES(report_enabled)
+                """,
+                (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
+                 allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id, bool(report_enabled)),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO paper_configs
+                    (symbol, market, timeframe, strategy_name, is_active,
+                     allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id,
+                     telegram_enabled, report_enabled)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    is_active = VALUES(is_active),
+                    allocated_capital = VALUES(allocated_capital),
+                    risk_per_trade_pct = VALUES(risk_per_trade_pct),
+                    ml_model_id = VALUES(ml_model_id),
+                    ml_generator_model_id = VALUES(ml_generator_model_id),
                     telegram_enabled = VALUES(telegram_enabled),
                     report_enabled = VALUES(report_enabled)
                 """,
                 (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
-                 allocated_capital, risk_per_trade_pct, ml_model_id,
+                 allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id,
                  bool(telegram_enabled), bool(report_enabled)),
             )
         # Resolve the persisted row after the upsert so promotion audit records
@@ -276,8 +295,9 @@ def set_paper_config(
             """
             SELECT id FROM paper_configs
             WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
+              AND ml_model_id <=> %s AND ml_generator_model_id <=> %s
             """,
-            (symbol, market, timeframe, strategy_name),
+            (symbol, market, timeframe, strategy_name, ml_model_id, ml_generator_model_id),
         )
         config_row = cur.fetchone()
         config_id = config_row.get("id") if isinstance(config_row, dict) else None
@@ -290,6 +310,7 @@ def set_paper_config(
             "strategy": strategy_name,
             "is_active": is_active,
             "ml_model_id": ml_model_id,
+            "ml_generator_model_id": ml_generator_model_id,
         }
     finally:
         conn.close()
@@ -309,7 +330,8 @@ def get_active_positions() -> List[Dict[str, Any]]:
                 allocated_capital, risk_per_trade_pct, risk_amount,
                 stop_distance, quantity, notional_value, entry_fee,
                 unrealized_pnl_pct, unrealized_r, holding_bars,
-                max_hold_bars, status, last_update_time
+                max_hold_bars, status, last_update_time, config_id,
+                ml_model_id, ml_generator_model_id, ml_probability
             FROM paper_positions
             WHERE status = 'OPEN'
             ORDER BY id DESC
@@ -349,10 +371,10 @@ def get_paper_trades(limit: int = 50) -> List[Dict[str, Any]]:
                 t.stop_loss, t.take_profit, t.quantity, t.notional_value,
                 t.gross_pnl, t.entry_fee, t.exit_fee, t.funding_pnl, t.net_pnl,
                 t.allocated_capital, t.risk_per_trade_pct, t.risk_amount,
-                t.net_return_pct, t.r_multiple, t.holding_bars, t.created_at
+                t.net_return_pct, t.r_multiple, t.holding_bars, t.created_at,
+                t.config_id, t.ml_generator_model_id, t.ml_model_id, t.ml_probability
             FROM paper_trades t
-            LEFT JOIN paper_positions p ON p.id = t.position_id
-            LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name
+            LEFT JOIN paper_configs c ON c.id = t.config_id
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE
             ORDER BY t.id DESC
             LIMIT %s
@@ -391,15 +413,14 @@ def get_paper_metrics() -> Dict[str, Any]:
                    AVG(t.r_multiple) AS avg_r,
                    SUM(t.net_pnl) AS net_pnl
             FROM paper_trades t
-            LEFT JOIN paper_positions p ON p.id = t.position_id
-            LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name
+            LEFT JOIN paper_configs c ON c.id = t.config_id
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE
             """
         )
         summary = cur.fetchone()
         cur.execute(
             """
-            SELECT t.strategy_name,
+            SELECT t.strategy_name, t.config_id, t.ml_generator_model_id, t.ml_model_id,
                    COUNT(*) AS total_trades,
                    SUM(CASE WHEN t.r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
                    SUM(CASE WHEN t.r_multiple <= 0 THEN 1 ELSE 0 END) AS losses,
@@ -407,11 +428,10 @@ def get_paper_metrics() -> Dict[str, Any]:
                    AVG(t.r_multiple) AS avg_r,
                    SUM(t.net_pnl) AS net_pnl
             FROM paper_trades t
-            LEFT JOIN paper_positions p ON p.id = t.position_id
-            LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name
+            LEFT JOIN paper_configs c ON c.id = t.config_id
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE
-            GROUP BY t.strategy_name
-            ORDER BY t.strategy_name
+            GROUP BY t.strategy_name, t.config_id, t.ml_generator_model_id, t.ml_model_id
+            ORDER BY t.strategy_name, t.config_id
             """
         )
         strategy_rows = cur.fetchall()
@@ -425,6 +445,9 @@ def get_paper_metrics() -> Dict[str, Any]:
             strategy_wins = int(row["wins"] or 0)
             by_strategy.append({
                 "strategy": row["strategy_name"],
+                "configId": row.get("config_id"),
+                "ml_generator_model_id": row.get("ml_generator_model_id"),
+                "ml_model_id": row.get("ml_model_id"),
                 "totalTrades": strategy_total,
                 "wins": strategy_wins,
                 "losses": int(row["losses"] or 0),
@@ -526,10 +549,11 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
                 stop_loss, take_profit, allocated_capital, risk_per_trade_pct,
                 risk_amount, stop_distance, quantity, notional_value,
                 gross_pnl, entry_fee, exit_fee, funding_pnl, net_pnl,
-                net_return_pct, r_multiple, holding_bars, ml_model_id, ml_probability
+                net_return_pct, r_multiple, holding_bars, ml_model_id, ml_probability,
+                config_id, ml_generator_model_id
             ) VALUES (
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
             )
             """,
             (
@@ -540,6 +564,7 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
                 accounting["gross_pnl"], pos["entry_fee"], accounting["fees"] - float(pos["entry_fee"]),
                 -funding_cost, accounting["net_pnl"], accounting["return_pct_on_entry_notional"],
                 accounting["r_multiple"], pos["holding_bars"], pos.get("ml_model_id"), pos.get("ml_probability"),
+                pos.get("config_id"), pos.get("ml_generator_model_id"),
             ),
         )
         conn.commit()
@@ -558,14 +583,20 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
         conn_cfg = get_pool().get_connection()
         try:
             cur_cfg = conn_cfg.cursor(dictionary=True)
-            cur_cfg.execute(
-                """
-                SELECT telegram_enabled FROM paper_configs
-                WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
-                LIMIT 1
-                """,
-                (pos["symbol"], pos["market"], pos["timeframe"], pos["strategy_name"]),
-            )
+            if pos.get("config_id") is not None:
+                cur_cfg.execute(
+                    "SELECT telegram_enabled FROM paper_configs WHERE id=%s LIMIT 1",
+                    (int(pos["config_id"]),),
+                )
+            else:
+                cur_cfg.execute(
+                    """
+                    SELECT telegram_enabled FROM paper_configs
+                    WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
+                    LIMIT 1
+                    """,
+                    (pos["symbol"], pos["market"], pos["timeframe"], pos["strategy_name"]),
+                )
             cfg_row = cur_cfg.fetchone()
             cur_cfg.close()
             if cfg_row and cfg_row.get("telegram_enabled"):
@@ -583,6 +614,7 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
                 entry_price=entry_price, exit_price=float(exit_price), exit_reason=exit_reason,
                 net_return_pct=accounting["return_pct_on_entry_notional"],
                 r_multiple=accounting["r_multiple"] or 0.0, holding_bars=pos.get("holding_bars", 0),
+                ml_generator_model_id=pos.get("ml_generator_model_id"),
             )
         except Exception as tel_err:
             logger.warning("Telegram trade close alert failed: %s", tel_err)
@@ -614,6 +646,7 @@ def _insert_position(
     candle_open_time: int,
     ml_model_id: Optional[str] = None,
     ml_probability: Optional[float] = None,
+    ml_generator_model_id: Optional[str] = None,
     connection=None,
 ) -> Optional[int]:
     """Returns the new paper_positions row id on success, or None if the
@@ -665,10 +698,10 @@ def _insert_position(
                 holding_bars, max_hold_bars, last_update_time, status,
                 allocated_capital, risk_per_trade_pct, risk_amount, stop_distance,
                 quantity, notional_value, entry_fee, exit_fee, funding_pnl,
-                ml_model_id, ml_probability
+                ml_model_id, ml_probability, config_id, ml_generator_model_id
             ) VALUES (
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0,1.0,1.5,%s,%s,0.0,0.0,
-                0,200,%s,'OPEN',%s,%s,%s,%s,%s,%s,%s,0.0,0.0,%s,%s
+                0,200,%s,'OPEN',%s,%s,%s,%s,%s,%s,%s,0.0,0.0,%s,%s,%s,%s
             )
             """,
             (
@@ -677,6 +710,7 @@ def _insert_position(
                 atr, size.stop_distance, last_applied_candle, cfg["allocated_capital"],
                 cfg["risk_per_trade_pct"], size.risk_amount, size.stop_distance,
                 size.quantity, size.notional, entry_fee, ml_model_id, ml_probability,
+                cfg.get("id"), ml_generator_model_id or cfg.get("ml_generator_model_id"),
             ),
         )
         if owns_connection:
@@ -729,15 +763,21 @@ def _signal_already_traded(cfg: Dict[str, Any], entry_candle: int) -> bool:
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT 1 FROM paper_trades
-            WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
-              AND entry_time=%s
-            LIMIT 1
-            """,
-            (cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"], int(entry_candle)),
-        )
+        if cfg.get("id") is not None:
+            cur.execute(
+                "SELECT 1 FROM paper_trades WHERE config_id=%s AND entry_time=%s LIMIT 1",
+                (int(cfg["id"]), int(entry_candle)),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT 1 FROM paper_trades
+                WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
+                  AND entry_time=%s
+                LIMIT 1
+                """,
+                (cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"], int(entry_candle)),
+            )
         found = cur.fetchone() is not None
         cur.close()
         return found
@@ -763,6 +803,7 @@ def _send_paper_entry_alert(order: Dict[str, Any], ml_threshold: Optional[float]
             ml_probability=order.get("ml_probability"),
             ml_threshold=ml_threshold,
             ml_model_id=order.get("ml_model_id"),
+            ml_generator_model_id=order.get("ml_generator_model_id"),
         )
     except Exception as tel_err:
         logger.warning("Telegram entry alert failed for paper order #%s: %s", order.get("id"), tel_err)
@@ -792,7 +833,8 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
         if (cfg["symbol"] != order["symbol"] or cfg["market"] != order["market"]
                 or cfg["timeframe"] != order["timeframe"]
                 or cfg["strategy_name"] != order["strategy_name"]
-                or (cfg.get("ml_model_id") or None) != (order.get("ml_model_id") or None)):
+                or (cfg.get("ml_model_id") or None) != (order.get("ml_model_id") or None)
+                or (cfg.get("ml_generator_model_id") or None) != (order.get("ml_generator_model_id") or None)):
             try:
                 transition_order(int(order["id"]), "CANCELLED", reason="Paper config changed after signal")
             except Exception:
@@ -852,6 +894,7 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
                     cfg, trade, float(open_candle["close"]), entry_time,
                     ml_model_id=order.get("ml_model_id"),
                     ml_probability=order.get("ml_probability"),
+                    ml_generator_model_id=order.get("ml_generator_model_id"),
                     connection=conn,
                 ),
             )
@@ -873,7 +916,11 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
     order_recovery = _process_pending_paper_orders(configs)
     active_cfgs = [c for c in configs if c["is_active"]]
     positions = get_active_positions()
-    open_pos_map = {(p["symbol"], p["market"], p["timeframe"], p["strategy_name"]): p for p in positions}
+    open_pos_map = {
+        (int(p["config_id"]) if p.get("config_id") is not None else
+         (p["symbol"], p["market"], p["timeframe"], p["strategy_name"])): p
+        for p in positions
+    }
     result = {"evaluated_configs": len(active_cfgs), "positions_updated": 0,
               "new_positions_opened": order_recovery["filled"], "positions_closed": 0,
               "orders_filled": order_recovery["filled"], "orders_expired": order_recovery["expired"],
@@ -881,7 +928,8 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
 
     for cfg in active_cfgs:
         symbol, market, timeframe, strategy_name = cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"]
-        key = (symbol, market, timeframe, strategy_name)
+        key = int(cfg["id"]) if cfg.get("id") is not None else (symbol, market, timeframe, strategy_name)
+        is_generator_strategy = strategy_name == "ml_signal_generator_v1"
         is_overlay_strategy = strategy_name in OVERLAY_STRATEGIES
         if strategy_name not in STRATEGIES and not is_overlay_strategy:
             continue
@@ -1026,6 +1074,13 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                 continue
 
             run_params = dict(BASE_PARAMS, symbol=symbol, market=market, timeframe=timeframe)
+            if strategy_name == "ml_signal_generator_v1":
+                generator_model_id = cfg.get("ml_generator_model_id")
+                if not generator_model_id or cfg.get("ml_model_id"):
+                    logger.error("Generator paper config #%s has an invalid model association; skipping entry", cfg.get("id"))
+                    continue
+                run_params["ml_generator_model_id"] = generator_model_id
+                run_params["_require_generator_eligible"] = True
             if strategy_name in TREND_ALIGNMENT_STRATEGIES and timeframe != HTF_TIMEFRAME:
                 run_params["htf_df"] = fetch_ohlcv_with_features_df(symbol, market, HTF_TIMEFRAME, closed_only=True, limit=300)
             if strategy_name in PAIRS_STRATEGIES and symbol != PAIRS_BASE_SYMBOL:
@@ -1041,9 +1096,13 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                 # was already known.
                 if (latest_trade.get("signal_open_time") == candle_open_time
                         and latest_trade.get("entry_time") == entry_candle_time):
-                    # ML Signal Filtering Gate (if model attached to this paper config)
+                    # Existing ML filter remains a separate optional gate. The
+                    # standalone generator reports its own confidence metadata.
                     ml_model_id = cfg.get("ml_model_id")
-                    ml_probability = None
+                    ml_probability = (
+                        latest_trade.get("ml_probability")
+                        if strategy_name == "ml_signal_generator_v1" else None
+                    )
                     ml_threshold = None
 
                     if ml_model_id:
@@ -1090,7 +1149,9 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                             "stop_loss": float(latest_trade["stop_loss"]),
                             "take_profit": float(latest_trade["take_profit"]),
                             "atr_at_signal": float(latest_trade.get("atr_at_signal", latest_bar.get("atr", 0)) or 0),
-                            "ml_model_id": ml_model_id, "ml_probability": ml_probability,
+                            "ml_model_id": ml_model_id,
+                            "ml_generator_model_id": cfg.get("ml_generator_model_id"),
+                            "ml_probability": ml_probability,
                             "telegram_enabled": bool(cfg.get("telegram_enabled", False)),
                         })
                     except Exception:
@@ -1111,7 +1172,9 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                             or order.get("symbol") != symbol
                             or order.get("market") != market
                             or order.get("timeframe") != timeframe
-                            or order.get("strategy_name") != strategy_name):
+                            or order.get("strategy_name") != strategy_name
+                            or (order.get("ml_model_id") or None) != (cfg.get("ml_model_id") or None)
+                            or (order.get("ml_generator_model_id") or None) != (cfg.get("ml_generator_model_id") or None)):
                         continue
                     durable_trade = {
                         "direction": order["direction"],
@@ -1122,13 +1185,14 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                     }
                     durable_ml_model_id = order.get("ml_model_id")
                     durable_ml_probability = order.get("ml_probability")
+                    durable_generator_model_id = order.get("ml_generator_model_id")
                     order_result = fill_pending_order(
                         int(order["id"]),
                         float(order["requested_entry_price"]),
                         lambda conn: _insert_position(
                             cfg, durable_trade, float(open_candle["close"]), entry_candle_time,
                             ml_model_id=durable_ml_model_id, ml_probability=durable_ml_probability,
-                            connection=conn,
+                            ml_generator_model_id=durable_generator_model_id, connection=conn,
                         ),
                     )
                     if order_result["status"] == "expired":

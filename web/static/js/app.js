@@ -1917,9 +1917,63 @@ const App = {
             if (status) status.textContent = options.length
                 ? `${options.length} executable strategy variants available`
                 : "No executable strategies returned";
+            select.onchange = () => this.updatePaperGeneratorModelVisibility();
+            await this.fetchPaperGeneratorModels();
+            this.updatePaperGeneratorModelVisibility();
         } catch (error) {
             select.innerHTML = `<option value="">Strategy list unavailable</option>`;
             if (status) status.textContent = `Unable to load strategies: ${error.message || error}`;
+        }
+    },
+
+    async fetchPaperGeneratorModels() {
+        const select = document.getElementById("paper-config-generator-model");
+        const status = document.getElementById("paper-generator-model-status");
+        if (!select) return;
+        try {
+            const response = await fetch(`${API_BASE}/api/ml/generator-models`, { headers: this.getAuthHeaders() });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+            if (!Array.isArray(payload.models)) throw new Error("Invalid generator model response");
+            const previous = select.value;
+            select.innerHTML = '<option value="">Select a generator model…</option>' + payload.models.map(model => {
+                const id = this._escapeHtml(model.model_id || "");
+                const eligible = Boolean(model.eligibility && model.eligibility.eligible);
+                const label = (model.model_id || "") + (eligible ? " · Paper eligible" : " · Research only");
+                return '<option value="' + id + '" data-eligible="' + String(eligible) + '">' + this._escapeHtml(label) + '</option>';
+            }).join("");
+            if (previous && payload.models.some(model => model.model_id === previous)) select.value = previous;
+            select.onchange = () => this.updatePaperGeneratorModelVisibility();
+            if (status) status.textContent = payload.models.length
+                ? "Only eligible models can be activated for paper trading."
+                : "No generator artifacts found. Train and save a generator model first.";
+        } catch (error) {
+            select.innerHTML = '<option value="">Generator models unavailable</option>';
+            if (status) status.textContent = `Unable to load generator models: ${error.message || error}`;
+        }
+    },
+
+    updatePaperGeneratorModelVisibility() {
+        const strategy = document.getElementById("paper-config-strategy")?.value || "";
+        const field = document.getElementById("paper-generator-model-field");
+        const modelSelect = document.getElementById("paper-config-generator-model");
+        const active = document.getElementById("paper-config-active");
+        const status = document.getElementById("paper-generator-model-status");
+        const isGenerator = strategy === "ml_signal_generator_v1";
+        if (field) field.hidden = !isGenerator;
+        if (!isGenerator) {
+            if (active) active.disabled = false;
+            return;
+        }
+        const eligible = modelSelect?.selectedOptions?.[0]?.dataset?.eligible === "true";
+        if (active) {
+            active.disabled = !eligible;
+            if (!eligible) active.checked = false;
+        }
+        if (status && modelSelect?.value) {
+            status.textContent = eligible
+                ? "This model passed the paper eligibility gate. Paper activation remains your choice."
+                : "Research-only model: save it with paper evaluation disabled until it passes eligibility.";
         }
     },
 
@@ -1931,10 +1985,16 @@ const App = {
         const market = String(value("paper-config-market") || "spot").trim().toLowerCase();
         const timeframe = String(value("paper-config-timeframe") || "").trim();
         const strategyName = String(value("paper-config-strategy") || "").trim();
+        const generatorModelId = strategyName === "ml_signal_generator_v1"
+            ? String(value("paper-config-generator-model") || "").trim() : "";
         const allocatedCapital = Number(value("paper-config-capital"));
         const riskPerTradePct = Number(value("paper-config-risk"));
         if (!symbol || !strategyName || !timeframe || !["spot", "futures"].includes(market)) {
             this.showToast("Choose a valid symbol, market, timeframe, and executable strategy.", "error");
+            return;
+        }
+        if (strategyName === "ml_signal_generator_v1" && !generatorModelId) {
+            this.showToast("Select an independent ML generator model before saving this strategy.", "error");
             return;
         }
         if (!Number.isFinite(allocatedCapital) || allocatedCapital < 100 ||
@@ -1955,6 +2015,7 @@ const App = {
                     is_active: checked("paper-config-active"),
                     allocated_capital: allocatedCapital,
                     risk_per_trade_pct: riskPerTradePct,
+                    ml_generator_model_id: generatorModelId || null,
                     telegram_enabled: checked("paper-config-telegram"),
                     report_enabled: checked("paper-config-report"),
                 }),
@@ -2074,7 +2135,7 @@ const App = {
                     const winRate = Number(row.winRatePct || 0);
                     return `
                         <tr>
-                            <td class="font-mono text-xs text-sky-400">${this._escapeHtml(row.strategy || "Unknown")}</td>
+                            <td class="font-mono text-xs text-sky-400">${this._escapeHtml(row.strategy || "Unknown")}${row.ml_generator_model_id ? `<div class="text-[10px] text-purple-300">${this._escapeHtml(row.ml_generator_model_id)}</div>` : row.ml_model_id ? `<div class="text-[10px] text-slate-400">${this._escapeHtml(row.ml_model_id)}</div>` : ""}</td>
                             <td class="font-mono text-xs text-slate-200">${this._escapeHtml(String(row.totalTrades || 0))}</td>
                             <td class="font-mono text-xs text-slate-200">${this._escapeHtml(String(row.wins || 0))}</td>
                             <td class="font-mono text-xs text-slate-200">${Number.isFinite(winRate) ? winRate.toFixed(2) : "—"}%</td>
@@ -2103,7 +2164,7 @@ const App = {
                                     ${this._escapeHtml(p.direction)}
                                 </span>
                             </td>
-                            <td class="font-mono text-xs text-sky-400">${this._escapeHtml(p.strategy_name)}</td>
+                            <td class="font-mono text-xs text-sky-400">${this._escapeHtml(p.strategy_name)}${p.ml_generator_model_id ? `<div class="text-[10px] text-purple-300">${this._escapeHtml(p.ml_generator_model_id)}</div>` : ""}</td>
                             <td class="font-mono text-xs text-slate-200">$${this._escapeHtml(p.entry_price.toLocaleString())}</td>
                             <td class="font-mono text-xs font-bold text-slate-100">$${this._escapeHtml(p.current_price.toLocaleString())}</td>
                             <td class="font-mono text-xs ${isProfitable ? "text-emerald-400" : "text-rose-400"} font-semibold">
@@ -2141,18 +2202,19 @@ const App = {
                             ${c.is_active ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">ACTIVE LIVE</span>` : `<span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-500">PAUSED</span>`}
                         </div>
                         <div class="text-xs font-mono text-sky-400 mt-1">${this._escapeHtml(c.strategy_name)}</div>
-                        <div class="text-[10px] text-slate-500 mt-0.5">$${this._escapeHtml(Number(c.allocated_capital).toLocaleString())} capital &middot; ${this._escapeHtml(String(c.risk_per_trade_pct))}% risk/trade</div>
+                        ${c.ml_generator_model_id ? `<div class="text-[10px] text-purple-300 mt-0.5">Generator: ${this._escapeHtml(c.ml_generator_model_id)}</div>` : c.ml_model_id ? `<div class="text-[10px] text-slate-400 mt-0.5">Filter: ${this._escapeHtml(c.ml_model_id)}</div>` : ""}
+                        <div class="text-[10px] text-slate-500 mt-0.5">${this._escapeHtml(Number(c.allocated_capital).toLocaleString())} capital &middot; ${this._escapeHtml(String(c.risk_per_trade_pct))}% risk/trade</div>
                     </div>
                     <div class="flex flex-col gap-2 items-end">
-                        <button type="button" data-paper-config-toggle data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-next-active="${!c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
+                        <button type="button" data-paper-config-toggle data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-generator-model-id="${this._escapeHtml(c.ml_generator_model_id || "")}" data-ml-model-id="${this._escapeHtml(c.ml_model_id || "")}" data-next-active="${!c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
                             class="px-3 py-1.5 rounded text-xs font-semibold ${c.is_active ? "bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30" : "bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30"}">
                             ${c.is_active ? "Pause" : "Activate"}
                         </button>
-                        <button type="button" data-paper-config-telegram data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-next-telegram="${!c.telegram_enabled}" data-active="${c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
+                        <button type="button" data-paper-config-telegram data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-generator-model-id="${this._escapeHtml(c.ml_generator_model_id || "")}" data-ml-model-id="${this._escapeHtml(c.ml_model_id || "")}" data-next-telegram="${!c.telegram_enabled}" data-active="${c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
                             class="px-3 py-1.5 rounded text-xs font-semibold ${c.telegram_enabled ? "bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30" : "bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700"}">
                             Telegram ${c.telegram_enabled ? "On" : "Off"}
                         </button>
-                        <button type="button" data-paper-config-report data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-next-report="${!c.report_enabled}" data-active="${c.is_active}" data-telegram="${c.telegram_enabled}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
+                        <button type="button" data-paper-config-report data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-generator-model-id="${this._escapeHtml(c.ml_generator_model_id || "")}" data-ml-model-id="${this._escapeHtml(c.ml_model_id || "")}" data-next-report="${!c.report_enabled}" data-active="${c.is_active}" data-telegram="${c.telegram_enabled}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
                             class="px-3 py-1.5 rounded text-xs font-semibold ${c.report_enabled ? "bg-violet-600/20 hover:bg-violet-600 text-violet-300 hover:text-white border border-violet-500/30" : "bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700"}">
                             Report ${c.report_enabled ? "On" : "Off"}
                         </button>
@@ -2171,7 +2233,9 @@ const App = {
                         button.dataset.strategy || "",
                         button.dataset.nextActive === "true",
                         capital,
-                        risk
+                        risk,
+                        button.dataset.generatorModelId || "",
+                        button.dataset.mlModelId || ""
                     );
                 });
             });
@@ -2188,7 +2252,9 @@ const App = {
                         button.dataset.active === "true",
                         button.dataset.nextTelegram === "true",
                         capital,
-                        risk
+                        risk,
+                        button.dataset.generatorModelId || "",
+                        button.dataset.mlModelId || ""
                     );
                 });
             });
@@ -2206,7 +2272,9 @@ const App = {
                         button.dataset.telegram === "true",
                         button.dataset.nextReport === "true",
                         capital,
-                        risk
+                        risk,
+                        button.dataset.generatorModelId || "",
+                        button.dataset.mlModelId || ""
                     );
                 });
             });
@@ -2223,7 +2291,7 @@ const App = {
                     return `
                         <tr>
                             <td class="font-bold font-mono text-slate-200">${this._escapeHtml(t.symbol)}</td>
-                            <td class="text-xs font-mono text-sky-400">${this._escapeHtml(t.strategy_name)}</td>
+                            <td class="text-xs font-mono text-sky-400">${this._escapeHtml(t.strategy_name)}${t.ml_generator_model_id ? `<div class="text-[10px] text-purple-300">${this._escapeHtml(t.ml_generator_model_id)}</div>` : ""}</td>
                             <td>
                                 <span class="px-2 py-0.5 rounded text-[10px] font-bold ${t.direction === "LONG" ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-rose-950 text-rose-400 border border-rose-800"}">
                                     ${this._escapeHtml(t.direction)}
@@ -2310,7 +2378,7 @@ const App = {
         }
     },
 
-    async togglePaperTelegram(symbol, market, timeframe, strategy, isActive, nextTelegram, allocatedCapital, riskPerTradePct) {
+    async togglePaperTelegram(symbol, market, timeframe, strategy, isActive, nextTelegram, allocatedCapital, riskPerTradePct, generatorModelId = "", filterModelId = "") {
         try {
             const res = await fetch(`${API_BASE}/api/paper/configs`, {
                 method: "POST",
@@ -2318,7 +2386,9 @@ const App = {
                 body: JSON.stringify({
                     symbol, market, timeframe, strategy_name: strategy,
                     is_active: isActive, allocated_capital: allocatedCapital,
-                    risk_per_trade_pct: riskPerTradePct, telegram_enabled: nextTelegram
+                    risk_per_trade_pct: riskPerTradePct, ml_model_id: filterModelId || null,
+                    ml_generator_model_id: generatorModelId || null,
+                    telegram_enabled: nextTelegram
                 })
             });
             const data = await res.json();
@@ -2330,7 +2400,7 @@ const App = {
         }
     },
 
-    async togglePaperReport(symbol, market, timeframe, strategy, isActive, telegramEnabled, nextReport, allocatedCapital, riskPerTradePct) {
+    async togglePaperReport(symbol, market, timeframe, strategy, isActive, telegramEnabled, nextReport, allocatedCapital, riskPerTradePct, generatorModelId = "", filterModelId = "") {
         try {
             const res = await fetch(`${API_BASE}/api/paper/configs`, {
                 method: "POST",
@@ -2339,6 +2409,8 @@ const App = {
                     symbol, market, timeframe, strategy_name: strategy,
                     is_active: isActive, allocated_capital: allocatedCapital,
                     risk_per_trade_pct: riskPerTradePct,
+                    ml_model_id: filterModelId || null,
+                    ml_generator_model_id: generatorModelId || null,
                     telegram_enabled: telegramEnabled, report_enabled: nextReport
                 })
             });
@@ -2351,7 +2423,7 @@ const App = {
         }
     },
 
-    async togglePaperStrategy(symbol, market, timeframe, strategy, newActive, allocatedCapital, riskPerTradePct) {
+    async togglePaperStrategy(symbol, market, timeframe, strategy, newActive, allocatedCapital, riskPerTradePct, generatorModelId = "", filterModelId = "") {
         try {
             const res = await fetch(`${API_BASE}/api/paper/configs`, {
                 method: "POST",
@@ -2368,6 +2440,8 @@ const App = {
                     // every single pause/activate click.
                     allocated_capital: allocatedCapital,
                     risk_per_trade_pct: riskPerTradePct,
+                    ml_model_id: filterModelId || null,
+                    ml_generator_model_id: generatorModelId || null,
                 })
             });
             if (res.ok) {

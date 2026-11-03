@@ -8,6 +8,7 @@ tested and reviewed before they control position creation.
 from __future__ import annotations
 
 import math
+import re
 import os
 import time
 from typing import Any
@@ -68,6 +69,21 @@ def validate_order(order: dict[str, Any]) -> dict[str, Any]:
         raise OrderValidationError("LONG order requires stop_loss < entry < take_profit")
     if direction == "SHORT" and not target < entry < stop:
         raise OrderValidationError("SHORT order requires take_profit < entry < stop_loss")
+    filter_model_id = order.get("ml_model_id")
+    generator_model_id = order.get("ml_generator_model_id")
+    if filter_model_id is not None and generator_model_id is not None:
+        raise OrderValidationError("an order cannot reference both an ML filter and a generator model")
+    for name, value in (("ml_model_id", filter_model_id), ("ml_generator_model_id", generator_model_id)):
+        if value is not None and (
+            not isinstance(value, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", value)
+            or ".." in value
+        ):
+            raise OrderValidationError(f"{name} must be a safe model identifier")
+    if order["strategy_name"] == "ml_signal_generator_v1" and not generator_model_id:
+        raise OrderValidationError("generator strategy orders require ml_generator_model_id")
+    if order["strategy_name"] != "ml_signal_generator_v1" and generator_model_id is not None:
+        raise OrderValidationError("ml_generator_model_id is only valid for ml_signal_generator_v1")
     probability = order.get("ml_probability")
     if probability is not None:
         try:
@@ -87,6 +103,7 @@ def validate_order(order: dict[str, Any]) -> dict[str, Any]:
         "take_profit": target,
         "atr_at_signal": atr,
         "ml_probability": probability,
+        "ml_generator_model_id": generator_model_id.strip() if generator_model_id else None,
         "telegram_enabled": bool(order.get("telegram_enabled", False)),
     })
     for name in ("symbol", "market", "timeframe", "strategy_name"):
@@ -111,15 +128,15 @@ def create_pending_order(order: dict[str, Any]) -> dict[str, Any]:
             INSERT IGNORE INTO paper_orders (
                 config_id, symbol, market, timeframe, strategy_name,
                 signal_open_time, entry_time, direction, requested_entry_price,
-                stop_loss, take_profit, atr_at_signal, ml_model_id, ml_probability,
-                telegram_enabled
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                stop_loss, take_profit, atr_at_signal, ml_model_id, ml_generator_model_id,
+                ml_probability, telegram_enabled
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """,
             (
                 o["config_id"], o["symbol"], o["market"], o["timeframe"], o["strategy_name"],
                 o["signal_open_time"], o["entry_time"], o["direction"], o["requested_entry_price"],
                 o["stop_loss"], o["take_profit"], o["atr_at_signal"], o.get("ml_model_id"),
-                o.get("ml_probability"), o["telegram_enabled"],
+                o.get("ml_generator_model_id"), o.get("ml_probability"), o["telegram_enabled"],
             ),
         )
         order_id = int(cur.lastrowid or 0)

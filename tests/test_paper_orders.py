@@ -83,6 +83,18 @@ class TestValidateOrder(unittest.TestCase):
         self.assertFalse(validate_order(_valid_order())["telegram_enabled"])
         self.assertTrue(validate_order(_valid_order(telegram_enabled=True))["telegram_enabled"])
 
+    def test_generator_model_id_is_preserved_and_bounded(self):
+        order = validate_order(_valid_order(strategy_name="ml_signal_generator_v1", ml_generator_model_id="generator-v1"))
+        self.assertEqual(order["ml_generator_model_id"], "generator-v1")
+        with self.assertRaises(OrderValidationError):
+            validate_order(_valid_order(strategy_name="ml_signal_generator_v1", ml_generator_model_id=""))
+        with self.assertRaises(OrderValidationError):
+            validate_order(_valid_order(strategy_name="ml_signal_generator_v1", ml_generator_model_id="g" * 101))
+        with self.assertRaises(OrderValidationError):
+            validate_order(_valid_order(strategy_name="ml_signal_generator_v1", ml_model_id="filter-1", ml_generator_model_id="generator-1"))
+        with self.assertRaises(OrderValidationError):
+            validate_order(_valid_order(ml_model_id="../unsafe"))
+
     def test_rejects_invalid_direction_and_wrong_stop_geometry(self):
         with self.assertRaises(OrderValidationError):
             validate_order(_valid_order(direction="SIDEWAYS"))
@@ -101,11 +113,13 @@ class TestPendingOrderPersistence(unittest.TestCase):
         cur = _Cursor(lastrowid=17, row={"id": 17, "status": "PENDING"})
         conn = _Conn(cur)
         with patch("paper.orders.get_pool", return_value=type("Pool", (), {"get_connection": lambda self: conn})()):
-            row = create_pending_order(_valid_order())
+            row = create_pending_order(_valid_order(strategy_name="ml_signal_generator_v1", ml_generator_model_id="gen-model-1"))
         self.assertEqual(row["id"], 17)
         self.assertEqual(row["status"], "PENDING")
         self.assertEqual(conn.commits, 1)
-        self.assertTrue(any("INSERT IGNORE INTO paper_orders" in sql for sql, _ in cur.executed))
+        insert = next((sql, params) for sql, params in cur.executed if "INSERT IGNORE INTO paper_orders" in sql)
+        self.assertIn("ml_generator_model_id", insert[0])
+        self.assertEqual(insert[1][13], "gen-model-1")
 
     def test_duplicate_signal_returns_existing_order_without_overwriting(self):
         cur = _Cursor(lastrowid=0, row={"id": 17, "status": "FILLED"})
