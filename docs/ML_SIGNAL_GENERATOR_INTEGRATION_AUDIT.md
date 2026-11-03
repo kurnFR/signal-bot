@@ -97,3 +97,57 @@ Add a separate generator path:
 - New configurations remain disabled until explicitly activated.
 - Existing open positions continue to receive exit management after a strategy is disabled.
 - All schema changes must be additive/backward-compatible and covered by migration tests and MariaDB integration tests.
+
+
+---
+
+## 7. Post-integration status after PRs #676–#679
+
+The original Phase 0 findings above describe the pre-implementation baseline. The following capabilities have since been merged into master:
+
+| Capability | Current status |
+|---|---|
+| Independent candle-level labels | Implemented in `ml/generator_dataset.py` |
+| Multiclass model fitting and confidence/margin policy | Implemented in `ml/generator_trainer.py` |
+| Typed generator artifact and secure model loading | Implemented in `ml/generator_artifacts.py` |
+| Fail-closed inference runtime | Implemented in `ml/generator_runtime.py` |
+| Standalone strategy adapter using canonical simulator | Implemented in `backtest/strategies/ml_signal_generator.py` |
+| Strategy registration | Implemented as `ml_signal_generator_v1` |
+| Multiple paper config instances and durable model attribution | Implemented through PRs #677 and #679 |
+| Typed generator model catalog API | Implemented at `GET /api/ml/generator-models` |
+| Paper UI generator model selection | Implemented |
+| Per-config Telegram preference and model attribution | Implemented |
+| Generator-specific paper eligibility gate | Implemented; requires canonical OOS simulator metadata |
+
+Existing filter model IDs and filter artifacts remain separate from generator model IDs and artifacts.
+
+## 8. Remaining critical gap: end-to-end generator experiment execution
+
+The generator has dataset, trainer, artifact, inference, and paper integration modules, but the existing experiment entry points are still filter-oriented:
+
+- `POST /api/ml/run-experiment` calls `ml.run_real_experiment.run_real_experiment`, which builds a dataset from a registered strategy's completed trades and trains an `MLSignalFilter`.
+- `MLStudioPanel` is explicitly read-only and only lists existing filter experiment results and filter artifacts.
+- There is no dedicated generator experiment runner/CLI/API that fetches closed candles, builds the independent candle dataset, purges chronological partitions, fits the multiclass model, evaluates candidate policies in the canonical simulator, writes a typed generator manifest, and exposes the resulting experiment.
+
+This means the model selector and paper runtime are integration points, not proof that a trained generator model is ready to use. A generator artifact must exist and pass the typed eligibility gate before it can be activated.
+
+### Metric-selection issue that must be fixed before training is exposed
+
+`ml.generator_trainer.train_generator` currently chooses confidence/margin thresholds and calculates its own validation/test diagnostics using `long_net_return` and `short_net_return` for each candle opportunity. Those opportunities overlap in time. They are useful label-level diagnostics, but summing them as if each were an independently executable trade can overstate returns and does not model the simulator's one-position-at-a-time execution.
+
+The artifact eligibility gate correctly rejects these label-level metrics: it requires `evaluation_mode=canonical_simulator_oos`, `execution_engine=backtest.simulate`, and `non_overlapping_execution=true`. Do not weaken that gate or mark trainer diagnostics as canonical metrics.
+
+### Next implementation gate
+
+Build a generator-specific experiment orchestrator that:
+
+1. Fetches closed OHLCV and the shared point-in-time feature columns; does not call any registered strategy to create training examples.
+2. Builds barrier labels with explicit label-end timestamps and purges boundary-crossing outcomes.
+3. Fits the estimator on TRAIN only and fits preprocessing on TRAIN only.
+4. Selects confidence/margin policy on VALIDATION by executing candidate decisions through `backtest.simulate`, with fees, slippage, stop/target, max-hold, and non-overlapping positions.
+5. Locks the selected policy, evaluates TEST exactly once through the same canonical simulator, and emits the required canonical OOS metadata and metrics.
+6. Saves an immutable typed `signal_generator_v1` artifact using the hardened model store; eligibility is true only when the untouched canonical test gate passes.
+7. Adds a separate generator experiment API and ML Studio workflow. Do not route generator training through the legacy filter experiment endpoint.
+8. Adds deterministic tests proving no base-strategy dependency, no overlapping executed trades, validation-only policy selection, untouched-test isolation, and failure to promote label-only metrics.
+
+Until this orchestration is implemented and tested, generator paper activation must remain blocked for research-only artifacts. No automatic training, paper activation, or Telegram opt-in is authorized by this audit.
