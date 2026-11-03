@@ -384,10 +384,6 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
         self.assertEqual(result["new_positions_opened"], 0)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestInsertPositionExposureCap(unittest.TestCase):
     def test_entry_is_refused_before_any_insert_when_cap_would_be_exceeded(self):
         class Pool:
@@ -462,3 +458,7 @@ class TestGeneratorMaxHoldPersistence(unittest.TestCase):
         self.assertEqual(position_id, 124)
         self.assertTrue(load.call_args.kwargs["require_eligible"])
         self.assertEqual(cursor.execute.call_args.args[1][13], 41)
+
+
+if __name__ == "__main__":
+    unittest.main()
