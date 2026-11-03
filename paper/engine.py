@@ -507,7 +507,7 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
                 config_id, ml_generator_model_id
             ) VALUES (
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
             )
             """,
             (
