@@ -15,7 +15,6 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
-from backtest.accounting import calculate_trade_accounting
 from backtest.metrics import compute_metrics
 from backtest.params import BASE_PARAMS
 from backtest.simulate import simulate
