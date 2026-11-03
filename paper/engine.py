@@ -1152,7 +1152,9 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                             or order.get("symbol") != symbol
                             or order.get("market") != market
                             or order.get("timeframe") != timeframe
-                            or order.get("strategy_name") != strategy_name):
+                            or order.get("strategy_name") != strategy_name
+                            or (order.get("ml_model_id") or None) != (cfg.get("ml_model_id") or None)
+                            or (order.get("ml_generator_model_id") or None) != (cfg.get("ml_generator_model_id") or None)):
                         continue
                     durable_trade = {
                         "direction": order["direction"],
