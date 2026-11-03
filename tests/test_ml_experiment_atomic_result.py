@@ -8,6 +8,22 @@ from ml import run_real_experiment
 
 
 class TestMLExperimentAtomicResult(unittest.TestCase):
+    def test_experiment_ids_are_unique_and_fit_paper_config_limit(self):
+        first = run_real_experiment._build_experiment_id(
+            symbol="BTCUSDT", market="spot", timeframe="1h",
+            strategy_name="trend_ema_v1", model_type="logistic_regression",
+            target_type="binary_positive_r",
+        )
+        second = run_real_experiment._build_experiment_id(
+            symbol="BTCUSDT", market="spot", timeframe="1h",
+            strategy_name="trend_ema_v1", model_type="logistic_regression",
+            target_type="binary_positive_r",
+        )
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.startswith("real-btcusdt-spot-1h-trend_ema_v1-logistic_regression-"))
+        self.assertLessEqual(len(first), 100)
+        self.assertRegex(first.rsplit("-", 1)[-1], r"^[a-f0-9]{12}$")
+
     def test_atomic_result_write_replaces_complete_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "experiment.json"
