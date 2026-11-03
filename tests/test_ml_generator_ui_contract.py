@@ -15,6 +15,8 @@ def test_static_ml_studio_exposes_generator_training_form():
     assert "runMLGeneratorExperiment(event)" in app_js
     assert "/api/ml/generator/run-experiment" in app_js
     assert "await this.fetchPaperGeneratorModels()" in app_js
+    assert "/api/ml/generator-models" in app_js
+    assert "generatorData.models.length" in app_js
     assert "/static/js/app.js?v=20261103-1" in html
 
 
