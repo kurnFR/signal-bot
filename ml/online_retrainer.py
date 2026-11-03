@@ -255,7 +255,7 @@ def _persist_retraining_updates(updates: Mapping[str, Mapping[str, Any]]) -> boo
         latest = _load_registry()
         # A malformed/disabled registry is a hard stop; never replace it with
         # the cycle's older, previously valid snapshot.
-        if latest.get("enabled") is not True:
+        if latest.get("enabled", True) is not True:
             logger.error("Registry changed to disabled/invalid during retraining; retaining recovery journal")
             return False
 
