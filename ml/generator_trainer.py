@@ -11,6 +11,14 @@ from ml.generator_dataset import GENERATOR_CLASSES
 from ml.models import create_model, supported_models
 
 
+_NON_FEATURE_COLUMNS = {
+    "open_time", "entry_time", "exit_time", "label_end_time",
+    "entry_price", "label_exit_price", "target", "target_name",
+    "gross_return", "net_return", "forward_return",
+    "long_net_return", "short_net_return", "label_reason", "is_closed",
+}
+
+
 @dataclass(frozen=True)
 class GeneratorTrainingConfig:
     model_type: str
@@ -228,6 +236,9 @@ def train_generator(
     features = tuple(config.feature_columns)
     if not features or len(set(features)) != len(features):
         raise ValueError("feature_columns must be non-empty and unique")
+    forbidden = sorted(set(features) & _NON_FEATURE_COLUMNS)
+    if forbidden:
+        raise ValueError("feature_columns contain target/future metadata: " + ", ".join(forbidden))
     if config.model_type not in supported_models():
         raise ValueError(f"unsupported generator model_type: {config.model_type}")
     for name, frame in (("train", train), ("validation", validation), ("test", test)):
