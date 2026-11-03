@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field, field_validator
 
-from ml.artifacts import paper_eligibility_report
+from ml.artifacts import CURRENT_EVALUATION_PROTOCOL_VERSION, paper_eligibility_report
 from ml.run_real_experiment import run_real_experiment
 from ml.dataset import TARGET_TYPES
 from backtest.strategies import STRATEGIES
@@ -254,6 +254,8 @@ def list_saved_models() -> Dict[str, Any]:
             reasons = list(report["reasons"])
             if not data.get("eligible_for_paper"):
                 reasons.append("manifest is not flagged eligible_for_paper")
+            if data.get("evaluation_protocol_version") != CURRENT_EVALUATION_PROTOCOL_VERSION:
+                reasons.append("model was not evaluated with the current purged exit-time protocol")
             if not data["has_weights"]:
                 reasons.append("model weights (.joblib) are missing")
             data["eligibility"] = {"eligible": not reasons, "reasons": reasons}
@@ -312,6 +314,11 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
     # Promotion gate: re-evaluate from the stored untouched-test metrics instead of
     # trusting the manifest flag alone (manifests are plain, editable JSON files).
     report = paper_eligibility_report(test_metrics=manifest.get("test_metrics") or {})
+    if manifest.get("evaluation_protocol_version") != CURRENT_EVALUATION_PROTOCOL_VERSION:
+        raise HTTPException(
+            status_code=409,
+            detail="Model must be re-evaluated with the current purged exit-time protocol before paper deployment",
+        )
     if not manifest.get("eligible_for_paper") or not report["eligible"]:
         reasons = report["reasons"] or ["manifest is not flagged eligible_for_paper"]
         raise HTTPException(
