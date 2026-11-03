@@ -131,6 +131,8 @@ class TestPaperConfigFieldLimits(unittest.TestCase):
             ("strategy_name", "T" * 51),
             ("ml_model_id", "m" * 101),
             ("ml_generator_model_id", "g" * 101),
+            ("ml_model_id", "../unsafe"),
+            ("ml_generator_model_id", "bad/model"),
         )
         for field_name, value in invalid_values:
             with self.subTest(field=field_name):
