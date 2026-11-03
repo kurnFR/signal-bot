@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -104,6 +105,59 @@ class TestMLWebRoutes(unittest.TestCase):
         self.assertIn("status", data)
         self.assertIn("can_open_new_position", data)
         self.assertIn("max_concurrent_positions", data)
+
+
+    def test_generator_experiment_endpoint_uses_separate_research_pipeline(self):
+        result = SimpleNamespace(
+            artifact=SimpleNamespace(
+                model_id="generator-test-0123456789abcdef",
+                task_type="signal_generator_v1",
+                eligible_for_paper=False,
+                decision_policy={"min_confidence": 0.6, "min_directional_margin": 0.1},
+            ),
+            dataset_rows=500,
+            train_rows=280,
+            validation_rows=90,
+            test_rows=80,
+            validation_metrics={"evaluation_mode": "canonical_simulator_validation"},
+            test_metrics={"evaluation_mode": "canonical_simulator_oos"},
+        )
+        with (
+            patch("db.db.fetch_ohlcv_with_features_df", return_value=[object()] * 120),
+            patch("ml.generator_experiment.run_generator_experiment", return_value=result) as runner,
+            patch("web.routes.ml_routes.set_paper_config") as set_config,
+            patch("web.routes.ml_routes.send_telegram_message") as telegram,
+        ):
+            response = self.client.post(
+                "/api/ml/generator/run-experiment",
+                json={"symbol": "BTCUSDT", "market": "spot", "timeframe": "1h"},
+                headers=self.headers,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["model_id"], result.artifact.model_id)
+        self.assertEqual(payload["task_type"], "signal_generator_v1")
+        self.assertFalse(payload["eligible_for_paper"])
+        self.assertEqual(payload["test_metrics"]["evaluation_mode"], "canonical_simulator_oos")
+        runner.assert_called_once()
+        self.assertEqual(runner.call_args.kwargs["model_type"], "hist_gradient_boosting")
+        set_config.assert_not_called()
+        telegram.assert_not_called()
+
+    def test_generator_experiment_endpoint_rejects_insufficient_closed_candles(self):
+        with (
+            patch("db.db.fetch_ohlcv_with_features_df", return_value=[object()] * 99),
+            patch("ml.generator_experiment.run_generator_experiment") as runner,
+        ):
+            response = self.client.post(
+                "/api/ml/generator/run-experiment",
+                json={"symbol": "BTCUSDT", "market": "spot", "timeframe": "1h"},
+                headers=self.headers,
+            )
+
+        self.assertEqual(response.status_code, 400)
+        runner.assert_not_called()
 
 
 if __name__ == "__main__":
