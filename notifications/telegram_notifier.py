@@ -130,6 +130,7 @@ def send_signal_alert(
     ml_probability: Optional[float] = None,
     ml_threshold: Optional[float] = None,
     ml_model_id: Optional[str] = None,
+    ml_generator_model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Formats and dispatches an official trade entry signal alert with optional ML gating metadata."""
     safe_symbol = escape(str(symbol))
