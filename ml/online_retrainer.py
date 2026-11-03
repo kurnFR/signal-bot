@@ -271,6 +271,39 @@ def _persist_retraining_updates(updates: Mapping[str, Mapping[str, Any]]) -> Non
             _save_registry(latest)
 
 
+
+def _load_experiment_result(result: Any) -> Mapping[str, Any]:
+    """Load the persisted experiment payload returned by run_real_experiment.
+
+    The experiment runner's public contract is a result-file Path. Accept a
+    mapping as well for older integrations and focused unit-test doubles.
+    """
+    if isinstance(result, Mapping):
+        payload = result
+    elif isinstance(result, (str, os.PathLike)):
+        result_path = Path(result)
+        try:
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Unable to load experiment result {result_path}") from exc
+    else:
+        raise TypeError("Experiment runner must return a result mapping or JSON file path")
+
+    if not isinstance(payload, Mapping):
+        raise ValueError("Experiment result must be a JSON object")
+    winner = payload.get("winner")
+    experiment = payload.get("experiment")
+    if not isinstance(winner, Mapping) or not isinstance(winner.get("model_type"), str):
+        raise ValueError("Experiment result is missing winner.model_type")
+    if not isinstance(experiment, Mapping):
+        raise ValueError("Experiment result is missing experiment details")
+    if not isinstance(experiment.get("threshold"), (int, float)):
+        raise ValueError("Experiment result is missing a numeric threshold")
+    for field in ("baseline_test_metrics", "ml_test_metrics"):
+        if not isinstance(experiment.get(field), Mapping):
+            raise ValueError(f"Experiment result is missing {field}")
+    return payload
+
 def _public_audit_entry(entry: Any) -> dict[str, Any]:
     """Expose only documented audit fields; never return persisted exception text."""
     if not isinstance(entry, dict):
@@ -394,13 +427,14 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
                 continue
 
             logger.info("Executing continuous retraining for %s (new candles: %d)", key, new_candles)
-            exp_res = run_real_experiment(
+            exp_result_path = run_real_experiment(
                 symbol=symbol,
                 market=market,
                 timeframe=timeframe,
                 strategy_name=strategy_name,
                 model_type=model_type,
             )
+            exp_res = _load_experiment_result(exp_result_path)
 
             now_iso = datetime.now(timezone.utc).isoformat()
             audit_entry = {
