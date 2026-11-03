@@ -201,6 +201,10 @@ def _select_policy(
     if config.min_validation_trades < 1:
         raise ValueError("min_validation_trades must be positive")
     best = None
+    best_any = None
+    evaluated = 0
+    trade_floor_candidates = 0
+    max_observed_trades = 0
     for confidence in config.confidence_candidates:
         if not 0.0 < confidence < 1.0:
             raise ValueError("confidence candidates must be between zero and one")
@@ -216,18 +220,39 @@ def _select_policy(
                     raise ValueError(
                         "policy_evaluator must return trades, total_net_return, and expectancy"
                     )
-            if metrics["trades"] < config.min_validation_trades:
-                continue
+            evaluated += 1
+            trades = int(metrics["trades"])
+            max_observed_trades = max(max_observed_trades, trades)
             score = (
-                metrics["total_net_return"],
+                float(metrics["total_net_return"]),
                 metrics["expectancy"] if metrics["expectancy"] is not None else float("-inf"),
                 -confidence,
                 -margin,
             )
+            if best_any is None or score > best_any[0]:
+                best_any = (score, confidence, margin, metrics)
+            if trades < config.min_validation_trades:
+                continue
+            trade_floor_candidates += 1
             if best is None or score > best[0]:
                 best = (score, confidence, margin, metrics)
     if best is None or best[3]["total_net_return"] <= 0:
-        raise ValueError("no validation-only generator policy meets minimum trades with positive net return")
+        if best_any is None:
+            best_summary = "none"
+        else:
+            best_summary = (
+                f"{best_any[3]['total_net_return']:.6f} net return / "
+                f"{int(best_any[3]['trades'])} trades "
+                f"(confidence={best_any[1]:.2f}, margin={best_any[2]:.2f})"
+            )
+        raise ValueError(
+            "no validation-only generator policy qualifies: "
+            f"evaluated={evaluated}, trade_floor_candidates={trade_floor_candidates}, "
+            f"required_trades={config.min_validation_trades}, "
+            f"max_observed_trades={max_observed_trades}, "
+            f"best_validation_candidate={best_summary}. "
+            "Untouched test data was not used for policy selection."
+        )
     _, confidence, margin, metrics = best
     policy = GeneratorPolicy(
         min_confidence=float(confidence),
