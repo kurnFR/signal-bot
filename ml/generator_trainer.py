@@ -201,6 +201,10 @@ def _select_policy(
     if config.min_validation_trades < 1:
         raise ValueError("min_validation_trades must be positive")
     best = None
+    best_any = None
+    policies_evaluated = 0
+    policies_meeting_trade_minimum = 0
+    max_observed_trades = 0
     for confidence in config.confidence_candidates:
         if not 0.0 < confidence < 1.0:
             raise ValueError("confidence candidates must be between zero and one")
@@ -216,18 +220,46 @@ def _select_policy(
                     raise ValueError(
                         "policy_evaluator must return trades, total_net_return, and expectancy"
                     )
-            if metrics["trades"] < config.min_validation_trades:
-                continue
+            policies_evaluated += 1
+            trade_count = int(metrics["trades"])
+            net_return = float(metrics["total_net_return"])
+            max_observed_trades = max(max_observed_trades, trade_count)
             score = (
-                metrics["total_net_return"],
+                net_return,
                 metrics["expectancy"] if metrics["expectancy"] is not None else float("-inf"),
                 -confidence,
                 -margin,
             )
+            if best_any is None or score > best_any[0]:
+                best_any = (score, confidence, margin, metrics)
+            if trade_count < config.min_validation_trades:
+                continue
+            policies_meeting_trade_minimum += 1
             if best is None or score > best[0]:
                 best = (score, confidence, margin, metrics)
     if best is None or best[3]["total_net_return"] <= 0:
-        raise ValueError("no validation-only generator policy meets minimum trades with positive net return")
+        best_any_metrics = best_any[3] if best_any is not None else {}
+        best_any_return = best_any_metrics.get("total_net_return")
+        best_any_trades = best_any_metrics.get("trades", 0)
+        if best is not None:
+            failure_reason = "all policies meeting the trade minimum had non-positive net return"
+            best_qualified = (
+                f"; best qualified return={float(best[3]['total_net_return']):.6f} "
+                f"from {int(best[3]['trades'])} trades"
+            )
+        else:
+            failure_reason = "no policy reached the minimum validation trade count"
+            best_qualified = ""
+        raise ValueError(
+            "no validation-only generator policy meets minimum trades with positive net return "
+            f"({failure_reason}; minimum trades={config.min_validation_trades}; "
+            f"policies evaluated={policies_evaluated}; "
+            f"policies meeting trade minimum={policies_meeting_trade_minimum}; "
+            f"maximum trades observed={max_observed_trades}; "
+            f"best candidate return={float(best_any_return):.6f} from "
+            f"{int(best_any_trades)} trades{best_qualified}). "
+            "The validation gate was not relaxed and the untouched test set was not used for selection."
+        )
     _, confidence, margin, metrics = best
     policy = GeneratorPolicy(
         min_confidence=float(confidence),
