@@ -4836,8 +4836,8 @@ const App = {
             if (test) {
                 const metrics = payload.test_metrics;
                 const trades = Number.isFinite(Number(metrics.trades)) ? Number(metrics.trades) : "—";
-                const pf = Number.isFinite(Number(metrics.profit_factor)) ? Number(metrics.profit_factor).toFixed(2) : "—";
-                const dd = Number.isFinite(Number(metrics.max_drawdown_pct)) ? `${Number(metrics.max_drawdown_pct).toFixed(2)}%` : "—";
+                const pf = typeof metrics.profit_factor === "number" && Number.isFinite(metrics.profit_factor) ? metrics.profit_factor.toFixed(2) : "—";
+                const dd = typeof metrics.max_drawdown_pct === "number" && Number.isFinite(metrics.max_drawdown_pct) ? `${metrics.max_drawdown_pct.toFixed(2)}%` : "—";
                 test.textContent = `${trades} · PF ${pf} · DD ${dd}`;
             }
             if (result) result.hidden = false;
