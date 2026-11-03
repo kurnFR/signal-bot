@@ -111,3 +111,47 @@ def test_generator_drawdown_is_compounded_equity_drawdown():
     metrics = _trading_metrics(np.asarray([0.10, -0.10]), opportunities=2)
 
     assert metrics["max_drawdown_pct"] == pytest.approx(10.0)
+
+
+
+def test_generator_trainer_uses_injected_canonical_policy_evaluator():
+    train, validation, test = _partitions()
+    calls = []
+
+    def evaluator(name, partition, probabilities, confidence, margin):
+        calls.append(name)
+        if name == "validation":
+            return {
+                "trades": 12,
+                "total_net_return": confidence + margin,
+                "expectancy": 0.2,
+                "evaluation_mode": "canonical_simulator_validation",
+            }
+        return {
+            "trades": 31,
+            "total_net_return": 0.08,
+            "expectancy": 0.12,
+            "profit_factor": 1.4,
+            "max_drawdown_pct": 8.0,
+            "evaluation_mode": "canonical_simulator_oos",
+            "execution_engine": "backtest.simulate",
+            "non_overlapping_execution": True,
+        }
+
+    config = _config(
+        confidence_candidates=(0.4, 0.5),
+        margin_candidates=(0.05, 0.1),
+    )
+    result = train_generator(
+        train,
+        validation,
+        test,
+        config,
+        policy_evaluator=evaluator,
+    )
+
+    assert result.policy.min_confidence == 0.5
+    assert result.policy.min_directional_margin == 0.1
+    assert calls.count("validation") == 4
+    assert calls.count("test") == 1
+    assert result.test_metrics["evaluation_mode"] == "canonical_simulator_oos"
