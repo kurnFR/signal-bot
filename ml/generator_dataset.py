@@ -69,7 +69,7 @@ def build_generator_dataset(
         return pd.DataFrame(columns=[
             "open_time", "entry_time", "exit_time", "label_end_time",
             "entry_price", "label_exit_price", "target", "target_name",
-            "gross_return", "net_return", "label_reason", *features,
+            "gross_return", "net_return", "forward_return", "long_net_return", "short_net_return", "label_reason", *features,
         ])
 
     data = frame.copy().reset_index(drop=True)
@@ -151,6 +151,9 @@ def build_generator_dataset(
                 reason = "lower_barrier_first" if target_name == "SHORT" else "lower_barrier_below_cost_hurdle"
                 break
 
+        forward_return = (float(label_exit_price) - entry_price) / entry_price
+        long_net_return = forward_return - round_trip_cost
+        short_net_return = -forward_return - round_trip_cost
         net_return = gross_return - round_trip_cost if target_name != "HOLD" else 0.0
         signal = {
             "open_time": int(data.at[signal_idx, "open_time"]),
@@ -163,6 +166,9 @@ def build_generator_dataset(
             "target_name": target_name,
             "gross_return": float(gross_return),
             "net_return": float(net_return),
+            "forward_return": float(forward_return),
+            "long_net_return": float(long_net_return),
+            "short_net_return": float(short_net_return),
             "label_reason": reason,
         }
         for column in features:
@@ -177,6 +183,6 @@ def build_generator_dataset(
     columns = [
         "open_time", "entry_time", "exit_time", "label_end_time",
         "entry_price", "label_exit_price", "target", "target_name",
-        "gross_return", "net_return", "label_reason", *features,
+        "gross_return", "net_return", "forward_return", "long_net_return", "short_net_return", "label_reason", *features,
     ]
     return pd.DataFrame(rows, columns=columns)
