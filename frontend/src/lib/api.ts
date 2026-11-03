@@ -2,6 +2,10 @@
  * Same-origin JSON transport for verified API endpoints.
  * Mutations are exposed only through explicit domain helpers that call postJson.
  */
+// Keep mutation scope explicit: this UI currently needs only generator training.
+// Add a path here only after reviewing the endpoint's authorization and side effects.
+const ALLOWED_POST_ENDPOINTS = new Set(["/api/ml/generator/run-experiment"]);
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: "http" | "invalid-json" | "invalid-content-type";
@@ -90,6 +94,9 @@ export async function postJson<TResponse, TBody extends object>(
   signal?: AbortSignal,
 ): Promise<TResponse> {
   assertApiPath(path);
+  if (!ALLOWED_POST_ENDPOINTS.has(path)) {
+    throw new TypeError("POST endpoint is not allowlisted");
+  }
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
