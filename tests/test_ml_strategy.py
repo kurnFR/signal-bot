@@ -120,6 +120,27 @@ class TestMLStrategy(unittest.TestCase):
             probabilities = loaded.predict_probability(pd.DataFrame({"x": [0.5, 2.5]}))
             self.assertEqual(len(probabilities), 2)
 
+    def test_from_artifact_constructs_loaded_filter_without_refitting(self):
+        with tempfile.TemporaryDirectory() as d:
+            artifact = self._paper_artifact()
+            store = self._trained_store(d, artifact)
+            loaded_model = store.load(artifact, ["x"])
+            base_strategy = lambda df, p: []
+
+            loaded = MLSignalFilter.from_artifact(
+                artifact=artifact,
+                model=loaded_model,
+                base_strategy=base_strategy,
+            )
+
+            self.assertIs(loaded.model, loaded_model)
+            self.assertIs(loaded.base_strategy, base_strategy)
+            self.assertEqual(loaded.model_id, artifact.model_id)
+            self.assertEqual(loaded.feature_columns, ("x",))
+            self.assertEqual(loaded.threshold, artifact.threshold)
+            probabilities = loaded.predict_probability(pd.DataFrame({"x": [0.5, 2.5]}))
+            self.assertEqual(len(probabilities), 2)
+
     def test_registry_loader_rejects_retired_model(self):
         with tempfile.TemporaryDirectory() as d:
             artifact = self._paper_artifact()
