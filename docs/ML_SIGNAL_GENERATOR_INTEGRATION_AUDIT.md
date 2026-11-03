@@ -168,3 +168,24 @@ PR #683 also includes regression coverage for the paper max-hold propagation and
 ### Still not performed
 
 No actual model has been trained from the user's production candle history as part of these code changes. No paper strategy has been activated, no Telegram message has been sent, and no deployment or live trading has occurred. After merge, the next safe step is a user-reviewed generator experiment on selected historical symbols/timeframes, followed by inspection of untouched test metrics before any explicit paper activation.
+
+
+## 10. Verified merge status — 2026-11-03
+
+The follow-up implementation referenced in Section 9 is now merged:
+
+| PR | Scope | Merge commit |
+|---|---|---|
+| #681 | Canonical generator experiment runner | `a286e61` |
+| #682 | Dedicated generator training API | `1f2df60` |
+| #683 | Dashboard training workflow, paper execution-contract parity, and current Telegram preference enforcement | `519ead5` |
+
+PR #683 passed all six required checks on its final head: both pytest checks, unit tests, wallet-tracker MariaDB integration, paper-accounting regression, and frontend checks including type-check, unit tests, production build, and browser smoke tests. The final master branch was verified at `519ead5be4e1ffd4da8a29f3d5f17002ecd2d4ad`.
+
+The final Telegram audit confirms:
+- Paper entry and close notifications are gated by the selected configuration's current `telegram_enabled` value.
+- Pending-order fills use the current configuration toggle, not only the historical toggle snapshot stored when the order was created.
+- Generator entry and close alerts retain the generator model ID for attribution.
+- A disabled strategy creates no new entries; existing positions continue through normal exit management.
+
+**Release boundary:** implementation and CI are complete, but this is not a trained or production-validated strategy yet. No user-history experiment has been run, no model has been promoted, no paper config has been activated, no Telegram signal has been sent, and no deployment/live trading has occurred. The first actual experiment must use a user-selected symbol, market, and timeframe; its untouched-test report must be reviewed before paper activation.
