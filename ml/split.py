@@ -15,6 +15,44 @@ class TimeSeriesSplit:
     test: pd.DataFrame
 
 
+def _purge_overlapping_outcomes(
+    train: pd.DataFrame,
+    validation: pd.DataFrame,
+    test: pd.DataFrame,
+) -> TimeSeriesSplit:
+    """Remove labels whose realized outcome reaches the next time partition.
+
+    A trade belongs to a partition by signal time, but its label is only safe
+    for that partition when its exit occurred strictly before the next
+    partition begins. This purges train/validation boundary-crossing labels.
+    """
+    if "exit_time" not in train.columns:
+        return TimeSeriesSplit(train=train, validation=validation, test=test)
+
+    for name, frame in (("train", train), ("validation", validation), ("test", test)):
+        exits = pd.to_numeric(frame["exit_time"], errors="coerce")
+        if exits.isna().any():
+            raise ValueError(f"{name} split contains an invalid exit_time")
+
+    validation_start = int(validation["open_time"].min())
+    test_start = int(test["open_time"].min())
+    safe_train = train[pd.to_numeric(train["exit_time"], errors="coerce") < validation_start]
+    safe_validation = validation[
+        pd.to_numeric(validation["exit_time"], errors="coerce") < test_start
+    ]
+
+    if safe_train.empty or safe_validation.empty:
+        raise ValueError(
+            "purging overlapping trade outcomes left an empty train or validation partition"
+        )
+
+    return TimeSeriesSplit(
+        train=safe_train.reset_index(drop=True),
+        validation=safe_validation.reset_index(drop=True),
+        test=test.reset_index(drop=True),
+    )
+
+
 def split_by_fractions(
     df: pd.DataFrame,
     train_fraction: float = 0.60,
@@ -45,10 +83,10 @@ def split_by_fractions(
     train_end = max(1, min(train_end, n - 2))
     validation_end = max(train_end + 1, min(validation_end, n - 1))
 
-    return TimeSeriesSplit(
-        train=ordered.iloc[:train_end].reset_index(drop=True),
-        validation=ordered.iloc[train_end:validation_end].reset_index(drop=True),
-        test=ordered.iloc[validation_end:].reset_index(drop=True),
+    return _purge_overlapping_outcomes(
+        ordered.iloc[:train_end].reset_index(drop=True),
+        ordered.iloc[train_end:validation_end].reset_index(drop=True),
+        ordered.iloc[validation_end:].reset_index(drop=True),
     )
 
 
@@ -80,8 +118,8 @@ def split_by_timestamps(
     if train.empty or validation.empty or test.empty:
         raise ValueError("timestamp boundaries must produce non-empty train/validation/test splits")
 
-    return TimeSeriesSplit(
-        train=train.reset_index(drop=True),
-        validation=validation.reset_index(drop=True),
-        test=test.reset_index(drop=True),
+    return _purge_overlapping_outcomes(
+        train.reset_index(drop=True),
+        validation.reset_index(drop=True),
+        test.reset_index(drop=True),
     )
