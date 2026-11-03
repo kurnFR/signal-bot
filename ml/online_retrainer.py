@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 import fcntl
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -107,6 +108,30 @@ def _load_registry() -> dict[str, Any]:
     models = registry.get("registered_models", {})
     if not isinstance(enabled, bool) or not isinstance(models, dict):
         logger.error("Online retraining registry has invalid control fields; disabling retraining")
+        return _default_registry(enabled=False)
+
+    interval = registry.get("retrain_interval_hours", 24)
+    min_candles = registry.get("min_new_candles", 48)
+    max_drift = registry.get("max_drift_psi", 0.25)
+    valid_interval = (
+        isinstance(interval, (int, float))
+        and not isinstance(interval, bool)
+        and math.isfinite(interval)
+        and interval >= 0
+    )
+    valid_min_candles = (
+        isinstance(min_candles, int)
+        and not isinstance(min_candles, bool)
+        and min_candles >= 0
+    )
+    valid_max_drift = (
+        isinstance(max_drift, (int, float))
+        and not isinstance(max_drift, bool)
+        and math.isfinite(max_drift)
+        and max_drift >= 0
+    )
+    if not (valid_interval and valid_min_candles and valid_max_drift):
+        logger.error("Online retraining registry contains invalid policy values; disabling retraining")
         return _default_registry(enabled=False)
 
     required_model_fields = ("symbol", "market", "timeframe", "strategy_name")

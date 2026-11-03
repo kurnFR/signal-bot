@@ -47,6 +47,29 @@ class TestOnlineRetrainerRegistryValidation(unittest.TestCase):
             self.assertIs(registry["enabled"], False)
             self.assertEqual(registry["registered_models"], {})
 
+    def test_invalid_policy_values_disable_registry(self):
+        invalid_values = [
+            {"retrain_interval_hours": "not-a-number"},
+            {"retrain_interval_hours": float("inf")},
+            {"retrain_interval_hours": -1},
+            {"min_new_candles": 1.5},
+            {"min_new_candles": True},
+            {"min_new_candles": -1},
+            {"max_drift_psi": float("nan")},
+            {"max_drift_psi": -0.1},
+        ]
+        for policy in invalid_values:
+            with self.subTest(policy=policy), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "registry.json"
+                path.write_text(json.dumps({
+                    "enabled": True,
+                    "registered_models": {},
+                    **policy,
+                }), encoding="utf-8")
+                with patch.object(online_retrainer, "REGISTRY_PATH", path):
+                    registry = online_retrainer._load_registry()
+                self.assertIs(registry["enabled"], False)
+
     def test_valid_legacy_registry_remains_enabled(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "registry.json"
