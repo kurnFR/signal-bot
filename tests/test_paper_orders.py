@@ -115,7 +115,7 @@ class TestPendingOrderPersistence(unittest.TestCase):
         self.assertEqual(conn.commits, 1)
         insert = next((sql, params) for sql, params in cur.executed if "INSERT IGNORE INTO paper_orders" in sql)
         self.assertIn("ml_generator_model_id", insert[0])
-        self.assertEqual(insert[1][13], None)
+        self.assertEqual(insert[1][13], "gen-model-1")
 
     def test_duplicate_signal_returns_existing_order_without_overwriting(self):
         cur = _Cursor(lastrowid=0, row={"id": 17, "status": "FILLED"})
