@@ -80,6 +80,9 @@ describe("read-only same-origin API transport", () => {
       body: JSON.stringify({ symbol: "BTCUSDT" }),
     }));
     await expect(postJson("/api/../static/app.js", {})).rejects.toThrow(TypeError);
+    await expect(postJson("/api/paper/config", {})).rejects.toThrow("POST endpoint is not allowlisted");
+    await expect(postJson("/api/ml/generator/run-experiment?redirect=/api/paper/config", {})).rejects.toThrow("POST endpoint is not allowlisted");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("clears an expired session on a protected JSON POST", async () => {
