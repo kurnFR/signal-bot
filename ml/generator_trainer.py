@@ -196,7 +196,7 @@ def _select_policy(
     validation: pd.DataFrame,
     probabilities: np.ndarray,
     config: GeneratorTrainingConfig,
-    policy_evaluator: Callable[[pd.DataFrame, np.ndarray, float, float], Mapping[str, Any]] | None = None,
+    policy_evaluator: Callable[[str, pd.DataFrame, np.ndarray, float, float], Mapping[str, Any]] | None = None,
 ) -> tuple[GeneratorPolicy, dict[str, Any]]:
     if config.min_validation_trades < 1:
         raise ValueError("min_validation_trades must be positive")
@@ -210,7 +210,7 @@ def _select_policy(
             if policy_evaluator is None:
                 metrics, _ = _evaluate_policy(validation, probabilities, confidence, margin)
             else:
-                metrics = dict(policy_evaluator(validation, probabilities, confidence, margin))
+                metrics = dict(policy_evaluator("validation", validation, probabilities, confidence, margin))
                 required_metrics = {"trades", "total_net_return", "expectancy"}
                 if not required_metrics.issubset(metrics):
                     raise ValueError(
@@ -245,7 +245,7 @@ def train_generator(
     test: pd.DataFrame,
     config: GeneratorTrainingConfig,
     *,
-    policy_evaluator: Callable[[pd.DataFrame, np.ndarray, float, float], Mapping[str, Any]] | None = None,
+    policy_evaluator: Callable[[str, pd.DataFrame, np.ndarray, float, float], Mapping[str, Any]] | None = None,
 ) -> GeneratorTrainingResult:
     """Fit on TRAIN, select the policy on VALIDATION, and evaluate TEST once.
 
@@ -292,7 +292,7 @@ def train_generator(
         )
     else:
         test_metrics = dict(policy_evaluator(
-            test, test_probabilities, policy.min_confidence, policy.min_directional_margin
+            "test", test, test_probabilities, policy.min_confidence, policy.min_directional_margin
         ))
         required_metrics = {"trades", "total_net_return", "expectancy"}
         if not required_metrics.issubset(test_metrics):
