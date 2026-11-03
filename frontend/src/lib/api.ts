@@ -1,8 +1,6 @@
 /**
- * Same-origin, read-only API transport for future migration slices.
- *
- * Domain endpoints and response schemas must be verified against FastAPI before
- * they are added. This module intentionally exposes GET only.
+ * Same-origin JSON transport for verified API endpoints.
+ * Mutations are exposed only through explicit domain helpers that call postJson.
  */
 export class ApiError extends Error {
   readonly status: number;
@@ -80,6 +78,48 @@ export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T>
 
   try {
     return await response.json() as T;
+  } catch {
+    throw new ApiError("API returned invalid JSON", response.status, "invalid-json");
+  }
+}
+
+/** Submit a same-origin JSON request to a verified mutation endpoint. */
+export async function postJson<TResponse, TBody extends Record<string, unknown>>(
+  path: string,
+  body: TBody,
+  signal?: AbortSignal,
+): Promise<TResponse> {
+  assertApiPath(path);
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+  const token = readAuthToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 && path !== "/api/auth/me") {
+      try { window.localStorage.removeItem("token"); } catch { /* Auth state still resets via the event. */ }
+      window.dispatchEvent(new Event("signal-bot:session-expired"));
+    }
+    throw new ApiError(`API request failed with status ${response.status}`, response.status, "http");
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new ApiError("API response was not JSON", response.status, "invalid-content-type");
+  }
+
+  try {
+    return await response.json() as TResponse;
   } catch {
     throw new ApiError("API returned invalid JSON", response.status, "invalid-json");
   }
