@@ -9,7 +9,7 @@ def _dataset(n=50):
     times = np.arange(1, n + 1, dtype=np.int64)
     x = np.linspace(-2.0, 2.0, n)
     target = (np.arange(n) % 2).astype(int)
-    return pd.DataFrame({"open_time": times, "x": x, "target": target, "outcome_r": np.where(target, 1.0, -0.5)})
+    return pd.DataFrame({"open_time": times, "exit_time": times, "x": x, "target": target, "outcome_r": np.where(target, 1.0, -0.5)})
 
 
 def test_execution_tournament_selects_threshold_from_simulator_and_tests_once():
