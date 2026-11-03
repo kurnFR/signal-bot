@@ -16,6 +16,7 @@ class TestMLTournamentRunner(unittest.TestCase):
         outcome = np.where(target == 1, 1.0, -0.5)
         return pd.DataFrame({
             "open_time": np.arange(n),
+            "exit_time": np.arange(n),
             "feature": feature,
             "target": target,
             "outcome_r": outcome,
