@@ -17,8 +17,6 @@ export function MLGeneratorTrainingPanel({ onCompleted }: Props) {
   const [modelType, setModelType] = useState<"logistic_regression" | "random_forest" | "hist_gradient_boosting">("hist_gradient_boosting");
   const [horizon, setHorizon] = useState(12);
   const [barrier, setBarrier] = useState(1.5);
-  const [feeRate, setFeeRate] = useState(0.001);
-  const [slippageRate, setSlippageRate] = useState(0.0005);
   const [minimumTrades, setMinimumTrades] = useState(10);
   const [stopAtr, setStopAtr] = useState(1.5);
   const [riskReward, setRiskReward] = useState(2);
@@ -40,8 +38,6 @@ export function MLGeneratorTrainingPanel({ onCompleted }: Props) {
         model_type: modelType,
         horizon_bars: horizon,
         barrier_atr_multiple: barrier,
-        fee_rate: feeRate,
-        slippage_rate: slippageRate,
         min_net_return: 0,
         min_validation_trades: minimumTrades,
         stop_atr_multiple: stopAtr,
@@ -82,15 +78,13 @@ export function MLGeneratorTrainingPanel({ onCompleted }: Props) {
         <label>Model<select value={modelType} onChange={(event) => setModelType(event.target.value as typeof modelType)}><option value="hist_gradient_boosting">Histogram Gradient Boosting</option><option value="random_forest">Random Forest</option><option value="logistic_regression">Logistic Regression</option></select></label>
         <label>Label horizon (bars)<input type="number" min={2} max={200} value={horizon} onChange={(event) => setHorizon(Number(event.target.value))} required /></label>
         <label>ATR barrier multiple<input type="number" min={0.1} max={20} step={0.1} value={barrier} onChange={(event) => setBarrier(Number(event.target.value))} required /></label>
-        <label>Fee rate<input type="number" min={0} max={0.099} step={0.0001} value={feeRate} onChange={(event) => setFeeRate(Number(event.target.value))} required /></label>
-        <label>Slippage rate<input type="number" min={0} max={0.099} step={0.0001} value={slippageRate} onChange={(event) => setSlippageRate(Number(event.target.value))} required /></label>
         <label>Minimum validation trades<input type="number" min={1} max={500} value={minimumTrades} onChange={(event) => setMinimumTrades(Number(event.target.value))} required /></label>
         <label>Stop distance (ATR)<input type="number" min={0.1} max={20} step={0.1} value={stopAtr} onChange={(event) => setStopAtr(Number(event.target.value))} required /></label>
         <label>Risk / reward ratio<input type="number" min={0.1} max={20} step={0.1} value={riskReward} onChange={(event) => setRiskReward(Number(event.target.value))} required /></label>
         <label>Maximum holding bars<input type="number" min={1} max={1000} value={maxHold} onChange={(event) => setMaxHold(Number(event.target.value))} required /></label>
       </div>
       <div className="ml-generator-actions">
-        <p>Uses closed candles, chronological purging, validation-only policy selection, and one untouched canonical-simulator test. Training does not activate paper trading or Telegram.</p>
+        <p>Uses closed candles, chronological purging, validation-only policy selection, one untouched canonical-simulator test, and the server's configured paper fees/slippage. Training does not activate paper trading or Telegram.</p>
         <button className="button button-primary" type="submit" disabled={busy || !symbol.trim()}>
           {busy ? <LoaderCircle size={15} className="spin" /> : <Play size={15} />}
           {busy ? "Training generator…" : "Train generator"}
