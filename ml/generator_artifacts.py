@@ -208,7 +208,8 @@ def load_generator_artifact(
     model = ModelStore(directory).load(
         artifact, artifact.feature_columns, manifest=manifest
     )
-    classes = set(getattr(model, "classes_", []).tolist())
+    import numpy as np
+    classes = set(np.asarray(getattr(model, "classes_", [])).tolist())
     if classes != set(GENERATOR_CLASS_MAPPING.values()):
         raise ValueError("loaded generator model does not support SHORT, HOLD, and LONG")
     if not hasattr(model, "predict_proba"):
