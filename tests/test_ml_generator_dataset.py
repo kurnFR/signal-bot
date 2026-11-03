@@ -1,6 +1,8 @@
+import numpy as np
 import pandas as pd
 import pytest
 
+from features.indicators import compute_all_features
 from ml.generator_dataset import (
     GENERATOR_CLASSES,
     build_generator_dataset,
@@ -161,3 +163,40 @@ def test_open_future_candles_are_not_used_to_resolve_labels():
 
     assert 100 not in set(result["open_time"])
     assert 200 not in set(result["open_time"])
+
+
+def test_shared_ml_features_do_not_change_when_future_ohlcv_is_mutated():
+    count = 96
+    steps = np.arange(count, dtype=float)
+    mid = 100.0 + steps * 0.15 + np.sin(steps / 3.0)
+    open_price = mid
+    close_price = mid + 0.2 * np.sin(steps / 2.0)
+    frame = pd.DataFrame({
+        "open": open_price,
+        "high": np.maximum(open_price, close_price) + 0.8,
+        "low": np.minimum(open_price, close_price) - 0.8,
+        "close": close_price,
+        "volume": 1000.0 + steps * 3.0 + 100.0 * np.cos(steps / 4.0),
+    })
+    params = {
+        "RSI_WINDOW": 14,
+        "MACD_FAST": 12,
+        "MACD_SLOW": 26,
+        "MACD_SIGNAL": 9,
+        "ATR_PERIOD": 14,
+        "VOLUME_SMA_PERIOD": 20,
+        "HTF_S_R_LOOKBACK_BARS": 24,
+    }
+    cutoff = 60
+    changed_future = frame.copy()
+    changed_future.loc[cutoff + 1:, ["open", "high", "low", "close"]] *= 1.4
+    changed_future.loc[cutoff + 1:, "volume"] *= 5.0
+
+    original_features = compute_all_features(frame, params)
+    changed_features = compute_all_features(changed_future, params)
+
+    pd.testing.assert_frame_equal(
+        original_features.iloc[:cutoff + 1].reset_index(drop=True),
+        changed_features.iloc[:cutoff + 1].reset_index(drop=True),
+        check_exact=True,
+    )
