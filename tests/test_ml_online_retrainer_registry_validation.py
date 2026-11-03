@@ -70,6 +70,53 @@ class TestOnlineRetrainerRegistryValidation(unittest.TestCase):
                     registry = online_retrainer._load_registry()
                 self.assertIs(registry["enabled"], False)
 
+    def test_invalid_optional_runtime_fields_disable_registry(self):
+        valid_model = {
+            "symbol": "BTCUSDT", "market": "spot",
+            "timeframe": "1h", "strategy_name": "trend_ema_v1",
+        }
+        invalid_models = [
+            {"last_candle_count": -1},
+            {"last_candle_count": 1.5},
+            {"last_candle_count": True},
+            {"last_retrained_at": 123},
+            {"last_retrained_at": "not-a-timestamp"},
+            {"auto_promote": "yes"},
+            {"model_type": ""},
+            {"model_type": 7},
+        ]
+        for invalid in invalid_models:
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "registry.json"
+                model = {**valid_model, **invalid}
+                path.write_text(json.dumps({
+                    "enabled": True,
+                    "registered_models": {"btc": model},
+                }), encoding="utf-8")
+                with patch.object(online_retrainer, "REGISTRY_PATH", path):
+                    registry = online_retrainer._load_registry()
+                self.assertIs(registry["enabled"], False)
+                self.assertEqual(registry["registered_models"], {})
+
+    def test_valid_optional_runtime_fields_remain_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "registry.json"
+            path.write_text(json.dumps({
+                "enabled": True,
+                "registered_models": {"btc": {
+                    "symbol": "BTCUSDT", "market": "spot",
+                    "timeframe": "1h", "strategy_name": "trend_ema_v1",
+                    "last_candle_count": 100,
+                    "last_retrained_at": "2026-11-03T00:00:00+00:00",
+                    "auto_promote": False,
+                    "model_type": "hist_gradient_boosting",
+                }},
+            }), encoding="utf-8")
+            with patch.object(online_retrainer, "REGISTRY_PATH", path):
+                registry = online_retrainer._load_registry()
+            self.assertIs(registry["enabled"], True)
+            self.assertEqual(registry["registered_models"]["btc"]["last_candle_count"], 100)
+
     def test_valid_legacy_registry_remains_enabled(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "registry.json"
