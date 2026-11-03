@@ -444,7 +444,12 @@ class TestGeneratorMaxHoldPersistence(unittest.TestCase):
             "atr_at_signal": 1.0,
         }
         artifact = MagicMock()
-        artifact.label_config = {"max_hold_bars": 41}
+        from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT
+        artifact.label_config = {
+            "max_hold_bars": 41,
+            "fee_rate": BACKTEST_FEE_PCT,
+            "slippage_rate": BACKTEST_SLIPPAGE_PCT,
+        }
 
         with patch("paper.engine.get_pool", return_value=pool), \
              patch("paper.circuit_breaker.check_exposure_limit", return_value=(True, "")), \
