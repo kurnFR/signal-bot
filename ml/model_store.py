@@ -17,7 +17,12 @@ try:
 except ImportError:  # dependency is optional until ML runtime is installed
     joblib = None
 
-from ml.artifacts import ModelArtifact, resolve_model_artifact_paths, resolve_model_manifest_path
+from ml.artifacts import (
+    ModelArtifact,
+    read_model_manifest_file,
+    resolve_model_artifact_paths,
+    resolve_model_manifest_path,
+)
 
 
 class ModelStore:
@@ -143,7 +148,7 @@ class ModelStore:
             raise ValueError("ML artifact feature schema does not match requested features")
         manifest_path, path = resolve_model_artifact_paths(artifact.model_id, self.root)
         if manifest is None:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest = read_model_manifest_file(manifest_path)
         if not isinstance(manifest, dict) or manifest.get("model_id") != artifact.model_id:
             raise ValueError("Model manifest ID does not match requested artifact")
 
@@ -177,4 +182,4 @@ class ModelStore:
 
     def load_manifest(self, model_id: str) -> dict[str, Any]:
         path = resolve_model_manifest_path(model_id, self.root)
-        return json.loads(path.read_text(encoding="utf-8"))
+        return read_model_manifest_file(path)
