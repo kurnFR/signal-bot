@@ -609,3 +609,142 @@
         flex-shrink: 0;
     }
 }
+
+
+/* Fluid desktop workspace: prevent fixed sidebar/content sizing from fighting
+   browser zoom and intermediate laptop widths. The mobile navigation rules
+   below 767px remain authoritative. */
+html,
+body {
+    width: 100%;
+    min-width: 320px;
+}
+
+body {
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+body > aside {
+    flex: 0 0 16rem;
+    min-width: 0;
+    max-width: 16rem;
+}
+
+body > div.flex-1.flex.flex-col.min-w-0 {
+    flex: 1 1 0%;
+    width: 0;
+    min-width: 0;
+    max-width: none;
+}
+
+body > div.flex-1.flex.flex-col.min-w-0 > main {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    box-sizing: border-box;
+}
+
+.view-section,
+.view-section > *,
+.view-section .grid,
+.view-section .flex {
+    min-width: 0;
+}
+
+.view-section input,
+.view-section select,
+.view-section textarea {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* At browser-zoomed and compact laptop widths, use an icon rail rather than
+   allowing the fixed 16rem navigation to consume the workspace. */
+@media (min-width: 768px) and (max-width: 1100px) {
+    body > aside {
+        flex-basis: 4.75rem;
+        width: 4.75rem;
+        max-width: 4.75rem;
+    }
+
+    body > aside > div:first-child > div:first-child {
+        justify-content: center;
+        padding-inline: 0.5rem;
+    }
+
+    body > aside > div:first-child > div:first-child > div:last-child {
+        display: none;
+    }
+
+    body > aside nav {
+        padding-inline: 0.5rem;
+    }
+
+    body > aside nav .nav-btn {
+        justify-content: center;
+        gap: 0;
+        padding-inline: 0.5rem;
+    }
+
+    body > aside nav .nav-btn > span {
+        display: none;
+    }
+
+    body > aside nav .nav-btn > i,
+    body > aside nav .nav-btn > svg {
+        flex: 0 0 auto;
+    }
+
+    body > aside > div:last-child {
+        display: flex;
+        justify-content: center;
+    }
+
+    body > aside > div:last-child > * {
+        max-width: calc(100% - 0.5rem);
+    }
+
+    body > div.flex-1.flex.flex-col.min-w-0 > header {
+        min-width: 0;
+    }
+
+    body > div.flex-1.flex.flex-col.min-w-0 > header > div:first-child {
+        min-width: 0;
+    }
+
+    #view-header-title {
+        overflow-wrap: anywhere;
+    }
+
+    body > div.flex-1.flex.flex-col.min-w-0 > main {
+        padding-inline: clamp(0.75rem, 2vw, 1.5rem);
+    }
+}
+
+@media (min-width: 768px) {
+    body > div.flex-1.flex.flex-col.min-w-0 {
+        min-height: 100vh;
+        min-height: 100dvh;
+    }
+
+    body > div.flex-1.flex.flex-col.min-w-0 > main {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+}
+
+@media (max-width: 767px) {
+    body > aside {
+        flex-basis: auto;
+        max-width: none;
+    }
+
+    body > div.flex-1.flex.flex-col.min-w-0 {
+        width: 100%;
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+}
