@@ -1,4 +1,4 @@
-import { getJson } from "./api";
+import { getJson, postJson } from "./api";
 
 export interface MLExperimentSummary {
   experiment_id: string;
@@ -108,4 +108,60 @@ export async function fetchMLExperimentDetails(experimentId: string, signal?: Ab
     throw new Error("ML experiment details returned an invalid response");
   }
   return payload;
+}
+
+
+export interface MLGeneratorExperimentRequest {
+  symbol: string;
+  market: "spot" | "futures";
+  timeframe: string;
+  model_type: "logistic_regression" | "random_forest" | "hist_gradient_boosting";
+  horizon_bars: number;
+  barrier_atr_multiple: number;
+  fee_rate: number;
+  slippage_rate: number;
+  min_net_return: number;
+  min_validation_trades: number;
+  stop_atr_multiple: number;
+  risk_reward_ratio: number;
+  max_hold_bars: number;
+  seed: number;
+}
+export interface MLGeneratorExperimentResponse {
+  status: "success";
+  model_id: string;
+  task_type: "signal_generator_v1";
+  eligible_for_paper: boolean;
+  decision_policy: { min_confidence: number; min_directional_margin: number };
+  dataset_rows: number;
+  train_rows: number;
+  validation_rows: number;
+  test_rows: number;
+  validation_metrics: Record<string, unknown>;
+  test_metrics: Record<string, unknown>;
+  message: string;
+}
+
+/** Launch only the dedicated independent generator experiment API. */
+export async function runMLGeneratorExperiment(
+  request: MLGeneratorExperimentRequest,
+): Promise<MLGeneratorExperimentResponse> {
+  const payload = await postJson<unknown, MLGeneratorExperimentRequest>(
+    "/api/ml/generator/run-experiment",
+    request,
+  );
+  if (!isRecord(payload) || payload.status !== "success" ||
+      !isNonEmptyString(payload.model_id) || !SAFE_ML_ID.test(payload.model_id) ||
+      payload.task_type !== "signal_generator_v1" ||
+      typeof payload.eligible_for_paper !== "boolean" ||
+      !isRecord(payload.decision_policy) ||
+      !isFiniteNumber(payload.decision_policy.min_confidence) ||
+      !isFiniteNumber(payload.decision_policy.min_directional_margin) ||
+      !isCount(payload.dataset_rows) || !isCount(payload.train_rows) ||
+      !isCount(payload.validation_rows) || !isCount(payload.test_rows) ||
+      !isRecord(payload.validation_metrics) || !isRecord(payload.test_metrics) ||
+      !isNonEmptyString(payload.message)) {
+    throw new Error("ML generator experiment returned an invalid response");
+  }
+  return payload as unknown as MLGeneratorExperimentResponse;
 }
