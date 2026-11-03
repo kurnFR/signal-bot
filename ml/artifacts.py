@@ -19,6 +19,7 @@ import tempfile
 from typing import Any
 
 
+CURRENT_EVALUATION_PROTOCOL_VERSION = "purged_exit_time_v1"
 _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 
@@ -100,6 +101,7 @@ class ModelArtifact:
     eligible_for_paper: bool = False
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     weights_sha256: str | None = None
+    evaluation_protocol_version: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_id, str) or not _MODEL_ID_RE.fullmatch(self.model_id) or ".." in self.model_id:
@@ -110,6 +112,17 @@ class ModelArtifact:
             raise ValueError("threshold must be between 0 and 1")
         if self.weights_sha256 is not None and (not isinstance(self.weights_sha256, str) or not _SHA256_RE.fullmatch(self.weights_sha256)):
             raise ValueError("weights_sha256 must be a lowercase SHA-256 hex digest")
+        if self.evaluation_protocol_version is not None and (
+            not isinstance(self.evaluation_protocol_version, str)
+            or not re.fullmatch(r"[a-z0-9_]{1,64}", self.evaluation_protocol_version)
+        ):
+            raise ValueError("evaluation_protocol_version must be a safe protocol identifier")
+        if self.eligible_for_paper is True and (
+            self.evaluation_protocol_version != CURRENT_EVALUATION_PROTOCOL_VERSION
+        ):
+            raise ValueError(
+                "paper-eligible artifacts require the current purged exit-time evaluation protocol"
+            )
 
     def manifest(self) -> dict[str, Any]:
         return asdict(self)
@@ -224,6 +237,10 @@ def load_eligible_paper_artifact(
         raise ValueError("Model manifest ID does not match configured model ID")
     if manifest.get("eligible_for_paper") is not True:
         raise ValueError("Model manifest is not marked eligible for paper trading")
+    if manifest.get("evaluation_protocol_version") != CURRENT_EVALUATION_PROTOCOL_VERSION:
+        raise ValueError(
+            "Model was not evaluated with the current purged exit-time protocol"
+        )
     if not isinstance(manifest.get("weights_sha256"), str) or not _SHA256_RE.fullmatch(manifest["weights_sha256"]):
         raise ValueError("Paper model manifest must contain a valid weights_sha256 digest")
     report = paper_eligibility_report(test_metrics=manifest.get("test_metrics"))
