@@ -43,7 +43,7 @@ def _load_verified_ml_model(ml_model_id: str, models_dir: str = "ml_models"):
     with open(manifest_path, "r", encoding="utf-8") as mf:
         manifest = json.load(mf)
     artifact = load_eligible_paper_artifact(manifest, ml_model_id)
-    model = ModelStore(models_dir).load(artifact, artifact.feature_columns)
+    model = ModelStore(models_dir).load(artifact, artifact.feature_columns, manifest=manifest)
     return artifact, model
 
 # Strategies whose entries are opened by their own dedicated module rather
