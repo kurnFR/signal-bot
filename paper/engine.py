@@ -935,7 +935,7 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
             )
             if fill["status"] == "filled":
                 result["filled"] += 1
-                if order.get("telegram_enabled", cfg.get("telegram_enabled", False)):
+                if bool(cfg.get("telegram_enabled", False)):
                     _send_paper_entry_alert(order)
             elif fill["status"] == "rejected":
                 result["rejected"] += 1
