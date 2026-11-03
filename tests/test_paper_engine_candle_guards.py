@@ -482,5 +482,53 @@ class TestGeneratorMaxHoldPersistence(unittest.TestCase):
                 )
 
 
+class TestTelegramUsesCurrentPaperConfigPreference(unittest.TestCase):
+    def _run_pending_fill(self, current_enabled, persisted_enabled):
+        entry_time = 100_000
+        cfg = _make_cfg(
+            id=77,
+            strategy_name="ml_signal_generator_v1",
+            is_active=1,
+            telegram_enabled=current_enabled,
+            ml_generator_model_id="generator-paper-test",
+        )
+        order = {
+            "id": 88,
+            "config_id": 77,
+            "symbol": cfg["symbol"],
+            "market": cfg["market"],
+            "timeframe": cfg["timeframe"],
+            "strategy_name": cfg["strategy_name"],
+            "ml_model_id": None,
+            "ml_generator_model_id": cfg["ml_generator_model_id"],
+            "direction": "LONG",
+            "entry_time": entry_time,
+            "requested_entry_price": 100.0,
+            "stop_loss": 98.0,
+            "take_profit": 104.0,
+            "atr_at_signal": 1.0,
+            "telegram_enabled": persisted_enabled,
+        }
+        open_candle = {"open_time": entry_time, "close": 100.0}
+        with patch("paper.engine.list_orders", return_value=[order]), \
+             patch("paper.engine.fetch_latest_open_candle", return_value=open_candle), \
+             patch("paper.engine.time.time", return_value=(entry_time + 1000) / 1000), \
+             patch("paper.circuit_breaker.check_circuit_breakers", return_value=(True, "")), \
+             patch("paper.engine.fill_pending_order", return_value={"status": "filled"}), \
+             patch("paper.engine._send_paper_entry_alert") as send_alert:
+            result = pe._process_pending_paper_orders([cfg])
+        return result, send_alert
+
+    def test_disabling_telegram_before_pending_fill_suppresses_entry_alert(self):
+        result, send_alert = self._run_pending_fill(current_enabled=False, persisted_enabled=True)
+        self.assertEqual(result["filled"], 1)
+        send_alert.assert_not_called()
+
+    def test_enabling_telegram_before_pending_fill_enables_entry_alert(self):
+        result, send_alert = self._run_pending_fill(current_enabled=True, persisted_enabled=False)
+        self.assertEqual(result["filled"], 1)
+        send_alert.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
