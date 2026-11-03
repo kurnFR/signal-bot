@@ -155,3 +155,33 @@ def test_generator_trainer_uses_injected_canonical_policy_evaluator():
     assert calls.count("validation") == 4
     assert calls.count("test") == 1
     assert result.test_metrics["evaluation_mode"] == "canonical_simulator_oos"
+
+
+
+def test_policy_failure_reports_validation_search_diagnostics_without_relaxing_gate():
+    from ml.generator_trainer import _select_policy
+
+    _, validation, _ = _partitions()
+    config = _config(min_validation_trades=10)
+
+    def losing_evaluator(name, partition, probabilities, confidence, margin):
+        return {
+            "trades": 8,
+            "total_net_return": -0.03,
+            "expectancy": -0.00375,
+        }
+
+    with pytest.raises(ValueError) as error:
+        _select_policy(
+            validation,
+            np.full((len(validation), 3), 1.0 / 3.0),
+            config,
+            losing_evaluator,
+        )
+
+    message = str(error.value)
+    assert "minimum trades=10" in message
+    assert "policies evaluated=18" in message
+    assert "maximum trades observed=8" in message
+    assert "best candidate return=-0.030000 from 8 trades" in message
+    assert "validation gate was not relaxed" in message
