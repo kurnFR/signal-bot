@@ -717,15 +717,21 @@ def _signal_already_traded(cfg: Dict[str, Any], entry_candle: int) -> bool:
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT 1 FROM paper_trades
-            WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
-              AND entry_time=%s
-            LIMIT 1
-            """,
-            (cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"], int(entry_candle)),
-        )
+        if cfg.get("id") is not None:
+            cur.execute(
+                "SELECT 1 FROM paper_trades WHERE config_id=%s AND entry_time=%s LIMIT 1",
+                (int(cfg["id"]), int(entry_candle)),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT 1 FROM paper_trades
+                WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
+                  AND entry_time=%s
+                LIMIT 1
+                """,
+                (cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"], int(entry_candle)),
+            )
         found = cur.fetchone() is not None
         cur.close()
         return found
@@ -780,7 +786,8 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
         if (cfg["symbol"] != order["symbol"] or cfg["market"] != order["market"]
                 or cfg["timeframe"] != order["timeframe"]
                 or cfg["strategy_name"] != order["strategy_name"]
-                or (cfg.get("ml_model_id") or None) != (order.get("ml_model_id") or None)):
+                or (cfg.get("ml_model_id") or None) != (order.get("ml_model_id") or None)
+                or (cfg.get("ml_generator_model_id") or None) != (order.get("ml_generator_model_id") or None)):
             try:
                 transition_order(int(order["id"]), "CANCELLED", reason="Paper config changed after signal")
             except Exception:
@@ -840,6 +847,7 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
                     cfg, trade, float(open_candle["close"]), entry_time,
                     ml_model_id=order.get("ml_model_id"),
                     ml_probability=order.get("ml_probability"),
+                    ml_generator_model_id=order.get("ml_generator_model_id"),
                     connection=conn,
                 ),
             )
@@ -861,7 +869,11 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
     order_recovery = _process_pending_paper_orders(configs)
     active_cfgs = [c for c in configs if c["is_active"]]
     positions = get_active_positions()
-    open_pos_map = {(p["symbol"], p["market"], p["timeframe"], p["strategy_name"]): p for p in positions}
+    open_pos_map = {
+        (int(p["config_id"]) if p.get("config_id") is not None else
+         (p["symbol"], p["market"], p["timeframe"], p["strategy_name"])): p
+        for p in positions
+    }
     result = {"evaluated_configs": len(active_cfgs), "positions_updated": 0,
               "new_positions_opened": order_recovery["filled"], "positions_closed": 0,
               "orders_filled": order_recovery["filled"], "orders_expired": order_recovery["expired"],
@@ -869,7 +881,8 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
 
     for cfg in active_cfgs:
         symbol, market, timeframe, strategy_name = cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"]
-        key = (symbol, market, timeframe, strategy_name)
+        key = int(cfg["id"]) if cfg.get("id") is not None else (symbol, market, timeframe, strategy_name)
+        is_generator_strategy = strategy_name == "ml_signal_generator_v1"
         is_overlay_strategy = strategy_name in OVERLAY_STRATEGIES
         if strategy_name not in STRATEGIES and not is_overlay_strategy:
             continue
@@ -1014,6 +1027,13 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                 continue
 
             run_params = dict(BASE_PARAMS, symbol=symbol, market=market, timeframe=timeframe)
+            if is_generator_strategy:
+                generator_model_id = cfg.get("ml_generator_model_id")
+                if not generator_model_id or cfg.get("ml_model_id"):
+                    logger.error("Invalid generator paper config #%s; skipping entry", cfg.get("id"))
+                    continue
+                run_params["ml_generator_model_id"] = generator_model_id
+                run_params["_require_generator_eligible"] = True
             if strategy_name in TREND_ALIGNMENT_STRATEGIES and timeframe != HTF_TIMEFRAME:
                 run_params["htf_df"] = fetch_ohlcv_with_features_df(symbol, market, HTF_TIMEFRAME, closed_only=True, limit=300)
             if strategy_name in PAIRS_STRATEGIES and symbol != PAIRS_BASE_SYMBOL:
@@ -1031,7 +1051,12 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                         and latest_trade.get("entry_time") == entry_candle_time):
                     # ML Signal Filtering Gate (if model attached to this paper config)
                     ml_model_id = cfg.get("ml_model_id")
-                    ml_probability = None
+                    ml_generator_model_id = cfg.get("ml_generator_model_id") if is_generator_strategy else None
+                    ml_probability = (
+                        float(latest_trade.get("ml_probability"))
+                        if is_generator_strategy and latest_trade.get("ml_probability") is not None
+                        else None
+                    )
                     ml_threshold = None
 
                     if ml_model_id:
@@ -1079,6 +1104,7 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                             "take_profit": float(latest_trade["take_profit"]),
                             "atr_at_signal": float(latest_trade.get("atr_at_signal", latest_bar.get("atr", 0)) or 0),
                             "ml_model_id": ml_model_id, "ml_probability": ml_probability,
+                            "ml_generator_model_id": ml_generator_model_id,
                             "telegram_enabled": bool(cfg.get("telegram_enabled", False)),
                         })
                     except Exception:
@@ -1099,7 +1125,8 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                             or order.get("symbol") != symbol
                             or order.get("market") != market
                             or order.get("timeframe") != timeframe
-                            or order.get("strategy_name") != strategy_name):
+                            or order.get("strategy_name") != strategy_name
+                            or (order.get("ml_generator_model_id") or None) != (ml_generator_model_id or None)):
                         continue
                     durable_trade = {
                         "direction": order["direction"],
@@ -1110,12 +1137,14 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                     }
                     durable_ml_model_id = order.get("ml_model_id")
                     durable_ml_probability = order.get("ml_probability")
+                    durable_generator_model_id = order.get("ml_generator_model_id")
                     order_result = fill_pending_order(
                         int(order["id"]),
                         float(order["requested_entry_price"]),
                         lambda conn: _insert_position(
                             cfg, durable_trade, float(open_candle["close"]), entry_candle_time,
                             ml_model_id=durable_ml_model_id, ml_probability=durable_ml_probability,
+                            ml_generator_model_id=durable_generator_model_id,
                             connection=conn,
                         ),
                     )
