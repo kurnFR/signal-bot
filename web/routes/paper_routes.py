@@ -113,25 +113,41 @@ def _sync_retailbot2_lifecycle(strategy_name: str, is_active: bool, telegram_ena
     except Exception as exc:
         logging.getLogger("web.paper_routes").warning("Could not sync RetailBot2 lifecycle: %s", exc)
 
-def _validate_generator_config(strategy_name: str, generator_model_id: Optional[str], filter_model_id: Optional[str], is_active: bool) -> None:
+def _validate_generator_config(
+    symbol: str, market: str, timeframe: str, strategy_name: str,
+    generator_model_id: Optional[str], filter_model_id: Optional[str], is_active: bool,
+) -> None:
     generator_strategy = "ml_signal_generator_v1"
     if strategy_name == generator_strategy:
         if not generator_model_id:
             raise HTTPException(status_code=400, detail="Select an independent ML generator model for this strategy.")
         if filter_model_id:
             raise HTTPException(status_code=400, detail="The independent generator cannot be combined with a legacy ML filter model.")
-        try:
-            from ml.generator_artifacts import load_generator_artifact
-            load_generator_artifact(generator_model_id, require_eligible=bool(is_active))
-        except Exception as exc:
-            logging.getLogger("web.paper_routes").warning(
-                "Generator model validation failed (%s)", type(exc).__name__
+        # A preference update or pause must remain possible even if a model file
+        # has since gone missing. Revalidate only when creating/reactivating this
+        # exact generator config; the paper runtime independently fails closed
+        # on every inference load.
+        if is_active:
+            existing_active = any(
+                cfg.get("symbol") == symbol and cfg.get("market") == market
+                and cfg.get("timeframe") == timeframe
+                and cfg.get("strategy_name") == strategy_name
+                and cfg.get("ml_generator_model_id") == generator_model_id
+                and bool(cfg.get("is_active"))
+                for cfg in get_paper_configs()
             )
-            raise HTTPException(
-                status_code=409,
-                detail=("Generator model is invalid or unavailable." if not is_active else
-                        "Generator model must pass the current paper-eligibility gate before activation."),
-            )
+            if not existing_active:
+                try:
+                    from ml.generator_artifacts import load_generator_artifact
+                    load_generator_artifact(generator_model_id, require_eligible=True)
+                except Exception as exc:
+                    logging.getLogger("web.paper_routes").warning(
+                        "Generator model validation failed (%s)", type(exc).__name__
+                    )
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Generator model must pass the current paper-eligibility gate before activation.",
+                    )
     elif generator_model_id:
         raise HTTPException(status_code=400, detail="ml_generator_model_id is only valid for ml_signal_generator_v1.")
 
@@ -152,6 +168,7 @@ def update_config(req: PaperConfigRequest):
     if req.timeframe.strip() not in {"15m", "1h", "4h", "1d"}:
         raise HTTPException(status_code=400, detail="timeframe must be one of: 15m, 1h, 4h, 1d")
     _validate_generator_config(
+        req.symbol.strip().upper(), req.market.strip().lower(), req.timeframe.strip(),
         req.strategy_name.strip(), req.ml_generator_model_id, req.ml_model_id, req.is_active
     )
     res = set_paper_config(
