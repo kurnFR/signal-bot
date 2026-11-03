@@ -711,7 +711,7 @@ def _insert_position(
                 atr, size.stop_distance, last_applied_candle, cfg["allocated_capital"],
                 cfg["risk_per_trade_pct"], size.risk_amount, size.stop_distance,
                 size.quantity, size.notional, entry_fee, ml_model_id, ml_probability,
-                cfg.get("id"), ml_generator_model_id,
+                cfg.get("id"), ml_generator_model_id or cfg.get("ml_generator_model_id"),
             ),
         )
         if owns_connection:
