@@ -1032,6 +1032,7 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
 
                     if ml_model_id:
                         try:
+                            import json
                             from ml.artifacts import load_eligible_paper_artifact, resolve_model_manifest_path
                             from ml.model_store import ModelStore
                             from ml.strategy import MLSignalFilter
