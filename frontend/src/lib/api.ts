@@ -84,7 +84,7 @@ export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T>
 }
 
 /** Submit a same-origin JSON request to a verified mutation endpoint. */
-export async function postJson<TResponse, TBody extends Record<string, unknown>>(
+export async function postJson<TResponse, TBody extends object>(
   path: string,
   body: TBody,
   signal?: AbortSignal,
