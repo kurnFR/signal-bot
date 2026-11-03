@@ -398,3 +398,32 @@ class TestInsertPositionExposureCap(unittest.TestCase):
         with patch("paper.engine.get_pool", return_value=Pool()), \
              patch("paper.circuit_breaker.get_open_notional_usd", return_value=24999.0):
             self.assertIsNone(pe._insert_position(_make_cfg(), trade, 64010.0, CANDLE_A))
+
+
+class TestGeneratorMaxHoldPersistence(unittest.TestCase):
+    def test_generator_trade_max_hold_is_persisted_to_paper_position(self):
+        cursor = MagicMock()
+        cursor.lastrowid = 123
+        connection = MagicMock()
+        connection.cursor.return_value = cursor
+        pool = MagicMock()
+        pool.get_connection.return_value = connection
+        trade = {
+            "direction": "LONG",
+            "entry_price": 100.0,
+            "stop_loss": 98.0,
+            "take_profit": 104.0,
+            "atr_at_signal": 1.0,
+            "max_hold_bars": 37,
+        }
+
+        with patch("paper.engine.get_pool", return_value=pool), \
+             patch("paper.circuit_breaker.check_exposure_limit", return_value=(True, "")):
+            position_id = pe._insert_position(_make_cfg(), trade, 100.0, CANDLE_A)
+
+        self.assertEqual(position_id, 123)
+        sql, values = cursor.execute.call_args.args
+        self.assertIn("0,%s,%s,'OPEN'", sql)
+        self.assertEqual(values[13], 37)
+        self.assertEqual(values[14], CANDLE_A - 1)
+        connection.commit.assert_called_once()
