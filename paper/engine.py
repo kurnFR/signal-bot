@@ -35,13 +35,15 @@ logger = logging.getLogger("paper.engine")
 
 def _load_verified_ml_model(ml_model_id: str, models_dir: str = "ml_models"):
     """Load an eligible paper model only after same-descriptor hash verification."""
-    import json
-    from ml.artifacts import load_eligible_paper_artifact, resolve_model_manifest_path
+    from ml.artifacts import (
+        load_eligible_paper_artifact,
+        read_model_manifest_file,
+        resolve_model_manifest_path,
+    )
     from ml.model_store import ModelStore
 
     manifest_path = resolve_model_manifest_path(ml_model_id, models_dir)
-    with open(manifest_path, "r", encoding="utf-8") as mf:
-        manifest = json.load(mf)
+    manifest = read_model_manifest_file(manifest_path)
     artifact = load_eligible_paper_artifact(manifest, ml_model_id)
     model = ModelStore(models_dir).load(artifact, artifact.feature_columns, manifest=manifest)
     return artifact, model
