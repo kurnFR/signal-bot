@@ -32,6 +32,20 @@ from paper.orders import create_pending_order, fill_pending_order, list_orders, 
 
 logger = logging.getLogger("paper.engine")
 
+
+def _load_verified_ml_model(ml_model_id: str, models_dir: str = "ml_models"):
+    """Load an eligible paper model only after same-descriptor hash verification."""
+    import json
+    from ml.artifacts import load_eligible_paper_artifact, resolve_model_manifest_path
+    from ml.model_store import ModelStore
+
+    manifest_path = resolve_model_manifest_path(ml_model_id, models_dir)
+    with open(manifest_path, "r", encoding="utf-8") as mf:
+        manifest = json.load(mf)
+    artifact = load_eligible_paper_artifact(manifest, ml_model_id)
+    model = ModelStore(models_dir).load(artifact, artifact.feature_columns)
+    return artifact, model
+
 # Strategies whose entries are opened by their own dedicated module rather
 # than the STRATEGIES-driven signal loop below -- deliberately excluded from
 # STRATEGIES (and from backtest/strategies/__init__.py's registry) because
@@ -1032,19 +1046,9 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
 
                     if ml_model_id:
                         try:
-                            import json
-                            from ml.artifacts import load_eligible_paper_artifact, resolve_model_manifest_path
-                            from ml.model_store import ModelStore
                             from ml.strategy import MLSignalFilter
 
-                            manifest_path = resolve_model_manifest_path(ml_model_id)
-                            with open(manifest_path, "r", encoding="utf-8") as mf:
-                                manifest = json.load(mf)
-                            artifact = load_eligible_paper_artifact(manifest, ml_model_id)
-                            # Hash and deserialize through one O_NOFOLLOW file descriptor.
-                            # Loading the path again after a separate hash check would
-                            # permit a replacement between verification and joblib.load.
-                            model = ModelStore("ml_models").load(artifact, artifact.feature_columns)
+                            artifact, model = _load_verified_ml_model(ml_model_id)
                             ml_filter = MLSignalFilter(artifact=artifact, model=model, threshold=artifact.threshold)
 
                             # Evaluate features on current candle
