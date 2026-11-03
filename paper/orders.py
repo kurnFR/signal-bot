@@ -8,6 +8,7 @@ tested and reviewed before they control position creation.
 from __future__ import annotations
 
 import math
+import re
 import os
 import time
 from typing import Any
@@ -68,15 +69,21 @@ def validate_order(order: dict[str, Any]) -> dict[str, Any]:
         raise OrderValidationError("LONG order requires stop_loss < entry < take_profit")
     if direction == "SHORT" and not target < entry < stop:
         raise OrderValidationError("SHORT order requires take_profit < entry < stop_loss")
+    filter_model_id = order.get("ml_model_id")
     generator_model_id = order.get("ml_generator_model_id")
-    if order.get("ml_model_id") and generator_model_id:
+    if filter_model_id is not None and generator_model_id is not None:
         raise OrderValidationError("an order cannot reference both an ML filter and a generator model")
-    if generator_model_id is not None and (
-        not isinstance(generator_model_id, str)
-        or not generator_model_id.strip()
-        or len(generator_model_id) > 100
-    ):
-        raise OrderValidationError("ml_generator_model_id must be a non-empty string of at most 100 characters")
+    for name, value in (("ml_model_id", filter_model_id), ("ml_generator_model_id", generator_model_id)):
+        if value is not None and (
+            not isinstance(value, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", value)
+            or ".." in value
+        ):
+            raise OrderValidationError(f"{name} must be a safe model identifier")
+    if order["strategy_name"] == "ml_signal_generator_v1" and not generator_model_id:
+        raise OrderValidationError("generator strategy orders require ml_generator_model_id")
+    if order["strategy_name"] != "ml_signal_generator_v1" and generator_model_id is not None:
+        raise OrderValidationError("ml_generator_model_id is only valid for ml_signal_generator_v1")
     probability = order.get("ml_probability")
     if probability is not None:
         try:
