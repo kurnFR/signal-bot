@@ -24,6 +24,35 @@ class TestMLExperimentAtomicResult(unittest.TestCase):
         self.assertLessEqual(len(first), 100)
         self.assertRegex(first.rsplit("-", 1)[-1], r"^[a-f0-9]{12}$")
 
+    def test_experiment_id_rejects_path_separators(self):
+        for field, value in (
+            ("symbol", "../outside"),
+            ("market", "spot/futures"),
+            ("timeframe", "1h\\\\..\\\\escape"),
+            ("strategy_name", "../../outside"),
+            ("model_type", "model/type"),
+            ("target_type", "binary/positive"),
+        ):
+            values = {
+                "symbol": "BTCUSDT",
+                "market": "spot",
+                "timeframe": "1h",
+                "strategy_name": "trend_ema_v1",
+                "model_type": "logistic_regression",
+                "target_type": "binary_positive_r",
+            }
+            values[field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "Invalid experiment identifier component"):
+                run_real_experiment._build_experiment_id(**values)
+
+    def test_experiment_id_rejects_non_string_components(self):
+        with self.assertRaisesRegex(ValueError, "Invalid experiment identifier component: symbol"):
+            run_real_experiment._build_experiment_id(
+                symbol=None, market="spot", timeframe="1h",
+                strategy_name="trend_ema_v1", model_type="logistic_regression",
+                target_type="binary_positive_r",
+            )
+
     def test_atomic_result_write_replaces_complete_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "experiment.json"
