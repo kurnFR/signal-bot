@@ -15,6 +15,7 @@ import time
 import logging
 import pandas as pd
 import os
+import re
 from typing import List, Dict, Any, Optional
 
 from db.db import get_pool, fetch_ohlcv_with_features_df, fetch_latest_open_candle
