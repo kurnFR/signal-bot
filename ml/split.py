@@ -15,7 +15,7 @@ class TimeSeriesSplit:
     test: pd.DataFrame
 
 
-def _purge_overlapping_outcomes(
+def purge_overlapping_outcomes(
     train: pd.DataFrame,
     validation: pd.DataFrame,
     test: pd.DataFrame,
@@ -83,7 +83,7 @@ def split_by_fractions(
     train_end = max(1, min(train_end, n - 2))
     validation_end = max(train_end + 1, min(validation_end, n - 1))
 
-    return _purge_overlapping_outcomes(
+    return purge_overlapping_outcomes(
         ordered.iloc[:train_end].reset_index(drop=True),
         ordered.iloc[train_end:validation_end].reset_index(drop=True),
         ordered.iloc[validation_end:].reset_index(drop=True),
