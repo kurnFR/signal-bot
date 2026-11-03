@@ -86,6 +86,7 @@ class TestPaperMLModelLoading(unittest.TestCase):
                     "net_pnl": 12.0,
                 },
                 eligible_for_paper=True,
+                evaluation_protocol_version=CURRENT_EVALUATION_PROTOCOL_VERSION,
             )
             store.save(artifact, {"source": "validated-manifest"})
             manifest_path = Path(tmp) / "paper-manifest-test.json"
