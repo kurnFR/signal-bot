@@ -29,6 +29,6 @@ def test_set_paper_config_returns_persisted_config_id():
         call for call in cursor.execute.call_args_list
         if "SELECT id FROM paper_configs" in call.args[0]
     )
-    assert select_call.args[1] == ("BTCUSDT", "spot", "1d", "trend_ema_v1")
+    assert select_call.args[1] == ("BTCUSDT", "spot", "1d", "trend_ema_v1", None, None)
     connection.commit.assert_called_once()
     connection.close.assert_called_once()
