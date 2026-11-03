@@ -998,12 +998,6 @@
                             <label class="text-[11px] text-slate-400 space-y-1">ATR barrier multiple
                                 <input id="ml-generator-barrier" type="number" min="0.1" max="20" step="0.1" value="1.5" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100">
                             </label>
-                            <label class="text-[11px] text-slate-400 space-y-1">Fee rate
-                                <input id="ml-generator-fee" type="number" min="0" max="0.099" step="0.0001" value="0.001" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100">
-                            </label>
-                            <label class="text-[11px] text-slate-400 space-y-1">Slippage rate
-                                <input id="ml-generator-slippage" type="number" min="0" max="0.099" step="0.0001" value="0.0005" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100">
-                            </label>
                             <label class="text-[11px] text-slate-400 space-y-1">Minimum validation trades
                                 <input id="ml-generator-min-trades" type="number" min="1" max="500" value="10" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100">
                             </label>
@@ -1018,7 +1012,7 @@
                             </label>
                         </div>
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-800 pt-4">
-                            <p class="text-[11px] text-slate-500 max-w-3xl">Uses chronological purging, validation-only policy selection, and one untouched canonical-simulator test. Training saves a research artifact only; paper activation and Telegram are separate choices.</p>
+                            <p class="text-[11px] text-slate-500 max-w-3xl">Uses chronological purging, validation-only policy selection, one untouched canonical-simulator test, and server-configured paper fees/slippage. Training saves a research artifact only; paper activation and Telegram are separate choices.</p>
                             <button id="ml-generator-submit" type="submit" class="shrink-0 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-2">
                                 <i data-lucide="play" class="w-4 h-4"></i> Train Generator
                             </button>
