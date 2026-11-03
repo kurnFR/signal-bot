@@ -8,10 +8,12 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import fcntl
+import hashlib
 import json
 import logging
 import math
 import os
+import stat
 from pathlib import Path
 import tempfile
 import uuid
@@ -23,7 +25,8 @@ from ml.walk_forward_engine import compute_drift_psi
 
 logger = logging.getLogger("ml.online_retrainer")
 
-REGISTRY_PATH = Path("ml_models") / "retraining_registry.json"
+MODEL_ARTIFACTS_DIR = Path("ml_models")
+REGISTRY_PATH = MODEL_ARTIFACTS_DIR / "retraining_registry.json"
 AUDIT_LOG_PATH = Path("ml_results") / "retraining_audit.json"
 CYCLE_LOCK_PATH = Path("ml_models") / "retraining_cycle.lock"
 REGISTRY_LOCK_PATH = Path("ml_models") / "retraining_registry.lock"
@@ -437,6 +440,45 @@ def _load_experiment_result(result: Any) -> Mapping[str, Any]:
     normalized_payload["experiment"] = normalized_experiment
     return normalized_payload
 
+def _verify_persisted_model_artifact(model_id: str, root: str | Path | None = None) -> tuple[Path, Path]:
+    """Require a complete, digest-consistent model artifact before checkpointing retraining."""
+    from ml.artifacts import resolve_model_artifact_paths
+
+    artifact_root = MODEL_ARTIFACTS_DIR if root is None else Path(root)
+    try:
+        manifest_path, weights_path = resolve_model_artifact_paths(model_id, artifact_root)
+        manifest_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        manifest_descriptor = os.open(manifest_path, manifest_flags)
+        with os.fdopen(manifest_descriptor, "r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
+    except Exception as exc:
+        raise RuntimeError(f"Retrained model artifact is missing or invalid: {model_id}") from exc
+
+    if not isinstance(manifest, dict) or manifest.get("model_id") != model_id:
+        raise RuntimeError(f"Retrained model artifact manifest ID mismatch: {model_id}")
+    expected_digest = manifest.get("weights_sha256")
+    if (
+        not isinstance(expected_digest, str)
+        or len(expected_digest) != 64
+        or any(char not in "0123456789abcdef" for char in expected_digest)
+    ):
+        raise RuntimeError(f"Retrained model artifact has an invalid SHA-256 digest: {model_id}")
+
+    try:
+        weights_descriptor = os.open(weights_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError as exc:
+        raise RuntimeError(f"Retrained model weights could not be opened safely: {model_id}") from exc
+    digest = hashlib.sha256()
+    with os.fdopen(weights_descriptor, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise RuntimeError(f"Retrained model weights are not a regular file: {model_id}")
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != expected_digest:
+        raise RuntimeError(f"Retrained model artifact SHA-256 verification failed: {model_id}")
+    return manifest_path, weights_path
+
+
 def _public_audit_entry(entry: Any) -> dict[str, Any]:
     """Expose only documented audit fields; never return persisted exception text."""
     if not isinstance(entry, dict):
@@ -569,6 +611,10 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
                 model_type=model_type,
             )
             exp_res = _load_experiment_result(exp_result_path)
+            experiment_id = exp_res["experiment"].get("experiment_id")
+            if not isinstance(experiment_id, str) or not experiment_id:
+                raise RuntimeError("Retraining result is missing its experiment_id")
+            _verify_persisted_model_artifact(experiment_id)
 
             now_iso = datetime.now(timezone.utc).isoformat()
             run_id = uuid.uuid4().hex

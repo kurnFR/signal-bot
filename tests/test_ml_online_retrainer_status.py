@@ -11,8 +11,10 @@ from ml import online_retrainer
 class TestOnlineRetrainerPromotionStatus(unittest.TestCase):
     def test_retraining_audit_distinguishes_requested_from_applied_promotion(self):
         experiment_result = {
+            "experiment_id": "exp-retrainer-status-test",
             "winner": {"model_type": "hist_gradient_boosting"},
             "experiment": {
+                "experiment_id": "exp-retrainer-status-test",
                 "threshold": 0.2,
                 "baseline_test_metrics": {"total_outcome_r": 1.0},
                 "ml_test_metrics": {"total_outcome_r": 1.5},
@@ -36,7 +38,7 @@ class TestOnlineRetrainerPromotionStatus(unittest.TestCase):
                         }
                     },
                 }
-                with patch.object(online_retrainer, "_load_registry", return_value=registry), patch.object(online_retrainer, "_save_registry"), patch.object(online_retrainer, "_append_audit_log") as append_audit, patch.object(online_retrainer, "fetch_ohlcv_with_features_df", return_value=[None] * 200), patch.object(online_retrainer, "run_real_experiment", return_value=experiment_result):
+                with patch.object(online_retrainer, "_load_registry", return_value=registry), patch.object(online_retrainer, "_save_registry"), patch.object(online_retrainer, "_append_audit_log") as append_audit, patch.object(online_retrainer, "fetch_ohlcv_with_features_df", return_value=[None] * 200), patch.object(online_retrainer, "run_real_experiment", return_value=experiment_result), patch.object(online_retrainer, "_verify_persisted_model_artifact"):
                     results = online_retrainer.execute_retraining_cycle(force=True)
 
                 self.assertEqual(len(results), 1)
