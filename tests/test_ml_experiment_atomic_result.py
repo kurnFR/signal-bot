@@ -64,8 +64,8 @@ class TestMLExperimentAtomicResult(unittest.TestCase):
             timeframe="1h",
             base_strategy="trend_ema_v1",
             model_type="logistic_regression",
-            baseline_metrics={},
-            ml_validation_metrics={},
+            baseline_metrics={"test": {"total_outcome_r": 1.0}},
+            ml_validation_metrics={"probability_diagnostics": {"roc_auc": 0.7, "brier_score": 0.18}},
             ml_test_metrics={},
             threshold=0.5,
         )
@@ -90,7 +90,7 @@ class TestMLExperimentAtomicResult(unittest.TestCase):
         )
 
         payload = run_real_experiment._result_payload(
-            result, dataset_rows=30, market_rows=1000
+            result, dataset_rows=30, market_rows=1000, market="spot"
         )
 
         self.assertEqual(payload["experiment_id"], experiment.experiment_id)

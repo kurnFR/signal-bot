@@ -6,6 +6,7 @@ real trading simulator and canonical accounting.
 from __future__ import annotations
 
 from typing import Any
+import math
 
 
 def _quantile(values: list[float], q: float) -> float:
@@ -52,12 +53,16 @@ def probability_diagnostics(y_true, probabilities, *, thresholds=(0.20, 0.25, 0.
     how many signals would be accepted; trading economics must still come from
     the execution-aware simulator.
     """
-    y = [int(v) for v in y_true]
-    p = [float(v) for v in probabilities]
-    if len(y) != len(p) or not y:
+    raw_y = [float(value) for value in y_true]
+    p = [float(value) for value in probabilities]
+    if len(raw_y) != len(p) or not raw_y:
         raise ValueError("y_true and probabilities must have the same non-zero length")
-    if any(value < 0.0 or value > 1.0 for value in p):
-        raise ValueError("probabilities must be between 0 and 1")
+    if any(not math.isfinite(value) or value not in (0.0, 1.0) for value in raw_y):
+        raise ValueError("y_true values must be finite binary labels")
+    if any(not math.isfinite(value) or value < 0.0 or value > 1.0 for value in p):
+        raise ValueError("probabilities must be finite and between 0 and 1")
+    y = [int(value) for value in raw_y]
+    brier_score = sum((probability - target) ** 2 for target, probability in zip(y, p)) / len(y)
     normalized_thresholds = tuple(float(t) for t in thresholds)
     if any(not 0.0 < t < 1.0 for t in normalized_thresholds):
         raise ValueError("thresholds must be strictly between 0 and 1")
@@ -77,6 +82,7 @@ def probability_diagnostics(y_true, probabilities, *, thresholds=(0.20, 0.25, 0.
             "p90": round(_quantile(p, 0.90), 8),
         },
         "roc_auc": round(_roc_auc(y, p), 8) if _roc_auc(y, p) is not None else None,
+        "brier_score": round(brier_score, 8),
         "thresholds": [
             {
                 "threshold": round(t, 4),

@@ -98,8 +98,19 @@ def _candidate_to_dict(candidate: Any) -> dict[str, Any]:
             "threshold_candidates": list(candidate.threshold_candidates)}
 
 
-def _result_payload(result: Any, *, dataset_rows: int, market_rows: int) -> dict[str, Any]:
+def _result_payload(result: Any, *, dataset_rows: int, market_rows: int, market: str) -> dict[str, Any]:
     experiment = result.experiment
+    experiment_payload = asdict(experiment)
+    baseline_metrics = experiment_payload.get("baseline_metrics", {})
+    validation_metrics = experiment_payload.get("ml_validation_metrics", {})
+    experiment_payload["market"] = market
+    experiment_payload["baseline_test_metrics"] = (
+        baseline_metrics.get("test", {}) if isinstance(baseline_metrics, dict) else {}
+    )
+    experiment_payload["probability_diagnostics"] = (
+        validation_metrics.get("probability_diagnostics", {})
+        if isinstance(validation_metrics, dict) else {}
+    )
     ranked = [{"candidate": _candidate_to_dict(score.candidate),
                "validation_total_outcome_r": score.validation_net_pnl_r,
                "validation_profit_factor": score.validation_profit_factor,
@@ -108,7 +119,7 @@ def _result_payload(result: Any, *, dataset_rows: int, market_rows: int) -> dict
               for score in result.ranked_validation]
     return {"status": experiment.status, "experiment_id": experiment.experiment_id,
             "dataset_rows": dataset_rows, "market_rows": market_rows,
-            "experiment": asdict(experiment), "winner": _candidate_to_dict(result.winner),
+            "market": market, "experiment": experiment_payload, "winner": _candidate_to_dict(result.winner),
             "ranked_validation": ranked,
             "validation_by_candidate": [{
                 "candidate_index": item["candidate_index"],
@@ -191,7 +202,7 @@ def run_real_experiment(*, symbol: str = DEFAULT_SYMBOL, market: str = DEFAULT_M
         train_fraction=0.60, validation_fraction=0.20, min_validation_trades=min_validation_trades,
         max_candidates=max(50, len(candidates)), seed=seed, threshold_candidates=DEFAULT_THRESHOLDS, target_type=target_type)
 
-    payload = _result_payload(result, dataset_rows=len(dataset), market_rows=len(market_df))
+    payload = _result_payload(result, dataset_rows=len(dataset), market_rows=len(market_df), market=market)
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
     result_path = destination / f"{experiment_id}.json"

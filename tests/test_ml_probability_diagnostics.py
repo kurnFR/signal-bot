@@ -20,6 +20,7 @@ class TestMLProbabilityDiagnostics(unittest.TestCase):
         self.assertEqual(result["thresholds"][1]["selected_count"], 2)
         self.assertEqual(result["thresholds"][2]["selected_count"], 0)
         self.assertEqual(result["roc_auc"], 1.0)
+        self.assertAlmostEqual(result["brier_score"], 0.1)
 
     def test_single_class_auc_is_none(self):
         result = probability_diagnostics([0, 0, 0], [0.2, 0.3, 0.4])
