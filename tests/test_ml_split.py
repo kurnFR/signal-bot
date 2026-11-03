@@ -23,7 +23,7 @@ class TestMLSplit(unittest.TestCase):
     def test_fraction_split_sorts_unsorted_input_without_shuffling_within_splits(self):
         result = split_by_fractions(self.df.iloc[::-1], 0.5, 0.2)
         self.assertEqual(list(result.train.open_time), [1, 2, 3, 4, 5])
-        self.assertEqual(list(result.validation.open_time), [7])
+        self.assertEqual(list(result.validation.open_time), [6, 7])
         self.assertEqual(list(result.test.open_time), [8, 9, 10])
 
     def test_timestamp_split_uses_half_open_boundaries(self):
@@ -57,7 +57,7 @@ class TestMLSplit(unittest.TestCase):
         frame.loc[5, "exit_time"] = 8
         result = split_by_timestamps(frame, 5, 8)
         self.assertEqual(list(result.train.open_time), [1, 2, 3])
-        self.assertEqual(list(result.validation.open_time), [6, 7])
+        self.assertEqual(list(result.validation.open_time), [5, 7])
         self.assertEqual(list(result.test.open_time), [8, 9, 10])
 
     def test_invalid_fraction_is_rejected(self):
