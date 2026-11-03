@@ -91,14 +91,14 @@ def build_generator_dataset(
         raise ValueError("low must be less than or equal to open, close, and high")
 
     if "is_closed" in data.columns:
-        closed = data["is_closed"].fillna(0).astype(bool).to_numpy()
+        closed = pd.to_numeric(data["is_closed"], errors="coerce").fillna(0).eq(1).to_numpy()
     else:
         closed = np.ones(len(data), dtype=bool)
 
     round_trip_cost = 2.0 * (float(fee_rate) + float(slippage_rate))
     rows = []
     for signal_idx in range(0, len(data) - horizon_bars):
-        if not closed[signal_idx]:
+        if not closed[signal_idx] or not closed[signal_idx + 1:signal_idx + horizon_bars + 1].all():
             continue
         atr = float(data.at[signal_idx, "atr"])
         if not np.isfinite(atr) or atr <= 0:
