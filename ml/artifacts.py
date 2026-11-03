@@ -15,6 +15,7 @@ import math
 import os
 from pathlib import Path
 import re
+import stat
 import tempfile
 from typing import Any
 
@@ -83,6 +84,33 @@ def resolve_model_artifact_paths(
     if not model_path.is_file():
         raise FileNotFoundError("Model weights must be a regular file inside the artifact directory")
     return manifest_path, model_path
+
+
+def read_model_manifest_file(path: str | Path) -> dict[str, Any]:
+    """Read a resolved manifest through a no-follow descriptor.
+
+    Callers must resolve and contain the path first. O_NOFOLLOW and fstat then
+    prevent a symlink or non-regular file from being substituted before open.
+    """
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise RuntimeError("safe model manifest reads require O_NOFOLLOW support")
+    flags = os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0)
+    try:
+        descriptor = os.open(Path(path), flags)
+    except OSError as exc:
+        raise ValueError("Model manifest could not be opened safely") from exc
+
+    with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise ValueError("Model manifest must be a regular file")
+        try:
+            manifest = json.load(handle)
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Model manifest is not valid JSON") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError("Model manifest must be a JSON object")
+    return manifest
 
 
 @dataclass(frozen=True)
