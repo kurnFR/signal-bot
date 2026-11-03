@@ -27,6 +27,7 @@ from ml.generator_artifacts import (
     GENERATOR_CLASS_MAPPING,
     GeneratorArtifact,
     generator_paper_eligibility_report,
+    load_generator_artifact,
     save_generator_artifact,
 )
 from ml.generator_dataset import (
@@ -272,8 +273,9 @@ def run_generator_experiment(
         eligible_for_paper=generator_paper_eligibility_report(test_metrics)["eligible"],
     )
     model_path, manifest_path = save_generator_artifact(artifact, training.model, artifact_dir)
+    persisted_artifact, _ = load_generator_artifact(model_id, artifact_dir)
     return GeneratorExperimentResult(
-        artifact=artifact,
+        artifact=persisted_artifact,
         model_path=model_path,
         manifest_path=manifest_path,
         dataset_rows=len(dataset),
