@@ -204,6 +204,10 @@ def set_paper_config(
         raise ValueError("ml_generator_model_id must be a non-empty string of at most 100 characters")
     if ml_model_id and ml_generator_model_id:
         raise ValueError("a paper config cannot use both an ML filter and a generator model")
+    if strategy_name == "ml_signal_generator_v1" and not ml_generator_model_id:
+        raise ValueError("ml_signal_generator_v1 requires ml_generator_model_id")
+    if strategy_name != "ml_signal_generator_v1" and ml_generator_model_id:
+        raise ValueError("ml_generator_model_id is only valid for ml_signal_generator_v1")
 
     conn = get_pool().get_connection()
     try:
@@ -601,6 +605,7 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
                 entry_price=entry_price, exit_price=float(exit_price), exit_reason=exit_reason,
                 net_return_pct=accounting["return_pct_on_entry_notional"],
                 r_multiple=accounting["r_multiple"] or 0.0, holding_bars=pos.get("holding_bars", 0),
+                ml_generator_model_id=pos.get("ml_generator_model_id"),
             )
         except Exception as tel_err:
             logger.warning("Telegram trade close alert failed: %s", tel_err)
@@ -1070,9 +1075,13 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                 # was already known.
                 if (latest_trade.get("signal_open_time") == candle_open_time
                         and latest_trade.get("entry_time") == entry_candle_time):
-                    # ML Signal Filtering Gate (if model attached to this paper config)
+                    # Existing ML filter remains a separate optional gate. The
+                    # standalone generator reports its own confidence metadata.
                     ml_model_id = cfg.get("ml_model_id")
-                    ml_probability = None
+                    ml_probability = (
+                        latest_trade.get("ml_probability")
+                        if strategy_name == "ml_signal_generator_v1" else None
+                    )
                     ml_threshold = None
 
                     if ml_model_id:
