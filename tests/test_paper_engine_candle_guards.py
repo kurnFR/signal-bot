@@ -462,3 +462,27 @@ class TestGeneratorMaxHoldPersistence(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_recovered_generator_order_is_rejected_if_paper_costs_changed(self):
+        artifact = MagicMock()
+        artifact.label_config = {
+            "max_hold_bars": 41,
+            "fee_rate": 0.002,
+            "slippage_rate": 0.0005,
+        }
+        trade = {
+            "direction": "LONG",
+            "entry_price": 100.0,
+            "stop_loss": 98.0,
+            "take_profit": 104.0,
+            "atr_at_signal": 1.0,
+        }
+        with patch("paper.circuit_breaker.check_exposure_limit", return_value=(True, "")), \
+             patch("ml.generator_runtime.load_generator_predictor", return_value=(artifact, object())), \
+             patch("paper.engine.get_pool", side_effect=AssertionError("must not persist a cost-mismatched order")):
+            with self.assertRaisesRegex(ValueError, "fee assumptions differ"):
+                pe._insert_position(
+                    _make_cfg(), trade, 100.0, CANDLE_A,
+                    ml_generator_model_id="generator-cost-mismatch",
+                )
