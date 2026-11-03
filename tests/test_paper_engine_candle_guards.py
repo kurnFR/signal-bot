@@ -162,15 +162,13 @@ class TestInsertPositionLastUpdateTime(unittest.TestCase):
         # The VALUES tuple mixes literal SQL values (trailing_active=0,
         # trail_activation_r=1.0, ...) with %s placeholders, so the column
         # name list and the params tuple are NOT 1:1 -- parsing the SQL
-        # text to find the index is fragile. Instead assert against the
-        # fixed positional index in the params tuple as currently written
-        # in paper/engine.py's _insert_position (see the VALUES tuple
-        # there): last_update_time is params[13].
-        self.assertEqual(captured["params"][13], CANDLE_A - 1)
+        # text to find the index is fragile. The max_hold_bars placeholder
+        # now precedes last_update_time, so the timestamp is params[14].
+        self.assertEqual(captured["params"][14], CANDLE_A - 1)
         # And explicitly NOT the old (buggy) value -- a dollar risk amount
         # (1% of $5000 / (64000-63000) risk-based sizing = 1000.0 units'
         # worth of risk), nowhere near a millisecond timestamp.
-        self.assertNotEqual(captured["params"][13], 1000.0)
+        self.assertNotEqual(captured["params"][14], 1000.0)
 
 
 class TestPerCandleIdempotency(unittest.TestCase):
