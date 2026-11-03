@@ -13,6 +13,7 @@ as live execution.
 """
 import time
 import logging
+import re
 import pandas as pd
 import os
 from typing import List, Dict, Any, Optional
@@ -192,16 +193,16 @@ def set_paper_config(
     ):
         if not isinstance(value, str) or len(value) > max_length:
             raise ValueError(f"{field_name} must be a string of at most {max_length} characters")
-    if ml_model_id is not None and (
-        not isinstance(ml_model_id, str) or not ml_model_id.strip() or len(ml_model_id) > 100
+    for field_name, value in (
+        ("ml_model_id", ml_model_id),
+        ("ml_generator_model_id", ml_generator_model_id),
     ):
-        raise ValueError("ml_model_id must be a non-empty string of at most 100 characters")
-    if ml_generator_model_id is not None and (
-        not isinstance(ml_generator_model_id, str)
-        or not ml_generator_model_id.strip()
-        or len(ml_generator_model_id) > 100
-    ):
-        raise ValueError("ml_generator_model_id must be a non-empty string of at most 100 characters")
+        if value is not None and (
+            not isinstance(value, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", value)
+            or ".." in value
+        ):
+            raise ValueError(f"{field_name} must be a safe model identifier")
     if ml_model_id and ml_generator_model_id:
         raise ValueError("a paper config cannot use both an ML filter and a generator model")
     if strategy_name == "ml_signal_generator_v1" and not ml_generator_model_id:
