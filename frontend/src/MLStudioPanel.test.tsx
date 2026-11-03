@@ -136,7 +136,6 @@ describe("MLStudioPanel", () => {
 
   it("shows a safe validation error when generator training is rejected", async () => {
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
-      const path = new URL(url, "http://localhost").pathname;
       if (init?.method === "POST") {
         return Promise.resolve(new Response(JSON.stringify({ detail: "internal training details" }), {
           status: 422,
