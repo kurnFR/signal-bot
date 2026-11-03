@@ -139,3 +139,10 @@ def test_empty_input_returns_stable_generator_schema():
 
     assert result.empty
     assert {"open_time", "exit_time", "target", "target_name", "feature"} <= set(result.columns)
+
+
+def test_builder_keeps_last_signal_with_a_complete_forward_horizon():
+    result = _build(_frame())
+
+    assert list(result["open_time"]) == [100, 200, 300, 400]
+    assert result.iloc[-1]["exit_time"] == 600
