@@ -20,6 +20,7 @@ from ml.artifacts import (
 )
 from ml.run_real_experiment import run_real_experiment
 from ml.dataset import TARGET_TYPES
+from ml.generator_artifacts import list_generator_artifacts
 from backtest.strategies import STRATEGIES
 from paper.engine import set_paper_config, sync_and_evaluate_paper_trading
 from notifications.telegram_notifier import send_telegram_message
@@ -252,6 +253,8 @@ def list_saved_models() -> Dict[str, Any]:
     for safe_manifest in sorted(safe_manifest_files, key=lambda f: f.stat().st_mtime, reverse=True):
         try:
             data = read_model_manifest_file(safe_manifest)
+            if data.get("task_type") == "signal_generator_v1":
+                continue
             joblib_file = (models_root / f"{safe_manifest.stem}.joblib").resolve()
             data["has_weights"] = joblib_file.parent == models_root and joblib_file.is_file()
             report = paper_eligibility_report(test_metrics=data.get("test_metrics") or {})
@@ -268,6 +271,16 @@ def list_saved_models() -> Dict[str, Any]:
             logger.warning("Failed to parse model manifest %s (%s)", safe_manifest.name, type(exc).__name__)
 
     return {"models": models}
+
+
+@router.get("/generator-models")
+def list_saved_generator_models() -> Dict[str, Any]:
+    """List only typed independent generator artifacts for the paper selector."""
+    try:
+        return {"models": list_generator_artifacts(ML_MODELS_DIR)}
+    except Exception as exc:
+        logger.error("Unable to list generator models (%s)", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Unable to list ML generator models")
 
 
 @router.post("/run-experiment")
