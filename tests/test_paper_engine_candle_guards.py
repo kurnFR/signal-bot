@@ -427,3 +427,33 @@ class TestGeneratorMaxHoldPersistence(unittest.TestCase):
         self.assertEqual(values[13], 37)
         self.assertEqual(values[14], CANDLE_A - 1)
         connection.commit.assert_called_once()
+
+
+    def test_recovered_generator_order_uses_verified_artifact_max_hold(self):
+        cursor = MagicMock()
+        cursor.lastrowid = 124
+        connection = MagicMock()
+        connection.cursor.return_value = cursor
+        pool = MagicMock()
+        pool.get_connection.return_value = connection
+        trade = {
+            "direction": "LONG",
+            "entry_price": 100.0,
+            "stop_loss": 98.0,
+            "take_profit": 104.0,
+            "atr_at_signal": 1.0,
+        }
+        artifact = MagicMock()
+        artifact.label_config = {"max_hold_bars": 41}
+
+        with patch("paper.engine.get_pool", return_value=pool), \
+             patch("paper.circuit_breaker.check_exposure_limit", return_value=(True, "")), \
+             patch("ml.generator_artifacts.load_generator_artifact", return_value=(artifact, object())) as load:
+            position_id = pe._insert_position(
+                _make_cfg(), trade, 100.0, CANDLE_A,
+                ml_generator_model_id="generator-recovery-test",
+            )
+
+        self.assertEqual(position_id, 124)
+        self.assertTrue(load.call_args.kwargs["require_eligible"])
+        self.assertEqual(cursor.execute.call_args.args[1][13], 41)
