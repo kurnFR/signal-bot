@@ -32,7 +32,7 @@ def test_set_paper_config_returns_persisted_config_id():
     assert select_call.args[1] == ("BTCUSDT", "spot", "1d", "trend_ema_v1", None, None)
     connection.commit.assert_called_once()
     connection.close.assert_called_once()
-\n
+
 def test_set_paper_config_resolves_generator_config_by_both_model_ids():
     cursor = Mock()
     cursor.fetchone.return_value = {"id": 84}
