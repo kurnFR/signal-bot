@@ -146,3 +146,14 @@ def test_builder_keeps_last_signal_with_a_complete_forward_horizon():
 
     assert list(result["open_time"]) == [100, 200, 300, 400]
     assert result.iloc[-1]["exit_time"] == 600
+
+
+def test_open_future_candles_are_not_used_to_resolve_labels():
+    frame = _frame()
+    frame["is_closed"] = 1
+    frame.loc[2, "is_closed"] = 0
+
+    result = _build(frame)
+
+    assert 100 not in set(result["open_time"])
+    assert 200 not in set(result["open_time"])
