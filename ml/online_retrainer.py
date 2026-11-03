@@ -188,7 +188,7 @@ def _audit_log_lock() -> Iterator[None]:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def _append_audit_log(entry: dict[str, Any]) -> None:
+def _append_audit_log(entry: dict[str, Any]) -> bool:
     """Append without losing concurrent entries or destroying unreadable history."""
     with _audit_log_lock():
         history: list[dict[str, Any]] = []
@@ -197,17 +197,18 @@ def _append_audit_log(entry: dict[str, Any]) -> None:
                 loaded = json.loads(AUDIT_LOG_PATH.read_text(encoding="utf-8"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 logger.error("Retraining audit log is unreadable; preserving it without appending")
-                return
+                return False
             if not isinstance(loaded, list) or any(not isinstance(item, dict) for item in loaded):
                 logger.error("Retraining audit log has an invalid structure; preserving it without appending")
-                return
+                return False
             history = loaded
 
         run_id = entry.get("run_id")
         if run_id is not None and any(item.get("run_id") == run_id for item in history):
-            return
+            return True
         history.insert(0, entry)
         _atomic_write_json(AUDIT_LOG_PATH, history[:200])
+        return True
 
 
 def register_model_for_retraining(
@@ -348,7 +349,9 @@ def _recover_completed_retraining() -> None:
         if not _persist_retraining_updates({entry["key"]: entry["update"]}):
             logger.error("Retaining completed retraining journal entry %s while registry is disabled", run_id)
             continue
-        _append_audit_log(audit)
+        if not _append_audit_log(audit):
+            logger.error("Retaining completed retraining journal entry %s because audit history is unavailable", run_id)
+            continue
         _clear_retraining_journal_entry(run_id)
 
 
@@ -488,6 +491,7 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
         return results
 
     for key, cfg in models.items():
+        journaled = False
         symbol = cfg["symbol"]
         market = cfg["market"]
         timeframe = cfg["timeframe"]
@@ -554,14 +558,20 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
                 "update": update,
                 "audit": audit_entry,
             })
+            journaled = True
             if not _persist_retraining_updates({key: update}):
                 continue
-            _append_audit_log(audit_entry)
+            if not _append_audit_log(audit_entry):
+                logger.error("Completed retraining for %s is journaled pending audit recovery", key)
+                continue
             _clear_retraining_journal_entry(run_id)
             results.append(audit_entry)
 
         except Exception as exc:
             logger.warning("Error retraining model %s: %s", key, exc)
+            if journaled:
+                logger.error("Completed retraining for %s remains in recovery journal", key)
+                continue
             _append_audit_log({
                 "key": key,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
