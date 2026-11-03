@@ -63,6 +63,22 @@ def run(df: pd.DataFrame, params: dict) -> list[dict]:
         )
         return []
 
+    # The immutable artifact records the execution assumptions used by its
+    # canonical validation/test runs. Reuse them in paper inference so the
+    # same model cannot silently trade with different stops, costs, or exits.
+    execution = artifact.label_config
+    runtime_params = dict(params)
+    execution_fields = {
+        "stop_atr_multiple": "ML_GENERATOR_STOP_ATR_MULT",
+        "risk_reward_ratio": "ML_GENERATOR_RISK_REWARD_RATIO",
+        "fee_rate": "BACKTEST_FEE_PCT",
+        "slippage_rate": "BACKTEST_SLIPPAGE_PCT",
+        "max_hold_bars": "BACKTEST_MAX_HOLD_BARS",
+    }
+    for artifact_key, runtime_key in execution_fields.items():
+        if artifact_key in execution:
+            runtime_params[runtime_key] = execution[artifact_key]
+
     signal_df = df.copy()
     signal_df["_ml_generator_decision"] = predictions["decision"].to_numpy()
     signal_df["_ml_generator_probability"] = predictions["confidence"].to_numpy()
@@ -71,7 +87,7 @@ def run(df: pd.DataFrame, params: dict) -> list[dict]:
 
     trades = simulate(
         signal_df,
-        params,
+        runtime_params,
         _long_condition,
         _short_condition,
         _stop_target,

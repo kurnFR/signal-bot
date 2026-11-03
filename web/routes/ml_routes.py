@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ml.artifacts import (
     CURRENT_EVALUATION_PROTOCOL_VERSION,
@@ -105,6 +105,47 @@ class RunExperimentRequest(MLStrategyRequest):
         if normalized not in TARGET_TYPES:
             raise ValueError("target_type is unsupported")
         return normalized
+
+
+class RunGeneratorExperimentRequest(MLBaseRequest):
+    """Parameters for the independent signal-generator research pipeline."""
+    model_type: str = Field("hist_gradient_boosting", min_length=1, max_length=30)
+    horizon_bars: int = Field(12, ge=2, le=200)
+    barrier_atr_multiple: float = Field(1.5, gt=0, le=20)
+    fee_rate: float = Field(0.001, ge=0, lt=0.1)
+    slippage_rate: float = Field(0.0005, ge=0, lt=0.1)
+    min_net_return: float = Field(0.0, ge=0, le=1)
+    min_validation_trades: int = Field(10, ge=1, le=500)
+    train_fraction: float = Field(0.60, gt=0.1, lt=0.9)
+    validation_fraction: float = Field(0.20, gt=0.05, lt=0.5)
+    stop_atr_multiple: float = Field(1.5, gt=0, le=20)
+    risk_reward_ratio: float = Field(2.0, gt=0, le=20)
+    max_hold_bars: int = Field(72, ge=1, le=1000)
+    seed: int = Field(42, ge=0, le=2147483647)
+
+    @field_validator("model_type")
+    @classmethod
+    def validate_model_type(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in SUPPORTED_ML_MODELS:
+            raise ValueError("model_type is unsupported")
+        return normalized
+
+    @field_validator(
+        "barrier_atr_multiple", "fee_rate", "slippage_rate", "min_net_return",
+        "train_fraction", "validation_fraction", "stop_atr_multiple", "risk_reward_ratio",
+    )
+    @classmethod
+    def validate_finite_generator_parameters(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("generator numeric parameters must be finite")
+        return value
+
+    @model_validator(mode="after")
+    def validate_split_fractions(self):
+        if self.train_fraction + self.validation_fraction >= 1.0:
+            raise ValueError("train_fraction + validation_fraction must be less than one")
+        return self
 
 
 
@@ -305,6 +346,88 @@ def trigger_experiment(req: RunExperimentRequest):
     except Exception as exc:
         logger.error("ML experiment execution failed (%s)", type(exc).__name__)
         raise HTTPException(status_code=500, detail="ML experiment execution failed; check server logs for diagnostics")
+
+
+@router.post("/generator/run-experiment")
+def trigger_generator_experiment(req: RunGeneratorExperimentRequest):
+    """Train one independent generator and persist its typed research artifact.
+
+    This endpoint intentionally does not activate paper trading or send
+    Telegram notifications. It is separate from the legacy filter tournament.
+    """
+    try:
+        from db.db import fetch_ohlcv_with_features_df
+        from ml.dataset import SHARED_FEATURE_COLUMNS
+        from ml.generator_experiment import run_generator_experiment
+
+        feature_frame = fetch_ohlcv_with_features_df(
+            req.symbol, req.market, req.timeframe, closed_only=True
+        )
+        if feature_frame is None or len(feature_frame) < 100:
+            raise HTTPException(
+                status_code=400,
+                detail="At least 100 closed candles with shared features are required for generator research.",
+            )
+
+        label_config = {
+            "horizon_bars": req.horizon_bars,
+            "barrier_atr_multiple": req.barrier_atr_multiple,
+            "fee_rate": req.fee_rate,
+            "slippage_rate": req.slippage_rate,
+            "min_net_return": req.min_net_return,
+        }
+        strategy_params = {
+            "symbol": req.symbol,
+            "market": req.market,
+            "timeframe": req.timeframe,
+            "ML_GENERATOR_STOP_ATR_MULT": req.stop_atr_multiple,
+            "ML_GENERATOR_RISK_REWARD_RATIO": req.risk_reward_ratio,
+            "BACKTEST_FEE_PCT": req.fee_rate,
+            "BACKTEST_SLIPPAGE_PCT": req.slippage_rate,
+            "BACKTEST_MAX_HOLD_BARS": req.max_hold_bars,
+        }
+        result = run_generator_experiment(
+            feature_frame,
+            model_type=req.model_type,
+            feature_columns=SHARED_FEATURE_COLUMNS,
+            label_config=label_config,
+            strategy_params=strategy_params,
+            train_fraction=req.train_fraction,
+            validation_fraction=req.validation_fraction,
+            min_validation_trades=req.min_validation_trades,
+            seed=req.seed,
+            artifact_dir=ML_MODELS_DIR,
+        )
+        artifact = result.artifact
+        return {
+            "status": "success",
+            "model_id": artifact.model_id,
+            "task_type": artifact.task_type,
+            "eligible_for_paper": artifact.eligible_for_paper,
+            "decision_policy": artifact.decision_policy,
+            "dataset_rows": result.dataset_rows,
+            "train_rows": result.train_rows,
+            "validation_rows": result.validation_rows,
+            "test_rows": result.test_rows,
+            "validation_metrics": result.validation_metrics,
+            "test_metrics": result.test_metrics,
+            "message": (
+                "Generator model saved and eligible for paper review."
+                if artifact.eligible_for_paper
+                else "Generator model saved as research-only; untouched canonical test did not pass paper eligibility."
+            ),
+        }
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        logger.info("Generator experiment rejected (%s)", type(exc).__name__)
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        logger.error("Generator experiment failed (%s)", type(exc).__name__)
+        raise HTTPException(
+            status_code=500,
+            detail="Generator experiment failed; check server logs for diagnostics",
+        )
 
 
 @router.post("/deploy-to-paper")
