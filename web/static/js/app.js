@@ -2253,7 +2253,8 @@ const App = {
                         button.dataset.nextTelegram === "true",
                         capital,
                         risk,
-                        button.dataset.generatorModelId || ""
+                        button.dataset.generatorModelId || "",
+                        button.dataset.mlModelId || ""
                     );
                 });
             });
@@ -2272,7 +2273,8 @@ const App = {
                         button.dataset.nextReport === "true",
                         capital,
                         risk,
-                        button.dataset.generatorModelId || ""
+                        button.dataset.generatorModelId || "",
+                        button.dataset.mlModelId || ""
                     );
                 });
             });
