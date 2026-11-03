@@ -279,7 +279,7 @@ def get_active_positions() -> List[Dict[str, Any]]:
         cur.execute(
             """
             SELECT
-                id, symbol, market, timeframe, strategy_name, direction,
+                id, config_id, ml_generator_model_id, symbol, market, timeframe, strategy_name, direction,
                 entry_time, entry_time_wib, entry_price, current_price,
                 stop_loss, take_profit, current_stop, trailing_active,
                 trail_activation_r, trail_distance_atr_mult, initial_risk,
@@ -320,7 +320,8 @@ def get_paper_trades(limit: int = 50) -> List[Dict[str, Any]]:
         cur.execute(
             """
             SELECT
-                t.id, t.position_id, t.symbol, t.market, t.timeframe, t.strategy_name,
+                t.id, t.position_id, t.config_id, t.ml_generator_model_id,
+                t.symbol, t.market, t.timeframe, t.strategy_name,
                 t.direction, t.entry_time, t.entry_time_wib, t.entry_price,
                 t.exit_time, t.exit_time_wib, t.exit_price, t.exit_reason,
                 t.stop_loss, t.take_profit, t.quantity, t.notional_value,
@@ -328,8 +329,7 @@ def get_paper_trades(limit: int = 50) -> List[Dict[str, Any]]:
                 t.allocated_capital, t.risk_per_trade_pct, t.risk_amount,
                 t.net_return_pct, t.r_multiple, t.holding_bars, t.created_at
             FROM paper_trades t
-            LEFT JOIN paper_positions p ON p.id = t.position_id
-            LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name
+            LEFT JOIN paper_configs c ON c.id = t.config_id
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE
             ORDER BY t.id DESC
             LIMIT %s
@@ -368,15 +368,14 @@ def get_paper_metrics() -> Dict[str, Any]:
                    AVG(t.r_multiple) AS avg_r,
                    SUM(t.net_pnl) AS net_pnl
             FROM paper_trades t
-            LEFT JOIN paper_positions p ON p.id = t.position_id
-            LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name
+            LEFT JOIN paper_configs c ON c.id = t.config_id
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE
             """
         )
         summary = cur.fetchone()
         cur.execute(
             """
-            SELECT t.strategy_name,
+            SELECT t.config_id, t.strategy_name, t.ml_generator_model_id,
                    COUNT(*) AS total_trades,
                    SUM(CASE WHEN t.r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
                    SUM(CASE WHEN t.r_multiple <= 0 THEN 1 ELSE 0 END) AS losses,
@@ -387,8 +386,8 @@ def get_paper_metrics() -> Dict[str, Any]:
             LEFT JOIN paper_positions p ON p.id = t.position_id
             LEFT JOIN paper_configs c ON c.symbol = p.symbol AND c.market = p.market AND c.timeframe = p.timeframe AND c.strategy_name = p.strategy_name
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE
-            GROUP BY t.strategy_name
-            ORDER BY t.strategy_name
+            GROUP BY t.config_id, t.strategy_name, t.ml_generator_model_id
+            ORDER BY t.strategy_name, t.config_id
             """
         )
         strategy_rows = cur.fetchall()
@@ -402,6 +401,8 @@ def get_paper_metrics() -> Dict[str, Any]:
             strategy_wins = int(row["wins"] or 0)
             by_strategy.append({
                 "strategy": row["strategy_name"],
+                "configId": row.get("config_id"),
+                "mlGeneratorModelId": row.get("ml_generator_model_id"),
                 "totalTrades": strategy_total,
                 "wins": strategy_wins,
                 "losses": int(row["losses"] or 0),
