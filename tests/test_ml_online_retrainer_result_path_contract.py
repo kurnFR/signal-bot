@@ -63,7 +63,8 @@ class TestOnlineRetrainerResultPathContract(unittest.TestCase):
         (root / f"{model_id}.joblib").write_bytes(weights)
         manifest = {
             "model_id": model_id,
-            "weights_sha256": hashlib.sha256(weights).hexdigest(),\n            "evaluation_protocol_version": CURRENT_EVALUATION_PROTOCOL_VERSION,
+            "weights_sha256": hashlib.sha256(weights).hexdigest(),
+            "evaluation_protocol_version": CURRENT_EVALUATION_PROTOCOL_VERSION,
         }
         (root / f"{model_id}.json").write_text(
             json.dumps(manifest), encoding="utf-8"
