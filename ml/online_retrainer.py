@@ -279,6 +279,7 @@ def _persist_retraining_updates(updates: Mapping[str, Mapping[str, Any]]) -> boo
         return True
 
 
+@contextmanager
 def _journal_lock() -> Iterator[None]:
     """Serialize recovery-journal updates across processes."""
     JOURNAL_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
