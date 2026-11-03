@@ -8,6 +8,7 @@ from web.routes.ml_routes import (
     RLTrainRequest,
     RegisterRetrainRequest,
     RunExperimentRequest,
+    RunGeneratorExperimentRequest,
 )
 
 
@@ -76,6 +77,33 @@ class TestMLRequestValidation(unittest.TestCase):
         ):
             with self.subTest(payload=payload), self.assertRaises(ValidationError):
                 RLTrainRequest(**payload)
+
+
+    def test_generator_experiment_request_defaults_and_normalizes_market_fields(self):
+        request = RunGeneratorExperimentRequest(
+            symbol=" btcusdt ",
+            market="SPOT",
+            timeframe=" 1h ",
+        )
+        self.assertEqual(request.symbol, "BTCUSDT")
+        self.assertEqual(request.market, "spot")
+        self.assertEqual(request.timeframe, "1h")
+        self.assertEqual(request.model_type, "hist_gradient_boosting")
+        self.assertEqual(request.horizon_bars, 12)
+
+    def test_generator_experiment_request_rejects_invalid_parameters(self):
+        for payload in (
+            {"model_type": "unsupported"},
+            {"horizon_bars": 1},
+            {"barrier_atr_multiple": 0},
+            {"fee_rate": -0.01},
+            {"slippage_rate": 0.2},
+            {"train_fraction": 0.9, "validation_fraction": 0.2},
+            {"max_hold_bars": 0},
+            {"risk_reward_ratio": 0},
+        ):
+            with self.subTest(payload=payload), self.assertRaises(ValidationError):
+                RunGeneratorExperimentRequest(**payload)
 
 
 if __name__ == "__main__":
