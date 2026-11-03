@@ -966,6 +966,76 @@
                     </div>
                 </div>
 
+                <!-- Independent ML signal generator training -->
+                <section class="p-6 rounded-2xl bg-slate-900/90 border border-indigo-800/40 space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                                <i data-lucide="brain-circuit" class="w-4 h-4 text-indigo-400"></i>
+                                Train Independent ML Signal Generator
+                            </h3>
+                            <p class="text-xs text-slate-400 mt-1">Creates LONG / SHORT / HOLD decisions directly from closed candles. It does not depend on an existing strategy signal.</p>
+                        </div>
+                        <span class="px-2 py-1 rounded-md text-[10px] font-bold tracking-wide bg-slate-800 text-slate-300 border border-slate-700">RESEARCH ONLY</span>
+                    </div>
+                    <form id="ml-generator-form" onsubmit="App.runMLGeneratorExperiment(event)" class="space-y-4">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                            <label class="text-[11px] text-slate-400 space-y-1">Symbol
+                                <input id="ml-generator-symbol" required minlength="2" maxlength="20" pattern="[A-Za-z0-9]+" value="BTCUSDT" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100">
+                            </label>
+                            <label class="text-[11px] text-slate-400 space-y-1">Market
+                                <select id="ml-generator-market" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100"><option value="spot">Spot</option><option value="futures">Futures</option></select>
+                            </label>
+                            <label class="text-[11px] text-slate-400 space-y-1">Timeframe
+                                <select id="ml-generator-timeframe" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100"><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select>
+                            </label>
+                            <label class="text-[11px] text-slate-400 space-y-1">Model
+                                <select id="ml-generator-model" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100"><option value="hist_gradient_boosting">Histogram Gradient Boosting</option><option value="random_forest">Random Forest</option><option value="logistic_regression">Logistic Regression</option></select>
+                            </label>
+                            <label class="text-[11px] text-slate-400 space-y-1">Label horizon (bars)
+                                <input id="ml-generator-horizon" type="number" min="2" max="200" value="12" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100">
+                            </label>
+                            <label class="text-[11px] text-slate-400 space-y-1">ATR barrier multiple
+                                <input id="ml-generator-barrier" type="number" min="0.1" max="20" step="0.1" value="1.5" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100">
+                            </label>
+                            <label class="text-[11px] text-slate-400 space-y-1">Fee rate
+                                <input id="ml-generator-fee" type="number" min="0" max="0.099" step="0.0001" value="0.001" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100">
+                            </label>
+                            <label class="text-[11px] text-slate-400 space-y-1">Slippage rate
+                                <input id="ml-generator-slippage" type="number" min="0" max="0.099" step="0.0001" value="0.0005" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100">
+                            </label>
+                            <label class="text-[11px] text-slate-400 space-y-1">Minimum validation trades
+                                <input id="ml-generator-min-trades" type="number" min="1" max="500" value="10" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100">
+                            </label>
+                            <label class="text-[11px] text-slate-400 space-y-1">Stop distance (ATR)
+                                <input id="ml-generator-stop-atr" type="number" min="0.1" max="20" step="0.1" value="1.5" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100">
+                            </label>
+                            <label class="text-[11px] text-slate-400 space-y-1">Risk / reward ratio
+                                <input id="ml-generator-risk-reward" type="number" min="0.1" max="20" step="0.1" value="2" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100">
+                            </label>
+                            <label class="text-[11px] text-slate-400 space-y-1">Maximum holding bars
+                                <input id="ml-generator-max-hold" type="number" min="1" max="1000" value="72" required class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100">
+                            </label>
+                        </div>
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-800 pt-4">
+                            <p class="text-[11px] text-slate-500 max-w-3xl">Uses chronological purging, validation-only policy selection, and one untouched canonical-simulator test. Training saves a research artifact only; paper activation and Telegram are separate choices.</p>
+                            <button id="ml-generator-submit" type="submit" class="shrink-0 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-2">
+                                <i data-lucide="play" class="w-4 h-4"></i> Train Generator
+                            </button>
+                        </div>
+                    </form>
+                    <p id="ml-generator-status" class="text-xs text-slate-400" role="status" aria-live="polite"></p>
+                    <div id="ml-generator-result" hidden class="rounded-xl border border-slate-700 bg-slate-950/70 p-4 space-y-3">
+                        <div><strong id="ml-generator-result-title" class="text-sm text-slate-100"></strong><p id="ml-generator-result-message" class="text-xs text-slate-400 mt-1"></p></div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 text-xs">
+                            <div><span class="text-slate-500 block">Model ID</span><code id="ml-generator-result-id" class="text-slate-200 break-all"></code></div>
+                            <div><span class="text-slate-500 block">Decision policy</span><strong id="ml-generator-result-policy" class="text-slate-200"></strong></div>
+                            <div><span class="text-slate-500 block">Dataset rows</span><strong id="ml-generator-result-rows" class="text-slate-200"></strong></div>
+                            <div><span class="text-slate-500 block">Test trades / PF / DD</span><strong id="ml-generator-result-test" class="text-slate-200"></strong></div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Metrics & Risk Circuit Breaker Row -->
                 <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div class="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
