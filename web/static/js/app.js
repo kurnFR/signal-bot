@@ -4768,8 +4768,6 @@ const App = {
         const model_type = String(value("ml-generator-model") || "hist_gradient_boosting");
         const horizon_bars = numberValue("ml-generator-horizon");
         const barrier_atr_multiple = numberValue("ml-generator-barrier");
-        const fee_rate = numberValue("ml-generator-fee");
-        const slippage_rate = numberValue("ml-generator-slippage");
         const min_validation_trades = numberValue("ml-generator-min-trades");
         const stop_atr_multiple = numberValue("ml-generator-stop-atr");
         const risk_reward_ratio = numberValue("ml-generator-risk-reward");
@@ -4780,7 +4778,7 @@ const App = {
             return;
         }
         const numericValues = [
-            horizon_bars, barrier_atr_multiple, fee_rate, slippage_rate,
+            horizon_bars, barrier_atr_multiple,
             min_validation_trades, stop_atr_multiple, risk_reward_ratio, max_hold_bars,
         ];
         if (!numericValues.every(Number.isFinite)) {
@@ -4800,7 +4798,7 @@ const App = {
                 },
                 body: JSON.stringify({
                     symbol, market, timeframe, model_type,
-                    horizon_bars, barrier_atr_multiple, fee_rate, slippage_rate,
+                    horizon_bars, barrier_atr_multiple,
                     min_net_return: 0,
                     min_validation_trades,
                     stop_atr_multiple, risk_reward_ratio, max_hold_bars,
