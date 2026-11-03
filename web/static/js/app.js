@@ -4843,7 +4843,11 @@ const App = {
                 ? "Generator training completed. You may review it in Paper Trading; activation is still a separate choice."
                 : "Generator saved successfully, but it cannot be activated for paper trading yet.";
             this.showToast(eligible ? "Generator model passed its paper eligibility gate." : "Generator saved as research-only.", eligible ? "success" : "info");
-            await this.fetchPaperGeneratorModels();
+            try {
+                await this.fetchPaperGeneratorModels();
+            } catch (refreshError) {
+                console.warn("Generator model selector refresh failed after successful training.");
+            }
         } catch (error) {
             const message = error && error.message ? error.message : String(error || "Unknown error");
             if (status) status.textContent = `Generator training failed: ${message}`;
@@ -4888,7 +4892,7 @@ const App = {
             // 2. Fetch models count
             const [modelsRes, generatorModelsRes] = await Promise.all([
                 fetch(`${API_BASE}/api/ml/models`, { headers: this.getAuthHeaders() }),
-                fetch(`${API_BASE}/api/ml/generator-models`, { headers: this.getAuthHeaders() }),
+                fetch(`${API_BASE}/api/ml/generator-models`, { headers: this.getAuthHeaders() }).catch(() => null),
             ]);
             if (!modelsRes.ok) throw new Error(`ML models request failed: HTTP ${modelsRes.status}`);
             {
@@ -4898,7 +4902,7 @@ const App = {
                     throw new Error("Invalid ML models response");
                 }
                 let generatorModelCount = 0;
-                if (generatorModelsRes.ok) {
+                if (generatorModelsRes && generatorModelsRes.ok) {
                     try {
                         const generatorData = await generatorModelsRes.json();
                         if (generatorData && typeof generatorData === "object" &&
