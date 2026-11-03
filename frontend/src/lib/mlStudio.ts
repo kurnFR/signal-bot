@@ -118,8 +118,6 @@ export interface MLGeneratorExperimentRequest {
   model_type: "logistic_regression" | "random_forest" | "hist_gradient_boosting";
   horizon_bars: number;
   barrier_atr_multiple: number;
-  fee_rate: number;
-  slippage_rate: number;
   min_net_return: number;
   min_validation_trades: number;
   stop_atr_multiple: number;
