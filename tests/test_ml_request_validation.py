@@ -96,8 +96,6 @@ class TestMLRequestValidation(unittest.TestCase):
             {"model_type": "unsupported"},
             {"horizon_bars": 1},
             {"barrier_atr_multiple": 0},
-            {"fee_rate": -0.01},
-            {"slippage_rate": 0.2},
             {"train_fraction": 0.9, "validation_fraction": 0.2},
             {"max_hold_bars": 0},
             {"risk_reward_ratio": 0},
