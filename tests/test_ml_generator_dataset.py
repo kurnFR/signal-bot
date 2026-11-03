@@ -20,15 +20,15 @@ def _frame():
 
 
 def _build(frame, **kwargs):
-    return build_generator_dataset(
-        frame,
-        feature_columns=("feature",),
-        horizon_bars=2,
-        barrier_atr_multiple=1.5,
-        fee_rate=0.0,
-        slippage_rate=0.0,
-        **kwargs,
-    )
+    params = {
+        "feature_columns": ("feature",),
+        "horizon_bars": 2,
+        "barrier_atr_multiple": 1.5,
+        "fee_rate": 0.0,
+        "slippage_rate": 0.0,
+    }
+    params.update(kwargs)
+    return build_generator_dataset(frame, **params)
 
 
 def test_generator_labels_long_without_any_base_strategy_trades():
