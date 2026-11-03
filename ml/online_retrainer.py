@@ -25,6 +25,19 @@ logger = logging.getLogger("ml.online_retrainer")
 REGISTRY_PATH = Path("ml_models") / "retraining_registry.json"
 AUDIT_LOG_PATH = Path("ml_results") / "retraining_audit.json"
 CYCLE_LOCK_PATH = Path("ml_models") / "retraining_cycle.lock"
+REGISTRY_LOCK_PATH = Path("ml_models") / "retraining_registry.lock"
+
+
+@contextmanager
+def _registry_lock() -> Iterator[None]:
+    """Serialize short registry read/modify/write sections across processes."""
+    REGISTRY_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with REGISTRY_LOCK_PATH.open("a", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 @contextmanager
@@ -179,26 +192,62 @@ def register_model_for_retraining(
     auto_promote: bool = True,
 ) -> dict[str, Any]:
     """Register a strategy model pipeline to be tracked and periodically retrained."""
-    reg = _load_registry()
     key = f"{symbol}_{market}_{timeframe}_{strategy_name}"
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    reg["registered_models"][key] = {
-        "key": key,
-        "symbol": symbol,
-        "market": market,
-        "timeframe": timeframe,
-        "strategy_name": strategy_name,
-        "model_type": model_type,
-        "auto_promote": auto_promote,
-        "registered_at": now_iso,
-        "last_retrained_at": None,
-        "last_candle_count": 0,
-        "drift_psi": 0.0,
-        "status": "active",
-    }
-    _save_registry(reg)
-    return reg["registered_models"][key]
+    with _registry_lock():
+        reg = _load_registry()
+        model = {
+            "key": key,
+            "symbol": symbol,
+            "market": market,
+            "timeframe": timeframe,
+            "strategy_name": strategy_name,
+            "model_type": model_type,
+            "auto_promote": auto_promote,
+            "registered_at": now_iso,
+            "last_retrained_at": None,
+            "last_candle_count": 0,
+            "drift_psi": 0.0,
+            "status": "active",
+        }
+        reg["registered_models"][key] = model
+        _save_registry(reg)
+        return model
+
+
+def _persist_retraining_updates(updates: Mapping[str, Mapping[str, Any]]) -> None:
+    """Merge cycle results into the latest registry without resurrecting stale models."""
+    if not updates:
+        return
+
+    identity_fields = ("symbol", "market", "timeframe", "strategy_name", "registered_at")
+    runtime_fields = ("last_retrained_at", "last_candle_count", "last_result")
+    with _registry_lock():
+        latest = _load_registry()
+        # A malformed/disabled registry is a hard stop; never replace it with
+        # the cycle's older, previously valid snapshot.
+        if latest.get("enabled") is not True:
+            logger.error("Registry changed to disabled/invalid during retraining; discarding state updates")
+            return
+
+        latest_models = latest.get("registered_models", {})
+        changed = False
+        for key, update in updates.items():
+            current = latest_models.get(key)
+            if not isinstance(current, dict):
+                continue
+            expected_identity = update.get("identity", {})
+            if any(current.get(field) != expected_identity.get(field) for field in identity_fields):
+                continue
+            runtime = update.get("runtime", {})
+            for field in runtime_fields:
+                if field in runtime:
+                    current[field] = runtime[field]
+                    changed = True
+
+        if changed:
+            _save_registry(latest)
 
 
 def _public_audit_entry(entry: Any) -> dict[str, Any]:
@@ -297,6 +346,7 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
     reg = _load_registry()
     models = reg.get("registered_models", {})
     results = []
+    runtime_updates: dict[str, dict[str, Any]] = {}
 
     # A disabled registry is a hard stop; force only bypasses per-model due gates.
     if reg.get("enabled", True) is not True:
@@ -347,12 +397,20 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
             }
             _append_audit_log(audit_entry)
 
-            cfg["last_retrained_at"] = now_iso
-            cfg["last_candle_count"] = current_candles
-            cfg["last_result"] = {
-                "winner": exp_res["winner"]["model_type"],
-                "ml_test_r": exp_res["experiment"]["ml_test_metrics"].get("total_outcome_r"),
-                "threshold": exp_res["experiment"]["threshold"],
+            runtime_updates[key] = {
+                "identity": {
+                    field: cfg.get(field)
+                    for field in ("symbol", "market", "timeframe", "strategy_name", "registered_at")
+                },
+                "runtime": {
+                    "last_retrained_at": now_iso,
+                    "last_candle_count": current_candles,
+                    "last_result": {
+                        "winner": exp_res["winner"]["model_type"],
+                        "ml_test_r": exp_res["experiment"]["ml_test_metrics"].get("total_outcome_r"),
+                        "threshold": exp_res["experiment"]["threshold"],
+                    },
+                },
             }
             results.append(audit_entry)
 
@@ -365,5 +423,5 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
                 "status": "failed",
             })
 
-    _save_registry(reg)
+    _persist_retraining_updates(runtime_updates)
     return results
