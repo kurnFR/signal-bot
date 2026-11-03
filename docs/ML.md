@@ -11,8 +11,8 @@ The model never sets prices, stops or sizes. Those still come from the base stra
 ## 1. Rules that keep results honest
 
 - **Point-in-time features only.** `ml/dataset.py` builds one row per base-strategy signal using data available at that candle's close. Features are `SHARED_FEATURE_COLUMNS`; there is no second feature pipeline.
-- **Chronological split, no shuffling:** train / validation / test (default 60% / 20% / 20%, `ml/split.py`).
-- **Selection uses the real simulator.** Model, hyperparameters and probability threshold are chosen on train and validation by running the filtered signals through the actual backtest, so fees, slippage and stop/target behaviour count. Classification metrics (`ml/metrics.py`) are diagnostics only.
+- **Purged chronological split, no shuffling:** train / validation / test (default 60% / 20% / 20%, `ml/split.py`). Every supervised trade row carries its `exit_time`; train labels whose trades reach validation are purged, and validation labels whose trades reach test are purged. Absolute-timestamp splits and walk-forward folds apply the same rule. Tournament and walk-forward entry points reject datasets without exit timestamps.
+- **Selection uses the real simulator.** Model, hyperparameters and probability threshold are chosen on train and validation by running the filtered signals through the actual backtest, so fees, slippage and stop/target behaviour count. Classification metrics (`ml/metrics.py`) are diagnostics only; validation probability diagnostics include ROC-AUC and Brier score.
 - **Test is evaluated once**, after the choice is locked. Changing the model, features, threshold or strategy parameters after seeing the test result makes that test result no longer out-of-sample.
 - **ML never mutates `BASE_PARAMS`.** Strategy parameters stay the single source of truth.
 
@@ -39,7 +39,7 @@ python3 -m ml.run_real_experiment \
   --output-dir ml_results
 ```
 
-`--model all` runs the whole tournament grid instead of a single model. It writes a JSON result to `ml_results/` and a model artifact (`<id>.json` manifest plus `<id>.joblib`) to `ml_models/`; both directories are gitignored. The run does not insert backtest or paper records.
+`--model all` runs the whole tournament grid instead of a single model. It writes a JSON result to `ml_results/` and a model artifact (`<id>.json` manifest plus `<id>.joblib`) to `ml_models/`; both directories are gitignored. Result IDs are unique per run and validated before they are used as paths. The JSON exposes both canonical nested metrics and dashboard-compatible aliases, and the API normalizes older result files when reading them. The run does not insert backtest or paper records.
 
 What to read in the result: validation and test trade counts, total R or net PnL, profit factor, max drawdown, the locked threshold, and the validation-to-test degradation. A small test sample is weak evidence even when profitable.
 
@@ -47,7 +47,7 @@ If a run fails, the usual causes are: no database connection, the base strategy 
 
 ## 4. Promotion to paper trading
 
-The gate (`ml/artifacts.py: paper_eligibility_report`) requires, on the untouched test segment: at least 30 integer-count trades, profit factor at least 1.0, max drawdown between 0% and 25%, and net PnL at least 0. Missing, malformed, fractional-count, NaN, and infinite metrics fail closed. The model list combines the metric report with the manifest's eligibility flag and a regular `.joblib` file; paper manifests must include a SHA-256 digest of the serialized weights, and the paper runtime verifies that digest before deserializing the model. This detects weight-file changes when the manifest remains intact, but a hash stored beside the weights is not a signature: an attacker able to replace both files can replace the digest too. Use trusted signing or an independently protected provenance store for that threat model. PR #263 additionally requires model manifests and weights to resolve inside `ml_models/`, rejecting external symlinks. Before activating a paper config, deployment validates the threshold as finite and strictly between 0 and 1, requires `strategy_params` to be an object, and validates symbol, market, timeframe, and registered base strategy. `ml/registry.py` independently rechecks metrics rather than trusting only `eligible_for_paper`.
+The gate (`ml/artifacts.py: paper_eligibility_report`) requires, on the untouched test segment: at least 30 integer-count trades, profit factor at least 1.0, max drawdown between 0% and 25%, and net PnL at least 0. Missing, malformed, fractional-count, NaN, and infinite metrics fail closed. The model list combines the metric report with the manifest's eligibility flag and a regular `.joblib` file; paper manifests must include a SHA-256 digest of the serialized weights. The paper runtime validates eligibility from one manifest snapshot, then hashes and deserializes weights through the same opened file descriptor. The runtime builds the inference filter from the verified artifact/model pair; missing files, digest mismatches, unsupported feature schemas, or prediction failures fail closed. This detects weight-file changes when the manifest remains intact, but a hash stored beside the weights is not a signature: an attacker able to replace both files can replace the digest too. Use trusted signing or an independently protected provenance store for that threat model. PR #263 additionally requires model manifests and weights to resolve inside `ml_models/`, rejecting external symlinks. Before activating a paper config, deployment validates the threshold as finite and strictly between 0 and 1, requires `strategy_params` to be an object, and validates symbol, market, timeframe, and registered base strategy. `ml/registry.py` independently rechecks metrics rather than trusting only `eligible_for_paper`.
 
 **Existing artifact compatibility:** manifests created before weight-digest enforcement do not contain `weights_sha256` and are now rejected by the paper eligibility loader. Do not simply calculate a digest for an unverified legacy file and append it to the manifest: that would bind the manifest to whatever bytes happen to be present, not prove their origin. Re-run the experiment from a trusted source and save it through `ModelStore` to produce a digest, then re-check the resulting test metrics and eligibility before promoting it. Treat existing eligible flags as insufficient until this migration is complete.
 
@@ -68,13 +68,19 @@ The command only reads root-level JSON manifests and weight bytes. It reports mi
 
 For the proposed signature-based authenticity boundary, key-management options, threat model, and rollout gates, see [ML artifact provenance design](ML_ARTIFACT_PROVENANCE_DESIGN.md). This is a design proposal only; signing and signature enforcement are not implemented.
 
-## 5. Package map
+## 5. Online retraining
+
+Online retraining consumes the same experiment-result contract as the dashboard. A cycle is checkpointed only after the result identifies its experiment and the matching manifest/weight pair exists inside `ml_models/` with a matching SHA-256 digest. Missing or inconsistent artifacts leave the cycle failed and do not advance the candle checkpoint. The verifier reads the manifest and hashes the weights through no-follow file handles.
+
+The `auto_promote` setting is currently an audit request only: `auto_promote_applied` remains false and the promotion status is `not_implemented`. Online retraining does not activate paper configurations or Telegram alerts. Paper deployment remains a separate explicit operation after the untouched-test eligibility gate passes.
+
+## 6. Package map
 
 | Module | Role |
 |---|---|
-| `dataset.py`, `split.py` | Point-in-time dataset, chronological split |
+| `dataset.py`, `split.py` | Point-in-time dataset with trade exit timestamps, chronological purged splits |
 | `models.py`, `trainer.py` | Model factory, leakage-safe training and validation selection |
-| `strategy.py`, `strategy_config.py`, `strategy_registry.py` | ML filter adapter, configuration contract, bridge to the strategy menu |
+| `strategy.py`, `strategy_config.py`, `strategy_registry.py` | ML filter adapter, verified-artifact inference factory, configuration contract, bridge to the strategy menu |
 | `evaluation.py` | Filtered-vs-original comparison through the simulator |
 | `tournament.py`, `tournament_runner.py`, `execution_tournament.py` | Candidate grid and execution-aware selection |
 | `experiment.py`, `experiment_runner.py`, `result.py`, `runner.py` | Immutable experiment contract, orchestration, serializable result |

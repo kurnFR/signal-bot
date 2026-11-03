@@ -1,6 +1,6 @@
 # Status
 
-What exists and works today, and the known gaps. Reconciled against current `master` on 2026-11-02; historical verification claims should still be checked against the latest CI and runtime evidence. Keep this file short: when a gap is fixed, delete the line; when you add a capability, add one row. Do not add dated reviews or history here (use pull-request descriptions).
+What exists and works today, and the known gaps. Reconciled against current `master` on 2026-11-03; historical verification claims should still be checked against the latest CI and runtime evidence. Keep this file short: when a gap is fixed, delete the line; when you add a capability, add one row. Do not add dated reviews or history here (use pull-request descriptions).
 
 ## 1. Implemented
 
@@ -10,7 +10,7 @@ What exists and works today, and the known gaps. Reconciled against current `mas
 | Backtesting | One execution engine, shared accounting with configurable per-side fee/slippage assumptions, funding and position sizing; 24 strategy variants; metrics, equity, PnL report; read-only training-segment cost sensitivity report | `backtest/`, [cost sensitivity](BACKTEST_COST_SENSITIVITY.md) |
 | Validation | Train/holdout split, single-use holdout check, walk-forward, optimizer, ranked "run all" screening | [STRATEGIES.md](STRATEGIES.md) |
 | Paper trading | Shadow engine, shared accounting, idempotent syncs, circuit breakers that fail closed, Telegram alerts, backtest/paper parity tests | `paper/`, `notifications/` |
-| ML filters | Leakage-safe pipeline, tournament, versioned artifacts, deploy-to-paper | [ML.md](ML.md) |
+| ML filters | Purged chronological and walk-forward evaluation, execution-aware tournament, versioned artifacts, verified paper inference, online retraining gates, deploy-to-paper | [ML.md](ML.md) |
 | News AI | News and calendar ingest, structured LLM reasoning, guarded paper execution | [NEWS_AI.md](NEWS_AI.md) |
 | Wallet tracking | Swap scanner, candidates, token flow, quality-gated follow with expiry, live feed, Telegram alerts, single-instance lock | [WALLET_TRACKER.md](WALLET_TRACKER.md) |
 | Research bots | `retailbot2` and the smart-money volume screener (experimental, own tables); RetailBot2 has DB-backed per-strategy evaluation/paper/Telegram/report controls, fail-closed restored exit alerts, lifecycle DB-outage fail-closed behavior, and regression coverage | `paper/retailbot2.py`, `web/routes/research_routes.py`, `Screen/`, [lifecycle spec](UI_MANAGED_STRATEGY_PROMOTION.md) |
@@ -18,7 +18,7 @@ What exists and works today, and the known gaps. Reconciled against current `mas
 | Web and security | FastAPI app, central fail-closed authentication, three roles, token revocation, audit log, login rate limiting, random first-admin password, ML experiment path containment | [SECURITY.md](SECURITY.md) |
 | Operations | `run_all.py` supervisor with restart backoff; CI on Python 3.11 including a MariaDB integration job | `.github/workflows/` |
 
-Verified by current route-policy tests: all registered API operations require authentication except login; the viewer role is denied registered mutations; unknown/unclassified GET routes fail closed while unregistered URLs retain FastAPI's normal 404. The latest master commit `2ba4324d` passed its PR-head pytest, unit, MariaDB integration, and RetailBot accounting checks; post-merge checks are running. This does not establish live-server acceptance or deployment readiness.
+Verified by current route-policy tests: all registered API operations require authentication except login; the viewer role is denied registered mutations; unknown/unclassified GET routes fail closed while unregistered URLs retain FastAPI's normal 404. The latest master commit `4215a175` has all five required PR checks green. PRs #659–#666 hardened verified model loading, purged time splits, retraining result/artifact contracts, and experiment dashboard fields. This does not establish live-server acceptance or deployment readiness.
 
 ## 2. Known gaps
 
@@ -45,6 +45,10 @@ Verified by current route-policy tests: all registered API operations require au
 - **Dashboard fixes found by live browser testing:** data loads only after a usable sign-in (no more 401 storms for anonymous visitors); the active tab loads right after login; Settings no longer crashes on a removed element; admin user-management errors are readable toasts instead of `[object Object]` alerts; weak-password variants such as `password1234` are rejected.
 - **Route authorization is explicit and fail-closed.** Viewer-readable GET routes are enumerated in `AUTHENTICATED_READ_PATHS`; new registered GET routes remain denied until reviewed. The route sweep checks every registered GET route's viewer decision and denies unknown GET/mutation routes (PR #610).
 - **ML artifact listing paths are contained.** Experiment, saved-model, and RL-model listings resolve JSON files before sorting or reading and skip external symlink targets; the RL artifact directory itself cannot be a symlink (PR #639).
+- **ML evaluation labels are purged at time boundaries.** Supervised datasets retain trade exit timestamps; train and validation labels whose outcomes cross into the next partition are removed, including absolute-timestamp and walk-forward splits. Tournament entry points reject datasets without exit timestamps (PR #661).
+- **Paper ML inference uses the verified artifact path end to end.** The paper engine validates one manifest snapshot, hashes and deserializes weights through the same file descriptor, and constructs its filter through the artifact factory rather than unsupported constructor arguments (PRs #659, #660, #664).
+- **Online retraining checkpoints only persisted artifacts.** The retrainer normalizes the current experiment-result schema and verifies the matching manifest/weight pair and SHA-256 before advancing the schedule; missing or mismatched artifacts fail the cycle (PRs #662, #666). Automatic paper promotion remains unimplemented and is not implied by a retraining success.
+- **ML experiment dashboard contracts are aligned.** Result JSON exposes the experiment ID, market, baseline test metrics, validation diagnostics, and Brier score; list/detail APIs normalize older result files (PRs #663, #665).
 - **ML and Backtest error responses redact internal exception details.** The ML retraining status API returns only an allowlisted audit schema and a generic failure message (PR #634); ML walk-forward and RL training endpoints return generic errors (PR #635); rolling Backtest walk-forward does the same while preserving its existing HTTP status (PR #636). Detailed diagnostics remain in server logs. PR-head and post-merge CI passed for all three.
 - **ML request schemas validate before training/data access.** Symbols are normalized and bounded; market/timeframe values, registered strategies, model/target types, RL agents/reward functions, and numeric training bounds are checked (PR #638).
 - **Online ML retraining audit reports truthful promotion state.** Successful cycles are labeled `retrained`, not `retrained_and_promoted`; the audit distinguishes requested promotion from applied promotion and reports `not_implemented` until a real paper-activation path exists (PR #641). This does not implement automatic paper promotion.
