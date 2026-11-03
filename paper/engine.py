@@ -1032,17 +1032,18 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
 
                     if ml_model_id:
                         try:
-                            import json
-                            import joblib
-                            from ml.artifacts import load_eligible_paper_artifact, resolve_model_artifact_paths, verify_model_weights_hash
+                            from ml.artifacts import load_eligible_paper_artifact, resolve_model_manifest_path
+                            from ml.model_store import ModelStore
                             from ml.strategy import MLSignalFilter
 
-                            manifest_path, model_path = resolve_model_artifact_paths(ml_model_id)
+                            manifest_path = resolve_model_manifest_path(ml_model_id)
                             with open(manifest_path, "r", encoding="utf-8") as mf:
                                 manifest = json.load(mf)
                             artifact = load_eligible_paper_artifact(manifest, ml_model_id)
-                            verify_model_weights_hash(manifest, model_path)
-                            model = joblib.load(model_path)
+                            # Hash and deserialize through one O_NOFOLLOW file descriptor.
+                            # Loading the path again after a separate hash check would
+                            # permit a replacement between verification and joblib.load.
+                            model = ModelStore("ml_models").load(artifact, artifact.feature_columns)
                             ml_filter = MLSignalFilter(artifact=artifact, model=model, threshold=artifact.threshold)
 
                             # Evaluate features on current candle
