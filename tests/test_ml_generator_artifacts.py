@@ -9,6 +9,7 @@ from ml.generator_artifacts import (
     GeneratorArtifact,
     generator_paper_eligibility_report,
     load_generator_artifact,
+    list_generator_artifacts,
     save_generator_artifact,
 )
 
@@ -79,6 +80,30 @@ def test_generator_artifact_round_trip_uses_hardened_model_store(tmp_path):
     assert set(loaded_model.classes_) == {0, 1, 2}
     assert loaded_model.predict_proba(np.asarray([[0.0]] )).shape == (1, 3)
 
+
+
+def test_generator_model_listing_checks_type_eligibility_and_weight_digest(tmp_path):
+    metrics = {
+        "trades": 35,
+        "profit_factor": 1.1,
+        "max_drawdown_pct": 20.0,
+        "total_net_return": 0.05,
+        "evaluation_mode": "canonical_simulator_oos",
+        "execution_engine": "backtest.simulate",
+        "non_overlapping_execution": True,
+    }
+    artifact = _artifact(test_metrics=metrics, eligible_for_paper=True)
+    weights_path, _ = save_generator_artifact(artifact, _model(), tmp_path)
+
+    listed = list_generator_artifacts(tmp_path)
+    assert len(listed) == 1
+    assert listed[0]["model_id"] == artifact.model_id
+    assert listed[0]["eligibility"]["eligible"] is True
+
+    weights_path.write_bytes(weights_path.read_bytes() + b"tampered")
+    listed_after_tamper = list_generator_artifacts(tmp_path)
+    assert listed_after_tamper[0]["eligibility"]["eligible"] is False
+    assert "SHA-256 verification" in " ".join(listed_after_tamper[0]["eligibility"]["reasons"])
 
 def test_filter_artifact_cannot_be_loaded_as_generator(tmp_path):
     model_id = "gen-wrong-type-0123456789ab"
