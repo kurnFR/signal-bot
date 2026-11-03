@@ -584,14 +584,20 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
         conn_cfg = get_pool().get_connection()
         try:
             cur_cfg = conn_cfg.cursor(dictionary=True)
-            cur_cfg.execute(
-                """
-                SELECT telegram_enabled FROM paper_configs
-                WHERE id=%s
-                LIMIT 1
-                """,
-                (pos.get("config_id"),),
-            )
+            if pos.get("config_id") is not None:
+                cur_cfg.execute(
+                    "SELECT telegram_enabled FROM paper_configs WHERE id=%s LIMIT 1",
+                    (int(pos["config_id"]),),
+                )
+            else:
+                cur_cfg.execute(
+                    """
+                    SELECT telegram_enabled FROM paper_configs
+                    WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
+                    LIMIT 1
+                    """,
+                    (pos["symbol"], pos["market"], pos["timeframe"], pos["strategy_name"]),
+                )
             cfg_row = cur_cfg.fetchone()
             cur_cfg.close()
             if cfg_row and cfg_row.get("telegram_enabled"):
@@ -758,14 +764,21 @@ def _signal_already_traded(cfg: Dict[str, Any], entry_candle: int) -> bool:
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT 1 FROM paper_trades
-            WHERE config_id=%s AND entry_time=%s
-            LIMIT 1
-            """,
-            (int(cfg["id"]), int(entry_candle)),
-        )
+        if cfg.get("id") is not None:
+            cur.execute(
+                "SELECT 1 FROM paper_trades WHERE config_id=%s AND entry_time=%s LIMIT 1",
+                (int(cfg["id"]), int(entry_candle)),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT 1 FROM paper_trades
+                WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
+                  AND entry_time=%s
+                LIMIT 1
+                """,
+                (cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"], int(entry_candle)),
+            )
         found = cur.fetchone() is not None
         cur.close()
         return found
@@ -904,7 +917,11 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
     order_recovery = _process_pending_paper_orders(configs)
     active_cfgs = [c for c in configs if c["is_active"]]
     positions = get_active_positions()
-    open_pos_map = {(p["symbol"], p["market"], p["timeframe"], p["strategy_name"]): p for p in positions}
+    open_pos_map = {
+        (int(p["config_id"]) if p.get("config_id") is not None else
+         (p["symbol"], p["market"], p["timeframe"], p["strategy_name"])): p
+        for p in positions
+    }
     result = {"evaluated_configs": len(active_cfgs), "positions_updated": 0,
               "new_positions_opened": order_recovery["filled"], "positions_closed": 0,
               "orders_filled": order_recovery["filled"], "orders_expired": order_recovery["expired"],
@@ -912,7 +929,8 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
 
     for cfg in active_cfgs:
         symbol, market, timeframe, strategy_name = cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"]
-        key = (symbol, market, timeframe, strategy_name)
+        key = int(cfg["id"]) if cfg.get("id") is not None else (symbol, market, timeframe, strategy_name)
+        is_generator_strategy = strategy_name == "ml_signal_generator_v1"
         is_overlay_strategy = strategy_name in OVERLAY_STRATEGIES
         if strategy_name not in STRATEGIES and not is_overlay_strategy:
             continue
