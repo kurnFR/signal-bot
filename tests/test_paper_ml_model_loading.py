@@ -52,5 +52,50 @@ class TestPaperMLModelLoading(unittest.TestCase):
         self.assertEqual(loaded_model, {"source": "verified"})
 
 
+    def test_runtime_uses_the_manifest_that_passed_eligibility_validation(self):
+        import json
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ModelStore(tmp)
+            artifact = ModelArtifact(
+                model_id="paper-manifest-test",
+                experiment_id="experiment-1",
+                model_type="logistic_regression",
+                base_strategy="trend_ema",
+                feature_columns=("rsi", "atr"),
+                strategy_params={},
+                model_params={},
+                threshold=0.6,
+                train_metrics={},
+                validation_metrics={},
+                test_metrics={
+                    "trade_count": 30,
+                    "profit_factor": 1.2,
+                    "max_drawdown_pct": 10.0,
+                    "net_pnl": 12.0,
+                },
+                eligible_for_paper=True,
+            )
+            store.save(artifact, {"source": "validated-manifest"})
+            manifest_path = Path(tmp) / "paper-manifest-test.json"
+            original_load = ModelStore.load
+
+            def replace_manifest_then_load(instance, loaded_artifact, expected_features, *, manifest=None):
+                replacement = json.loads(manifest_path.read_text(encoding="utf-8"))
+                replacement["weights_sha256"] = "0" * 64
+                manifest_path.write_text(json.dumps(replacement), encoding="utf-8")
+                return original_load(
+                    instance, loaded_artifact, expected_features, manifest=manifest
+                )
+
+            with patch.object(ModelStore, "load", replace_manifest_then_load):
+                loaded_artifact, loaded_model = _load_verified_ml_model(
+                    "paper-manifest-test", models_dir=tmp
+                )
+
+        self.assertEqual(loaded_artifact.model_id, "paper-manifest-test")
+        self.assertEqual(loaded_model, {"source": "validated-manifest"})
+
 if __name__ == "__main__":
     unittest.main()
