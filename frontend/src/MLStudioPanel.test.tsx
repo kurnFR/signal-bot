@@ -35,7 +35,7 @@ describe("MLStudioPanel", () => {
     expect((await screen.findAllByText("btc-trend-test")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("hist_gradient_boosting").length).toBeGreaterThan(0);
     expect(screen.getByText("Passes current gate")).toBeInTheDocument();
-    expect(screen.getByText(/Experiment execution, model deployment, paper configuration, and Telegram actions remain unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/Paper activation and Telegram alerts remain separate, explicit controls/i)).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.every((call) => call[1]?.method === "GET")).toBe(true);
   });
   it("filters experiments and selects a persisted result", async () => {
@@ -84,5 +84,75 @@ describe("MLStudioPanel", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
   });
+
+  it("launches a separate generator experiment and displays its research eligibility", async () => {
+    const generatorResult = {
+      status: "success",
+      model_id: "generator-test-0123456789abcdef",
+      task_type: "signal_generator_v1",
+      eligible_for_paper: false,
+      decision_policy: { min_confidence: 0.62, min_directional_margin: 0.15 },
+      dataset_rows: 500,
+      train_rows: 280,
+      validation_rows: 90,
+      test_rows: 80,
+      validation_metrics: { evaluation_mode: "canonical_simulator_validation" },
+      test_metrics: {
+        evaluation_mode: "canonical_simulator_oos",
+        trades: 12,
+        profit_factor: 0.9,
+        max_drawdown_pct: 18.2,
+      },
+      message: "Generator model saved as research-only.",
+    };
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      if (init?.method === "POST") {
+        expect(path).toBe("/api/ml/generator/run-experiment");
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          symbol: "BTCUSDT",
+          market: "spot",
+          timeframe: "1h",
+          model_type: "hist_gradient_boosting",
+          horizon_bars: 12,
+        });
+        return Promise.resolve(new Response(JSON.stringify(generatorResult), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }));
+      }
+      return Promise.resolve(response(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MLStudioPanel />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Train generator/i }));
+
+    expect(await screen.findByText("Saved as research-only")).toBeInTheDocument();
+    expect(screen.getByText(generatorResult.model_id)).toBeInTheDocument();
+    expect(screen.getByText(/62.0% confidence · 15.0% directional margin/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true);
+  });
+
+  it("shows a safe validation error when generator training is rejected", async () => {
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      if (init?.method === "POST") {
+        return Promise.resolve(new Response(JSON.stringify({ detail: "internal training details" }), {
+          status: 422,
+          headers: { "content-type": "application/json" },
+        }));
+      }
+      return Promise.resolve(response(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MLStudioPanel />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Train generator/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/longer history or different model settings/i);
+    expect(screen.queryByText("internal training details")).not.toBeInTheDocument();
+  });
+
 
 });
