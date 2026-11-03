@@ -503,7 +503,8 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
                 stop_loss, take_profit, allocated_capital, risk_per_trade_pct,
                 risk_amount, stop_distance, quantity, notional_value,
                 gross_pnl, entry_fee, exit_fee, funding_pnl, net_pnl,
-                net_return_pct, r_multiple, holding_bars, ml_model_id, ml_probability
+                net_return_pct, r_multiple, holding_bars, ml_model_id, ml_probability,
+                config_id, ml_generator_model_id
             ) VALUES (
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s
@@ -517,6 +518,7 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
                 accounting["gross_pnl"], pos["entry_fee"], accounting["fees"] - float(pos["entry_fee"]),
                 -funding_cost, accounting["net_pnl"], accounting["return_pct_on_entry_notional"],
                 accounting["r_multiple"], pos["holding_bars"], pos.get("ml_model_id"), pos.get("ml_probability"),
+                pos.get("config_id"), pos.get("ml_generator_model_id"),
             ),
         )
         conn.commit()
