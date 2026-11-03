@@ -162,9 +162,9 @@ def _trading_metrics(returns: np.ndarray, opportunities: int) -> dict[str, Any]:
     positive = float(returns[returns > 0].sum()) if count else 0.0
     negative = float(-returns[returns < 0].sum()) if count else 0.0
     total = float(returns.sum()) if count else 0.0
-    cumulative = np.cumsum(returns) if count else np.asarray([], dtype=float)
-    peak = np.maximum.accumulate(np.concatenate(([0.0], cumulative)))[1:] if count else cumulative
-    drawdown = peak - cumulative if count else cumulative
+    equity = np.cumprod(1.0 + returns) if count else np.asarray([], dtype=float)
+    peak = np.maximum.accumulate(np.concatenate(([1.0], equity)))[1:] if count else equity
+    drawdown = (peak - equity) / np.maximum(peak, 1e-12) if count else equity
     return {
         "opportunities": int(opportunities),
         "trades": count,
@@ -176,6 +176,7 @@ def _trading_metrics(returns: np.ndarray, opportunities: int) -> dict[str, Any]:
         "win_rate_pct": round(float((returns > 0).mean() * 100.0), 4) if count else None,
         "profit_factor": round(positive / negative, 8) if negative > 0 else None,
         "max_drawdown": round(float(drawdown.max()), 10) if count else 0.0,
+        "max_drawdown_pct": round(float(drawdown.max()) * 100.0, 8) if count else 0.0,
     }
 
 
