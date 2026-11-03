@@ -128,7 +128,8 @@ class TestDeployEndpoint(unittest.TestCase):
     def _write(self, model_id, *, eligible=True, metrics=GOOD, weights=True):
         manifest = {
             "model_id": model_id, "base_strategy": "trend_ema_v1", "model_type": "random_forest",
-            "threshold": 0.6, "eligible_for_paper": eligible, "test_metrics": metrics,\n            "evaluation_protocol_version": CURRENT_EVALUATION_PROTOCOL_VERSION,
+            "threshold": 0.6, "eligible_for_paper": eligible, "test_metrics": metrics,
+            "evaluation_protocol_version": CURRENT_EVALUATION_PROTOCOL_VERSION,
             "strategy_params": {"symbol": "BTCUSDT", "market": "spot", "timeframe": "1h"},
         }
         (self.models / f"{model_id}.json").write_text(json.dumps(manifest))
