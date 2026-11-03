@@ -2202,18 +2202,19 @@ const App = {
                             ${c.is_active ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">ACTIVE LIVE</span>` : `<span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-500">PAUSED</span>`}
                         </div>
                         <div class="text-xs font-mono text-sky-400 mt-1">${this._escapeHtml(c.strategy_name)}</div>
-                        <div class="text-[10px] text-slate-500 mt-0.5">$${this._escapeHtml(Number(c.allocated_capital).toLocaleString())} capital &middot; ${this._escapeHtml(String(c.risk_per_trade_pct))}% risk/trade</div>
+                        ${c.ml_generator_model_id ? `<div class="text-[10px] text-purple-300 mt-0.5">Generator: ${this._escapeHtml(c.ml_generator_model_id)}</div>` : c.ml_model_id ? `<div class="text-[10px] text-slate-400 mt-0.5">Filter: ${this._escapeHtml(c.ml_model_id)}</div>` : ""}
+                        <div class="text-[10px] text-slate-500 mt-0.5">${this._escapeHtml(Number(c.allocated_capital).toLocaleString())} capital &middot; ${this._escapeHtml(String(c.risk_per_trade_pct))}% risk/trade</div>
                     </div>
                     <div class="flex flex-col gap-2 items-end">
-                        <button type="button" data-paper-config-toggle data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-next-active="${!c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
+                        <button type="button" data-paper-config-toggle data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-generator-model-id="${this._escapeHtml(c.ml_generator_model_id || "")}" data-next-active="${!c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
                             class="px-3 py-1.5 rounded text-xs font-semibold ${c.is_active ? "bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30" : "bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30"}">
                             ${c.is_active ? "Pause" : "Activate"}
                         </button>
-                        <button type="button" data-paper-config-telegram data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-next-telegram="${!c.telegram_enabled}" data-active="${c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
+                        <button type="button" data-paper-config-telegram data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-generator-model-id="${this._escapeHtml(c.ml_generator_model_id || "")}" data-next-telegram="${!c.telegram_enabled}" data-active="${c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
                             class="px-3 py-1.5 rounded text-xs font-semibold ${c.telegram_enabled ? "bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30" : "bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700"}">
                             Telegram ${c.telegram_enabled ? "On" : "Off"}
                         </button>
-                        <button type="button" data-paper-config-report data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-next-report="${!c.report_enabled}" data-active="${c.is_active}" data-telegram="${c.telegram_enabled}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
+                        <button type="button" data-paper-config-report data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-generator-model-id="${this._escapeHtml(c.ml_generator_model_id || "")}" data-next-report="${!c.report_enabled}" data-active="${c.is_active}" data-telegram="${c.telegram_enabled}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
                             class="px-3 py-1.5 rounded text-xs font-semibold ${c.report_enabled ? "bg-violet-600/20 hover:bg-violet-600 text-violet-300 hover:text-white border border-violet-500/30" : "bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700"}">
                             Report ${c.report_enabled ? "On" : "Off"}
                         </button>
@@ -2232,7 +2233,8 @@ const App = {
                         button.dataset.strategy || "",
                         button.dataset.nextActive === "true",
                         capital,
-                        risk
+                        risk,
+                        button.dataset.generatorModelId || ""
                     );
                 });
             });
@@ -2249,7 +2251,8 @@ const App = {
                         button.dataset.active === "true",
                         button.dataset.nextTelegram === "true",
                         capital,
-                        risk
+                        risk,
+                        button.dataset.generatorModelId || ""
                     );
                 });
             });
@@ -2267,7 +2270,8 @@ const App = {
                         button.dataset.telegram === "true",
                         button.dataset.nextReport === "true",
                         capital,
-                        risk
+                        risk,
+                        button.dataset.generatorModelId || ""
                     );
                 });
             });
@@ -2371,7 +2375,7 @@ const App = {
         }
     },
 
-    async togglePaperTelegram(symbol, market, timeframe, strategy, isActive, nextTelegram, allocatedCapital, riskPerTradePct) {
+    async togglePaperTelegram(symbol, market, timeframe, strategy, isActive, nextTelegram, allocatedCapital, riskPerTradePct, generatorModelId = "") {
         try {
             const res = await fetch(`${API_BASE}/api/paper/configs`, {
                 method: "POST",
@@ -2379,7 +2383,8 @@ const App = {
                 body: JSON.stringify({
                     symbol, market, timeframe, strategy_name: strategy,
                     is_active: isActive, allocated_capital: allocatedCapital,
-                    risk_per_trade_pct: riskPerTradePct, telegram_enabled: nextTelegram
+                    risk_per_trade_pct: riskPerTradePct, ml_generator_model_id: generatorModelId || null,
+                    telegram_enabled: nextTelegram
                 })
             });
             const data = await res.json();
@@ -2391,7 +2396,7 @@ const App = {
         }
     },
 
-    async togglePaperReport(symbol, market, timeframe, strategy, isActive, telegramEnabled, nextReport, allocatedCapital, riskPerTradePct) {
+    async togglePaperReport(symbol, market, timeframe, strategy, isActive, telegramEnabled, nextReport, allocatedCapital, riskPerTradePct, generatorModelId = "") {
         try {
             const res = await fetch(`${API_BASE}/api/paper/configs`, {
                 method: "POST",
@@ -2400,6 +2405,7 @@ const App = {
                     symbol, market, timeframe, strategy_name: strategy,
                     is_active: isActive, allocated_capital: allocatedCapital,
                     risk_per_trade_pct: riskPerTradePct,
+                    ml_generator_model_id: generatorModelId || null,
                     telegram_enabled: telegramEnabled, report_enabled: nextReport
                 })
             });
@@ -2412,7 +2418,7 @@ const App = {
         }
     },
 
-    async togglePaperStrategy(symbol, market, timeframe, strategy, newActive, allocatedCapital, riskPerTradePct) {
+    async togglePaperStrategy(symbol, market, timeframe, strategy, newActive, allocatedCapital, riskPerTradePct, generatorModelId = "") {
         try {
             const res = await fetch(`${API_BASE}/api/paper/configs`, {
                 method: "POST",
@@ -2429,6 +2435,7 @@ const App = {
                     // every single pause/activate click.
                     allocated_capital: allocatedCapital,
                     risk_per_trade_pct: riskPerTradePct,
+                    ml_generator_model_id: generatorModelId || null,
                 })
             });
             if (res.ok) {
