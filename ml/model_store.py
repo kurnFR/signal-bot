@@ -124,13 +124,28 @@ class ModelStore:
                     except OSError:
                         pass
 
-    def load(self, artifact: ModelArtifact, expected_features: list[str] | tuple[str, ...]):
+    def load(
+        self,
+        artifact: ModelArtifact,
+        expected_features: list[str] | tuple[str, ...],
+        *,
+        manifest: dict[str, Any] | None = None,
+    ):
+        """Load weights against one consistent manifest snapshot.
+
+        Callers that already validated a manifest should pass that exact
+        snapshot so eligibility checks and the digest used for verification
+        cannot be split across two different manifest versions.
+        """
         self._require_joblib()
         expected = tuple(expected_features)
         if tuple(artifact.feature_columns) != expected:
             raise ValueError("ML artifact feature schema does not match requested features")
         manifest_path, path = resolve_model_artifact_paths(artifact.model_id, self.root)
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest is None:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict) or manifest.get("model_id") != artifact.model_id:
+            raise ValueError("Model manifest ID does not match requested artifact")
 
         # Open once, then hash and deserialize through the same file descriptor.
         # Otherwise a writer could replace the path after digest verification but
