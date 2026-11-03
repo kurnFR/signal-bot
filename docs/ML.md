@@ -112,3 +112,6 @@ closed candles -> point-in-time shared features -> LONG / HOLD / SHORT
 
 
 The default dashboard's ML Forecast Studio exposes this workflow through the **Train Independent ML Signal Generator** form. It displays the saved model ID, locked policy, partition sizes, and untouched-test diagnostics. After a model is saved, the Paper Trading configuration form refreshes its generator model selector. Research-only models can be saved with paper execution disabled; only eligible artifacts may have paper activation enabled. The Telegram checkbox remains an independent per-config setting.
+
+
+Generator execution assumptions are pinned to the server's configured `BACKTEST_FEE_PCT` and `BACKTEST_SLIPPAGE_PCT`; the UI does not permit overriding those values for an experiment. Paper inference fails closed if the server cost settings later differ from the artifact's stored assumptions. The artifact's stop distance, reward multiple, and maximum holding bars are carried into the generator strategy and persisted on paper positions so paper exits use the evaluated limits.
