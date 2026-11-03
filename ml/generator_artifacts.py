@@ -11,7 +11,7 @@ import re
 import tempfile
 from typing import Any, Mapping
 
-from ml.artifacts import read_model_manifest_file, resolve_model_manifest_path
+from ml.artifacts import read_model_manifest_file, resolve_model_artifact_paths, resolve_model_manifest_path
 from ml.models import supported_models
 
 GENERATOR_TASK_TYPE = "signal_generator_v1"
@@ -229,3 +229,45 @@ def load_generator_artifact(
     ):
         raise ValueError("loaded generator model is missing its fitted preprocessor")
     return artifact, model
+
+
+def list_generator_artifacts(directory: str | Path = "ml_models") -> list[dict[str, Any]]:
+    """List typed generator manifests without deserializing model weights."""
+    root = Path(directory).resolve()
+    if not root.is_dir():
+        return []
+    results: list[dict[str, Any]] = []
+    for candidate in root.glob("*.json"):
+        try:
+            resolved = candidate.resolve(strict=True)
+            if resolved.parent != root or not resolved.is_file():
+                continue
+            manifest = read_model_manifest_file(resolved)
+            artifact = GeneratorArtifact.from_manifest(manifest)
+            if artifact.model_id != candidate.stem:
+                continue
+            try:
+                _, weights_path = resolve_model_artifact_paths(artifact.model_id, root)
+                has_weights = weights_path.is_file()
+            except (OSError, ValueError, FileNotFoundError):
+                has_weights = False
+            report = generator_paper_eligibility_report(artifact.test_metrics)
+            reasons = list(report["reasons"])
+            if not artifact.eligible_for_paper:
+                reasons.append("manifest is not flagged eligible_for_paper")
+            if not has_weights:
+                reasons.append("model weights are missing")
+            results.append({
+                "model_id": artifact.model_id,
+                "experiment_id": artifact.experiment_id,
+                "model_type": artifact.model_type,
+                "feature_columns": list(artifact.feature_columns),
+                "created_at": artifact.created_at,
+                "eligible_for_paper": bool(artifact.eligible_for_paper and not reasons),
+                "eligibility": {"eligible": not reasons, "reasons": reasons},
+                "test_metrics": artifact.test_metrics,
+            })
+        except Exception:
+            # Invalid, filter-type, or unsafe manifests are intentionally omitted.
+            continue
+    return sorted(results, key=lambda item: item["created_at"], reverse=True)
