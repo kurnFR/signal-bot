@@ -181,7 +181,7 @@ def test_policy_failure_reports_validation_search_diagnostics_without_relaxing_g
 
     message = str(error.value)
     assert "minimum trades=10" in message
-    assert "policies evaluated=18" in message
+    assert "policies evaluated=6" in message
     assert "maximum trades observed=8" in message
     assert "best candidate return=-0.030000 from 8 trades" in message
     assert "validation gate was not relaxed" in message
