@@ -673,15 +673,24 @@ def _insert_position(
     entry_fee = raw_entry * size.quantity * BACKTEST_FEE_PCT
     atr = float(trade.get("atr_at_signal", 0.0) or 0.0)
     raw_max_hold_bars = trade.get("max_hold_bars")
-    if raw_max_hold_bars is None and ml_generator_model_id:
-        # Pending-order recovery rebuilds the trade from its durable order row.
-        # Re-read the typed, paper-eligible artifact rather than falling back to
-        # the generic 200-bar default and changing the model's exit contract.
-        from ml.generator_artifacts import load_generator_artifact
-        generator_artifact, _ = load_generator_artifact(
+    if ml_generator_model_id:
+        # Verify the model contract again at fill time. Pending orders can be
+        # recovered after a process restart or server-cost configuration change.
+        # The cached typed loader reuses the already-verified artifact when warm.
+        import math
+        from ml.generator_runtime import load_generator_predictor
+        generator_artifact, _ = load_generator_predictor(
             ml_generator_model_id, require_eligible=True
         )
-        raw_max_hold_bars = generator_artifact.label_config.get("max_hold_bars", 200)
+        execution = generator_artifact.label_config
+        if not math.isclose(float(execution["fee_rate"]), BACKTEST_FEE_PCT, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError("generator fee assumptions differ from current paper accounting")
+        if not math.isclose(float(execution["slippage_rate"]), BACKTEST_SLIPPAGE_PCT, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError("generator slippage assumptions differ from current paper accounting")
+        artifact_max_hold = int(execution.get("max_hold_bars", 200))
+        if raw_max_hold_bars is not None and int(raw_max_hold_bars) != artifact_max_hold:
+            raise ValueError("generator max-hold metadata does not match its verified artifact")
+        raw_max_hold_bars = artifact_max_hold
     if raw_max_hold_bars is None:
         raw_max_hold_bars = 200
     if isinstance(raw_max_hold_bars, bool):
