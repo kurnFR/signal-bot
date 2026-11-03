@@ -41,3 +41,19 @@ def test_generator_policy_evaluation_uses_canonical_non_overlapping_simulator():
     assert metrics["trades"] == 2
     assert metrics["long_trades"] == 2
     assert metrics["short_trades"] == 0
+
+
+
+def test_generator_experiment_rejects_cost_assumptions_that_differ_from_paper():
+    import pytest
+    from config import BACKTEST_FEE_PCT
+    from ml.generator_experiment import run_generator_experiment
+
+    frame = pd.DataFrame({"open_time": [1]})
+    with pytest.raises(ValueError, match="fee assumptions must match server paper accounting"):
+        run_generator_experiment(
+            frame,
+            model_type="hist_gradient_boosting",
+            feature_columns=("feature",),
+            label_config={"fee_rate": BACKTEST_FEE_PCT + 0.001},
+        )
