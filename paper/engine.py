@@ -591,6 +591,7 @@ def _insert_position(
     candle_open_time: int,
     ml_model_id: Optional[str] = None,
     ml_probability: Optional[float] = None,
+    ml_generator_model_id: Optional[str] = None,
     connection=None,
 ) -> Optional[int]:
     """Returns the new paper_positions row id on success, or None if the
@@ -642,10 +643,10 @@ def _insert_position(
                 holding_bars, max_hold_bars, last_update_time, status,
                 allocated_capital, risk_per_trade_pct, risk_amount, stop_distance,
                 quantity, notional_value, entry_fee, exit_fee, funding_pnl,
-                ml_model_id, ml_probability
+                ml_model_id, ml_probability, config_id, ml_generator_model_id
             ) VALUES (
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0,1.0,1.5,%s,%s,0.0,0.0,
-                0,200,%s,'OPEN',%s,%s,%s,%s,%s,%s,%s,0.0,0.0,%s,%s
+                0,200,%s,'OPEN',%s,%s,%s,%s,%s,%s,%s,0.0,0.0,%s,%s,%s,%s
             )
             """,
             (
@@ -654,6 +655,7 @@ def _insert_position(
                 atr, size.stop_distance, last_applied_candle, cfg["allocated_capital"],
                 cfg["risk_per_trade_pct"], size.risk_amount, size.stop_distance,
                 size.quantity, size.notional, entry_fee, ml_model_id, ml_probability,
+                cfg.get("id"), ml_generator_model_id or cfg.get("ml_generator_model_id"),
             ),
         )
         if owns_connection:
