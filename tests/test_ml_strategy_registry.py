@@ -1,6 +1,6 @@
 import unittest
 
-from ml.artifacts import ModelArtifact
+from ml.artifacts import CURRENT_EVALUATION_PROTOCOL_VERSION, ModelArtifact
 from ml.registry import ModelRegistry
 from ml.strategy_registry import available_ml_strategies, validate_base_strategy
 
@@ -12,6 +12,7 @@ def make_artifact(model_id="m1", status_eligible=True):
         strategy_params={}, model_params={}, threshold=.6,
         train_metrics={}, validation_metrics={}, test_metrics={},
         eligible_for_paper=status_eligible,
+        evaluation_protocol_version=CURRENT_EVALUATION_PROTOCOL_VERSION if status_eligible else None,
     )
 
 
