@@ -672,7 +672,18 @@ def _insert_position(
         return None
     entry_fee = raw_entry * size.quantity * BACKTEST_FEE_PCT
     atr = float(trade.get("atr_at_signal", 0.0) or 0.0)
-    raw_max_hold_bars = trade.get("max_hold_bars", 200)
+    raw_max_hold_bars = trade.get("max_hold_bars")
+    if raw_max_hold_bars is None and ml_generator_model_id:
+        # Pending-order recovery rebuilds the trade from its durable order row.
+        # Re-read the typed, paper-eligible artifact rather than falling back to
+        # the generic 200-bar default and changing the model's exit contract.
+        from ml.generator_artifacts import load_generator_artifact
+        generator_artifact, _ = load_generator_artifact(
+            ml_generator_model_id, require_eligible=True
+        )
+        raw_max_hold_bars = generator_artifact.label_config.get("max_hold_bars", 200)
+    if raw_max_hold_bars is None:
+        raw_max_hold_bars = 200
     if isinstance(raw_max_hold_bars, bool):
         raise ValueError("max_hold_bars must be an integer between 1 and 1000")
     max_hold_bars = int(raw_max_hold_bars)
