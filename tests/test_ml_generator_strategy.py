@@ -135,6 +135,7 @@ def test_strategy_adapter_generates_trades_through_canonical_simulator(tmp_path)
     assert trades[0]["ml_probability"] == 0.90
     assert trades[0]["stop_loss"] == 102.0
     assert trades[0]["take_profit"] == 94.0
+    assert trades[0]["max_hold_bars"] == 5
 
 
 def test_strategy_fails_closed_without_model_id():
@@ -166,3 +167,28 @@ def test_standalone_generator_is_registered_as_a_selectable_strategy():
     from backtest.strategies import STRATEGIES
 
     assert STRATEGIES[NAME] is run
+
+
+def test_strategy_fails_closed_when_server_paper_costs_differ_from_artifact(tmp_path):
+    artifact = _save(tmp_path)
+    frame = pd.DataFrame({
+        "open_time": [100, 200, 300, 400, 500, 600],
+        "open": [100.0] * 6,
+        "high": [100.5] * 6,
+        "low": [99.5] * 6,
+        "close": [100.0] * 6,
+        "atr": [1.0] * 6,
+        "feature": [0.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+    })
+    params = dict(
+        BASE_PARAMS,
+        symbol="BTCUSDT",
+        market="spot",
+        timeframe="1h",
+        ml_generator_model_id=artifact.model_id,
+        ML_GENERATOR_MODELS_DIR=str(tmp_path),
+    )
+
+    from unittest.mock import patch
+    with patch("config.BACKTEST_FEE_PCT", 0.002):
+        assert run(frame, params) == []

@@ -15,6 +15,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
+from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT
 from backtest.metrics import compute_metrics
 from backtest.params import BASE_PARAMS
 from backtest.simulate import simulate
@@ -177,7 +178,28 @@ def run_generator_experiment(
     ordered = feature_frame.sort_values("open_time", kind="stable").reset_index(drop=True)
     if ordered["open_time"].duplicated().any():
         raise ValueError("feature_frame open_time values must be unique")
-    labels = dict(label_config or {})
+    labels = {
+        "horizon_bars": 12,
+        "barrier_atr_multiple": 1.5,
+        "fee_rate": BACKTEST_FEE_PCT,
+        "slippage_rate": BACKTEST_SLIPPAGE_PCT,
+        "min_net_return": 0.0,
+        **dict(label_config or {}),
+    }
+    import math
+    if not math.isclose(float(labels["fee_rate"]), BACKTEST_FEE_PCT, rel_tol=0.0, abs_tol=1e-12):
+        raise ValueError("generator fee assumptions must match server paper accounting")
+    if not math.isclose(float(labels["slippage_rate"]), BACKTEST_SLIPPAGE_PCT, rel_tol=0.0, abs_tol=1e-12):
+        raise ValueError("generator slippage assumptions must match server paper accounting")
+    effective_strategy_params = dict(strategy_params or {})
+    if "BACKTEST_FEE_PCT" in effective_strategy_params and not math.isclose(
+        float(effective_strategy_params["BACKTEST_FEE_PCT"]), BACKTEST_FEE_PCT, rel_tol=0.0, abs_tol=1e-12
+    ):
+        raise ValueError("generator execution fee must match server paper accounting")
+    if "BACKTEST_SLIPPAGE_PCT" in effective_strategy_params and not math.isclose(
+        float(effective_strategy_params["BACKTEST_SLIPPAGE_PCT"]), BACKTEST_SLIPPAGE_PCT, rel_tol=0.0, abs_tol=1e-12
+    ):
+        raise ValueError("generator execution slippage must match server paper accounting")
     dataset = build_generator_dataset(
         ordered,
         feature_columns=feature_columns,
@@ -210,7 +232,7 @@ def run_generator_experiment(
             confidence,
             margin,
             evaluation_mode=mode,
-            strategy_params=strategy_params,
+            strategy_params=effective_strategy_params,
         )
 
     training: GeneratorTrainingResult = train_generator(
@@ -242,12 +264,12 @@ def run_generator_experiment(
         "label_protocol": GENERATOR_LABEL_PROTOCOL,
         "horizon_bars": int(labels.get("horizon_bars", 12)),
         "barrier_atr_multiple": float(labels.get("barrier_atr_multiple", 1.5)),
-        "fee_rate": float(labels.get("fee_rate", 0.001)),
-        "slippage_rate": float(labels.get("slippage_rate", 0.0005)),
+        "fee_rate": float(labels["fee_rate"]),
+        "slippage_rate": float(labels["slippage_rate"]),
         "min_net_return": float(labels.get("min_net_return", 0.0)),
-        "stop_atr_multiple": float((strategy_params or {}).get("ML_GENERATOR_STOP_ATR_MULT", 1.5)),
-        "risk_reward_ratio": float((strategy_params or {}).get("ML_GENERATOR_RISK_REWARD_RATIO", 2.0)),
-        "max_hold_bars": int((strategy_params or {}).get("BACKTEST_MAX_HOLD_BARS", BASE_PARAMS["BACKTEST_MAX_HOLD_BARS"])),
+        "stop_atr_multiple": float(effective_strategy_params.get("ML_GENERATOR_STOP_ATR_MULT", 1.5)),
+        "risk_reward_ratio": float(effective_strategy_params.get("ML_GENERATOR_RISK_REWARD_RATIO", 2.0)),
+        "max_hold_bars": int(effective_strategy_params.get("BACKTEST_MAX_HOLD_BARS", BASE_PARAMS["BACKTEST_MAX_HOLD_BARS"])),
     }
     artifact = GeneratorArtifact(
         model_id=model_id,

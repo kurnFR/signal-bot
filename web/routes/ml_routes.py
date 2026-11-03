@@ -112,8 +112,6 @@ class RunGeneratorExperimentRequest(MLBaseRequest):
     model_type: str = Field("hist_gradient_boosting", min_length=1, max_length=30)
     horizon_bars: int = Field(12, ge=2, le=200)
     barrier_atr_multiple: float = Field(1.5, gt=0, le=20)
-    fee_rate: float = Field(0.001, ge=0, lt=0.1)
-    slippage_rate: float = Field(0.0005, ge=0, lt=0.1)
     min_net_return: float = Field(0.0, ge=0, le=1)
     min_validation_trades: int = Field(10, ge=1, le=500)
     train_fraction: float = Field(0.60, gt=0.1, lt=0.9)
@@ -132,8 +130,8 @@ class RunGeneratorExperimentRequest(MLBaseRequest):
         return normalized
 
     @field_validator(
-        "barrier_atr_multiple", "fee_rate", "slippage_rate", "min_net_return",
-        "train_fraction", "validation_fraction", "stop_atr_multiple", "risk_reward_ratio",
+        "barrier_atr_multiple", "min_net_return", "train_fraction",
+        "validation_fraction", "stop_atr_multiple", "risk_reward_ratio",
     )
     @classmethod
     def validate_finite_generator_parameters(cls, value: float) -> float:
@@ -356,6 +354,7 @@ def trigger_generator_experiment(req: RunGeneratorExperimentRequest):
     Telegram notifications. It is separate from the legacy filter tournament.
     """
     try:
+        from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT
         from db.db import fetch_ohlcv_with_features_df
         from ml.dataset import SHARED_FEATURE_COLUMNS
         from ml.generator_experiment import run_generator_experiment
@@ -372,8 +371,8 @@ def trigger_generator_experiment(req: RunGeneratorExperimentRequest):
         label_config = {
             "horizon_bars": req.horizon_bars,
             "barrier_atr_multiple": req.barrier_atr_multiple,
-            "fee_rate": req.fee_rate,
-            "slippage_rate": req.slippage_rate,
+            "fee_rate": BACKTEST_FEE_PCT,
+            "slippage_rate": BACKTEST_SLIPPAGE_PCT,
             "min_net_return": req.min_net_return,
         }
         strategy_params = {
@@ -382,8 +381,8 @@ def trigger_generator_experiment(req: RunGeneratorExperimentRequest):
             "timeframe": req.timeframe,
             "ML_GENERATOR_STOP_ATR_MULT": req.stop_atr_multiple,
             "ML_GENERATOR_RISK_REWARD_RATIO": req.risk_reward_ratio,
-            "BACKTEST_FEE_PCT": req.fee_rate,
-            "BACKTEST_SLIPPAGE_PCT": req.slippage_rate,
+            "BACKTEST_FEE_PCT": BACKTEST_FEE_PCT,
+            "BACKTEST_SLIPPAGE_PCT": BACKTEST_SLIPPAGE_PCT,
             "BACKTEST_MAX_HOLD_BARS": req.max_hold_bars,
         }
         result = run_generator_experiment(

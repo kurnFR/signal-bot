@@ -151,3 +151,20 @@ Build a generator-specific experiment orchestrator that:
 8. Adds deterministic tests proving no base-strategy dependency, no overlapping executed trades, validation-only policy selection, untouched-test isolation, and failure to promote label-only metrics.
 
 Until this orchestration is implemented and tested, generator paper activation must remain blocked for research-only artifacts. No automatic training, paper activation, or Telegram opt-in is authorized by this audit.
+
+
+## 9. Follow-up implementation status (PRs #681–#683)
+
+The critical gap identified in Section 8 is now addressed in the implementation branch:
+
+- PR #681 adds `ml/generator_experiment.py`: purged candle-level dataset, TRAIN-only fit, canonical simulator validation policy selection, one untouched canonical test, non-overlap assertion, and immutable typed artifact persistence.
+- PR #682 adds `POST /api/ml/generator/run-experiment`, separate from the legacy filter endpoint.
+- PR #683 adds a training form to the default dashboard and React ML Studio, refreshes the generator model selector, and retains separate paper activation and Telegram controls.
+- The runner and paper runtime now bind fee/slippage assumptions to server paper-accounting settings. Paper inference fails closed if those settings later differ.
+- Stop distance, reward multiple, and maximum holding bars are stored in the generator artifact. The strategy emits the max-hold metadata, paper positions persist it, and pending-order recovery revalidates the typed eligible artifact before filling.
+
+PR #683 also includes regression coverage for the paper max-hold propagation and cost-mismatch fail-closed behavior. This section describes the implementation being validated in that PR; merge status must be confirmed from GitHub checks before treating it as part of master.
+
+### Still not performed
+
+No actual model has been trained from the user's production candle history as part of these code changes. No paper strategy has been activated, no Telegram message has been sent, and no deployment or live trading has occurred. After merge, the next safe step is a user-reviewed generator experiment on selected historical symbols/timeframes, followed by inspection of untouched test metrics before any explicit paper activation.

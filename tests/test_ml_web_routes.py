@@ -142,6 +142,9 @@ class TestMLWebRoutes(unittest.TestCase):
         self.assertEqual(payload["test_metrics"]["evaluation_mode"], "canonical_simulator_oos")
         runner.assert_called_once()
         self.assertEqual(runner.call_args.kwargs["model_type"], "hist_gradient_boosting")
+        from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT
+        self.assertEqual(runner.call_args.kwargs["label_config"]["fee_rate"], BACKTEST_FEE_PCT)
+        self.assertEqual(runner.call_args.kwargs["label_config"]["slippage_rate"], BACKTEST_SLIPPAGE_PCT)
         set_config.assert_not_called()
         telegram.assert_not_called()
 

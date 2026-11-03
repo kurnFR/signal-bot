@@ -162,15 +162,13 @@ class TestInsertPositionLastUpdateTime(unittest.TestCase):
         # The VALUES tuple mixes literal SQL values (trailing_active=0,
         # trail_activation_r=1.0, ...) with %s placeholders, so the column
         # name list and the params tuple are NOT 1:1 -- parsing the SQL
-        # text to find the index is fragile. Instead assert against the
-        # fixed positional index in the params tuple as currently written
-        # in paper/engine.py's _insert_position (see the VALUES tuple
-        # there): last_update_time is params[13].
-        self.assertEqual(captured["params"][13], CANDLE_A - 1)
+        # text to find the index is fragile. The max_hold_bars placeholder
+        # now precedes last_update_time, so the timestamp is params[14].
+        self.assertEqual(captured["params"][14], CANDLE_A - 1)
         # And explicitly NOT the old (buggy) value -- a dollar risk amount
         # (1% of $5000 / (64000-63000) risk-based sizing = 1000.0 units'
         # worth of risk), nowhere near a millisecond timestamp.
-        self.assertNotEqual(captured["params"][13], 1000.0)
+        self.assertNotEqual(captured["params"][14], 1000.0)
 
 
 class TestPerCandleIdempotency(unittest.TestCase):
@@ -384,10 +382,6 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
         self.assertEqual(result["new_positions_opened"], 0)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestInsertPositionExposureCap(unittest.TestCase):
     def test_entry_is_refused_before_any_insert_when_cap_would_be_exceeded(self):
         class Pool:
@@ -398,3 +392,143 @@ class TestInsertPositionExposureCap(unittest.TestCase):
         with patch("paper.engine.get_pool", return_value=Pool()), \
              patch("paper.circuit_breaker.get_open_notional_usd", return_value=24999.0):
             self.assertIsNone(pe._insert_position(_make_cfg(), trade, 64010.0, CANDLE_A))
+
+
+class TestGeneratorMaxHoldPersistence(unittest.TestCase):
+    def test_generator_trade_max_hold_is_persisted_to_paper_position(self):
+        cursor = MagicMock()
+        cursor.lastrowid = 123
+        connection = MagicMock()
+        connection.cursor.return_value = cursor
+        pool = MagicMock()
+        pool.get_connection.return_value = connection
+        trade = {
+            "direction": "LONG",
+            "entry_price": 100.0,
+            "stop_loss": 98.0,
+            "take_profit": 104.0,
+            "atr_at_signal": 1.0,
+            "max_hold_bars": 37,
+        }
+
+        with patch("paper.engine.get_pool", return_value=pool), \
+             patch("paper.circuit_breaker.check_exposure_limit", return_value=(True, "")):
+            position_id = pe._insert_position(_make_cfg(), trade, 100.0, CANDLE_A)
+
+        self.assertEqual(position_id, 123)
+        sql, values = cursor.execute.call_args.args
+        self.assertIn("0,%s,%s,'OPEN'", sql)
+        self.assertEqual(values[13], 37)
+        self.assertEqual(values[14], CANDLE_A - 1)
+        connection.commit.assert_called_once()
+
+
+    def test_recovered_generator_order_uses_verified_artifact_max_hold(self):
+        cursor = MagicMock()
+        cursor.lastrowid = 124
+        connection = MagicMock()
+        connection.cursor.return_value = cursor
+        pool = MagicMock()
+        pool.get_connection.return_value = connection
+        trade = {
+            "direction": "LONG",
+            "entry_price": 100.0,
+            "stop_loss": 98.0,
+            "take_profit": 104.0,
+            "atr_at_signal": 1.0,
+        }
+        artifact = MagicMock()
+        from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT
+        artifact.label_config = {
+            "max_hold_bars": 41,
+            "fee_rate": BACKTEST_FEE_PCT,
+            "slippage_rate": BACKTEST_SLIPPAGE_PCT,
+        }
+
+        with patch("paper.engine.get_pool", return_value=pool), \
+             patch("paper.circuit_breaker.check_exposure_limit", return_value=(True, "")), \
+             patch("ml.generator_runtime.load_generator_predictor", return_value=(artifact, object())) as load:
+            position_id = pe._insert_position(
+                _make_cfg(), trade, 100.0, CANDLE_A,
+                ml_generator_model_id="generator-recovery-test",
+            )
+
+        self.assertEqual(position_id, 124)
+        self.assertTrue(load.call_args.kwargs["require_eligible"])
+        self.assertEqual(cursor.execute.call_args.args[1][13], 41)
+
+
+    def test_recovered_generator_order_is_rejected_if_paper_costs_changed(self):
+        artifact = MagicMock()
+        artifact.label_config = {
+            "max_hold_bars": 41,
+            "fee_rate": 0.002,
+            "slippage_rate": 0.0005,
+        }
+        trade = {
+            "direction": "LONG",
+            "entry_price": 100.0,
+            "stop_loss": 98.0,
+            "take_profit": 104.0,
+            "atr_at_signal": 1.0,
+        }
+        with patch("paper.circuit_breaker.check_exposure_limit", return_value=(True, "")), \
+             patch("ml.generator_runtime.load_generator_predictor", return_value=(artifact, object())), \
+             patch("paper.engine.get_pool", side_effect=AssertionError("must not persist a cost-mismatched order")):
+            with self.assertRaisesRegex(ValueError, "fee assumptions differ"):
+                pe._insert_position(
+                    _make_cfg(), trade, 100.0, CANDLE_A,
+                    ml_generator_model_id="generator-cost-mismatch",
+                )
+
+
+class TestTelegramUsesCurrentPaperConfigPreference(unittest.TestCase):
+    def _run_pending_fill(self, current_enabled, persisted_enabled):
+        entry_time = 100_000
+        cfg = _make_cfg(
+            id=77,
+            strategy_name="ml_signal_generator_v1",
+            is_active=1,
+            telegram_enabled=current_enabled,
+            ml_generator_model_id="generator-paper-test",
+        )
+        order = {
+            "id": 88,
+            "config_id": 77,
+            "symbol": cfg["symbol"],
+            "market": cfg["market"],
+            "timeframe": cfg["timeframe"],
+            "strategy_name": cfg["strategy_name"],
+            "ml_model_id": None,
+            "ml_generator_model_id": cfg["ml_generator_model_id"],
+            "direction": "LONG",
+            "entry_time": entry_time,
+            "requested_entry_price": 100.0,
+            "stop_loss": 98.0,
+            "take_profit": 104.0,
+            "atr_at_signal": 1.0,
+            "telegram_enabled": persisted_enabled,
+        }
+        open_candle = {"open_time": entry_time, "close": 100.0}
+        with patch("paper.engine.list_orders", return_value=[order]), \
+             patch("paper.engine.fetch_latest_open_candle", return_value=open_candle), \
+             patch("paper.engine.time.time", return_value=(entry_time + 1000) / 1000), \
+             patch("paper.circuit_breaker.check_circuit_breakers", return_value=(True, "")), \
+             patch("paper.engine.fill_pending_order", return_value={"status": "filled"}), \
+             patch("paper.engine._send_paper_entry_alert") as send_alert:
+            result = pe._process_pending_paper_orders([cfg])
+        return result, send_alert
+
+    def test_disabling_telegram_before_pending_fill_suppresses_entry_alert(self):
+        result, send_alert = self._run_pending_fill(current_enabled=False, persisted_enabled=True)
+        self.assertEqual(result["filled"], 1)
+        send_alert.assert_not_called()
+
+    def test_enabling_telegram_before_pending_fill_enables_entry_alert(self):
+        result, send_alert = self._run_pending_fill(current_enabled=True, persisted_enabled=False)
+        self.assertEqual(result["filled"], 1)
+        send_alert.assert_called_once()
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity, BrainCircuit, RefreshCw, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
+import { MLGeneratorTrainingPanel } from "./MLGeneratorTrainingPanel";
 import { fetchMLExperimentDetails, fetchMLExperiments, fetchMLModels, type MLExperimentDetails, type MLExperimentSummary, type MLModelManifest } from "./lib/mlStudio";
 
 const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 });
@@ -57,7 +58,8 @@ export function MLStudioPanel() {
   const eligibleModels = models.filter((model) => model.eligibility?.eligible === true && model.eligible_for_paper === true && model.has_weights === true).length;
 
   return <div className="ml-studio-view" aria-busy={loading || detailLoading}>
-    <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>Read-only ML Studio</strong><p>Inspect saved tournament results, model manifests, artifact availability, and eligibility diagnostics. Launching experiments, deploying models to paper trading, changing strategy configuration, and sending Telegram alerts are not available here.</p></div><span className="panel-counter">READ ONLY</span></section>
+    <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>ML Research Studio</strong><p>Train independent signal generators and inspect saved ML results. Paper activation and Telegram alerts remain separate, explicit controls in Paper Trading.</p></div><span className="panel-counter">RESEARCH</span></section>
+    <MLGeneratorTrainingPanel onCompleted={() => setAttempt((n) => n + 1)} />
     {error && <div className="api-error" role="alert"><div><strong>Unable to load ML Studio</strong><p>{error}</p></div><button className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}><RefreshCw size={15} /> Retry</button></div>}
     <section className="metrics-grid" aria-label="ML research summary">
       <article className="metric-card"><div className="metric-top"><span>Saved experiments</span><span className="metric-icon"><BrainCircuit size={17} /></span></div><div className="metric-value">{loading && !experiments.length ? "Loading…" : experiments.length}</div><div className="metric-foot"><span>Persisted result manifests</span></div></article>
@@ -79,6 +81,6 @@ export function MLStudioPanel() {
       {detailError && <p role="alert" className="error-banner">{detailError}</p>}
       {detailLoading ? <p className="empty-state" role="status">Loading experiment details…</p> : details ? <details className="backtest-params" open><summary>{selectedId}</summary><pre>{JSON.stringify(details, null, 2)}</pre></details> : <p className="empty-state">{selectedId ? "Experiment details are not available." : "Select a completed experiment to inspect its saved result."}</p>}
     </section>
-    <p className="page-description">Scope note: only GET endpoints are called. Experiment execution, model deployment, paper configuration, and Telegram actions remain unavailable.</p>
+    <p className="page-description">Scope note: generator training saves a research artifact only. Paper strategy activation and per-strategy Telegram opt-in are separate actions; this panel never activates either.</p>
   </div>;
 }

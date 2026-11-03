@@ -1,9 +1,11 @@
 /**
- * Same-origin, read-only API transport for future migration slices.
- *
- * Domain endpoints and response schemas must be verified against FastAPI before
- * they are added. This module intentionally exposes GET only.
+ * Same-origin JSON transport for verified API endpoints.
+ * JSON mutations are restricted to a reviewed endpoint allowlist.
  */
+// Keep mutation scope explicit: this UI currently needs only generator training.
+// Add a path here only after reviewing the endpoint's authorization and side effects.
+const ALLOWED_POST_ENDPOINTS = new Set(["/api/ml/generator/run-experiment"]);
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: "http" | "invalid-json" | "invalid-content-type";
@@ -80,6 +82,51 @@ export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T>
 
   try {
     return await response.json() as T;
+  } catch {
+    throw new ApiError("API returned invalid JSON", response.status, "invalid-json");
+  }
+}
+
+/** Submit a same-origin JSON request to a verified mutation endpoint. */
+export async function postJson<TResponse, TBody extends object>(
+  path: string,
+  body: TBody,
+  signal?: AbortSignal,
+): Promise<TResponse> {
+  assertApiPath(path);
+  if (!ALLOWED_POST_ENDPOINTS.has(path)) {
+    throw new TypeError("POST endpoint is not allowlisted");
+  }
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+  const token = readAuthToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 && path !== "/api/auth/me") {
+      try { window.localStorage.removeItem("token"); } catch { /* Auth state still resets via the event. */ }
+      window.dispatchEvent(new Event("signal-bot:session-expired"));
+    }
+    throw new ApiError(`API request failed with status ${response.status}`, response.status, "http");
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new ApiError("API response was not JSON", response.status, "invalid-content-type");
+  }
+
+  try {
+    return await response.json() as TResponse;
   } catch {
     throw new ApiError("API returned invalid JSON", response.status, "invalid-json");
   }

@@ -672,6 +672,41 @@ def _insert_position(
         return None
     entry_fee = raw_entry * size.quantity * BACKTEST_FEE_PCT
     atr = float(trade.get("atr_at_signal", 0.0) or 0.0)
+    raw_max_hold_bars = trade.get("max_hold_bars")
+    if ml_generator_model_id:
+        # Verify the model contract again at fill time. Pending orders can be
+        # recovered after a process restart or server-cost configuration change.
+        # The cached typed loader reuses the already-verified artifact when warm.
+        import math
+        from ml.generator_runtime import load_generator_predictor
+        generator_artifact, _ = load_generator_predictor(
+            ml_generator_model_id, require_eligible=True
+        )
+        execution = generator_artifact.label_config
+        if not math.isclose(float(execution["fee_rate"]), BACKTEST_FEE_PCT, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError("generator fee assumptions differ from current paper accounting")
+        if not math.isclose(float(execution["slippage_rate"]), BACKTEST_SLIPPAGE_PCT, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError("generator slippage assumptions differ from current paper accounting")
+        raw_artifact_max_hold = execution.get("max_hold_bars", 200)
+        if (
+            isinstance(raw_artifact_max_hold, bool)
+            or not isinstance(raw_artifact_max_hold, (int, float))
+            or not math.isfinite(float(raw_artifact_max_hold))
+            or int(raw_artifact_max_hold) != raw_artifact_max_hold
+            or not 1 <= int(raw_artifact_max_hold) <= 1000
+        ):
+            raise ValueError("verified generator artifact has an invalid max-hold setting")
+        artifact_max_hold = int(raw_artifact_max_hold)
+        if raw_max_hold_bars is not None and int(raw_max_hold_bars) != artifact_max_hold:
+            raise ValueError("generator max-hold metadata does not match its verified artifact")
+        raw_max_hold_bars = artifact_max_hold
+    if raw_max_hold_bars is None:
+        raw_max_hold_bars = 200
+    if isinstance(raw_max_hold_bars, bool):
+        raise ValueError("max_hold_bars must be an integer between 1 and 1000")
+    max_hold_bars = int(raw_max_hold_bars)
+    if max_hold_bars < 1 or max_hold_bars > 1000 or max_hold_bars != raw_max_hold_bars:
+        raise ValueError("max_hold_bars must be an integer between 1 and 1000")
 
     # last_update_time = open_time of the last candle whose data has been
     # applied to this position (holding_bars, SL/TP, trailing). At insert
@@ -701,13 +736,13 @@ def _insert_position(
                 ml_model_id, ml_probability, config_id, ml_generator_model_id
             ) VALUES (
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0,1.0,1.5,%s,%s,0.0,0.0,
-                0,200,%s,'OPEN',%s,%s,%s,%s,%s,%s,%s,0.0,0.0,%s,%s,%s,%s
+                0,%s,%s,'OPEN',%s,%s,%s,%s,%s,%s,%s,0.0,0.0,%s,%s,%s,%s
             )
             """,
             (
                 cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"], direction,
                 int(candle_open_time), raw_entry, current_close, stop_loss, take_profit, stop_loss,
-                atr, size.stop_distance, last_applied_candle, cfg["allocated_capital"],
+                atr, size.stop_distance, max_hold_bars, last_applied_candle, cfg["allocated_capital"],
                 cfg["risk_per_trade_pct"], size.risk_amount, size.stop_distance,
                 size.quantity, size.notional, entry_fee, ml_model_id, ml_probability,
                 cfg.get("id"), ml_generator_model_id or cfg.get("ml_generator_model_id"),
@@ -900,7 +935,7 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
             )
             if fill["status"] == "filled":
                 result["filled"] += 1
-                if order.get("telegram_enabled", cfg.get("telegram_enabled", False)):
+                if bool(cfg.get("telegram_enabled", False)):
                     _send_paper_entry_alert(order)
             elif fill["status"] == "rejected":
                 result["rejected"] += 1
