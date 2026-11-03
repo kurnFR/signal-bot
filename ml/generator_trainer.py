@@ -166,7 +166,7 @@ def _trading_metrics(returns: np.ndarray, opportunities: int) -> dict[str, Any]:
         "total_net_return": round(total, 10),
         "expectancy": round(total / count, 10) if count else None,
         "win_rate_pct": round(float((returns > 0).mean() * 100.0), 4) if count else None,
-        "profit_factor": round(positive / negative, 8) if negative > 0 else (float("inf") if positive > 0 else 0.0),
+        "profit_factor": round(positive / negative, 8) if negative > 0 else None,
         "max_drawdown": round(float(drawdown.max()), 10) if count else 0.0,
     }
 
