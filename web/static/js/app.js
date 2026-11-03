@@ -2135,7 +2135,7 @@ const App = {
                     const winRate = Number(row.winRatePct || 0);
                     return `
                         <tr>
-                            <td class="font-mono text-xs text-sky-400">${this._escapeHtml(row.strategy || "Unknown")}</td>
+                            <td class="font-mono text-xs text-sky-400">${this._escapeHtml(row.strategy || "Unknown")}${row.ml_generator_model_id ? `<div class="text-[10px] text-purple-300">${this._escapeHtml(row.ml_generator_model_id)}</div>` : row.ml_model_id ? `<div class="text-[10px] text-slate-400">${this._escapeHtml(row.ml_model_id)}</div>` : ""}</td>
                             <td class="font-mono text-xs text-slate-200">${this._escapeHtml(String(row.totalTrades || 0))}</td>
                             <td class="font-mono text-xs text-slate-200">${this._escapeHtml(String(row.wins || 0))}</td>
                             <td class="font-mono text-xs text-slate-200">${Number.isFinite(winRate) ? winRate.toFixed(2) : "—"}%</td>
@@ -2164,7 +2164,7 @@ const App = {
                                     ${this._escapeHtml(p.direction)}
                                 </span>
                             </td>
-                            <td class="font-mono text-xs text-sky-400">${this._escapeHtml(p.strategy_name)}</td>
+                            <td class="font-mono text-xs text-sky-400">${this._escapeHtml(p.strategy_name)}${p.ml_generator_model_id ? `<div class="text-[10px] text-purple-300">${this._escapeHtml(p.ml_generator_model_id)}</div>` : ""}</td>
                             <td class="font-mono text-xs text-slate-200">$${this._escapeHtml(p.entry_price.toLocaleString())}</td>
                             <td class="font-mono text-xs font-bold text-slate-100">$${this._escapeHtml(p.current_price.toLocaleString())}</td>
                             <td class="font-mono text-xs ${isProfitable ? "text-emerald-400" : "text-rose-400"} font-semibold">
@@ -2291,7 +2291,7 @@ const App = {
                     return `
                         <tr>
                             <td class="font-bold font-mono text-slate-200">${this._escapeHtml(t.symbol)}</td>
-                            <td class="text-xs font-mono text-sky-400">${this._escapeHtml(t.strategy_name)}</td>
+                            <td class="text-xs font-mono text-sky-400">${this._escapeHtml(t.strategy_name)}${t.ml_generator_model_id ? `<div class="text-[10px] text-purple-300">${this._escapeHtml(t.ml_generator_model_id)}</div>` : ""}</td>
                             <td>
                                 <span class="px-2 py-0.5 rounded text-[10px] font-bold ${t.direction === "LONG" ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-rose-950 text-rose-400 border border-rose-800"}">
                                     ${this._escapeHtml(t.direction)}
