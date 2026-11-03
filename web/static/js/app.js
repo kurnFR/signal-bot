@@ -4755,6 +4755,106 @@ const App = {
     // ========================================================================
     // ML STUDIO & CIRCUIT BREAKER METHODS
     // ========================================================================
+    async runMLGeneratorExperiment(event) {
+        if (event && typeof event.preventDefault === "function") event.preventDefault();
+        const value = id => document.getElementById(id)?.value;
+        const numberValue = id => Number(value(id));
+        const status = document.getElementById("ml-generator-status");
+        const submit = document.getElementById("ml-generator-submit");
+        const result = document.getElementById("ml-generator-result");
+        const symbol = String(value("ml-generator-symbol") || "").trim().toUpperCase();
+        const market = String(value("ml-generator-market") || "spot");
+        const timeframe = String(value("ml-generator-timeframe") || "1h");
+        const model_type = String(value("ml-generator-model") || "hist_gradient_boosting");
+        const horizon_bars = numberValue("ml-generator-horizon");
+        const barrier_atr_multiple = numberValue("ml-generator-barrier");
+        const fee_rate = numberValue("ml-generator-fee");
+        const slippage_rate = numberValue("ml-generator-slippage");
+        const min_validation_trades = numberValue("ml-generator-min-trades");
+        const stop_atr_multiple = numberValue("ml-generator-stop-atr");
+        const risk_reward_ratio = numberValue("ml-generator-risk-reward");
+        const max_hold_bars = numberValue("ml-generator-max-hold");
+
+        if (!/^[A-Z0-9]{2,20}$/.test(symbol)) {
+            if (status) status.textContent = "Enter a valid symbol using 2–20 letters or digits.";
+            return;
+        }
+        const numericValues = [
+            horizon_bars, barrier_atr_multiple, fee_rate, slippage_rate,
+            min_validation_trades, stop_atr_multiple, risk_reward_ratio, max_hold_bars,
+        ];
+        if (!numericValues.every(Number.isFinite)) {
+            if (status) status.textContent = "All numeric parameters must be finite numbers.";
+            return;
+        }
+
+        if (submit) submit.disabled = true;
+        if (result) result.hidden = true;
+        if (status) status.textContent = "Training generator on closed candles. This can take some time…";
+        try {
+            const response = await fetch(`${API_BASE}/api/ml/generator/run-experiment`, {
+                method: "POST",
+                headers: {
+                    ...this.getAuthHeaders(),
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    symbol, market, timeframe, model_type,
+                    horizon_bars, barrier_atr_multiple, fee_rate, slippage_rate,
+                    min_net_return: 0,
+                    min_validation_trades,
+                    stop_atr_multiple, risk_reward_ratio, max_hold_bars,
+                    seed: 42,
+                }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(typeof payload.detail === "string" ? payload.detail : `HTTP ${response.status}`);
+            }
+            if (!payload || payload.status !== "success" ||
+                typeof payload.model_id !== "string" ||
+                payload.task_type !== "signal_generator_v1" ||
+                typeof payload.eligible_for_paper !== "boolean" ||
+                !payload.decision_policy || !payload.test_metrics) {
+                throw new Error("The generator API returned an invalid response.");
+            }
+
+            const eligible = payload.eligible_for_paper;
+            const title = document.getElementById("ml-generator-result-title");
+            const message = document.getElementById("ml-generator-result-message");
+            const modelId = document.getElementById("ml-generator-result-id");
+            const policy = document.getElementById("ml-generator-result-policy");
+            const rows = document.getElementById("ml-generator-result-rows");
+            const test = document.getElementById("ml-generator-result-test");
+            if (title) title.textContent = eligible ? "Untouched test passed the paper eligibility gate" : "Saved as research-only";
+            if (message) message.textContent = payload.message || "Generator artifact saved.";
+            if (modelId) modelId.textContent = payload.model_id;
+            if (policy) policy.textContent =
+                `${(Number(payload.decision_policy.min_confidence) * 100).toFixed(1)}% confidence · ${(Number(payload.decision_policy.min_directional_margin) * 100).toFixed(1)}% margin`;
+            if (rows) rows.textContent =
+                `${Number(payload.dataset_rows).toLocaleString()} total · ${Number(payload.train_rows).toLocaleString()} / ${Number(payload.validation_rows).toLocaleString()} / ${Number(payload.test_rows).toLocaleString()}`;
+            if (test) {
+                const metrics = payload.test_metrics;
+                const trades = Number.isFinite(Number(metrics.trades)) ? Number(metrics.trades) : "—";
+                const pf = Number.isFinite(Number(metrics.profit_factor)) ? Number(metrics.profit_factor).toFixed(2) : "—";
+                const dd = Number.isFinite(Number(metrics.max_drawdown_pct)) ? `${Number(metrics.max_drawdown_pct).toFixed(2)}%` : "—";
+                test.textContent = `${trades} · PF ${pf} · DD ${dd}`;
+            }
+            if (result) result.hidden = false;
+            if (status) status.textContent = eligible
+                ? "Generator training completed. You may review it in Paper Trading; activation is still a separate choice."
+                : "Generator saved successfully, but it cannot be activated for paper trading yet.";
+            this.showToast(eligible ? "Generator model passed its paper eligibility gate." : "Generator saved as research-only.", eligible ? "success" : "info");
+            await this.fetchPaperGeneratorModels();
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error || "Unknown error");
+            if (status) status.textContent = `Generator training failed: ${message}`;
+            this.showToast(`Generator training failed: ${message}`, "error");
+        } finally {
+            if (submit) submit.disabled = false;
+        }
+    },
+
     async fetchMLData() {
         try {
             // 1. Fetch circuit breakers
