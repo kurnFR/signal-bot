@@ -189,3 +189,17 @@ The final Telegram audit confirms:
 - A disabled strategy creates no new entries; existing positions continue through normal exit management.
 
 **Release boundary:** implementation and CI are complete, but this is not a trained or production-validated strategy yet. No user-history experiment has been run, no model has been promoted, no paper config has been activated, no Telegram signal has been sent, and no deployment/live trading has occurred. The first actual experiment must use a user-selected symbol, market, and timeframe; its untouched-test report must be reviewed before paper activation.
+
+
+## 11. Post-release reliability hardening — PRs #685–#686
+
+Two additional safeguards were merged after the dashboard workflow:
+
+- **PR #685 — fixed canonical evaluation boundary:** validation and test simulation now end at the final partition signal candle plus the configured label horizon. The boundary is no longer derived from the maximum observed label exit timestamp, which depends on future price outcomes. Canonical metrics record the fixed boundary and horizon. A regression test proves that changing label exit times cannot move the simulator boundary.
+- **PR #686 — shared feature point-in-time contract:** a future-bar mutation test recomputes the full shared feature set after materially changing only future OHLCV. All feature values through the cutoff candle must remain exactly unchanged. This covers RSI, MACD, ATR, volume, rolling support/resistance, swing levels, and Fibonacci levels.
+
+**Current verified master after these changes:** `b35843c0d423ab66b93d19ef5bddd64097bf9124`.
+
+### Remaining release gate
+
+The code and CI coverage for the independent generator are in place, but no actual generator model has been trained from historical candle data yet. The first research run still needs an explicit symbol, market, and timeframe selection. It must remain research-only until the untouched canonical test report is reviewed. No paper strategy has been activated, no Telegram signal has been sent, and no deployment or live trading has occurred.
