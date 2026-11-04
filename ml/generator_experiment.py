@@ -143,7 +143,10 @@ def _evaluate_partition(
     )
     if len(signal_positions) != 1:
         raise ValueError("canonical evaluation frame is missing the final partition signal candle")
-    end_idx = int(signal_positions[0]) + horizon_bars
+    max_hold_bars = int((strategy_params or {}).get("BACKTEST_MAX_HOLD_BARS", BASE_PARAMS["BACKTEST_MAX_HOLD_BARS"]))
+    # Entry occurs one candle after the final signal; the simulator's timeout
+    # check allows the entry candle plus max_hold_bars additional candles.
+    end_idx = int(signal_positions[0]) + max_hold_bars + 1
     if end_idx >= len(ordered_frame):
         raise ValueError("canonical evaluation frame does not contain the fixed label horizon")
     simulation_end = int(ordered_frame.iloc[end_idx]["open_time"])
@@ -205,8 +208,6 @@ def run_generator_experiment(
     if ordered["open_time"].duplicated().any():
         raise ValueError("feature_frame open_time values must be unique")
     labels = {
-        "horizon_bars": 12,
-        "barrier_atr_multiple": 1.5,
         "fee_rate": BACKTEST_FEE_PCT,
         "slippage_rate": BACKTEST_SLIPPAGE_PCT,
         "min_net_return": 0.0,
@@ -226,9 +227,15 @@ def run_generator_experiment(
         float(effective_strategy_params["BACKTEST_SLIPPAGE_PCT"]), BACKTEST_SLIPPAGE_PCT, rel_tol=0.0, abs_tol=1e-12
     ):
         raise ValueError("generator execution slippage must match server paper accounting")
+    stop_atr_multiple = float(effective_strategy_params.get("ML_GENERATOR_STOP_ATR_MULT", 1.5))
+    risk_reward_ratio = float(effective_strategy_params.get("ML_GENERATOR_RISK_REWARD_RATIO", 2.0))
+    max_hold_bars = int(effective_strategy_params.get("BACKTEST_MAX_HOLD_BARS", BASE_PARAMS["BACKTEST_MAX_HOLD_BARS"]))
     dataset = build_generator_dataset(
         ordered,
         feature_columns=feature_columns,
+        stop_atr_multiple=stop_atr_multiple,
+        risk_reward_ratio=risk_reward_ratio,
+        max_hold_bars=max_hold_bars,
         **labels,
     )
     if len(dataset) < 30:
@@ -259,7 +266,7 @@ def run_generator_experiment(
             margin,
             evaluation_mode=mode,
             strategy_params=effective_strategy_params,
-            horizon_bars=int(labels["horizon_bars"]),
+            horizon_bars=max_hold_bars,
         )
 
     training: GeneratorTrainingResult = train_generator(
@@ -289,8 +296,8 @@ def run_generator_experiment(
     }
     artifact_label_config = {
         "label_protocol": GENERATOR_LABEL_PROTOCOL,
-        "horizon_bars": int(labels.get("horizon_bars", 12)),
-        "barrier_atr_multiple": float(labels.get("barrier_atr_multiple", 1.5)),
+        "label_horizon_bars": max_hold_bars,
+        "barrier_atr_multiple": None,
         "fee_rate": float(labels["fee_rate"]),
         "slippage_rate": float(labels["slippage_rate"]),
         "min_net_return": float(labels.get("min_net_return", 0.0)),
