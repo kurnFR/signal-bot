@@ -195,4 +195,4 @@ def test_generator_artifact_uses_execution_aligned_label_and_purge_protocols():
     assert artifact.label_protocol_version == "execution_aligned_gap_aware_stop_target_timeout_v3"
     assert artifact.label_protocol_version == GENERATOR_LABEL_PROTOCOL
     assert artifact.evaluation_protocol_version == GENERATOR_EVALUATION_PROTOCOL
-    assert artifact.evaluation_protocol_version == "purged_generator_max_execution_end_v2"
+    assert artifact.evaluation_protocol_version == "purged_generator_max_execution_end_gap_aware_v3"
