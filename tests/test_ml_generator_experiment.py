@@ -16,7 +16,7 @@ def test_generator_policy_evaluation_uses_canonical_non_overlapping_simulator():
     })
     partition = pd.DataFrame({
         "open_time": [2, 4, 6],
-        "exit_time": [4, 6, 8],
+        "exit_time": [4, 6, 7],
     })
     probabilities = np.asarray([
         [0.05, 0.05, 0.90],
