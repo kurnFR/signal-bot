@@ -110,8 +110,6 @@ class RunExperimentRequest(MLStrategyRequest):
 class RunGeneratorExperimentRequest(MLBaseRequest):
     """Parameters for the independent signal-generator research pipeline."""
     model_type: str = Field("hist_gradient_boosting", min_length=1, max_length=30)
-    horizon_bars: int = Field(12, ge=2, le=200)
-    barrier_atr_multiple: float = Field(1.5, gt=0, le=20)
     min_net_return: float = Field(0.0, ge=0, le=1)
     min_validation_trades: int = Field(10, ge=1, le=500)
     train_fraction: float = Field(0.60, gt=0.1, lt=0.9)
@@ -130,7 +128,7 @@ class RunGeneratorExperimentRequest(MLBaseRequest):
         return normalized
 
     @field_validator(
-        "barrier_atr_multiple", "min_net_return", "train_fraction",
+        "min_net_return", "train_fraction",
         "validation_fraction", "stop_atr_multiple", "risk_reward_ratio",
     )
     @classmethod
