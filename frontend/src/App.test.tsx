@@ -140,6 +140,6 @@ describe("frontend foundation shell", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Current session" })).toBeInTheDocument();
-    expect(screen.getByText(/User management, credential settings, and other consequential controls remain in the legacy dashboard/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Change My Password" })).toBeInTheDocument();
   });
 });

@@ -1,7 +1,7 @@
 # Signal Bot — Modern UI Reversible Cutover Plan
 
 **Repository:** `kurnFR/signal-bot`  
-**Target:** Safe, zero-downtime, fully reversible cutover from the legacy static dashboard (`web/static/`) to the modern React + TypeScript dashboard (`frontend/dist/`).  
+**Target:** Controlled, reversible cutover from the legacy static dashboard (`web/static/`) to the modern React + TypeScript dashboard (`frontend/dist/`) requiring a web service reload/restart.  
 **Author:** Antigravity  
 **Status:** Prepared for Owner Approval (Cutover switch remains disabled until authorized)  
 **Reference:** [`docs/ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md`](ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md), Phase 9  
@@ -10,7 +10,12 @@
 
 ## 1. Overview & Serving Architecture
 
-The Signal Bot FastAPI backend currently supports both the legacy static frontend and the modern React application through a reversible environment toggle.
+The Signal Bot FastAPI backend supports both the legacy static frontend and the modern React application through a reversible environment toggle.
+
+> [!IMPORTANT]
+> **Process Restart Requirement:** Toggling `SIGNAL_BOT_USE_MODERN_UI` requires reloading or restarting the web process (`systemctl reload-or-restart` or supervisor reload) for the environment change to take effect. If not fronted by an upstream reverse proxy with socket handover (e.g., Nginx), a brief interruption to in-flight HTTP connections may occur.
+>
+> **Data Compatibility:** Both frontends communicate with the exact same FastAPI endpoints and MariaDB database tables. No schema mutations or destructive conversions occur during cutover or rollback. However, operations should be performed during low-traffic windows after verifying that paper trading loops and background collectors are stable.
 
 ### Current Serving Mechanism in `web/app.py`
 ```python
@@ -180,7 +185,7 @@ If any unexpected regression, rendering defect, or user disruption occurs, the r
    curl -s http://127.0.0.1:8050/ | grep -q "dashboard_enhancements.js" && echo "Rollback successful: legacy dashboard active"
    ```
 
-*Note: Database migrations and stored data are 100% compatible between both interfaces; switching back and forth carries zero data loss risk.*
+*Note: Database tables and stored data are shared directly between both interfaces without interface-specific schema mutations; switching serving modes does not modify persistent database records. Operators should still verify service health and backfill job status before and after reloading.*
 
 ---
 

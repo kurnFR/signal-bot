@@ -55,6 +55,10 @@ async function mockApi(page: Page, options: { expiredScreener?: boolean; expired
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ configured: true, chatId: "-100123456789", hasToken: true }) });
       return;
     }
+    if (path === "/api/users") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ users: [] }) });
+      return;
+    }
     if (path === "/api/telegram/test" && request.method() === "POST") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, chat_id: "-100123456789" }) });
       return;
@@ -441,7 +445,7 @@ test("viewer Settings does not request admin diagnostics or Telegram configurati
   const restrictedReads: string[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (["/api/settings/status", "/api/telegram/status"].includes(url.pathname)) {
+    if (["/api/settings/status", "/api/telegram/status", "/api/users"].includes(url.pathname)) {
       restrictedReads.push(request.method() + " " + url.pathname);
     }
   });

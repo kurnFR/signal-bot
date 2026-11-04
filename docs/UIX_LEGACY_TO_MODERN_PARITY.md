@@ -19,9 +19,9 @@ Every view, sub-menu, interactive control, form, data table, modal dialog, and b
 - **Interactive Modals & Dialogs:** 7 / 7 modals mapped and implemented with accessible dialog semantics.
 - **Backend API Endpoints Covered:** 81 unique API method/path routes mapped across 13 FastAPI modules.
 - **Parity Status:** 11 Views COMPLETE, 0 MISSING, 0 UNAPPROVED REMOVALS.
-- **Automated Frontend Test Suite:** 30 test files, 202 unit/component tests passing (`npm test`).
+- **Automated Frontend Test Suite:** 31 test files, 210 unit/component tests passing (`npm test`).
 - **End-to-End Browser Tests:** 28 Playwright tests passing across Desktop Chrome, responsive mobile, tablet, and dark/light themes (`npx playwright test`).
-- **Backend Test Suite:** 1,087 unit/integration tests passing (`pytest`).
+- **Backend Test Suite:** 1,088 unit/integration tests passing (`pytest`).
 
 ---
 
@@ -288,32 +288,42 @@ Every view, sub-menu, interactive control, form, data table, modal dialog, and b
 - **Components & Layout:**
   - Theme Selector: Instant toggle between Dark and Light mode, persisted in `localStorage`.
   - Session Profile: Username, Role badge, Session expiration indicator.
-  - Password Change Form: Current password, new password, confirm new password with length and match validation.
-  - User Management Table (Admin only): Username, Role, Created date, Must change password flag.
-  - Add User Modal (Admin only): Form with username, temporary password, role selector (`admin`, `trader`, `viewer`).
-  - Telegram Test Alert (Admin/Trader only): "Send Test Ping" with confirmation dialog.
+  - Self Password Change Form: Current password, new password, confirm new password with length and match validation (`POST /api/auth/change-password`).
+  - User Accounts Administration Table (Admin only): Live catalog displaying User ID, username, email, role badge, active status, creation timestamp, and action buttons (`GET /api/users`).
+  - Create User Form / Modal (Admin only): Interactive form with fields for username, email, password, and role selector (`trader`, `admin`, `viewer`) (`POST /api/users`).
+  - Password Reset Action (Admin only): Inline confirmation dialog triggering temporary password reset with display of the new temporary credential (`POST /api/users/{id}/reset-password`).
+  - Toggle Active Status (Admin only): Instant enable/disable for accounts with self-disable protection preventing admin lockout (`PUT /api/users/{id}`).
+  - Delete User Action (Admin only): Two-step confirmation dialog with self-deletion protection preventing an admin from deleting their own session (`DELETE /api/users/{id}`).
+  - Telegram Test Alert (Admin only): "Send Test Ping" with explicit confirmation dialog warning that a test message will be sent to the configured Telegram chat. Note: Both `GET /api/telegram/status` and `POST /api/telegram/test` are strictly restricted to the `admin` role by backend FastAPI `require_admin` dependency.
   - System Diagnostics Card (Admin only): CPU usage, Memory allocation, DB latency, MariaDB thread pool, version details. Sanitized against leaking environment variables or credentials.
   - Forced Password Change Modal (`AuthGate`): Appears immediately upon sign-in if `must_change_password` is `true`. Blocks dashboard navigation until updated.
 - **Interactive Controls:**
   - `Theme Toggle`: Updates UI theme and `data-theme` attribute.
   - `Change Password`: Calls `POST /api/auth/change-password`.
-  - `Create User`: Calls `POST /api/users`.
-  - `Send Test Ping`: Calls `POST /api/telegram/test`.
+  - `Create User`: Submits `POST /api/users`.
+  - `Reset Password`: Submits `POST /api/users/{id}/reset-password`.
+  - `Toggle Status`: Submits `PUT /api/users/{id}` (`is_active: boolean`).
+  - `Delete User`: Submits `DELETE /api/users/{id}`.
+  - `Send Test Ping`: Submits `POST /api/telegram/test` (Admin only).
   - `Sign Out`: Clears token and session storage, dispatches logout.
 - **API Contracts:**
   - `POST /api/auth/login`
   - `GET /api/auth/me`
   - `POST /api/auth/logout`
   - `POST /api/auth/change-password`
-  - `GET /api/users`
-  - `POST /api/users`
-  - `POST /api/telegram/test`
-  - `GET /api/settings/diagnostics`
+  - `GET /api/users` (Admin only)
+  - `POST /api/users` (Admin only)
+  - `POST /api/users/{id}/reset-password` (Admin only)
+  - `PUT /api/users/{id}` (Admin only)
+  - `DELETE /api/users/{id}` (Admin only)
+  - `GET /api/telegram/status` (Admin only)
+  - `POST /api/telegram/test` (Admin only)
+  - `GET /api/settings/diagnostics` (Admin only)
 - **Roles & RBAC:**
-  - Viewer: Theme toggle, profile info, password change.
-  - Trader: Above plus Telegram test ping.
-  - Admin: Full access including user management and system diagnostics.
-- **Safety & Error Behavior:** Strict backend authentication enforcement; token auto-revocation on 401; password fields masked with input type `password`.
+  - Viewer: Theme toggle, profile info, own password change.
+  - Trader: Theme toggle, profile info, own password change. (No access to user management, system diagnostics, or Telegram test ping).
+  - Admin: Full access including user administration (create, reset password, toggle active, delete), Telegram test ping, and system diagnostics.
+- **Safety & Error Behavior:** Strict backend authentication enforcement; token auto-revocation on 401; password fields masked with input type `password`; client and server guards against self-deletion and self-deactivation.
 - **Status:** `COMPLETE`.
 
 ---
@@ -329,6 +339,8 @@ Every view, sub-menu, interactive control, form, data table, modal dialog, and b
 | 5 | `modal-run-ml` | `MLStudioPanel.tsx` | `COMPLETE` | Clear research-only label, no automatic paper or Telegram activation |
 | 6 | Strategy Quick Test Modal | `StrategyLibraryPanel.tsx` | `COMPLETE` | In-memory 1,000 candle simulation; no database writes |
 | 7 | Strategy Delete Confirmation | `StrategyLibraryPanel.tsx` | `COMPLETE` | Explicit name verification required before deletion |
+| 8 | User Delete Confirmation | `SettingsPanel.tsx` | `COMPLETE` | Two-step confirmation dialog; prevents self-deletion |
+| 9 | Password Reset Confirmation | `SettingsPanel.tsx` | `COMPLETE` | Modal confirmation revealing temporary credentials |
 
 ---
 
@@ -338,12 +350,12 @@ All parity implementations have been validated through three comprehensive autom
 
 1. **Frontend Unit & Component Testing (`Vitest`):**
    - **Command:** `cd frontend && npm test -- --run`
-   - **Result:** 30 test files passed, 202 tests passed, 0 failed.
-   - **Coverage:** AuthGate, App, SystemStatus, Screener, ScreenerControls, PaperTrading, StrategyLibrary, WalletTracking, BacktestStudio, PromotionPolicy, MLStudio, MLGeneratorTraining, Research, NewsAI, MasterData, Settings.
+   - **Result:** 31 test files passed, 210 tests passed, 0 failed.
+   - **Coverage:** AuthGate, App, SystemStatus, Screener, ScreenerControls, PaperTrading, StrategyLibrary, WalletTracking, BacktestStudio, PromotionPolicy, MLStudio, MLGeneratorTraining, Research, NewsAI, MasterData, Settings, User Management client & UI.
 
 2. **Frontend Production Type-check & Build (`TypeScript + Vite`):**
    - **Command:** `cd frontend && npm run typecheck && npm run build`
-   - **Result:** TypeScript compile passed with zero errors (`tsc --noEmit`). Production bundle built in `frontend/dist/` (1,608 modules transformed).
+   - **Result:** TypeScript compile passed with zero errors (`tsc --noEmit`). Production bundle built in `frontend/dist/` (1,609 modules transformed).
 
 3. **End-to-End Browser Testing (`Playwright 1.64.1 Chromium`):**
    - **Command:** `cd frontend && npx playwright test`
@@ -351,7 +363,7 @@ All parity implementations have been validated through three comprehensive autom
 
 4. **Backend Regression Testing (`pytest`):**
    - **Command:** `python3 -m pytest -q`
-   - **Result:** 1,087 passed, 18 skipped, 0 failed in 19.20s.
+   - **Result:** 1,088 passed, 18 skipped, 0 failed in 19.45s.
 
 ---
 
