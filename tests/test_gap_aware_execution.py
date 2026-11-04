@@ -89,7 +89,7 @@ def test_generator_label_uses_same_gap_aware_stop_fill_as_simulator():
     )
     row = labels.loc[labels["open_time"] == 0].iloc[0]
 
-    # The LONG stop was 95, but the next candle opened at 94. The label must
+    # The LONG stop was 99, but the next candle opened at 94. The label must
     # account for the adverse gap rather than assuming a fill at 95.
     assert row["long_net_return"] == pytest.approx(-0.06)
     assert row["target_name"] == "SHORT"
