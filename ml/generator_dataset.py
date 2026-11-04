@@ -109,8 +109,8 @@ def build_generator_dataset(
         closed = np.ones(len(data), dtype=bool)
 
     rows = []
-    for signal_idx in range(0, len(data) - max_hold_bars - 1):
-        if not closed[signal_idx] or not closed[signal_idx + 1:signal_idx + max_hold_bars + 2].all():
+    for signal_idx in range(0, len(data) - max_hold_bars):
+        if not closed[signal_idx] or not closed[signal_idx + 1:signal_idx + max_hold_bars + 1].all():
             continue
         atr = float(data.at[signal_idx, "atr"])
         if not np.isfinite(atr) or atr <= 0:
@@ -137,7 +137,7 @@ def build_generator_dataset(
             exit_price = None
             exit_idx = entry_idx
             reason = "max_hold_timeout"
-            final_idx = min(entry_idx + max_hold_bars, len(data) - 1)
+            final_idx = min(entry_idx + max_hold_bars - 1, len(data) - 1)
             for future_idx in range(entry_idx, final_idx + 1):
                 bar = data.iloc[future_idx]
                 # Use the exact same gap-aware stop/target resolver as the
@@ -155,7 +155,7 @@ def build_generator_dataset(
                     reason = "stop_loss" if exit_code == "SL" else "take_profit"
                     exit_idx = future_idx
                     break
-                if future_idx - entry_idx >= max_hold_bars:
+                if future_idx - entry_idx + 1 >= max_hold_bars:
                     exit_price = float(bar["close"])
                     exit_idx = future_idx
                     reason = "max_hold_timeout"
