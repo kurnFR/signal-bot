@@ -1313,7 +1313,8 @@ def set_retailbot2_strategy_lifecycle_setting(strategy_id, mode, settings):
     conn = get_retailbot2_pool().get_connection()
     try:
         cur = conn.cursor()
-        _ensure_retailbot2_strategy_lifecycle_table(cur)
+        # The lifecycle table is provisioned and verified by the migration/startup
+        # path. Runtime writes must not call a table-creation helper here.
         cur.execute("""
             INSERT INTO rdt_strategy_lifecycle
                 (strategy_id, mode, evaluation_enabled, paper_enabled,
