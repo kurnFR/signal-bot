@@ -124,8 +124,12 @@ def resolve_stop_target_exit(
         stop_price=stop_price,
         target_price=target_price,
     )
-    if min(bar_open, bar_high, bar_low, stop_price, target_price) <= 0:
-        raise ValueError("bar and order prices must be positive")
+    if min(bar_open, bar_high, bar_low) <= 0:
+        raise ValueError("bar prices must be positive")
+    # Strategy ATR stops/targets can mathematically fall at or below zero
+    # when volatility is extreme relative to price. Such an order level is
+    # unreachable on a positive-price market; keep it as a finite threshold
+    # rather than failing the entire backtest.
     if bar_high < max(bar_open, bar_low) or bar_low > min(bar_open, bar_high):
         raise ValueError("invalid OHLC range")
     if direction == "LONG":
