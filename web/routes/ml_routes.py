@@ -109,6 +109,7 @@ class RunExperimentRequest(MLStrategyRequest):
 
 class RunGeneratorExperimentRequest(MLBaseRequest):
     """Parameters for the independent signal-generator research pipeline."""
+    model_config = {"extra": "forbid"}
     model_type: str = Field("hist_gradient_boosting", min_length=1, max_length=30)
     min_net_return: float = Field(0.0, ge=0, le=1)
     min_validation_trades: int = Field(10, ge=1, le=500)
