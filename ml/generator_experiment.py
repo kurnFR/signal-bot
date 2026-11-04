@@ -296,8 +296,7 @@ def run_generator_experiment(
     }
     artifact_label_config = {
         "label_protocol": GENERATOR_LABEL_PROTOCOL,
-        "label_horizon_bars": max_hold_bars,
-        "barrier_atr_multiple": None,
+        "max_hold_bars": max_hold_bars,
         "fee_rate": float(labels["fee_rate"]),
         "slippage_rate": float(labels["slippage_rate"]),
         "min_net_return": float(labels.get("min_net_return", 0.0)),
