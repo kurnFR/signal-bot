@@ -63,9 +63,10 @@ def build_generator_dataset(
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be finite and positive")
     if max_hold_bars is None:
-        # Backward-compatible direct builder calls use their horizon as the
-        # timeout; production experiments always pass the strategy max hold.
-        max_hold_bars = max(1, horizon_bars - 1)
+        # Backward-compatible direct builder calls use the full horizon
+        # as the number of holding candles, including the entry candle.
+        # Production experiments always pass the strategy max hold explicitly.
+        max_hold_bars = horizon_bars
     if isinstance(max_hold_bars, bool) or not isinstance(max_hold_bars, int) or max_hold_bars < 1:
         raise ValueError("max_hold_bars must be a positive integer")
     if fee_rate < 0 or slippage_rate < 0 or min_net_return < 0:
