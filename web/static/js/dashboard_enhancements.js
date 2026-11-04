@@ -223,9 +223,6 @@
             // not cause the same table to be inspected repeatedly in one batch.
             const tablesToEnhance = new Set();
             for (const mutation of mutations) {
-                const target = mutation.target.nodeType === Node.ELEMENT_NODE
-                    ? mutation.target
-                    : mutation.target.parentElement;
                 for (const node of mutation.addedNodes) {
                     if (node.nodeType !== Node.ELEMENT_NODE) continue;
                     if (node.matches(SORTABLE_TABLE_SELECTOR)) tablesToEnhance.add(node);
