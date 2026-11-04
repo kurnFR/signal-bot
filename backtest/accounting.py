@@ -102,6 +102,59 @@ def calculate_funding_cost(
     return total
 
 
+
+def resolve_stop_target_exit(
+    direction: str,
+    bar_open: float,
+    bar_high: float,
+    bar_low: float,
+    stop_price: float,
+    target_price: float,
+) -> tuple[float, str] | None:
+    """Resolve a fixed stop/target against one OHLC bar with gap-aware fills.
+
+    A stop or target crossed by the opening gap fills at the open. Intrabar
+    touches fill at the order price. If both levels are touched after an open
+    between them, stop-loss wins conservatively.
+    """
+    _require_finite(
+        bar_open=bar_open,
+        bar_high=bar_high,
+        bar_low=bar_low,
+        stop_price=stop_price,
+        target_price=target_price,
+    )
+    if min(bar_open, bar_high, bar_low, stop_price, target_price) <= 0:
+        raise ValueError("bar and order prices must be positive")
+    if bar_high < max(bar_open, bar_low) or bar_low > min(bar_open, bar_high):
+        raise ValueError("invalid OHLC range")
+    if direction == "LONG":
+        if stop_price >= target_price:
+            raise ValueError("LONG stop must be below target")
+        if bar_open <= stop_price:
+            return float(bar_open), "SL"
+        if bar_open >= target_price:
+            return float(bar_open), "TP"
+        if bar_low <= stop_price:
+            return float(stop_price), "SL"
+        if bar_high >= target_price:
+            return float(target_price), "TP"
+        return None
+    if direction == "SHORT":
+        if stop_price <= target_price:
+            raise ValueError("SHORT stop must be above target")
+        if bar_open >= stop_price:
+            return float(bar_open), "SL"
+        if bar_open <= target_price:
+            return float(bar_open), "TP"
+        if bar_high >= stop_price:
+            return float(stop_price), "SL"
+        if bar_low <= target_price:
+            return float(target_price), "TP"
+        return None
+    raise ValueError("direction must be LONG or SHORT")
+
+
 def calculate_trade_accounting(
     direction: str,
     quantity: float,
