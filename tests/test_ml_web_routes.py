@@ -123,7 +123,7 @@ class TestMLWebRoutes(unittest.TestCase):
             test_metrics={"evaluation_mode": "canonical_simulator_oos"},
         )
         with (
-            patch("db.db.fetch_ohlcv_with_features_df", return_value=[object()] * 120),
+            patch("db.db.fetch_ohlcv_with_features_df", return_value=[object()] * 500),
             patch("ml.generator_experiment.run_generator_experiment", return_value=result) as runner,
             patch("web.routes.ml_routes.set_paper_config") as set_config,
             patch("web.routes.ml_routes.send_telegram_message") as telegram,
