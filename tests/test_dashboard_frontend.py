@@ -1044,7 +1044,7 @@ class TestDashboardForcedColorsAccessibility(unittest.TestCase):
         self.assertIn("background-color: Highlight;", forced_colors)
         self.assertIn("background: Canvas;", forced_colors)
         self.assertIn("color: CanvasText;", forced_colors)
-        self.assertIn(".dashboard-table-scroll:focus-visible", css)
+        self.assertNotIn(".dashboard-horizontal-scroll", css)
 
 
 
@@ -1150,6 +1150,7 @@ class TestDashboardNativeHorizontalScroll(unittest.TestCase):
         self.assertIn("tablesToEnhance.forEach(enhanceTable);", init)
         self.assertNotIn("tablesToSync", init)
         self.assertIn("enhanceAllTables();", init)
+        self.assertNotIn("syncHorizontalScrollbars", init)
 
 
 class TestMobileHeaderIconButtonAccessibility(unittest.TestCase):
