@@ -245,9 +245,6 @@
             resizeFrame = window.requestAnimationFrame(() => {
                 resizeFrame = null;
                 enhanceAllTables();
-                // ResizeObserver is not available in some older browsers; refresh
-                // existing scrollbars explicitly as a fallback after viewport changes.
-                syncHorizontalScrollbars();
             });
         });
     }
