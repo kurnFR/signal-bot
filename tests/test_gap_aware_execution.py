@@ -72,6 +72,34 @@ def test_canonical_simulator_uses_gap_aware_fill(direction, gap_open, expected_r
     assert trades[0]["exit_price"] == pytest.approx(gap_open)
 
 
+def test_canonical_simulator_counts_entry_candle_as_first_holding_bar():
+    frame = pd.DataFrame({
+        "open_time": [0, 1, 2, 3],
+        "open": [100.0, 100.0, 100.0, 100.0],
+        "high": [101.0, 101.0, 101.0, 101.0],
+        "low": [99.0, 99.0, 99.0, 99.0],
+        "close": [100.0, 100.0, 100.0, 100.0],
+        "atr": [1.0] * 4,
+        "signal": [False, True, False, False],
+    })
+    trades = simulate(
+        frame,
+        {
+            "BACKTEST_FEE_PCT": 0.0,
+            "BACKTEST_SLIPPAGE_PCT": 0.0,
+            "BACKTEST_MAX_HOLD_BARS": 1,
+        },
+        lambda row, prev, params: bool(row["signal"]),
+        lambda row, prev, params: False,
+        lambda side, entry, atr, row, params: (entry - 10.0, entry + 10.0),
+    )
+
+    assert len(trades) == 1
+    assert trades[0]["exit_reason"] == "TIMEOUT"
+    assert trades[0]["exit_time"] == 2
+    assert trades[0]["holding_bars"] == 1
+
+
 def test_generator_label_uses_same_gap_aware_stop_fill_as_simulator():
     frame = pd.DataFrame({
         "open_time": [0, 1, 2, 3, 4],
@@ -92,7 +120,7 @@ def test_generator_label_uses_same_gap_aware_stop_fill_as_simulator():
         slippage_rate=0.0,
         stop_atr_multiple=1.0,
         risk_reward_ratio=2.0,
-        max_hold_bars=1,
+        max_hold_bars=2,
     )
     row = labels.loc[labels["open_time"] == 0].iloc[0]
 
