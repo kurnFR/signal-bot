@@ -148,7 +148,7 @@ def test_empty_input_returns_stable_generator_schema():
 
 
 def test_builder_keeps_last_signal_with_a_complete_forward_horizon():
-    result = _build(_frame())
+    result = _build(_frame(), max_hold_bars=1)
 
     assert list(result["open_time"]) == [100, 200, 300, 400, 500]
     assert result.iloc[-1]["exit_time"] == 600
