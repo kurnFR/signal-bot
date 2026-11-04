@@ -195,7 +195,7 @@ def build_generator_dataset(
         short_result = directional["SHORT"]
         best_direction = "LONG" if long_result["net_return"] >= short_result["net_return"] else "SHORT"
         best_result = directional[best_direction]
-        target_name = best_direction if best_result["net_return"] >= min_net_return else "HOLD"
+        target_name = best_direction if best_result["net_return"] > min_net_return else "HOLD"
         label_end_idx = max(long_result["exit_idx"], short_result["exit_idx"])
         signal = {
             "open_time": int(data.at[signal_idx, "open_time"]),
