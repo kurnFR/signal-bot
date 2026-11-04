@@ -29,7 +29,7 @@ def build_generator_dataset(
     min_net_return: float = 0.0,
     stop_atr_multiple: float = 1.5,
     risk_reward_ratio: float = 2.0,
-    max_hold_bars: int = 72,
+    max_hold_bars: int | None = None,
 ) -> pd.DataFrame:
     """Build one labeled opportunity per eligible closed candle.
 
@@ -61,6 +61,10 @@ def build_generator_dataset(
     for name, value in (("stop_atr_multiple", stop_atr_multiple), ("risk_reward_ratio", risk_reward_ratio)):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be finite and positive")
+    if max_hold_bars is None:
+        # Backward-compatible direct builder calls use their horizon as the
+        # timeout; production experiments always pass the strategy max hold.
+        max_hold_bars = horizon_bars
     if isinstance(max_hold_bars, bool) or not isinstance(max_hold_bars, int) or max_hold_bars < 1:
         raise ValueError("max_hold_bars must be a positive integer")
     if fee_rate < 0 or slippage_rate < 0 or min_net_return < 0:
