@@ -1144,7 +1144,7 @@ class TestDashboardNativeHorizontalScroll(unittest.TestCase):
         self.assertNotIn("syncHorizontalScrollbars", enhancements)
         self.assertNotIn("scheduleHorizontalScrollbarSync", enhancements)
         init_start = enhancements.index("    function init() {")
-        init_end = enhancements.index("\\n    if (document.readyState === \\"loading\\")", init_start)
+        init_end = enhancements.index("    if (document.readyState", init_start)
         init = enhancements[init_start:init_end]
         self.assertIn("observer.observe(document.body, { childList: true, characterData: true, subtree: true });", init)
         self.assertIn("tablesToEnhance.forEach(enhanceTable);", init)
