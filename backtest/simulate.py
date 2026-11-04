@@ -144,7 +144,7 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
             if exit_price is not None:
                 exit_idx = j
                 break
-            if j - entry_idx >= max_hold:
+            if j - entry_idx + 1 >= max_hold:
                 exit_price, exit_reason, exit_idx = float(bar["close"]), "TIMEOUT", j
                 break
             j += 1
@@ -179,7 +179,7 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
             "net_pnl": float(accounting["net_pnl"]),
             "net_return_pct": float(accounting["return_pct_on_entry_notional"]),
             "r_multiple": float(accounting["r_multiple"]) if accounting["r_multiple"] is not None else None,
-            "holding_bars": exit_idx - entry_idx,
+            "holding_bars": exit_idx - entry_idx + 1,
         }
         if ml_probability is not None:
             trade["ml_probability"] = ml_probability
