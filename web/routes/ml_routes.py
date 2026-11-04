@@ -369,8 +369,6 @@ def trigger_generator_experiment(req: RunGeneratorExperimentRequest):
             )
 
         label_config = {
-            "horizon_bars": req.horizon_bars,
-            "barrier_atr_multiple": req.barrier_atr_multiple,
             "fee_rate": BACKTEST_FEE_PCT,
             "slippage_rate": BACKTEST_SLIPPAGE_PCT,
             "min_net_return": req.min_net_return,
