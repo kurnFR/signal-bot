@@ -1,7 +1,7 @@
 """Generic trade simulation engine shared by all strategies."""
 import pandas as pd
 
-from backtest.accounting import calculate_trade_accounting
+from backtest.accounting import calculate_trade_accounting, resolve_stop_target_exit
 
 
 def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, stop_target) -> list:
@@ -100,10 +100,20 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
         while j <= last_allowed_idx:
             bar = df.iloc[j]
             if use_trailing and initial_risk_price > 0:
-                if direction == "LONG" and bar["low"] <= current_stop:
-                    exit_price, exit_reason = current_stop, "TRAIL" if trailing_active else "SL"
-                elif direction == "SHORT" and bar["high"] >= current_stop:
-                    exit_price, exit_reason = current_stop, "TRAIL" if trailing_active else "SL"
+                if direction == "LONG":
+                    if float(bar["open"]) <= current_stop:
+                        exit_price = float(bar["open"])
+                    elif bar["low"] <= current_stop:
+                        exit_price = current_stop
+                    if exit_price is not None:
+                        exit_reason = "TRAIL" if trailing_active else "SL"
+                elif direction == "SHORT":
+                    if float(bar["open"]) >= current_stop:
+                        exit_price = float(bar["open"])
+                    elif bar["high"] >= current_stop:
+                        exit_price = current_stop
+                    if exit_price is not None:
+                        exit_reason = "TRAIL" if trailing_active else "SL"
                 if exit_price is None:
                     if direction == "LONG":
                         favorable_extreme = max(favorable_extreme, bar["high"])
@@ -120,16 +130,16 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
                         if trailing_active:
                             current_stop = min(current_stop, favorable_extreme + trail_distance_atr_mult * atr_at_signal)
             else:
-                if direction == "LONG":
-                    if bar["low"] <= stop_loss:
-                        exit_price, exit_reason = stop_loss, "SL"
-                    elif bar["high"] >= take_profit:
-                        exit_price, exit_reason = take_profit, "TP"
-                else:
-                    if bar["high"] >= stop_loss:
-                        exit_price, exit_reason = stop_loss, "SL"
-                    elif bar["low"] <= take_profit:
-                        exit_price, exit_reason = take_profit, "TP"
+                resolved_exit = resolve_stop_target_exit(
+                    direction,
+                    float(bar["open"]),
+                    float(bar["high"]),
+                    float(bar["low"]),
+                    float(stop_loss),
+                    float(take_profit),
+                )
+                if resolved_exit is not None:
+                    exit_price, exit_reason = resolved_exit
 
             if exit_price is not None:
                 exit_idx = j
