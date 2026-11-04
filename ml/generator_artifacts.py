@@ -18,7 +18,7 @@ from ml.models import supported_models
 
 GENERATOR_TASK_TYPE = "signal_generator_v1"
 GENERATOR_LABEL_PROTOCOL = "execution_aligned_gap_aware_stop_target_timeout_v3"
-GENERATOR_EVALUATION_PROTOCOL = "purged_generator_max_execution_end_v2"
+GENERATOR_EVALUATION_PROTOCOL = "purged_generator_max_execution_end_gap_aware_v3"
 GENERATOR_FEATURE_SCHEMA = "shared_features_v1"
 GENERATOR_CLASS_MAPPING = {"SHORT": 0, "HOLD": 1, "LONG": 2}
 _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
