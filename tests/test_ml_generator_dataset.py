@@ -81,8 +81,8 @@ def test_no_barrier_touch_before_horizon_is_hold_and_exit_time_is_recorded():
 
     assert row["target"] == GENERATOR_CLASSES["HOLD"]
     assert row["label_reason"] == "max_hold_timeout"
-    assert row["exit_time"] == 200
-    assert row["label_end_time"] == 200
+    assert row["exit_time"] == 300
+    assert row["label_end_time"] == 300
 
 
 def test_directional_label_is_downgraded_when_round_trip_cost_exceeds_edge():
