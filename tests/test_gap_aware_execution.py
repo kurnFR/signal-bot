@@ -29,6 +29,13 @@ def test_intrabar_both_levels_touched_uses_stop_first():
     ) == (95.0, "SL")
 
 
+def test_non_positive_atr_barrier_is_treated_as_unreachable():
+    # Extreme ATR can place an ATR-derived stop/target below zero. Market
+    # OHLC prices remain positive, so that barrier must not crash simulation.
+    assert resolve_stop_target_exit("LONG", 1.0, 1.5, 0.5, -0.5, 2.0) is None
+    assert resolve_stop_target_exit("SHORT", 1.0, 1.5, 0.5, 2.0, -0.5) is None
+
+
 @pytest.mark.parametrize(
     ("direction", "gap_open", "expected_reason"),
     [("LONG", 94.0, "SL"), ("LONG", 112.0, "TP"),
