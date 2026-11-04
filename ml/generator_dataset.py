@@ -211,7 +211,11 @@ def build_generator_dataset(
             "forward_return": float(best_result["gross_return"]),
             "long_net_return": float(long_result["net_return"]),
             "short_net_return": float(short_result["net_return"]),
-            "label_reason": best_result["reason"] if target_name != "HOLD" else "directional_returns_below_hurdle",
+            "label_reason": (
+                best_result["reason"]
+                if target_name != "HOLD" or best_result["reason"] == "max_hold_timeout"
+                else "directional_returns_below_hurdle"
+            ),
         }
         for column in features:
             value = data.at[signal_idx, column]
