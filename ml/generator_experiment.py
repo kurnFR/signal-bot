@@ -144,11 +144,11 @@ def _evaluate_partition(
     if len(signal_positions) != 1:
         raise ValueError("canonical evaluation frame is missing the final partition signal candle")
     max_hold_bars = int((strategy_params or {}).get("BACKTEST_MAX_HOLD_BARS", max(1, horizon_bars - 1)))
-    # Entry occurs one candle after the final signal; the simulator's timeout
-    # check allows the entry candle plus max_hold_bars additional candles.
-    end_idx = int(signal_positions[0]) + max_hold_bars + 1
+    # Entry occurs one candle after the final signal, and that entry candle
+    # counts as holding bar one in both paper execution and the simulator.
+    end_idx = int(signal_positions[0]) + max_hold_bars
     if end_idx >= len(ordered_frame):
-        raise ValueError("canonical evaluation frame does not contain the fixed label horizon")
+        raise ValueError("canonical evaluation frame does not contain the configured max-hold window")
     simulation_end = int(ordered_frame.iloc[end_idx]["open_time"])
     if int(partition["exit_time"].max()) > simulation_end:
         raise ValueError("partition label exits exceed the fixed evaluation horizon")
