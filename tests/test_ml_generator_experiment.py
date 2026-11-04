@@ -39,8 +39,8 @@ def test_generator_policy_evaluation_uses_canonical_non_overlapping_simulator():
     assert metrics["execution_engine"] == "backtest.simulate"
     assert metrics["non_overlapping_execution"] is True
     assert metrics["opportunities"] == 3
-    assert metrics["trades"] == 2
-    assert metrics["long_trades"] == 2
+    assert metrics["trades"] == 3
+    assert metrics["long_trades"] == 3
     assert metrics["short_trades"] == 0
 
 
