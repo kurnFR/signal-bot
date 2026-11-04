@@ -16,7 +16,7 @@ from backtest.accounting import calculate_trade_accounting, resolve_stop_target_
 
 GENERATOR_CLASSES = {"SHORT": 0, "HOLD": 1, "LONG": 2}
 GENERATOR_CLASS_NAMES = {value: key for key, value in GENERATOR_CLASSES.items()}
-GENERATOR_LABEL_PROTOCOL = "execution_aligned_stop_target_timeout_v2"
+GENERATOR_LABEL_PROTOCOL = "execution_aligned_gap_aware_stop_target_timeout_v3"
 
 
 def build_generator_dataset(
