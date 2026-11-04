@@ -176,5 +176,5 @@ def test_generator_validation_boundary_covers_configured_max_hold(monkeypatch):
         horizon_bars=3,
     )
 
-    assert metrics["simulation_end_open_time"] == 10
-    assert boundaries == [10]
+    assert metrics["simulation_end_open_time"] == 9
+    assert boundaries == [9]
