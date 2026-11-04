@@ -27,7 +27,9 @@ def build_generator_dataset(
     fee_rate: float = 0.001,
     slippage_rate: float = 0.0005,
     min_net_return: float = 0.0,
-    stop_atr_multiple: float = 1.5,\n    risk_reward_ratio: float = 2.0,\n    max_hold_bars: int = 72,
+    stop_atr_multiple: float = 1.5,
+    risk_reward_ratio: float = 2.0,
+    max_hold_bars: int = 72,
 ) -> pd.DataFrame:
     """Build one labeled opportunity per eligible closed candle.
 
