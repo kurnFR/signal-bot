@@ -159,7 +159,7 @@ def test_open_future_candles_are_not_used_to_resolve_labels():
     frame["is_closed"] = 1
     frame.loc[2, "is_closed"] = 0
 
-    result = _build(frame)
+    result = _build(frame, max_hold_bars=2)
 
     assert 100 not in set(result["open_time"])
     assert 200 not in set(result["open_time"])
