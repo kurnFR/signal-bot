@@ -27,7 +27,7 @@ from backtest.strategies import (
 )
 from backtest.strategies.trend_alignment import HTF_TIMEFRAME
 from backtest.params import BASE_PARAMS
-from backtest.accounting import calculate_position_size, calculate_trade_accounting
+from backtest.accounting import calculate_position_size, calculate_trade_accounting, resolve_stop_target_exit
 from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT, PAIRS_BASE_SYMBOL
 from paper.orders import create_pending_order, fill_pending_order, list_orders, transition_order
 
@@ -1029,24 +1029,40 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
 
             exit_reason = None
             exit_price = None
-            if direction == "LONG":
-                if float(latest_bar["low"]) <= current_stop:
-                    exit_reason, exit_price = ("TRAIL" if trailing_active else "SL"), current_stop
-                elif not trailing_active and float(latest_bar["high"]) >= take_profit:
-                    exit_reason, exit_price = "TP", take_profit
-                elif holding_bars >= int(pos["max_hold_bars"]):
-                    exit_reason, exit_price = "TIMEOUT", current_close
-                elif unrealized_r >= trail_act_r and atr > 0:
+            if trailing_active:
+                # A trailing stop has no fixed take-profit. A gap through the
+                # active stop fills at the candle open; otherwise an intrabar
+                # touch fills at the stop level.
+                if direction == "LONG":
+                    if float(latest_bar["open"]) <= current_stop:
+                        exit_reason, exit_price = "TRAIL", float(latest_bar["open"])
+                    elif float(latest_bar["low"]) <= current_stop:
+                        exit_reason, exit_price = "TRAIL", current_stop
+                else:
+                    if float(latest_bar["open"]) >= current_stop:
+                        exit_reason, exit_price = "TRAIL", float(latest_bar["open"])
+                    elif float(latest_bar["high"]) >= current_stop:
+                        exit_reason, exit_price = "TRAIL", current_stop
+            else:
+                resolved_exit = resolve_stop_target_exit(
+                    direction,
+                    float(latest_bar["open"]),
+                    float(latest_bar["high"]),
+                    float(latest_bar["low"]),
+                    current_stop,
+                    take_profit,
+                )
+                if resolved_exit is not None:
+                    exit_price, exit_code = resolved_exit
+                    exit_reason = "SL" if exit_code == "SL" else "TP"
+
+            if exit_reason is None and holding_bars >= int(pos["max_hold_bars"]):
+                exit_reason, exit_price = "TIMEOUT", current_close
+            elif exit_reason is None and unrealized_r >= trail_act_r and atr > 0:
+                if direction == "LONG":
                     trailing_active = True
                     current_stop = max(current_stop, current_close - trail_dist_mult * atr)
-            else:
-                if float(latest_bar["high"]) >= current_stop:
-                    exit_reason, exit_price = ("TRAIL" if trailing_active else "SL"), current_stop
-                elif not trailing_active and float(latest_bar["low"]) <= take_profit:
-                    exit_reason, exit_price = "TP", take_profit
-                elif holding_bars >= int(pos["max_hold_bars"]):
-                    exit_reason, exit_price = "TIMEOUT", current_close
-                elif unrealized_r >= trail_act_r and atr > 0:
+                else:
                     trailing_active = True
                     current_stop = min(current_stop, current_close + trail_dist_mult * atr)
 
