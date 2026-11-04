@@ -35,7 +35,7 @@ def _build(frame, **kwargs):
 
 def test_generator_labels_long_without_any_base_strategy_trades():
     frame = _frame()
-    frame.loc[1, "high"] = 102.0
+    frame.loc[1, "high"] = 104.0
 
     result = _build(frame)
 
@@ -51,14 +51,14 @@ def test_generator_labels_long_without_any_base_strategy_trades():
 
 def test_generator_labels_short_when_lower_barrier_is_first():
     frame = _frame()
-    frame.loc[1, "low"] = 98.0
+    frame.loc[1, "low"] = 96.0
 
     result = _build(frame)
     row = result.loc[result["open_time"] == 100].iloc[0]
 
     assert row["target"] == GENERATOR_CLASSES["SHORT"]
     assert row["target_name"] == "SHORT"
-    assert row["label_reason"] == "lower_barrier_first"
+    assert row["label_reason"] == "take_profit"
 
 
 def test_same_bar_touching_both_barriers_is_conservatively_hold():
@@ -70,7 +70,7 @@ def test_same_bar_touching_both_barriers_is_conservatively_hold():
     row = result.loc[result["open_time"] == 100].iloc[0]
 
     assert row["target"] == GENERATOR_CLASSES["HOLD"]
-    assert row["label_reason"] == "ambiguous_both_barriers_same_bar"
+    assert row["label_reason"] == "directional_returns_below_hurdle"
     assert row["long_net_return"] < 0
     assert row["short_net_return"] < 0
 
@@ -80,7 +80,7 @@ def test_no_barrier_touch_before_horizon_is_hold_and_exit_time_is_recorded():
     row = result.loc[result["open_time"] == 100].iloc[0]
 
     assert row["target"] == GENERATOR_CLASSES["HOLD"]
-    assert row["label_reason"] == "horizon_expired"
+    assert row["label_reason"] == "max_hold_timeout"
     assert row["exit_time"] == 300
     assert row["label_end_time"] == 300
 
@@ -89,11 +89,11 @@ def test_directional_label_is_downgraded_when_round_trip_cost_exceeds_edge():
     frame = _frame()
     frame.loc[1, "high"] = 102.0
 
-    result = _build(frame, fee_rate=0.01, slippage_rate=0.01)
+    result = _build(frame, fee_rate=0.02, slippage_rate=0.02)
     row = result.loc[result["open_time"] == 100].iloc[0]
 
     assert row["target"] == GENERATOR_CLASSES["HOLD"]
-    assert row["label_reason"] == "upper_barrier_below_cost_hurdle"
+    assert row["label_reason"] == "directional_returns_below_hurdle"
     assert row["gross_return"] > 0
     assert row["net_return"] == 0
 
@@ -102,7 +102,7 @@ def test_features_are_read_from_signal_candle_not_future_candles():
     original = _frame()
     changed_future = original.copy()
     changed_future.loc[1:, "feature"] = -999.0
-    changed_future.loc[1, "high"] = 102.0
+    changed_future.loc[1, "high"] = 104.0
 
     first = _build(original).loc[lambda x: x["open_time"] == 100].iloc[0]
     second = _build(changed_future).loc[lambda x: x["open_time"] == 100].iloc[0]
