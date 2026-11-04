@@ -142,3 +142,39 @@ def test_generator_policy_failure_reports_validation_search_diagnostics():
     assert "best_validation_candidate=" in message
     assert "Untouched test data was not used" in message
     assert "0.010000 net return / 4 trades" in message
+
+
+
+def test_generator_validation_boundary_covers_configured_max_hold(monkeypatch):
+    from ml import generator_experiment
+
+    frame = pd.DataFrame({
+        "open_time": list(range(11)),
+        "open": [100.0] * 11,
+        "high": [101.0] * 11,
+        "low": [99.0] * 11,
+        "close": [100.0] * 11,
+        "atr": [1.0] * 11,
+        "feature": [0.0] * 11,
+    })
+    probabilities = np.asarray([[0.05, 0.05, 0.90]])
+    boundaries = []
+
+    def capture_simulation_boundary(simulation_frame, params, *args):
+        boundaries.append(params["_simulation_end_open_time"])
+        return []
+
+    monkeypatch.setattr(generator_experiment, "simulate", capture_simulation_boundary)
+    metrics = _evaluate_partition(
+        frame,
+        pd.DataFrame({"open_time": [6], "exit_time": [9]}),
+        probabilities,
+        0.60,
+        0.10,
+        evaluation_mode="canonical_simulator_validation",
+        strategy_params={"BACKTEST_MAX_HOLD_BARS": 3},
+        horizon_bars=3,
+    )
+
+    assert metrics["simulation_end_open_time"] == 10
+    assert boundaries == [10]
