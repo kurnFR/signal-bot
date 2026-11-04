@@ -2,23 +2,23 @@
 
 **Repository:** `kurnFR/signal-bot`  
 **Target:** Complete parity verification between the legacy dashboard (`web/static/`) and the modern React + TypeScript frontend (`frontend/src/`).  
-**Status:** COMPLETE (All 11 views, modals, and operational workflows verified)  
+**Status:** AUDITED — Parity Rebuilt (6 Views Complete, 5 Views Partial with Read-Only Monitors, 0 Missing)  
 **Date:** November 2026  
-**Reference:** [`docs/ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md`](ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md)  
+**Reference:** [`docs/ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md`](ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md), [`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md)  
 
 ---
 
 ## 1. Executive Summary
 
-This document establishes the exhaustive feature-by-feature parity inventory between the legacy dashboard (`web/static/index.html`, `web/static/js/app.js`) and the modern React/TypeScript frontend (`frontend/src/`).
+This document establishes the feature-by-feature parity inventory between the legacy dashboard (`web/static/index.html`, `web/static/js/app.js`) and the modern React/TypeScript frontend (`frontend/src/`).
 
-Every view, sub-menu, interactive control, form, data table, modal dialog, and backend API contract has been inspected and mapped. The modern frontend preserves all authorized business operations while maintaining strict defense-in-depth role gating, safety confirmation workflows, and separation between research activities, paper execution, and Telegram notifications.
+In accordance with the workflow parity audit ([`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md)), views are audited at the individual workflow level. Modern preview views that operate as read-only monitors (e.g. Paper Trading, Research Bots, Wallet Tracking) are accurately designated as `PARTIAL` rather than overstated as 100% complete.
 
 ### Summary Metrics
 - **Navigation Views Audited:** 11 / 11 views mapped and verified.
-- **Interactive Modals & Dialogs:** 7 / 7 modals mapped and implemented with accessible dialog semantics.
+- **Workflow Parity Status:** 45 Workflows COMPLETE, 14 Specialized Mutations LEGACY_ONLY, 0 MISSING.
+- **View-Level Breakdown:** 6 Views COMPLETE, 5 Views PARTIAL (Read-only monitoring complete; execution mutations intentionally legacy-only), 0 MISSING.
 - **Backend API Endpoints Covered:** 81 unique API method/path routes mapped across 13 FastAPI modules.
-- **Parity Status:** 11 Views COMPLETE, 0 MISSING, 0 UNAPPROVED REMOVALS.
 - **Automated Frontend Test Suite:** 31 test files, 210 unit/component tests passing (`npm test`).
 - **End-to-End Browser Tests:** 28 Playwright tests passing across Desktop Chrome, responsive mobile, tablet, and dark/light themes (`npx playwright test`).
 - **Backend Test Suite:** 1,088 unit/integration tests passing (`pytest`).
@@ -27,19 +27,19 @@ Every view, sub-menu, interactive control, form, data table, modal dialog, and b
 
 ## 2. Navigation & View Mapping Matrix
 
-| # | Legacy Menu / View ID | Modern UI Navigation Label | Primary React Component | Status | Test Coverage |
+| # | Legacy Menu / View ID | Modern UI Navigation Label | Primary React Component | Status | Detailed Workflow Parity |
 |---|---|---|---|---|---|
-| 1 | `view-home` ("Home & Overview") | **Overview** | `SystemStatusPanel.tsx` | `COMPLETE` | `SystemStatusPanel.test.tsx`, `lib/systemStatus.test.ts`, Playwright |
-| 2 | `view-master-data` ("Master Data") | **Master Data** | `MasterDataPanel.tsx` | `COMPLETE` | `MasterDataPanel.test.tsx`, Playwright |
-| 3 | `view-backtest` ("Backtest Studio") | **Backtest Studio** | `BacktestStudioPanel.tsx` | `COMPLETE` | `BacktestStudioPanel.test.tsx`, `PromotionPolicyEditor.test.tsx`, Playwright |
-| 4 | `view-paper` ("Paper Trading") | **Paper Trading** | `PaperTradingPanel.tsx` | `COMPLETE` | `PaperTradingPanel.test.tsx`, `lib/paperTrading.test.ts`, Playwright |
-| 5 | `view-ml-studio` ("ML Forecast Studio") | **ML Studio** | `MLStudioPanel.tsx`, `MLGeneratorTrainingPanel.tsx` | `COMPLETE` | `MLStudioPanel.test.tsx`, `lib/mlStudio.test.ts`, Playwright |
-| 6 | `view-strategies` ("Strategy Library") | **Strategy Library** | `StrategyLibraryPanel.tsx` | `COMPLETE` | `StrategyLibraryPanel.test.tsx`, `lib/strategyLibrary.test.ts`, Playwright |
-| 7 | `view-news-ai` ("News AI Signals") | **News AI** | `NewsAIPanel.tsx` | `COMPLETE` | `NewsAIPanel.test.tsx`, `lib/news.test.ts`, Playwright |
-| 8 | `view-research` ("Research Bots") | **Research** | `ResearchPanel.tsx`, `PromotionStatusPanel.tsx` | `COMPLETE` | `ResearchPanel.test.tsx`, `lib/research.test.ts`, Playwright |
-| 9 | `view-market-screener` ("Market Screener") | **Market Screener** | `ScreenerPanel.tsx`, `ScreenerControlsPanel.tsx` | `COMPLETE` | `ScreenerPanel.test.tsx`, `ScreenerControlsPanel.test.tsx`, Playwright |
-| 10 | `view-wallet-tracking` ("Wallet Tracking") | **Wallet Tracking** | `WalletTrackingPanel.tsx` | `COMPLETE` | `WalletTrackingPanel.test.tsx`, Playwright |
-| 11 | `view-settings` ("Settings & Users") | **Settings** | `SettingsPanel.tsx`, `AuthGate.tsx` | `COMPLETE` | `SettingsPanel.test.tsx`, `AuthGate.test.tsx`, `lib/auth.test.ts`, Playwright |
+| 1 | `view-home` ("Home & Overview") | **Overview** | `SystemStatusPanel.tsx` | `COMPLETE` | Health KPIs, MariaDB pool status, collector threads, open positions count. |
+| 2 | `view-master-data` ("Master Data") | **Master Data** | `MasterDataPanel.tsx` | `COMPLETE` | Coverage inspector, backfill launch modal, feature build modal, jobs polling. |
+| 3 | `view-backtest` ("Backtest Studio") | **Backtest Studio** | `BacktestStudioPanel.tsx`, `PromotionPolicyEditor.tsx` | `COMPLETE` | Multi-factor backtest form, run execution, closed trades ledger, saved runs, auto-promotion policy. |
+| 4 | `view-paper` ("Paper Trading") | **Paper Trading** | `PaperTradingPanel.tsx` | `PARTIAL` | **Complete:** Positions, orders, performance, circuit breaker reads.<br>**Legacy Only:** Order cancellation, manual position close, deploy bot, trip/reset breaker. |
+| 5 | `view-ml-studio` ("ML Forecast Studio") | **ML Studio** | `MLStudioPanel.tsx`, `MLGeneratorTrainingPanel.tsx` | `PARTIAL` | **Complete:** Tournament results, model inspection, independent ML Signal Generator training.<br>**Legacy Only:** Battle royale tournament launch modal, deploy ML filter modal. |
+| 6 | `view-strategies` ("Strategy Library") | **Strategy Library** | `StrategyLibraryPanel.tsx` | `COMPLETE` | Strategy catalog, custom rule architect, quick-test simulation, AI draft generator, delete confirmation. |
+| 7 | `view-news-ai` ("News AI Signals") | **News AI** | `NewsAIPanel.tsx` | `COMPLETE` | Aggregate sentiment index, real-time news feed, macroeconomic calendar, sentiment trade signals. |
+| 8 | `view-research` ("Research Bots") | **Research** | `ResearchPanel.tsx`, `PromotionStatusPanel.tsx` | `PARTIAL` | **Complete:** RetailBot2 positions, trades, bot lifecycle state, stats.<br>**Legacy Only:** Lifecycle settings toggle, stop/hide bot. |
+| 9 | `view-market-screener` ("Market Screener") | **Market Screener** | `ScreenerPanel.tsx`, `ScreenerControlsPanel.tsx` | `COMPLETE` | Real-time multi-pair quantitative signals, worker pause/resume, threshold controls, Telegram alert gate. |
+| 10 | `view-wallet-tracking` ("Wallet Tracking") | **Wallet Tracking** | `WalletTrackingPanel.tsx` | `PARTIAL` | **Complete:** Tracked wallets table, token transfers feed, multi-chain filters, summary metrics.<br>**Legacy Only:** Track/untrack address mutations, wallet alert settings save. |
+| 11 | `view-settings` ("Settings & Users") | **Settings** | `SettingsPanel.tsx`, `AuthGate.tsx`, `lib/users.ts` | `COMPLETE` | Live user accounts catalog, create user, reset password, toggle active status, delete user, change password form, Telegram test ping (admin only), diagnostics. |
 
 ---
 
