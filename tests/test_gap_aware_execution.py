@@ -69,8 +69,10 @@ def test_generator_label_uses_same_gap_aware_stop_fill_as_simulator():
     frame = pd.DataFrame({
         "open_time": [0, 1, 2, 3, 4],
         "open": [100.0, 100.0, 94.0, 94.0, 94.0],
-        "high": [101.0, 101.0, 97.0, 97.0, 97.0],
-        "low": [99.0, 99.0, 93.0, 93.0, 93.0],
+        # Keep the entry candle between the stop and target; the following
+        # candle then gaps through the LONG stop and SHORT target.
+        "high": [101.0, 100.5, 97.0, 97.0, 97.0],
+        "low": [99.0, 99.5, 93.0, 93.0, 93.0],
         "close": [100.0, 100.0, 94.0, 94.0, 94.0],
         "atr": [1.0] * 5,
         "feature": [0.0] * 5,
