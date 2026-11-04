@@ -26,7 +26,7 @@ def build_generator_dataset(
     barrier_atr_multiple: float = 1.5,
     fee_rate: float = 0.001,
     slippage_rate: float = 0.0005,
-    min_net_return: float = 0.0,
+    min_net_return: float = 0.0,\n    stop_atr_multiple: float = 1.5,\n    risk_reward_ratio: float = 2.0,\n    max_hold_bars: int = 72,
 ) -> pd.DataFrame:
     """Build one labeled opportunity per eligible closed candle.
 
@@ -95,10 +95,11 @@ def build_generator_dataset(
     else:
         closed = np.ones(len(data), dtype=bool)
 
-    round_trip_cost = 2.0 * (float(fee_rate) + float(slippage_rate))
+    from backtest.accounting import calculate_trade_accounting
+
     rows = []
-    for signal_idx in range(0, len(data) - horizon_bars):
-        if not closed[signal_idx] or not closed[signal_idx + 1:signal_idx + horizon_bars + 1].all():
+    for signal_idx in range(0, len(data) - max_hold_bars - 1):
+        if not closed[signal_idx] or not closed[signal_idx + 1:signal_idx + max_hold_bars + 2].all():
             continue
         atr = float(data.at[signal_idx, "atr"])
         if not np.isfinite(atr) or atr <= 0:
@@ -109,76 +110,97 @@ def build_generator_dataset(
         if not np.isfinite(entry_price) or entry_price <= 0:
             continue
 
-        upper = entry_price + atr * float(barrier_atr_multiple)
-        lower = entry_price - atr * float(barrier_atr_multiple)
-        if lower <= 0:
+        directional = {}
+        for direction in ("LONG", "SHORT"):
+            stop_distance = atr * float(stop_atr_multiple)
+            if direction == "LONG":
+                stop_price = entry_price - stop_distance
+                target_price = entry_price + stop_distance * float(risk_reward_ratio)
+            else:
+                stop_price = entry_price + stop_distance
+                target_price = entry_price - stop_distance * float(risk_reward_ratio)
+            if stop_price <= 0 or target_price <= 0:
+                directional[direction] = None
+                continue
+
+            exit_price = None
+            exit_idx = entry_idx
+            reason = "max_hold_timeout"
+            final_idx = min(entry_idx + max_hold_bars, len(data) - 1)
+            for future_idx in range(entry_idx, final_idx + 1):
+                bar = data.iloc[future_idx]
+                # Match backtest.simulate: stop is checked before target on
+                # a candle that touches both levels.
+                if direction == "LONG":
+                    if float(bar["low"]) <= stop_price:
+                        exit_price, reason = stop_price, "stop_loss"
+                    elif float(bar["high"]) >= target_price:
+                        exit_price, reason = target_price, "take_profit"
+                else:
+                    if float(bar["high"]) >= stop_price:
+                        exit_price, reason = stop_price, "stop_loss"
+                    elif float(bar["low"]) <= target_price:
+                        exit_price, reason = target_price, "take_profit"
+                if exit_price is not None:
+                    exit_idx = future_idx
+                    break
+                if future_idx - entry_idx >= max_hold_bars:
+                    exit_price = float(bar["close"])
+                    exit_idx = future_idx
+                    reason = "max_hold_timeout"
+                    break
+            if exit_price is None:
+                # Insufficient future bars are never silently treated as a
+                # completed max-hold outcome.
+                directional[direction] = None
+                continue
+
+            accounting = calculate_trade_accounting(
+                direction=direction,
+                quantity=1.0,
+                entry_price=entry_price,
+                exit_price=float(exit_price),
+                fee_pct=float(fee_rate),
+                entry_slippage_pct=float(slippage_rate),
+                exit_slippage_pct=float(slippage_rate),
+                stop_price=stop_price,
+            )
+            net_return = float(accounting["return_pct_on_entry_notional"]) / 100.0
+            directional[direction] = {
+                "net_return": net_return,
+                "exit_idx": exit_idx,
+                "exit_price": float(exit_price),
+                "reason": reason,
+                "gross_return": (
+                    (float(exit_price) - entry_price) / entry_price
+                    if direction == "LONG"
+                    else (entry_price - float(exit_price)) / entry_price
+                ),
+            }
+
+        if directional.get("LONG") is None or directional.get("SHORT") is None:
             continue
-
-        target_name = "HOLD"
-        label_exit_price = float(data.at[entry_idx + horizon_bars - 1, "close"])
-        label_end_idx = entry_idx + horizon_bars - 1
-        reason = "horizon_expired"
-        gross_return = 0.0
-        ambiguous = False
-
-        for future_idx in range(entry_idx, entry_idx + horizon_bars):
-            bar = data.iloc[future_idx]
-            hit_upper = float(bar["high"]) >= upper
-            hit_lower = float(bar["low"]) <= lower
-
-            if hit_upper and hit_lower:
-                label_end_idx = future_idx
-                label_exit_price = float(bar["close"])
-                reason = "ambiguous_both_barriers_same_bar"
-                target_name = "HOLD"
-                ambiguous = True
-                gross_return = 0.0
-                break
-
-            if hit_upper:
-                label_end_idx = future_idx
-                label_exit_price = max(upper, float(bar["open"])) if float(bar["open"]) >= upper else upper
-                gross_return = (label_exit_price - entry_price) / entry_price
-                net_return = gross_return - round_trip_cost
-                target_name = "LONG" if net_return >= min_net_return else "HOLD"
-                reason = "upper_barrier_first" if target_name == "LONG" else "upper_barrier_below_cost_hurdle"
-                break
-
-            if hit_lower:
-                label_end_idx = future_idx
-                label_exit_price = min(lower, float(bar["open"])) if float(bar["open"]) <= lower else lower
-                gross_return = (entry_price - label_exit_price) / entry_price
-                net_return = gross_return - round_trip_cost
-                target_name = "SHORT" if net_return >= min_net_return else "HOLD"
-                reason = "lower_barrier_first" if target_name == "SHORT" else "lower_barrier_below_cost_hurdle"
-                break
-
-        forward_return = (float(label_exit_price) - entry_price) / entry_price
-        if ambiguous:
-            # The simulator resolves same-bar SL/TP ambiguity stop-first for
-            # either direction. Keep the directional validation outcomes
-            # conservative instead of using the ambiguous candle close.
-            long_net_return = (lower - entry_price) / entry_price - round_trip_cost
-            short_net_return = (entry_price - upper) / entry_price - round_trip_cost
-        else:
-            long_net_return = forward_return - round_trip_cost
-            short_net_return = -forward_return - round_trip_cost
-        net_return = gross_return - round_trip_cost if target_name != "HOLD" else 0.0
+        long_result = directional["LONG"]
+        short_result = directional["SHORT"]
+        best_direction = "LONG" if long_result["net_return"] >= short_result["net_return"] else "SHORT"
+        best_result = directional[best_direction]
+        target_name = best_direction if best_result["net_return"] >= min_net_return else "HOLD"
+        label_end_idx = max(long_result["exit_idx"], short_result["exit_idx"])
         signal = {
             "open_time": int(data.at[signal_idx, "open_time"]),
             "entry_time": int(data.at[entry_idx, "open_time"]),
             "exit_time": int(data.at[label_end_idx, "open_time"]),
             "label_end_time": int(data.at[label_end_idx, "open_time"]),
             "entry_price": entry_price,
-            "label_exit_price": float(label_exit_price),
+            "label_exit_price": best_result["exit_price"],
             "target": GENERATOR_CLASSES[target_name],
             "target_name": target_name,
-            "gross_return": float(gross_return),
-            "net_return": float(net_return),
-            "forward_return": float(forward_return),
-            "long_net_return": float(long_net_return),
-            "short_net_return": float(short_net_return),
-            "label_reason": reason,
+            "gross_return": float(best_result["gross_return"]),
+            "net_return": float(best_result["net_return"]) if target_name != "HOLD" else 0.0,
+            "forward_return": float(best_result["gross_return"]),
+            "long_net_return": float(long_result["net_return"]),
+            "short_net_return": float(short_result["net_return"]),
+            "label_reason": best_result["reason"] if target_name != "HOLD" else "directional_returns_below_hurdle",
         }
         for column in features:
             value = data.at[signal_idx, column]
