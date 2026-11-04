@@ -302,7 +302,6 @@ def run_generator_experiment(
         "min_net_return": float(labels.get("min_net_return", 0.0)),
         "stop_atr_multiple": float(effective_strategy_params.get("ML_GENERATOR_STOP_ATR_MULT", 1.5)),
         "risk_reward_ratio": float(effective_strategy_params.get("ML_GENERATOR_RISK_REWARD_RATIO", 2.0)),
-        "max_hold_bars": int(effective_strategy_params.get("BACKTEST_MAX_HOLD_BARS", BASE_PARAMS["BACKTEST_MAX_HOLD_BARS"])),
     }
     artifact = GeneratorArtifact(
         model_id=model_id,
