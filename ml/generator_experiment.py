@@ -143,7 +143,7 @@ def _evaluate_partition(
     )
     if len(signal_positions) != 1:
         raise ValueError("canonical evaluation frame is missing the final partition signal candle")
-    max_hold_bars = int((strategy_params or {}).get("BACKTEST_MAX_HOLD_BARS", BASE_PARAMS["BACKTEST_MAX_HOLD_BARS"]))
+    max_hold_bars = int((strategy_params or {}).get("BACKTEST_MAX_HOLD_BARS", max(1, horizon_bars - 1)))
     # Entry occurs one candle after the final signal; the simulator's timeout
     # check allows the entry candle plus max_hold_bars additional candles.
     end_idx = int(signal_positions[0]) + max_hold_bars + 1
