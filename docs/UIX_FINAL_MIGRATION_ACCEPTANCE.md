@@ -19,7 +19,7 @@ Defects identified in review PR #694—specifically the Settings & User Administ
 - **Frontend Unit & Component Suite:** PASS (31 test files, 210 tests passed, 0 failed).
 - **Frontend Production Build:** PASS (`vite build`, 1,609 modules transformed, clean bundle in `frontend/dist/`).
 - **Playwright Browser Tests:** PASS (28 tests passed across Desktop, Tablet, Mobile 375px viewports, and both Dark/Light themes).
-- **Backend Test Suite:** PASS (1,088 passed, 18 skipped, 0 failed).
+- **Backend Test Suite:** PASS (1,094 passed, 18 skipped, 0 failed).
 - **Parity Deliverable:** [`docs/UIX_LEGACY_TO_MODERN_PARITY.md`](UIX_LEGACY_TO_MODERN_PARITY.md) (Complete 11-view inventory).
 - **Cutover Plan Deliverable:** [`docs/UIX_CUTOVER_PLAN.md`](UIX_CUTOVER_PLAN.md) (Controlled, reversible cutover procedure).
 
@@ -49,9 +49,9 @@ Backend authorization remains the authoritative security boundary. The React fro
 
 | Role | Read Access | Authorized Mutation Capabilities | Blocked Actions (UI Hidden & Server-Enforced) |
 |---|---|---|---|
-| **Viewer** | All 11 navigation views (excluding Admin Diagnostics and User Accounts) | Theme preference, own password change, logout | Screener saves, Backfills, Feature builds, Backtests, Strategy creation/deletion, AI generation, Telegram test ping, User management |
-| **Trader** | All 11 navigation views (excluding Admin Diagnostics and User Accounts) | All Viewer actions + Screener controls save, Backfill launch, Feature build, Backtest execution, Strategy creation/quick-test/AI draft/deletion, ML generator training | User creation, User deletion, User password reset, User status toggle, System diagnostics, Telegram test ping (Admin only) |
-| **Admin** | Full system visibility including System Diagnostics, Audit Logs, and User Accounts | All Trader actions + Telegram test ping + User management (create user, reset password, toggle active, delete user) | N/A |
+| **Viewer** | All 11 navigation views (Telegram status returns masked `chatId: null`; User Accounts and Admin Diagnostics denied) | Theme preference, own password change, logout | Screener saves, Backfills, Feature builds, Backtests, Strategy creation/deletion, AI generation, Telegram test ping, User management |
+| **Trader** | All 11 navigation views (Telegram status returns masked `chatId: null`; User Accounts and Admin Diagnostics denied) | All Viewer actions + Screener controls save, Backfill launch, Feature build, Backtest execution, Strategy creation/quick-test/AI draft/deletion, ML generator training | User creation, User deletion, User password reset, User status toggle, System diagnostics, Telegram test ping (Admin only) |
+| **Admin** | Full system visibility including System Diagnostics, Audit Logs, and User Accounts (Telegram status returns `chatId`) | All Trader actions + Telegram test ping + User management (create user, reset password, toggle active, delete user) | N/A |
 | **Unauthenticated** | Redirected to Login form in `AuthGate.tsx` | `POST /api/auth/login` | All protected API reads and mutations blocked |
 | **Expired / Forced Password** | Intercepted by Forced Password Dialog | `POST /api/auth/change-password` | Dashboard frame blocked until password change succeeds |
 
@@ -101,7 +101,7 @@ Running 28 tests using 6 workers
 ### 4.4 Backend Regression Test Suite (`pytest`)
 ```text
 python3 -m pytest -q
-1088 passed, 18 skipped, 6 warnings in 19.45s
+1094 passed, 18 skipped, 6 warnings in 19.04s
 ```
 - Covers all 13 route modules, business logic, paper trading engine, ML generators, wallet tracker, screener, authentication, and database migrations.
 

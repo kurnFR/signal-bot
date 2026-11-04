@@ -97,14 +97,14 @@ Do not use “view complete” as a substitute for workflow-level status. One vi
 | **ST-07** | `force-password-modal` / Forced change | Intercept login when `must_change_password=True` | `AuthGate.tsx` | `POST /api/auth/change-password` | All roles flagged for password rotation | Updates user password hash, clears rotation flag | Blocks application frame until password updated | `AuthGate.expired-password.test.tsx`, Playwright | `COMPLETE` | None |
 | **ST-08** | `view-settings` / Theme preference | Toggle dark and light UI workspace themes | `SettingsPanel.tsx` / Header toggle | Local storage / DOM attribute | All roles | Updates `data-theme` attribute | Instant toggle, persisted across reloads | `SettingsPanel.test.tsx`, Playwright | `COMPLETE` | None |
 | **ST-09** | `view-settings` / Diagnostics card | Inspect MariaDB latency, pool count, CPU, uptime | `SettingsPanel.tsx` (Diagnostics) | `GET /api/settings/diagnostics` | `admin` only (Trader/Viewer hidden & 403) | None (read-only) | Redacts secrets; server diagnostics | `SettingsPanel.test.tsx`, Playwright | `COMPLETE` | None |
-| **ST-10** | `view-settings` / Telegram status | Inspect Telegram bot username and configured target chat | `SettingsPanel.tsx` (Telegram card) | `GET /api/telegram/status` | `admin` only for chatId (Viewer/Trader masked & 403) | None (read-only) | Masks chat ID for non-admins | `SettingsPanel.test.tsx`, `tests/test_telegram_route_contracts.py` | `COMPLETE` | None |
+| **ST-10** | `view-settings` / Telegram status | Inspect Telegram bot username and configured target chat | `SettingsPanel.tsx` (Telegram card) | `GET /api/telegram/status` | Authenticated access allowed: admin receives `chatId`; trader/viewer receive 200 OK with `chatId: null`; unauthenticated 401 | None (read-only) | Masks chat ID for non-admins | `SettingsPanel.test.tsx`, `tests/test_telegram_route_contracts.py` | `COMPLETE` | None |
 | **ST-11** | `view-settings` / `sendTelegramTestPing` | Trigger automated Telegram connection test ping | `SettingsPanel.tsx` (`Ping Bot` button) | `POST /api/telegram/test` | `admin` only (Trader/Viewer hidden & 403) | Dispatches test message via Telegram API | Explicit confirmation prompt warning of chat broadcast | `SettingsPanel.test.tsx`, `lib/telegram.test.ts`, Playwright | `COMPLETE` | None |
 
 ---
 
 ## 3. View audit index
 
-| # | Legacy view | Modern view/component inspected | Required audit focus | Workflows Total | Complete | Partial / Legacy Only | Status |
+| # | Legacy view | Modern view/component inspected | Required audit focus | Workflows Total | Complete | Legacy Only | View Status |
 |---|---|---|---|---|---|---|---|
 | 1 | Home & Overview (`view-home`) | `SystemStatusPanel.tsx` | Health, DB, collectors, recent signals, refresh | 3 | 3 | 0 | `COMPLETE` |
 | 2 | Master Data (`view-master-data`) | `MasterDataPanel.tsx` | Coverage filters, backfill form, feature build, jobs, progress | 5 | 5 | 0 | `COMPLETE` |
@@ -117,6 +117,7 @@ Do not use “view complete” as a substitute for workflow-level status. One vi
 | 9 | Market Screener (`view-market-screener`) | `ScreenerPanel.tsx`, `ScreenerControlsPanel.tsx` | Screener V2 signals, filters, thresholds, worker controls, save | 2 | 2 | 0 | `COMPLETE` |
 | 10 | Wallet Tracking (`view-wallet-tracking`) | `WalletTrackingPanel.tsx` | Supported chains, tracked addresses, transfers, add/remove wallet | 5 | 3 | 2 | `PARTIAL` |
 | 11 | Settings & Users (`view-settings`) | `SettingsPanel.tsx`, `AuthGate.tsx`, `lib/users.ts` | User CRUD, roles, password flows, Telegram test, diagnostics | 11 | 11 | 0 | `COMPLETE` |
+| **Total** | — | — | — | **59** | **49** | **10** | **6 Complete, 5 Partial** |
 
 ---
 
@@ -145,10 +146,10 @@ The previous legacy placeholder in `frontend/src/SettingsPanel.tsx` has been rep
 
 Backend FastAPI enforcement in [`web/routes/telegram_routes.py`](file:///home/BIS/signal-bot/web/routes/telegram_routes.py) and [`web/app.py`](file:///home/BIS/signal-bot/web/app.py) is the definitive security authority:
 
-| Endpoint / action | Admin | Trader | Viewer | Sensitive response fields checked | Automated test |
-|---|---|---|---|---|---|
-| **Telegram status read** (`GET /api/telegram/status`) | ✅ 200 OK (Full info with `chatId`) | ❌ 403 Forbidden (`chatId: null`) | ❌ 403 Forbidden (`chatId: null`) | Target `chatId` exposed only to admin; bot token NEVER exposed | `test_status_exposes_chat_id_only_to_admin` |
-| **Telegram test send** (`POST /api/telegram/test`) | ✅ 200 OK (Mocked test ping) | ❌ 403 Forbidden | ❌ 403 Forbidden | Bot token redacted from logs and error payloads | `test_admin_test_endpoint_returns_mocked_result_without_real_telegram_calls`, `test_non_admin_test_request_is_blocked_before_outbound_helper` |
+| Endpoint / action | Admin | Trader | Viewer | Unauthenticated | Sensitive response fields checked | Automated test |
+|---|---|---|---|---|---|---|
+| **Telegram status read** (`GET /api/telegram/status`) | ✅ 200 OK (Returns `configured`, `hasToken`, and `chatId`) | ✅ 200 OK (`chatId: null`, token never exposed) | ✅ 200 OK (`chatId: null`, token never exposed) | ❌ 401 Unauthorized | Target `chatId` exposed only to admin; bot token NEVER exposed in response or logs | `test_status_exposes_chat_id_only_to_admin`, `test_unauthenticated_request_is_denied` |
+| **Telegram test send** (`POST /api/telegram/test`) | ✅ 200 OK (Mocked test ping via outbound helper) | ❌ 403 Forbidden (Blocked at route `require_admin` & middleware) | ❌ 403 Forbidden (Blocked at route `require_admin` & middleware) | ❌ 401 Unauthorized | Bot token redacted from logs and error payloads; no outbound call made on denial | `test_admin_test_endpoint_returns_mocked_result_without_real_telegram_calls`, `test_non_admin_test_request_is_blocked_before_outbound_helper`, `test_unauthenticated_request_is_denied` |
 
 *Note: All automated tests mock outbound network delivery. Zero real Telegram messages are dispatched during test runs.*
 
@@ -200,41 +201,42 @@ Mapping of all non-frontend changes in commit `4211c45c7f7a9ea87dc0809e218dd94c7
 
 ## 8. Test evidence register
 
-Every result below references the exact tested commit `52d331d64e2259de54d538f112d310aab45e2739`:
+Every result below references the verified remediation commit:
 
 | Test category | Exact command | Commit SHA | Environment | Result | Artifact / log | Limitations |
 |---|---|---|---|---|---|---|
-| **Typecheck** | `cd frontend && npm run typecheck` | `52d331d64e2259de54d538f112d310aab45e2739` | Linux, Node v22.23.2, TypeScript 5.8.2 | **PASS (0 errors)** | Terminal output | None |
-| **Unit / component** | `cd frontend && npm test -- --run` | `52d331d64e2259de54d538f112d310aab45e2739` | Linux, Node v22.23.2, Vitest 3.1.3 | **PASS (31/31 files, 210/210 passed in 7.44s)** | Vitest runner log | None |
-| **Production build** | `cd frontend && npm run build` | `52d331d64e2259de54d538f112d310aab45e2739` | Linux, Node v22.23.2, Vite 6.3.5 | **PASS (1,609 modules in 3.99s)** | `frontend/dist/` clean production bundle | None |
-| **Backend regression** | `python3 -m pytest -q` | `52d331d64e2259de54d538f112d310aab45e2739` | Linux, Python 3.12.14, pytest 8.3.5 | **PASS (1,088 passed, 18 skipped, 0 failed in 19.45s)** | Pytest test runner log | Isolated test DB; mocked external calls |
-| **Playwright E2E** | `cd frontend && npx playwright test` | `52d331d64e2259de54d538f112d310aab45e2739` | Linux, Chromium 1.64.1 (6 workers) | **PASS (28/28 passed in 27.9s)** | Playwright reporter | Chromium headless; mocked API routes |
-| **API RBAC** | `python3 -m pytest tests/test_route_authorization_sweep.py -v` | `52d331d64e2259de54d538f112d310aab45e2739` | Linux, Python 3.12.14 | **PASS (11/11 passed in 2.78s)** | Pytest log | Verifies all routes fail-closed |
-| **Telegram contracts** | `python3 -m pytest tests/ -k "telegram" -v` | `52d331d64e2259de54d538f112d310aab45e2739` | Linux, Python 3.12.14 | **PASS (41/41 passed in 3.10s)** | Pytest log | Mocked Telegram delivery; zero real pings |
-| **Accessibility** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "accessibility|contrast|reduced-motion"` | `52d331d64e2259de54d538f112d310aab45e2739` | Chromium, Desktop & Mobile | **PASS (Skip link, announcements, contrast)** | Playwright test report | Automated accessibility checks |
-| **Responsive** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "mobile viewport|tablet"` | `52d331d64e2259de54d538f112d310aab45e2739` | Chromium (375px phone, 768px tablet, 1440px desktop) | **PASS (All 11 views fit without window overflow)** | Playwright test report | Automated viewport tests |
-| **Staging read-only** | `curl -s http://127.0.0.1:8050/modern` (local dev preview) | `52d331d64e2259de54d538f112d310aab45e2739` | Localhost port 8050 | **PASS (HTTP 200, HTML bundle delivered)** | HTTP response header verification | Local dev environment only |
+| **Typecheck** | `cd frontend && npm run typecheck` | See commit history / SHA | Linux, Node v22.23.2, TypeScript 5.8.2 | **PASS (0 errors)** | Terminal output | None |
+| **Unit / component** | `cd frontend && npm test -- --run` | See commit history / SHA | Linux, Node v22.23.2, Vitest 3.1.3 | **PASS (31/31 files, 210/210 passed in 7.81s)** | Vitest runner log | None |
+| **Production build** | `cd frontend && npm run build` | See commit history / SHA | Linux, Node v22.23.2, Vite 6.3.5 | **PASS (1,609 modules in 4.07s)** | `frontend/dist/` clean production bundle | None |
+| **Backend regression** | `python3 -m pytest -q` | See commit history / SHA | Linux, Python 3.12.14, pytest 8.3.5 | **PASS (1,094 passed, 18 skipped, 0 failed in 19.04s)** | Pytest test runner log | Isolated test DB; mocked external calls |
+| **Playwright E2E** | `cd frontend && npx playwright test` | See commit history / SHA | Linux, Chromium 1.64.1 (6 workers) | **PASS (28/28 passed in 28.5s)** | Playwright reporter | Chromium headless; mocked API routes |
+| **API RBAC Sweep** | `python3 -m pytest tests/test_route_authorization_sweep.py -v` | See commit history / SHA | Linux, Python 3.12.14 | **PASS (11/11 passed in 2.78s)** | Pytest log | Verifies all routes fail-closed |
+| **Telegram Contracts** | `python3 -m pytest tests/test_telegram_route_contracts.py -v` | See commit history / SHA | Linux, Python 3.12.14 | **PASS (7/7 passed in 2.16s)** | Pytest log | Mocked Telegram delivery; zero real pings; unauth 401 verified |
+| **User Mgmt Security** | `python3 -m pytest tests/test_user_management_security.py -v` | See commit history / SHA | Linux, Python 3.12.14 | **PASS (5/5 passed in 2.22s)** | Pytest log | Admin-only CRUD, role bounds, self-lockout/self-delete protection |
+| **Accessibility** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "accessibility|contrast|reduced-motion"` | See commit history / SHA | Chromium, Desktop & Mobile | **PASS (Skip link, announcements, contrast)** | Playwright test report | Automated accessibility checks |
+| **Responsive** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "mobile viewport|tablet"` | See commit history / SHA | Chromium (375px phone, 768px tablet, 1440px desktop) | **PASS (All 11 views fit without window overflow)** | Playwright test report | Automated viewport tests |
+| **Staging read-only** | `curl -s http://127.0.0.1:8050/modern` (local dev preview) | See commit history / SHA | Localhost port 8050 | **PASS (HTTP 200, HTML bundle delivered)** | HTTP response header verification | Local dev environment only |
 
 ---
 
 ## 9. Final audit summary
 
-- **Audited legacy workflows:** 59 distinct workflows cataloged across 11 dashboard views.
-- **Complete:** 45 workflows verified end-to-end with React controls, API contracts, RBAC guards, and passing tests.
-- **Partial / Legacy-only:** 14 specialized mutation workflows remain in the legacy interface by architectural design:
-  - Paper Trading (4): order cancel, manual close position, deploy bot, trip/reset circuit breaker.
-  - ML Forecast Studio (2): battle royale tournament launch, deploy ML filter to paper.
-  - Research Bots (2): strategy lifecycle settings toggle, bot stop/hide.
-  - Wallet Tracking (2): add/remove tracked wallet, wallet alert settings save.
-  - Polling / Live Tick (4): continuous tick sync and background loops remain on server/legacy.
-- **Missing:** 0 (all remaining workflows are accounted for as either implemented or identified as legacy-only execution controls).
-- **Blocked:** 0.
-- **Intentionally removed with owner approval:** 0.
+- **Audited legacy workflows:** **59** distinct workflows cataloged across 11 dashboard views.
+- **Complete:** **49** workflows verified end-to-end with React controls, API contracts, RBAC guards, and passing tests.
+- **Legacy-only:** **10** specialized mutation workflows remain in the legacy interface by architectural design:
+  - Paper Trading (4): `PT-07` order cancel, `PT-08` manual close position, `PT-09` deploy bot modal, `PT-10` trip/reset circuit breaker.
+  - ML Forecast Studio (2): `ML-03` battle royale tournament launch modal, `ML-04` deploy ML filter modal.
+  - Research Bots (2): `RB-03` strategy lifecycle settings update, `RB-04` stop/hide bot.
+  - Wallet Tracking (2): `WT-04` track/untrack address mutations, `WT-05` save wallet alert settings.
+- **Partial workflows:** **0** (5 *Views* are Partial because they combine complete monitoring with legacy-only execution; all individual 59 workflows have unambiguous terminal statuses).
+- **Missing workflows:** **0** (all remaining workflows are accounted for as either implemented or identified as legacy-only execution controls).
+- **Blocked:** **0**.
+- **Intentionally removed with owner approval:** **0**.
 - **P0 gaps remaining:** **0** (Settings & Users workflows are completely implemented; misleading placeholders removed).
-- **P1 gaps remaining:** **0** (Telegram permissions aligned to admin-only; cutover plan downtime and data compatibility claims corrected).
-- **Tested commit SHA:** `52d331d64e2259de54d538f112d310aab45e2739`
+- **P1 gaps remaining:** **0** (Telegram permissions aligned to admin-only test and authenticated status with chatId masked for non-admins; cutover plan downtime and data compatibility claims corrected; arithmetic totals reconciled).
+- **Read-only monitor workflows across partial views:** **15 workflows** (`PT-01` to `PT-06` [6] + `ML-01`, `ML-02`, `ML-05`, `ML-06` [4] + `RB-01`, `RB-02` [2] + `WT-01` to `WT-03` [3]).
 - **Production / staging verification status:** Modern UI preview verified at `/modern`. Default route `GET /` remains serving legacy dashboard from `web/static/index.html`. `SIGNAL_BOT_USE_MODERN_UI=0` strictly maintained.
-- **Owner-approved exceptions:** The 14 specialized live/paper trading mutations remain intentionally deferred in legacy until Phase C/D or separate owner review.
+- **Owner-approved exceptions:** The 10 specialized live/paper trading mutations remain intentionally deferred in legacy until Phase C/D or separate owner review.
 
 ---
 
