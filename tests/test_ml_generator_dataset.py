@@ -200,3 +200,38 @@ def test_shared_ml_features_do_not_change_when_future_ohlcv_is_mutated():
         changed_features.iloc[:cutoff + 1].reset_index(drop=True),
         check_exact=True,
     )
+
+
+
+def test_generator_labels_use_configured_asymmetric_stop_target_and_full_hold_window():
+    frame = pd.DataFrame({
+        "open_time": list(range(7)),
+        "open": [100.0] * 7,
+        "high": [100.5, 100.5, 100.5, 100.5, 102.5, 100.5, 100.5],
+        "low": [99.5, 99.5, 99.5, 99.5, 99.5, 99.5, 99.5],
+        "close": [100.0] * 7,
+        "atr": [1.0] * 7,
+        "feature": [1.0] * 7,
+    })
+
+    result = _build(
+        frame,
+        horizon_bars=2,
+        max_hold_bars=3,
+        stop_atr_multiple=1.0,
+        risk_reward_ratio=2.0,
+    )
+    row = result.loc[result["open_time"] == 0].iloc[0]
+
+    assert row["target_name"] == "LONG"
+    assert row["exit_time"] == 4
+    assert row["long_net_return"] == pytest.approx(0.02)
+    assert row["short_net_return"] == pytest.approx(-0.01)
+    assert row["label_reason"] == "take_profit"
+
+
+def test_generator_dataset_requires_complete_max_hold_future_window():
+    frame = _frame()
+    result = _build(frame, horizon_bars=2, max_hold_bars=4)
+
+    assert result.empty
