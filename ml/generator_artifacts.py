@@ -17,7 +17,7 @@ from ml.artifacts import read_model_manifest_file, resolve_model_artifact_paths,
 from ml.models import supported_models
 
 GENERATOR_TASK_TYPE = "signal_generator_v1"
-GENERATOR_LABEL_PROTOCOL = "execution_aligned_stop_target_timeout_v2"
+GENERATOR_LABEL_PROTOCOL = "execution_aligned_gap_aware_stop_target_timeout_v3"
 GENERATOR_EVALUATION_PROTOCOL = "purged_generator_max_execution_end_v2"
 GENERATOR_FEATURE_SCHEMA = "shared_features_v1"
 GENERATOR_CLASS_MAPPING = {"SHORT": 0, "HOLD": 1, "LONG": 2}
