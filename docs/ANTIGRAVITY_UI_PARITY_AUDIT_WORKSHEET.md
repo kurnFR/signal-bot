@@ -4,7 +4,7 @@
 **Legacy source:** `web/static/` (`index.html`, `js/app.js`, `css/tailwind.css`)  
 **Modern source:** `frontend/src/`  
 **Branch:** `fix/ui-migration-review-remediation`  
-**Commit SHA:** `52d331d64e2259de54d538f112d310aab45e2739`  
+**Commit SHA:** `53bd8713d20e3348a5d23d951737037e916ba67f`  
 **Owner:** Antigravity  
 **Independent acceptance:** ChatGPT / repository owner  
 **Status:** AUDITED — Rebuilt directly from legacy source inspection and modern codebase verification.
@@ -205,17 +205,17 @@ Every result below references the verified remediation commit:
 
 | Test category | Exact command | Commit SHA | Environment | Result | Artifact / log | Limitations |
 |---|---|---|---|---|---|---|
-| **Typecheck** | `cd frontend && npm run typecheck` | See commit history / SHA | Linux, Node v22.23.2, TypeScript 5.8.2 | **PASS (0 errors)** | Terminal output | None |
-| **Unit / component** | `cd frontend && npm test -- --run` | See commit history / SHA | Linux, Node v22.23.2, Vitest 3.1.3 | **PASS (31/31 files, 210/210 passed in 7.81s)** | Vitest runner log | None |
-| **Production build** | `cd frontend && npm run build` | See commit history / SHA | Linux, Node v22.23.2, Vite 6.3.5 | **PASS (1,609 modules in 4.07s)** | `frontend/dist/` clean production bundle | None |
-| **Backend regression** | `python3 -m pytest -q` | See commit history / SHA | Linux, Python 3.12.14, pytest 8.3.5 | **PASS (1,094 passed, 18 skipped, 0 failed in 19.04s)** | Pytest test runner log | Isolated test DB; mocked external calls |
-| **Playwright E2E** | `cd frontend && npx playwright test` | See commit history / SHA | Linux, Chromium 1.64.1 (6 workers) | **PASS (28/28 passed in 28.5s)** | Playwright reporter | Chromium headless; mocked API routes |
-| **API RBAC Sweep** | `python3 -m pytest tests/test_route_authorization_sweep.py -v` | See commit history / SHA | Linux, Python 3.12.14 | **PASS (11/11 passed in 2.78s)** | Pytest log | Verifies all routes fail-closed |
-| **Telegram Contracts** | `python3 -m pytest tests/test_telegram_route_contracts.py -v` | See commit history / SHA | Linux, Python 3.12.14 | **PASS (7/7 passed in 2.16s)** | Pytest log | Mocked Telegram delivery; zero real pings; unauth 401 verified |
-| **User Mgmt Security** | `python3 -m pytest tests/test_user_management_security.py -v` | See commit history / SHA | Linux, Python 3.12.14 | **PASS (5/5 passed in 2.22s)** | Pytest log | Admin-only CRUD, role bounds, self-lockout/self-delete protection |
-| **Accessibility** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "accessibility|contrast|reduced-motion"` | See commit history / SHA | Chromium, Desktop & Mobile | **PASS (Skip link, announcements, contrast)** | Playwright test report | Automated accessibility checks |
-| **Responsive** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "mobile viewport|tablet"` | See commit history / SHA | Chromium (375px phone, 768px tablet, 1440px desktop) | **PASS (All 11 views fit without window overflow)** | Playwright test report | Automated viewport tests |
-| **Staging read-only** | `curl -s http://127.0.0.1:8050/modern` (local dev preview) | See commit history / SHA | Localhost port 8050 | **PASS (HTTP 200, HTML bundle delivered)** | HTTP response header verification | Local dev environment only |
+| **Typecheck** | `cd frontend && npm run typecheck` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Node v22.23.2, TypeScript 5.8.2 | **PASS (0 errors)** | Terminal output | None |
+| **Unit / component** | `cd frontend && npm test -- --run` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Node v22.23.2, Vitest 3.1.3 | **PASS (31/31 files, 210/210 passed in 7.81s)** | Vitest runner log | None |
+| **Production build** | `cd frontend && npm run build` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Node v22.23.2, Vite 6.3.5 | **PASS (1,609 modules in 4.07s)** | `frontend/dist/` clean production bundle | None |
+| **Backend regression** | `python3 -m pytest -q` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Python 3.12.14, pytest 8.3.5 | **PASS (1,094 passed, 18 skipped, 0 failed in 19.04s)** | Pytest test runner log | Isolated test DB; mocked external calls |
+| **Playwright E2E** | `cd frontend && npx playwright test` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Chromium 1.64.1 (6 workers) | **PASS (28/28 passed in 28.5s)** | Playwright reporter | Chromium headless; mocked API routes |
+| **API RBAC Sweep** | `python3 -m pytest tests/test_route_authorization_sweep.py -v` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Python 3.12.14 | **PASS (11/11 passed in 2.78s)** | Pytest log | Verifies all routes fail-closed |
+| **Telegram Contracts** | `python3 -m pytest tests/test_telegram_route_contracts.py -v` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Python 3.12.14 | **PASS (7/7 passed in 2.16s)** | Pytest log | Mocked Telegram delivery; zero real pings; unauth 401 verified |
+| **User Mgmt Security** | `python3 -m pytest tests/test_user_management_security.py -v` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Python 3.12.14 | **PASS (5/5 passed in 2.22s)** | Pytest log | Admin-only CRUD, role bounds, self-lockout/self-delete protection |
+| **Accessibility** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "accessibility|contrast|reduced-motion"` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Chromium, Desktop & Mobile | **PASS (Skip link, announcements, contrast)** | Playwright test report | Automated accessibility checks |
+| **Responsive** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "mobile viewport|tablet"` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Chromium (375px phone, 768px tablet, 1440px desktop) | **PASS (All 11 views fit without window overflow)** | Playwright test report | Automated viewport tests |
+| **Staging read-only** | `curl -s http://127.0.0.1:8050/modern` (local dev preview) | `53bd8713d20e3348a5d23d951737037e916ba67f` | Localhost port 8050 | **PASS (HTTP 200, HTML bundle delivered)** | HTTP response header verification | Local dev environment only |
 
 ---
 

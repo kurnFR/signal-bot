@@ -4,6 +4,7 @@
 **Target:** Complete parity verification between the legacy dashboard (`web/static/`) and the modern React + TypeScript frontend (`frontend/src/`).  
 **Status:** AUDITED — Parity Rebuilt (6 Views Complete, 5 Views Partial with Read-Only Monitors, 0 Missing)  
 **Date:** November 2026  
+**Verified Commit SHA:** `53bd8713d20e3348a5d23d951737037e916ba67f`  
 **Reference:** [`docs/ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md`](ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md), [`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md)  
 
 ---

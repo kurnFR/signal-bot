@@ -2,6 +2,7 @@
 
 **Repository:** `kurnFR/signal-bot`  
 **Remediation Branch:** `fix/ui-migration-review-remediation`  
+**Verified Commit SHA:** `53bd8713d20e3348a5d23d951737037e916ba67f`  
 **Review Target:** Modern UI Migration Acceptance according to [`docs/ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md`](ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md) and PR #694 Review Remediation ([`docs/ANTIGRAVITY_UI_MIGRATION_REVIEW_FINDINGS.md`](ANTIGRAVITY_UI_MIGRATION_REVIEW_FINDINGS.md))  
 **Report Status:** **REMEDIATION IMPLEMENTED — Settings & Users Workflows Closed, Gaps Rectified, Cutover Subject to Owner Authorization**  
 **Production Status:** React/Vite preview is mounted at `/modern` and static files compiled at `frontend/dist/`. FastAPI continues to default `GET /` to `web/static/` unless `SIGNAL_BOT_USE_MODERN_UI=1` is explicitly set. Production cutover remains an explicitly approved, owner-led action requiring web service reload.
