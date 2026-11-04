@@ -130,10 +130,6 @@ def build_generator_dataset(
             else:
                 stop_price = entry_price + stop_distance
                 target_price = entry_price - stop_distance * float(risk_reward_ratio)
-            if stop_price <= 0 or target_price <= 0:
-                directional[direction] = None
-                continue
-
             exit_price = None
             exit_idx = entry_idx
             reason = "max_hold_timeout"
