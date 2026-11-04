@@ -34,6 +34,11 @@ import time
 import signal
 import argparse
 import logging
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -46,7 +51,14 @@ RESTART_BACKOFF_SECONDS = 5
 # name -> command. Order doesn't matter functionally (each is independent),
 # but this is roughly "most people want this" -> "opt-in extras".
 PROCESSES = {
-    "web_server":   [sys.executable, "run_web.py", "--port", os.getenv("WEB_PORT", "8050")],
+    "web_server":   [
+        sys.executable,
+        "run_web.py",
+        "--port",
+        os.getenv("WEB_PORT", "8050"),
+        "--host",
+        os.getenv("SIGNAL_BOT_HOST", "0.0.0.0"),
+    ],
     "collectors":   [sys.executable, "run_collectors.py"],
     "paper_engine": [sys.executable, "run_paper_engine.py"],
     "news_ai":      [sys.executable, "run_news_ai.py"],

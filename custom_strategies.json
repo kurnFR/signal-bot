@@ -22,5 +22,55 @@
     "useTrailingStop": false,
     "trailActivationR": 1.0,
     "trailDistanceAtrMult": 1.5
+  },
+  {
+    "name": "test_rsi_momentum_v1",
+    "displayName": "Test RSI Momentum",
+    "description": "Auto-test created strategy",
+    "rationale": "Testing quantitative momentum",
+    "longConditions": [
+      {
+        "indicator": "rsi",
+        "operator": "<",
+        "value": 32
+      }
+    ],
+    "shortConditions": [
+      {
+        "indicator": "rsi",
+        "operator": ">",
+        "value": 68
+      }
+    ],
+    "slAtrMult": 1.5,
+    "riskRewardRatio": 3.0,
+    "useTrailingStop": false,
+    "trailActivationR": 1.0,
+    "trailDistanceAtrMult": 1.5
+  },
+  {
+    "name": "e2e_verified_strategy_v1",
+    "displayName": "E2E Verified Strategy",
+    "description": "Rule-based strategy for end-to-end verification",
+    "rationale": "High-conviction RSI dip buyer with ATR profit taking",
+    "longConditions": [
+      {
+        "indicator": "rsi",
+        "operator": "<",
+        "value": 30
+      }
+    ],
+    "shortConditions": [
+      {
+        "indicator": "rsi",
+        "operator": ">",
+        "value": 70
+      }
+    ],
+    "slAtrMult": 1.5,
+    "riskRewardRatio": 2.5,
+    "useTrailingStop": false,
+    "trailActivationR": 1.0,
+    "trailDistanceAtrMult": 1.5
   }
 ]

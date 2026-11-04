@@ -48,10 +48,9 @@ export function MLGeneratorTrainingPanel({ onCompleted }: Props) {
         setError("Your session expired. Sign in again before starting an ML experiment.");
       } else if (cause instanceof ApiError && cause.status === 403) {
         setError("Your account is not permitted to run ML experiments.");
+      } else if (cause instanceof ApiError && cause.status === 422) {
+        setError("The experiment could not satisfy the data, validation, or execution requirements. Try a longer history or different model settings.");
       } else if (cause instanceof ApiError) {
-        // Preserve safe, actionable API validation diagnostics (including the
-        // validation policy search summary) instead of hiding them behind a
-        // generic frontend message.
         setError(cause.message || `Generator training failed (HTTP ${cause.status}).`);
       } else {
         setError(cause instanceof Error

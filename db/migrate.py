@@ -32,6 +32,9 @@ from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
 HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 logger = logging.getLogger("db.migrate")
 
 LOCK_NAME = "signal_bot_schema_migrations"

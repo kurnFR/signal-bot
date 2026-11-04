@@ -17,9 +17,21 @@ VIEWER_ALLOWED_MUTATIONS = {"/api/auth/logout", "/api/auth/change-password"}
 PUBLIC = {("POST", "/api/auth/login")}
 
 
+def _collect_routes(routes):
+    collected = []
+    for route in routes:
+        if hasattr(route, "original_router") and hasattr(route.original_router, "routes"):
+            collected.extend(_collect_routes(route.original_router.routes))
+        elif hasattr(route, "routes"):
+            collected.extend(_collect_routes(route.routes))
+        else:
+            collected.append(route)
+    return collected
+
+
 def _operations():
     ops = []
-    for route in app.routes:
+    for route in _collect_routes(app.routes):
         path = getattr(route, "path", "")
         methods = getattr(route, "methods", None) or set()
         if not path.startswith("/api/"):

@@ -11,10 +11,16 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 if __name__ == "__main__":
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
     parser = argparse.ArgumentParser(description="Run Crypto Signal Bot Web Dashboard")
     parser.add_argument("--port", type=int, default=8050, help="Port to listen on (default: 8050)")
-    parser.add_argument("--host", type=str, default=os.getenv("SIGNAL_BOT_HOST", "127.0.0.1"),
-                        help="Bind address (default: SIGNAL_BOT_HOST or 127.0.0.1; use 0.0.0.0 only behind a firewall/reverse proxy)")
+    parser.add_argument("--host", type=str, default=os.getenv("SIGNAL_BOT_HOST", "0.0.0.0"),
+                        help="Bind address (default: SIGNAL_BOT_HOST or 0.0.0.0)")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
     args = parser.parse_args()
 

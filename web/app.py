@@ -15,6 +15,12 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from web.auth import seed_default_admin, authenticate_request, enable_durable_rate_limit
 from web.routes.auth_routes import router as auth_router
 from web.routes.paper_routes import router as paper_router
@@ -71,7 +77,10 @@ app = FastAPI(
     version="2.0.0",
 )
 
-_raw_origins = os.getenv("SIGNAL_BOT_ALLOWED_ORIGINS", "http://localhost:8050,http://127.0.0.1:8050,http://localhost:5173,http://127.0.0.1:5173")
+_raw_origins = os.getenv(
+    "SIGNAL_BOT_ALLOWED_ORIGINS",
+    "http://localhost:8050,http://127.0.0.1:8050,http://192.168.1.30:8050,http://localhost:5173,http://127.0.0.1:5173,http://192.168.1.30:5173",
+)
 ALLOWED_ORIGINS = [origin.strip() for origin in _raw_origins.split(",") if origin.strip()]
 
 app.add_middleware(

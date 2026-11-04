@@ -114,7 +114,9 @@ describe("MLStudioPanel", () => {
           market: "spot",
           timeframe: "1h",
           model_type: "hist_gradient_boosting",
-          horizon_bars: 12,
+          stop_atr_multiple: 1.5,
+          risk_reward_ratio: 2,
+          max_hold_bars: 72,
         });
         return Promise.resolve(new Response(JSON.stringify(generatorResult), {
           status: 200,

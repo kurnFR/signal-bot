@@ -418,6 +418,13 @@ def fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, in
     if closed_only and (limit is None or int(limit) <= 0):
         df = df[df["is_closed"] == 1].reset_index(drop=True)
 
+    if df.empty:
+        if include_funding and "funding_rate" not in df.columns:
+            df["funding_rate"] = pd.Series(dtype=float)
+        return df
+
+    df["open_time"] = df["open_time"].astype("int64")
+
     numeric_cols = [c for c in df.columns if c not in ("open_time", "is_closed")]
     for col in numeric_cols:
         df[col] = df[col].astype(float)
@@ -1313,7 +1320,8 @@ def set_retailbot2_strategy_lifecycle_setting(strategy_id, mode, settings):
     conn = get_retailbot2_pool().get_connection()
     try:
         cur = conn.cursor()
-        _ensure_retailbot2_strategy_lifecycle_table(cur)
+        # The lifecycle table is provisioned and verified by the migration/startup
+        # path. Runtime writes must not call a table-creation helper here.
         cur.execute("""
             INSERT INTO rdt_strategy_lifecycle
                 (strategy_id, mode, evaluation_enabled, paper_enabled,
