@@ -54,6 +54,44 @@ class TestRetailBot2MigrationManagedStartup(unittest.TestCase):
             db_helpers.ensure_retailbot2_lifecycle_table()
         verify.assert_called_once_with()
 
+    def test_strategy_lifecycle_save_uses_migration_managed_table_and_commits(self):
+        pool = Mock()
+        cursor = Mock()
+        conn = Mock()
+        conn.cursor.return_value = cursor
+        pool.get_connection.return_value = conn
+        settings = {
+            "evaluation_enabled": True,
+            "paper_enabled": True,
+            "telegram_enabled": True,
+            "report_enabled": True,
+            "auto_promote_enabled": False,
+        }
+
+        with patch.object(db_helpers, "get_retailbot2_pool", return_value=pool):
+            db_helpers.set_retailbot2_strategy_lifecycle_setting(
+                "BB_REV_INV", "inverse", settings
+            )
+
+        self.assertEqual(cursor.execute.call_count, 1)
+        sql, params = cursor.execute.call_args.args
+        normalized_sql = " ".join(sql.split()).upper()
+        self.assertIn("INSERT INTO RDT_STRATEGY_LIFECYCLE", normalized_sql)
+        self.assertIn("TELEGRAM_ENABLED", normalized_sql)
+        self.assertNotIn("CREATE TABLE", normalized_sql)
+        self.assertEqual(
+            params,
+            ("BB_REV_INV", "inverse", True, True, True, True, False),
+        )
+        conn.commit.assert_called_once()
+        conn.rollback.assert_not_called()
+        cursor.close.assert_called_once()
+        conn.close.assert_called_once()
+
+        # Catch regressions that reintroduce a missing runtime DDL helper.
+        source = inspect.getsource(db_helpers.set_retailbot2_strategy_lifecycle_setting)
+        self.assertNotIn("_ensure_retailbot2_strategy_lifecycle_table", source)
+
     def test_migration_defines_all_runtime_tables_and_legacy_column(self):
         migration = Path("db/migrate_retailbot2_runtime_schema.sql").read_text(encoding="utf-8")
         for table in ("rdt_trades", "rdt_strategy_stats", "bot_control", "rdt_strategy_lifecycle"):
