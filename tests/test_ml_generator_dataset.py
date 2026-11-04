@@ -232,6 +232,6 @@ def test_generator_labels_use_configured_asymmetric_stop_target_and_full_hold_wi
 
 def test_generator_dataset_requires_complete_max_hold_future_window():
     frame = _frame()
-    result = _build(frame, horizon_bars=2, max_hold_bars=4)
+    result = _build(frame, horizon_bars=2, max_hold_bars=5)
 
     assert result.empty
