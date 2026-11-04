@@ -362,10 +362,20 @@ def trigger_generator_experiment(req: RunGeneratorExperimentRequest):
         feature_frame = fetch_ohlcv_with_features_df(
             req.symbol, req.market, req.timeframe, closed_only=True
         )
-        if feature_frame is None or len(feature_frame) < 100:
+        required_candles = max(
+            100,
+            math.ceil(
+                (req.min_validation_trades + req.max_hold_bars)
+                / req.validation_fraction
+            ) + req.max_hold_bars + 1,
+        )
+        if feature_frame is None or len(feature_frame) < required_candles:
             raise HTTPException(
                 status_code=400,
-                detail="At least 100 closed candles with shared features are required for generator research.",
+                detail=(
+                    f"At least {required_candles} closed candles with shared features are required "
+                    "for the configured max holding period, chronological purge, and validation trade floor."
+                ),
             )
 
         label_config = {
