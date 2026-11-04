@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from ml.dataset import SHARED_FEATURE_COLUMNS
+from backtest.accounting import calculate_trade_accounting, resolve_stop_target_exit
 
 GENERATOR_CLASSES = {"SHORT": 0, "HOLD": 1, "LONG": 2}
 GENERATOR_CLASS_NAMES = {value: key for key, value in GENERATOR_CLASSES.items()}
@@ -107,8 +108,6 @@ def build_generator_dataset(
     else:
         closed = np.ones(len(data), dtype=bool)
 
-    from backtest.accounting import calculate_trade_accounting
-
     rows = []
     for signal_idx in range(0, len(data) - max_hold_bars - 1):
         if not closed[signal_idx] or not closed[signal_idx + 1:signal_idx + max_hold_bars + 2].all():
@@ -141,19 +140,19 @@ def build_generator_dataset(
             final_idx = min(entry_idx + max_hold_bars, len(data) - 1)
             for future_idx in range(entry_idx, final_idx + 1):
                 bar = data.iloc[future_idx]
-                # Match backtest.simulate: stop is checked before target on
-                # a candle that touches both levels.
-                if direction == "LONG":
-                    if float(bar["low"]) <= stop_price:
-                        exit_price, reason = stop_price, "stop_loss"
-                    elif float(bar["high"]) >= target_price:
-                        exit_price, reason = target_price, "take_profit"
-                else:
-                    if float(bar["high"]) >= stop_price:
-                        exit_price, reason = stop_price, "stop_loss"
-                    elif float(bar["low"]) <= target_price:
-                        exit_price, reason = target_price, "take_profit"
-                if exit_price is not None:
+                # Use the exact same gap-aware stop/target resolver as the
+                # canonical simulator so labels cannot assume better fills.
+                resolved_exit = resolve_stop_target_exit(
+                    direction,
+                    float(bar["open"]),
+                    float(bar["high"]),
+                    float(bar["low"]),
+                    stop_price,
+                    target_price,
+                )
+                if resolved_exit is not None:
+                    exit_price, exit_code = resolved_exit
+                    reason = "stop_loss" if exit_code == "SL" else "take_profit"
                     exit_idx = future_idx
                     break
                 if future_idx - entry_idx >= max_hold_bars:
