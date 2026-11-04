@@ -222,10 +222,6 @@
     border-left-color: #0284c7;
 }
 
-:root[data-theme="light"] .dashboard-horizontal-scroll {
-    background: #e2e8f0;
-}
-
 @media (prefers-reduced-motion: reduce) {
     .dashboard-theme-toggle,
     .table-sortable-header {
