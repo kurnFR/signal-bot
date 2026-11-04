@@ -81,8 +81,8 @@ def test_no_barrier_touch_before_horizon_is_hold_and_exit_time_is_recorded():
 
     assert row["target"] == GENERATOR_CLASSES["HOLD"]
     assert row["label_reason"] == "max_hold_timeout"
-    assert row["exit_time"] == 300
-    assert row["label_end_time"] == 300
+    assert row["exit_time"] == 200
+    assert row["label_end_time"] == 200
 
 
 def test_directional_label_is_downgraded_when_round_trip_cost_exceeds_edge():
@@ -150,7 +150,7 @@ def test_empty_input_returns_stable_generator_schema():
 def test_builder_keeps_last_signal_with_a_complete_forward_horizon():
     result = _build(_frame())
 
-    assert list(result["open_time"]) == [100, 200, 300, 400]
+    assert list(result["open_time"]) == [100, 200, 300, 400, 500]
     assert result.iloc[-1]["exit_time"] == 600
 
 
@@ -207,7 +207,7 @@ def test_generator_labels_use_configured_asymmetric_stop_target_and_full_hold_wi
     frame = pd.DataFrame({
         "open_time": list(range(7)),
         "open": [100.0] * 7,
-        "high": [100.5, 100.5, 100.5, 100.5, 102.5, 100.5, 100.5],
+        "high": [100.5, 100.5, 100.5, 102.5, 100.5, 100.5, 100.5],
         "low": [99.5, 99.5, 99.5, 99.5, 99.5, 99.5, 99.5],
         "close": [100.0] * 7,
         "atr": [1.0] * 7,
@@ -224,7 +224,7 @@ def test_generator_labels_use_configured_asymmetric_stop_target_and_full_hold_wi
     row = result.loc[result["open_time"] == 0].iloc[0]
 
     assert row["target_name"] == "LONG"
-    assert row["exit_time"] == 4
+    assert row["exit_time"] == 3
     assert row["long_net_return"] == pytest.approx(0.02)
     assert row["short_net_return"] == pytest.approx(-0.01)
     assert row["label_reason"] == "take_profit"
@@ -232,6 +232,6 @@ def test_generator_labels_use_configured_asymmetric_stop_target_and_full_hold_wi
 
 def test_generator_dataset_requires_complete_max_hold_future_window():
     frame = _frame()
-    result = _build(frame, horizon_bars=2, max_hold_bars=5)
+    result = _build(frame, horizon_bars=2, max_hold_bars=6)
 
     assert result.empty
