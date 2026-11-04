@@ -15,7 +15,7 @@ from ml.dataset import SHARED_FEATURE_COLUMNS
 
 GENERATOR_CLASSES = {"SHORT": 0, "HOLD": 1, "LONG": 2}
 GENERATOR_CLASS_NAMES = {value: key for key, value in GENERATOR_CLASSES.items()}
-GENERATOR_LABEL_PROTOCOL = "atr_barrier_first_touch_v1"
+GENERATOR_LABEL_PROTOCOL = "execution_aligned_stop_target_timeout_v2"
 
 
 def build_generator_dataset(
@@ -26,20 +26,21 @@ def build_generator_dataset(
     barrier_atr_multiple: float = 1.5,
     fee_rate: float = 0.001,
     slippage_rate: float = 0.0005,
-    min_net_return: float = 0.0,\n    stop_atr_multiple: float = 1.5,\n    risk_reward_ratio: float = 2.0,\n    max_hold_bars: int = 72,
+    min_net_return: float = 0.0,
+    stop_atr_multiple: float = 1.5,\n    risk_reward_ratio: float = 2.0,\n    max_hold_bars: int = 72,
 ) -> pd.DataFrame:
     """Build one labeled opportunity per eligible closed candle.
 
-    Entry is the next candle's open. Symmetric barriers are anchored to the
-    signal candle's ATR. The first barrier touched determines LONG/SHORT;
-    no touch before the horizon, or both barriers touched in the same bar,
-    is labeled HOLD. Directional labels are retained only when the barrier
-    return remains above the configured round-trip fee/slippage hurdle.
+    Entry is the next candle's open. Each direction is independently simulated
+    with the configured ATR stop, reward multiple, max holding period, and
+    canonical fee/slippage accounting. Stop is checked before target on a bar
+    touching both. The better net direction is labeled LONG/SHORT only when it
+    clears the configured return hurdle; otherwise the row is HOLD.
 
     Cost parameters are decimal fractions (0.001 means 0.1%). Features are
     copied exclusively from the signal candle and never from future bars.
     exit_time and label_end_time identify the last future bar used by the
-    label and can be passed to the chronological purging splitter.
+    both directional outcomes and can be passed to the chronological purging splitter.
     """
     if not isinstance(frame, pd.DataFrame):
         raise TypeError("frame must be a pandas DataFrame")
@@ -55,6 +56,11 @@ def build_generator_dataset(
             raise ValueError(f"{name} must be finite")
     if barrier_atr_multiple <= 0:
         raise ValueError("barrier_atr_multiple must be positive")
+    for name, value in (("stop_atr_multiple", stop_atr_multiple), ("risk_reward_ratio", risk_reward_ratio)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value) or value <= 0:
+            raise ValueError(f"{name} must be finite and positive")
+    if isinstance(max_hold_bars, bool) or not isinstance(max_hold_bars, int) or max_hold_bars < 1:
+        raise ValueError("max_hold_bars must be a positive integer")
     if fee_rate < 0 or slippage_rate < 0 or min_net_return < 0:
         raise ValueError("cost rates and min_net_return must be non-negative")
 
