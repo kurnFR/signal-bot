@@ -15,8 +15,6 @@ export function MLGeneratorTrainingPanel({ onCompleted }: Props) {
   const [market, setMarket] = useState<"spot" | "futures">("spot");
   const [timeframe, setTimeframe] = useState("1h");
   const [modelType, setModelType] = useState<"logistic_regression" | "random_forest" | "hist_gradient_boosting">("hist_gradient_boosting");
-  const [horizon, setHorizon] = useState(12);
-  const [barrier, setBarrier] = useState(1.5);
   const [minimumTrades, setMinimumTrades] = useState(10);
   const [stopAtr, setStopAtr] = useState(1.5);
   const [riskReward, setRiskReward] = useState(2);
@@ -36,8 +34,6 @@ export function MLGeneratorTrainingPanel({ onCompleted }: Props) {
         market,
         timeframe,
         model_type: modelType,
-        horizon_bars: horizon,
-        barrier_atr_multiple: barrier,
         min_net_return: 0,
         min_validation_trades: minimumTrades,
         stop_atr_multiple: stopAtr,
@@ -71,7 +67,7 @@ export function MLGeneratorTrainingPanel({ onCompleted }: Props) {
     <div className="panel-heading">
       <div>
         <h2 id="ml-generator-title"><BrainCircuit size={16} /> Train independent ML signal generator</h2>
-        <p>Train a new model that creates LONG, SHORT, or HOLD decisions without relying on a technical strategy signal.</p>
+        <p>Train a new model that creates LONG, SHORT, or HOLD decisions without relying on a technical strategy signal. Labels and evaluation use the configured stop, reward target, maximum holding period, and server trading costs.</p>
       </div>
       <span className="panel-counter">RESEARCH ONLY</span>
     </div>
@@ -81,8 +77,6 @@ export function MLGeneratorTrainingPanel({ onCompleted }: Props) {
         <label>Market<select value={market} onChange={(event) => setMarket(event.target.value as "spot" | "futures")}><option value="spot">Spot</option><option value="futures">Futures</option></select></label>
         <label>Timeframe<select value={timeframe} onChange={(event) => setTimeframe(event.target.value)}>{["15m", "1h", "4h", "1d"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
         <label>Model<select value={modelType} onChange={(event) => setModelType(event.target.value as typeof modelType)}><option value="hist_gradient_boosting">Histogram Gradient Boosting</option><option value="random_forest">Random Forest</option><option value="logistic_regression">Logistic Regression</option></select></label>
-        <label>Label horizon (bars)<input type="number" min={2} max={200} value={horizon} onChange={(event) => setHorizon(Number(event.target.value))} required /></label>
-        <label>ATR barrier multiple<input type="number" min={0.1} max={20} step={0.1} value={barrier} onChange={(event) => setBarrier(Number(event.target.value))} required /></label>
         <label>Minimum validation trades<input type="number" min={1} max={500} value={minimumTrades} onChange={(event) => setMinimumTrades(Number(event.target.value))} required /></label>
         <label>Stop distance (ATR)<input type="number" min={0.1} max={20} step={0.1} value={stopAtr} onChange={(event) => setStopAtr(Number(event.target.value))} required /></label>
         <label>Risk / reward ratio<input type="number" min={0.1} max={20} step={0.1} value={riskReward} onChange={(event) => setRiskReward(Number(event.target.value))} required /></label>
