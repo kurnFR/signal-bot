@@ -8,7 +8,7 @@
     scrollbar-width: thin;
 }
 
- .dashboard-table-scroll > table {
+.dashboard-table-scroll > table {
     min-width: max-content;
 }
 
@@ -530,6 +530,9 @@
 }
 
 @media (forced-colors: active) {
+    .dashboard-table-scroll:focus-visible {
+        outline-color: Highlight;
+    }
     #main-content:focus-visible {
         outline-color: Highlight;
     }
