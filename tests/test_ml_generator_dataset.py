@@ -63,8 +63,8 @@ def test_generator_labels_short_when_lower_barrier_is_first():
 
 def test_same_bar_touching_both_barriers_is_conservatively_hold():
     frame = _frame()
-    frame.loc[1, "high"] = 102.0
-    frame.loc[1, "low"] = 98.0
+    frame.loc[1, "high"] = 104.0
+    frame.loc[1, "low"] = 96.0
 
     result = _build(frame)
     row = result.loc[result["open_time"] == 100].iloc[0]
@@ -87,7 +87,7 @@ def test_no_barrier_touch_before_horizon_is_hold_and_exit_time_is_recorded():
 
 def test_directional_label_is_downgraded_when_round_trip_cost_exceeds_edge():
     frame = _frame()
-    frame.loc[1, "high"] = 102.0
+    frame.loc[1, "high"] = 104.0
 
     result = _build(frame, fee_rate=0.02, slippage_rate=0.02)
     row = result.loc[result["open_time"] == 100].iloc[0]
