@@ -127,7 +127,7 @@ def test_generator_policy_failure_reports_validation_search_diagnostics():
         trades = 4 if confidence == 0.5 else 2
         return {
             "trades": trades,
-            "total_net_return": -0.01 if margin == 0.1 else -0.02,
+            "total_net_return": 0.01 if margin == 0.1 else 0.005,
             "expectancy": -0.002,
         }
 
@@ -141,3 +141,4 @@ def test_generator_policy_failure_reports_validation_search_diagnostics():
     assert "max_observed_trades=4" in message
     assert "best_validation_candidate=" in message
     assert "Untouched test data was not used" in message
+    assert "0.010000 net return / 4 trades" in message
