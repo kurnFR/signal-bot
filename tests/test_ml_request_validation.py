@@ -89,13 +89,18 @@ class TestMLRequestValidation(unittest.TestCase):
         self.assertEqual(request.market, "spot")
         self.assertEqual(request.timeframe, "1h")
         self.assertEqual(request.model_type, "hist_gradient_boosting")
-        self.assertEqual(request.horizon_bars, 12)
+        self.assertEqual(request.max_hold_bars, 72)
+        self.assertEqual(request.stop_atr_multiple, 1.5)
+        self.assertEqual(request.risk_reward_ratio, 2.0)
 
     def test_generator_experiment_request_rejects_invalid_parameters(self):
         for payload in (
             {"model_type": "unsupported"},
-            {"horizon_bars": 1},
-            {"barrier_atr_multiple": 0},
+            {"max_hold_bars": 0},
+            {"stop_atr_multiple": 0},
+            {"risk_reward_ratio": 0},
+            {"horizon_bars": 12},
+            {"barrier_atr_multiple": 1.5},
             {"train_fraction": 0.9, "validation_fraction": 0.2},
             {"max_hold_bars": 0},
             {"risk_reward_ratio": 0},
