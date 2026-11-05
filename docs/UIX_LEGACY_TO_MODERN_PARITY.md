@@ -292,10 +292,10 @@ In accordance with the workflow parity audit ([`docs/ANTIGRAVITY_UI_PARITY_AUDIT
   - Self Password Change Form: Current password, new password, confirm new password with length and match validation (`POST /api/auth/change-password`).
   - User Accounts Administration Table (Admin only): Live catalog displaying User ID, username, email, role badge, active status, creation timestamp, and action buttons (`GET /api/users`).
   - Create User Form / Modal (Admin only): Interactive form with fields for username, email, password, and role selector (`trader`, `admin`, `viewer`) (`POST /api/users`).
-  - Password Reset Action (Admin only): Inline confirmation dialog triggering temporary password reset with display of the new temporary credential (`POST /api/users/{id}/reset-password`).
-  - Toggle Active Status (Admin only): Instant enable/disable for accounts with self-disable protection preventing admin lockout (`PUT /api/users/{id}`).
-  - Delete User Action (Admin only): Two-step confirmation dialog with self-deletion protection preventing an admin from deleting their own session (`DELETE /api/users/{id}`).
-  - Telegram Test Alert (Admin only): "Send Test Ping" with explicit confirmation dialog warning that a test message will be sent to the configured Telegram chat. Note: Both `GET /api/telegram/status` and `POST /api/telegram/test` are strictly restricted to the `admin` role by backend FastAPI `require_admin` dependency.
+  - Password Reset Action (Admin only): Modal confirmation form accepting a new password (min 10 chars) submitted via `POST /api/users/{id}/reset-password`. The backend updates the password hash, increments `session_version` (revoking existing sessions), and sets `must_change_password = 1` requiring the user to change their password upon their next login.
+  - Toggle Active Status (Admin only): Instant enable/disable for accounts with self-disable and last-admin protections preventing administrator lockout (`PUT /api/users/{id}`).
+  - Delete User Action (Admin only): Two-step confirmation dialog with self-deletion and last-admin protections preventing an admin from deleting their own session or the system's last administrator (`DELETE /api/users/{id}`).
+  - Telegram Status & Test Alert: Telegram card displays configuration state. `GET /api/telegram/status` is accessible to all authenticated roles (admin receives `chatId`; trader/viewer receive `200 OK` with `chatId: null`). `POST /api/telegram/test` ("Send Test Ping") is strictly restricted to the `admin` role by explicit backend `require_admin` dependency and middleware enforcement, disallowing test message broadcasts from non-admins.
   - System Diagnostics Card (Admin only): CPU usage, Memory allocation, DB latency, MariaDB thread pool, version details. Sanitized against leaking environment variables or credentials.
   - Forced Password Change Modal (`AuthGate`): Appears immediately upon sign-in if `must_change_password` is `true`. Blocks dashboard navigation until updated.
 - **Interactive Controls:**
@@ -317,14 +317,14 @@ In accordance with the workflow parity audit ([`docs/ANTIGRAVITY_UI_PARITY_AUDIT
   - `POST /api/users/{id}/reset-password` (Admin only)
   - `PUT /api/users/{id}` (Admin only)
   - `DELETE /api/users/{id}` (Admin only)
-  - `GET /api/telegram/status` (Admin only)
+  - `GET /api/telegram/status` (Authenticated: admin receives `chatId`, trader/viewer receive `chatId: null`)
   - `POST /api/telegram/test` (Admin only)
   - `GET /api/settings/diagnostics` (Admin only)
 - **Roles & RBAC:**
-  - Viewer: Theme toggle, profile info, own password change.
-  - Trader: Theme toggle, profile info, own password change. (No access to user management, system diagnostics, or Telegram test ping).
+  - Viewer: Theme toggle, profile info, own password change. (Telegram status returns masked `chatId: null`; no access to user management, system diagnostics, or Telegram test ping).
+  - Trader: Theme toggle, profile info, own password change. (Telegram status returns masked `chatId: null`; no access to user management, system diagnostics, or Telegram test ping).
   - Admin: Full access including user administration (create, reset password, toggle active, delete), Telegram test ping, and system diagnostics.
-- **Safety & Error Behavior:** Strict backend authentication enforcement; token auto-revocation on 401; password fields masked with input type `password`; client and server guards against self-deletion and self-deactivation.
+- **Safety & Error Behavior:** Strict backend authentication enforcement; token auto-revocation on 401; password fields masked with input type `password`; server-side guards against self-deletion, self-deactivation, self-demotion, and last-active-admin lockout.
 - **Status:** `COMPLETE`.
 
 ---

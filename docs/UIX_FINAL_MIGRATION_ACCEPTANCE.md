@@ -11,18 +11,25 @@
 
 ## 1. Executive Summary & Migration Status
 
-The modern React + TypeScript dashboard (`frontend/`) has achieved functional equivalence with the legacy dashboard (`web/static/`). All 11 navigation views, 9 interactive/modal dialogs, and backend API routes have been audited, implemented, and verified.
+The modern React + TypeScript dashboard (`frontend/`) provides 49 complete workflows across 6 complete views and 5 partial views with read-only monitors. 10 specialized execution mutations remain legacy-only. All 59 workflows across all 11 navigation views, interactive dialogs, and backend API routes have been audited and verified in [`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md) and [`docs/UIX_LEGACY_TO_MODERN_PARITY.md`](UIX_LEGACY_TO_MODERN_PARITY.md). Full modern UI parity is not claimed while the 10 specialized mutations remain legacy-only.
 
-Defects identified in review PR #694—specifically the Settings & User Administration parity gap (replacing the previous legacy placeholder with live User catalog, Create User, Reset Password, Toggle Active, and Delete User operations), Telegram permission alignment (`admin`-only per backend FastAPI security constraints), and cutover documentation corrections—have been resolved and covered by automated regression tests.
+Defects identified in review PR #694 and the independent review PR #696 have been resolved and covered by automated regression tests:
+- **Settings & User Administration:** Live user accounts catalog, create user, reset password, toggle active status, and delete user.
+- **Admin Lockout Safeguards:** Server-side defense-in-depth preventing admin self-demotion (`role != admin`), self-deactivation (`is_active = False`), self-deletion, and any mutation leaving zero active administrators in the system. Rejected operations are non-mutating and atomic.
+- **Password Reset Implementation:** The administrator specifies the new password (min 10 chars) in a confirmation modal; the backend updates `password_hash`, increments `session_version` (revoking active user sessions), and flags `must_change_password = 1` requiring rotation upon next login.
+- **Telegram Authorization:** Authenticated traders and viewers can access `GET /api/telegram/status` (`200 OK` with masked `chatId: null`); `POST /api/telegram/test` remains strictly `admin`-only via backend `require_admin` dependency and middleware enforcement.
+- **Cutover Safety:** Default serving remains legacy (`web/static/`); preview is accessible at `/modern`. Production cutover requires explicit owner authorization and process restart with `SIGNAL_BOT_USE_MODERN_UI=1`.
 
 ### Validation Summary
 - **Frontend Typecheck:** PASS (`tsc --noEmit`, 0 errors).
-- **Frontend Unit & Component Suite:** PASS (31 test files, 210 tests passed, 0 failed).
-- **Frontend Production Build:** PASS (`vite build`, 1,609 modules transformed, clean bundle in `frontend/dist/`).
-- **Playwright Browser Tests:** PASS (28 tests passed across Desktop, Tablet, Mobile 375px viewports, and both Dark/Light themes).
-- **Backend Test Suite:** PASS (1,094 passed, 18 skipped, 0 failed).
-- **Parity Deliverable:** [`docs/UIX_LEGACY_TO_MODERN_PARITY.md`](UIX_LEGACY_TO_MODERN_PARITY.md) (Complete 11-view inventory).
-- **Cutover Plan Deliverable:** [`docs/UIX_CUTOVER_PLAN.md`](UIX_CUTOVER_PLAN.md) (Controlled, reversible cutover procedure).
+- **Frontend Unit & Component Suite:** PASS (31 test files, 210 tests passed, 0 failed in 7.36s).
+- **Frontend Production Build:** PASS (`vite build`, 1,609 modules transformed, clean bundle in `frontend/dist/` in 3.89s).
+- **Playwright Browser Tests:** PASS (28 tests passed across Desktop, Tablet, Mobile 375px viewports, and both Dark/Light themes in 28.5s; 100% of tests use deterministic API route mocking via `page.route()`).
+- **Backend Test Suite:** PASS (`python3 -m pytest -q`: 1,100 passed, 18 skipped, 0 failed in 19.41s).
+- **Workflow Parity Reconciled Totals:** 59 Total = 49 Complete + 10 Legacy-Only + 0 Missing (6 Complete views, 5 Partial views with 15 read-only monitor workflows).
+- **Parity Deliverable:** [`docs/UIX_LEGACY_TO_MODERN_PARITY.md`](UIX_LEGACY_TO_MODERN_PARITY.md).
+- **Audit Worksheet:** [`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md).
+- **Cutover Plan Deliverable:** [`docs/UIX_CUTOVER_PLAN.md`](UIX_CUTOVER_PLAN.md).
 
 ---
 
@@ -77,16 +84,19 @@ cd frontend && npm run typecheck && npm run build
 ✓ 1609 modules transformed.
 dist/index.html                   0.43 kB │ gzip:   0.30 kB
 dist/assets/index-CJm7x4VF.css   39.25 kB │ gzip:   7.66 kB
-dist/assets/index-o0P_9eg1.js   443.84 kB │ gzip: 112.73 kB
-✓ built in 4.04s
+dist/assets/index-o0P_9eg1.js   443.84 kB │ gzip: 112.73 kB │ map: 1,526.57 kB
+✓ built in 3.89s
 ```
 
 ### 4.3 End-to-End Browser Tests (`Playwright 1.64.1 Chromium`)
 ```text
 cd frontend && npx playwright test
 Running 28 tests using 6 workers
-28 passed (27.9s)
+28 passed (28.5s)
 ```
+> [!NOTE]
+> All 28 tests in `frontend/e2e/dashboard.spec.ts` use deterministic client-side API route mocking via `page.route("**/api/**")`. Zero live backend processes or database connections are made during the Playwright browser test run.
+
 - Verified workflows:
   - Sign-in, sign-out, session restoration from `localStorage`.
   - Forced password change blocks application access until resolved.
@@ -102,9 +112,9 @@ Running 28 tests using 6 workers
 ### 4.4 Backend Regression Test Suite (`pytest`)
 ```text
 python3 -m pytest -q
-1094 passed, 18 skipped, 6 warnings in 19.04s
+1100 passed, 18 skipped, 6 warnings in 19.41s
 ```
-- Covers all 13 route modules, business logic, paper trading engine, ML generators, wallet tracker, screener, authentication, and database migrations.
+- Covers all 13 route modules, business logic, paper trading engine, ML generators, wallet tracker, screener, authentication, user management security safeguards, and database migrations.
 
 ---
 
@@ -121,10 +131,10 @@ python3 -m pytest -q
 
 ## 6. Acceptance Sign-Off
 
-- [x] Full feature parity inventory completed and recorded in [`docs/UIX_LEGACY_TO_MODERN_PARITY.md`](UIX_LEGACY_TO_MODERN_PARITY.md).
-- [x] All 11 views, 7 modals, and 81 backend routes verified.
+- [x] Workflow-by-workflow parity audit completed and recorded in [`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md) and [`docs/UIX_LEGACY_TO_MODERN_PARITY.md`](UIX_LEGACY_TO_MODERN_PARITY.md) (59 total workflows: 49 complete, 10 legacy-only specialized mutations, 0 missing).
+- [x] All 11 views (6 complete, 5 partial with read-only monitors) and 81 backend routes verified.
 - [x] Frontend typecheck, unit/component tests, and production build pass with 0 errors.
-- [x] Playwright browser test suite (28 tests) passes across viewports and themes.
-- [x] Backend test suite (1,087 tests) passes with 0 failures.
+- [x] Playwright browser test suite (28 tests) passes across viewports and themes using mocked APIs.
+- [x] Backend test suite (1,100 tests passed, 0 failures) verified with complete admin security and lockout protections.
 - [x] Reversible cutover plan established in [`docs/UIX_CUTOVER_PLAN.md`](UIX_CUTOVER_PLAN.md).
 - [ ] Owner live staging read-only verification and final production cutover authorization.

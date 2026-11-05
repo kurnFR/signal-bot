@@ -95,6 +95,7 @@ class TestUserManagementSecurity(unittest.TestCase):
         self.assertIn("Cannot deactivate your own admin account", res_self_deactivate.json()["detail"])
 
         # Admin rejects invalid role update
+        mock_cur.fetchone.return_value = {"id": 2, "username": "user2", "role": "trader", "is_active": 1}
         with patch("web.routes.auth_routes.get_pool") as mock_pool:
             mock_pool.return_value.get_connection.return_value = mock_conn
             res_bad_role = self.client.put(
@@ -119,6 +120,205 @@ class TestUserManagementSecurity(unittest.TestCase):
         )
         self.assertEqual(res_self_delete.status_code, 400)
         self.assertIn("Cannot delete your own admin account", res_self_delete.json()["detail"])
+
+    def test_admin_self_demotion_rejected_and_non_mutating(self):
+        # Admin attempting to change their own role to trader or viewer is rejected with 400
+        mock_conn, mock_cur = MagicMock(), MagicMock()
+        mock_conn.cursor.return_value = mock_cur
+        mock_cur.fetchone.return_value = {"id": 1, "username": "admin", "role": "admin", "is_active": 1}
+
+        with patch("web.routes.auth_routes.get_pool") as mock_pool:
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            res_demote_trader = self.client.put(
+                "/api/users/1",
+                json={"role": "trader"},
+                headers=self._headers(self.admin_token),
+            )
+            res_demote_viewer = self.client.put(
+                "/api/users/1",
+                json={"role": "viewer"},
+                headers=self._headers(self.admin_token),
+            )
+
+        self.assertEqual(res_demote_trader.status_code, 400)
+        self.assertIn("Cannot change your own role from admin", res_demote_trader.json()["detail"])
+        self.assertEqual(res_demote_viewer.status_code, 400)
+        self.assertIn("Cannot change your own role from admin", res_demote_viewer.json()["detail"])
+
+        # Verify no UPDATE executed and no commit performed
+        for call_args in mock_cur.execute.call_args_list:
+            sql = call_args[0][0]
+            self.assertFalse(sql.strip().upper().startswith("UPDATE"), f"Unexpected UPDATE executed: {sql}")
+        mock_conn.commit.assert_not_called()
+
+    def test_last_admin_demotion_and_deactivation_rejected(self):
+        # Attempting to demote or deactivate another admin when no other active admin exists is rejected
+        mock_conn, mock_cur = MagicMock(), MagicMock()
+        mock_conn.cursor.return_value = mock_cur
+        # Target user 2 is an active admin; count of OTHER active admins is 0
+        mock_cur.fetchone.side_effect = [
+            {"id": 2, "username": "admin2", "role": "admin", "is_active": 1},
+            {"cnt": 0},
+            {"id": 2, "username": "admin2", "role": "admin", "is_active": 1},
+            {"cnt": 0},
+        ]
+
+        with patch("web.routes.auth_routes.get_pool") as mock_pool:
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            # 1. Deactivation rejected
+            res_deact = self.client.put(
+                "/api/users/2",
+                json={"is_active": False},
+                headers=self._headers(self.admin_token),
+            )
+            # 2. Demotion rejected
+            res_demote = self.client.put(
+                "/api/users/2",
+                json={"role": "trader"},
+                headers=self._headers(self.admin_token),
+            )
+
+        self.assertEqual(res_deact.status_code, 400)
+        self.assertIn("Cannot demote or deactivate the last active administrator", res_deact.json()["detail"])
+        self.assertEqual(res_demote.status_code, 400)
+        self.assertIn("Cannot demote or deactivate the last active administrator", res_demote.json()["detail"])
+
+        for call_args in mock_cur.execute.call_args_list:
+            sql = call_args[0][0]
+            self.assertFalse(sql.strip().upper().startswith("UPDATE"), f"Unexpected UPDATE executed: {sql}")
+        mock_conn.commit.assert_not_called()
+
+    def test_last_admin_deletion_rejected(self):
+        # Attempting to delete another admin when no other active admin exists is rejected with 400
+        mock_conn, mock_cur = MagicMock(), MagicMock()
+        mock_conn.cursor.return_value = mock_cur
+        # Target user 2 is active admin; count of other active admins is 0
+        mock_cur.fetchone.side_effect = [
+            {"username": "admin2", "role": "admin", "is_active": 1},
+            {"cnt": 0},
+        ]
+
+        with patch("web.routes.auth_routes.get_pool") as mock_pool:
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            res_del = self.client.delete(
+                "/api/users/2",
+                headers=self._headers(self.admin_token),
+            )
+
+        self.assertEqual(res_del.status_code, 400)
+        self.assertIn("Cannot delete the last active administrator", res_del.json()["detail"])
+
+        for call_args in mock_cur.execute.call_args_list:
+            sql = call_args[0][0]
+            self.assertFalse(sql.strip().upper().startswith("DELETE"), f"Unexpected DELETE executed: {sql}")
+        mock_conn.commit.assert_not_called()
+
+    def test_multiple_admin_operations_succeed(self):
+        # When other active admins exist (cnt > 0), demoting, deactivating, and deleting an admin succeeds
+        mock_conn, mock_cur = MagicMock(), MagicMock()
+        mock_conn.cursor.return_value = mock_cur
+
+        # 1. Update (demote) when another active admin exists
+        mock_cur.fetchone.side_effect = [
+            {"id": 2, "username": "admin2", "role": "admin", "is_active": 1},
+            {"cnt": 1},
+        ]
+        with patch("web.routes.auth_routes.get_pool") as mock_pool, \
+             patch("web.routes.auth_routes._commit_with_audit") as mock_audit:
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            res_demote = self.client.put(
+                "/api/users/2",
+                json={"role": "trader"},
+                headers=self._headers(self.admin_token),
+            )
+        self.assertEqual(res_demote.status_code, 200)
+        self.assertIn("User 'admin2' updated", res_demote.json()["message"])
+        mock_audit.assert_called_once()
+
+        # 2. Delete when another active admin exists
+        mock_cur.fetchone.side_effect = [
+            {"username": "admin2", "role": "admin", "is_active": 1},
+            {"cnt": 1},
+        ]
+        with patch("web.routes.auth_routes.get_pool") as mock_pool, \
+             patch("web.routes.auth_routes._commit_with_audit") as mock_audit:
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            res_delete = self.client.delete(
+                "/api/users/2",
+                headers=self._headers(self.admin_token),
+            )
+        self.assertEqual(res_delete.status_code, 200)
+        self.assertIn("User 'admin2' deleted", res_delete.json()["message"])
+        mock_audit.assert_called_once()
+
+    def test_reset_password_updates_hash_must_change_and_session_version(self):
+        payload = {"new_password": "NewSecurePassword123!"}
+        mock_conn, mock_cur = MagicMock(), MagicMock()
+        mock_conn.cursor.return_value = mock_cur
+        mock_cur.fetchone.return_value = {"id": 2, "username": "trader_joe"}
+
+        with patch("web.routes.auth_routes.get_pool") as mock_pool, \
+             patch("web.routes.auth_routes._commit_with_audit") as mock_audit:
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            res = self.client.post(
+                "/api/users/2/reset-password",
+                json=payload,
+                headers=self._headers(self.admin_token),
+            )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {
+            "status": "success",
+            "message": "Password reset successfully for user 'trader_joe'",
+        })
+
+        # Verify UPDATE executed with must_change_password=1 and session_version increment
+        update_calls = [
+            c for c in mock_cur.execute.call_args_list
+            if "UPDATE users SET password_hash" in c[0][0]
+        ]
+        self.assertEqual(len(update_calls), 1)
+        update_sql, update_params = update_calls[0][0]
+        self.assertIn("must_change_password = 1", update_sql)
+        self.assertIn("session_version = session_version + 1", update_sql)
+        self.assertEqual(update_params[1], 2)  # target user_id
+
+        # Verify audit log recorded
+        mock_audit.assert_called_once()
+        self.assertEqual(mock_audit.call_args[0][2], "USER_PASSWORD_RESET")
+        self.assertEqual(mock_audit.call_args[0][3], "admin")
+        self.assertEqual(mock_audit.call_args[0][5], {"target_user": "trader_joe", "target_id": 2})
+
+    def test_reset_password_rejects_policy_violations_without_mutation(self):
+        # 1. Pydantic schema rejection for short password (< 10 chars) returns 422
+        payload_short = {"new_password": "short"}
+        res_short = self.client.post(
+            "/api/users/2/reset-password",
+            json=payload_short,
+            headers=self._headers(self.admin_token),
+        )
+        self.assertEqual(res_short.status_code, 422)
+
+        # 2. Business rule complexity rejection for trivial / common base password returns 400
+        payload_weak = {"new_password": "password1234!"}
+        mock_conn, mock_cur = MagicMock(), MagicMock()
+        mock_conn.cursor.return_value = mock_cur
+        mock_cur.fetchone.return_value = {"id": 2, "username": "trader_joe"}
+
+        with patch("web.routes.auth_routes.get_pool") as mock_pool:
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            res_weak = self.client.post(
+                "/api/users/2/reset-password",
+                json=payload_weak,
+                headers=self._headers(self.admin_token),
+            )
+
+        self.assertEqual(res_weak.status_code, 400)
+        self.assertIn("Password is too common or easy to guess", res_weak.json()["detail"])
+        mock_conn.commit.assert_not_called()
+        for call_args in mock_cur.execute.call_args_list:
+            sql = call_args[0][0]
+            self.assertFalse(sql.strip().upper().startswith("UPDATE"), f"Unexpected UPDATE executed: {sql}")
 
     def test_reset_password_role_gating(self):
         payload = {"new_password": "NewSecurePassword123!"}

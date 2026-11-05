@@ -505,18 +505,35 @@ def update_user(user_id: int, req: UpdateUserRequest, admin: dict = Depends(requ
         if not target:
             raise HTTPException(status_code=404, detail="Target user not found")
 
+        if req.role is not None and req.role not in ("admin", "trader", "viewer"):
+            raise HTTPException(status_code=400, detail="Invalid role")
+
+        # 1. Admin self-demotion protection: an admin cannot change their own role
+        if target["id"] == admin["id"] and req.role is not None and req.role != "admin":
+            raise HTTPException(status_code=400, detail="Cannot change your own role from admin")
+
+        # 2. Admin self-deactivation protection: an admin cannot deactivate their own account
+        if target["id"] == admin["id"] and req.is_active is False:
+            raise HTTPException(status_code=400, detail="Cannot deactivate your own admin account")
+
+        # 3. Last-admin protection: prevent any mutation from leaving zero active administrators
+        target_is_active_admin = (target.get("role") == "admin" and bool(target.get("is_active")))
+        demoting_target = (req.role is not None and req.role != "admin")
+        deactivating_target = (req.is_active is False)
+        if target_is_active_admin and (demoting_target or deactivating_target):
+            cur.execute("SELECT COUNT(*) AS cnt FROM users WHERE role = 'admin' AND is_active = 1 AND id != %s", (user_id,))
+            row = cur.fetchone()
+            other_active_admins = (row.get("cnt") if isinstance(row, dict) else row[0]) if row else 0
+            if other_active_admins == 0:
+                raise HTTPException(status_code=400, detail="Cannot demote or deactivate the last active administrator")
+
         updates = []
         params = []
         if req.role is not None:
-            if req.role not in ("admin", "trader", "viewer"):
-                raise HTTPException(status_code=400, detail="Invalid role")
             updates.append("role = %s")
             params.append(req.role)
 
         if req.is_active is not None:
-            # Prevent admin deactivating self
-            if target["id"] == admin["id"] and not req.is_active:
-                raise HTTPException(status_code=400, detail="Cannot deactivate your own admin account")
             updates.append("is_active = %s")
             params.append(1 if req.is_active else 0)
 
@@ -544,10 +561,18 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
     conn = _get_required_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT username FROM users WHERE id = %s", (user_id,))
+        cur.execute("SELECT username, role, is_active FROM users WHERE id = %s", (user_id,))
         target = cur.fetchone()
         if not target:
             raise HTTPException(status_code=404, detail="User not found")
+
+        # Last-admin protection: cannot delete an active admin if no other active admin exists
+        if target.get("role") == "admin" and bool(target.get("is_active")):
+            cur.execute("SELECT COUNT(*) AS cnt FROM users WHERE role = 'admin' AND is_active = 1 AND id != %s", (user_id,))
+            row = cur.fetchone()
+            other_active_admins = (row.get("cnt") if isinstance(row, dict) else row[0]) if row else 0
+            if other_active_admins == 0:
+                raise HTTPException(status_code=400, detail="Cannot delete the last active administrator")
 
         cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
         _commit_with_audit(
