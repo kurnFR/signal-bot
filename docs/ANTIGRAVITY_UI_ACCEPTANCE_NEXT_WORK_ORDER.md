@@ -345,3 +345,14 @@ Do not claim full parity while any required workflow remains legacy-only or part
 
 ### Final stop condition
 Push the work and report exact evidence. **Stop before merge or deployment.** Wait for independent review and explicit owner authorization.
+
+
+## 12. PR mergeability check
+
+At the time this work order was created, the GitHub PR metadata reported PR #697 as open and unmerged, but `mergeable=false`. Before pushing further commits:
+
+1. Fetch the latest `master` and PR head.
+2. Identify whether the false mergeability state represents an actual content conflict or a transient GitHub calculation.
+3. If conflicts exist, resolve them on the working branch without force-pushing over unreviewed work.
+4. Re-run all affected tests after conflict resolution and update the exact tested SHA in the report.
+5. Report the resulting PR mergeability state. Do not merge the PR.
