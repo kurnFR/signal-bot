@@ -1,11 +1,12 @@
 # Signal Bot — Legacy to Modern UI Parity Inventory
 
-**Repository:** `kurnFR/signal-bot`  
-**Target:** Complete parity verification between the legacy dashboard (`web/static/`) and the modern React + TypeScript frontend (`frontend/src/`).  
-**Status:** AUDITED — Parity Rebuilt (6 Views Complete, 5 Views Partial with Read-Only Monitors, 0 Missing)  
-**Date:** November 2026  
-**Verified Commit SHA:** `84940c93c538271dbf66c0012af616206a8df5e0`  
-**Reference:** [`docs/ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md`](ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md), [`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md)  
+**Repository:** `kurnFR/signal-bot`
+**Target:** Complete parity verification between the legacy dashboard (`web/static/`) and the modern React + TypeScript frontend (`frontend/src/`).
+**Status:** AUDITED — Parity Rebuilt (6 Views Complete, 5 Views Partial with Read-Only Monitors, 0 Missing)
+**Date:** November 2026
+**Baseline Commit:** `53bd8713d20e3348a5d23d951737037e916ba67f`
+**Reviewed Implementation Baseline:** `c4c97f38445755d2daf577c57acbbcd13e835ab3`
+**Reference:** [`docs/ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md`](ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md), [`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md)
 
 ---
 
@@ -22,7 +23,7 @@ In accordance with the workflow parity audit ([`docs/ANTIGRAVITY_UI_PARITY_AUDIT
 - **Backend API Endpoints Covered:** 81 unique API method/path routes mapped across 13 FastAPI modules.
 - **Automated Frontend Test Suite:** 31 test files, 210 unit/component tests passing (`npm test`).
 - **End-to-End Browser Tests:** 28 Playwright tests passing across Desktop Chrome, responsive mobile, tablet, and dark/light themes (`npx playwright test`; 100% using mocked API routes).
-- **Backend Test Suite:** 1,106 unit/integration tests passing (`pytest`).
+- **Backend Test Suite:** 1,107 unit/integration tests passing (`pytest`).
 
 ---
 

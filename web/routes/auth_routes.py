@@ -4,7 +4,7 @@ Strictly parameterized SQL queries throughout to eliminate SQL injection vectors
 """
 import re
 import logging
-from typing import Optional, List
+from typing import Optional, List, Callable, Any
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel, Field
 
@@ -47,6 +47,11 @@ def _write_required_audit(action: str, username: str, user_id: Optional[int] = N
         )
 
 
+# Test-only hook for deterministic transaction synchronization tests.
+# Must remain None in production.
+_test_after_admin_lock_hook: Optional[Callable[[Any, Any, int], None]] = None
+
+
 def _commit_with_audit(conn, cur, action: str, username: str,
                        user_id: Optional[int] = None, details: Optional[dict] = None,
                        ip_address: Optional[str] = None) -> None:
@@ -57,6 +62,7 @@ def _commit_with_audit(conn, cur, action: str, username: str,
     except Exception as exc:
         try:
             conn.rollback()
+            setattr(conn, "_rolled_back", True)
         except Exception:
             pass
         logger.error("Required audit transaction failed for %s (%s)", action, type(exc).__name__)
@@ -462,8 +468,25 @@ def create_user(req: CreateUserRequest, admin: dict = Depends(require_admin)):
                 "is_active": True,
             }
         }
+    except HTTPException:
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
+        raise
+    except Exception:
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
+        raise
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 @router.post("/users/{user_id}/reset-password")
@@ -492,15 +515,24 @@ def reset_user_password(user_id: int, req: ResetPasswordRequest, admin: dict = D
             "message": f"Password reset successfully for user '{target['username']}'"
         }
     except HTTPException:
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
         raise
     except Exception:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
         raise
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 @router.put("/users/{user_id}")
@@ -534,6 +566,8 @@ def update_user(user_id: int, req: UpdateUserRequest, admin: dict = Depends(requ
             cur.execute(
                 "SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY id FOR UPDATE"
             )
+            if _test_after_admin_lock_hook is not None:
+                _test_after_admin_lock_hook(conn, cur, user_id)
             active_admins = cur.fetchall() or []
             other_active_admins = [u for u in active_admins if u["id"] != user_id]
             if len(other_active_admins) == 0:
@@ -562,15 +596,24 @@ def update_user(user_id: int, req: UpdateUserRequest, admin: dict = Depends(requ
         )
         return {"status": "success", "message": f"User '{target['username']}' updated"}
     except HTTPException:
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
         raise
     except Exception:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
         raise
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 @router.delete("/users/{user_id}")
@@ -592,6 +635,8 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
             cur.execute(
                 "SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY id FOR UPDATE"
             )
+            if _test_after_admin_lock_hook is not None:
+                _test_after_admin_lock_hook(conn, cur, user_id)
             active_admins = cur.fetchall() or []
             other_active_admins = [u for u in active_admins if u["id"] != user_id]
             if len(other_active_admins) == 0:
@@ -605,12 +650,21 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
         cur.close()
         return {"status": "success", "message": f"User '{target['username']}' deleted"}
     except HTTPException:
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
         raise
     except Exception:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
         raise
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()

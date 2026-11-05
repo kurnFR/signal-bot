@@ -9,8 +9,10 @@ DB_DIR = Path(__file__).resolve().parents[1] / "db"
 def test_paper_generator_instance_migration_is_registered_after_existing_schema():
     versions = [migration.version for migration in MIGRATIONS]
 
-    assert versions[-1] == "024_paper_generator_instances"
-    assert MIGRATIONS[-1].filename == "migrate_paper_generator_instances.sql"
+    assert "024_paper_generator_instances" in versions
+    idx = versions.index("024_paper_generator_instances")
+    assert idx > versions.index("023_screener_runtime_schema")
+    assert MIGRATIONS[idx].filename == "migrate_paper_generator_instances.sql"
 
 
 def test_generator_migration_preserves_legacy_identity_and_adds_instance_identity():
