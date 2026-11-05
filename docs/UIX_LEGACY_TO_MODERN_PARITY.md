@@ -24,7 +24,7 @@ In accordance with the workflow parity audit ([`docs/ANTIGRAVITY_UI_PARITY_AUDIT
 - **Workflow Parity Status:** 49 Workflows COMPLETE, 10 Specialized Mutations LEGACY_ONLY, 0 MISSING (59 Total).
 - **View-Level Breakdown:** 6 Views COMPLETE, 5 Views PARTIAL (Read-only monitoring complete; execution mutations intentionally legacy-only), 0 MISSING.
 - **Backend API Endpoints Covered:** 81 unique API method/path routes mapped across 13 FastAPI modules.
-- **Automated Frontend Test Suite:** 31 test files, 213 unit/component tests passing (`npm test`).
+- **Automated Frontend Test Suite:** 31 test files, 224 unit/component tests passing (`npm test`).
 - **End-to-End Browser Tests:** 28 Playwright tests passing across Desktop Chrome, responsive mobile, tablet, and dark/light themes (`npx playwright test`; 100% using mocked API routes).
 - **Backend Test Suite:** 1,115 unit/integration tests passing (`pytest`).
 
@@ -344,8 +344,9 @@ In accordance with the workflow parity audit ([`docs/ANTIGRAVITY_UI_PARITY_AUDIT
 | 5 | `modal-run-ml` | `MLStudioPanel.tsx` | `COMPLETE` | Clear research-only label, no automatic paper or Telegram activation |
 | 6 | Strategy Quick Test Modal | `StrategyLibraryPanel.tsx` | `COMPLETE` | In-memory 1,000 candle simulation; no database writes |
 | 7 | Strategy Delete Confirmation | `StrategyLibraryPanel.tsx` | `COMPLETE` | Explicit name verification required before deletion |
-| 8 | User Delete Confirmation | `SettingsPanel.tsx` | `COMPLETE` | Two-step confirmation dialog; prevents self-deletion |
-| 9 | Password Reset Confirmation | `SettingsPanel.tsx` | `COMPLETE` | Modal dialog prompting administrator to enter and confirm new password |
+| 8 | User Delete Confirmation | `SettingsPanel.tsx` | `COMPLETE` | Accessible native HTML `<dialog>` modal; initial cancel focus, keyboard trap, Escape dismissal, focus restoration to trigger, prevents self-deletion |
+| 9 | Password Reset Confirmation | `SettingsPanel.tsx` | `COMPLETE` | Accessible native HTML `<dialog>` modal prompting administrator for new password (min 10 chars); input focus, keyboard trap, Escape dismissal, and focus restoration |
+| 10 | Telegram Test Ping Confirmation | `SettingsPanel.tsx` | `COMPLETE` | Accessible native HTML `<dialog>` modal confirming outbound broadcast; cancel focus, Escape dismissal without sending ping, and focus restoration |
 
 ---
 
@@ -355,7 +356,7 @@ All parity implementations have been validated through three comprehensive autom
 
 1. **Frontend Unit & Component Testing (`Vitest`):**
    - **Command:** `cd frontend && npm test -- --run`
-   - **Result:** 31 test files passed, 213 tests passed, 0 failed.
+   - **Result:** 31 test files passed, 224 tests passed, 0 failed.
    - **Coverage:** AuthGate, App, SystemStatus, Screener, ScreenerControls, PaperTrading, StrategyLibrary, WalletTracking, BacktestStudio, PromotionPolicy, MLStudio, MLGeneratorTraining, Research, NewsAI, MasterData, Settings, User Management client & UI.
 
 2. **Frontend Production Type-check & Build (`TypeScript + Vite`):**

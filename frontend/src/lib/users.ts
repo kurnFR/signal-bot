@@ -147,11 +147,19 @@ export async function resetUserPassword(userId: number, newPassword: string): Pr
   if (!Number.isSafeInteger(userId) || userId <= 0) {
     throw new TypeError("Invalid user ID");
   }
-  const payload = await userRequest<{ status: string; message?: string }>(`/api/users/${userId}/reset-password`, {
+  const payload = await userRequest<unknown>(`/api/users/${userId}/reset-password`, {
     method: "POST",
     body: JSON.stringify({ new_password: newPassword }),
   });
-  return payload.message || "Password reset successfully";
+  if (
+    !isRecord(payload) ||
+    payload.status !== "success" ||
+    typeof payload.message !== "string" ||
+    payload.message.trim().length === 0
+  ) {
+    throw new UserActionError(502, "Server returned an invalid password reset response contract");
+  }
+  return payload.message.trim();
 }
 
 /** Update user active status or role (Admin only). */
@@ -162,11 +170,19 @@ export async function updateUser(
   if (!Number.isSafeInteger(userId) || userId <= 0) {
     throw new TypeError("Invalid user ID");
   }
-  const payload = await userRequest<{ status: string; message?: string }>(`/api/users/${userId}`, {
+  const payload = await userRequest<unknown>(`/api/users/${userId}`, {
     method: "PUT",
     body: JSON.stringify(updates),
   });
-  return payload.message || "User updated successfully";
+  if (
+    !isRecord(payload) ||
+    payload.status !== "success" ||
+    typeof payload.message !== "string" ||
+    payload.message.trim().length === 0
+  ) {
+    throw new UserActionError(502, "Server returned an invalid user update response contract");
+  }
+  return payload.message.trim();
 }
 
 /** Delete a user account (Admin only). */
@@ -174,8 +190,16 @@ export async function deleteUser(userId: number): Promise<string> {
   if (!Number.isSafeInteger(userId) || userId <= 0) {
     throw new TypeError("Invalid user ID");
   }
-  const payload = await userRequest<{ status: string; message?: string }>(`/api/users/${userId}`, {
+  const payload = await userRequest<unknown>(`/api/users/${userId}`, {
     method: "DELETE",
   });
-  return payload.message || "User deleted successfully";
+  if (
+    !isRecord(payload) ||
+    payload.status !== "success" ||
+    typeof payload.message !== "string" ||
+    payload.message.trim().length === 0
+  ) {
+    throw new UserActionError(502, "Server returned an invalid user deletion response contract");
+  }
+  return payload.message.trim();
 }

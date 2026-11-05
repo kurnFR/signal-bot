@@ -121,6 +121,26 @@ button:focus-visible,a:focus-visible,[tabindex="-1"]:focus-visible{outline:2px s
 .settings-telegram-status > div span { color: var(--text-secondary, #94a3b8); font-size: .75rem; }
 .settings-telegram-status > div strong { overflow-wrap: anywhere; font-size: .85rem; font-variant-numeric: tabular-nums; }
 
+/* Accessible native modal dialog styling */
+dialog.settings-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+  padding: 24px;
+  max-width: 520px;
+  width: calc(100% - 32px);
+  z-index: 1000;
+}
+dialog.settings-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(2px);
+}
+
 .table-sort-button{display:inline-flex;align-items:center;gap:6px;padding:2px 0;border:0;background:transparent;color:inherit;font:inherit;font-size:inherit;font-weight:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer;white-space:nowrap;user-select:none;transition:color 120ms ease}.table-sort-button:hover{color:var(--color-text)}.table-sort-button:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px;border-radius:4px}.table-sort-button.is-active{color:var(--color-accent)}.sort-icon-idle{opacity:.35;transition:opacity 120ms ease}.table-sort-button:hover .sort-icon-idle{opacity:.8}.sort-icon-active{color:var(--color-accent)}
 
 

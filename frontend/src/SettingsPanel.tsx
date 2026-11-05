@@ -1,5 +1,5 @@
 import { Key, MessageCircle, Moon, Plus, RefreshCw, ShieldCheck, Sun, Trash2, UserPlus, UserRound, Users } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError } from "./lib/api";
 import { changePassword, AuthRequestError } from "./lib/auth";
 import { fetchTelegramStatus, sendTelegramTestPing, TelegramActionError, type TelegramStatus } from "./lib/telegram";
@@ -23,6 +23,28 @@ interface SettingsPanelProps {
   role?: string;
 }
 
+function trapFocus(e: React.KeyboardEvent<HTMLDialogElement>) {
+  if (e.key !== "Tab") return;
+  const dialog = e.currentTarget;
+  const focusable = dialog.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  );
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (e.shiftKey) {
+    if (document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    }
+  } else {
+    if (document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+}
+
 function PreferenceRow({ icon, title, description, children }: { icon: ReactNode; title: string; description: string; children: ReactNode }) {
   return <div className="settings-preference-row"><div className="settings-preference-icon" aria-hidden="true">{icon}</div><div className="settings-preference-copy"><strong>{title}</strong><p>{description}</p></div><div className="settings-preference-control">{children}</div></div>;
 }
@@ -40,6 +62,9 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
   const [telegramTestBusy, setTelegramTestBusy] = useState(false);
   const [telegramTestError, setTelegramTestError] = useState<string | null>(null);
   const [telegramTestMessage, setTelegramTestMessage] = useState<string | null>(null);
+  const telegramDialogRef = useRef<HTMLDialogElement | null>(null);
+  const telegramCancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const telegramTriggerRef = useRef<HTMLElement | null>(null);
 
   // Diagnostics
   const [adminDiagnostics, setAdminDiagnostics] = useState<AdminSystemStatusResponse | null>(null);
@@ -60,6 +85,9 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
   const [usersAttempt, setUsersAttempt] = useState(0);
+  const [userActionError, setUserActionError] = useState<string | null>(null);
+  const [userActionSuccess, setUserActionSuccess] = useState<string | null>(null);
+  const [togglingUserId, setTogglingUserId] = useState<number | null>(null);
 
   // Create User Form State
   const [newUsername, setNewUsername] = useState("");
@@ -70,16 +98,112 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
   const [createUserError, setCreateUserError] = useState<string | null>(null);
   const [createUserSuccess, setCreateUserSuccess] = useState<string | null>(null);
 
-  // Action states for Reset/Delete
+  // Action states and refs for Reset Password Dialog
   const [selectedUserForReset, setSelectedUserForReset] = useState<ManagedUser | null>(null);
   const [adminNewPassword, setAdminNewPassword] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
-  const [resetSuccess, setResetSuccess] = useState<string | null>(null);
+  const resetDialogRef = useRef<HTMLDialogElement | null>(null);
+  const resetInputRef = useRef<HTMLInputElement | null>(null);
+  const resetTriggerRef = useRef<HTMLElement | null>(null);
 
+  // Action states and refs for Delete User Dialog
   const [selectedUserForDelete, setSelectedUserForDelete] = useState<ManagedUser | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteDialogRef = useRef<HTMLDialogElement | null>(null);
+  const deleteCancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const deleteTriggerRef = useRef<HTMLElement | null>(null);
+
+  // Focus management and modal lifecycle for Reset Password Dialog
+  useEffect(() => {
+    if (selectedUserForReset && resetDialogRef.current) {
+      if (!resetDialogRef.current.open) {
+        if (typeof resetDialogRef.current.showModal === "function") {
+          resetDialogRef.current.showModal();
+        } else {
+          resetDialogRef.current.setAttribute("open", "");
+        }
+      }
+      resetInputRef.current?.focus();
+    }
+  }, [selectedUserForReset]);
+
+  // Focus management and modal lifecycle for Delete User Dialog
+  useEffect(() => {
+    if (selectedUserForDelete && deleteDialogRef.current) {
+      if (!deleteDialogRef.current.open) {
+        if (typeof deleteDialogRef.current.showModal === "function") {
+          deleteDialogRef.current.showModal();
+        } else {
+          deleteDialogRef.current.setAttribute("open", "");
+        }
+      }
+      deleteCancelButtonRef.current?.focus();
+    }
+  }, [selectedUserForDelete]);
+
+  // Focus management and modal lifecycle for Telegram Test Confirmation Dialog
+  useEffect(() => {
+    if (confirmTelegramTest && telegramDialogRef.current) {
+      if (!telegramDialogRef.current.open) {
+        if (typeof telegramDialogRef.current.showModal === "function") {
+          telegramDialogRef.current.showModal();
+        } else {
+          telegramDialogRef.current.setAttribute("open", "");
+        }
+      }
+      telegramCancelButtonRef.current?.focus();
+    }
+  }, [confirmTelegramTest]);
+
+  const closeResetDialog = () => {
+    if (resetDialogRef.current?.open) {
+      if (typeof resetDialogRef.current.close === "function") {
+        resetDialogRef.current.close();
+      } else {
+        resetDialogRef.current.removeAttribute("open");
+      }
+    }
+    setSelectedUserForReset(null);
+    setAdminNewPassword("");
+    setResetError(null);
+    const trigger = resetTriggerRef.current;
+    if (trigger && document.body.contains(trigger)) {
+      trigger.focus();
+    }
+  };
+
+  const closeDeleteDialog = () => {
+    if (deleteDialogRef.current?.open) {
+      if (typeof deleteDialogRef.current.close === "function") {
+        deleteDialogRef.current.close();
+      } else {
+        deleteDialogRef.current.removeAttribute("open");
+      }
+    }
+    setSelectedUserForDelete(null);
+    setDeleteError(null);
+    const trigger = deleteTriggerRef.current;
+    if (trigger && document.body.contains(trigger)) {
+      trigger.focus();
+    }
+  };
+
+  const closeTelegramDialog = () => {
+    if (telegramDialogRef.current?.open) {
+      if (typeof telegramDialogRef.current.close === "function") {
+        telegramDialogRef.current.close();
+      } else {
+        telegramDialogRef.current.removeAttribute("open");
+      }
+    }
+    setConfirmTelegramTest(false);
+    const trigger = telegramTriggerRef.current;
+    if (trigger && document.body.contains(trigger)) {
+      trigger.focus();
+    }
+  };
 
   // Load Telegram Status (Admin Only)
   useEffect(() => {
@@ -227,19 +351,24 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
   };
 
   const handleToggleUserStatus = async (user: ManagedUser) => {
+    setUserActionError(null);
+    setUserActionSuccess(null);
+    setTogglingUserId(user.id);
     try {
-      await updateUser(user.id, { is_active: !user.is_active });
+      const message = await updateUser(user.id, { is_active: !user.is_active });
+      setUserActionSuccess(message);
       setUsersAttempt((v) => v + 1);
     } catch (cause) {
-      alert(cause instanceof UserActionError ? cause.message : "Failed to update user status.");
+      setUserActionError(cause instanceof UserActionError ? cause.message : "Failed to update user status.");
+    } finally {
+      setTogglingUserId(null);
     }
   };
 
   const handleResetUserPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedUserForReset) return;
+    if (!selectedUserForReset || resetBusy) return;
     setResetError(null);
-    setResetSuccess(null);
 
     if (adminNewPassword.length < 10) {
       setResetError("Password must be at least 10 characters.");
@@ -249,9 +378,9 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
     setResetBusy(true);
     try {
       const message = await resetUserPassword(selectedUserForReset.id, adminNewPassword);
-      setResetSuccess(message);
-      setAdminNewPassword("");
+      setUserActionSuccess(message);
       setUsersAttempt((v) => v + 1);
+      closeResetDialog();
     } catch (cause) {
       setResetError(cause instanceof UserActionError ? cause.message : "Failed to reset password.");
     } finally {
@@ -260,13 +389,14 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
   };
 
   const handleDeleteUser = async () => {
-    if (!selectedUserForDelete) return;
+    if (!selectedUserForDelete || deleteBusy) return;
     setDeleteBusy(true);
     setDeleteError(null);
     try {
-      await deleteUser(selectedUserForDelete.id);
-      setSelectedUserForDelete(null);
+      const message = await deleteUser(selectedUserForDelete.id);
+      setUserActionSuccess(message);
       setUsersAttempt((v) => v + 1);
+      closeDeleteDialog();
     } catch (cause) {
       setDeleteError(cause instanceof UserActionError ? cause.message : "Failed to delete user.");
     } finally {
@@ -275,11 +405,13 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
   };
 
   const runTelegramTest = async () => {
-    if (!isAdmin || !confirmTelegramTest || !telegramStatus?.hasToken) return;
-    setTelegramTestBusy(true); setTelegramTestError(null); setTelegramTestMessage(null);
+    if (!isAdmin || !confirmTelegramTest || telegramTestBusy || !telegramStatus?.hasToken) return;
+    setTelegramTestBusy(true);
+    setTelegramTestError(null);
+    setTelegramTestMessage(null);
     try {
       const result = await sendTelegramTestPing();
-      setConfirmTelegramTest(false);
+      closeTelegramDialog();
       if (result.success) {
         setTelegramTestMessage(result.chat_id
           ? `Test ping sent to the configured Telegram chat${result.bot?.username ? ` via @${result.bot.username}` : ""}.`
@@ -288,10 +420,13 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
         setTelegramTestError(result.error || "Telegram test failed. Check bot and chat configuration.");
       }
     } catch (cause) {
+      closeTelegramDialog();
       if (cause instanceof TelegramActionError && cause.status === 403) setTelegramTestError("Only admins can send a Telegram test ping.");
       else if (cause instanceof TelegramActionError && cause.status === 401) setTelegramTestError("Your session has expired. Sign in again before testing Telegram.");
       else setTelegramTestError(cause instanceof Error ? cause.message : "Telegram test failed. Please retry.");
-    } finally { setTelegramTestBusy(false); }
+    } finally {
+      setTelegramTestBusy(false);
+    }
   };
 
   return <div className="settings-view">
@@ -354,6 +489,22 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
 
       {usersError && <div className="api-error" role="alert"><div><strong>User management unavailable</strong><p>{usersError}</p></div><button className="button button-secondary" type="button" onClick={() => setUsersAttempt((v) => v + 1)}><RefreshCw size={15} /> Retry</button></div>}
 
+      {userActionError && (
+        <div className="api-error" role="alert" style={{ marginTop: 12 }}>
+          <div>
+            <strong>User action failed</strong>
+            <p>{userActionError}</p>
+          </div>
+          <button className="button button-secondary" type="button" onClick={() => setUserActionError(null)}>Dismiss</button>
+        </div>
+      )}
+
+      {userActionSuccess && (
+        <p className="control-feedback control-success" role="status" style={{ marginTop: 12 }}>
+          {userActionSuccess}
+        </p>
+      )}
+
       {/* Users Catalog Table */}
       <div className="status-table-wrap">
         <table className="status-table">
@@ -391,7 +542,13 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
                       type="button"
                       className="button button-secondary"
                       style={{ padding: "4px 8px", fontSize: 11 }}
-                      onClick={() => { setSelectedUserForReset(u); setResetError(null); setResetSuccess(null); }}
+                      aria-label={`Reset password for ${u.username}`}
+                      onClick={(e) => {
+                        resetTriggerRef.current = e.currentTarget;
+                        setAdminNewPassword("");
+                        setResetError(null);
+                        setSelectedUserForReset(u);
+                      }}
                     >
                       Reset Pass
                     </button>
@@ -400,9 +557,11 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
                         type="button"
                         className="button button-secondary"
                         style={{ padding: "4px 8px", fontSize: 11 }}
+                        aria-label={`${u.is_active ? "Disable" : "Enable"} user ${u.username}`}
+                        disabled={togglingUserId === u.id}
                         onClick={() => void handleToggleUserStatus(u)}
                       >
-                        {u.is_active ? "Disable" : "Enable"}
+                        {togglingUserId === u.id ? "Updating…" : u.is_active ? "Disable" : "Enable"}
                       </button>
                     )}
                     {!isSelf && (
@@ -410,7 +569,12 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
                         type="button"
                         className="button button-danger"
                         style={{ padding: "4px 8px", fontSize: 11 }}
-                        onClick={() => { setSelectedUserForDelete(u); setDeleteError(null); }}
+                        aria-label={`Delete user ${u.username}`}
+                        onClick={(e) => {
+                          deleteTriggerRef.current = e.currentTarget;
+                          setDeleteError(null);
+                          setSelectedUserForDelete(u);
+                        }}
                       >
                         <Trash2 size={12} />
                       </button>
@@ -425,59 +589,124 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
         </table>
       </div>
 
-      {/* Reset Password Inline Modal / Dialog */}
+      {/* Accessible Native HTML Modal Dialog: Reset Password */}
       {selectedUserForReset && (
-        <section className="panel" style={{ marginTop: 18, border: "1px solid var(--color-accent)" }}>
+        <dialog
+          ref={resetDialogRef}
+          className="settings-dialog"
+          aria-labelledby="reset-dialog-title"
+          aria-describedby="reset-dialog-desc"
+          onCancel={(e) => {
+            e.preventDefault();
+            closeResetDialog();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              closeResetDialog();
+            } else {
+              trapFocus(e);
+            }
+          }}
+        >
           <div className="panel-heading">
             <div>
-              <h3>Reset Password for '{selectedUserForReset.username}'</h3>
-              <p>Sets a temporary password. The user will be required to change it upon their next sign-in.</p>
+              <h3 id="reset-dialog-title">Reset Password for '{selectedUserForReset.username}'</h3>
+              <p id="reset-dialog-desc">Sets a temporary password. The user will be required to change it upon their next sign-in.</p>
             </div>
           </div>
-          <form onSubmit={handleResetUserPassword} style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-            <div className="screener-control-field" style={{ minWidth: 240 }}>
+          <form onSubmit={handleResetUserPassword} style={{ marginTop: 14 }}>
+            <div className="screener-control-field">
               <label htmlFor="admin-reset-new-password">New Password (min 10 chars)</label>
               <input
+                ref={resetInputRef}
                 id="admin-reset-new-password"
                 type="password"
                 required
                 minLength={10}
                 value={adminNewPassword}
+                disabled={resetBusy}
                 onChange={(e) => setAdminNewPassword(e.target.value)}
                 placeholder="Temporary password"
               />
             </div>
-            <button type="submit" className="button button-primary" disabled={resetBusy || adminNewPassword.length < 10}>
-              {resetBusy ? "Resetting…" : "Confirm Password Reset"}
-            </button>
-            <button type="button" className="button button-secondary" onClick={() => setSelectedUserForReset(null)}>
-              Cancel
-            </button>
+            {resetError && (
+              <div className="api-error" role="alert" style={{ marginTop: 10 }}>
+                <div><p>{resetError}</p></div>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={resetBusy}
+                onClick={closeResetDialog}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="button button-primary"
+                disabled={resetBusy || adminNewPassword.length < 10}
+              >
+                {resetBusy ? "Resetting…" : "Confirm Password Reset"}
+              </button>
+            </div>
           </form>
-          {resetError && <div className="api-error" role="alert" style={{ marginTop: 10 }}><div><p>{resetError}</p></div></div>}
-          {resetSuccess && <p className="control-feedback control-success" role="status">{resetSuccess}</p>}
-        </section>
+        </dialog>
       )}
 
-      {/* Delete User Confirmation Dialog */}
+      {/* Accessible Native HTML Modal Dialog: Delete User */}
       {selectedUserForDelete && (
-        <section className="panel" style={{ marginTop: 18, border: "1px solid var(--color-warning)" }}>
+        <dialog
+          ref={deleteDialogRef}
+          className="settings-dialog"
+          aria-labelledby="delete-dialog-title"
+          aria-describedby="delete-dialog-desc"
+          onCancel={(e) => {
+            e.preventDefault();
+            closeDeleteDialog();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              closeDeleteDialog();
+            } else {
+              trapFocus(e);
+            }
+          }}
+        >
           <div className="panel-heading">
             <div>
-              <h3>Delete Account '{selectedUserForDelete.username}'?</h3>
-              <p>This action permanently removes the user account and revokes active sessions. This cannot be undone.</p>
+              <h3 id="delete-dialog-title">Delete Account '{selectedUserForDelete.username}'?</h3>
+              <p id="delete-dialog-desc">This action permanently removes the user account and revokes active sessions. This cannot be undone.</p>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-            <button type="button" className="button button-danger" disabled={deleteBusy} onClick={() => void handleDeleteUser()}>
-              {deleteBusy ? "Deleting…" : "Confirm Delete"}
-            </button>
-            <button type="button" className="button button-secondary" disabled={deleteBusy} onClick={() => setSelectedUserForDelete(null)}>
+          {deleteError && (
+            <div className="api-error" role="alert" style={{ marginTop: 10 }}>
+              <div><p>{deleteError}</p></div>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
+            <button
+              ref={deleteCancelButtonRef}
+              type="button"
+              className="button button-secondary"
+              disabled={deleteBusy}
+              onClick={closeDeleteDialog}
+            >
               Cancel
             </button>
+            <button
+              type="button"
+              className="button button-danger"
+              disabled={deleteBusy}
+              onClick={() => void handleDeleteUser()}
+            >
+              {deleteBusy ? "Deleting…" : "Confirm Delete"}
+            </button>
           </div>
-          {deleteError && <div className="api-error" role="alert" style={{ marginTop: 10 }}><div><p>{deleteError}</p></div></div>}
-        </section>
+        </dialog>
       )}
 
       {/* Create New User Form */}
@@ -571,8 +800,57 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
         </div>}
         {telegramTestError && <div className="api-error" role="alert"><div><strong>Telegram test failed</strong><p>{telegramTestError}</p></div><button className="button button-secondary" type="button" onClick={() => setTelegramTestError(null)}>Dismiss</button></div>}
         {telegramTestMessage && <p className="control-feedback control-success" role="status">{telegramTestMessage}</p>}
-        <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={telegramLoading || telegramTestBusy || !telegramStatus?.hasToken} onClick={() => { setConfirmTelegramTest(true); setTelegramTestError(null); setTelegramTestMessage(null); }}>Review Telegram test</button></div>
-        {confirmTelegramTest && <section className="panel" aria-labelledby="settings-telegram-confirm-title"><div className="panel-heading"><div><h3 id="settings-telegram-confirm-title">Confirm Telegram test ping</h3><p>{telegramStatus?.chatId ? "This sends a real test message to the configured Telegram chat. Continue only if you intend to send that message." : "No chat ID is configured. This will verify the bot token but should not send a message."}</p></div></div><div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={telegramTestBusy} onClick={() => setConfirmTelegramTest(false)}>Cancel test</button><button className="button button-primary" type="button" disabled={telegramTestBusy || !telegramStatus?.hasToken} onClick={() => void runTelegramTest()}>{telegramTestBusy ? "Testing…" : "Send test ping"}</button></div></section>}
+        <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={telegramLoading || telegramTestBusy || !telegramStatus?.hasToken} onClick={(e) => { telegramTriggerRef.current = e.currentTarget; setConfirmTelegramTest(true); setTelegramTestError(null); setTelegramTestMessage(null); }}>Review Telegram test</button></div>
+        {confirmTelegramTest && (
+          <dialog
+            ref={telegramDialogRef}
+            className="settings-dialog"
+            aria-labelledby="settings-telegram-confirm-title"
+            aria-describedby="settings-telegram-confirm-desc"
+            onCancel={(e) => {
+              e.preventDefault();
+              closeTelegramDialog();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                closeTelegramDialog();
+              } else {
+                trapFocus(e);
+              }
+            }}
+          >
+            <div className="panel-heading">
+              <div>
+                <h3 id="settings-telegram-confirm-title">Confirm Telegram test ping</h3>
+                <p id="settings-telegram-confirm-desc">
+                  {telegramStatus?.chatId
+                    ? "This sends a real test message to the configured Telegram chat. Continue only if you intend to send that message."
+                    : "No chat ID is configured. This will verify the bot token but should not send a message."}
+                </p>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
+              <button
+                ref={telegramCancelButtonRef}
+                type="button"
+                className="button button-secondary"
+                disabled={telegramTestBusy}
+                onClick={closeTelegramDialog}
+              >
+                Cancel test
+              </button>
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={telegramTestBusy || !telegramStatus?.hasToken}
+                onClick={() => void runTelegramTest()}
+              >
+                {telegramTestBusy ? "Testing…" : "Send test ping"}
+              </button>
+            </div>
+          </dialog>
+        )}
       </>}
     </section>
 

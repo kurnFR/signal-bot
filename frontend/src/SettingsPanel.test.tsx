@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, cleanup } from "@testing-library/react";
+import { fireEvent, render, screen, cleanup, within, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsPanel } from "./SettingsPanel";
 
@@ -182,5 +182,438 @@ describe("SettingsPanel", () => {
 
     expect(await screen.findByText(/Password updated successfully/i)).toBeInTheDocument();
     expect(window.localStorage.getItem("token")).toBe("renewed-jwt-token");
+  });
+
+  describe("Accessible Dialogs & User Management Workflows", () => {
+    const baseUsers = [
+      {
+        id: 1,
+        username: "admin",
+        email: "admin@bot.internal",
+        role: "admin" as const,
+        is_active: true,
+        must_change_password: false,
+        created_at: "2026-10-01 10:00:00",
+        updated_at: "2026-10-01 10:00:00",
+      },
+      {
+        id: 2,
+        username: "trader_alice",
+        email: "alice@bot.internal",
+        role: "trader" as const,
+        is_active: true,
+        must_change_password: false,
+        created_at: "2026-10-02 12:00:00",
+        updated_at: "2026-10-02 12:00:00",
+      },
+    ];
+
+    const validAdminStatus = {
+      database: { status: "ok", host: "127.0.0.1", port: 3306, database: "test", tables: {}, error: null },
+      heartbeats: [],
+      binance: { spotApi: "online", futuresApi: "online", enableFuturesConfig: true },
+    };
+
+    it("opens reset-password dialog with accessible semantics, validates length, handles cancel/Escape focus restoration, and submits reset", async () => {
+      window.localStorage.setItem("token", "admin-session");
+      let resetPasswordCalledWith: unknown = null;
+
+      const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://localhost");
+        const path = url.pathname;
+        const method = init?.method ?? "GET";
+        const json = (payload: unknown, status = 200) =>
+          Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+
+        if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
+        if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
+        if (path === "/api/settings/status") return json(validAdminStatus);
+        if (path === "/api/users/2/reset-password" && method === "POST") {
+          resetPasswordCalledWith = JSON.parse(String(init?.body));
+          return json({ status: "success", message: "Password reset successfully for user 'trader_alice'" });
+        }
+        throw new Error("Unexpected: " + method + " " + path);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(<SettingsPanel theme="dark" onToggleTheme={() => undefined} username="admin" role="admin" />);
+
+      expect(await screen.findByText("trader_alice")).toBeInTheDocument();
+      const resetBtn = screen.getByRole("button", { name: "Reset password for trader_alice" });
+
+      // Open reset dialog
+      fireEvent.click(resetBtn);
+
+      const dialog = await screen.findByRole("dialog", { name: "Reset Password for 'trader_alice'" });
+      expect(dialog).toBeInTheDocument();
+      expect(dialog).toHaveAttribute("aria-describedby", "reset-dialog-desc");
+      expect(within(dialog).getByText(/Sets a temporary password/i)).toBeInTheDocument();
+
+      // Initial focus on input
+      const passInput = within(dialog).getByLabelText("New Password (min 10 chars)");
+      expect(document.activeElement).toBe(passInput);
+
+      // Submit button disabled when password < 10 chars
+      const submitBtn = within(dialog).getByRole("button", { name: "Confirm Password Reset" });
+      expect(submitBtn).toBeDisabled();
+
+      fireEvent.change(passInput, { target: { value: "short" } });
+      expect(submitBtn).toBeDisabled();
+
+      // Dismiss via Cancel button -> focus restored
+      const cancelBtn = within(dialog).getByRole("button", { name: "Cancel" });
+      fireEvent.click(cancelBtn);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(resetBtn);
+
+      // Re-open and dismiss via Escape key -> focus restored
+      fireEvent.click(resetBtn);
+      const reOpenedDialog = await screen.findByRole("dialog", { name: "Reset Password for 'trader_alice'" });
+      fireEvent.keyDown(reOpenedDialog, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(resetBtn);
+
+      // Re-open and submit valid password
+      fireEvent.click(resetBtn);
+      const reOpenedDialog2 = await screen.findByRole("dialog", { name: "Reset Password for 'trader_alice'" });
+      const passInput2 = within(reOpenedDialog2).getByLabelText("New Password (min 10 chars)");
+      fireEvent.change(passInput2, { target: { value: "NewTempPassword123!" } });
+      const submitBtn2 = within(reOpenedDialog2).getByRole("button", { name: "Confirm Password Reset" });
+      expect(submitBtn2).not.toBeDisabled();
+
+      fireEvent.click(submitBtn2);
+
+      // Dialog closes, focus is restored, and success status message announced
+      expect(await screen.findByRole("status")).toHaveTextContent("Password reset successfully for user 'trader_alice'");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(resetBtn);
+      expect(resetPasswordCalledWith).toEqual({ new_password: "NewTempPassword123!" });
+    });
+
+    it("handles password reset failure with role=alert and prevents double submission", async () => {
+      window.localStorage.setItem("token", "admin-session");
+
+      const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://localhost");
+        const path = url.pathname;
+        const method = init?.method ?? "GET";
+        const json = (payload: unknown, status = 200) =>
+          Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+
+        if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
+        if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
+        if (path === "/api/settings/status") return json(validAdminStatus);
+        if (path === "/api/users/2/reset-password" && method === "POST") {
+          return json({ detail: "Target user not found" }, 404);
+        }
+        throw new Error("Unexpected: " + method + " " + path);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(<SettingsPanel theme="dark" onToggleTheme={() => undefined} username="admin" role="admin" />);
+
+      expect(await screen.findByText("trader_alice")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Reset password for trader_alice" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Reset Password for 'trader_alice'" });
+      const passInput = within(dialog).getByLabelText("New Password (min 10 chars)");
+      fireEvent.change(passInput, { target: { value: "NewTempPassword123!" } });
+
+      const submitBtn = within(dialog).getByRole("button", { name: "Confirm Password Reset" });
+      fireEvent.click(submitBtn);
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("Target user not found");
+      expect(screen.getByRole("dialog")).toBeInTheDocument(); // Dialog remains open on error
+    });
+
+    it("toggles user status with inline feedback, catalog refresh, and handles error without calling alert()", async () => {
+      window.localStorage.setItem("token", "admin-session");
+      const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+
+      let isAliceActive = true;
+      let shouldFail = false;
+
+      const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://localhost");
+        const path = url.pathname;
+        const method = init?.method ?? "GET";
+        const json = (payload: unknown, status = 200) =>
+          Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+
+        if (path === "/api/users" && method === "GET") {
+          return json({
+            users: [
+              baseUsers[0],
+              { ...baseUsers[1], is_active: isAliceActive },
+            ],
+          });
+        }
+        if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
+        if (path === "/api/settings/status") return json(validAdminStatus);
+        if (path === "/api/users/2" && method === "PUT") {
+          if (shouldFail) {
+            return json({ detail: "Database concurrency conflict" }, 409);
+          }
+          const body = JSON.parse(String(init?.body));
+          isAliceActive = body.is_active;
+          return json({ status: "success", message: `User 'trader_alice' ${isAliceActive ? "activated" : "deactivated"}` });
+        }
+        throw new Error("Unexpected: " + method + " " + path);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(<SettingsPanel theme="dark" onToggleTheme={() => undefined} username="admin" role="admin" />);
+
+      const disableBtn = await screen.findByRole("button", { name: "Disable user trader_alice" });
+
+      // Successful toggle
+      fireEvent.click(disableBtn);
+
+      expect(await screen.findByRole("status")).toHaveTextContent("User 'trader_alice' deactivated");
+      expect(await screen.findByRole("button", { name: "Enable user trader_alice" })).toBeInTheDocument();
+
+      // Failed toggle without alert()
+      shouldFail = true;
+      fireEvent.click(screen.getByRole("button", { name: "Enable user trader_alice" }));
+
+      const alertRegion = await screen.findByRole("alert");
+      expect(alertRegion).toHaveTextContent("Database concurrency conflict");
+      expect(alertSpy).not.toHaveBeenCalled(); // alert() was NEVER invoked!
+      // Status remained Disabled because mutation failed
+      expect(screen.getByRole("button", { name: "Enable user trader_alice" })).toBeInTheDocument();
+
+      // Dismiss inline error
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      alertSpy.mockRestore();
+    });
+
+    it("opens delete confirmation dialog with danger indicator, cancels without mutation, and restores focus", async () => {
+      window.localStorage.setItem("token", "admin-session");
+      let deleteCalled = false;
+
+      const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://localhost");
+        const path = url.pathname;
+        const method = init?.method ?? "GET";
+        const json = (payload: unknown, status = 200) =>
+          Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+
+        if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
+        if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
+        if (path === "/api/settings/status") return json(validAdminStatus);
+        if (path === "/api/users/2" && method === "DELETE") {
+          deleteCalled = true;
+          return json({ status: "success", message: "User 'trader_alice' deleted" });
+        }
+        throw new Error("Unexpected: " + method + " " + path);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(<SettingsPanel theme="dark" onToggleTheme={() => undefined} username="admin" role="admin" />);
+
+      expect(await screen.findByText("trader_alice")).toBeInTheDocument();
+      const deleteBtn = screen.getByRole("button", { name: "Delete user trader_alice" });
+
+      // Open delete dialog
+      fireEvent.click(deleteBtn);
+
+      const dialog = await screen.findByRole("dialog", { name: "Delete Account 'trader_alice'?" });
+      expect(dialog).toBeInTheDocument();
+      expect(dialog).toHaveAttribute("aria-describedby", "delete-dialog-desc");
+      expect(within(dialog).getByText(/permanently removes the user account/i)).toBeInTheDocument();
+
+      // Initial focus on Cancel button (destructive safety)
+      const cancelBtn = within(dialog).getByRole("button", { name: "Cancel" });
+      expect(document.activeElement).toBe(cancelBtn);
+
+      // Confirm button has destructive styling
+      const confirmDeleteBtn = within(dialog).getByRole("button", { name: "Confirm Delete" });
+      expect(confirmDeleteBtn).toHaveClass("button-danger");
+
+      // Cancel dismissal
+      fireEvent.click(cancelBtn);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(deleteCalled).toBe(false);
+      expect(document.activeElement).toBe(deleteBtn); // Focus restored!
+
+      // Re-open and dismiss via Escape
+      fireEvent.click(deleteBtn);
+      const dialog2 = await screen.findByRole("dialog", { name: "Delete Account 'trader_alice'?" });
+      fireEvent.keyDown(dialog2, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(deleteCalled).toBe(false);
+      expect(document.activeElement).toBe(deleteBtn); // Focus restored!
+    });
+
+    it("executes user deletion upon confirmation, prevents double submission, and refreshes catalog", async () => {
+      window.localStorage.setItem("token", "admin-session");
+      let usersList = [...baseUsers];
+
+      const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://localhost");
+        const path = url.pathname;
+        const method = init?.method ?? "GET";
+        const json = (payload: unknown, status = 200) =>
+          Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+
+        if (path === "/api/users" && method === "GET") return json({ users: usersList });
+        if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
+        if (path === "/api/settings/status") return json(validAdminStatus);
+        if (path === "/api/users/2" && method === "DELETE") {
+          usersList = usersList.filter((u) => u.id !== 2);
+          return json({ status: "success", message: "User 'trader_alice' deleted" });
+        }
+        throw new Error("Unexpected: " + method + " " + path);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(<SettingsPanel theme="dark" onToggleTheme={() => undefined} username="admin" role="admin" />);
+
+      expect(await screen.findByText("trader_alice")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Delete user trader_alice" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Delete Account 'trader_alice'?" });
+      const confirmDeleteBtn = within(dialog).getByRole("button", { name: "Confirm Delete" });
+      fireEvent.click(confirmDeleteBtn);
+
+      expect(await screen.findByRole("status")).toHaveTextContent("User 'trader_alice' deleted");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByText("trader_alice")).not.toBeInTheDocument());
+    });
+
+    it("handles delete failure with inline role=alert error", async () => {
+      window.localStorage.setItem("token", "admin-session");
+
+      const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://localhost");
+        const path = url.pathname;
+        const method = init?.method ?? "GET";
+        const json = (payload: unknown, status = 200) =>
+          Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+
+        if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
+        if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
+        if (path === "/api/settings/status") return json(validAdminStatus);
+        if (path === "/api/users/2" && method === "DELETE") {
+          return json({ detail: "Cannot delete the last active administrator" }, 400);
+        }
+        throw new Error("Unexpected: " + method + " " + path);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(<SettingsPanel theme="dark" onToggleTheme={() => undefined} username="admin" role="admin" />);
+
+      expect(await screen.findByText("trader_alice")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Delete user trader_alice" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Delete Account 'trader_alice'?" });
+      const confirmDeleteBtn = within(dialog).getByRole("button", { name: "Confirm Delete" });
+      fireEvent.click(confirmDeleteBtn);
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("Cannot delete the last active administrator");
+      expect(screen.getByRole("dialog")).toBeInTheDocument(); // Dialog remains open on error
+    });
+
+    it("dismisses Telegram test ping confirmation via cancel and Escape without calling /api/telegram/test, restoring focus", async () => {
+      window.localStorage.setItem("token", "admin-session");
+      let telegramTestCalled = false;
+
+      const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://localhost");
+        const path = url.pathname;
+        const method = init?.method ?? "GET";
+        const json = (payload: unknown, status = 200) =>
+          Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+
+        if (path === "/api/telegram/status" && method === "GET") return json({ configured: true, chatId: "-100123456789", hasToken: true });
+        if (path === "/api/settings/status") return json(validAdminStatus);
+        if (path === "/api/users") return json({ users: [] });
+        if (path === "/api/telegram/test" && method === "POST") {
+          telegramTestCalled = true;
+          return json({ success: true, chat_id: "-100123456789" });
+        }
+        throw new Error("Unexpected: " + method + " " + path);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(<SettingsPanel theme="dark" onToggleTheme={() => undefined} username="admin" role="admin" />);
+
+      expect(await screen.findByText("-100123456789")).toBeInTheDocument();
+      const reviewBtn = screen.getByRole("button", { name: "Review Telegram test" });
+
+      // Open Telegram test dialog
+      fireEvent.click(reviewBtn);
+
+      const dialog = await screen.findByRole("dialog", { name: "Confirm Telegram test ping" });
+      expect(dialog).toBeInTheDocument();
+      expect(dialog).toHaveAttribute("aria-describedby", "settings-telegram-confirm-desc");
+
+      // Initial focus on Cancel test button
+      const cancelTestBtn = within(dialog).getByRole("button", { name: "Cancel test" });
+      expect(document.activeElement).toBe(cancelTestBtn);
+
+      // Dismiss via Cancel button -> focus restored to review button
+      fireEvent.click(cancelTestBtn);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(telegramTestCalled).toBe(false);
+      expect(document.activeElement).toBe(reviewBtn);
+
+      // Re-open and dismiss via Escape -> focus restored to review button
+      fireEvent.click(reviewBtn);
+      const dialog2 = await screen.findByRole("dialog", { name: "Confirm Telegram test ping" });
+      fireEvent.keyDown(dialog2, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(telegramTestCalled).toBe(false);
+      expect(document.activeElement).toBe(reviewBtn);
+    });
+
+    it("traps keyboard focus within accessible dialogs", async () => {
+      window.localStorage.setItem("token", "admin-session");
+
+      const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://localhost");
+        const path = url.pathname;
+        const method = init?.method ?? "GET";
+        const json = (payload: unknown, status = 200) =>
+          Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+
+        if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
+        if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
+        if (path === "/api/settings/status") return json(validAdminStatus);
+        throw new Error("Unexpected: " + method + " " + path);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(<SettingsPanel theme="dark" onToggleTheme={() => undefined} username="admin" role="admin" />);
+
+      expect(await screen.findByText("trader_alice")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Reset password for trader_alice" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Reset Password for 'trader_alice'" });
+      const passInput = within(dialog).getByLabelText("New Password (min 10 chars)");
+      const cancelBtn = within(dialog).getByRole("button", { name: "Cancel" });
+
+      // Enable submit button
+      fireEvent.change(passInput, { target: { value: "ValidPassword123!" } });
+      const submitBtn = within(dialog).getByRole("button", { name: "Confirm Password Reset" });
+
+      // Tab on last element (submitBtn) wraps to first element (passInput)
+      submitBtn.focus();
+      expect(document.activeElement).toBe(submitBtn);
+      fireEvent.keyDown(dialog, { key: "Tab" });
+      expect(document.activeElement).toBe(passInput);
+
+      // Shift+Tab on first element (passInput) wraps to last element (submitBtn)
+      passInput.focus();
+      expect(document.activeElement).toBe(passInput);
+      fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+      expect(document.activeElement).toBe(submitBtn);
+
+      // Dismiss dialog
+      fireEvent.click(cancelBtn);
+    });
   });
 });

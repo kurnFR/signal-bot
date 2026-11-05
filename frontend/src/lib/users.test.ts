@@ -144,6 +144,65 @@ describe("user management client", () => {
     }));
   });
 
+  describe("user mutation response contracts", () => {
+    const invalidPayloads = [
+      null,
+      "unexpected string",
+      12345,
+      [],
+      {},
+      { status: "error", message: "Error occurred" },
+      { status: "ok", message: "Not canonical success" },
+      { status: "success" },
+      { status: "success", message: null },
+      { status: "success", message: "" },
+      { status: "success", message: "   " },
+      { status: "success", message: 123 },
+    ];
+
+    it("rejects malformed resetUserPassword responses with UserActionError(502)", async () => {
+      window.localStorage.setItem("token", "admin-jwt-token");
+      for (const payload of invalidPayloads) {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+          JSON.stringify(payload),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )));
+
+        const errPromise = resetUserPassword(2, "SecurePass123!");
+        await expect(errPromise).rejects.toThrow(UserActionError);
+        await expect(errPromise).rejects.toMatchObject({ status: 502 });
+      }
+    });
+
+    it("rejects malformed updateUser responses with UserActionError(502)", async () => {
+      window.localStorage.setItem("token", "admin-jwt-token");
+      for (const payload of invalidPayloads) {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+          JSON.stringify(payload),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )));
+
+        const errPromise = updateUser(2, { is_active: false });
+        await expect(errPromise).rejects.toThrow(UserActionError);
+        await expect(errPromise).rejects.toMatchObject({ status: 502 });
+      }
+    });
+
+    it("rejects malformed deleteUser responses with UserActionError(502)", async () => {
+      window.localStorage.setItem("token", "admin-jwt-token");
+      for (const payload of invalidPayloads) {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+          JSON.stringify(payload),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )));
+
+        const errPromise = deleteUser(2);
+        await expect(errPromise).rejects.toThrow(UserActionError);
+        await expect(errPromise).rejects.toMatchObject({ status: 502 });
+      }
+    });
+  });
+
   describe("createUser contract and validation", () => {
     it("accepts user creation with missing optional fields and safely defaults them", async () => {
       window.localStorage.setItem("token", "admin-jwt-token");
