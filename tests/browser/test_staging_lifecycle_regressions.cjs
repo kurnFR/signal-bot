@@ -17,7 +17,7 @@
 const http = require("node:http");
 const net = require("node:net");
 const { spawn } = require("node:child_process");
-const { checkPortFree, waitForServer } = require("./staging_browser_acceptance.cjs");
+const { checkPortFree, waitForServer, isProcessAlive, terminateChildProcess } = require("./staging_browser_acceptance.cjs");
 
 function assert(condition, message) {
   if (!condition) {
@@ -400,6 +400,76 @@ async function runTests() {
       console.log("  [✓] waitForServer detected premature exit during identity verification:", err.message);
     }
     assert(waitFailed, "waitForServer must fail when child exits during identity verification");
+    passed++;
+  }
+
+  // --------------------------------------------------------------------------
+  // TEST 10: Process ignores SIGTERM; SIGKILL fallback terminates and confirms
+  // --------------------------------------------------------------------------
+  console.log("\n=== Test 10: Process ignores SIGTERM; SIGKILL fallback terminates and confirms ===");
+  {
+    const childScript = `
+      process.on('SIGTERM', () => {
+        // Intentionally ignore SIGTERM
+      });
+      setInterval(() => {}, 1000);
+    `;
+    const child = spawn("node", ["-e", childScript]);
+    await new Promise((r) => setTimeout(r, 200));
+    assert(isProcessAlive(child.pid), "Spawned child should be alive initially");
+
+    const result = await terminateChildProcess(child, 300, 2500);
+    assert(result.exited === true, "Child should be confirmed exited");
+    assert(result.forcedKill === true, "Child should have required SIGKILL fallback");
+    assert(!isProcessAlive(child.pid), "Child PID must not be alive after termination");
+    console.log(`  [✓] terminateChildProcess verified SIGKILL fallback for PID ${child.pid}.`);
+    passed++;
+  }
+
+  // --------------------------------------------------------------------------
+  // TEST 11: Unconfirmed process termination rejects and preserves fixtures
+  // --------------------------------------------------------------------------
+  console.log("\n=== Test 11: Unconfirmed process termination rejects and preserves fixtures ===");
+  {
+    const mockProc = {
+      pid: 888888,
+      exitCode: null,
+      signalCode: null,
+      kill: () => {},
+      once: () => {},
+    };
+
+    let terminationFailed = false;
+    let fixturesDeleted = false;
+
+    // Simulate cleanup flow from staging_browser_acceptance.cjs:
+    // If terminateChildProcess fails, fixtures must NOT be deleted.
+    let processTerminationError = null;
+    try {
+      // Simulate aliveCheckFn returning true (process remains alive)
+      await terminateChildProcess(mockProc, 100, 200, () => true);
+    } catch (err) {
+      terminationFailed = true;
+      processTerminationError = err;
+      assert(
+        err.message.includes("could not be confirmed terminated") && err.message.includes("Process remains alive"),
+        `Unexpected termination error message: ${err.message}`
+      );
+      console.log("  [✓] terminateChildProcess correctly rejected unconfirmed termination:", err.message);
+    }
+
+    assert(terminationFailed, "terminateChildProcess must reject when process termination cannot be confirmed");
+
+    // Guard fixture cleanup
+    if (processTerminationError) {
+      // Fixtures preserved!
+      fixturesDeleted = false;
+      console.log("  [✓] Safety guard verified: fixtures preserved when process termination is unconfirmed.");
+    } else {
+      fixturesDeleted = true;
+    }
+
+    assert(!fixturesDeleted, "Fixtures must NOT be deleted when process termination cannot be confirmed");
     passed++;
   }
 

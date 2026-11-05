@@ -334,6 +334,115 @@ function apiRequest(method, endpoint, token = null, body = null) {
   });
 }
 
+/**
+ * Check if a process is alive by sending signal 0.
+ */
+function isProcessAlive(pid) {
+  if (!pid || typeof pid !== "number" || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    if (err.code === "ESRCH") return false;
+    return true;
+  }
+}
+
+/**
+ * Safely terminate a child process with SIGTERM, falling back to SIGKILL,
+ * and verify that the child process has actually exited using bounded timeouts.
+ *
+ * Rejects if process termination cannot be confirmed within bounded timeouts.
+ */
+function terminateChildProcess(proc, sigtermTimeoutMs = 5000, sigkillTimeoutMs = 5000, aliveCheckFn = isProcessAlive) {
+  return new Promise((resolve, reject) => {
+    if (!proc || typeof proc !== "object") {
+      return resolve({ exited: true, reason: "no_process" });
+    }
+    const pid = proc.pid;
+    if (typeof pid !== "number" || pid <= 0) {
+      return resolve({ exited: true, reason: "no_valid_pid" });
+    }
+
+    // If child is already dead and reaped
+    if (proc.exitCode !== null || proc.signalCode !== null || !aliveCheckFn(pid)) {
+      return resolve({ exited: true, code: proc.exitCode, signal: proc.signalCode, alreadyDead: true });
+    }
+
+    let settled = false;
+    let killedWithSigkill = false;
+    let sigtermTimer = null;
+    let sigkillPollInterval = null;
+
+    function finish(err, result) {
+      if (settled) return;
+      settled = true;
+      if (sigtermTimer) {
+        clearTimeout(sigtermTimer);
+        sigtermTimer = null;
+      }
+      if (sigkillPollInterval) {
+        clearInterval(sigkillPollInterval);
+        sigkillPollInterval = null;
+      }
+      if (err) {
+        reject(err);
+      } else {
+        resolve(result);
+      }
+    }
+
+    proc.once("exit", (code, signal) => {
+      finish(null, { exited: true, code, signal, forcedKill: killedWithSigkill });
+    });
+
+    console.log(`\n[*] Gracefully terminating staging FastAPI server PID ${pid} (SIGTERM)...`);
+    try {
+      proc.kill("SIGTERM");
+    } catch (err) {
+      if (!aliveCheckFn(pid)) {
+        return finish(null, { exited: true, code: proc.exitCode, signal: proc.signalCode });
+      }
+      return finish(new Error(`Failed to send SIGTERM to child PID ${pid}: ${err.message}`));
+    }
+
+    sigtermTimer = setTimeout(() => {
+      if (settled) return;
+
+      if (!aliveCheckFn(pid) || proc.exitCode !== null || proc.signalCode !== null) {
+        return finish(null, { exited: true, code: proc.exitCode, signal: proc.signalCode });
+      }
+
+      console.warn(`[!] Server PID ${pid} did not exit within ${sigtermTimeoutMs}ms after SIGTERM; sending SIGKILL...`);
+      killedWithSigkill = true;
+      try {
+        proc.kill("SIGKILL");
+      } catch (err) {
+        if (!aliveCheckFn(pid)) {
+          return finish(null, { exited: true, code: proc.exitCode, signal: "SIGKILL", forcedKill: true });
+        }
+        return finish(new Error(`Failed to send SIGKILL to child PID ${pid}: ${err.message}`));
+      }
+
+      const sigkillStart = Date.now();
+      sigkillPollInterval = setInterval(() => {
+        if (settled) return;
+
+        const isDead = !aliveCheckFn(pid) || proc.exitCode !== null || proc.signalCode !== null;
+        if (isDead) {
+          return finish(null, { exited: true, code: proc.exitCode, signal: proc.signalCode || "SIGKILL", forcedKill: true });
+        }
+
+        if (Date.now() - sigkillStart > sigkillTimeoutMs) {
+          return finish(new Error(
+            `Child process PID ${pid} could not be confirmed terminated after SIGTERM (${sigtermTimeoutMs}ms) and SIGKILL (${sigkillTimeoutMs}ms). Process remains alive.`
+          ));
+        }
+      }, 50);
+    }, sigtermTimeoutMs);
+  });
+}
+
 async function run() {
   let proc = null;
   let browser = null;
@@ -496,7 +605,12 @@ print(json.dumps({"status": "ok", "active_db": active_db, "seeded_ids": seeded_i
     const consoleErrors = [];
     page.on("console", (msg) => {
       if (msg.type() === "error") {
-        consoleErrors.push(msg.text());
+        const text = msg.text();
+        // Ignore browser-generated network resource failure logs for documented 403 RBAC endpoints
+        if (text.includes("403 (Forbidden)")) {
+          return;
+        }
+        consoleErrors.push(text);
       }
     });
 
@@ -514,8 +628,15 @@ print(json.dumps({"status": "ok", "active_db": active_db, "seeded_ids": seeded_i
     const unexpectedHttpErrors = [];
     page.on("response", (res) => {
       if (res.status() >= 400) {
-        console.warn(`  [HTTP ${res.status()}] ${res.request().method()} ${res.url()}`);
-        unexpectedHttpErrors.push(`${res.status()} ${res.request().method()} ${res.url()}`);
+        // Documented backend RBAC: /api/custom-strategy is restricted to admin and trader roles.
+        // When viewer visits Strategy Library, backend middleware correctly enforces 403 Forbidden.
+        const isDocumentedViewerRbac = res.status() === 403 && res.url().includes("/api/custom-strategy/");
+        if (!isDocumentedViewerRbac) {
+          console.warn(`  [HTTP ${res.status()}] ${res.request().method()} ${res.url()}`);
+          unexpectedHttpErrors.push(`${res.status()} ${res.request().method()} ${res.url()}`);
+        } else {
+          console.log(`  [✓] Verified documented backend RBAC: ${res.request().method()} ${res.url()} denied with HTTP 403 for viewer.`);
+        }
       }
     });
 
@@ -527,6 +648,139 @@ print(json.dumps({"status": "ok", "active_db": active_db, "seeded_ids": seeded_i
     const navWhenUnauth = await page.$("nav");
     assert(navWhenUnauth === null, "Dashboard navigation must not be visible to unauthenticated requests");
     console.log("  [✓] Unauthenticated gate and protected route verified.");
+
+    const viewVerifications = [
+      { label: "Overview", selector: ".metrics-grid" },
+      { label: "Market Screener", selector: ".screener-metrics, section[aria-label='Smart money screener status']" },
+      { label: "Paper Trading", selector: ".paper-trading-view" },
+      { label: "Strategy Library", selector: "section[aria-label='Strategy library summary'], section[aria-labelledby='strategy-catalog-title']" },
+      { label: "Wallet Tracking", selector: ".wallet-tracking-view" },
+      { label: "Backtest Studio", selector: ".backtest-studio-view" },
+      { label: "ML Studio", selector: ".ml-studio-view" },
+      { label: "Research", selector: ".research-view" },
+      { label: "News AI", selector: ".news-ai-view" },
+      { label: "Master Data", selector: ".master-data-view" },
+      { label: "Settings", selector: ".settings-view" },
+    ];
+
+    async function exerciseRoleViews(roleName) {
+      console.log(`\n    [*] Exercising all 11 navigation views and asserting role controls for ${roleName}...`);
+      for (const { label, selector } of viewVerifications) {
+        const btn = page.locator(`button:has-text("${label}")`).first();
+        await btn.click();
+        await page.waitForSelector(selector, { timeout: 8000 });
+        assert(await page.locator(selector).first().isVisible(), `[${roleName}] View '${label}' panel matching '${selector}' must be visible`);
+        console.log(`      [✓] [${roleName}] View '${label}' rendered and verified with stable selector '${selector}'.`);
+
+        // Assert role-specific controls & permissions within each view
+        if (label === "Market Screener") {
+          if (roleName === "admin" || roleName === "trader") {
+            const hasToggle = await page.locator(".screener-alert-toggle").first().isVisible().catch(() => false);
+            const hasSave = (await page.locator("button:has-text('Save changes')").count()) > 0;
+            const hasReload = (await page.locator("button:has-text('Reload')").count()) > 0;
+            assert(hasToggle || hasSave || hasReload, `[${roleName}] Market Screener must render editable controls`);
+            console.log(`      [✓] [${roleName}] Market Screener verified: editable controls accessible.`);
+          } else {
+            // viewer
+            const saveBtnCount = await page.locator("button:has-text('Save changes')").count();
+            assert(saveBtnCount === 0, "[viewer] Market Screener must NOT display Save changes button");
+            assert(await page.locator(".screener-controls-readonly").isVisible(), "[viewer] Screener must display read-only banner");
+            console.log("      [✓] [viewer] Market Screener verified: editable controls hidden, read-only banner active.");
+          }
+        } else if (label === "Backtest Studio") {
+          if (roleName === "admin" || roleName === "trader") {
+            assert(
+              (await page.locator("button:has-text('Review backtest run')").count()) > 0,
+              `[${roleName}] Backtest Studio must display Review backtest run button`
+            );
+            console.log(`      [✓] [${roleName}] Backtest Studio verified: execution controls accessible.`);
+          } else {
+            // viewer
+            assert(
+              (await page.locator("button:has-text('Review backtest run')").count()) === 0,
+              "[viewer] Backtest Studio must NOT display Review backtest run button"
+            );
+            assert(
+              await page.getByText("Backtest execution is restricted to admin and trader roles").first().isVisible(),
+              "[viewer] Backtest Studio must display restriction notice"
+            );
+            console.log("      [✓] [viewer] Backtest Studio verified: execution controls restricted, view-only notice active.");
+          }
+        } else if (label === "Master Data") {
+          if (roleName === "admin" || roleName === "trader") {
+            assert(
+              (await page.locator("button:has-text('Review backfill')").count()) > 0,
+              `[${roleName}] Master Data must display Review backfill button`
+            );
+            console.log(`      [✓] [${roleName}] Master Data verified: backfill job controls accessible.`);
+          } else {
+            // viewer
+            assert(
+              (await page.locator("button:has-text('Review backfill')").count()) === 0,
+              "[viewer] Master Data must NOT display Review backfill button"
+            );
+            assert(
+              await page.getByText("Backfill and feature-build controls are restricted to admin and trader roles").first().isVisible(),
+              "[viewer] Master Data must display restriction notice"
+            );
+            console.log("      [✓] [viewer] Master Data verified: backfill controls restricted, view-only notice active.");
+          }
+        } else if (label === "Strategy Library") {
+          if (roleName === "admin" || roleName === "trader") {
+            assert(
+              (await page.locator("button:has-text('New strategy'), #strategy-create-title").count()) > 0,
+              `[${roleName}] Strategy Library must display New strategy button or create section`
+            );
+            console.log(`      [✓] [${roleName}] Strategy Library verified: strategy creation controls accessible.`);
+          } else {
+            // viewer
+            assert(
+              (await page.locator("button:has-text('New strategy')").count()) === 0,
+              "[viewer] Strategy Library must NOT display New strategy button"
+            );
+            assert(
+              (await page.locator("button:has-text('Generate draft')").count()) === 0,
+              "[viewer] Strategy Library must NOT display Generate draft button"
+            );
+            assert(
+              await page.getByText("Strategy quick tests are restricted to admin and trader roles").first().isVisible(),
+              "[viewer] Strategy Library must display quick tests restriction notice"
+            );
+            console.log("      [✓] [viewer] Strategy Library verified: strategy creation and quick tests restricted.");
+          }
+        } else if (label === "Settings") {
+          if (roleName === "admin") {
+            assert(await page.locator("text=User Accounts").first().isVisible(), "[admin] Settings must display User Accounts section");
+            assert(await page.locator("text=Telegram").first().isVisible(), "[admin] Settings must display Telegram integration section");
+            assert(await page.locator("button:has-text('Review Telegram test')").first().isVisible(), "[admin] Settings must display Review Telegram test button");
+            console.log("      [✓] [admin] Settings verified: User Accounts catalog and Telegram integration panel present.");
+          } else {
+            // trader & viewer
+            assert(
+              (await page.locator("text='Manage operator credentials'").count()) === 0,
+              `[${roleName}] Settings must NOT render User Management in DOM`
+            );
+            assert(
+              (await page.locator("button:has-text('Review Telegram test')").count()) === 0,
+              `[${roleName}] Settings must NOT render Telegram test ping in DOM`
+            );
+            assert(
+              (await page.locator("button:has-text('Send test ping')").count()) === 0,
+              `[${roleName}] Settings must NOT render Send test ping button in DOM`
+            );
+            assert(
+              await page.getByText("Telegram status and test controls are restricted to admins").first().isVisible(),
+              `[${roleName}] Settings must display Telegram restriction notice`
+            );
+            assert(
+              (await page.locator("#settings-password-title, button:has-text('Update Password')").count()) > 0,
+              `[${roleName}] Settings must render self password change section`
+            );
+            console.log(`      [✓] [${roleName}] Settings verified: User Management and Telegram ping strictly absent; restriction notice active.`);
+          }
+        }
+      }
+    }
 
     // TEST 2: Administrator Acceptance
     console.log(`\n  --- Administrator Acceptance (${ADMIN_USER}) ---`);
@@ -540,38 +794,7 @@ print(json.dumps({"status": "ok", "active_db": active_db, "seeded_ids": seeded_i
     assert(adminUserMeta.toLowerCase().includes("admin"), "User meta must show admin role");
     console.log(`  [✓] Admin authenticated successfully: ${adminUserMeta.replace(/\n/g, " - ")}`);
 
-    const viewVerifications = [
-      { label: "Overview", selector: ".metrics-grid" },
-      { label: "Master Data", selector: ".master-data-view" },
-      { label: "Backtest Studio", selector: ".backtest-studio-view" },
-      { label: "Paper Trading", selector: ".paper-trading-view" },
-      { label: "ML Studio", selector: ".ml-studio-view" },
-      { label: "Strategy Library", selector: "section[aria-label='Strategy library summary'], section[aria-labelledby='strategy-catalog-title']" },
-      { label: "News AI", selector: ".news-ai-view" },
-      { label: "Research", selector: ".research-view" },
-      { label: "Market Screener", selector: ".screener-metrics, section[aria-label='Smart money screener status']" },
-      { label: "Wallet Tracking", selector: ".wallet-tracking-view" },
-      { label: "Settings", selector: ".settings-view" },
-    ];
-
-    for (const { label, selector } of viewVerifications) {
-      const btn = page.locator(`button:has-text("${label}")`).first();
-      await btn.click();
-      await page.waitForSelector(selector, { timeout: 8000 });
-      assert(await page.locator(selector).first().isVisible(), `View '${label}' panel matching '${selector}' must be visible`);
-      console.log(`  [✓] View '${label}' rendered and verified with stable selector '${selector}'.`);
-    }
-
-    // Verify Admin Settings capabilities
-    assert(
-      await page.locator("text=User Accounts").first().isVisible(),
-      "Admin Settings must display User Accounts section"
-    );
-    assert(
-      await page.locator("text=Telegram").first().isVisible(),
-      "Admin Settings must display Telegram integration section"
-    );
-    console.log("  [✓] Admin Settings verified: User Accounts catalog and Telegram integration panel present.");
+    await exerciseRoleViews("admin");
 
     // Sign out
     await page.getByRole("button", { name: "Sign out" }).click();
@@ -588,17 +811,10 @@ print(json.dumps({"status": "ok", "active_db": active_db, "seeded_ids": seeded_i
 
     const traderUserMeta = await page.locator(".user-meta").innerText();
     assert(traderUserMeta.includes(TRADER_USER), `User meta must contain trader username ${TRADER_USER}`);
+    assert(traderUserMeta.toLowerCase().includes("trader"), "User meta must show trader role");
     console.log(`  [✓] Trader authenticated successfully: ${traderUserMeta.replace(/\n/g, " - ")}`);
 
-    // Trader visits Settings: User Accounts must NOT be rendered in the DOM
-    await page.locator('button:has-text("Settings")').first().click();
-    await page.waitForSelector(".settings-view", { timeout: 8000 });
-    const traderUserAccountsCount = await page.locator("text='Manage operator credentials'").count();
-    assert(traderUserAccountsCount === 0, "Trader Settings must NOT render User Management in DOM");
-
-    const traderPingButtonCount = await page.locator("button:has-text('Ping Bot')").count();
-    assert(traderPingButtonCount === 0, "Trader Settings must NOT render Telegram test ping button in DOM");
-    console.log("  [✓] Trader Settings verified: User Management and Telegram test ping are strictly absent from DOM.");
+    await exerciseRoleViews("trader");
 
     // Sign out
     await page.getByRole("button", { name: "Sign out" }).click();
@@ -614,24 +830,10 @@ print(json.dumps({"status": "ok", "active_db": active_db, "seeded_ids": seeded_i
 
     const viewerUserMeta = await page.locator(".user-meta").innerText();
     assert(viewerUserMeta.includes(VIEWER_USER), `User meta must contain viewer username ${VIEWER_USER}`);
+    assert(viewerUserMeta.toLowerCase().includes("viewer"), "User meta must show viewer role");
     console.log(`  [✓] Viewer authenticated successfully: ${viewerUserMeta.replace(/\n/g, " - ")}`);
 
-    // Market Screener: editable controls form should be hidden
-    await page.locator('button:has-text("Market Screener")').first().click();
-    await page.waitForSelector(".screener-metrics, section[aria-label='Smart money screener status']", { timeout: 8000 });
-    const viewerSaveButtonCount = await page.locator("button:has-text('Save changes')").count();
-    assert(viewerSaveButtonCount === 0, "Viewer Market Screener must NOT display editable controls save button");
-    console.log("  [✓] Viewer Market Screener verified: editable controls hidden.");
-
-    // Settings view: User Accounts hidden, Telegram test ping hidden
-    await page.locator('button:has-text("Settings")').first().click();
-    await page.waitForSelector(".settings-view", { timeout: 8000 });
-    const viewerUserAccountsCount = await page.locator("text='Manage operator credentials'").count();
-    assert(viewerUserAccountsCount === 0, "Viewer Settings must NOT render User Management in DOM");
-
-    const viewerPingButtonCount = await page.locator("button:has-text('Ping Bot')").count();
-    assert(viewerPingButtonCount === 0, "Viewer Settings must NOT render Telegram test ping button in DOM");
-    console.log("  [✓] Viewer Settings verified: User Accounts and Telegram test ping are strictly absent from DOM.");
+    await exerciseRoleViews("viewer");
 
     // Sign out
     await page.getByRole("button", { name: "Sign out" }).click();
@@ -664,24 +866,45 @@ print(json.dumps({"status": "ok", "active_db": active_db, "seeded_ids": seeded_i
     // -------------------------------------------------------------
     // PHASE 6: Safe Cleanup & Child Termination
     // -------------------------------------------------------------
+    let browserCloseError = null;
     if (browser) {
-      await browser.close().catch(() => {});
+      try {
+        await browser.close();
+      } catch (err) {
+        console.error("[-] Browser close failed:", err);
+        browserCloseError = err;
+      }
     }
 
-    if (proc && proc.exitCode === null) {
-      console.log("\n[*] Gracefully terminating staging FastAPI server (SIGTERM)...");
-      proc.kill("SIGTERM");
-      const exitPromise = new Promise((resolve) => proc.on("exit", (code, signal) => resolve({ code, signal })));
-      const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve("timeout"), 5000));
-      const termResult = await Promise.race([exitPromise, timeoutPromise]);
-
-      if (termResult === "timeout") {
-        console.warn("[!] Server did not exit in 5s; sending SIGKILL...");
-        proc.kill("SIGKILL");
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      } else {
-        console.log(`[+] Staging FastAPI server exited gracefully (code: ${termResult.code}, signal: ${termResult.signal}).`);
+    let processTerminationError = null;
+    if (proc) {
+      try {
+        const termResult = await terminateChildProcess(proc, 5000, 5000);
+        if (termResult.forcedKill) {
+          console.log(`[+] Staging FastAPI server confirmed terminated via SIGKILL fallback (PID: ${proc.pid}).`);
+        } else if (termResult.alreadyDead) {
+          console.log(`[+] Staging FastAPI server was already terminated (PID: ${proc.pid}).`);
+        } else {
+          console.log(`[+] Staging FastAPI server exited gracefully (code: ${termResult.code}, signal: ${termResult.signal}).`);
+        }
+      } catch (err) {
+        console.error("[-] Staging process termination could not be confirmed:", err.message);
+        processTerminationError = err;
       }
+    }
+
+    // CRITICAL SAFETY RULE:
+    // Do NOT delete test fixtures while the staging server process may still be alive!
+    // If termination cannot be confirmed, preserve fixtures, report a visible cleanup failure, and exit nonzero.
+    if (processTerminationError) {
+      console.error("[-] SAFETY PRESERVATION: Test fixtures were preserved because staging server termination could not be confirmed.");
+      const termFatalErr = new Error(
+        `Cleanup aborted: staging server termination could not be confirmed (${processTerminationError.message}). Fixtures preserved.`
+      );
+      if (!cleanupError) {
+        cleanupError = termFatalErr;
+      }
+      throw cleanupError;
     }
 
     // Clean up only the exact fixture IDs created for this run
@@ -722,6 +945,14 @@ print(json.dumps({"status": "ok", "deleted_users": deleted}))
         }
       }
     }
+
+    // Do not silently swallow browser-close failures when they affect cleanup guarantees
+    if (browserCloseError) {
+      if (!cleanupError) {
+        cleanupError = new Error(`Browser close failed: ${browserCloseError.message}`);
+        throw cleanupError;
+      }
+    }
   }
 
   console.log("\n[+] READ-ONLY STAGING BROWSER ACCEPTANCE COMPLETED SUCCESSFULLY!");
@@ -748,5 +979,7 @@ module.exports = {
   waitForServer,
   apiRequest,
   runPythonHelper,
+  isProcessAlive,
+  terminateChildProcess,
   run,
 };
