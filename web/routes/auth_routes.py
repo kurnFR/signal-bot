@@ -51,6 +51,7 @@ def _write_required_audit(action: str, username: str, user_id: Optional[int] = N
 # Must remain None in production.
 _test_before_admin_lock_hook: Optional[Callable[[Any, Any, int], None]] = None
 _test_after_admin_lock_hook: Optional[Callable[[Any, Any, int], None]] = None
+_test_active_admin_filter: Optional[Callable[[dict], bool]] = None
 
 
 def _commit_with_audit(conn, cur, action: str, username: str,
@@ -572,6 +573,8 @@ def update_user(user_id: int, req: UpdateUserRequest, admin: dict = Depends(requ
             if _test_after_admin_lock_hook is not None:
                 _test_after_admin_lock_hook(conn, cur, user_id)
             active_admins = cur.fetchall() or []
+            if _test_active_admin_filter is not None:
+                active_admins = [u for u in active_admins if _test_active_admin_filter(u)]
             other_active_admins = [u for u in active_admins if u["id"] != user_id]
             if len(other_active_admins) == 0:
                 raise HTTPException(status_code=400, detail="Cannot demote or deactivate the last active administrator")
@@ -643,6 +646,8 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
             if _test_after_admin_lock_hook is not None:
                 _test_after_admin_lock_hook(conn, cur, user_id)
             active_admins = cur.fetchall() or []
+            if _test_active_admin_filter is not None:
+                active_admins = [u for u in active_admins if _test_active_admin_filter(u)]
             other_active_admins = [u for u in active_admins if u["id"] != user_id]
             if len(other_active_admins) == 0:
                 raise HTTPException(status_code=400, detail="Cannot delete the last active administrator")

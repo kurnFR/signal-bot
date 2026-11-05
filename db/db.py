@@ -29,7 +29,7 @@ def get_retailbot2_pool():
     if _retailbot2_pool is None:
         _retailbot2_pool = pooling.MySQLConnectionPool(
             pool_name="retailbot2_pool",
-            pool_size=10,
+            pool_size=3,
             init_command="SET time_zone = '+00:00'",
             **RETAILBOT2_DB_CONFIG,
         )

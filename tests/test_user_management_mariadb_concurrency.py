@@ -7,10 +7,10 @@ proves that the EXACT second transaction enters MariaDB's 'LOCK WAIT' state,
 and verifies that rejected operations explicitly roll back without leaving partial database
 or audit mutations.
 
-All tests execute against a dedicated disposable test database created specifically for this run.
+All tests execute strictly against the authorized 'signal_bot_test' database.
 """
 import concurrent.futures
-import subprocess
+import os
 import sys
 import threading
 import time
@@ -19,8 +19,17 @@ import uuid
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 
+# 1. Enforce database isolation before importing or initializing DB pools
+os.environ["MYSQL_DATABASE"] = "signal_bot_test"
+
 import config
+config.MYSQL_CONFIG["database"] = "signal_bot_test"
+config.RETAILBOT2_DB_CONFIG["database"] = "signal_bot_test"
+
 import db.db as db_module
+db_module._pool = None
+db_module._retailbot2_pool = None
+
 from web.app import app
 from web.auth import create_access_token, hash_password
 import web.routes.auth_routes as auth_routes
@@ -29,98 +38,93 @@ import web.routes.auth_routes as auth_routes
 class TestMariaDBUserManagementConcurrency(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls._orig_db = config.MYSQL_CONFIG.get("database", "crypto_signals")
-        cls._disposable_db = f"signal_bot_ui_acceptance_{int(time.time())}_{uuid.uuid4().hex[:6]}"
-
-        # Hard safety validation: refuse production and legacy test databases
-        if cls._disposable_db in ("crypto_signals", "signal_bot_test") or not cls._disposable_db.startswith("signal_bot_ui_acceptance_"):
-            raise ValueError(f"Prohibited or unsafe database name for concurrency acceptance: {cls._disposable_db}")
-
-        # Create the dedicated disposable database
-        root_conn = db_module.get_pool().get_connection()
-        try:
-            root_cur = root_conn.cursor()
-            root_cur.execute(f"CREATE DATABASE {cls._disposable_db}")
-            root_cur.close()
-        finally:
-            root_conn.close()
-
-        # Apply all migrations to the disposable database
-        env = {k: str(v) for k, v in config.MYSQL_CONFIG.items()}
-        env.update({"MYSQL_DATABASE": cls._disposable_db, "PATH": "/bin:/usr/bin"})
-        res = subprocess.run(
-            [sys.executable, "-m", "db.migrate"],
-            env=env,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-
-        # Configure centralized database pool to use the isolated disposable database
-        config.MYSQL_CONFIG["database"] = cls._disposable_db
-        config.RETAILBOT2_DB_CONFIG["database"] = cls._disposable_db
+        # Mandatory database isolation guard: enforce signal_bot_test authorization
+        os.environ["MYSQL_DATABASE"] = "signal_bot_test"
+        config.MYSQL_CONFIG["database"] = "signal_bot_test"
+        config.RETAILBOT2_DB_CONFIG["database"] = "signal_bot_test"
         db_module._pool = None
+        db_module._retailbot2_pool = None
+
         cls.pool = db_module.get_pool()
         cls.client = TestClient(app, raise_server_exceptions=False)
+
+        # Verify the exact resolved database on the active pool connection
+        conn = cls.pool.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT DATABASE()")
+            db_name = cur.fetchone()[0]
+            cur.close()
+            if db_name != "signal_bot_test":
+                raise RuntimeError(f"Database isolation guard failed: connected to '{db_name}', expected 'signal_bot_test'")
+        finally:
+            conn.close()
+
+        cls._run_id = uuid.uuid4().hex[:8]
 
     @classmethod
     def tearDownClass(cls):
         # Reset test hooks
         auth_routes._test_before_admin_lock_hook = None
         auth_routes._test_after_admin_lock_hook = None
+        auth_routes._test_active_admin_filter = None
 
-        # Close pool before dropping the database
-        config.MYSQL_CONFIG["database"] = cls._orig_db
-        config.RETAILBOT2_DB_CONFIG["database"] = cls._orig_db
+        # Reset pools without creating new connections
         db_module._pool = None
-
-        # Cleanly drop the dedicated disposable database
-        if cls._disposable_db.startswith("signal_bot_ui_acceptance_") and cls._disposable_db not in ("crypto_signals", "signal_bot_test"):
-            root_conn = db_module.get_pool().get_connection()
-            try:
-                root_cur = root_conn.cursor()
-                root_cur.execute(f"DROP DATABASE IF EXISTS {cls._disposable_db}")
-                root_cur.close()
-            finally:
-                root_conn.close()
+        db_module._retailbot2_pool = None
 
     def setUp(self):
         auth_routes._test_before_admin_lock_hook = None
         auth_routes._test_after_admin_lock_hook = None
+        auth_routes._test_active_admin_filter = None
+
+        self.test_prefix = f"conc_{self._run_id}_{int(time.time()*1000) % 1000000}"
+        self.seeded_user_ids = []
+
         conn = self.pool.get_connection()
         try:
             cur = conn.cursor()
-            cur.execute("DELETE FROM audit_logs WHERE username LIKE 'conc_test_%'")
-            cur.execute("DELETE FROM users WHERE username LIKE 'conc_test_%'")
-            cur.execute("UPDATE users SET is_active = 0 WHERE username = 'admin'")
-            conn.commit()
-
-            # Seed test administrators and operator
+            # Seed run-specific test administrators and caller with unique usernames
             pwd_hash = hash_password("SecurePassword123!")
+            u_admin1 = f"{self.test_prefix}_adm1"
+            u_admin2 = f"{self.test_prefix}_adm2"
+            u_caller = f"{self.test_prefix}_clr"
+
             cur.execute(
                 """
                 INSERT INTO users (username, email, password_hash, role, is_active, session_version)
                 VALUES
-                  ('conc_test_admin1', 'conc_admin1@test.com', %s, 'admin', 1, 0),
-                  ('conc_test_admin2', 'conc_admin2@test.com', %s, 'admin', 1, 0),
-                  ('conc_test_caller', 'conc_caller@test.com', %s, 'admin', 1, 0)
+                  (%s, %s, %s, 'admin', 1, 0),
+                  (%s, %s, %s, 'admin', 1, 0),
+                  (%s, %s, %s, 'admin', 1, 0)
                 """,
-                (pwd_hash, pwd_hash, pwd_hash),
+                (
+                    u_admin1, f"{u_admin1}@test.com", pwd_hash,
+                    u_admin2, f"{u_admin2}@test.com", pwd_hash,
+                    u_caller, f"{u_caller}@test.com", pwd_hash,
+                ),
             )
             conn.commit()
 
-            cur.execute("SELECT id, username FROM users WHERE username LIKE 'conc_test_%'")
+            cur.execute(
+                "SELECT id, username FROM users WHERE username IN (%s, %s, %s)",
+                (u_admin1, u_admin2, u_caller),
+            )
             rows = {r[1]: r[0] for r in cur.fetchall()}
-            self.admin1_id = rows["conc_test_admin1"]
-            self.admin2_id = rows["conc_test_admin2"]
-            self.caller_id = rows["conc_test_caller"]
+            self.admin1_id = rows[u_admin1]
+            self.admin2_id = rows[u_admin2]
+            self.caller_id = rows[u_caller]
+            self.seeded_user_ids = [self.admin1_id, self.admin2_id, self.caller_id]
             cur.close()
         finally:
             conn.close()
 
+        # Isolate the concurrency test to specifically protect the test admin fixtures
+        auth_routes._test_active_admin_filter = lambda u: u["id"] in {self.admin1_id, self.admin2_id}
+
         self.caller_token = create_access_token(
             user_id=self.caller_id,
-            username="conc_test_caller",
+            username=f"{self.test_prefix}_clr",
             role="admin",
             session_version=0,
         )
@@ -129,30 +133,41 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
             "Content-Type": "application/json",
         }
         self.user_auth = {
-            "id": self.caller_id, "username": "conc_test_caller",
-            "email": "conc_caller@test.com", "role": "admin",
+            "id": self.caller_id, "username": f"{self.test_prefix}_clr",
+            "email": f"{self.test_prefix}_clr@test.com", "role": "admin",
             "is_active": 1, "must_change_password": 0, "session_version": 0,
         }
 
     def tearDown(self):
         auth_routes._test_before_admin_lock_hook = None
         auth_routes._test_after_admin_lock_hook = None
-        conn = self.pool.get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute("DELETE FROM audit_logs WHERE username LIKE 'conc_test_%'")
-            cur.execute("DELETE FROM users WHERE username LIKE 'conc_test_%'")
-            conn.commit()
-            cur.close()
-        finally:
-            conn.close()
+        auth_routes._test_active_admin_filter = None
+
+        if hasattr(self, "seeded_user_ids") and self.seeded_user_ids:
+            conn = self.pool.get_connection()
+            try:
+                cur = conn.cursor()
+                placeholders = ",".join(["%s"] * len(self.seeded_user_ids))
+                cur.execute(
+                    f"DELETE FROM audit_logs WHERE user_id IN ({placeholders})",
+                    tuple(self.seeded_user_ids),
+                )
+                cur.execute(
+                    f"DELETE FROM users WHERE id IN ({placeholders})",
+                    tuple(self.seeded_user_ids),
+                )
+                conn.commit()
+                cur.close()
+            finally:
+                conn.close()
 
     def _count_active_test_admins(self):
         conn = self.pool.get_connection()
         try:
             cur = conn.cursor()
             cur.execute(
-                "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1 AND username IN ('conc_test_admin1', 'conc_test_admin2')"
+                "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1 AND id IN (%s, %s)",
+                (self.admin1_id, self.admin2_id),
             )
             count = cur.fetchone()[0]
             cur.close()
@@ -189,16 +204,6 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         7. Thread 2 unblocks, re-reads updated database state under lock, and is rejected with HTTP 400.
         8. Asserts exactly one 200, exactly one 400, and at least 1 active admin remains.
         """
-        # Deactivate caller to isolate admin1 and admin2 as the sole active admins
-        conn = self.pool.get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute("UPDATE users SET is_active = 0 WHERE id = %s", (self.caller_id,))
-            conn.commit()
-            cur.close()
-        finally:
-            conn.close()
-
         self.assertEqual(self._count_active_test_admins(), 2)
 
         t1_locked = threading.Event()
@@ -275,20 +280,24 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         remaining_admins = self._count_active_test_admins()
         self.assertEqual(remaining_admins, 1)
 
+        # Confirm the rejected user's state did not mutate
+        rejected_target_id = self.admin2_id if rejected is res2 else self.admin1_id
+        conn = self.pool.get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute("SELECT role, is_active FROM users WHERE id = %s", (rejected_target_id,))
+            user = cur.fetchone()
+            self.assertEqual(user["role"], "admin")
+            self.assertEqual(user["is_active"], 1)
+            cur.close()
+        finally:
+            conn.close()
+
     def test_concurrent_admin_deactivation_prevents_zero_admins(self):
         """Two administrators concurrently attempt to deactivate the last two active administrators.
 
         Proves that the EXACT second transaction enters MariaDB's LOCK WAIT state.
         """
-        conn = self.pool.get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute("UPDATE users SET is_active = 0 WHERE id = %s", (self.caller_id,))
-            conn.commit()
-            cur.close()
-        finally:
-            conn.close()
-
         self.assertEqual(self._count_active_test_admins(), 2)
 
         t1_locked = threading.Event()
@@ -367,15 +376,6 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
 
         Proves that the EXACT second transaction enters MariaDB's LOCK WAIT state.
         """
-        conn = self.pool.get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute("UPDATE users SET is_active = 0 WHERE id = %s", (self.caller_id,))
-            conn.commit()
-            cur.close()
-        finally:
-            conn.close()
-
         self.assertEqual(self._count_active_test_admins(), 2)
 
         t1_locked = threading.Event()
@@ -449,7 +449,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         self.assertEqual(remaining_admins, 1)
 
     def test_successful_deactivation_when_another_active_admin_exists(self):
-        """Deactivating admin1 succeeds when admin2 and caller are both active."""
+        """Deactivating admin1 succeeds when admin2 is active."""
         with patch("web.app.authenticate_request", return_value=self.user_auth), \
              patch("web.auth.authenticate_request", return_value=self.user_auth):
             res = self.client.put(
@@ -471,11 +471,11 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
 
     def test_rejected_operations_produce_no_database_or_audit_mutations(self):
         """Rejected operations must produce zero mutations in users and zero audit log entries."""
-        # Isolate admin1 as the sole active administrator
+        # Deactivate admin2 so admin1 is the sole remaining active admin in the test filter
         conn = self.pool.get_connection()
         try:
             cur = conn.cursor()
-            cur.execute("UPDATE users SET is_active = 0 WHERE id IN (%s, %s)", (self.admin2_id, self.caller_id))
+            cur.execute("UPDATE users SET is_active = 0 WHERE id = %s", (self.admin2_id,))
             conn.commit()
             cur.close()
         finally:
@@ -504,9 +504,10 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
             self.assertEqual(admin1["role"], "admin")
             self.assertEqual(admin1["is_active"], 1)
 
-            # Verify no audit logs were written for the rejected actions
+            # Verify no audit logs were written for the rejected actions on admin1
             cur.execute(
-                "SELECT COUNT(*) as count FROM audit_logs WHERE action IN ('USER_UPDATED', 'USER_DELETED') AND username = 'conc_test_caller'"
+                "SELECT COUNT(*) as count FROM audit_logs WHERE user_id = %s",
+                (self.caller_id,),
             )
             audit_count = cur.fetchone()["count"]
             self.assertEqual(audit_count, 0)
@@ -521,17 +522,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         2. The database connection can subsequently be reused without lingering locks.
         3. A subsequent valid administrator operation is not blocked by the previous rejected request.
         4. No partial database mutation occurs.
-        5. Existing audit behavior remains correct.
         """
-        conn = self.pool.get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute("UPDATE users SET is_active = 1 WHERE id IN (%s, %s, %s)", (self.admin1_id, self.admin2_id, self.caller_id))
-            conn.commit()
-            cur.close()
-        finally:
-            conn.close()
-
         with patch("web.app.authenticate_request", return_value=self.user_auth), \
              patch("web.auth.authenticate_request", return_value=self.user_auth):
 
@@ -562,6 +553,64 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
             cur.execute("SELECT role, is_active FROM users WHERE id = %s", (self.admin1_id,))
             admin1 = cur.fetchone()
             self.assertEqual(admin1["role"], "viewer")
+            cur.close()
+        finally:
+            conn.close()
+
+    def test_failure_path_releases_sync_and_cleans_up(self):
+        """Proves that a timeout or assertion failure during concurrent execution
+        safely releases synchronization events, joins worker threads, resets test hooks,
+        and leaves the test database usable for subsequent operations."""
+        t1_locked = threading.Event()
+        t1_can_proceed = threading.Event()
+        simulated_failure_hit = False
+
+        def after_hook(hook_conn, hook_cur, target_id):
+            if target_id == self.admin1_id:
+                t1_locked.set()
+                t1_can_proceed.wait(timeout=2.0)
+
+        auth_routes._test_after_admin_lock_hook = after_hook
+
+        def slow_admin_op(target_id):
+            client = TestClient(app, raise_server_exceptions=False)
+            return client.put(
+                f"/api/users/{target_id}",
+                json={"role": "trader"},
+                headers=self.headers,
+            )
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        try:
+            with patch("web.app.authenticate_request", return_value=self.user_auth), \
+                 patch("web.auth.authenticate_request", return_value=self.user_auth):
+                f1 = executor.submit(slow_admin_op, self.admin1_id)
+                self.assertTrue(t1_locked.wait(timeout=3.0))
+
+                # Simulate an unexpected assertion failure in the test orchestrator
+                simulated_failure_hit = True
+                raise AssertionError("Simulated test orchestrator assertion failure")
+        except AssertionError as e:
+            self.assertEqual(str(e), "Simulated test orchestrator assertion failure")
+        finally:
+            # Crucial failure-path cleanup: release lock wait so worker can finish
+            t1_locked.set()
+            t1_can_proceed.set()
+            auth_routes._test_before_admin_lock_hook = None
+            auth_routes._test_after_admin_lock_hook = None
+            auth_routes._test_active_admin_filter = None
+            executor.shutdown(wait=True)
+
+        self.assertTrue(simulated_failure_hit)
+        self.assertIsNone(auth_routes._test_before_admin_lock_hook)
+        self.assertIsNone(auth_routes._test_after_admin_lock_hook)
+
+        # Verify the test database is immediately usable and responsive
+        conn = self.pool.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            self.assertEqual(cur.fetchone()[0], 1)
             cur.close()
         finally:
             conn.close()
