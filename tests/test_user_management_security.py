@@ -90,6 +90,48 @@ class TestUserManagementSecurity(unittest.TestCase):
         self.assertEqual(res_bad_role.status_code, 400)
         self.assertIn("Role must be one of: admin, trader, viewer", res_bad_role.json()["detail"])
 
+    def test_create_user_success_returns_complete_profile(self):
+        payload = {
+            "username": "trader_frank",
+            "email": "frank@test.com",
+            "password": "SecurePassword123!",
+            "role": "trader",
+        }
+        mock_conn, mock_cur = MagicMock(), MagicMock()
+        mock_conn.cursor.return_value = mock_cur
+        mock_cur.lastrowid = 42
+        mock_cur.fetchone.side_effect = [
+            None,  # First query: collision check returns None
+            {      # Second query: fetch newly created user
+                "id": 42,
+                "username": "trader_frank",
+                "email": "frank@test.com",
+                "role": "trader",
+                "is_active": 1,
+                "must_change_password": 0,
+                "created_at": "2026-11-05 10:00:00",
+                "updated_at": "2026-11-05 10:00:00",
+            },
+        ]
+        with patch("web.app.authenticate_request", return_value=self._auth_user(1, "admin", "admin")), \
+             patch("web.auth.authenticate_request", return_value=self._auth_user(1, "admin", "admin")), \
+             patch("web.routes.auth_routes.get_pool") as mock_pool:
+            mock_pool.return_value.get_connection.return_value = mock_conn
+            res = self.client.post("/api/users", json=payload, headers=self._headers(self.admin_token))
+
+        self.assertEqual(res.status_code, 201)
+        data = res.json()
+        self.assertEqual(data["status"], "success")
+        user = data["user"]
+        self.assertEqual(user["id"], 42)
+        self.assertEqual(user["username"], "trader_frank")
+        self.assertEqual(user["email"], "frank@test.com")
+        self.assertEqual(user["role"], "trader")
+        self.assertIs(user["is_active"], True)
+        self.assertIs(user["must_change_password"], False)
+        self.assertEqual(user["created_at"], "2026-11-05 10:00:00")
+        self.assertEqual(user["updated_at"], "2026-11-05 10:00:00")
+
     def test_update_user_lockout_and_role_validation(self):
         # Unauthenticated -> 401
         self.assertEqual(self.client.put("/api/users/2", json={"is_active": False}).status_code, 401)

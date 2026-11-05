@@ -431,6 +431,7 @@ async function runTests() {
   // --------------------------------------------------------------------------
   console.log("\n=== Test 11: Cleanup orchestration - termination failure prevents fixture deletion ===");
   {
+    // Subtest 11A: terminateProcFn throws an error
     const mockProc = { pid: 888888, exitCode: null, signalCode: null };
     let deleteFixturesCalled = false;
     let cleanupReportedFailure = false;
@@ -454,12 +455,48 @@ async function runTests() {
         err.message.includes("staging server termination could not be confirmed") && err.message.includes("Fixtures preserved"),
         `Unexpected cleanup error message: ${err.message}`
       );
-      console.log("  [✓] orchestrateStagingCleanup reported visible termination failure:", err.message);
+      console.log("  [✓] 11A: orchestrateStagingCleanup reported visible termination failure on throw:", err.message);
     }
 
     assert(cleanupReportedFailure, "orchestrateStagingCleanup must report failure when process termination fails");
     assert(!deleteFixturesCalled, "Fixtures must NOT be deleted when process termination fails");
-    console.log("  [✓] Verified: termination failure strictly prevented fixture deletion.");
+    console.log("  [✓] 11A Verified: termination failure strictly prevented fixture deletion.");
+
+    // Subtest 11B: terminateProcFn returns { exited: false }
+    const unconfirmedResults = [
+      { exited: false },
+      {},
+      null,
+    ];
+
+    for (const [idx, result] of unconfirmedResults.entries()) {
+      let unconfirmedDeleteCalled = false;
+      let unconfirmedReportedFailure = false;
+
+      try {
+        await orchestrateStagingCleanup({
+          proc: mockProc,
+          seededUserIds: [8001, 8002],
+          targetDb: "signal_bot_test",
+          terminateProcFn: async () => result,
+          deleteFixturesFn: async () => {
+            unconfirmedDeleteCalled = true;
+            return { status: "ok" };
+          },
+        });
+      } catch (err) {
+        unconfirmedReportedFailure = true;
+        assert(
+          err.message.includes("staging server termination could not be confirmed") && err.message.includes("Fixtures preserved"),
+          `Unexpected cleanup error message for result ${JSON.stringify(result)}: ${err.message}`
+        );
+        console.log(`  [✓] 11B.${idx + 1}: orchestrateStagingCleanup rejected unconfirmed result ${JSON.stringify(result)}:`, err.message);
+      }
+
+      assert(unconfirmedReportedFailure, `orchestrateStagingCleanup must report failure for unconfirmed termination result ${JSON.stringify(result)}`);
+      assert(!unconfirmedDeleteCalled, `Fixtures must NOT be deleted when termination result is unconfirmed: ${JSON.stringify(result)}`);
+    }
+    console.log("  [✓] 11B Verified: unconfirmed termination results ({ exited: false }, {}, null) strictly prevented fixture deletion.");
     passed++;
   }
 

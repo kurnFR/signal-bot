@@ -274,11 +274,17 @@ app.include_router(research_router)
 app.include_router(wallet_router)
 
 
+LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
 @app.get("/api/system/test-identity")
-def get_test_identity():
+def get_test_identity(request: Request):
     run_id = os.getenv("SIGNAL_BOT_TEST_RUN_ID")
     if not run_id:
         raise HTTPException(status_code=404, detail="Test identity not configured")
+    client_host = request.client.host if request.client else None
+    if not client_host or client_host not in LOOPBACK_HOSTS:
+        raise HTTPException(status_code=404, detail="Test identity only accessible via loopback")
     return {"status": "ok", "run_id": run_id, "pid": os.getpid()}
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")

@@ -514,11 +514,16 @@ async function orchestrateStagingCleanup({
   if (proc) {
     try {
       const termResult = await terminateProcFn(proc, sigtermTimeoutMs, sigkillTimeoutMs);
-      if (termResult && termResult.forcedKill) {
+      if (!termResult || typeof termResult !== "object" || termResult.exited !== true) {
+        throw new Error(
+          `Process termination could not be confirmed: termination result did not confirm exit (${JSON.stringify(termResult)})`
+        );
+      }
+      if (termResult.forcedKill) {
         console.log(`[+] Staging FastAPI server confirmed terminated via SIGKILL fallback (PID: ${proc.pid}).`);
-      } else if (termResult && termResult.alreadyDead) {
+      } else if (termResult.alreadyDead) {
         console.log(`[+] Staging FastAPI server was already terminated (PID: ${proc.pid}).`);
-      } else if (termResult) {
+      } else {
         console.log(`[+] Staging FastAPI server exited gracefully (code: ${termResult.code}, signal: ${termResult.signal}).`);
       }
     } catch (err) {

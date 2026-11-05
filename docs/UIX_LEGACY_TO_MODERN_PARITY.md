@@ -21,9 +21,9 @@ In accordance with the workflow parity audit ([`docs/ANTIGRAVITY_UI_PARITY_AUDIT
 - **Workflow Parity Status:** 49 Workflows COMPLETE, 10 Specialized Mutations LEGACY_ONLY, 0 MISSING (59 Total).
 - **View-Level Breakdown:** 6 Views COMPLETE, 5 Views PARTIAL (Read-only monitoring complete; execution mutations intentionally legacy-only), 0 MISSING.
 - **Backend API Endpoints Covered:** 81 unique API method/path routes mapped across 13 FastAPI modules.
-- **Automated Frontend Test Suite:** 31 test files, 210 unit/component tests passing (`npm test`).
+- **Automated Frontend Test Suite:** 31 test files, 213 unit/component tests passing (`npm test`).
 - **End-to-End Browser Tests:** 28 Playwright tests passing across Desktop Chrome, responsive mobile, tablet, and dark/light themes (`npx playwright test`; 100% using mocked API routes).
-- **Backend Test Suite:** 1,107 unit/integration tests passing (`pytest`).
+- **Backend Test Suite:** 1,115 unit/integration tests passing (`pytest`).
 
 ---
 
@@ -352,7 +352,7 @@ All parity implementations have been validated through three comprehensive autom
 
 1. **Frontend Unit & Component Testing (`Vitest`):**
    - **Command:** `cd frontend && npm test -- --run`
-   - **Result:** 31 test files passed, 210 tests passed, 0 failed.
+   - **Result:** 31 test files passed, 213 tests passed, 0 failed.
    - **Coverage:** AuthGate, App, SystemStatus, Screener, ScreenerControls, PaperTrading, StrategyLibrary, WalletTracking, BacktestStudio, PromotionPolicy, MLStudio, MLGeneratorTraining, Research, NewsAI, MasterData, Settings, User Management client & UI.
 
 2. **Frontend Production Type-check & Build (`TypeScript + Vite`):**
@@ -366,7 +366,7 @@ All parity implementations have been validated through three comprehensive autom
 
 4. **Backend Regression Testing (`pytest`):**
    - **Command:** `python3 -m pytest -q`
-   - **Result:** 1,105 passed, 18 skipped, 0 failed.
+   - **Result:** 1,115 passed, 18 skipped, 6 warnings, 0 failed.
 
 ---
 

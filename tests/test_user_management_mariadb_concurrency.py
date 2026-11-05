@@ -628,6 +628,347 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         remaining_admins = self._count_active_test_admins()
         self.assertEqual(remaining_admins, 1)
 
+    def test_concurrent_trader_promotion_and_deletion_serialization(self):
+        """Proves transaction serialization between trader promotion and deletion.
+
+        1. Thread 1 initiates trader promotion to admin and acquires row locks on active admins.
+        2. Thread 2 attempts to delete the trader on concurrent connection.
+        3. Thread 2 blocks in MariaDB LOCK WAIT on Thread 2's exact thread ID.
+        4. Once exact LOCK WAIT is verified, Thread 1 commits.
+        5. Thread 2 unblocks, executes serialized under lock, and cleanly completes.
+        """
+        conn = self.pool.get_connection()
+        try:
+            cur = conn.cursor()
+            pwd_hash = hash_password("SecurePassword123!")
+            u_trader = f"{self.test_prefix}_t_promo"
+            cur.execute(
+                "INSERT INTO users (username, email, password_hash, role, is_active, session_version) "
+                "VALUES (%s, %s, %s, 'trader', 1, 0)",
+                (u_trader, f"{u_trader}@test.com", pwd_hash),
+            )
+            conn.commit()
+            cur.execute("SELECT id FROM users WHERE username = %s", (u_trader,))
+            trader_id = cur.fetchone()[0]
+            self.seeded_user_ids.append(trader_id)
+            cur.close()
+        finally:
+            conn.close()
+
+        t1_locked = threading.Event()
+        t1_can_proceed = threading.Event()
+        t2_about_to_query = threading.Event()
+        t2_thread_id_holder = []
+
+        def before_hook(hook_conn, hook_cur, target_id):
+            if t1_locked.is_set():
+                t2_thread_id_holder.append(hook_conn.connection_id)
+                t2_about_to_query.set()
+
+        def after_hook(hook_conn, hook_cur, target_id):
+            if not t1_locked.is_set():
+                t1_locked.set()
+                if not t1_can_proceed.wait(timeout=10.0):
+                    raise TimeoutError("Test timed out waiting for t1_can_proceed")
+
+        auth_routes._test_before_admin_lock_hook = before_hook
+        auth_routes._test_after_admin_lock_hook = after_hook
+
+        def promote_user(target_id):
+            client = TestClient(app, raise_server_exceptions=False)
+            return client.put(
+                f"/api/users/{target_id}",
+                json={"role": "admin"},
+                headers=self.headers,
+            )
+
+        def delete_user(target_id):
+            client = TestClient(app, raise_server_exceptions=False)
+            return client.delete(
+                f"/api/users/{target_id}",
+                headers=self.headers,
+            )
+
+        executor = self._create_executor(max_workers=2)
+        try:
+            with patch("web.app.authenticate_request", return_value=self.user_auth), \
+                 patch("web.auth.authenticate_request", return_value=self.user_auth):
+                f1 = executor.submit(promote_user, trader_id)
+                self.assertTrue(t1_locked.wait(timeout=5.0), "Thread 1 failed to acquire row lock")
+
+                f2 = executor.submit(delete_user, trader_id)
+                self.assertTrue(t2_about_to_query.wait(timeout=5.0), "Thread 2 failed to reach locking query")
+                t2_tid = t2_thread_id_holder[0]
+
+                t2_in_lock_wait = False
+                for _ in range(50):
+                    time.sleep(0.05)
+                    if self._check_exact_thread_lock_wait(t2_tid):
+                        t2_in_lock_wait = True
+                        break
+
+                self.assertTrue(
+                    t2_in_lock_wait,
+                    f"Exact Thread 2 transaction (thread_id={t2_tid}) failed to enter MariaDB LOCK WAIT state"
+                )
+
+                t1_can_proceed.set()
+
+                res1 = f1.result(timeout=5.0)
+                res2 = f2.result(timeout=5.0)
+        finally:
+            t1_locked.set()
+            t1_can_proceed.set()
+            t2_about_to_query.set()
+            auth_routes._test_before_admin_lock_hook = None
+            auth_routes._test_after_admin_lock_hook = None
+
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res2.status_code, 200)
+
+        conn = self.pool.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM users WHERE id = %s", (trader_id,))
+            self.assertIsNone(cur.fetchone())
+            cur.close()
+        finally:
+            conn.close()
+
+    def test_concurrent_admin_activation_and_deactivation_serialization(self):
+        """Proves transaction serialization when activating an admin concurrently with deactivating an admin.
+
+        1. Test database has exactly one active admin (admin1) and one inactive admin (admin3).
+        2. Thread 1 activates admin3, acquiring lock on active admin1.
+        3. Thread 2 attempts to deactivate admin1 (which would fail as last-admin if not serialized).
+        4. Thread 2 enters MariaDB LOCK WAIT on Thread 2's exact thread ID.
+        5. Thread 1 commits activation of admin3.
+        6. Thread 2 unblocks, re-evaluates active admins under lock, finds admin3 active,
+           and successfully deactivates admin1.
+        7. Exactly one active admin (admin3) remains, never zero.
+        """
+        conn = self.pool.get_connection()
+        try:
+            cur = conn.cursor()
+            pwd_hash = hash_password("SecurePassword123!")
+            u_admin3 = f"{self.test_prefix}_adm3"
+            cur.execute("UPDATE users SET is_active = 0 WHERE id = %s", (self.admin2_id,))
+            cur.execute(
+                "INSERT INTO users (username, email, password_hash, role, is_active, session_version) "
+                "VALUES (%s, %s, %s, 'admin', 0, 0)",
+                (u_admin3, f"{u_admin3}@test.com", pwd_hash),
+            )
+            conn.commit()
+            cur.execute("SELECT id FROM users WHERE username = %s", (u_admin3,))
+            admin3_id = cur.fetchone()[0]
+            self.seeded_user_ids.append(admin3_id)
+            cur.close()
+        finally:
+            conn.close()
+
+        auth_routes._test_active_admin_filter = lambda u: u["id"] in {self.admin1_id, self.admin2_id, admin3_id}
+
+        t1_locked = threading.Event()
+        t1_can_proceed = threading.Event()
+        t2_about_to_query = threading.Event()
+        t2_thread_id_holder = []
+
+        def before_hook(hook_conn, hook_cur, target_id):
+            if t1_locked.is_set():
+                t2_thread_id_holder.append(hook_conn.connection_id)
+                t2_about_to_query.set()
+
+        def after_hook(hook_conn, hook_cur, target_id):
+            if not t1_locked.is_set():
+                t1_locked.set()
+                if not t1_can_proceed.wait(timeout=10.0):
+                    raise TimeoutError("Test timed out waiting for t1_can_proceed")
+
+        auth_routes._test_before_admin_lock_hook = before_hook
+        auth_routes._test_after_admin_lock_hook = after_hook
+
+        def set_user_active(target_id, active: bool):
+            client = TestClient(app, raise_server_exceptions=False)
+            return client.put(
+                f"/api/users/{target_id}",
+                json={"is_active": active},
+                headers=self.headers,
+            )
+
+        executor = self._create_executor(max_workers=2)
+        try:
+            with patch("web.app.authenticate_request", return_value=self.user_auth), \
+                 patch("web.auth.authenticate_request", return_value=self.user_auth):
+                f1 = executor.submit(set_user_active, admin3_id, True)
+                self.assertTrue(t1_locked.wait(timeout=5.0), "Thread 1 failed to acquire row lock")
+
+                f2 = executor.submit(set_user_active, self.admin1_id, False)
+                self.assertTrue(t2_about_to_query.wait(timeout=5.0), "Thread 2 failed to reach locking query")
+                t2_tid = t2_thread_id_holder[0]
+
+                t2_in_lock_wait = False
+                for _ in range(50):
+                    time.sleep(0.05)
+                    if self._check_exact_thread_lock_wait(t2_tid):
+                        t2_in_lock_wait = True
+                        break
+
+                self.assertTrue(
+                    t2_in_lock_wait,
+                    f"Exact Thread 2 transaction (thread_id={t2_tid}) failed to enter MariaDB LOCK WAIT state"
+                )
+
+                t1_can_proceed.set()
+
+                res1 = f1.result(timeout=5.0)
+                res2 = f2.result(timeout=5.0)
+        finally:
+            t1_locked.set()
+            t1_can_proceed.set()
+            t2_about_to_query.set()
+            auth_routes._test_before_admin_lock_hook = None
+            auth_routes._test_after_admin_lock_hook = None
+
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res2.status_code, 200)
+
+        conn = self.pool.get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute("SELECT is_active FROM users WHERE id = %s", (admin3_id,))
+            self.assertEqual(cur.fetchone()["is_active"], 1)
+
+            cur.execute("SELECT is_active FROM users WHERE id = %s", (self.admin1_id,))
+            self.assertEqual(cur.fetchone()["is_active"], 0)
+
+            cur.execute(
+                "SELECT COUNT(*) as cnt FROM users WHERE role = 'admin' AND is_active = 1 AND id IN (%s, %s, %s)",
+                (self.admin1_id, self.admin2_id, admin3_id),
+            )
+            self.assertEqual(cur.fetchone()["cnt"], 1)
+            cur.close()
+        finally:
+            conn.close()
+
+    def test_concurrent_role_change_and_deletion_same_target(self):
+        """Proves transaction serialization for concurrent role change and deletion on the same target.
+
+        1. Thread 1 initiates deletion of target trader and acquires active admin lock.
+        2. Thread 2 attempts role change to viewer on the same target.
+        3. Thread 2 enters MariaDB LOCK WAIT on Thread 2's exact thread ID.
+        4. Thread 1 commits deletion.
+        5. Thread 2 unblocks, attempts to read target under lock, gets 404, and rolls back cleanly.
+        6. Proves target is deleted and no unintended user or audit log mutations occur for Thread 2.
+        """
+        conn = self.pool.get_connection()
+        try:
+            cur = conn.cursor()
+            pwd_hash = hash_password("SecurePassword123!")
+            u_target = f"{self.test_prefix}_target"
+            cur.execute(
+                "INSERT INTO users (username, email, password_hash, role, is_active, session_version) "
+                "VALUES (%s, %s, %s, 'trader', 1, 0)",
+                (u_target, f"{u_target}@test.com", pwd_hash),
+            )
+            conn.commit()
+            cur.execute("SELECT id FROM users WHERE username = %s", (u_target,))
+            target_id = cur.fetchone()[0]
+            self.seeded_user_ids.append(target_id)
+            cur.close()
+        finally:
+            conn.close()
+
+        t1_locked = threading.Event()
+        t1_can_proceed = threading.Event()
+        t2_about_to_query = threading.Event()
+        t2_thread_id_holder = []
+
+        def before_hook(hook_conn, hook_cur, tid):
+            if t1_locked.is_set():
+                t2_thread_id_holder.append(hook_conn.connection_id)
+                t2_about_to_query.set()
+
+        def after_hook(hook_conn, hook_cur, tid):
+            if not t1_locked.is_set():
+                t1_locked.set()
+                if not t1_can_proceed.wait(timeout=10.0):
+                    raise TimeoutError("Test timed out waiting for t1_can_proceed")
+
+        auth_routes._test_before_admin_lock_hook = before_hook
+        auth_routes._test_after_admin_lock_hook = after_hook
+
+        def delete_user(tid):
+            client = TestClient(app, raise_server_exceptions=False)
+            return client.delete(
+                f"/api/users/{tid}",
+                headers=self.headers,
+            )
+
+        def update_role(tid):
+            client = TestClient(app, raise_server_exceptions=False)
+            return client.put(
+                f"/api/users/{tid}",
+                json={"role": "viewer"},
+                headers=self.headers,
+            )
+
+        executor = self._create_executor(max_workers=2)
+        try:
+            with patch("web.app.authenticate_request", return_value=self.user_auth), \
+                 patch("web.auth.authenticate_request", return_value=self.user_auth):
+                f1 = executor.submit(delete_user, target_id)
+                self.assertTrue(t1_locked.wait(timeout=5.0), "Thread 1 failed to acquire row lock")
+
+                f2 = executor.submit(update_role, target_id)
+                self.assertTrue(t2_about_to_query.wait(timeout=5.0), "Thread 2 failed to reach locking query")
+                t2_tid = t2_thread_id_holder[0]
+
+                t2_in_lock_wait = False
+                for _ in range(50):
+                    time.sleep(0.05)
+                    if self._check_exact_thread_lock_wait(t2_tid):
+                        t2_in_lock_wait = True
+                        break
+
+                self.assertTrue(
+                    t2_in_lock_wait,
+                    f"Exact Thread 2 transaction (thread_id={t2_tid}) failed to enter MariaDB LOCK WAIT state"
+                )
+
+                t1_can_proceed.set()
+
+                res1 = f1.result(timeout=5.0)
+                res2 = f2.result(timeout=5.0)
+        finally:
+            t1_locked.set()
+            t1_can_proceed.set()
+            t2_about_to_query.set()
+            auth_routes._test_before_admin_lock_hook = None
+            auth_routes._test_after_admin_lock_hook = None
+
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res2.status_code, 404)
+        self.assertIn("Target user not found", res2.json()["detail"])
+
+        conn = self.pool.get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute("SELECT id FROM users WHERE id = %s", (target_id,))
+            self.assertIsNone(cur.fetchone())
+
+            cur.execute(
+                "SELECT action, details FROM audit_logs WHERE user_id = %s",
+                (self.caller_id,),
+            )
+            logs = cur.fetchall()
+            delete_logs = [l for l in logs if l["action"] == "USER_DELETED" and f'"deleted_id": {target_id}' in l["details"]]
+            update_logs = [l for l in logs if f'"target_id": {target_id}' in l["details"] or f'"user_id": {target_id}' in l["details"]]
+            self.assertEqual(len(delete_logs), 1)
+            self.assertEqual(len(update_logs), 0)
+            cur.close()
+        finally:
+            conn.close()
+
     def test_successful_deactivation_when_another_active_admin_exists(self):
         """Deactivating admin1 succeeds when admin2 is active."""
         with patch("web.app.authenticate_request", return_value=self.user_auth), \

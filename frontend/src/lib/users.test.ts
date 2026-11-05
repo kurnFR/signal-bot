@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createUser, deleteUser, fetchUsers, resetUserPassword, updateUser, UserActionError } from "./users";
+import { createUser, deleteUser, fetchUsers, isManagedUser, resetUserPassword, updateUser, UserActionError } from "./users";
 
 describe("user management client", () => {
   afterEach(() => {
@@ -142,5 +142,95 @@ describe("user management client", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/users/2", expect.objectContaining({
       method: "DELETE",
     }));
+  });
+
+  describe("createUser contract and validation", () => {
+    it("accepts user creation with missing optional fields and safely defaults them", async () => {
+      window.localStorage.setItem("token", "admin-jwt-token");
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          status: "success",
+          user: {
+            id: 10,
+            username: "minimal_user",
+            role: "trader",
+          },
+        }),
+        { status: 201, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const created = await createUser({
+        username: "minimal_user",
+        password: "Password123!",
+        role: "trader",
+      });
+
+      expect(created.id).toBe(10);
+      expect(created.username).toBe("minimal_user");
+      expect(created.email).toBeNull();
+      expect(created.role).toBe("trader");
+      expect(created.is_active).toBe(true);
+      expect(created.must_change_password).toBe(false);
+      expect(created.created_at).toBe("");
+      expect(created.updated_at).toBe("");
+    });
+
+    it("rejects malformed createUser responses", async () => {
+      window.localStorage.setItem("token", "admin-jwt-token");
+
+      const malformedCases = [
+        { status: "error", user: { id: 1, username: "a", role: "admin" } },
+        { status: "success", user: null },
+        { status: "success", user: { id: -1, username: "a", role: "admin" } },
+        { status: "success", user: { id: 1, username: "", role: "admin" } },
+        { status: "success", user: { id: 1, username: "a", role: "invalid_role" } },
+        { status: "success", user: { id: 1, username: "a", role: "admin", is_active: "not_a_bool" } },
+      ];
+
+      for (const payload of malformedCases) {
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+          JSON.stringify(payload),
+          { status: 201, headers: { "content-type": "application/json" } },
+        )));
+
+        await expect(createUser({
+          username: "test",
+          password: "Password123!",
+          role: "admin",
+        })).rejects.toThrow(UserActionError);
+      }
+    });
+
+    it("validates objects with isManagedUser guard", () => {
+      // Full valid object
+      expect(isManagedUser({
+        id: 1,
+        username: "admin",
+        email: "a@b.c",
+        role: "admin",
+        is_active: true,
+        must_change_password: false,
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+      })).toBe(true);
+
+      // Minimal valid object with omitted optional fields
+      expect(isManagedUser({
+        id: 2,
+        username: "trader",
+        role: "trader",
+      })).toBe(true);
+
+      // Invalid cases
+      expect(isManagedUser(null)).toBe(false);
+      expect(isManagedUser({})).toBe(false);
+      expect(isManagedUser({ id: 0, username: "u", role: "viewer" })).toBe(false);
+      expect(isManagedUser({ id: 1, username: " ", role: "viewer" })).toBe(false);
+      expect(isManagedUser({ id: 1, username: "u", role: "superadmin" })).toBe(false);
+      expect(isManagedUser({ id: 1, username: "u", role: "viewer", email: 123 })).toBe(false);
+      expect(isManagedUser({ id: 1, username: "u", role: "viewer", is_active: "yes" })).toBe(false);
+      expect(isManagedUser({ id: 1, username: "u", role: "viewer", created_at: 12345 })).toBe(false);
+    });
   });
 });

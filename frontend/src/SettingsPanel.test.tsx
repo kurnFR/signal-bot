@@ -105,6 +105,7 @@ describe("SettingsPanel", () => {
       },
     ];
 
+    let currentUsers = [...mockUsers];
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), "http://localhost");
       const path = url.pathname;
@@ -112,22 +113,24 @@ describe("SettingsPanel", () => {
       const json = (payload: unknown, status = 200) =>
         Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
-      if (path === "/api/users" && method === "GET") return json({ users: mockUsers });
+      if (path === "/api/users" && method === "GET") return json({ users: currentUsers });
       if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
       if (path === "/api/settings/status") return json({ database: { status: "ok", host: "127.0.0.1", port: 3306, database: "test", tables: {} }, heartbeats: [], binance: { spotApi: "online", futuresApi: "online" } });
       if (path === "/api/users" && method === "POST") {
+        const newUser = {
+          id: 3,
+          username: "new_trader",
+          email: "new@bot.internal",
+          role: "trader" as const,
+          is_active: true,
+          must_change_password: false,
+          created_at: "2026-11-04 10:00:00",
+          updated_at: "2026-11-04 10:00:00",
+        };
+        currentUsers.push(newUser);
         return json({
           status: "success",
-          user: {
-            id: 3,
-            username: "new_trader",
-            email: "new@bot.internal",
-            role: "trader",
-            is_active: true,
-            must_change_password: false,
-            created_at: "2026-11-04 10:00:00",
-            updated_at: "2026-11-04 10:00:00",
-          },
+          user: newUser,
         }, 201);
       }
       throw new Error("Unexpected: " + method + " " + path);
@@ -140,11 +143,18 @@ describe("SettingsPanel", () => {
     expect(screen.getByText("admin@bot.internal")).toBeInTheDocument();
 
     // Create user
-    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "new_trader" } });
-    fireEvent.change(screen.getByLabelText("Password (10–1024 chars)"), { target: { value: "SecurePassword123!" } });
+    const usernameInput = screen.getByLabelText("Username");
+    const passwordInput = screen.getByLabelText("Password (10–1024 chars)");
+    fireEvent.change(usernameInput, { target: { value: "new_trader" } });
+    fireEvent.change(passwordInput, { target: { value: "SecurePassword123!" } });
     fireEvent.click(screen.getByRole("button", { name: /Add User Account/i }));
 
     expect(await screen.findByText(/User 'new_trader' created successfully/i)).toBeInTheDocument();
+    // Inputs reset
+    expect((usernameInput as HTMLInputElement).value).toBe("");
+    expect((passwordInput as HTMLInputElement).value).toBe("");
+    // Catalog refreshed with new user
+    expect(await screen.findByText("new@bot.internal")).toBeInTheDocument();
   });
 
   it("handles self password change with validation", async () => {
