@@ -91,7 +91,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-PUBLIC_API_PATHS = {"/api/auth/login"}
+PUBLIC_API_PATHS = {"/api/auth/login", "/api/system/test-identity"}
 # A user flagged must_change_password may only do what is needed to fix that.
 PASSWORD_CHANGE_ALLOWED_PATHS = {"/api/auth/me", "/api/auth/logout", "/api/auth/change-password"}
 ADMIN_ONLY_PREFIXES = ("/api/settings", "/api/auth/audit-logs")
@@ -140,6 +140,7 @@ AUTHENTICATED_READ_PATHS = (
     "/api/backtest/history",
     "/api/backtest/runs/{run_id}",
     "/api/system/status",
+    "/api/system/test-identity",
     "/api/telegram/status",
     "/api/ml/experiments",
     "/api/ml/experiments/{experiment_id}",
@@ -271,6 +272,14 @@ app.include_router(ml_router)
 app.include_router(news_router)
 app.include_router(research_router)
 app.include_router(wallet_router)
+
+
+@app.get("/api/system/test-identity")
+def get_test_identity():
+    run_id = os.getenv("SIGNAL_BOT_TEST_RUN_ID")
+    if not run_id:
+        raise HTTPException(status_code=404, detail="Test identity not configured")
+    return {"status": "ok", "run_id": run_id, "pid": os.getpid()}
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)

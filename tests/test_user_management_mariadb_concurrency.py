@@ -46,19 +46,26 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         db_module._retailbot2_pool = None
 
         cls.pool = db_module.get_pool()
+        cls.retailbot2_pool = db_module.get_retailbot2_pool()
         cls.client = TestClient(app, raise_server_exceptions=False)
 
-        # Verify the exact resolved database on the active pool connection
-        conn = cls.pool.get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT DATABASE()")
-            db_name = cur.fetchone()[0]
-            cur.close()
-            if db_name != "signal_bot_test":
-                raise RuntimeError(f"Database isolation guard failed: connected to '{db_name}', expected 'signal_bot_test'")
-        finally:
-            conn.close()
+        # Independently verify every configured database pool strictly uses signal_bot_test
+        cls.verified_pools = {}
+        for pool_name, pool_obj in [("primary_pool", cls.pool), ("retailbot2_pool", cls.retailbot2_pool)]:
+            conn = pool_obj.get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT DATABASE()")
+                db_name = cur.fetchone()[0]
+                cur.close()
+                if db_name != "signal_bot_test":
+                    raise RuntimeError(
+                        f"Database isolation guard failed for {pool_name}: "
+                        f"connected to '{db_name}', strictly expected 'signal_bot_test'"
+                    )
+                cls.verified_pools[pool_name] = db_name
+            finally:
+                conn.close()
 
         cls._run_id = uuid.uuid4().hex[:8]
 
@@ -69,7 +76,18 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         auth_routes._test_after_admin_lock_hook = None
         auth_routes._test_active_admin_filter = None
 
-        # Reset pools without creating new connections
+        # Safe teardown: drain and close pool connections before resetting references
+        for pool_obj in [getattr(cls, "pool", None), getattr(cls, "retailbot2_pool", None), db_module._pool, db_module._retailbot2_pool]:
+            if pool_obj is not None:
+                try:
+                    for _ in range(30):
+                        if pool_obj._cnx_queue.qsize() >= pool_obj.pool_size:
+                            break
+                        time.sleep(0.05)
+                    pool_obj._remove_connections()
+                except Exception:
+                    pass
+
         db_module._pool = None
         db_module._retailbot2_pool = None
 
@@ -558,21 +576,35 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
             conn.close()
 
     def test_failure_path_releases_sync_and_cleans_up(self):
-        """Proves that a timeout or assertion failure during concurrent execution
-        safely releases synchronization events, joins worker threads, resets test hooks,
-        and leaves the test database usable for subsequent operations."""
+        """Proves that a real worker failure during database contention (MariaDB lock-wait timeout)
+        terminates the blocked worker within bounded time, rolls back its transaction,
+        leaves zero partial mutation, cleans up all threads, and returns all connections
+        cleanly to the pool without lingering locks."""
+        self.assertEqual(self._count_active_test_admins(), 2)
+
         t1_locked = threading.Event()
         t1_can_proceed = threading.Event()
-        simulated_failure_hit = False
+        t2_about_to_query = threading.Event()
+        t2_thread_id_holder = []
+
+        def before_hook(hook_conn, hook_cur, target_id):
+            if target_id == self.admin2_id:
+                # Set a tight 1-second lock-wait timeout specifically for Thread 2's session
+                hook_cur.execute("SET SESSION innodb_lock_wait_timeout = 1")
+                t2_thread_id_holder.append(hook_conn.connection_id)
+                t2_about_to_query.set()
 
         def after_hook(hook_conn, hook_cur, target_id):
             if target_id == self.admin1_id:
+                # Thread 1 holds the row lock on active admins
                 t1_locked.set()
-                t1_can_proceed.wait(timeout=2.0)
+                if not t1_can_proceed.wait(timeout=10.0):
+                    raise TimeoutError("Test timed out waiting for t1_can_proceed")
 
+        auth_routes._test_before_admin_lock_hook = before_hook
         auth_routes._test_after_admin_lock_hook = after_hook
 
-        def slow_admin_op(target_id):
+        def demote_user(target_id):
             client = TestClient(app, raise_server_exceptions=False)
             return client.put(
                 f"/api/users/{target_id}",
@@ -584,33 +616,92 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         try:
             with patch("web.app.authenticate_request", return_value=self.user_auth), \
                  patch("web.auth.authenticate_request", return_value=self.user_auth):
-                f1 = executor.submit(slow_admin_op, self.admin1_id)
-                self.assertTrue(t1_locked.wait(timeout=3.0))
+                # 1. Thread 1 initiates demotion of admin1 and acquires row-level lock
+                f1 = executor.submit(demote_user, self.admin1_id)
+                self.assertTrue(t1_locked.wait(timeout=5.0), "Thread 1 failed to acquire row lock")
 
-                # Simulate an unexpected assertion failure in the test orchestrator
-                simulated_failure_hit = True
-                raise AssertionError("Simulated test orchestrator assertion failure")
-        except AssertionError as e:
-            self.assertEqual(str(e), "Simulated test orchestrator assertion failure")
+                # 2. Thread 2 initiates demotion of admin2 with 1s innodb_lock_wait_timeout
+                f2 = executor.submit(demote_user, self.admin2_id)
+                self.assertTrue(t2_about_to_query.wait(timeout=5.0), "Thread 2 failed to reach query hook")
+                t2_tid = t2_thread_id_holder[0]
+
+                # 3. Prove Thread 2's EXACT transaction enters MariaDB 'LOCK WAIT' state
+                t2_in_lock_wait = False
+                for _ in range(50):
+                    time.sleep(0.05)
+                    if self._check_exact_thread_lock_wait(t2_tid):
+                        t2_in_lock_wait = True
+                        break
+                self.assertTrue(
+                    t2_in_lock_wait,
+                    f"Thread 2 (thread_id={t2_tid}) failed to enter MariaDB LOCK WAIT state"
+                )
+
+                # 4. Hold Thread 1 and allow Thread 2's 1-second timeout to trigger in MariaDB.
+                # Assert Thread 2 terminates within bounded timeout.
+                start_wait = time.time()
+                res2 = f2.result(timeout=5.0)
+                elapsed_wait = time.time() - start_wait
+                self.assertLess(elapsed_wait, 4.0, "Thread 2 did not terminate within bounded timeout")
+
+                # 5. Thread 2 caught MariaDB Error 1205 (lock wait timeout), rolled back, and returned HTTP 500
+                self.assertEqual(res2.status_code, 500)
+
+                # 6. Unblock Thread 1 to let it finish cleanly
+                t1_can_proceed.set()
+                res1 = f1.result(timeout=5.0)
+                self.assertEqual(res1.status_code, 200)
         finally:
-            # Crucial failure-path cleanup: release lock wait so worker can finish
+            # Ensure synchronization flags are set to unblock any pending waiters
             t1_locked.set()
             t1_can_proceed.set()
+            t2_about_to_query.set()
             auth_routes._test_before_admin_lock_hook = None
             auth_routes._test_after_admin_lock_hook = None
             auth_routes._test_active_admin_filter = None
             executor.shutdown(wait=True)
 
-        self.assertTrue(simulated_failure_hit)
-        self.assertIsNone(auth_routes._test_before_admin_lock_hook)
-        self.assertIsNone(auth_routes._test_after_admin_lock_hook)
-
-        # Verify the test database is immediately usable and responsive
+        # 7. Assert that admin2's transaction was completely rolled back:
+        # admin2 remains role='admin', is_active=1, session_version=0
         conn = self.pool.get_connection()
         try:
-            cur = conn.cursor()
+            cur = conn.cursor(dictionary=True)
+            cur.execute("SELECT role, is_active, session_version FROM users WHERE id = %s", (self.admin2_id,))
+            admin2_row = cur.fetchone()
+            self.assertEqual(admin2_row["role"], "admin")
+            self.assertEqual(admin2_row["is_active"], 1)
+            self.assertEqual(admin2_row["session_version"], 0)
+
+            # Assert no audit log was created for admin2's failed mutation
+            cur.execute(
+                "SELECT COUNT(*) as count FROM audit_logs WHERE details LIKE %s",
+                (f"%{self.admin2_id}%",),
+            )
+            audit_count = cur.fetchone()["count"]
+            self.assertEqual(audit_count, 0)
+
+            # Assert that the database connection pool is immediately healthy and usable
             cur.execute("SELECT 1")
-            self.assertEqual(cur.fetchone()[0], 1)
+            self.assertEqual(cur.fetchone()["1"], 1)
+            cur.close()
+        finally:
+            conn.close()
+
+        # 8. Verify subsequent operation against admin2 succeeds without lingering locks
+        with patch("web.app.authenticate_request", return_value=self.user_auth), \
+             patch("web.auth.authenticate_request", return_value=self.user_auth):
+            res_subsequent = self.client.put(
+                f"/api/users/{self.admin2_id}",
+                json={"role": "viewer"},
+                headers=self.headers,
+            )
+            self.assertEqual(res_subsequent.status_code, 200)
+
+        conn = self.pool.get_connection()
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute("SELECT role FROM users WHERE id = %s", (self.admin2_id,))
+            self.assertEqual(cur.fetchone()["role"], "viewer")
             cur.close()
         finally:
             conn.close()

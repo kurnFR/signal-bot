@@ -91,55 +91,186 @@ function runPythonHelper(scriptContent, envOverrides = {}, stdinJson = null) {
 }
 
 /**
- * Port occupancy pre-check. Fails immediately if the port is already listening.
+ * Port occupancy pre-check. Strictly verifies that the port is free.
+ * - Only ECONNREFUSED is accepted as proof that no process is listening.
+ * - EADDRINUSE is treated as a hard failure.
+ * - Unexpected socket errors are propagated (rejected) rather than treated as free.
  */
 function checkPortFree(port) {
   return new Promise((resolve, reject) => {
     const socket = new net.Socket();
-    socket.setTimeout(800);
+    let settled = false;
+
+    function finish(err, isFree) {
+      if (settled) return;
+      settled = true;
+      try {
+        socket.destroy();
+      } catch (_) {}
+      if (err) {
+        reject(err);
+      } else {
+        resolve(isFree);
+      }
+    }
+
+    socket.setTimeout(1000);
+
     socket.on("connect", () => {
-      socket.destroy();
-      reject(new Error(`Port ${port} is already in use by another process. Refusing to run acceptance against an unverified listener.`));
+      finish(new Error(`Port ${port} is already in use by another process. Refusing to run acceptance against an unverified listener.`));
     });
+
     socket.on("timeout", () => {
-      socket.destroy();
-      resolve(true);
+      finish(new Error(`Timeout probing port ${port}: socket did not receive expected ECONNREFUSED.`));
     });
+
     socket.on("error", (err) => {
       if (err.code === "ECONNREFUSED") {
-        resolve(true);
+        // Strictly only ECONNREFUSED indicates the port is free and refusing connections
+        finish(null, true);
+      } else if (err.code === "EADDRINUSE") {
+        finish(new Error(`Port ${port} is already in use (EADDRINUSE).`));
       } else {
-        resolve(true);
+        // Propagate unexpected socket errors instead of treating them as proof that the port is free
+        finish(err);
       }
     });
+
     socket.connect(port, "127.0.0.1");
   });
 }
 
-function waitForServer(url, childProc, timeoutMs = 25000) {
+/**
+ * Wait for the staging server to become ready and prove it is the intended child process.
+ *
+ * Verifies:
+ * 1. Child process is alive and has not exited or crashed.
+ * 2. HTTP response from /api/system/test-identity returns status 200 with run_id === expectedRunId.
+ * 3. Child process PID matches the PID reported by the server.
+ * 4. Fails immediately if another process or unverified identity is responding on the target port.
+ */
+function waitForServer(target, childProc, expectedRunId, timeoutMs = 25000) {
   const start = Date.now();
+  let identityUrl;
+  if (typeof target === "number") {
+    identityUrl = `http://127.0.0.1:${target}/api/system/test-identity`;
+  } else if (typeof target === "string") {
+    try {
+      const u = new URL(target);
+      identityUrl = `${u.origin}/api/system/test-identity`;
+    } catch (_) {
+      identityUrl = target;
+    }
+  } else {
+    throw new Error("Invalid target for waitForServer");
+  }
+
   return new Promise((resolve, reject) => {
-    function ping() {
-      if (childProc.exitCode !== null) {
-        return reject(new Error(`Staging server child process died prematurely with exit code ${childProc.exitCode}`));
+    let timer = null;
+    let completed = false;
+
+    function cleanup() {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
       }
-      http.get(url, (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 500) {
-          resolve(true);
+    }
+
+    function fail(err) {
+      if (completed) return;
+      completed = true;
+      cleanup();
+      reject(err);
+    }
+
+    function succeed(val) {
+      if (completed) return;
+      completed = true;
+      cleanup();
+      resolve(val);
+    }
+
+    function checkChildAlive() {
+      if (!childProc) return true;
+      if (childProc.exitCode !== null) {
+        fail(new Error(`Staging server child process died prematurely with exit code ${childProc.exitCode}`));
+        return false;
+      }
+      if (childProc.killed) {
+        fail(new Error("Staging server child process was killed prematurely"));
+        return false;
+      }
+      if (childProc.pid) {
+        try {
+          process.kill(childProc.pid, 0);
+        } catch (e) {
+          fail(new Error(`Staging server child process PID ${childProc.pid} is not alive: ${e.message}`));
+          return false;
+        }
+      }
+      return true;
+    }
+
+    function ping() {
+      if (completed) return;
+      if (!checkChildAlive()) return;
+
+      const req = http.get(identityUrl, { timeout: 1500 }, (res) => {
+        let body = "";
+        res.on("data", (chunk) => { body += chunk.toString(); });
+        res.on("end", () => {
+          if (completed) return;
+          if (!checkChildAlive()) return;
+
+          let data = null;
+          try {
+            data = JSON.parse(body);
+          } catch (_) {}
+
+          // Verify exact identity match
+          if (res.statusCode === 200 && data && data.status === "ok" && data.run_id === expectedRunId) {
+            if (childProc && childProc.pid && data.pid && data.pid !== childProc.pid) {
+              return fail(new Error(
+                `Target port responded with matching run_id but mismatched PID: server PID is ${data.pid}, expected child PID is ${childProc.pid}`
+              ));
+            }
+            return succeed(data);
+          }
+
+          // An HTTP response was received, but the identity is invalid or conflicting.
+          // This proves another process is responding or the server failed to configure the identity.
+          const detail = data ? JSON.stringify(data) : (body ? body.slice(0, 100) : "empty response");
+          return fail(new Error(
+            `Target port is served by an unverified or conflicting process (status ${res.statusCode}, response: ${detail}). Another process may be occupying the port.`
+          ));
+        });
+      });
+
+      req.on("timeout", () => {
+        req.destroy();
+        retry();
+      });
+
+      req.on("error", (err) => {
+        if (completed) return;
+        if (!checkChildAlive()) return;
+        if (err.code === "ECONNREFUSED" || err.code === "ECONNRESET") {
+          // Expected while server is still binding and starting up
+          retry();
         } else {
           retry();
         }
-      }).on("error", () => {
-        retry();
       });
     }
+
     function retry() {
+      if (completed) return;
       if (Date.now() - start > timeoutMs) {
-        reject(new Error(`Timeout waiting for staging server at ${url}`));
-      } else {
-        setTimeout(ping, 400);
+        return fail(new Error(`Timeout waiting for staging server identity at ${identityUrl} after ${timeoutMs}ms`));
       }
+      timer = setTimeout(ping, 250);
     }
+
     ping();
   });
 }
@@ -275,8 +406,8 @@ print(json.dumps({"status": "ok", "active_db": active_db, "seeded_ids": seeded_i
       }
     });
 
-    await waitForServer(`http://127.0.0.1:${STAGING_PORT}/modern/`, proc);
-    console.log(`[+] Staging FastAPI server is healthy and responding on port ${STAGING_PORT}.`);
+    const serverIdentity = await waitForServer(STAGING_PORT, proc, RUN_ID);
+    console.log(`[+] Staging FastAPI server verified (run_id: ${serverIdentity.run_id}, PID: ${serverIdentity.pid}) and responding on port ${STAGING_PORT}.`);
 
     // -------------------------------------------------------------
     // PHASE 3: Direct API Contract & RBAC Checks
@@ -578,9 +709,19 @@ print(json.dumps({"status": "ok", "deleted_users": deleted}))
   console.log("    Exact fixture users safely cleaned up; zero mutations to pre-existing accounts.");
 }
 
-run().then(() => {
-  process.exit(0);
-}).catch((err) => {
-  console.error("\n[-] Acceptance run failed:", err.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  run().then(() => {
+    process.exit(0);
+  }).catch((err) => {
+    console.error("\n[-] Acceptance run failed:", err.message);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  checkPortFree,
+  waitForServer,
+  apiRequest,
+  runPythonHelper,
+  run,
+};

@@ -5,7 +5,7 @@
 **Modern source:** `frontend/src/`
 **Branch:** `fix/ui-migration-review-remediation`
 **Baseline Commit:** `53bd8713d20e3348a5d23d951737037e916ba67f`
-**Reviewed Implementation Baseline:** `c4c97f38445755d2daf577c57acbbcd13e835ab3`
+**Reviewed Implementation Baseline:** `32348c2042f0c8d028e98f977b4d224d3bc33a58`
 **Owner:** Antigravity
 **Independent acceptance:** ChatGPT / repository owner
 **Status:** AUDITED — Rebuilt directly from legacy source inspection and modern codebase verification.
@@ -207,17 +207,18 @@ Every result below reflects local validation on the remediation branch:
 | Test category | Exact command | Environment | Result | Artifact / log | Limitations |
 |---|---|---|---|---|---|
 | **Typecheck** | `cd frontend && npm run typecheck` | Linux, Node v22.23.2, TypeScript 5.8.2 | **PASS (0 errors)** | Terminal output | None |
-| **Unit / component** | `cd frontend && npm test -- --run` | Linux, Node v22.23.2, Vitest 3.1.3 | **PASS (31/31 files, 210/210 passed in 7.84s)** | Vitest runner log | None |
-| **Production build** | `cd frontend && npm run build` | Linux, Node v22.23.2, Vite 6.3.5 | **PASS (1,609 modules in 4.04s)** | `frontend/dist/` clean production bundle | None |
-| **Backend regression** | `PYTHONPATH=$PWD python3 -m pytest -q` | Linux, Python 3.12.14, pytest 8.3.5 | **PASS (1,108 passed, 18 skipped, 6 warnings, 0 failed in 21.24s)** | Pytest test runner log | Authorized test DB `signal_bot_test`; external APIs mocked |
-| **Playwright E2E** | `cd frontend && npx playwright test` | Linux, Chromium 1.64.1 (6 workers) | **PASS (28/28 passed in 28.3s)** | Playwright reporter | Chromium headless; 100% mocked API routes via `page.route()` |
-| **API RBAC Sweep** | `python3 -m pytest tests/test_route_authorization_sweep.py -v` | Linux, Python 3.12.14 | **PASS (11/11 passed in 2.78s)** | Pytest log | Verifies all routes fail-closed |
-| **Telegram Contracts** | `python3 -m pytest tests/test_telegram_route_contracts.py -v` | Linux, Python 3.12.14 | **PASS (7/7 passed in 2.24s)** | Pytest log | Mocked Telegram delivery; zero real pings; unauth 401 verified; chatId masked for non-admin |
-| **User Mgmt Security** | `python3 -m pytest tests/test_user_management_security.py -v` | Linux, Python 3.12.14 | **PASS (12/12 passed in 3.13s)** | Pytest log | Admin-only CRUD, self-demotion lockout, self-delete prevention, session-version invalidation, hash update verification |
-| **MariaDB Concurrency** | `python3 -m pytest tests/test_user_management_mariadb_concurrency.py -v` | Linux, Python 3.12.14, MariaDB (authorized `signal_bot_test`) | **PASS (7/7 passed in 3.60s)** | Pytest log | Explicit `SELECT ... FOR UPDATE` row locks; deterministic `LOCK WAIT` contention verified on exact second thread ID; failure-path cleanup verified; concurrent demotion/deactivation/deletion cannot leave 0 active admins; non-mutating rollbacks and connection reuse verified |
+| **Unit / component** | `cd frontend && npm test -- --run` | Linux, Node v22.23.2, Vitest 3.1.3 | **PASS (31/31 files, 210/210 passed in 7.82s)** | Vitest runner log | None |
+| **Production build** | `cd frontend && npm run build` | Linux, Node v22.23.2, Vite 6.3.5 | **PASS (1,609 modules in 4.06s)** | `frontend/dist/` clean production bundle | None |
+| **Backend regression** | `PYTHONPATH=$PWD python3 -m pytest -q` | Linux, Python 3.12.14, pytest 8.3.5 | **PASS (1,108 passed, 18 skipped, 6 warnings, 0 failed in 25.67s)** | Pytest test runner log | Authorized test DB `signal_bot_test`; external APIs mocked |
+| **Playwright E2E** | `cd frontend && npx playwright test` | Linux, Chromium 1.64.1 (6 workers) | **PASS (28/28 passed in 28.6s)** | Playwright reporter | Chromium headless; 100% mocked API routes via `page.route()` |
+| **API RBAC Sweep** | `python3 -m pytest tests/test_route_authorization_sweep.py -v` | Linux, Python 3.12.14 | **PASS (11/11 passed in 2.72s)** | Pytest log | Verifies all routes fail-closed |
+| **Telegram Contracts** | `python3 -m pytest tests/test_telegram_route_contracts.py -v` | Linux, Python 3.12.14 | **PASS (7/7 passed in 2.16s)** | Pytest log | Mocked Telegram delivery; zero real pings; unauth 401 verified; chatId masked for non-admin |
+| **User Mgmt Security** | `python3 -m pytest tests/test_user_management_security.py -v` | Linux, Python 3.12.14 | **PASS (12/12 passed in 2.87s)** | Pytest log | Admin-only CRUD, self-demotion lockout, self-delete prevention, session-version invalidation, hash update verification |
+| **MariaDB Concurrency** | `python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py` | Linux, Python 3.12.14, MariaDB (authorized `signal_bot_test`) | **PASS (7/7 passed in 5.45s across 3 runs)** | Pytest log | Explicit `SELECT ... FOR UPDATE` row locks; deterministic `LOCK WAIT` contention verified on exact second thread ID; genuine worker failure handled via MariaDB lock wait timeout with clean rollback and zero partial mutation; independent pool database verification on all pools; non-mutating rollbacks and connection reuse verified |
+| **Staging regressions** | `node tests/browser/test_staging_lifecycle_regressions.cjs` | Linux, Node.js v22.23.2 | **PASS (5/5 passed in 0.9s)** | Node runner log | Proves port collision rejection, alien identity rejection, premature exit detection, socket error propagation, and child-verified readiness |
 | **Accessibility** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "accessibility|contrast|reduced-motion"` | Chromium, Desktop & Mobile | **PASS (Skip link, announcements, contrast)** | Playwright test report | Automated accessibility checks |
 | **Responsive** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "mobile viewport|tablet"` | Chromium (375px phone, 768px tablet, 1440px desktop) | **PASS (All 11 views fit without window overflow)** | Playwright test report | Automated viewport tests |
-| **Staging browser acceptance** | `node tests/browser/staging_browser_acceptance.cjs` | Localhost port 8055 (authorized `signal_bot_test`) | **PASS (All 3 roles authenticated, verified direct backend RBAC, 11 views rendered with executable assertions, role boundaries enforced, zero console errors, zero network failures, zero operational mutations in 20.2s)** | Node test runner log | Tracked staging browser test against live backend and authorized test DB |
+| **Staging browser acceptance** | `node tests/browser/staging_browser_acceptance.cjs` | Localhost port 8055 (authorized `signal_bot_test`) | **PASS (All 3 roles authenticated, verified direct backend RBAC, child process identity verified, 11 views rendered with executable assertions, role boundaries enforced, zero console errors, zero network failures, zero operational mutations in 14.8s)** | Node test runner log | Tracked staging browser test against live backend and authorized test DB |
 | **Migration & Query Plan** | `MYSQL_DATABASE=signal_bot_test python3 -m db.migrate --status` | MariaDB 10.9.4 (authorized `signal_bot_test`) | **PASS (Migration 025 applied, EXPLAIN ref lookup verified)** | Terminal output | `idx_users_role_active_id` eliminates non-admin row locks |
 
 ---

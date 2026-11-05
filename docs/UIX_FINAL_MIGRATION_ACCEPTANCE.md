@@ -4,7 +4,7 @@
 **Remediation Branch:** `fix/ui-migration-review-remediation`<br>
 **Pull Request:** [#697](https://github.com/kurnFR/signal-bot/pull/697) (`fix/ui-migration-review-remediation` -> `master`)<br>
 **Baseline Commit:** `53bd8713d20e3348a5d23d951737037e916ba67f` (Independent UI remediation review)<br>
-**Reviewed Implementation Baseline:** `c4c97f38445755d2daf577c57acbbcd13e835ab3` (Findings 1-6 base)<br>
+**Reviewed Implementation Baseline:** `32348c2042f0c8d028e98f977b4d224d3bc33a58` (PR #697 independent review baseline)<br>
 **Date of Local Validation:** November 5, 2026<br>
 **Environment:** Linux x86_64<br>
 **Python Version:** 3.12.14<br>
@@ -12,7 +12,7 @@
 **Node.js Version:** v22.23.2<br>
 **Frontend Package Manager / Version:** npm 12.0.2<br>
 **Review Target:** Modern UI Migration Acceptance according to [`docs/ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md`](ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md) and PR #696 / PR #697 Remediation<br>
-**Report Status:** **REMEDIATION IMPLEMENTED — Settings & Users Workflows Closed, Deterministic Concurrency Verified, Gaps Rectified, Cutover Subject to Owner Authorization**<br>
+**Report Status:** **REMEDIATION IMPLEMENTED — Settings & Users Workflows Closed, Deterministic Concurrency & Lock Wait Contention Verified, Staging Child Process Identity Proven, Gaps Rectified, Cutover Subject to Owner Authorization**<br>
 **Production Status:** React/Vite preview is mounted at `/modern` and static files compiled at `frontend/dist/`. FastAPI continues to default `GET /` to `web/static/` unless `SIGNAL_BOT_USE_MODERN_UI=1` is explicitly set. Production cutover remains an explicitly approved, owner-led action requiring web service reload.
 
 ---
@@ -21,26 +21,29 @@
 
 The modern React + TypeScript dashboard (`frontend/`) provides 49 complete workflows across 6 complete views and 5 partial views with read-only monitors. 10 specialized execution mutations remain legacy-only. All 59 workflows across all 11 navigation views, interactive dialogs, and backend API routes have been audited and verified in [`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md) and [`docs/UIX_LEGACY_TO_MODERN_PARITY.md`](UIX_LEGACY_TO_MODERN_PARITY.md). Full modern UI parity is not claimed while the 10 specialized mutations remain legacy-only.
 
-Defects identified in review PR #694, review PR #696, and the follow-up work order have been resolved and covered by automated regression tests:
+Defects identified in review PR #694, review PR #696, and the follow-up work orders have been resolved and covered by automated regression tests:
 - **Settings & User Administration:** Live user accounts catalog, create user, reset password, toggle active status, and delete user.
 - **Admin Lockout Safeguards & Deterministic Concurrency Serialization:** Server-side defense-in-depth preventing admin self-demotion (`role != admin`), self-deactivation (`is_active = False`), self-deletion, and any mutation leaving zero active administrators in the system. Explicit row-level locking via `SELECT ... FOR UPDATE ORDER BY id` guarantees deterministic serialization across concurrent requests. Concurrency tests deterministically verify MariaDB `trx_state = 'LOCK WAIT'` state contention on the exact thread ID of the blocked second transaction without `not f2.done()` fallbacks. Rejected operations explicitly roll back and are non-mutating.
+- **Genuine Worker Failure & Contention Failure-Path:** Tested controlled database contention timeout via `SET SESSION innodb_lock_wait_timeout = 1` on Thread 2 during active row lock by Thread 1. Proved MariaDB Error 1205 is caught, transaction rolls back, worker terminates within bounded timeout, zero partial mutation occurs on `admin2`, threads are joined, and connections return cleanly to the pool.
+- **Independent Database Pool Isolation Verification:** Both configured database pools (`_pool` / `primary_pool` and `_retailbot2_pool` / `retailbot2_pool`) independently assert `SELECT DATABASE() == 'signal_bot_test'`. Hard fail-closed guards prevent any execution if a pool resolves anywhere other than `signal_bot_test`. Teardown safely drains and closes connections before resetting references.
+- **Staging Server Child Process Identity & Readiness:** Hardened `waitForServer()` in `tests/browser/staging_browser_acceptance.cjs` to poll `GET /api/system/test-identity`, verifying the responding HTTP server returns status 200 with matching `run_id` and PID identical to the spawned child process. Hardened `checkPortFree()` to accept strictly `ECONNREFUSED` as evidence of availability, handle `EADDRINUSE` as hard failure, and propagate unexpected socket errors. Added 5 dedicated regression tests in `tests/browser/test_staging_lifecycle_regressions.cjs`.
 - **Active-Admin Locking Query Optimization:** Added migration `025_users_role_active_index` creating composite index `idx_users_role_active_id` on `users (role, is_active, id)`, optimizing the locking query from a clustered primary index scan (`type: index`) to a direct const-ref lookup (`type: ref`), eliminating non-admin row locks.
 - **Explicit Transaction Rollbacks:** All user mutation endpoints (`create_user`, `reset_user_password`, `update_user`, `delete_user`) explicitly roll back transactions before re-raising `HTTPException`, preventing connection pool lock leaks and ensuring immediate connection reuse.
 - **Password Reset Implementation:** The administrator specifies the new password (min 10 chars) in a confirmation modal; the backend updates `password_hash`, increments `session_version` (revoking active user sessions and invalidating outstanding JWT tokens), and flags `must_change_password = 1` requiring rotation upon next login.
 - **Telegram Authorization:** Authenticated traders and viewers can access `GET /api/telegram/status` (`200 OK` with masked `chatId: null`); `POST /api/telegram/test` remains strictly `admin`-only via backend `require_admin` dependency and middleware enforcement.
 - **RetailBot2 Connection Pool & Client Batching:** Reverted `retailbot2_pool` to its original baseline `pool_size = 3` in `db/db.py`. In `frontend/src/lib/research.ts`, optimized `fetchResearchSnapshot` to batch the 4 panel queries into 2 concurrent pairs of 2, capping peak connection demand at 2 connections (within the pool of 3), eliminating `PoolError` on panel mount without increasing database connection allocations.
 - **Database Isolation & Safety Boundaries:** Authorized test database `signal_bot_test` is used exclusively. The harness strictly validates `SELECT DATABASE() = 'signal_bot_test'` before any fixture or test logic runs, with a hard fail-closed guard preventing fallback to `crypto_signals`. Zero mutations to pre-existing accounts (`admin`, `staging_trader`, `staging_viewer`); run-specific fixtures are isolated and cleanly removed upon completion.
-- **Harden Staging Browser Acceptance:** Replaced shell string interpolation with argument-safe process execution passing credentials via stdin JSON. Added port occupancy preflight checks, child process exit monitoring, graceful SIGTERM/SIGKILL termination, and verified direct backend contract RBAC checks (401 unauth, 403 viewer/trader, 200 admin).
 - **Cutover Safety:** Default serving remains legacy (`web/static/`); preview is accessible at `/modern`. Production cutover requires explicit owner authorization and process restart with `SIGNAL_BOT_USE_MODERN_UI=1`.
 
 ### Validation Summary
 - **Frontend Typecheck:** PASS (`tsc --noEmit`, 0 errors).
-- **Frontend Unit & Component Suite:** PASS (31 test files, 210 tests passed, 0 failed in 7.29s).
+- **Frontend Unit & Component Suite:** PASS (31 test files, 210 tests passed, 0 failed in 7.82s).
 - **Frontend Production Build:** PASS (`vite build`, 1,609 modules transformed, clean bundle in `frontend/dist/` in 4.06s).
-- **Playwright Browser Tests (Mocked API):** PASS (28 tests passed across Desktop, Tablet, Mobile 375px viewports, and both Dark/Light themes in 28.3s; 100% of tests use deterministic API route mocking via `page.route()`).
-- **Backend Test Suite:** PASS (`python3 -m pytest -q`: 1,108 passed, 18 skipped, 6 warnings, 0 failed in 21.24s).
-- **MariaDB Concurrency & Security Suite:** PASS (`pytest tests/test_user_management_mariadb_concurrency.py`: 7 passed in 3.60s against authorized `signal_bot_test`, proving deterministic lock contention, exact second thread ID `LOCK WAIT` state in `information_schema.innodb_trx`, explicit rollbacks, connection reuse, and failure-path resource cleanup).
-- **Tracked Staging Browser Acceptance:** PASS (`node tests/browser/staging_browser_acceptance.cjs`: verified against real FastAPI backend on port 8055 using authorized `signal_bot_test` across admin, trader, and viewer roles; verified direct backend RBAC contracts, executable assertions passed for all 11 views, 0 console errors, 0 uncaught page errors, 0 network failures, 0 unexpected HTTP errors, 0 operational mutations, and verified fixture cleanup).
+- **Playwright Browser Tests (Mocked API):** PASS (28 tests passed across Desktop, Tablet, Mobile 375px viewports, and both Dark/Light themes in 28.6s; 100% of tests use deterministic API route mocking via `page.route()`).
+- **Backend Test Suite:** PASS (`python3 -m pytest -q`: 1,108 passed, 18 skipped, 6 warnings, 0 failed in 25.67s).
+- **MariaDB Concurrency & Security Suite:** PASS (`python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py`: 7 passed in 5.45s across 3 consecutive runs against authorized `signal_bot_test`, proving deterministic lock contention, exact second thread ID `LOCK WAIT` state in `information_schema.innodb_trx`, genuine worker failure handling via MariaDB lock wait timeout, explicit rollbacks, connection reuse, and failure-path resource cleanup).
+- **Staging Lifecycle & Identity Regression Suite:** PASS (`node tests/browser/test_staging_lifecycle_regressions.cjs`: 5 passed in 0.9s proving port collision rejection, alien identity rejection, premature exit detection, socket error propagation, and child-verified readiness).
+- **Tracked Staging Browser Acceptance:** PASS (`node tests/browser/staging_browser_acceptance.cjs`: verified against real FastAPI backend on port 8055 using child process identity verification and authorized `signal_bot_test` across admin, trader, and viewer roles; verified direct backend RBAC contracts, executable assertions passed for all 11 views, 0 console errors, 0 uncaught page errors, 0 network failures, 0 unexpected HTTP errors, 0 operational mutations, and verified fixture cleanup).
 - **Workflow Parity Reconciled Totals:** 59 Total = 49 Complete + 10 Legacy-Only + 0 Missing (6 Complete views, 5 Partial views with 15 read-only monitor workflows).
 - **Parity Deliverable:** [`docs/UIX_LEGACY_TO_MODERN_PARITY.md`](UIX_LEGACY_TO_MODERN_PARITY.md).
 - **Audit Worksheet:** [`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md).
@@ -134,7 +137,7 @@ PYTHONPATH=$PWD python3 -m pytest -q
 ### 4.5 MariaDB Concurrency & Security Suite (`pytest tests/test_user_management_mariadb_concurrency.py`)
 ```text
 PYTHONPATH=$PWD python3 -m pytest tests/test_user_management_mariadb_concurrency.py -v
-7 passed in 3.60s
+7 passed in 5.45s (verified repeatedly across 3 consecutive runs)
 ```
 - Tests explicit row-level locking (`SELECT ... FOR UPDATE ORDER BY id`) against authorized test database `signal_bot_test`, proving lock contention specifically on the second request's connection thread ID without any `not f2.done()` fallback:
   1. `test_concurrent_admin_demotion_prevents_zero_admins`: Thread 1 acquires row locks via `SELECT ... FOR UPDATE` and pauses. Thread 2 attempts demotion on independent connection; test captures Thread 2's exact MariaDB connection ID (`trx_mysql_thread_id`) and asserts `trx_state = 'LOCK WAIT'` in `information_schema.innodb_trx`. When Thread 1 commits, Thread 2 unblocks, reads updated state, and is cleanly rejected with HTTP 400 (`Cannot demote or deactivate the last active administrator`).
@@ -143,9 +146,21 @@ PYTHONPATH=$PWD python3 -m pytest tests/test_user_management_mariadb_concurrency
   4. `test_successful_deactivation_when_another_active_admin_exists`: Admin deactivation succeeds (HTTP 200) when another active admin remains in the system.
   5. `test_rejected_operations_produce_no_database_or_audit_mutations`: Rejected operations roll back cleanly without inserting invalid audit records or mutating user state.
   6. `test_rejected_operation_explicit_rollback_and_connection_reuse`: Proves explicit rollback on rejected operation and subsequent connection reuse. A subsequent valid administrator operation is not blocked by lingering locks.
-  7. `test_failure_path_releases_sync_and_cleans_up`: Proves that a timeout or assertion failure safely releases synchronization events, joins worker threads, resets test hooks, and leaves the test database pool immediately usable.
+  7. `test_failure_path_releases_sync_and_cleans_up`: Proves that a real worker failure during contention (MariaDB `SET SESSION innodb_lock_wait_timeout = 1` triggering Error 1205 while in `LOCK WAIT`) terminates within bounded timeout, rolls back the transaction, leaves zero partial user mutation on `admin2`, joins worker threads, and leaves the pool healthy and usable for subsequent operations.
 
-### 4.6 Tracked Staging Browser Acceptance (`tests/browser/staging_browser_acceptance.cjs`)
+### 4.6 Staging Lifecycle & Server Identity Regressions (`tests/browser/test_staging_lifecycle_regressions.cjs`)
+```text
+node tests/browser/test_staging_lifecycle_regressions.cjs
+[+] ALL 5 STAGING LIFECYCLE REGRESSION TESTS PASSED SUCCESSFULLY!
+```
+- Proves deterministic server readiness, child process proof, and port safety:
+  1. **Occupied Port Rejection:** An unrelated HTTP server occupying the target port triggers immediate preflight rejection in `checkPortFree()`, and `waitForServer()` immediately rejects unverified HTTP responses from an alien server without false-positive readiness.
+  2. **Mismatched Identity Rejection:** A child process responding with mismatched or unverified `run_id` is immediately rejected.
+  3. **Premature Child Exit Detection:** A child process exiting with non-zero exit code before readiness is detected immediately via `exitCode` / PID check without waiting for full timeout.
+  4. **Socket Error Propagation:** Unexpected socket errors (e.g. `EPERM`) and `EADDRINUSE` are treated as hard failures and propagated, never assumed to indicate a free port.
+  5. **Child Process Verified Readiness:** Successfully connects to child process, validates `run_id` match and `pid` match against spawned child.
+
+### 4.7 Tracked Staging Browser Acceptance (`tests/browser/staging_browser_acceptance.cjs`)
 ```text
 node tests/browser/staging_browser_acceptance.cjs
 [+] READ-ONLY STAGING BROWSER ACCEPTANCE COMPLETED SUCCESSFULLY!
@@ -159,13 +174,20 @@ node tests/browser/staging_browser_acceptance.cjs
 ```
 - Real FastAPI server spawned on port 8055 with authorized test database `signal_bot_test`.
 - **Harness Security & Hardening:**
-  - **Port Occupancy Preflight:** Checks port 8055 before spawning child server, refusing to attach to an unverified listener.
-  - **Shell-Safe Process Execution:** Zero shell string interpolation of credentials; passwords and user payloads delivered via stdin JSON.
-  - **Child Process Lifecycle:** Monitors child process error and exit events; verifies graceful SIGTERM termination with timeout and SIGKILL fallback.
+  - **Child Process Identity Proof:** Verifies child process is alive and polls `GET /api/system/test-identity`, asserting `run_id === RUN_ID` and PID matches spawned child.
+  - **Strict Port Occupancy Preflight:** Only `ECONNREFUSED` indicates an available port; `EADDRINUSE` and socket errors fail hard.
+  - **Shell-Safe Process Execution:** Zero shell string interpolation of credentials; passwords and user payloads delivered strictly via stdin JSON.
   - **Direct Backend RBAC Contracts:** Direct HTTP calls assert 401 unauthenticated, 403 viewer/trader on user management and Telegram tests, and 200 admin user catalog.
   - **Executable DOM Assertions:** Asserts stable selectors for all 11 views, asserts presence of User Accounts and Telegram integration for admin, asserts absence of User Accounts and Telegram test buttons for trader/viewer, asserts absence of editable screener controls for viewer.
   - **Browser Health Audit:** Asserts 0 console errors, 0 uncaught page errors, 0 failed network requests, and 0 unexpected HTTP 4xx/5xx responses.
   - **Top-Level Cleanup:** Preflight, seeding, execution, and cleanup enclosed in a single top-level `try/finally`. Cleans up only the exact fixture IDs inserted (`adm_*`, `trd_*`, `viw_*`), reporting cleanup failure as a fatal test error. Zero mutations to pre-existing `signal_bot_test` users.
+
+### 4.8 Independent Database Pool Verification
+- Before database operations execute, the suite independently tests:
+  1. `db_module.get_pool()` (`crypto_bot_pool`): asserts `SELECT DATABASE() == 'signal_bot_test'`.
+  2. `db_module.get_retailbot2_pool()` (`retailbot2_pool`): asserts `SELECT DATABASE() == 'signal_bot_test'`.
+- Fails closed if either pool resolves to any database other than `signal_bot_test`.
+- Teardown safely awaits connection returns, drains connections via `_remove_connections()`, and only then resets pool references.
 
 ### 4.7 Database Mutation & Isolation Disclosure (Finding 6 Verification)
 
@@ -237,9 +259,11 @@ SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY i
 - [x] All 11 views (6 complete, 5 partial with read-only monitors) and 81 backend routes verified.
 - [x] Frontend typecheck, unit/component tests, and production build pass with 0 errors.
 - [x] Mocked Playwright browser test suite (28 tests) passes across viewports and themes using mocked APIs.
-- [x] Backend test suite (1,107 tests passed, 0 failures) verified with complete admin security, deterministic transaction concurrency serialization, and lockout protections.
-- [x] MariaDB concurrency suite (6 tests passed) proves lock contention via `information_schema.innodb_trx` (`trx_state = 'LOCK WAIT'`) specifically for the second request's connection thread ID, explicit rollback on rejection, and connection reuse.
-- [x] Real-backend browser acceptance test committed to tracked location `tests/browser/staging_browser_acceptance.cjs` and passes across all 3 roles using dedicated disposable DB `signal_bot_ui_acceptance_*` with executable assertions, 0 console errors, and 0 network failures.
+- [x] Backend test suite (1,108 tests passed, 0 failures) verified with complete admin security, deterministic transaction concurrency serialization, and lockout protections.
+- [x] MariaDB concurrency suite (7 tests passed across 3 consecutive runs) proves lock contention via `information_schema.innodb_trx` (`trx_state = 'LOCK WAIT'`) specifically for the second request's connection thread ID, genuine worker failure handling via MariaDB lock wait timeout, explicit rollback on rejection, and connection reuse.
+- [x] Independent database pool verification proves both primary and retailbot2 pools strictly resolve to authorized `signal_bot_test`.
+- [x] Staging lifecycle & server identity regressions (5 tests) prove child process identity verification, port collision rejection, and socket error propagation.
+- [x] Real-backend browser acceptance test committed to tracked location `tests/browser/staging_browser_acceptance.cjs` and passes across all 3 roles using child process identity verification and authorized DB `signal_bot_test` with executable assertions, 0 console errors, and 0 network failures.
 - [x] Dedicated PR #697 created from `fix/ui-migration-review-remediation` to `master`.
 - [x] Reversible cutover plan established in [`docs/UIX_CUTOVER_PLAN.md`](UIX_CUTOVER_PLAN.md).
 - [ ] Owner live staging read-only verification and final production cutover authorization.
@@ -250,14 +274,15 @@ SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY i
 
 | Test area | Command | Exit Code | Result | Evidence Output Summary | Environment & Limitations | Status |
 |---|---|:---:|:---:|---|---|:---:|
-| **Full backend** | `PYTHONPATH=$PWD python3 -m pytest -q` | 0 | **PASS** | `1108 passed, 18 skipped, 6 warnings in 21.24s` | Linux, Python 3.12.14, MariaDB. External exchange APIs mocked. | Run by Antigravity |
+| **Full backend** | `PYTHONPATH=$PWD python3 -m pytest -q` | 0 | **PASS** | `1108 passed, 18 skipped, 6 warnings in 25.67s` | Linux, Python 3.12.14, MariaDB. External exchange APIs mocked. | Run by Antigravity |
 | **User security** | `PYTHONPATH=$PWD python3 -m pytest tests/test_user_management_security.py -v` | 0 | **PASS** | `12 passed in 2.87s` | Linux, Python 3.12.14. Tests self-demotion, self-deletion, token revocation, password hash updates. | Run by Antigravity |
-| **MariaDB concurrency** | `PYTHONPATH=$PWD python3 -m pytest tests/test_user_management_mariadb_concurrency.py -v` | 0 | **PASS** | `7 passed in 3.60s` | Linux, MariaDB (authorized `signal_bot_test`). Proves deterministic MariaDB `LOCK WAIT` on exact second thread ID, failure-path cleanup, serialized rejections, explicit rollback, connection reuse. | Run by Antigravity |
+| **MariaDB concurrency** | `python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py` | 0 | **PASS** | `7 passed in 5.45s (3 consecutive runs)` | Linux, MariaDB (authorized `signal_bot_test`). Proves deterministic MariaDB `LOCK WAIT` on exact second thread ID, genuine worker failure under contention via MariaDB lock wait timeout, failure-path cleanup, serialized rejections, explicit rollback, connection reuse. | Run by Antigravity |
 | **Telegram authorization** | `PYTHONPATH=$PWD python3 -m pytest tests/test_telegram_route_contracts.py -v` | 0 | **PASS** | `7 passed in 2.16s` | Linux, Python 3.12.14. `POST /api/telegram/test` is admin-only; `GET /api/telegram/status` masks `chatId: null` for trader/viewer. Real Telegram sends mocked. | Run by Antigravity |
+| **Staging lifecycle regressions** | `node tests/browser/test_staging_lifecycle_regressions.cjs` | 0 | **PASS** | `5 passed in 0.9s` | Linux, Node.js v22.23.2. Proves child process identity proof, port collision rejection, alien identity rejection, premature exit detection, socket error propagation. | Run by Antigravity |
 | **Frontend typecheck** | `cd frontend && npm run typecheck` | 0 | **PASS** | `tsc --noEmit (0 errors)` | Node v22.23.2, TypeScript 5.8.2. | Run by Antigravity |
-| **Frontend unit tests** | `cd frontend && npm test -- --run` | 0 | **PASS** | `Test Files 31 passed (31), Tests 210 passed (210) in 7.29s` | Node v22.23.2, Vitest 3.1.3. Component and client logic unit tests. | Run by Antigravity |
+| **Frontend unit tests** | `cd frontend && npm test -- --run` | 0 | **PASS** | `Test Files 31 passed (31), Tests 210 passed (210) in 7.82s` | Node v22.23.2, Vitest 3.1.3. Component and client logic unit tests. | Run by Antigravity |
 | **Frontend build** | `cd frontend && npm run build` | 0 | **PASS** | `1,609 modules transformed, built in 4.06s` | Production Vite bundle generated in `frontend/dist/`. | Run by Antigravity |
-| **Mocked Playwright** | `cd frontend && npx playwright test` | 0 | **PASS** | `28 passed in 28.3s` | Chromium headless (6 workers). 100% mocked API routes via `page.route()`. | Run by Antigravity |
-| **Real-backend browser acceptance** | `node tests/browser/staging_browser_acceptance.cjs` | 0 | **PASS** | `All 3 roles passed, verified direct backend RBAC, executable assertions verified for all 11 views, 0 console errors, 0 network failures, 0 unexpected HTTP errors in 20.2s` | Real FastAPI backend on port 8055, Chromium headless, authorized MariaDB `signal_bot_test`. Zero operational mutations. | Run by Antigravity |
+| **Mocked Playwright** | `cd frontend && npx playwright test` | 0 | **PASS** | `28 passed in 28.6s` | Chromium headless (6 workers). 100% mocked API routes via `page.route()`. | Run by Antigravity |
+| **Real-backend browser acceptance** | `node tests/browser/staging_browser_acceptance.cjs` | 0 | **PASS** | `All 3 roles passed, verified direct backend RBAC, child process identity verified (run_id + PID), executable assertions verified for all 11 views, 0 console errors, 0 network failures, 0 unexpected HTTP errors in 14.8s` | Real FastAPI backend on port 8055, Chromium headless, authorized MariaDB `signal_bot_test`. Zero operational mutations. | Run by Antigravity |
 | **MariaDB migration** | `MYSQL_DATABASE=signal_bot_test python3 -m db.migrate --status` | 0 | **PASS** | `025_users_role_active_index applied successfully` | Applied to `signal_bot_test`. Schema table `schema_version` updated. | Run by Antigravity |
 | **EXPLAIN verification** | `EXPLAIN SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY id FOR UPDATE` | 0 | **VERIFIED** | `type: ref, key: idx_users_role_active_id, key_len: 2, ref: const,const, rows: 1` | MariaDB 10.9.4 on `signal_bot_test`. Direct index ref lookup; avoids full index scan and row locking on non-admin rows. | Run by Antigravity |

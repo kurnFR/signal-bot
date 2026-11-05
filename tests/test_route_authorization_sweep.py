@@ -14,7 +14,7 @@ from web.app import app, _role_allowed
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 # Mutating endpoints every authenticated user (incl. viewer) legitimately needs.
 VIEWER_ALLOWED_MUTATIONS = {"/api/auth/logout", "/api/auth/change-password"}
-PUBLIC = {("POST", "/api/auth/login")}
+PUBLIC = {("POST", "/api/auth/login"), ("GET", "/api/system/test-identity")}
 
 
 def _collect_routes(routes):
