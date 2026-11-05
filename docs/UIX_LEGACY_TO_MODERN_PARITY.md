@@ -4,8 +4,11 @@
 **Target:** Complete parity verification between the legacy dashboard (`web/static/`) and the modern React + TypeScript frontend (`frontend/src/`).
 **Status:** AUDITED — Parity Rebuilt (6 Views Complete, 5 Views Partial with Read-Only Monitors, 0 Missing)
 **Date:** November 2026
-**Baseline Commit:** `53bd8713d20e3348a5d23d951737037e916ba67f`
-**Reviewed Implementation Baseline:** `c4c97f38445755d2daf577c57acbbcd13e835ab3`
+**Baseline Commit:** `53bd8713d20e3348a5d23d951737037e916ba67f` (Independent UI remediation review baseline)
+**Reviewed Implementation Baseline:** `32348c2042f0c8d028e98f977b4d224d3bc33a58` (PR #697 independent review baseline)
+**Previous Independently Reviewed Baseline:** `577544e4578ae46988a2cba96bcdc6338ba7b59f` (PR #697 acceptance blockers review)
+**Intermediate Remediation Commit:** `a72f81f34e1e9013e1b05e9bbdff751d6f6741f6` (Full 11-view browser acceptance & process termination)
+**Final Implementation Commit:** `98817a100bfe89e35237676f09c308c374ea0305` (Complete user profile contract, active-admin serialization, loopback staging identity, and final review remediation)
 **Reference:** [`docs/ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md`](ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md), [`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md)
 
 ---
