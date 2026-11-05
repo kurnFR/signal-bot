@@ -6,7 +6,7 @@
 **Branch:** `fix/ui-migration-review-remediation`
 **Baseline Commit:** `53bd8713d20e3348a5d23d951737037e916ba67f`
 **Reviewed Implementation Baseline:** `32348c2042f0c8d028e98f977b4d224d3bc33a58`
-**Latest Reviewed Baseline:** `d707eee6a330991f73778a166790e8757a1b8a1d`
+**Latest Reviewed Baseline:** `412111ee3bbb6148fac8fb30f00261a67c2ff5e5`
 **Owner:** Antigravity
 **Independent acceptance:** ChatGPT / repository owner
 **Status:** AUDITED — Rebuilt directly from legacy source inspection and modern codebase verification.

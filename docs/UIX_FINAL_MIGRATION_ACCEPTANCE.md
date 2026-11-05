@@ -5,7 +5,7 @@
 **Pull Request:** [#697](https://github.com/kurnFR/signal-bot/pull/697) (`fix/ui-migration-review-remediation` -> `master`)<br>
 **Baseline Commit:** `53bd8713d20e3348a5d23d951737037e916ba67f` (Independent UI remediation review)<br>
 **Reviewed Implementation Baseline:** `32348c2042f0c8d028e98f977b4d224d3bc33a58` (PR #697 independent review baseline)<br>
-**Latest Reviewed Baseline:** `d707eee6a330991f73778a166790e8757a1b8a1d` (PR #697 hardening baseline)<br>
+**Latest Reviewed Baseline:** `412111ee3bbb6148fac8fb30f00261a67c2ff5e5` (PR #697 hardening baseline)<br>
 **Date of Local Validation:** November 5, 2026<br>
 **Environment:** Linux x86_64<br>
 **Python Version:** 3.12.14<br>

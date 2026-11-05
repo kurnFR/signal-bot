@@ -68,6 +68,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 conn.close()
 
         cls._run_id = uuid.uuid4().hex[:8]
+        cls._all_executors = []
 
     @classmethod
     def tearDownClass(cls):
@@ -75,6 +76,14 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         auth_routes._test_before_admin_lock_hook = None
         auth_routes._test_after_admin_lock_hook = None
         auth_routes._test_active_admin_filter = None
+
+        # Verify no worker threads remain active before pool teardown
+        for ex in getattr(cls, "_all_executors", []):
+            alive_threads = [t for t in getattr(ex, "_threads", set()) if t.is_alive()]
+            if alive_threads:
+                raise RuntimeError(
+                    f"Database pool teardown failed: {len(alive_threads)} worker thread(s) remain active."
+                )
 
         # Gather all unique pool objects
         pools_to_clean = []
@@ -122,6 +131,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         auth_routes._test_active_admin_filter = None
 
         self._active_executors = []
+        self._active_futures = []
         self.test_prefix = f"conc_{self._run_id}_{int(time.time()*1000) % 1000000}"
         self.seeded_user_ids = []
 
@@ -185,6 +195,17 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
     def _create_executor(self, max_workers=2):
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
         self._active_executors.append(executor)
+        if hasattr(self.__class__, "_all_executors"):
+            self.__class__._all_executors.append(executor)
+
+        orig_submit = executor.submit
+
+        def tracked_submit(fn, *args, **kwargs):
+            fut = orig_submit(fn, *args, **kwargs)
+            self._active_futures.append(fut)
+            return fut
+
+        executor.submit = tracked_submit
         return executor
 
     def tearDown(self):
@@ -192,16 +213,35 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         auth_routes._test_after_admin_lock_hook = None
         auth_routes._test_active_admin_filter = None
 
-        # 1. Terminate and join all tracked worker executors/threads
-        if hasattr(self, "_active_executors"):
+        # 1. Track worker futures and verify their completion with bounded wait
+        if hasattr(self, "_active_futures") and self._active_futures:
+            done, not_done = concurrent.futures.wait(self._active_futures, timeout=5.0)
+            if not_done:
+                raise RuntimeError(
+                    f"Test teardown failed: {len(not_done)} worker future(s) did not terminate "
+                    f"within bounded wait (5.0s)."
+                )
+            for fut in self._active_futures:
+                if not fut.done():
+                    raise RuntimeError("Test teardown failed: tracked worker future is not done.")
+            self._active_futures.clear()
+
+        # 2. Terminate and join all tracked worker executors/threads with bounded wait
+        if hasattr(self, "_active_executors") and self._active_executors:
             for ex in self._active_executors:
-                try:
-                    ex.shutdown(wait=True, cancel_futures=True)
-                except Exception:
-                    pass
+                ex.shutdown(wait=True, cancel_futures=True)
+                start_wait = time.time()
+                while any(t.is_alive() for t in getattr(ex, "_threads", set())) and time.time() - start_wait < 3.0:
+                    time.sleep(0.05)
+                alive_threads = [t for t in getattr(ex, "_threads", set()) if t.is_alive()]
+                if alive_threads:
+                    raise RuntimeError(
+                        f"Test teardown failed: {len(alive_threads)} worker thread(s) in executor "
+                        f"failed to terminate within bounded wait (3.0s)."
+                    )
             self._active_executors.clear()
 
-        # 2. Delete test fixtures
+        # 3. Delete test fixtures
         if hasattr(self, "seeded_user_ids") and self.seeded_user_ids:
             conn = self.pool.get_connection()
             try:
@@ -220,7 +260,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
             finally:
                 conn.close()
 
-        # 3. Verify no checked-out connections were leaked by the test
+        # 4. Verify no checked-out connections were leaked by the test
         start_wait = time.time()
         recovered = False
         while time.time() - start_wait < 3.0:
@@ -717,7 +757,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
             auth_routes._test_before_admin_lock_hook = None
             auth_routes._test_after_admin_lock_hook = None
             auth_routes._test_active_admin_filter = None
-            executor.shutdown(wait=True)
+            executor.shutdown(wait=True, cancel_futures=True)
 
         # 7. Assert that admin2's transaction was completely rolled back:
         # admin2 remains role='admin', is_active=1, session_version=0
@@ -732,8 +772,8 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
 
             # Assert no audit log was created for admin2's failed mutation
             cur.execute(
-                "SELECT COUNT(*) as count FROM audit_logs WHERE details LIKE %s",
-                (f"%{self.admin2_id}%",),
+                "SELECT COUNT(*) as count FROM audit_logs WHERE user_id = %s AND details LIKE %s",
+                (self.caller_id, f'%"target_id": {self.admin2_id}%'),
             )
             audit_count = cur.fetchone()["count"]
             self.assertEqual(audit_count, 0)
