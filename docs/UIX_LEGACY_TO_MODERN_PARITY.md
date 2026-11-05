@@ -342,7 +342,7 @@ In accordance with the workflow parity audit ([`docs/ANTIGRAVITY_UI_PARITY_AUDIT
 | 6 | Strategy Quick Test Modal | `StrategyLibraryPanel.tsx` | `COMPLETE` | In-memory 1,000 candle simulation; no database writes |
 | 7 | Strategy Delete Confirmation | `StrategyLibraryPanel.tsx` | `COMPLETE` | Explicit name verification required before deletion |
 | 8 | User Delete Confirmation | `SettingsPanel.tsx` | `COMPLETE` | Two-step confirmation dialog; prevents self-deletion |
-| 9 | Password Reset Confirmation | `SettingsPanel.tsx` | `COMPLETE` | Modal confirmation revealing temporary credentials |
+| 9 | Password Reset Confirmation | `SettingsPanel.tsx` | `COMPLETE` | Modal dialog prompting administrator to enter and confirm new password |
 
 ---
 

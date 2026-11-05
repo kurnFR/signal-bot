@@ -47,8 +47,9 @@ def _write_required_audit(action: str, username: str, user_id: Optional[int] = N
         )
 
 
-# Test-only hook for deterministic transaction synchronization tests.
+# Test-only hooks for deterministic transaction synchronization tests.
 # Must remain None in production.
+_test_before_admin_lock_hook: Optional[Callable[[Any, Any, int], None]] = None
 _test_after_admin_lock_hook: Optional[Callable[[Any, Any, int], None]] = None
 
 
@@ -563,6 +564,8 @@ def update_user(user_id: int, req: UpdateUserRequest, admin: dict = Depends(requ
         demoting_target = (req.role is not None and req.role != "admin")
         deactivating_target = (req.is_active is False)
         if target_is_active_admin and (demoting_target or deactivating_target):
+            if _test_before_admin_lock_hook is not None:
+                _test_before_admin_lock_hook(conn, cur, user_id)
             cur.execute(
                 "SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY id FOR UPDATE"
             )
@@ -632,6 +635,8 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
         # Last-admin protection: cannot delete an active admin if no other active admin exists.
         # Explicit transaction serialization: lock active admin rows in deterministic ascending ID order.
         if target.get("role") == "admin" and bool(target.get("is_active")):
+            if _test_before_admin_lock_hook is not None:
+                _test_before_admin_lock_hook(conn, cur, user_id)
             cur.execute(
                 "SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY id FOR UPDATE"
             )
