@@ -6,7 +6,7 @@
 **Branch:** `fix/ui-migration-review-remediation`
 **Baseline Commit:** `53bd8713d20e3348a5d23d951737037e916ba67f`
 **Reviewed Implementation Baseline:** `32348c2042f0c8d028e98f977b4d224d3bc33a58`
-**Latest Reviewed Baseline:** `412111ee3bbb6148fac8fb30f00261a67c2ff5e5`
+**Latest Reviewed Baseline:** `050a9ed95388acdab2c3592ffaca4e24dc29c722`
 **Owner:** Antigravity
 **Independent acceptance:** ChatGPT / repository owner
 **Status:** AUDITED — Rebuilt directly from legacy source inspection and modern codebase verification.
@@ -215,7 +215,7 @@ Every result below reflects local validation on the remediation branch:
 | **API RBAC Sweep** | `python3 -m pytest tests/test_route_authorization_sweep.py -v` | Linux, Python 3.12.14 | **PASS (11/11 passed in 2.72s)** | Pytest log | Verifies all routes fail-closed |
 | **Telegram Contracts** | `python3 -m pytest tests/test_telegram_route_contracts.py -v` | Linux, Python 3.12.14 | **PASS (7/7 passed in 2.16s)** | Pytest log | Mocked Telegram delivery; zero real pings; unauth 401 verified; chatId masked for non-admin |
 | **User Mgmt Security** | `python3 -m pytest tests/test_user_management_security.py -v` | Linux, Python 3.12.14 | **PASS (12/12 passed in 2.87s)** | Pytest log | Admin-only CRUD, self-demotion lockout, self-delete prevention, session-version invalidation, hash update verification |
-| **MariaDB Concurrency** | `python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py` | Linux, Python 3.12.14, MariaDB (authorized `signal_bot_test`) | **PASS (7/7 passed in 5.45s across 3 runs)** | Pytest log | Explicit `SELECT ... FOR UPDATE` row locks; deterministic `LOCK WAIT` contention verified on exact second thread ID; genuine worker failure handled via MariaDB lock wait timeout with clean rollback and zero partial mutation; independent pool database verification on all pools; non-mutating rollbacks and connection reuse verified |
+| **MariaDB Concurrency** | `python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py` | Linux, Python 3.12.14, MariaDB (authorized `signal_bot_test`) | **PASS (7/7 passed across 3 runs)** | Pytest log | Explicit `SELECT ... FOR UPDATE` row locks; deterministic `LOCK WAIT` contention verified on exact second thread ID; genuine worker failure handled via MariaDB lock wait timeout with clean rollback and zero partial mutation; independent pool database verification on all pools; non-mutating rollbacks and connection reuse verified; explicit executor lifecycle management with strictly bounded future wait (5.0s) and thread join (3.0s); zero silent exception suppression |
 | **Staging regressions** | `node tests/browser/test_staging_lifecycle_regressions.cjs` | Linux, Node.js v22.23.2 | **PASS (9/9 passed in 1.4s)** | Node runner log | Proves port collision rejection, alien identity rejection, premature exit detection, socket error propagation, mandatory matching PID verification, missing/null/mismatched PID rejection |
 | **Accessibility** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "accessibility|contrast|reduced-motion"` | Chromium, Desktop & Mobile | **PASS (Skip link, announcements, contrast)** | Playwright test report | Automated accessibility checks |
 | **Responsive** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "mobile viewport|tablet"` | Chromium (375px phone, 768px tablet, 1440px desktop) | **PASS (All 11 views fit without window overflow)** | Playwright test report | Automated viewport tests |

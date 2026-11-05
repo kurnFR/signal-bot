@@ -229,16 +229,19 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         # 2. Terminate and join all tracked worker executors/threads with bounded wait
         if hasattr(self, "_active_executors") and self._active_executors:
             for ex in self._active_executors:
-                ex.shutdown(wait=True, cancel_futures=True)
+                # Trigger shutdown without unbounded wait; cancels queued work and wakes threads
+                ex.shutdown(wait=False, cancel_futures=True)
+
+                # Explicit bounded join on all worker threads
                 start_wait = time.time()
-                while any(t.is_alive() for t in getattr(ex, "_threads", set())) and time.time() - start_wait < 3.0:
-                    time.sleep(0.05)
-                alive_threads = [t for t in getattr(ex, "_threads", set()) if t.is_alive()]
-                if alive_threads:
-                    raise RuntimeError(
-                        f"Test teardown failed: {len(alive_threads)} worker thread(s) in executor "
-                        f"failed to terminate within bounded wait (3.0s)."
-                    )
+                for t in list(getattr(ex, "_threads", set())):
+                    remaining = max(0.05, 3.0 - (time.time() - start_wait))
+                    t.join(timeout=remaining)
+                    if t.is_alive():
+                        raise RuntimeError(
+                            f"Test teardown failed: worker thread {t.name} in executor "
+                            f"failed to terminate within bounded wait (3.0s)."
+                        )
             self._active_executors.clear()
 
         # 3. Delete test fixtures
@@ -349,35 +352,35 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 headers=self.headers,
             )
 
+        executor = self._create_executor(max_workers=2)
         try:
             with patch("web.app.authenticate_request", return_value=self.user_auth), \
                  patch("web.auth.authenticate_request", return_value=self.user_auth):
-                with self._create_executor(max_workers=2) as executor:
-                    f1 = executor.submit(demote_user, self.admin1_id)
-                    self.assertTrue(t1_locked.wait(timeout=5.0), "Thread 1 failed to acquire row lock")
+                f1 = executor.submit(demote_user, self.admin1_id)
+                self.assertTrue(t1_locked.wait(timeout=5.0), "Thread 1 failed to acquire row lock")
 
-                    f2 = executor.submit(demote_user, self.admin2_id)
-                    self.assertTrue(t2_about_to_query.wait(timeout=5.0), "Thread 2 failed to reach locking query")
-                    t2_tid = t2_thread_id_holder[0]
+                f2 = executor.submit(demote_user, self.admin2_id)
+                self.assertTrue(t2_about_to_query.wait(timeout=5.0), "Thread 2 failed to reach locking query")
+                t2_tid = t2_thread_id_holder[0]
 
-                    # Verify the EXACT Thread 2 transaction enters MariaDB LOCK WAIT state
-                    t2_in_lock_wait = False
-                    for _ in range(50):
-                        time.sleep(0.05)
-                        if self._check_exact_thread_lock_wait(t2_tid):
-                            t2_in_lock_wait = True
-                            break
+                # Verify the EXACT Thread 2 transaction enters MariaDB LOCK WAIT state
+                t2_in_lock_wait = False
+                for _ in range(50):
+                    time.sleep(0.05)
+                    if self._check_exact_thread_lock_wait(t2_tid):
+                        t2_in_lock_wait = True
+                        break
 
-                    self.assertTrue(
-                        t2_in_lock_wait,
-                        f"Exact Thread 2 transaction (thread_id={t2_tid}) failed to enter MariaDB LOCK WAIT state"
-                    )
+                self.assertTrue(
+                    t2_in_lock_wait,
+                    f"Exact Thread 2 transaction (thread_id={t2_tid}) failed to enter MariaDB LOCK WAIT state"
+                )
 
-                    # Unblock Thread 1 only after exact LOCK WAIT was observed
-                    t1_can_proceed.set()
+                # Unblock Thread 1 only after exact LOCK WAIT was observed
+                t1_can_proceed.set()
 
-                    res1 = f1.result(timeout=5.0)
-                    res2 = f2.result(timeout=5.0)
+                res1 = f1.result(timeout=5.0)
+                res2 = f2.result(timeout=5.0)
         finally:
             t1_locked.set()
             t1_can_proceed.set()
@@ -443,34 +446,34 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 headers=self.headers,
             )
 
+        executor = self._create_executor(max_workers=2)
         try:
             with patch("web.app.authenticate_request", return_value=self.user_auth), \
                  patch("web.auth.authenticate_request", return_value=self.user_auth):
-                with self._create_executor(max_workers=2) as executor:
-                    f1 = executor.submit(deactivate_user, self.admin1_id)
-                    self.assertTrue(t1_locked.wait(timeout=5.0), "Thread 1 failed to acquire row lock")
+                f1 = executor.submit(deactivate_user, self.admin1_id)
+                self.assertTrue(t1_locked.wait(timeout=5.0), "Thread 1 failed to acquire row lock")
 
-                    f2 = executor.submit(deactivate_user, self.admin2_id)
-                    self.assertTrue(t2_about_to_query.wait(timeout=5.0), "Thread 2 failed to reach locking query")
-                    t2_tid = t2_thread_id_holder[0]
+                f2 = executor.submit(deactivate_user, self.admin2_id)
+                self.assertTrue(t2_about_to_query.wait(timeout=5.0), "Thread 2 failed to reach locking query")
+                t2_tid = t2_thread_id_holder[0]
 
-                    # Verify the EXACT Thread 2 transaction enters MariaDB LOCK WAIT state
-                    t2_in_lock_wait = False
-                    for _ in range(50):
-                        time.sleep(0.05)
-                        if self._check_exact_thread_lock_wait(t2_tid):
-                            t2_in_lock_wait = True
-                            break
+                # Verify the EXACT Thread 2 transaction enters MariaDB LOCK WAIT state
+                t2_in_lock_wait = False
+                for _ in range(50):
+                    time.sleep(0.05)
+                    if self._check_exact_thread_lock_wait(t2_tid):
+                        t2_in_lock_wait = True
+                        break
 
-                    self.assertTrue(
-                        t2_in_lock_wait,
-                        f"Exact Thread 2 transaction (thread_id={t2_tid}) failed to enter MariaDB LOCK WAIT state"
-                    )
+                self.assertTrue(
+                    t2_in_lock_wait,
+                    f"Exact Thread 2 transaction (thread_id={t2_tid}) failed to enter MariaDB LOCK WAIT state"
+                )
 
-                    t1_can_proceed.set()
+                t1_can_proceed.set()
 
-                    res1 = f1.result(timeout=5.0)
-                    res2 = f2.result(timeout=5.0)
+                res1 = f1.result(timeout=5.0)
+                res2 = f2.result(timeout=5.0)
         finally:
             t1_locked.set()
             t1_can_proceed.set()
@@ -520,34 +523,34 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 headers=self.headers,
             )
 
+        executor = self._create_executor(max_workers=2)
         try:
             with patch("web.app.authenticate_request", return_value=self.user_auth), \
                  patch("web.auth.authenticate_request", return_value=self.user_auth):
-                with self._create_executor(max_workers=2) as executor:
-                    f1 = executor.submit(delete_user, self.admin1_id)
-                    self.assertTrue(t1_locked.wait(timeout=5.0), "Thread 1 failed to acquire row lock")
+                f1 = executor.submit(delete_user, self.admin1_id)
+                self.assertTrue(t1_locked.wait(timeout=5.0), "Thread 1 failed to acquire row lock")
 
-                    f2 = executor.submit(delete_user, self.admin2_id)
-                    self.assertTrue(t2_about_to_query.wait(timeout=5.0), "Thread 2 failed to reach locking query")
-                    t2_tid = t2_thread_id_holder[0]
+                f2 = executor.submit(delete_user, self.admin2_id)
+                self.assertTrue(t2_about_to_query.wait(timeout=5.0), "Thread 2 failed to reach locking query")
+                t2_tid = t2_thread_id_holder[0]
 
-                    # Verify the EXACT Thread 2 transaction enters MariaDB LOCK WAIT state
-                    t2_in_lock_wait = False
-                    for _ in range(50):
-                        time.sleep(0.05)
-                        if self._check_exact_thread_lock_wait(t2_tid):
-                            t2_in_lock_wait = True
-                            break
+                # Verify the EXACT Thread 2 transaction enters MariaDB LOCK WAIT state
+                t2_in_lock_wait = False
+                for _ in range(50):
+                    time.sleep(0.05)
+                    if self._check_exact_thread_lock_wait(t2_tid):
+                        t2_in_lock_wait = True
+                        break
 
-                    self.assertTrue(
-                        t2_in_lock_wait,
-                        f"Exact Thread 2 transaction (thread_id={t2_tid}) failed to enter MariaDB LOCK WAIT state"
-                    )
+                self.assertTrue(
+                    t2_in_lock_wait,
+                    f"Exact Thread 2 transaction (thread_id={t2_tid}) failed to enter MariaDB LOCK WAIT state"
+                )
 
-                    t1_can_proceed.set()
+                t1_can_proceed.set()
 
-                    res1 = f1.result(timeout=5.0)
-                    res2 = f2.result(timeout=5.0)
+                res1 = f1.result(timeout=5.0)
+                res2 = f2.result(timeout=5.0)
         finally:
             t1_locked.set()
             t1_can_proceed.set()
@@ -757,7 +760,6 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
             auth_routes._test_before_admin_lock_hook = None
             auth_routes._test_after_admin_lock_hook = None
             auth_routes._test_active_admin_filter = None
-            executor.shutdown(wait=True, cancel_futures=True)
 
         # 7. Assert that admin2's transaction was completely rolled back:
         # admin2 remains role='admin', is_active=1, session_version=0
