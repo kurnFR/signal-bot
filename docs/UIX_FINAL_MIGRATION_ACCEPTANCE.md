@@ -2,7 +2,7 @@
 
 **Repository:** `kurnFR/signal-bot`  
 **Remediation Branch:** `fix/ui-migration-review-remediation`  
-**Verified Commit SHA:** `53bd8713d20e3348a5d23d951737037e916ba67f`  
+**Verified Commit SHA:** `84940c93c538271dbf66c0012af616206a8df5e0`  
 **Review Target:** Modern UI Migration Acceptance according to [`docs/ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md`](ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md) and PR #694 Review Remediation ([`docs/ANTIGRAVITY_UI_MIGRATION_REVIEW_FINDINGS.md`](ANTIGRAVITY_UI_MIGRATION_REVIEW_FINDINGS.md))  
 **Report Status:** **REMEDIATION IMPLEMENTED — Settings & Users Workflows Closed, Gaps Rectified, Cutover Subject to Owner Authorization**  
 **Production Status:** React/Vite preview is mounted at `/modern` and static files compiled at `frontend/dist/`. FastAPI continues to default `GET /` to `web/static/` unless `SIGNAL_BOT_USE_MODERN_UI=1` is explicitly set. Production cutover remains an explicitly approved, owner-led action requiring web service reload.
@@ -15,17 +15,18 @@ The modern React + TypeScript dashboard (`frontend/`) provides 49 complete workf
 
 Defects identified in review PR #694 and the independent review PR #696 have been resolved and covered by automated regression tests:
 - **Settings & User Administration:** Live user accounts catalog, create user, reset password, toggle active status, and delete user.
-- **Admin Lockout Safeguards:** Server-side defense-in-depth preventing admin self-demotion (`role != admin`), self-deactivation (`is_active = False`), self-deletion, and any mutation leaving zero active administrators in the system. Rejected operations are non-mutating and atomic.
-- **Password Reset Implementation:** The administrator specifies the new password (min 10 chars) in a confirmation modal; the backend updates `password_hash`, increments `session_version` (revoking active user sessions), and flags `must_change_password = 1` requiring rotation upon next login.
+- **Admin Lockout Safeguards & Concurrency Serialization:** Server-side defense-in-depth preventing admin self-demotion (`role != admin`), self-deactivation (`is_active = False`), self-deletion, and any mutation leaving zero active administrators in the system. Explicit row-level locking via `SELECT ... FOR UPDATE ORDER BY id` guarantees deterministic serialization across concurrent requests, tested against MariaDB. Rejected operations are non-mutating and atomic.
+- **Password Reset Implementation:** The administrator specifies the new password (min 10 chars) in a confirmation modal; the backend updates `password_hash`, increments `session_version` (revoking active user sessions and invalidating outstanding JWT tokens), and flags `must_change_password = 1` requiring rotation upon next login.
 - **Telegram Authorization:** Authenticated traders and viewers can access `GET /api/telegram/status` (`200 OK` with masked `chatId: null`); `POST /api/telegram/test` remains strictly `admin`-only via backend `require_admin` dependency and middleware enforcement.
 - **Cutover Safety:** Default serving remains legacy (`web/static/`); preview is accessible at `/modern`. Production cutover requires explicit owner authorization and process restart with `SIGNAL_BOT_USE_MODERN_UI=1`.
 
 ### Validation Summary
 - **Frontend Typecheck:** PASS (`tsc --noEmit`, 0 errors).
 - **Frontend Unit & Component Suite:** PASS (31 test files, 210 tests passed, 0 failed in 7.36s).
-- **Frontend Production Build:** PASS (`vite build`, 1,609 modules transformed, clean bundle in `frontend/dist/` in 3.89s).
-- **Playwright Browser Tests:** PASS (28 tests passed across Desktop, Tablet, Mobile 375px viewports, and both Dark/Light themes in 28.5s; 100% of tests use deterministic API route mocking via `page.route()`).
-- **Backend Test Suite:** PASS (`python3 -m pytest -q`: 1,100 passed, 18 skipped, 0 failed in 19.41s).
+- **Frontend Production Build:** PASS (`vite build`, 1,609 modules transformed, clean bundle in `frontend/dist/` in 4.12s).
+- **Playwright Browser Tests:** PASS (28 tests passed across Desktop, Tablet, Mobile 375px viewports, and both Dark/Light themes in 28.4s; 100% of tests use deterministic API route mocking via `page.route()`).
+- **Backend Test Suite:** PASS (`python3 -m pytest -q`: 1,106 passed, 18 skipped, 0 failed in 21.08s).
+- **MariaDB Concurrency & Security Suite:** PASS (5 concurrency and non-mutation tests against real MariaDB).
 - **Workflow Parity Reconciled Totals:** 59 Total = 49 Complete + 10 Legacy-Only + 0 Missing (6 Complete views, 5 Partial views with 15 read-only monitor workflows).
 - **Parity Deliverable:** [`docs/UIX_LEGACY_TO_MODERN_PARITY.md`](UIX_LEGACY_TO_MODERN_PARITY.md).
 - **Audit Worksheet:** [`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md).
@@ -112,9 +113,37 @@ Running 28 tests using 6 workers
 ### 4.4 Backend Regression Test Suite (`pytest`)
 ```text
 python3 -m pytest -q
-1100 passed, 18 skipped, 6 warnings in 19.41s
+1106 passed, 18 skipped, 6 warnings in 21.08s
 ```
-- Covers all 13 route modules, business logic, paper trading engine, ML generators, wallet tracker, screener, authentication, user management security safeguards, and database migrations.
+- Covers all 13 route modules, business logic, paper trading engine, ML generators, wallet tracker, screener, authentication, user management security safeguards, MariaDB transaction concurrency serialization, and database migrations.
+
+### 4.5 MariaDB Concurrency & Security Suite (`pytest tests/test_user_management_mariadb_concurrency.py`)
+```text
+python3 -m pytest tests/test_user_management_mariadb_concurrency.py -v
+5 passed in 3.12s
+```
+- Tests explicit row-level locking (`SELECT ... FOR UPDATE ORDER BY id`) against disposable MariaDB instance (`signal_bot_test`):
+  1. `test_concurrent_admin_deactivation_prevents_zero_admins`: Concurrent requests attempting to deactivate both remaining admins concurrently serialize; exactly one succeeds and the other receives HTTP 400 (`Cannot deactivate the last active administrator`).
+  2. `test_concurrent_admin_deletion_prevents_zero_admins`: Concurrent deletion requests serialize; exactly one succeeds, leaving 1 active admin.
+  3. `test_concurrent_admin_demotion_prevents_zero_admins`: Concurrent role updates serialize; exactly one succeeds, preventing demotion of the last active admin.
+  4. `test_rejected_operations_produce_no_database_or_audit_mutations`: Rejected operations roll back cleanly without inserting invalid audit records or mutating user state.
+  5. `test_successful_deactivation_when_another_active_admin_exists`: Admin deactivation succeeds when another active admin remains in the system.
+
+### 4.6 Read-Only Staging Browser Acceptance (`Playwright against Real FastAPI Backend`)
+```text
+node scratch/staging_browser_acceptance.cjs
+[+] READ-ONLY STAGING BROWSER ACCEPTANCE COMPLETED SUCCESSFULLY!
+    All 3 roles (admin, trader, viewer) verified against real FastAPI backend.
+    All 11 navigation views verified without browser exceptions or layout overflow.
+    Role boundaries verified (admin user mgmt visible; trader/viewer user mgmt hidden).
+    Zero mutations, zero trading actions, zero real Telegram messages dispatches.
+```
+- Real FastAPI server spawned on port 8055 with `signal_bot_test` database.
+- Headless Chromium browses the live React application at `http://127.0.0.1:8055/modern/`:
+  - **Admin session (`admin`):** Authenticates, verifies session restoration, traverses all 11 views, verifies user catalog and Telegram status, signs out cleanly.
+  - **Trader session (`staging_trader`):** Authenticates, accesses Market Screener, verifies Settings: User Management is completely hidden, Telegram test ping button is hidden, signs out cleanly.
+  - **Viewer session (`staging_viewer`):** Authenticates, accesses Market Screener (editable form controls hidden), verifies Settings: User Management hidden, Telegram test button hidden, signs out cleanly.
+  - Server cleanly torn down with zero database mutations or side effects.
 
 ---
 
@@ -135,6 +164,6 @@ python3 -m pytest -q
 - [x] All 11 views (6 complete, 5 partial with read-only monitors) and 81 backend routes verified.
 - [x] Frontend typecheck, unit/component tests, and production build pass with 0 errors.
 - [x] Playwright browser test suite (28 tests) passes across viewports and themes using mocked APIs.
-- [x] Backend test suite (1,100 tests passed, 0 failures) verified with complete admin security and lockout protections.
+- [x] Backend test suite (1,106 tests passed, 0 failures) verified with complete admin security, transaction concurrency serialization, and lockout protections.
 - [x] Reversible cutover plan established in [`docs/UIX_CUTOVER_PLAN.md`](UIX_CUTOVER_PLAN.md).
 - [ ] Owner live staging read-only verification and final production cutover authorization.

@@ -165,9 +165,9 @@ Before enabling the cutover toggle in production, ensure that the modern fronten
 
 ---
 
-## 7. Immediate Rollback Procedure (< 60 Seconds)
+## 7. Immediate Rollback Procedure
 
-If any unexpected regression, rendering defect, or user disruption occurs, the rollback procedure is immediate and non-destructive:
+If any unexpected regression, rendering defect, or user disruption occurs, the rollback procedure is non-destructive and requires no database conversion:
 
 1. **Disable the modern UI toggle:**
    ```bash
@@ -185,7 +185,7 @@ If any unexpected regression, rendering defect, or user disruption occurs, the r
    curl -s http://127.0.0.1:8050/ | grep -q "dashboard_enhancements.js" && echo "Rollback successful: legacy dashboard active"
    ```
 
-*Note: Database tables and stored data are shared directly between both interfaces without interface-specific schema mutations; switching serving modes does not modify persistent database records. Operators should still verify service health and backfill job status before and after reloading.*
+*Note: Database tables and stored data are shared directly between both interfaces without interface-specific schema mutations; switching serving modes does not modify persistent database records. Actual execution duration depends on system service reload timing and operator action.*
 
 ---
 

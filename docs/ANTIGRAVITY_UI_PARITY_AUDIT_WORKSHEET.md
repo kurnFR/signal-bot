@@ -4,7 +4,7 @@
 **Legacy source:** `web/static/` (`index.html`, `js/app.js`, `css/tailwind.css`)  
 **Modern source:** `frontend/src/`  
 **Branch:** `fix/ui-migration-review-remediation`  
-**Commit SHA:** `53bd8713d20e3348a5d23d951737037e916ba67f`  
+**Commit SHA:** `84940c93c538271dbf66c0012af616206a8df5e0`  
 **Owner:** Antigravity  
 **Independent acceptance:** ChatGPT / repository owner  
 **Status:** AUDITED — Rebuilt directly from legacy source inspection and modern codebase verification.
@@ -205,17 +205,18 @@ Every result below references the verified remediation commit:
 
 | Test category | Exact command | Commit SHA | Environment | Result | Artifact / log | Limitations |
 |---|---|---|---|---|---|---|
-| **Typecheck** | `cd frontend && npm run typecheck` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Node v22.23.2, TypeScript 5.8.2 | **PASS (0 errors)** | Terminal output | None |
-| **Unit / component** | `cd frontend && npm test -- --run` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Node v22.23.2, Vitest 3.1.3 | **PASS (31/31 files, 210/210 passed in 7.81s)** | Vitest runner log | None |
-| **Production build** | `cd frontend && npm run build` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Node v22.23.2, Vite 6.3.5 | **PASS (1,609 modules in 4.07s)** | `frontend/dist/` clean production bundle | None |
-| **Backend regression** | `python3 -m pytest -q` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Python 3.12.14, pytest 8.3.5 | **PASS (1,094 passed, 18 skipped, 0 failed in 19.04s)** | Pytest test runner log | Isolated test DB; mocked external calls |
-| **Playwright E2E** | `cd frontend && npx playwright test` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Chromium 1.64.1 (6 workers) | **PASS (28/28 passed in 28.5s)** | Playwright reporter | Chromium headless; mocked API routes |
-| **API RBAC Sweep** | `python3 -m pytest tests/test_route_authorization_sweep.py -v` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Python 3.12.14 | **PASS (11/11 passed in 2.78s)** | Pytest log | Verifies all routes fail-closed |
-| **Telegram Contracts** | `python3 -m pytest tests/test_telegram_route_contracts.py -v` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Python 3.12.14 | **PASS (7/7 passed in 2.16s)** | Pytest log | Mocked Telegram delivery; zero real pings; unauth 401 verified |
-| **User Mgmt Security** | `python3 -m pytest tests/test_user_management_security.py -v` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Linux, Python 3.12.14 | **PASS (5/5 passed in 2.22s)** | Pytest log | Admin-only CRUD, role bounds, self-lockout/self-delete protection |
-| **Accessibility** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "accessibility|contrast|reduced-motion"` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Chromium, Desktop & Mobile | **PASS (Skip link, announcements, contrast)** | Playwright test report | Automated accessibility checks |
-| **Responsive** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "mobile viewport|tablet"` | `53bd8713d20e3348a5d23d951737037e916ba67f` | Chromium (375px phone, 768px tablet, 1440px desktop) | **PASS (All 11 views fit without window overflow)** | Playwright test report | Automated viewport tests |
-| **Staging read-only** | `curl -s http://127.0.0.1:8050/modern` (local dev preview) | `53bd8713d20e3348a5d23d951737037e916ba67f` | Localhost port 8050 | **PASS (HTTP 200, HTML bundle delivered)** | HTTP response header verification | Local dev environment only |
+| **Typecheck** | `cd frontend && npm run typecheck` | `84940c93c538271dbf66c0012af616206a8df5e0` | Linux, Node v22.23.2, TypeScript 5.8.2 | **PASS (0 errors)** | Terminal output | None |
+| **Unit / component** | `cd frontend && npm test -- --run` | `84940c93c538271dbf66c0012af616206a8df5e0` | Linux, Node v22.23.2, Vitest 3.1.3 | **PASS (31/31 files, 210/210 passed in 7.81s)** | Vitest runner log | None |
+| **Production build** | `cd frontend && npm run build` | `84940c93c538271dbf66c0012af616206a8df5e0` | Linux, Node v22.23.2, Vite 6.3.5 | **PASS (1,609 modules in 4.07s)** | `frontend/dist/` clean production bundle | None |
+| **Backend regression** | `python3 -m pytest -q` | `84940c93c538271dbf66c0012af616206a8df5e0` | Linux, Python 3.12.14, pytest 8.3.5 | **PASS (1,106 passed, 18 skipped, 0 failed in 21.08s)** | Pytest test runner log | Isolated test DB; mocked external calls |
+| **Playwright E2E** | `cd frontend && npx playwright test` | `84940c93c538271dbf66c0012af616206a8df5e0` | Linux, Chromium 1.64.1 (6 workers) | **PASS (28/28 passed in 28.5s)** | Playwright reporter | Chromium headless; 100% mocked API routes via `page.route()` |
+| **API RBAC Sweep** | `python3 -m pytest tests/test_route_authorization_sweep.py -v` | `84940c93c538271dbf66c0012af616206a8df5e0` | Linux, Python 3.12.14 | **PASS (11/11 passed in 2.78s)** | Pytest log | Verifies all routes fail-closed |
+| **Telegram Contracts** | `python3 -m pytest tests/test_telegram_route_contracts.py -v` | `84940c93c538271dbf66c0012af616206a8df5e0` | Linux, Python 3.12.14 | **PASS (7/7 passed in 2.16s)** | Pytest log | Mocked Telegram delivery; zero real pings; unauth 401 verified; chatId masked for non-admin |
+| **User Mgmt Security** | `python3 -m pytest tests/test_user_management_security.py -v` | `84940c93c538271dbf66c0012af616206a8df5e0` | Linux, Python 3.12.14 | **PASS (12/12 passed in 2.45s)** | Pytest log | Admin-only CRUD, self-demotion lockout, self-delete prevention, session-version invalidation, hash update verification |
+| **MariaDB Concurrency** | `python3 -m pytest tests/test_user_management_mariadb_concurrency.py -v` | `84940c93c538271dbf66c0012af616206a8df5e0` | Linux, Python 3.12.14, MariaDB (`signal_bot_test`) | **PASS (5/5 passed in 3.12s)** | Pytest log | Explicit `SELECT ... FOR UPDATE` row locks; concurrent demotion/deactivation/deletion cannot leave 0 active admins; non-mutating rollbacks verified |
+| **Accessibility** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "accessibility|contrast|reduced-motion"` | `84940c93c538271dbf66c0012af616206a8df5e0` | Chromium, Desktop & Mobile | **PASS (Skip link, announcements, contrast)** | Playwright test report | Automated accessibility checks |
+| **Responsive** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "mobile viewport|tablet"` | `84940c93c538271dbf66c0012af616206a8df5e0` | Chromium (375px phone, 768px tablet, 1440px desktop) | **PASS (All 11 views fit without window overflow)** | Playwright test report | Automated viewport tests |
+| **Staging browser acceptance** | Playwright staging acceptance against real FastAPI backend (`admin`, `trader`, `viewer` accounts) | `84940c93c538271dbf66c0012af616206a8df5e0` | Localhost port 8055 (`signal_bot_test`) | **PASS (All 3 roles authenticated, 11 views rendered, role boundaries enforced, zero mutations)** | Playwright browser runner log | Read-only staging verification against real backend |
 
 ---
 

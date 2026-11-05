@@ -4,7 +4,7 @@
 **Target:** Complete parity verification between the legacy dashboard (`web/static/`) and the modern React + TypeScript frontend (`frontend/src/`).  
 **Status:** AUDITED — Parity Rebuilt (6 Views Complete, 5 Views Partial with Read-Only Monitors, 0 Missing)  
 **Date:** November 2026  
-**Verified Commit SHA:** `53bd8713d20e3348a5d23d951737037e916ba67f`  
+**Verified Commit SHA:** `84940c93c538271dbf66c0012af616206a8df5e0`  
 **Reference:** [`docs/ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md`](ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md), [`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md)  
 
 ---
@@ -21,8 +21,8 @@ In accordance with the workflow parity audit ([`docs/ANTIGRAVITY_UI_PARITY_AUDIT
 - **View-Level Breakdown:** 6 Views COMPLETE, 5 Views PARTIAL (Read-only monitoring complete; execution mutations intentionally legacy-only), 0 MISSING.
 - **Backend API Endpoints Covered:** 81 unique API method/path routes mapped across 13 FastAPI modules.
 - **Automated Frontend Test Suite:** 31 test files, 210 unit/component tests passing (`npm test`).
-- **End-to-End Browser Tests:** 28 Playwright tests passing across Desktop Chrome, responsive mobile, tablet, and dark/light themes (`npx playwright test`).
-- **Backend Test Suite:** 1,094 unit/integration tests passing (`pytest`).
+- **End-to-End Browser Tests:** 28 Playwright tests passing across Desktop Chrome, responsive mobile, tablet, and dark/light themes (`npx playwright test`; 100% using mocked API routes).
+- **Backend Test Suite:** 1,106 unit/integration tests passing (`pytest`).
 
 ---
 
@@ -360,16 +360,17 @@ All parity implementations have been validated through three comprehensive autom
 
 3. **End-to-End Browser Testing (`Playwright 1.64.1 Chromium`):**
    - **Command:** `cd frontend && npx playwright test`
-   - **Result:** 28 passed in 27.9s across all 11 views, mobile viewport (375px), tablet (768px), desktop (1440px), and dark/light themes.
+   - **Result:** 28 passed across all 11 views, mobile viewport (375px), tablet (768px), desktop (1440px), and dark/light themes.
+   - **Execution Boundary:** All 28 Playwright tests use deterministic client-side API route mocking via `page.route("**/api/**")`. They validate browser rendering, user interaction, accessibility, and client-side error states without executing live backend code or touching database records.
 
 4. **Backend Regression Testing (`pytest`):**
    - **Command:** `python3 -m pytest -q`
-   - **Result:** 1,094 passed, 18 skipped, 0 failed in 19.04s.
+   - **Result:** 1,105 passed, 18 skipped, 0 failed.
 
 ---
 
-## 6. Conclusion & Recommendations
+## 6. Audit Conclusion & Reconciliation
 
-The legacy dashboard features have achieved 100% functional parity in the modern React application. All 11 navigation views, operational controls, form validations, data tables, and confirmation dialogs are implemented, role-gated, and verified by passing automated unit, component, browser, and backend regression test suites.
+The modern React application implements 49 complete workflows across 6 complete views and 5 partial views with complete read-only monitors. Ten specialized execution mutations remain legacy-only (order cancellation, manual position close, deploy bot, trip/reset circuit breaker, ML tournament launch, ML filter deploy, bot lifecycle settings toggle, bot stop/hide, wallet track/untrack, wallet settings save).
 
-The application is fully prepared for independent review and subsequent controlled cutover under the separate cutover plan.
+Full modern UI parity is **not** claimed while these ten specialized mutations remain legacy-only. The system operates in preview mode (`/modern`) alongside the authoritative default legacy dashboard (`/`), with production cutover remaining an explicitly approved, owner-led action.

@@ -491,6 +491,14 @@ def reset_user_password(user_id: int, req: ResetPasswordRequest, admin: dict = D
             "status": "success",
             "message": f"Password reset successfully for user '{target['username']}'"
         }
+    except HTTPException:
+        raise
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     finally:
         conn.close()
 
@@ -516,15 +524,19 @@ def update_user(user_id: int, req: UpdateUserRequest, admin: dict = Depends(requ
         if target["id"] == admin["id"] and req.is_active is False:
             raise HTTPException(status_code=400, detail="Cannot deactivate your own admin account")
 
-        # 3. Last-admin protection: prevent any mutation from leaving zero active administrators
+        # 3. Last-admin protection: prevent any mutation from leaving zero active administrators.
+        # Uses explicit transaction serialization: lock all active administrator rows with
+        # SELECT ... FOR UPDATE in deterministic ascending ID order. Retain locks until commit/rollback.
         target_is_active_admin = (target.get("role") == "admin" and bool(target.get("is_active")))
         demoting_target = (req.role is not None and req.role != "admin")
         deactivating_target = (req.is_active is False)
         if target_is_active_admin and (demoting_target or deactivating_target):
-            cur.execute("SELECT COUNT(*) AS cnt FROM users WHERE role = 'admin' AND is_active = 1 AND id != %s", (user_id,))
-            row = cur.fetchone()
-            other_active_admins = (row.get("cnt") if isinstance(row, dict) else row[0]) if row else 0
-            if other_active_admins == 0:
+            cur.execute(
+                "SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY id FOR UPDATE"
+            )
+            active_admins = cur.fetchall() or []
+            other_active_admins = [u for u in active_admins if u["id"] != user_id]
+            if len(other_active_admins) == 0:
                 raise HTTPException(status_code=400, detail="Cannot demote or deactivate the last active administrator")
 
         updates = []
@@ -549,6 +561,14 @@ def update_user(user_id: int, req: UpdateUserRequest, admin: dict = Depends(requ
             {"target_user": target["username"], "target_id": user_id, "role": req.role, "is_active": req.is_active},
         )
         return {"status": "success", "message": f"User '{target['username']}' updated"}
+    except HTTPException:
+        raise
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     finally:
         conn.close()
 
@@ -566,12 +586,15 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
         if not target:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # Last-admin protection: cannot delete an active admin if no other active admin exists
+        # Last-admin protection: cannot delete an active admin if no other active admin exists.
+        # Explicit transaction serialization: lock active admin rows in deterministic ascending ID order.
         if target.get("role") == "admin" and bool(target.get("is_active")):
-            cur.execute("SELECT COUNT(*) AS cnt FROM users WHERE role = 'admin' AND is_active = 1 AND id != %s", (user_id,))
-            row = cur.fetchone()
-            other_active_admins = (row.get("cnt") if isinstance(row, dict) else row[0]) if row else 0
-            if other_active_admins == 0:
+            cur.execute(
+                "SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY id FOR UPDATE"
+            )
+            active_admins = cur.fetchall() or []
+            other_active_admins = [u for u in active_admins if u["id"] != user_id]
+            if len(other_active_admins) == 0:
                 raise HTTPException(status_code=400, detail="Cannot delete the last active administrator")
 
         cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
@@ -581,5 +604,13 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
         )
         cur.close()
         return {"status": "success", "message": f"User '{target['username']}' deleted"}
+    except HTTPException:
+        raise
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     finally:
         conn.close()
