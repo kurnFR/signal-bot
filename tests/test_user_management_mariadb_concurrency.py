@@ -16,7 +16,7 @@ import threading
 import time
 import unittest
 import uuid
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 from fastapi.testclient import TestClient
 
 # 1. Enforce database isolation before importing or initializing DB pools
@@ -228,28 +228,50 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 if not fut.done() and fut not in unfinished_futures:
                     unfinished_futures.append(fut)
 
+        # Retain unfinished future references until their completion is confirmed
+        if hasattr(self, "_active_futures"):
+            self._active_futures = [fut for fut in self._active_futures if not fut.done()]
+
         # 2. In all cases, signal shutdown on every tracked executor using shutdown(wait=False, cancel_futures=True)
-        # and perform bounded joins with one shared deadline per executor
+        # and perform bounded joins with one strict shared deadline per executor
         executor_errors = []
+        thread_errors = []
         surviving_threads = []
+        surviving_executors = []
+
         if hasattr(self, "_active_executors") and self._active_executors:
             for ex in list(self._active_executors):
+                ex_shutdown_failed = False
                 try:
                     ex.shutdown(wait=False, cancel_futures=True)
                 except Exception as exc:
+                    ex_shutdown_failed = True
                     executor_errors.append(f"Executor shutdown failed: {exc}")
 
                 start_wait = time.time()
                 threads = list(getattr(ex, "_threads", set()))
-                for t in threads:
-                    remaining = max(0.01, timeout_threads - (time.time() - start_wait))
-                    t.join(timeout=remaining)
-                    if t.is_alive():
-                        surviving_threads.append(t)
-            self._active_executors.clear()
+                ex_surviving_threads = []
 
-        if hasattr(self, "_active_futures"):
-            self._active_futures.clear()
+                for t in threads:
+                    remaining = timeout_threads - (time.time() - start_wait)
+                    try:
+                        if remaining > 0:
+                            t.join(timeout=remaining)
+                        if t.is_alive():
+                            ex_surviving_threads.append(t)
+                    except Exception as exc:
+                        thread_errors.append(f"Thread {getattr(t, 'name', 'unknown')} join raised: {exc}")
+                        if t.is_alive():
+                            ex_surviving_threads.append(t)
+
+                if ex_surviving_threads:
+                    surviving_threads.extend(ex_surviving_threads)
+                    surviving_executors.append(ex)
+                elif ex_shutdown_failed:
+                    surviving_executors.append(ex)
+
+            # Retain references to executors with surviving threads or shutdown failures
+            self._active_executors = surviving_executors
 
         cleanup_failures = []
         if unfinished_futures:
@@ -263,6 +285,8 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
             )
         if executor_errors:
             cleanup_failures.extend(executor_errors)
+        if thread_errors:
+            cleanup_failures.extend(thread_errors)
 
         # 3. Never delete fixtures or drain database pools while any worker thread remains active
         if surviving_threads:
@@ -288,6 +312,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 )
                 conn.commit()
                 cur.close()
+                self.seeded_user_ids = []
             except Exception as exc:
                 fixture_error = exc
             finally:
@@ -843,15 +868,18 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
             conn.close()
 
     def test_unfinished_future_teardown_signals_shutdown_on_all_executors(self):
-        """Regression test: proves tearDown() signals executor shutdown even on unfinished futures.
+        """Regression test: proves tearDown() signals executor shutdown even on unfinished futures,
+        retains surviving executors and unfinished futures, protects fixtures, and cleans up completely
+        once workers terminate.
 
         Verifies:
-        1. When worker futures do not finish within the bounded future wait,
-           tearDown() does not raise before signaling shutdown.
-        2. shutdown(wait=False, cancel_futures=True) is signaled on all tracked executors.
-        3. All tracked executors have _shutdown = True.
-        4. tearDown() raises visible RuntimeError reporting unfinished futures and/or surviving threads.
-        5. Surviving worker threads are cleanly unblocked and joined so no threads leak.
+        1. Both executors receive shutdown signals.
+        2. Surviving executor references remain tracked after failed teardown.
+        3. Unfinished future references are not discarded prematurely.
+        4. Test fixtures are not deleted while worker threads remain active.
+        5. After workers are released, a subsequent cleanup attempt confirms termination.
+        6. All executors and worker threads are eventually cleaned up.
+        7. Fixtures and connection pools are only cleaned after worker termination.
         """
         task_blocker = threading.Event()
 
@@ -865,6 +893,9 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         fut1 = ex1.submit(slow_task)
         fut2 = ex2.submit(slow_task)
 
+        # Save seeded user IDs before teardown attempt
+        saved_user_ids = list(self.seeded_user_ids)
+
         # Use short bounded timeouts for the regression test
         self._future_wait_timeout = 0.1
         self._thread_join_timeout = 0.2
@@ -873,20 +904,99 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 self.tearDown()
 
-            # Confirm error message explicitly reports unfinished futures
+            # 1. Confirm error message explicitly reports unfinished futures
             self.assertIn("worker future(s) did not complete within bounded wait", str(ctx.exception))
 
-            # Prove shutdown signal was dispatched to BOTH executors despite the failure
+            # 2. Both executors received shutdown signals
             self.assertTrue(ex1._shutdown, "Executor 1 did not have shutdown signaled")
             self.assertTrue(ex2._shutdown, "Executor 2 did not have shutdown signaled")
-        finally:
-            # Unblock worker threads so they terminate and release cleanly
+
+            # 3. Surviving executor references remain tracked after failed teardown
+            self.assertIn(ex1, self._active_executors)
+            self.assertIn(ex2, self._active_executors)
+            self.assertEqual(len(self._active_executors), 2)
+
+            # 4. Unfinished future references are not discarded prematurely
+            self.assertIn(fut1, self._active_futures)
+            self.assertIn(fut2, self._active_futures)
+            self.assertEqual(len(self._active_futures), 2)
+
+            # 5. Fixtures were NOT deleted while worker threads were active
+            conn = self.pool.get_connection()
+            try:
+                cur = conn.cursor()
+                placeholders = ",".join(["%s"] * len(saved_user_ids))
+                cur.execute(f"SELECT COUNT(*) FROM users WHERE id IN ({placeholders})", tuple(saved_user_ids))
+                count_alive = cur.fetchone()[0]
+                self.assertEqual(count_alive, len(saved_user_ids), "Fixtures were prematurely deleted while threads were active")
+                cur.close()
+            finally:
+                conn.close()
+
+            # 6. Unblock worker threads so they terminate
             task_blocker.set()
             fut1.result(timeout=2.0)
             fut2.result(timeout=2.0)
-            # Restore standard timeouts
+            self.assertTrue(fut1.done())
+            self.assertTrue(fut2.done())
+
+            # 7. Restore standard timeouts and perform subsequent cleanup attempt
             self._future_wait_timeout = 5.0
             self._thread_join_timeout = 3.0
+            self.tearDown()
+
+            # 8. All executors and worker threads are eventually cleaned up
+            self.assertEqual(len(self._active_executors), 0, "Executors were not cleaned up after worker termination")
+            self.assertEqual(len(self._active_futures), 0, "Futures were not cleaned up after worker termination")
+
+            # 9. Fixtures are now confirmed deleted after worker termination
+            conn = self.pool.get_connection()
+            try:
+                cur = conn.cursor()
+                placeholders = ",".join(["%s"] * len(saved_user_ids))
+                cur.execute(f"SELECT COUNT(*) FROM users WHERE id IN ({placeholders})", tuple(saved_user_ids))
+                count_deleted = cur.fetchone()[0]
+                self.assertEqual(count_deleted, 0, "Fixtures were not deleted after worker termination")
+                cur.close()
+            finally:
+                conn.close()
+        finally:
+            task_blocker.set()
+            self._future_wait_timeout = 5.0
+            self._thread_join_timeout = 3.0
+
+    def test_thread_join_exception_still_attempts_all_executors(self):
+        """Proves that an exception during one thread's join does not prevent
+        cleanup attempts on remaining threads and executors."""
+        ex1 = self._create_executor(max_workers=1)
+        ex2 = self._create_executor(max_workers=1)
+
+        f1 = ex1.submit(lambda: None)
+        f2 = ex2.submit(lambda: None)
+
+        f1.result(timeout=2.0)
+        f2.result(timeout=2.0)
+
+        # Inject a failure into the first executor's thread join
+        t1 = list(ex1._threads)[0]
+        original_join = t1.join
+        t1.join = Mock(side_effect=RuntimeError("Simulated thread join error"))
+
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                self.tearDown()
+
+            # The error must report the thread join failure
+            self.assertIn("Simulated thread join error", str(ctx.exception))
+
+            # Most importantly: ex2 must still have received shutdown signal and been attempted!
+            self.assertTrue(ex1._shutdown, "Executor 1 did not have shutdown signaled")
+            self.assertTrue(ex2._shutdown, "Executor 2 did not have shutdown signaled")
+        finally:
+            t1.join = original_join
+            # Subsequent teardown should now be completely clean
+            self.tearDown()
+            self.assertEqual(len(self._active_executors), 0)
 
 
 if __name__ == "__main__":

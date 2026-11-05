@@ -5,7 +5,7 @@
 **Pull Request:** [#697](https://github.com/kurnFR/signal-bot/pull/697) (`fix/ui-migration-review-remediation` -> `master`)<br>
 **Baseline Commit:** `53bd8713d20e3348a5d23d951737037e916ba67f` (Independent UI remediation review)<br>
 **Reviewed Implementation Baseline:** `32348c2042f0c8d028e98f977b4d224d3bc33a58` (PR #697 independent review baseline)<br>
-**Latest Reviewed Baseline:** `ff884cdeb3fe1bcac7838c3d7e0ce42c22acd61b` (PR #697 reviewed HEAD)<br>
+**Latest Reviewed Baseline:** `bd76d92cd2d1561475ba819c8c69fd944b0427a5` (PR #697 reviewed HEAD)<br>
 **Date of Local Validation:** November 5, 2026<br>
 **Environment:** Linux x86_64<br>
 **Python Version:** 3.12.14<br>
@@ -60,8 +60,8 @@ To eliminate ambiguity between dashboard views and individual user workflows:
 - **Frontend Unit & Component Suite:** PASS (31 test files, 210 tests passed, 0 failed in 7.82s).
 - **Frontend Production Build:** PASS (`vite build`, 1,609 modules transformed, clean bundle in `frontend/dist/` in 4.06s).
 - **Playwright Browser Tests (Mocked API):** PASS (28 tests passed across Desktop, Tablet, Mobile 375px viewports, and both Dark/Light themes in 28.6s; 100% of tests use deterministic API route mocking via `page.route()`).
-- **Backend Test Suite:** PASS (`python3 -m pytest -q`: 1,108 passed, 18 skipped, 6 warnings, 0 failed in 25.67s).
-- **MariaDB Concurrency & Security Suite:** PASS (`python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py`: 7 passed in 2.90s across 3 consecutive runs against authorized `signal_bot_test`, proving deterministic lock contention, exact second thread ID `LOCK WAIT` state in `information_schema.innodb_trx`, genuine worker failure handling via MariaDB lock wait timeout, explicit rollbacks, connection reuse, and verified visible pool cleanup).
+- **Backend Test Suite:** PASS (`python3 -m pytest -q`: 1,110 passed, 18 skipped, 6 warnings, 0 failed in 21.23s).
+- **MariaDB Concurrency & Security Suite:** PASS (`python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py`: 9 passed in 3.2s across 3 consecutive runs against authorized `signal_bot_test`, proving deterministic lock contention, exact second thread ID `LOCK WAIT` state in `information_schema.innodb_trx`, genuine worker failure handling via MariaDB lock wait timeout, explicit rollbacks, connection reuse, surviving executor and future tracking retention on incomplete teardown, per-thread join exception isolation, strict shared deadline enforcement, and verified visible pool cleanup).
 - **Staging Lifecycle & Identity Regression Suite:** PASS (`node tests/browser/test_staging_lifecycle_regressions.cjs`: 9 passed in 1.4s proving port collision rejection, alien identity rejection, premature exit detection, socket error propagation, mandatory matching PID verification, missing PID rejection, null PID rejection, and mismatched PID rejection).
 - **Tracked Staging Browser Acceptance:** PASS (`node tests/browser/staging_browser_acceptance.cjs`: verified against real FastAPI backend on port 8055 using mandatory child process PID verification and authorized `signal_bot_test` across admin, trader, and viewer roles; verified direct backend RBAC contracts, executable assertions passed for all 11 views, 0 console errors, 0 uncaught page errors, 0 network failures, 0 unexpected HTTP errors, 0 operational mutations, and verified fixture cleanup).
 - **Workflow Parity Reconciled Totals:** 59 Total = 49 Complete + 10 Legacy-Only + 0 Partial + 0 Missing (6 Complete views, 5 Partial views with 15 read-only monitor workflows).
@@ -150,14 +150,14 @@ Running 28 tests using 6 workers
 ### 4.4 Backend Regression Test Suite (`pytest`)
 ```text
 PYTHONPATH=$PWD python3 -m pytest -q
-1107 passed, 18 skipped, 6 warnings in 20.90s
+1110 passed, 18 skipped, 6 warnings in 21.23s
 ```
 - Covers all 13 route modules, business logic, paper trading engine, ML generators, wallet tracker, screener, authentication, user management security safeguards, MariaDB transaction concurrency serialization, and database migrations (including migration `025_users_role_active_index`).
 
-### 4.5 MariaDB Concurrency & Security Suite (`pytest tests/test_user_management_mariadb_concurrency.py`)
+### 4.5 MariaDB Concurrency & Security Suite (`python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py`)
 ```text
-PYTHONPATH=$PWD python3 -m pytest tests/test_user_management_mariadb_concurrency.py -v
-7 passed in 5.45s (verified repeatedly across 3 consecutive runs)
+python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py
+Ran 9 tests in 3.2s (verified repeatedly across 3 consecutive runs)
 ```
 - Tests explicit row-level locking (`SELECT ... FOR UPDATE ORDER BY id`) against authorized test database `signal_bot_test`, proving lock contention specifically on the second request's connection thread ID without any `not f2.done()` fallback:
   1. `test_concurrent_admin_demotion_prevents_zero_admins`: Thread 1 acquires row locks via `SELECT ... FOR UPDATE` and pauses. Thread 2 attempts demotion on independent connection; test captures Thread 2's exact MariaDB connection ID (`trx_mysql_thread_id`) and asserts `trx_state = 'LOCK WAIT'` in `information_schema.innodb_trx`. When Thread 1 commits, Thread 2 unblocks, reads updated state, and is cleanly rejected with HTTP 400 (`Cannot demote or deactivate the last active administrator`).
@@ -167,6 +167,8 @@ PYTHONPATH=$PWD python3 -m pytest tests/test_user_management_mariadb_concurrency
   5. `test_rejected_operations_produce_no_database_or_audit_mutations`: Rejected operations roll back cleanly without inserting invalid audit records or mutating user state.
   6. `test_rejected_operation_explicit_rollback_and_connection_reuse`: Proves explicit rollback on rejected operation and subsequent connection reuse. A subsequent valid administrator operation is not blocked by lingering locks.
   7. `test_failure_path_releases_sync_and_cleans_up`: Proves that a real worker failure during contention (MariaDB `SET SESSION innodb_lock_wait_timeout = 1` triggering Error 1205 while in `LOCK WAIT`) terminates within bounded timeout, rolls back the transaction, leaves zero partial user mutation on `admin2`, joins worker threads, and leaves the pool healthy and usable for subsequent operations.
+  8. `test_unfinished_future_teardown_signals_shutdown_on_all_executors`: Regression test proving that if futures do not finish within bounded wait, `tearDown()` signals shutdown across all executors without premature exception abort, retains references to executors with surviving threads and unfinished futures, never deletes test fixtures or drains pools while worker threads survive, and verifies complete cleanup after workers terminate.
+  9. `test_thread_join_exception_still_attempts_all_executors`: Regression test proving that an exception during one thread's join is caught and isolated, allowing cleanup attempts to continue across all remaining threads and executors under a strict shared join deadline.
 
 ### 4.6 Staging Lifecycle & Server Identity Regressions (`tests/browser/test_staging_lifecycle_regressions.cjs`)
 ```text
@@ -283,8 +285,8 @@ SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY i
 - [x] All 11 views (6 complete, 5 partial with read-only monitors) and 81 backend routes verified.
 - [x] Frontend typecheck, unit/component tests, and production build pass with 0 errors.
 - [x] Mocked Playwright browser test suite (28 tests) passes across viewports and themes using mocked APIs.
-- [x] Backend test suite (1,109 tests passed, 0 failures) verified with complete admin security, deterministic transaction concurrency serialization, and lockout protections.
-- [x] MariaDB concurrency suite (8 tests passed across 3 consecutive runs) proves lock contention via `information_schema.innodb_trx` (`trx_state = 'LOCK WAIT'`) specifically for the second request's connection thread ID, genuine worker failure handling via MariaDB lock wait timeout, explicit rollback on rejection, connection reuse, explicit executor lifecycle management with strictly bounded future wait (5.0s) and thread termination (3.0s shared deadline per executor), non-aborting shutdown signaling across all executors, and guaranteed cleanup before fixture deletion and pool teardown.
+- [x] Backend test suite (1,110 tests passed, 0 failures) verified with complete admin security, deterministic transaction concurrency serialization, and lockout protections.
+- [x] MariaDB concurrency suite (9 tests passed across 3 consecutive runs) proves lock contention via `information_schema.innodb_trx` (`trx_state = 'LOCK WAIT'`) specifically for the second request's connection thread ID, genuine worker failure handling via MariaDB lock wait timeout, explicit rollback on rejection, connection reuse, explicit executor lifecycle management with strictly bounded future wait (5.0s) and thread termination (3.0s strict shared deadline per executor), non-aborting shutdown signaling across all executors, surviving executor and future reference retention, per-thread join exception isolation, and guaranteed cleanup before fixture deletion and pool teardown.
 - [x] Independent database pool verification proves both primary and retailbot2 pools strictly resolve to authorized `signal_bot_test`.
 - [x] Staging lifecycle & server identity regressions (9 tests) prove child process identity verification, port collision rejection, mandatory PID enforcement, and socket error propagation.
 - [x] Real-backend browser acceptance test committed to tracked location `tests/browser/staging_browser_acceptance.cjs` and passes across all 3 roles using child process identity verification and authorized DB `signal_bot_test` with executable assertions, 0 console errors, and 0 network failures.
@@ -298,9 +300,9 @@ SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY i
 
 | Test area | Command | Exit Code | Result | Evidence Output Summary | Environment & Limitations | Status |
 |---|---|:---:|:---:|---|---|:---:|
-| **Full backend** | `PYTHONPATH=$PWD python3 -m pytest -q` | 0 | **PASS** | `1109 passed, 18 skipped, 6 warnings in 23.50s` | Linux, Python 3.12.14, MariaDB. External exchange APIs mocked. | Run by Antigravity |
+| **Full backend** | `PYTHONPATH=$PWD python3 -m pytest -q` | 0 | **PASS** | `1110 passed, 18 skipped, 6 warnings in 21.23s` | Linux, Python 3.12.14, MariaDB. External exchange APIs mocked. | Run by Antigravity |
 | **User security** | `PYTHONPATH=$PWD python3 -m pytest tests/test_user_management_security.py -v` | 0 | **PASS** | `12 passed in 2.87s` | Linux, Python 3.12.14. Tests self-demotion, self-deletion, token revocation, password hash updates. | Run by Antigravity |
-| **MariaDB concurrency** | `python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py` | 0 | **PASS** | `8 passed across 3 consecutive runs` | Linux, MariaDB (authorized `signal_bot_test`). Proves deterministic MariaDB `LOCK WAIT` on exact second thread ID, genuine worker failure under contention via MariaDB lock wait timeout, explicit executor lifecycle management with strictly bounded future wait (5.0s) and thread join (3.0s shared deadline), non-aborting shutdown signaling on unfinished futures, surviving thread safety, zero silent suppression, serialized rejections, explicit rollback, connection reuse. | Run by Antigravity |
+| **MariaDB concurrency** | `python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py` | 0 | **PASS** | `9 passed across 3 consecutive runs` | Linux, MariaDB (authorized `signal_bot_test`). Proves deterministic MariaDB `LOCK WAIT` on exact second thread ID, genuine worker failure under contention via MariaDB lock wait timeout, explicit executor lifecycle management with strictly bounded future wait (5.0s) and thread join (3.0s strict shared deadline), non-aborting shutdown signaling on unfinished futures, surviving executor and future tracking retention, per-thread join exception isolation, surviving thread safety, zero silent suppression, serialized rejections, explicit rollback, connection reuse. | Run by Antigravity |
 | **Telegram authorization** | `PYTHONPATH=$PWD python3 -m pytest tests/test_telegram_route_contracts.py -v` | 0 | **PASS** | `7 passed in 2.16s` | Linux, Python 3.12.14. `POST /api/telegram/test` is admin-only; `GET /api/telegram/status` masks `chatId: null` for trader/viewer. Real Telegram sends mocked. | Run by Antigravity |
 | **Staging lifecycle regressions** | `node tests/browser/test_staging_lifecycle_regressions.cjs` | 0 | **PASS** | `9 passed in 1.4s` | Linux, Node.js v22.23.2. Proves child process identity proof, port collision rejection, alien identity rejection, premature exit detection, socket error propagation, mandatory PID verification, missing/null/mismatched PID rejection. | Run by Antigravity |
 | **Frontend typecheck** | `cd frontend && npm run typecheck` | 0 | **PASS** | `tsc --noEmit (0 errors)` | Node v22.23.2, TypeScript 5.8.2. | Run by Antigravity |
