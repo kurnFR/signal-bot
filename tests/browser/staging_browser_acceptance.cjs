@@ -443,11 +443,140 @@ function terminateChildProcess(proc, sigtermTimeoutMs = 5000, sigkillTimeoutMs =
   });
 }
 
+/**
+ * Safely delete exact fixture users from authorized test database signal_bot_test.
+ */
+async function defaultDeleteFixtures(targetDb, userIds) {
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    return { status: "ok", deleted_users: 0 };
+  }
+  assert(targetDb === "signal_bot_test", `Database mismatch safety refusal: ${targetDb}`);
+  const cleanupScript = `
+import json, sys
+import mysql.connector
+from config import MYSQL_CONFIG
+
+payload = json.loads(sys.stdin.read())
+user_ids = payload["user_ids"]
+db_name = payload["target_db"]
+assert db_name == "signal_bot_test", f"Safety refusal: {db_name}"
+
+cfg = MYSQL_CONFIG.copy()
+cfg["database"] = db_name
+conn = mysql.connector.connect(**cfg)
+cur = conn.cursor()
+
+placeholders = ",".join(["%s"] * len(user_ids))
+cur.execute(f"DELETE FROM audit_logs WHERE user_id IN ({placeholders})", tuple(user_ids))
+cur.execute(f"DELETE FROM users WHERE id IN ({placeholders})", tuple(user_ids))
+conn.commit()
+deleted = cur.rowcount
+cur.close()
+conn.close()
+
+print(json.dumps({"status": "ok", "deleted_users": deleted}))
+`;
+  return await runPythonHelper(cleanupScript, {}, { target_db: targetDb, user_ids: userIds });
+}
+
+/**
+ * Orchestrate safe staging cleanup:
+ * 1. Close browser if provided (capturing any browser close error).
+ * 2. Terminate child process and verify exit if proc provided (capturing termination error).
+ * 3. Enforce safety rule: if process termination cannot be confirmed, PRESERVE FIXTURES and throw/reject failure.
+ * 4. If process termination succeeded, clean up exact fixture user IDs via deleteFixturesFn.
+ * 5. Handle error propagation (prior error, fixture cleanup error, browser close error).
+ */
+async function orchestrateStagingCleanup({
+  browser = null,
+  proc = null,
+  seededUserIds = [],
+  targetDb = TARGET_DB,
+  previousError = null,
+  terminateProcFn = terminateChildProcess,
+  deleteFixturesFn = defaultDeleteFixtures,
+  sigtermTimeoutMs = 5000,
+  sigkillTimeoutMs = 5000,
+} = {}) {
+  let browserCloseError = null;
+  if (browser) {
+    try {
+      if (typeof browser.close === "function") {
+        await browser.close();
+      }
+    } catch (err) {
+      console.error("[-] Browser close failed:", err.message || err);
+      browserCloseError = err;
+    }
+  }
+
+  let processTerminationError = null;
+  if (proc) {
+    try {
+      const termResult = await terminateProcFn(proc, sigtermTimeoutMs, sigkillTimeoutMs);
+      if (termResult && termResult.forcedKill) {
+        console.log(`[+] Staging FastAPI server confirmed terminated via SIGKILL fallback (PID: ${proc.pid}).`);
+      } else if (termResult && termResult.alreadyDead) {
+        console.log(`[+] Staging FastAPI server was already terminated (PID: ${proc.pid}).`);
+      } else if (termResult) {
+        console.log(`[+] Staging FastAPI server exited gracefully (code: ${termResult.code}, signal: ${termResult.signal}).`);
+      }
+    } catch (err) {
+      console.error("[-] Staging process termination could not be confirmed:", err.message || err);
+      processTerminationError = err;
+    }
+  }
+
+  // CRITICAL SAFETY RULE:
+  // Do NOT delete test fixtures while the staging server process may still be alive!
+  // If termination cannot be confirmed, preserve fixtures, report a visible cleanup failure, and exit nonzero.
+  if (processTerminationError) {
+    console.error("[-] SAFETY PRESERVATION: Test fixtures were preserved because staging server termination could not be confirmed.");
+    const termFatalErr = new Error(
+      `Cleanup aborted: staging server termination could not be confirmed (${processTerminationError.message || processTerminationError}). Fixtures preserved.`
+    );
+    if (previousError) {
+      termFatalErr.cause = previousError;
+    }
+    throw termFatalErr;
+  }
+
+  // Clean up only the exact fixture IDs created for this run (only if termination succeeded)
+  let fixtureCleanupError = null;
+  if (Array.isArray(seededUserIds) && seededUserIds.length > 0) {
+    console.log(`[*] Cleaning up run-specific fixture users (IDs: ${seededUserIds.join(", ")})...`);
+    try {
+      await deleteFixturesFn(targetDb, seededUserIds);
+      console.log(`[+] Exact fixture cleanup complete: deleted users confirmed.`);
+    } catch (err) {
+      console.error("[-] FATAL: Fixture cleanup failed:", err.message || err);
+      fixtureCleanupError = err;
+    }
+  }
+
+  // Error propagation priority
+  if (previousError) {
+    throw previousError;
+  }
+  if (fixtureCleanupError) {
+    throw new Error(`Fixture cleanup failed: ${fixtureCleanupError.message || fixtureCleanupError}`);
+  }
+  if (browserCloseError) {
+    throw new Error(`Browser close failed: ${browserCloseError.message || browserCloseError}`);
+  }
+
+  return {
+    success: true,
+    fixturesCleaned: Array.isArray(seededUserIds) && seededUserIds.length > 0,
+    cleanedIds: seededUserIds,
+  };
+}
+
 async function run() {
   let proc = null;
   let browser = null;
   let seededUserIds = [];
-  let cleanupError = null;
+  let runError = null;
 
   try {
     // -------------------------------------------------------------
@@ -860,99 +989,19 @@ print(json.dumps({"status": "ok", "active_db": active_db, "seeded_ids": seeded_i
     console.log("  [✓] Executable assertion passed: Zero unexpected HTTP 4xx/5xx responses recorded.");
 
   } catch (err) {
-    cleanupError = err;
+    runError = err;
     throw err;
   } finally {
     // -------------------------------------------------------------
     // PHASE 6: Safe Cleanup & Child Termination
     // -------------------------------------------------------------
-    let browserCloseError = null;
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (err) {
-        console.error("[-] Browser close failed:", err);
-        browserCloseError = err;
-      }
-    }
-
-    let processTerminationError = null;
-    if (proc) {
-      try {
-        const termResult = await terminateChildProcess(proc, 5000, 5000);
-        if (termResult.forcedKill) {
-          console.log(`[+] Staging FastAPI server confirmed terminated via SIGKILL fallback (PID: ${proc.pid}).`);
-        } else if (termResult.alreadyDead) {
-          console.log(`[+] Staging FastAPI server was already terminated (PID: ${proc.pid}).`);
-        } else {
-          console.log(`[+] Staging FastAPI server exited gracefully (code: ${termResult.code}, signal: ${termResult.signal}).`);
-        }
-      } catch (err) {
-        console.error("[-] Staging process termination could not be confirmed:", err.message);
-        processTerminationError = err;
-      }
-    }
-
-    // CRITICAL SAFETY RULE:
-    // Do NOT delete test fixtures while the staging server process may still be alive!
-    // If termination cannot be confirmed, preserve fixtures, report a visible cleanup failure, and exit nonzero.
-    if (processTerminationError) {
-      console.error("[-] SAFETY PRESERVATION: Test fixtures were preserved because staging server termination could not be confirmed.");
-      const termFatalErr = new Error(
-        `Cleanup aborted: staging server termination could not be confirmed (${processTerminationError.message}). Fixtures preserved.`
-      );
-      if (!cleanupError) {
-        cleanupError = termFatalErr;
-      }
-      throw cleanupError;
-    }
-
-    // Clean up only the exact fixture IDs created for this run
-    if (seededUserIds.length > 0) {
-      console.log(`[*] Cleaning up run-specific fixture users (IDs: ${seededUserIds.join(", ")})...`);
-      const cleanupScript = `
-import json, sys
-import mysql.connector
-from config import MYSQL_CONFIG
-
-payload = json.loads(sys.stdin.read())
-user_ids = payload["user_ids"]
-db_name = payload["target_db"]
-assert db_name == "signal_bot_test", f"Safety refusal: {db_name}"
-
-cfg = MYSQL_CONFIG.copy()
-cfg["database"] = db_name
-conn = mysql.connector.connect(**cfg)
-cur = conn.cursor()
-
-placeholders = ",".join(["%s"] * len(user_ids))
-cur.execute(f"DELETE FROM audit_logs WHERE user_id IN ({placeholders})", tuple(user_ids))
-cur.execute(f"DELETE FROM users WHERE id IN ({placeholders})", tuple(user_ids))
-conn.commit()
-deleted = cur.rowcount
-cur.close()
-conn.close()
-
-print(json.dumps({"status": "ok", "deleted_users": deleted}))
-`;
-      try {
-        const cleanupResult = await runPythonHelper(cleanupScript, {}, { target_db: TARGET_DB, user_ids: seededUserIds });
-        console.log(`[+] Exact fixture cleanup complete: deleted users confirmed.`);
-      } catch (err) {
-        console.error("[-] FATAL: Fixture cleanup failed:", err);
-        if (!cleanupError) {
-          throw err;
-        }
-      }
-    }
-
-    // Do not silently swallow browser-close failures when they affect cleanup guarantees
-    if (browserCloseError) {
-      if (!cleanupError) {
-        cleanupError = new Error(`Browser close failed: ${browserCloseError.message}`);
-        throw cleanupError;
-      }
-    }
+    await orchestrateStagingCleanup({
+      browser,
+      proc,
+      seededUserIds,
+      targetDb: TARGET_DB,
+      previousError: runError,
+    });
   }
 
   console.log("\n[+] READ-ONLY STAGING BROWSER ACCEPTANCE COMPLETED SUCCESSFULLY!");
@@ -981,5 +1030,7 @@ module.exports = {
   runPythonHelper,
   isProcessAlive,
   terminateChildProcess,
+  defaultDeleteFixtures,
+  orchestrateStagingCleanup,
   run,
 };

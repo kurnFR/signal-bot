@@ -17,7 +17,7 @@
 const http = require("node:http");
 const net = require("node:net");
 const { spawn } = require("node:child_process");
-const { checkPortFree, waitForServer, isProcessAlive, terminateChildProcess } = require("./staging_browser_acceptance.cjs");
+const { checkPortFree, waitForServer, isProcessAlive, terminateChildProcess, orchestrateStagingCleanup } = require("./staging_browser_acceptance.cjs");
 
 function assert(condition, message) {
   if (!condition) {
@@ -427,49 +427,140 @@ async function runTests() {
   }
 
   // --------------------------------------------------------------------------
-  // TEST 11: Unconfirmed process termination rejects and preserves fixtures
+  // TEST 11: Cleanup orchestration - termination failure prevents fixture deletion
   // --------------------------------------------------------------------------
-  console.log("\n=== Test 11: Unconfirmed process termination rejects and preserves fixtures ===");
+  console.log("\n=== Test 11: Cleanup orchestration - termination failure prevents fixture deletion ===");
   {
-    const mockProc = {
-      pid: 888888,
-      exitCode: null,
-      signalCode: null,
-      kill: () => {},
-      once: () => {},
-    };
+    const mockProc = { pid: 888888, exitCode: null, signalCode: null };
+    let deleteFixturesCalled = false;
+    let cleanupReportedFailure = false;
 
-    let terminationFailed = false;
-    let fixturesDeleted = false;
-
-    // Simulate cleanup flow from staging_browser_acceptance.cjs:
-    // If terminateChildProcess fails, fixtures must NOT be deleted.
-    let processTerminationError = null;
     try {
-      // Simulate aliveCheckFn returning true (process remains alive)
-      await terminateChildProcess(mockProc, 100, 200, () => true);
+      await orchestrateStagingCleanup({
+        proc: mockProc,
+        seededUserIds: [8001, 8002],
+        targetDb: "signal_bot_test",
+        terminateProcFn: async () => {
+          throw new Error("Process PID 888888 remains alive after SIGTERM and SIGKILL");
+        },
+        deleteFixturesFn: async () => {
+          deleteFixturesCalled = true;
+          return { status: "ok" };
+        },
+      });
     } catch (err) {
-      terminationFailed = true;
-      processTerminationError = err;
+      cleanupReportedFailure = true;
       assert(
-        err.message.includes("could not be confirmed terminated") && err.message.includes("Process remains alive"),
-        `Unexpected termination error message: ${err.message}`
+        err.message.includes("staging server termination could not be confirmed") && err.message.includes("Fixtures preserved"),
+        `Unexpected cleanup error message: ${err.message}`
       );
-      console.log("  [✓] terminateChildProcess correctly rejected unconfirmed termination:", err.message);
+      console.log("  [✓] orchestrateStagingCleanup reported visible termination failure:", err.message);
     }
 
-    assert(terminationFailed, "terminateChildProcess must reject when process termination cannot be confirmed");
+    assert(cleanupReportedFailure, "orchestrateStagingCleanup must report failure when process termination fails");
+    assert(!deleteFixturesCalled, "Fixtures must NOT be deleted when process termination fails");
+    console.log("  [✓] Verified: termination failure strictly prevented fixture deletion.");
+    passed++;
+  }
 
-    // Guard fixture cleanup
-    if (processTerminationError) {
-      // Fixtures preserved!
-      fixturesDeleted = false;
-      console.log("  [✓] Safety guard verified: fixtures preserved when process termination is unconfirmed.");
-    } else {
-      fixturesDeleted = true;
+  // --------------------------------------------------------------------------
+  // TEST 12: Cleanup orchestration - successful termination permits exact-ID fixture cleanup
+  // --------------------------------------------------------------------------
+  console.log("\n=== Test 12: Cleanup orchestration - successful termination permits exact-ID fixture cleanup ===");
+  {
+    const mockProc = { pid: 888889, exitCode: null, signalCode: null };
+    let recordedTargetDb = null;
+    let recordedUserIds = null;
+
+    const cleanupResult = await orchestrateStagingCleanup({
+      proc: mockProc,
+      seededUserIds: [8003, 8004],
+      targetDb: "signal_bot_test",
+      terminateProcFn: async (proc) => {
+        return { exited: true, forcedKill: false, code: 0, signal: null };
+      },
+      deleteFixturesFn: async (targetDb, userIds) => {
+        recordedTargetDb = targetDb;
+        recordedUserIds = [...userIds];
+        return { status: "ok", deleted_users: userIds.length };
+      },
+    });
+
+    assert(cleanupResult.success === true, "orchestrateStagingCleanup must return success on clean termination and fixture cleanup");
+    assert(recordedTargetDb === "signal_bot_test", `Expected targetDb 'signal_bot_test', got: ${recordedTargetDb}`);
+    assert(
+      Array.isArray(recordedUserIds) && recordedUserIds.length === 2 && recordedUserIds[0] === 8003 && recordedUserIds[1] === 8004,
+      `Exact fixture user IDs not cleaned up: ${JSON.stringify(recordedUserIds)}`
+    );
+    console.log(`  [✓] orchestrateStagingCleanup successfully executed exact-ID cleanup for users ${JSON.stringify(recordedUserIds)} on ${recordedTargetDb}.`);
+    passed++;
+  }
+
+  // --------------------------------------------------------------------------
+  // TEST 13: Cleanup orchestration - browser closure and error propagation
+  // --------------------------------------------------------------------------
+  console.log("\n=== Test 13: Cleanup orchestration - browser closure and error propagation ===");
+  {
+    // Subtest 13A: Browser closure failure is captured and reported
+    let browserCloseFailed = false;
+    const failingBrowser = {
+      close: async () => {
+        throw new Error("Chromium CDP socket disconnected unexpectedly");
+      },
+    };
+    try {
+      await orchestrateStagingCleanup({
+        browser: failingBrowser,
+        terminateProcFn: async () => ({ exited: true }),
+        deleteFixturesFn: async () => ({ status: "ok" }),
+      });
+    } catch (err) {
+      browserCloseFailed = true;
+      assert(err.message.includes("Browser close failed: Chromium CDP socket disconnected unexpectedly"), `Unexpected browser error: ${err.message}`);
+      console.log("  [✓] orchestrateStagingCleanup reported browser close failure:", err.message);
     }
+    assert(browserCloseFailed, "orchestrateStagingCleanup must report browser close failure");
 
-    assert(!fixturesDeleted, "Fixtures must NOT be deleted when process termination cannot be confirmed");
+    // Subtest 13B: Prior test error propagation preserved while still cleaning fixtures
+    let fixturesDeletedOnPriorError = false;
+    let priorErrorPropagated = false;
+    const priorTestError = new Error("Assertion failed: DOM selector .screener-metrics not found");
+    try {
+      await orchestrateStagingCleanup({
+        previousError: priorTestError,
+        seededUserIds: [8005],
+        targetDb: "signal_bot_test",
+        terminateProcFn: async () => ({ exited: true }),
+        deleteFixturesFn: async (targetDb, userIds) => {
+          fixturesDeletedOnPriorError = true;
+          return { status: "ok" };
+        },
+      });
+    } catch (err) {
+      priorErrorPropagated = true;
+      assert(err === priorTestError, "orchestrateStagingCleanup must propagate prior test error");
+      console.log("  [✓] orchestrateStagingCleanup propagated prior test error:", err.message);
+    }
+    assert(priorErrorPropagated, "Prior error must be propagated");
+    assert(fixturesDeletedOnPriorError, "Fixtures must still be safely cleaned up when prior test error occurs but termination succeeded");
+
+    // Subtest 13C: Fixture cleanup failure reporting
+    let fixtureCleanupReported = false;
+    try {
+      await orchestrateStagingCleanup({
+        seededUserIds: [8006],
+        targetDb: "signal_bot_test",
+        terminateProcFn: async () => ({ exited: true }),
+        deleteFixturesFn: async () => {
+          throw new Error("Deadlock detected during audit_logs cleanup");
+        },
+      });
+    } catch (err) {
+      fixtureCleanupReported = true;
+      assert(err.message.includes("Fixture cleanup failed: Deadlock detected during audit_logs cleanup"), `Unexpected fixture error: ${err.message}`);
+      console.log("  [✓] orchestrateStagingCleanup reported fixture cleanup failure:", err.message);
+    }
+    assert(fixtureCleanupReported, "orchestrateStagingCleanup must report fixture cleanup failure");
     passed++;
   }
 
