@@ -132,6 +132,8 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
 
         self._active_executors = []
         self._active_futures = []
+        self._future_wait_timeout = 5.0
+        self._thread_join_timeout = 3.0
         self.test_prefix = f"conc_{self._run_id}_{int(time.time()*1000) % 1000000}"
         self.seeded_user_ids = []
 
@@ -213,38 +215,64 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         auth_routes._test_after_admin_lock_hook = None
         auth_routes._test_active_admin_filter = None
 
-        # 1. Track worker futures and verify their completion with bounded wait
+        timeout_futures = getattr(self, "_future_wait_timeout", 5.0)
+        timeout_threads = getattr(self, "_thread_join_timeout", 3.0)
+
+        # 1. Bounded future wait & record unfinished futures without immediately raising
+        unfinished_futures = []
         if hasattr(self, "_active_futures") and self._active_futures:
-            done, not_done = concurrent.futures.wait(self._active_futures, timeout=5.0)
+            done, not_done = concurrent.futures.wait(self._active_futures, timeout=timeout_futures)
             if not_done:
-                raise RuntimeError(
-                    f"Test teardown failed: {len(not_done)} worker future(s) did not terminate "
-                    f"within bounded wait (5.0s)."
-                )
+                unfinished_futures.extend(not_done)
             for fut in self._active_futures:
-                if not fut.done():
-                    raise RuntimeError("Test teardown failed: tracked worker future is not done.")
-            self._active_futures.clear()
+                if not fut.done() and fut not in unfinished_futures:
+                    unfinished_futures.append(fut)
 
-        # 2. Terminate and join all tracked worker executors/threads with bounded wait
+        # 2. In all cases, signal shutdown on every tracked executor using shutdown(wait=False, cancel_futures=True)
+        # and perform bounded joins with one shared deadline per executor
+        executor_errors = []
+        surviving_threads = []
         if hasattr(self, "_active_executors") and self._active_executors:
-            for ex in self._active_executors:
-                # Trigger shutdown without unbounded wait; cancels queued work and wakes threads
-                ex.shutdown(wait=False, cancel_futures=True)
+            for ex in list(self._active_executors):
+                try:
+                    ex.shutdown(wait=False, cancel_futures=True)
+                except Exception as exc:
+                    executor_errors.append(f"Executor shutdown failed: {exc}")
 
-                # Explicit bounded join on all worker threads
                 start_wait = time.time()
-                for t in list(getattr(ex, "_threads", set())):
-                    remaining = max(0.05, 3.0 - (time.time() - start_wait))
+                threads = list(getattr(ex, "_threads", set()))
+                for t in threads:
+                    remaining = max(0.01, timeout_threads - (time.time() - start_wait))
                     t.join(timeout=remaining)
                     if t.is_alive():
-                        raise RuntimeError(
-                            f"Test teardown failed: worker thread {t.name} in executor "
-                            f"failed to terminate within bounded wait (3.0s)."
-                        )
+                        surviving_threads.append(t)
             self._active_executors.clear()
 
-        # 3. Delete test fixtures
+        if hasattr(self, "_active_futures"):
+            self._active_futures.clear()
+
+        cleanup_failures = []
+        if unfinished_futures:
+            cleanup_failures.append(
+                f"{len(unfinished_futures)} worker future(s) did not complete within bounded wait ({timeout_futures}s)"
+            )
+        if surviving_threads:
+            t_names = ", ".join(t.name for t in surviving_threads)
+            cleanup_failures.append(
+                f"{len(surviving_threads)} worker thread(s) failed to terminate within bounded wait ({timeout_threads}s): {t_names}"
+            )
+        if executor_errors:
+            cleanup_failures.extend(executor_errors)
+
+        # 3. Never delete fixtures or drain database pools while any worker thread remains active
+        if surviving_threads:
+            err_msg = "; ".join(cleanup_failures)
+            raise RuntimeError(
+                f"Test teardown failed with surviving worker thread(s) (fixtures and pool untouched): {err_msg}"
+            )
+
+        # 4. If all worker threads have terminated, safely delete test fixtures
+        fixture_error = None
         if hasattr(self, "seeded_user_ids") and self.seeded_user_ids:
             conn = self.pool.get_connection()
             try:
@@ -260,10 +288,15 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 )
                 conn.commit()
                 cur.close()
+            except Exception as exc:
+                fixture_error = exc
             finally:
                 conn.close()
 
-        # 4. Verify no checked-out connections were leaked by the test
+        if fixture_error is not None:
+            cleanup_failures.append(f"Fixture deletion failed: {fixture_error}")
+
+        # 5. Verify no checked-out connections were leaked by the test
         start_wait = time.time()
         recovered = False
         while time.time() - start_wait < 3.0:
@@ -275,10 +308,13 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         if not recovered:
             qsize = self.pool._cnx_queue.qsize()
             expected = self.pool.pool_size
-            raise RuntimeError(
-                f"Test teardown failed: {self.pool.pool_name} has {expected - qsize} unreturned connection(s) "
-                f"(queue has {qsize}/{expected})."
+            cleanup_failures.append(
+                f"{self.pool.pool_name} has {expected - qsize} unreturned connection(s) (queue has {qsize}/{expected})"
             )
+
+        # 6. Raise visible errors for any unfinished futures, surviving threads, or cleanup failures
+        if cleanup_failures:
+            raise RuntimeError(f"Test teardown failed: {'; '.join(cleanup_failures)}")
 
     def _count_active_test_admins(self):
         conn = self.pool.get_connection()
@@ -805,6 +841,52 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
             cur.close()
         finally:
             conn.close()
+
+    def test_unfinished_future_teardown_signals_shutdown_on_all_executors(self):
+        """Regression test: proves tearDown() signals executor shutdown even on unfinished futures.
+
+        Verifies:
+        1. When worker futures do not finish within the bounded future wait,
+           tearDown() does not raise before signaling shutdown.
+        2. shutdown(wait=False, cancel_futures=True) is signaled on all tracked executors.
+        3. All tracked executors have _shutdown = True.
+        4. tearDown() raises visible RuntimeError reporting unfinished futures and/or surviving threads.
+        5. Surviving worker threads are cleanly unblocked and joined so no threads leak.
+        """
+        task_blocker = threading.Event()
+
+        def slow_task():
+            task_blocker.wait(timeout=5.0)
+
+        # Create two separate executors to prove shutdown is signaled across all tracked executors
+        ex1 = self._create_executor(max_workers=1)
+        ex2 = self._create_executor(max_workers=1)
+
+        fut1 = ex1.submit(slow_task)
+        fut2 = ex2.submit(slow_task)
+
+        # Use short bounded timeouts for the regression test
+        self._future_wait_timeout = 0.1
+        self._thread_join_timeout = 0.2
+
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                self.tearDown()
+
+            # Confirm error message explicitly reports unfinished futures
+            self.assertIn("worker future(s) did not complete within bounded wait", str(ctx.exception))
+
+            # Prove shutdown signal was dispatched to BOTH executors despite the failure
+            self.assertTrue(ex1._shutdown, "Executor 1 did not have shutdown signaled")
+            self.assertTrue(ex2._shutdown, "Executor 2 did not have shutdown signaled")
+        finally:
+            # Unblock worker threads so they terminate and release cleanly
+            task_blocker.set()
+            fut1.result(timeout=2.0)
+            fut2.result(timeout=2.0)
+            # Restore standard timeouts
+            self._future_wait_timeout = 5.0
+            self._thread_join_timeout = 3.0
 
 
 if __name__ == "__main__":

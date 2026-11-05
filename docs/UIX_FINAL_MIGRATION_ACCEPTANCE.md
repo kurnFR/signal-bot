@@ -5,7 +5,7 @@
 **Pull Request:** [#697](https://github.com/kurnFR/signal-bot/pull/697) (`fix/ui-migration-review-remediation` -> `master`)<br>
 **Baseline Commit:** `53bd8713d20e3348a5d23d951737037e916ba67f` (Independent UI remediation review)<br>
 **Reviewed Implementation Baseline:** `32348c2042f0c8d028e98f977b4d224d3bc33a58` (PR #697 independent review baseline)<br>
-**Latest Reviewed Baseline:** `050a9ed95388acdab2c3592ffaca4e24dc29c722` (PR #697 reviewed HEAD)<br>
+**Latest Reviewed Baseline:** `ff884cdeb3fe1bcac7838c3d7e0ce42c22acd61b` (PR #697 reviewed HEAD)<br>
 **Date of Local Validation:** November 5, 2026<br>
 **Environment:** Linux x86_64<br>
 **Python Version:** 3.12.14<br>
@@ -283,8 +283,8 @@ SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY i
 - [x] All 11 views (6 complete, 5 partial with read-only monitors) and 81 backend routes verified.
 - [x] Frontend typecheck, unit/component tests, and production build pass with 0 errors.
 - [x] Mocked Playwright browser test suite (28 tests) passes across viewports and themes using mocked APIs.
-- [x] Backend test suite (1,108 tests passed, 0 failures) verified with complete admin security, deterministic transaction concurrency serialization, and lockout protections.
-- [x] MariaDB concurrency suite (7 tests passed across 3 consecutive runs) proves lock contention via `information_schema.innodb_trx` (`trx_state = 'LOCK WAIT'`) specifically for the second request's connection thread ID, genuine worker failure handling via MariaDB lock wait timeout, explicit rollback on rejection, connection reuse, explicit executor lifecycle management with strictly bounded future wait (5.0s) and thread termination (3.0s), and guaranteed cleanup before fixture deletion and pool teardown.
+- [x] Backend test suite (1,109 tests passed, 0 failures) verified with complete admin security, deterministic transaction concurrency serialization, and lockout protections.
+- [x] MariaDB concurrency suite (8 tests passed across 3 consecutive runs) proves lock contention via `information_schema.innodb_trx` (`trx_state = 'LOCK WAIT'`) specifically for the second request's connection thread ID, genuine worker failure handling via MariaDB lock wait timeout, explicit rollback on rejection, connection reuse, explicit executor lifecycle management with strictly bounded future wait (5.0s) and thread termination (3.0s shared deadline per executor), non-aborting shutdown signaling across all executors, and guaranteed cleanup before fixture deletion and pool teardown.
 - [x] Independent database pool verification proves both primary and retailbot2 pools strictly resolve to authorized `signal_bot_test`.
 - [x] Staging lifecycle & server identity regressions (9 tests) prove child process identity verification, port collision rejection, mandatory PID enforcement, and socket error propagation.
 - [x] Real-backend browser acceptance test committed to tracked location `tests/browser/staging_browser_acceptance.cjs` and passes across all 3 roles using child process identity verification and authorized DB `signal_bot_test` with executable assertions, 0 console errors, and 0 network failures.
@@ -298,9 +298,9 @@ SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY i
 
 | Test area | Command | Exit Code | Result | Evidence Output Summary | Environment & Limitations | Status |
 |---|---|:---:|:---:|---|---|:---:|
-| **Full backend** | `PYTHONPATH=$PWD python3 -m pytest -q` | 0 | **PASS** | `1108 passed, 18 skipped, 6 warnings in 25.67s` | Linux, Python 3.12.14, MariaDB. External exchange APIs mocked. | Run by Antigravity |
+| **Full backend** | `PYTHONPATH=$PWD python3 -m pytest -q` | 0 | **PASS** | `1109 passed, 18 skipped, 6 warnings in 23.50s` | Linux, Python 3.12.14, MariaDB. External exchange APIs mocked. | Run by Antigravity |
 | **User security** | `PYTHONPATH=$PWD python3 -m pytest tests/test_user_management_security.py -v` | 0 | **PASS** | `12 passed in 2.87s` | Linux, Python 3.12.14. Tests self-demotion, self-deletion, token revocation, password hash updates. | Run by Antigravity |
-| **MariaDB concurrency** | `python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py` | 0 | **PASS** | `7 passed across 3 consecutive runs` | Linux, MariaDB (authorized `signal_bot_test`). Proves deterministic MariaDB `LOCK WAIT` on exact second thread ID, genuine worker failure under contention via MariaDB lock wait timeout, explicit executor lifecycle management with strictly bounded future wait (5.0s) and thread join (3.0s), zero silent suppression, serialized rejections, explicit rollback, connection reuse. | Run by Antigravity |
+| **MariaDB concurrency** | `python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py` | 0 | **PASS** | `8 passed across 3 consecutive runs` | Linux, MariaDB (authorized `signal_bot_test`). Proves deterministic MariaDB `LOCK WAIT` on exact second thread ID, genuine worker failure under contention via MariaDB lock wait timeout, explicit executor lifecycle management with strictly bounded future wait (5.0s) and thread join (3.0s shared deadline), non-aborting shutdown signaling on unfinished futures, surviving thread safety, zero silent suppression, serialized rejections, explicit rollback, connection reuse. | Run by Antigravity |
 | **Telegram authorization** | `PYTHONPATH=$PWD python3 -m pytest tests/test_telegram_route_contracts.py -v` | 0 | **PASS** | `7 passed in 2.16s` | Linux, Python 3.12.14. `POST /api/telegram/test` is admin-only; `GET /api/telegram/status` masks `chatId: null` for trader/viewer. Real Telegram sends mocked. | Run by Antigravity |
 | **Staging lifecycle regressions** | `node tests/browser/test_staging_lifecycle_regressions.cjs` | 0 | **PASS** | `9 passed in 1.4s` | Linux, Node.js v22.23.2. Proves child process identity proof, port collision rejection, alien identity rejection, premature exit detection, socket error propagation, mandatory PID verification, missing/null/mismatched PID rejection. | Run by Antigravity |
 | **Frontend typecheck** | `cd frontend && npm run typecheck` | 0 | **PASS** | `tsc --noEmit (0 errors)` | Node v22.23.2, TypeScript 5.8.2. | Run by Antigravity |
