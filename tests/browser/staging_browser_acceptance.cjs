@@ -165,6 +165,17 @@ function waitForServer(target, childProc, expectedRunId, timeoutMs = 25000) {
     throw new Error("Invalid target for waitForServer");
   }
 
+  // Mandatory validation: child process and expected run identity must be valid
+  if (!childProc || typeof childProc !== "object") {
+    throw new Error("waitForServer requires a child process instance");
+  }
+  if (typeof childProc.pid !== "number" || !Number.isInteger(childProc.pid) || childProc.pid <= 0) {
+    throw new Error(`waitForServer requires a valid integer child process PID, got: ${childProc ? childProc.pid : undefined}`);
+  }
+  if (!expectedRunId || typeof expectedRunId !== "string") {
+    throw new Error("waitForServer requires a non-empty expectedRunId string");
+  }
+
   return new Promise((resolve, reject) => {
     let timer = null;
     let completed = false;
@@ -191,7 +202,10 @@ function waitForServer(target, childProc, expectedRunId, timeoutMs = 25000) {
     }
 
     function checkChildAlive() {
-      if (!childProc) return true;
+      if (!childProc || typeof childProc.pid !== "number" || childProc.pid <= 0) {
+        fail(new Error("Staging server child process reference is missing or invalid"));
+        return false;
+      }
       if (childProc.exitCode !== null) {
         fail(new Error(`Staging server child process died prematurely with exit code ${childProc.exitCode}`));
         return false;
@@ -200,13 +214,11 @@ function waitForServer(target, childProc, expectedRunId, timeoutMs = 25000) {
         fail(new Error("Staging server child process was killed prematurely"));
         return false;
       }
-      if (childProc.pid) {
-        try {
-          process.kill(childProc.pid, 0);
-        } catch (e) {
-          fail(new Error(`Staging server child process PID ${childProc.pid} is not alive: ${e.message}`));
-          return false;
-        }
+      try {
+        process.kill(childProc.pid, 0);
+      } catch (e) {
+        fail(new Error(`Staging server child process PID ${childProc.pid} is not alive: ${e.message}`));
+        return false;
       }
       return true;
     }
@@ -227,13 +239,26 @@ function waitForServer(target, childProc, expectedRunId, timeoutMs = 25000) {
             data = JSON.parse(body);
           } catch (_) {}
 
-          // Verify exact identity match
+          // Readiness strictly requires:
+          // 1. HTTP 200 OK
+          // 2. JSON payload with status === 'ok'
+          // 3. Matching run_id === expectedRunId
+          // 4. Mandatory data.pid: must be a valid positive integer
+          // 5. Mandatory data.pid === childProc.pid
           if (res.statusCode === 200 && data && data.status === "ok" && data.run_id === expectedRunId) {
-            if (childProc && childProc.pid && data.pid && data.pid !== childProc.pid) {
+            const reportedPid = data.pid;
+            if (typeof reportedPid !== "number" || !Number.isInteger(reportedPid) || reportedPid <= 0) {
               return fail(new Error(
-                `Target port responded with matching run_id but mismatched PID: server PID is ${data.pid}, expected child PID is ${childProc.pid}`
+                `Target port responded with matching run_id but invalid or missing PID (expected integer ${childProc.pid}, got: ${JSON.stringify(reportedPid)}). Readiness cannot be accepted on run ID alone.`
               ));
             }
+
+            if (reportedPid !== childProc.pid) {
+              return fail(new Error(
+                `Target port responded with matching run_id but mismatched PID: server reported PID ${reportedPid}, expected child PID ${childProc.pid}`
+              ));
+            }
+
             return succeed(data);
           }
 

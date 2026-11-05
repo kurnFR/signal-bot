@@ -76,18 +76,43 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         auth_routes._test_after_admin_lock_hook = None
         auth_routes._test_active_admin_filter = None
 
-        # Safe teardown: drain and close pool connections before resetting references
-        for pool_obj in [getattr(cls, "pool", None), getattr(cls, "retailbot2_pool", None), db_module._pool, db_module._retailbot2_pool]:
-            if pool_obj is not None:
-                try:
-                    for _ in range(30):
-                        if pool_obj._cnx_queue.qsize() >= pool_obj.pool_size:
-                            break
-                        time.sleep(0.05)
-                    pool_obj._remove_connections()
-                except Exception:
-                    pass
+        # Gather all unique pool objects
+        pools_to_clean = []
+        seen = set()
+        for candidate in [getattr(cls, "pool", None), getattr(cls, "retailbot2_pool", None), db_module._pool, db_module._retailbot2_pool]:
+            if candidate is not None and id(candidate) not in seen:
+                seen.add(id(candidate))
+                pools_to_clean.append(candidate)
 
+        for pool_obj in pools_to_clean:
+            # 1. Bounded wait for all connections to return to the pool queue
+            start_wait = time.time()
+            recovered = False
+            while time.time() - start_wait < 3.0:
+                if pool_obj._cnx_queue.qsize() >= pool_obj.pool_size:
+                    recovered = True
+                    break
+                time.sleep(0.05)
+
+            if not recovered:
+                qsize = pool_obj._cnx_queue.qsize()
+                expected = pool_obj.pool_size
+                raise RuntimeError(
+                    f"Database pool cleanup failed: {pool_obj.pool_name} did not recover all checked-out connections. "
+                    f"Queue has {qsize}/{expected} connections ({expected - qsize} missing/checked out)."
+                )
+
+            # 2. Drain and close connections explicitly; do not swallow failures
+            pool_obj._remove_connections()
+
+            # 3. Explicitly verify queue is now empty
+            if pool_obj._cnx_queue.qsize() != 0:
+                raise RuntimeError(
+                    f"Database pool cleanup failed: {pool_obj.pool_name} queue is not empty after _remove_connections "
+                    f"({pool_obj._cnx_queue.qsize()} connections remaining)."
+                )
+
+        # 4. Only after all pools are verified cleanly drained and closed, reset references
         db_module._pool = None
         db_module._retailbot2_pool = None
 
@@ -96,6 +121,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         auth_routes._test_after_admin_lock_hook = None
         auth_routes._test_active_admin_filter = None
 
+        self._active_executors = []
         self.test_prefix = f"conc_{self._run_id}_{int(time.time()*1000) % 1000000}"
         self.seeded_user_ids = []
 
@@ -156,11 +182,26 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
             "is_active": 1, "must_change_password": 0, "session_version": 0,
         }
 
+    def _create_executor(self, max_workers=2):
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+        self._active_executors.append(executor)
+        return executor
+
     def tearDown(self):
         auth_routes._test_before_admin_lock_hook = None
         auth_routes._test_after_admin_lock_hook = None
         auth_routes._test_active_admin_filter = None
 
+        # 1. Terminate and join all tracked worker executors/threads
+        if hasattr(self, "_active_executors"):
+            for ex in self._active_executors:
+                try:
+                    ex.shutdown(wait=True, cancel_futures=True)
+                except Exception:
+                    pass
+            self._active_executors.clear()
+
+        # 2. Delete test fixtures
         if hasattr(self, "seeded_user_ids") and self.seeded_user_ids:
             conn = self.pool.get_connection()
             try:
@@ -178,6 +219,23 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 cur.close()
             finally:
                 conn.close()
+
+        # 3. Verify no checked-out connections were leaked by the test
+        start_wait = time.time()
+        recovered = False
+        while time.time() - start_wait < 3.0:
+            if self.pool._cnx_queue.qsize() >= self.pool.pool_size:
+                recovered = True
+                break
+            time.sleep(0.05)
+
+        if not recovered:
+            qsize = self.pool._cnx_queue.qsize()
+            expected = self.pool.pool_size
+            raise RuntimeError(
+                f"Test teardown failed: {self.pool.pool_name} has {expected - qsize} unreturned connection(s) "
+                f"(queue has {qsize}/{expected})."
+            )
 
     def _count_active_test_admins(self):
         conn = self.pool.get_connection()
@@ -254,7 +312,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         try:
             with patch("web.app.authenticate_request", return_value=self.user_auth), \
                  patch("web.auth.authenticate_request", return_value=self.user_auth):
-                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                with self._create_executor(max_workers=2) as executor:
                     f1 = executor.submit(demote_user, self.admin1_id)
                     self.assertTrue(t1_locked.wait(timeout=5.0), "Thread 1 failed to acquire row lock")
 
@@ -348,7 +406,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         try:
             with patch("web.app.authenticate_request", return_value=self.user_auth), \
                  patch("web.auth.authenticate_request", return_value=self.user_auth):
-                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                with self._create_executor(max_workers=2) as executor:
                     f1 = executor.submit(deactivate_user, self.admin1_id)
                     self.assertTrue(t1_locked.wait(timeout=5.0), "Thread 1 failed to acquire row lock")
 
@@ -425,7 +483,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         try:
             with patch("web.app.authenticate_request", return_value=self.user_auth), \
                  patch("web.auth.authenticate_request", return_value=self.user_auth):
-                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                with self._create_executor(max_workers=2) as executor:
                     f1 = executor.submit(delete_user, self.admin1_id)
                     self.assertTrue(t1_locked.wait(timeout=5.0), "Thread 1 failed to acquire row lock")
 
@@ -612,7 +670,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 headers=self.headers,
             )
 
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        executor = self._create_executor(max_workers=2)
         try:
             with patch("web.app.authenticate_request", return_value=self.user_auth), \
                  patch("web.auth.authenticate_request", return_value=self.user_auth):

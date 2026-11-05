@@ -210,9 +210,9 @@ async function runTests() {
   }
 
   // --------------------------------------------------------------------------
-  // TEST 5: Successful readiness from the intended child
+  // TEST 5: Successful readiness from intended child (matching run_id & PID)
   // --------------------------------------------------------------------------
-  console.log("\n=== Test 5: Successful readiness from intended child process ===");
+  console.log("\n=== Test 5: Correct run ID and exact matching PID ===");
   {
     const port = await getAvailablePort();
     const expectedRunId = `run_${Date.now().toString(36)}`;
@@ -251,6 +251,155 @@ async function runTests() {
       await new Promise((r) => child.on("close", r));
     }
     assert(identity !== null, "Readiness verification must succeed");
+    passed++;
+  }
+
+  // --------------------------------------------------------------------------
+  // TEST 6: Correct run ID but missing PID (mandatory PID enforcement)
+  // --------------------------------------------------------------------------
+  console.log("\n=== Test 6: Correct run ID but missing PID ===");
+  {
+    const port = await getAvailablePort();
+    const expectedRunId = `run_${Date.now().toString(36)}`;
+    const childScript = `
+      const http = require('http');
+      const server = http.createServer((req, res) => {
+        if (req.url === '/api/system/test-identity') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'ok', run_id: '${expectedRunId}' }));
+        } else {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+      server.listen(${port}, '127.0.0.1');
+    `;
+    const child = spawn("node", ["-e", childScript]);
+
+    let waitFailed = false;
+    try {
+      await waitForServer(port, child, expectedRunId, 3000);
+    } catch (err) {
+      waitFailed = true;
+      assert(
+        err.message.includes("missing PID") || err.message.includes("invalid or missing"),
+        `Unexpected error message: ${err.message}`
+      );
+      console.log("  [✓] waitForServer rejected response with missing PID:", err.message);
+    } finally {
+      child.kill("SIGKILL");
+      await new Promise((r) => child.on("close", r));
+    }
+    assert(waitFailed, "waitForServer must reject response with missing PID");
+    passed++;
+  }
+
+  // --------------------------------------------------------------------------
+  // TEST 7: Correct run ID but null PID
+  // --------------------------------------------------------------------------
+  console.log("\n=== Test 7: Correct run ID but null PID ===");
+  {
+    const port = await getAvailablePort();
+    const expectedRunId = `run_${Date.now().toString(36)}`;
+    const childScript = `
+      const http = require('http');
+      const server = http.createServer((req, res) => {
+        if (req.url === '/api/system/test-identity') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'ok', run_id: '${expectedRunId}', pid: null }));
+        } else {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+      server.listen(${port}, '127.0.0.1');
+    `;
+    const child = spawn("node", ["-e", childScript]);
+
+    let waitFailed = false;
+    try {
+      await waitForServer(port, child, expectedRunId, 3000);
+    } catch (err) {
+      waitFailed = true;
+      assert(
+        err.message.includes("missing PID") || err.message.includes("invalid or missing"),
+        `Unexpected error message: ${err.message}`
+      );
+      console.log("  [✓] waitForServer rejected response with null PID:", err.message);
+    } finally {
+      child.kill("SIGKILL");
+      await new Promise((r) => child.on("close", r));
+    }
+    assert(waitFailed, "waitForServer must reject response with null PID");
+    passed++;
+  }
+
+  // --------------------------------------------------------------------------
+  // TEST 8: Correct run ID but incorrect PID
+  // --------------------------------------------------------------------------
+  console.log("\n=== Test 8: Correct run ID but incorrect PID ===");
+  {
+    const port = await getAvailablePort();
+    const expectedRunId = `run_${Date.now().toString(36)}`;
+    const childScript = `
+      const http = require('http');
+      const server = http.createServer((req, res) => {
+        if (req.url === '/api/system/test-identity') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'ok', run_id: '${expectedRunId}', pid: 999999 }));
+        } else {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+      server.listen(${port}, '127.0.0.1');
+    `;
+    const child = spawn("node", ["-e", childScript]);
+
+    let waitFailed = false;
+    try {
+      await waitForServer(port, child, expectedRunId, 3000);
+    } catch (err) {
+      waitFailed = true;
+      assert(
+        err.message.includes("mismatched PID"),
+        `Unexpected error message: ${err.message}`
+      );
+      console.log("  [✓] waitForServer rejected response with incorrect PID:", err.message);
+    } finally {
+      child.kill("SIGKILL");
+      await new Promise((r) => child.on("close", r));
+    }
+    assert(waitFailed, "waitForServer must reject response with mismatched PID");
+    passed++;
+  }
+
+  // --------------------------------------------------------------------------
+  // TEST 9: Child process exits during identity verification
+  // --------------------------------------------------------------------------
+  console.log("\n=== Test 9: Child process exits during identity verification ===");
+  {
+    const port = await getAvailablePort();
+    const expectedRunId = `run_${Date.now().toString(36)}`;
+    const childScript = `
+      setTimeout(() => {
+        process.exit(13);
+      }, 250);
+    `;
+    const child = spawn("node", ["-e", childScript]);
+
+    let waitFailed = false;
+    try {
+      await waitForServer(port, child, expectedRunId, 3000);
+    } catch (err) {
+      waitFailed = true;
+      assert(
+        err.message.includes("died prematurely") && err.message.includes("13"),
+        `Unexpected error message: ${err.message}`
+      );
+      console.log("  [✓] waitForServer detected premature exit during identity verification:", err.message);
+    }
+    assert(waitFailed, "waitForServer must fail when child exits during identity verification");
     passed++;
   }
 

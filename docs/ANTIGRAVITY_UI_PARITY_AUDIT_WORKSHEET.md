@@ -6,6 +6,7 @@
 **Branch:** `fix/ui-migration-review-remediation`
 **Baseline Commit:** `53bd8713d20e3348a5d23d951737037e916ba67f`
 **Reviewed Implementation Baseline:** `32348c2042f0c8d028e98f977b4d224d3bc33a58`
+**Latest Reviewed Baseline:** `d707eee6a330991f73778a166790e8757a1b8a1d`
 **Owner:** Antigravity
 **Independent acceptance:** ChatGPT / repository owner
 **Status:** AUDITED — Rebuilt directly from legacy source inspection and modern codebase verification.
@@ -215,7 +216,7 @@ Every result below reflects local validation on the remediation branch:
 | **Telegram Contracts** | `python3 -m pytest tests/test_telegram_route_contracts.py -v` | Linux, Python 3.12.14 | **PASS (7/7 passed in 2.16s)** | Pytest log | Mocked Telegram delivery; zero real pings; unauth 401 verified; chatId masked for non-admin |
 | **User Mgmt Security** | `python3 -m pytest tests/test_user_management_security.py -v` | Linux, Python 3.12.14 | **PASS (12/12 passed in 2.87s)** | Pytest log | Admin-only CRUD, self-demotion lockout, self-delete prevention, session-version invalidation, hash update verification |
 | **MariaDB Concurrency** | `python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py` | Linux, Python 3.12.14, MariaDB (authorized `signal_bot_test`) | **PASS (7/7 passed in 5.45s across 3 runs)** | Pytest log | Explicit `SELECT ... FOR UPDATE` row locks; deterministic `LOCK WAIT` contention verified on exact second thread ID; genuine worker failure handled via MariaDB lock wait timeout with clean rollback and zero partial mutation; independent pool database verification on all pools; non-mutating rollbacks and connection reuse verified |
-| **Staging regressions** | `node tests/browser/test_staging_lifecycle_regressions.cjs` | Linux, Node.js v22.23.2 | **PASS (5/5 passed in 0.9s)** | Node runner log | Proves port collision rejection, alien identity rejection, premature exit detection, socket error propagation, and child-verified readiness |
+| **Staging regressions** | `node tests/browser/test_staging_lifecycle_regressions.cjs` | Linux, Node.js v22.23.2 | **PASS (9/9 passed in 1.4s)** | Node runner log | Proves port collision rejection, alien identity rejection, premature exit detection, socket error propagation, mandatory matching PID verification, missing/null/mismatched PID rejection |
 | **Accessibility** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "accessibility|contrast|reduced-motion"` | Chromium, Desktop & Mobile | **PASS (Skip link, announcements, contrast)** | Playwright test report | Automated accessibility checks |
 | **Responsive** | `cd frontend && npx playwright test tests/dashboard.spec.ts -g "mobile viewport|tablet"` | Chromium (375px phone, 768px tablet, 1440px desktop) | **PASS (All 11 views fit without window overflow)** | Playwright test report | Automated viewport tests |
 | **Staging browser acceptance** | `node tests/browser/staging_browser_acceptance.cjs` | Localhost port 8055 (authorized `signal_bot_test`) | **PASS (All 3 roles authenticated, verified direct backend RBAC, child process identity verified, 11 views rendered with executable assertions, role boundaries enforced, zero console errors, zero network failures, zero operational mutations in 14.8s)** | Node test runner log | Tracked staging browser test against live backend and authorized test DB |
@@ -225,14 +226,25 @@ Every result below reflects local validation on the remediation branch:
 
 ## 9. Final audit summary
 
+### View-Level vs. Workflow-Level Classification
+
+- **11 Domain Views:**
+  - **6 Complete Views:** Overview, Master Data, Backtest Studio, Strategy Library, News AI Signals, Settings & Users. (All workflows in these views are implemented and verified in the modern UI).
+  - **5 Partial Views:** Paper Trading, ML Forecast Studio, Research Bots, Market Screener, Wallet Tracking. (These view containers are classified as "Partial" because, while their data monitoring, metrics grids, tables, and filters are fully migrated, their specialized execution/mutation actions remain legacy-only).
+
+- **59 Granular Workflows:**
+  - **49 Complete Workflows:** Supported end-to-end with React user controls, responsive states, backend API route contracts, role policies, and test evidence.
+  - **10 Legacy-Only Workflows:** Specialized operational execution mutations that have no modern UI controls and are preserved in the legacy dashboard (`web/static/`) by architectural decision:
+    - *Paper Trading (4):* `PT-07` order cancel, `PT-08` manual close position, `PT-09` deploy bot modal, `PT-10` trip/reset circuit breaker.
+    - *ML Forecast Studio (2):* `ML-03` battle royale tournament launch modal, `ML-04` deploy ML filter modal.
+    - *Research Bots (2):* `RB-03` strategy lifecycle settings update, `RB-04` stop/hide bot.
+    - *Wallet Tracking (2):* `WT-04` track/untrack address mutations, `WT-05` save wallet alert settings.
+  - **0 Partial Workflows:** At the granular workflow level, zero workflows are partially implemented. Every single workflow among the 59 cataloged has a definitive terminal classification: it is either completely functional in the modern UI (`COMPLETE`) or strictly retained in the legacy interface (`LEGACY_ONLY`). No workflow has incomplete UI controls, broken request flows, or unhandled intermediate states.
+  - **0 Missing / Unaccounted Workflows:** Every legacy action from `web/static/` is tracked.
 - **Audited legacy workflows:** **59** distinct workflows cataloged across 11 dashboard views.
 - **Complete:** **49** workflows verified end-to-end with React controls, API contracts, RBAC guards, and passing tests.
-- **Legacy-only:** **10** specialized mutation workflows remain in the legacy interface by architectural design:
-  - Paper Trading (4): `PT-07` order cancel, `PT-08` manual close position, `PT-09` deploy bot modal, `PT-10` trip/reset circuit breaker.
-  - ML Forecast Studio (2): `ML-03` battle royale tournament launch modal, `ML-04` deploy ML filter modal.
-  - Research Bots (2): `RB-03` strategy lifecycle settings update, `RB-04` stop/hide bot.
-  - Wallet Tracking (2): `WT-04` track/untrack address mutations, `WT-05` save wallet alert settings.
-- **Partial workflows:** **0** (5 *Views* are Partial because they combine complete monitoring with legacy-only execution; all individual 59 workflows have unambiguous terminal statuses).
+- **Legacy-only:** **10** specialized mutation workflows remain in the legacy interface by architectural design.
+- **Partial workflows:** **0** (all 59 granular workflows have definitive terminal statuses; 5 views are partial at the view container level).
 - **Missing workflows:** **0** (all remaining workflows are accounted for as either implemented or identified as legacy-only execution controls).
 - **Blocked:** **0**.
 - **Intentionally removed with owner approval:** **0**.
