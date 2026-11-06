@@ -25,7 +25,7 @@ In accordance with the workflow parity audit ([`docs/ANTIGRAVITY_UI_PARITY_AUDIT
 - **Workflow Parity Status:** 59 Workflows `COMPLETE`, 0 `LEGACY_ONLY`, 0 `MISSING` (59 Total).
 - **View-Level Breakdown:** 11 Views `COMPLETE`, 0 Views `PARTIAL`, 0 `MISSING`.
 - **Backend API Endpoints Covered:** 93 unique API method/path routes mapped across 13 FastAPI modules.
-- **Automated Frontend Test Suite:** 31 test files, 276 unit/component tests passing (`npm test`).
+- **Automated Frontend Test Suite:** 31 test files, 288 unit/component tests passing (`npm test`).
 - **End-to-End Browser Tests:** 28 Playwright tests passing across Desktop Chrome, responsive mobile, tablet, and dark/light themes (`npx playwright test`; 100% using mocked API routes).
 - **Backend Test Suite:** 1,129 unit/integration tests passing (`pytest`).
 
@@ -409,14 +409,14 @@ All parity implementations have been validated through four comprehensive automa
 
 1. **Frontend Unit & Component Testing (`Vitest`):**
    - **Command:** `cd frontend && npm test -- --run`
-   - **Tested Commit:** `47623f715f0427d2d23dce1d39e6eb67c0fa525a`
-   - **Result:** 31 test files passed, 276 tests passed, 0 failed in 9.01s.
-   - **Coverage:** AuthGate, App, SystemStatus, Screener, ScreenerControls, PaperTrading, StrategyLibrary, WalletTracking, BacktestStudio, PromotionPolicy, MLStudio, MLGeneratorTraining, Research, NewsAI, MasterData, Settings, User Management client & UI, dialog focus traps, partial deployment feedback warnings, polling interval range validation, and mutation client contracts.
+   - **Tested Commit:** `5d43d1b3e328fd91ca2e1deb108a708c60b21c28`
+   - **Result:** 31 test files passed, 288 tests passed, 0 failed in 8.81s.
+   - **Coverage:** AuthGate, App, SystemStatus, Screener, ScreenerControls, PaperTrading, StrategyLibrary, WalletTracking, BacktestStudio, PromotionPolicy, MLStudio, MLGeneratorTraining, Research, NewsAI, MasterData, Settings, User Management client & UI, dialog focus traps, partial deployment feedback warnings, Telegram delivery feedback warnings and opt-in safety, polling interval range validation, and mutation client contracts.
 
 2. **Frontend Production Type-check & Build (`TypeScript + Vite`):**
    - **Command:** `cd frontend && npm run typecheck && npm run build`
-   - **Tested Commit:** `47623f715f0427d2d23dce1d39e6eb67c0fa525a`
-   - **Result:** TypeScript compile passed with zero errors (`tsc --noEmit`). Production bundle built in `frontend/dist/` (1,610 modules transformed in 4.66s).
+   - **Tested Commit:** `5d43d1b3e328fd91ca2e1deb108a708c60b21c28`
+   - **Result:** TypeScript compile passed with zero errors (`tsc --noEmit`). Production bundle built in `frontend/dist/` (1,610 modules transformed in 4.25s).
 
 3. **End-to-End Browser Testing (`Playwright 1.64.1 Chromium`):**
    - **Command:** `cd frontend && npx playwright test`
@@ -426,17 +426,17 @@ All parity implementations have been validated through four comprehensive automa
 
 4. **Backend Regression Testing (`pytest`):**
    - **Command:** `PYTHONPATH=$PWD python3 -m pytest -q`
-   - **Tested Commit:** `47623f715f0427d2d23dce1d39e6eb67c0fa525a`
-   - **Result:** 1,129 passed, 18 skipped, 6 warnings, 0 failed in 25.47s.
+   - **Tested Commit:** `5d43d1b3e328fd91ca2e1deb108a708c60b21c28`
+   - **Result:** 1,129 passed, 18 skipped, 6 warnings, 0 failed in 29.69s.
 
 5. **MariaDB Concurrency & Security Testing:**
    - **Command:** `python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py`
-   - **Tested Commit:** `47623f715f0427d2d23dce1d39e6eb67c0fa525a`
+   - **Tested Commit:** `5d43d1b3e328fd91ca2e1deb108a708c60b21c28`
    - **Result:** 12 passed in 5.21s across consecutive runs against authorized `signal_bot_test`.
 
 6. **Tracked Staging Browser Acceptance:**
    - **Command:** `node tests/browser/staging_browser_acceptance.cjs`
-   - **Tested Commit:** `47623f715f0427d2d23dce1d39e6eb67c0fa525a`
+   - **Tested Commit:** `5d43d1b3e328fd91ca2e1deb108a708c60b21c28`
    - **Result:** 11 views verified across 3 roles (`admin`, `trader`, `viewer`), child process identity verified, controlled test mutations in `signal_bot_test` (zero production operations), 0 console errors, 0 network errors.
 
 ---
