@@ -259,8 +259,8 @@ export function WalletTrackingPanel() {
       setSettingsError("Auto-track threshold must be greater than or equal to minimum net flow.");
       return;
     }
-    if (sPollInterval < 10 || sPollInterval > 3600) {
-      setSettingsError("Polling interval must be between 10 and 3600 seconds.");
+    if (sPollInterval < 15 || sPollInterval > 3600) {
+      setSettingsError("Polling interval must be between 15 and 3600 seconds.");
       return;
     }
 
@@ -794,11 +794,11 @@ export function WalletTrackingPanel() {
                 <input
                   id="s-poll"
                   type="number"
-                  min={10}
+                  min={15}
                   max={3600}
                   required
                   value={sPollInterval}
-                  onChange={(e) => setSPollInterval(parseInt(e.target.value, 10) || 60)}
+                  onChange={(e) => setSPollInterval(parseInt(e.target.value, 10) || 0)}
                   disabled={settingsBusy}
                   style={{ width: "100%", padding: "6px 8px" }}
                 />

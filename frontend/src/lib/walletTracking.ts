@@ -404,6 +404,9 @@ export async function saveWalletSettings(
   if (!isFiniteNumber(settings.auto_track_net_usd) || settings.auto_track_net_usd < settings.min_net_usd) {
     throw new WalletActionError(400, "Auto-track threshold must be greater than or equal to minimum net flow");
   }
+  if (!isCount(settings.poll_interval_seconds) || settings.poll_interval_seconds < 15 || settings.poll_interval_seconds > 3600) {
+    throw new WalletActionError(400, "Polling interval must be between 15 and 3600 seconds");
+  }
   const payload = await walletMutationRequest<unknown>("/api/wallets/settings", {
     method: "PUT",
     body: JSON.stringify(settings),

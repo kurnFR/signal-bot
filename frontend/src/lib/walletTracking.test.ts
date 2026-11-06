@@ -290,5 +290,94 @@ describe("Wallet Tracking mutation contracts", () => {
         token_addresses: [],
       })).rejects.toThrow(/Auto-track threshold must be greater than or equal to minimum net flow/);
     });
+
+    it("rejects polling interval below 15 seconds without network call", async () => {
+      await expect(saveWalletSettings({
+        enabled: true,
+        networks: ["eth"],
+        pools_per_network: 4,
+        min_trade_usd: 10000,
+        min_net_usd: 150000,
+        auto_track_net_usd: 500000,
+        poll_interval_seconds: 14,
+        retention_days: 8,
+        api_delay_seconds: 4.0,
+        token_mode: "all",
+        token_addresses: [],
+      })).rejects.toThrow(/Polling interval must be between 15 and 3600 seconds/);
+    });
+
+    it("rejects polling interval above 3600 seconds without network call", async () => {
+      await expect(saveWalletSettings({
+        enabled: true,
+        networks: ["eth"],
+        pools_per_network: 4,
+        min_trade_usd: 10000,
+        min_net_usd: 150000,
+        auto_track_net_usd: 500000,
+        poll_interval_seconds: 3601,
+        retention_days: 8,
+        api_delay_seconds: 4.0,
+        token_mode: "all",
+        token_addresses: [],
+      })).rejects.toThrow(/Polling interval must be between 15 and 3600 seconds/);
+    });
+
+    it("accepts polling intervals at the 15-second and 3600-second contract boundaries", async () => {
+      let sentPoll: number | null = null;
+      const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body));
+        sentPoll = body.poll_interval_seconds;
+        return Promise.resolve(new Response(
+          JSON.stringify({
+            enabled: true,
+            networks: ["eth"],
+            pools_per_network: 4,
+            min_trade_usd: 10000,
+            min_net_usd: 150000,
+            auto_track_net_usd: 500000,
+            poll_interval_seconds: sentPoll,
+            retention_days: 8,
+            api_delay_seconds: 4.0,
+            token_mode: "all",
+            token_addresses: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ));
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res15 = await saveWalletSettings({
+        enabled: true,
+        networks: ["eth"],
+        pools_per_network: 4,
+        min_trade_usd: 10000,
+        min_net_usd: 150000,
+        auto_track_net_usd: 500000,
+        poll_interval_seconds: 15,
+        retention_days: 8,
+        api_delay_seconds: 4.0,
+        token_mode: "all",
+        token_addresses: [],
+      });
+      expect(res15.poll_interval_seconds).toBe(15);
+      expect(sentPoll).toBe(15);
+
+      const res3600 = await saveWalletSettings({
+        enabled: true,
+        networks: ["eth"],
+        pools_per_network: 4,
+        min_trade_usd: 10000,
+        min_net_usd: 150000,
+        auto_track_net_usd: 500000,
+        poll_interval_seconds: 3600,
+        retention_days: 8,
+        api_delay_seconds: 4.0,
+        token_mode: "all",
+        token_addresses: [],
+      });
+      expect(res3600.poll_interval_seconds).toBe(3600);
+      expect(sentPoll).toBe(3600);
+    });
   });
 });

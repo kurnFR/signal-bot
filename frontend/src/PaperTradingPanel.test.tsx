@@ -258,7 +258,7 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
     expect(await screen.findByText(/Paper position #7 \(BTCUSDT\) was closed at market price/i)).toBeInTheDocument();
   });
 
-  it("PT-09: deploys paper strategy through modal", async () => {
+  it("PT-09: deploys paper strategy through modal and displays success feedback", async () => {
     let deployPayload: unknown = null;
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), "http://localhost");
@@ -296,7 +296,106 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
       risk_per_trade_pct: 1.0,
       send_telegram: false,
     });
-    expect(await screen.findByText(/Strategy trend_ema_v1 deployed/i)).toBeInTheDocument();
+    const successMsg = await screen.findByText(/Strategy trend_ema_v1 deployed/i);
+    expect(successMsg).toBeInTheDocument();
+    expect(successMsg.closest(".control-success")).toBeInTheDocument();
+    expect(screen.queryByText(/Configuration was saved, but immediate evaluation failed/i)).not.toBeInTheDocument();
+  });
+
+  it("PT-09: partial deployment displays warning, refreshes configuration, and avoids automatic retries", async () => {
+    let deployCalls = 0;
+    let getConfigsCalls = 0;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      const path = url.pathname + url.search;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/paper/configs" && method === "GET") {
+        getConfigsCalls++;
+        return Promise.resolve(json(baseFixture["/api/paper/configs"]));
+      }
+      if (path === "/api/paper/deploy" && method === "POST") {
+        deployCalls++;
+        return Promise.resolve(json({
+          status: "partial",
+          message: "Strategy 'confluence_ensemble_v1' deployed to Live Paper Trading on BTCUSDT (1d).",
+          config: {
+            id: 101,
+            symbol: "BTCUSDT",
+            market: "spot",
+            timeframe: "1d",
+            strategy_name: "confluence_ensemble_v1",
+            is_active: true,
+          },
+          syncResult: { error: "Immediate evaluation failed" },
+        }));
+      }
+      const payload = baseFixture[path as keyof typeof baseFixture];
+      return Promise.resolve(payload ? json(payload) : json({ detail: "Unexpected route" }, 404));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaperTradingPanel />);
+    expect(await screen.findByRole("heading", { name: "Open positions" })).toBeInTheDocument();
+    const initialConfigCalls = getConfigsCalls;
+
+    const deployBtn = screen.getByRole("button", { name: /Deploy strategy/i });
+    fireEvent.click(deployBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Deploy Strategy to Paper Trading" });
+    const submitBtn = within(dialog).getByRole("button", { name: "Deploy to Paper Trading" });
+    fireEvent.click(submitBtn);
+
+    // Warning is displayed explaining configuration was saved but immediate evaluation failed
+    const warningMsg = await screen.findByText(/Configuration was saved, but immediate evaluation failed/i);
+    expect(warningMsg).toBeInTheDocument();
+    expect(warningMsg.closest(".control-warning")).toBeInTheDocument();
+
+    // Success feedback is NOT reported
+    expect(screen.queryByText(/deployed to Paper Trading\.$/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: /CheckCircle/i })).not.toBeInTheDocument();
+
+    // Exactly one deployment request occurred (no automatic second attempt)
+    expect(deployCalls).toBe(1);
+
+    // Paper configuration was refreshed so user can see persisted state
+    await waitFor(() => expect(getConfigsCalls).toBeGreaterThan(initialConfigCalls));
+  });
+
+  it("PT-09: deployment API error displays error in dialog without reporting success", async () => {
+    let deployCalls = 0;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      const path = url.pathname + url.search;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/paper/deploy" && method === "POST") {
+        deployCalls++;
+        return Promise.resolve(json({ detail: "Failed to persist paper config to database" }, 500));
+      }
+      const payload = baseFixture[path as keyof typeof baseFixture];
+      return Promise.resolve(payload ? json(payload) : json({ detail: "Unexpected route" }, 404));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaperTradingPanel />);
+    expect(await screen.findByRole("heading", { name: "Open positions" })).toBeInTheDocument();
+
+    const deployBtn = screen.getByRole("button", { name: /Deploy strategy/i });
+    fireEvent.click(deployBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Deploy Strategy to Paper Trading" });
+    const submitBtn = within(dialog).getByRole("button", { name: "Deploy to Paper Trading" });
+    fireEvent.click(submitBtn);
+
+    // Error is displayed inside modal dialog
+    const errorAlert = await within(dialog).findByRole("alert");
+    expect(errorAlert).toHaveTextContent(/Failed to persist paper config to database/i);
+
+    // No success or warning feedback is reported on the main screen
+    expect(screen.queryByText(/deployed to Live Paper Trading/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Configuration was saved/i)).not.toBeInTheDocument();
+    expect(deployCalls).toBe(1);
   });
 
   it("PT-10: triggers emergency stop circuit breaker and resets", async () => {

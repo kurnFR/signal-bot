@@ -48,6 +48,7 @@ export function PaperTradingPanel() {
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [actionWarning, setActionWarning] = useState<string | null>(null);
 
   // PT-07: Cancel paper order
   const [selectedOrderForCancel, setSelectedOrderForCancel] = useState<PaperOrder | null>(null);
@@ -220,6 +221,7 @@ export function PaperTradingPanel() {
     setCancellingOrderId(orderId);
     setActionError(null);
     setActionSuccess(null);
+    setActionWarning(null);
     try {
       await cancelPaperOrder(orderId);
       setActionSuccess(`Paper order #${orderId} was cancelled successfully.`);
@@ -239,6 +241,7 @@ export function PaperTradingPanel() {
     setClosingPositionId(posId);
     setActionError(null);
     setActionSuccess(null);
+    setActionWarning(null);
     try {
       await closePaperPosition(posId);
       setActionSuccess(`Paper position #${posId} (${selectedPositionForClose.symbol}) was closed at market price.`);
@@ -258,6 +261,7 @@ export function PaperTradingPanel() {
     setDeployError(null);
     setActionError(null);
     setActionSuccess(null);
+    setActionWarning(null);
 
     const sym = deploySymbol.trim().toUpperCase();
     if (!sym) {
@@ -284,7 +288,15 @@ export function PaperTradingPanel() {
         risk_per_trade_pct: deployRisk,
         send_telegram: deployTelegram,
       });
-      setActionSuccess(res.message || `Strategy '${deployStrategy}' deployed to Paper Trading.`);
+      if (res.status === "partial") {
+        setActionWarning(
+          res.message
+            ? `${res.message} Configuration was saved, but immediate evaluation failed.`
+            : `Strategy '${deployStrategy}' configuration was saved, but immediate evaluation failed.`
+        );
+      } else {
+        setActionSuccess(res.message || `Strategy '${deployStrategy}' deployed to Paper Trading.`);
+      }
       closeDeployModal();
       setAttempt((v) => v + 1);
     } catch (cause) {
@@ -300,6 +312,7 @@ export function PaperTradingPanel() {
     setBreakerBusy(true);
     setActionError(null);
     setActionSuccess(null);
+    setActionWarning(null);
     try {
       if (breakerAction === "trip") {
         await tripPaperCircuitBreaker("Manual emergency stop via Web Dashboard");
@@ -359,6 +372,12 @@ export function PaperTradingPanel() {
       {actionSuccess && (
         <p className="control-feedback control-success" role="status">
           <CheckCircle size={15} /> {actionSuccess}
+        </p>
+      )}
+
+      {actionWarning && (
+        <p className="control-feedback control-warning" role="status">
+          <AlertTriangle size={15} /> {actionWarning}
         </p>
       )}
 
