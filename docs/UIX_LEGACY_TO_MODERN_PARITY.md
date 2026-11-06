@@ -9,7 +9,7 @@
 **Previous Independently Reviewed Baseline:** `577544e4578ae46988a2cba96bcdc6338ba7b59f` (PR #697 acceptance blockers review)
 **Intermediate Remediation Commit:** `a72f81f34e1e9013e1b05e9bbdff751d6f6741f6` (Full 11-view browser acceptance & process termination)
 **Final Reviewed PR #697 Commit:** `98817a100bfe89e35237676f09c308c374ea0305` (Complete user profile contract, active-admin serialization, loopback staging identity)
-**Remaining Workflows Implementation Commit:** `4b01e7fe22c7a72d31221b2ba78887e494b2da9f` (PT-07-PT-10, ML-03-ML-04, RB-03-RB-04, WT-04-WT-05)
+**Remaining Workflows Implementation Commit:** `5c30ee4b5e579114bcf0e6fd1fe06d46b3ac0a80` (PT-07-PT-10, ML-03-ML-04, RB-03-RB-04, WT-04-WT-05 remediation)
 **Reference:** [`docs/ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md`](ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md), [`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md), [`docs/ANTIGRAVITY_MODERN_UI_REMAINING_WORKFLOWS_WORK_ORDER.md`](ANTIGRAVITY_MODERN_UI_REMAINING_WORKFLOWS_WORK_ORDER.md)
 
 ---
@@ -409,35 +409,35 @@ All parity implementations have been validated through four comprehensive automa
 
 1. **Frontend Unit & Component Testing (`Vitest`):**
    - **Command:** `cd frontend && npm test -- --run`
-   - **Tested Commit:** `4b01e7fe22c7a72d31221b2ba78887e494b2da9f`
-   - **Result:** 31 test files passed, 270 tests passed, 0 failed in 9.11s.
+   - **Tested Commit:** `5c30ee4b5e579114bcf0e6fd1fe06d46b3ac0a80`
+   - **Result:** 31 test files passed, 270 tests passed, 0 failed in 11.61s.
    - **Coverage:** AuthGate, App, SystemStatus, Screener, ScreenerControls, PaperTrading, StrategyLibrary, WalletTracking, BacktestStudio, PromotionPolicy, MLStudio, MLGeneratorTraining, Research, NewsAI, MasterData, Settings, User Management client & UI, dialog focus traps, and mutation client contracts.
 
 2. **Frontend Production Type-check & Build (`TypeScript + Vite`):**
    - **Command:** `cd frontend && npm run typecheck && npm run build`
-   - **Tested Commit:** `4b01e7fe22c7a72d31221b2ba78887e494b2da9f`
-   - **Result:** TypeScript compile passed with zero errors (`tsc --noEmit`). Production bundle built in `frontend/dist/` (1,610 modules transformed in 4.31s).
+   - **Tested Commit:** `5c30ee4b5e579114bcf0e6fd1fe06d46b3ac0a80`
+   - **Result:** TypeScript compile passed with zero errors (`tsc --noEmit`). Production bundle built in `frontend/dist/` (1,610 modules transformed in 4.36s).
 
 3. **End-to-End Browser Testing (`Playwright 1.64.1 Chromium`):**
    - **Command:** `cd frontend && npx playwright test`
-   - **Tested Commit:** `4b01e7fe22c7a72d31221b2ba78887e494b2da9f`
+   - **Tested Commit:** `5c30ee4b5e579114bcf0e6fd1fe06d46b3ac0a80`
    - **Result:** 28 passed across all 11 views, mobile viewport (375px), tablet (768px), desktop (1440px), and dark/light themes in 28.8s.
    - **Execution Boundary:** All 28 Playwright tests use deterministic client-side API route mocking via `page.route("**/api/**")`. They validate browser rendering, user interaction, accessibility, and client-side error states without executing live backend code or touching database records.
 
 4. **Backend Regression Testing (`pytest`):**
    - **Command:** `PYTHONPATH=$PWD python3 -m pytest -q`
-   - **Tested Commit:** `4b01e7fe22c7a72d31221b2ba78887e494b2da9f`
-   - **Result:** 1,113 passed, 18 skipped, 6 warnings, 0 failed in 15.71s.
+   - **Tested Commit:** `5c30ee4b5e579114bcf0e6fd1fe06d46b3ac0a80`
+   - **Result:** 1,119 passed, 18 skipped, 6 warnings, 0 failed in 25.47s.
 
 5. **MariaDB Concurrency & Security Testing:**
    - **Command:** `python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py`
-   - **Tested Commit:** `4b01e7fe22c7a72d31221b2ba78887e494b2da9f`
-   - **Result:** 12 passed in 4.44s across consecutive runs against authorized `signal_bot_test`.
+   - **Tested Commit:** `5c30ee4b5e579114bcf0e6fd1fe06d46b3ac0a80`
+   - **Result:** 12 passed in 4.45s across consecutive runs against authorized `signal_bot_test`.
 
 6. **Tracked Staging Browser Acceptance:**
    - **Command:** `node tests/browser/staging_browser_acceptance.cjs`
-   - **Tested Commit:** `4b01e7fe22c7a72d31221b2ba78887e494b2da9f`
-   - **Result:** 11 views verified across 3 roles (`admin`, `trader`, `viewer`), child process identity verified, 0 console errors, 0 network errors, 0 operational mutations.
+   - **Tested Commit:** `5c30ee4b5e579114bcf0e6fd1fe06d46b3ac0a80`
+   - **Result:** 11 views verified across 3 roles (`admin`, `trader`, `viewer`), child process identity verified, controlled test mutations in `signal_bot_test` (zero production operations), 0 console errors, 0 network errors.
 
 ---
 
