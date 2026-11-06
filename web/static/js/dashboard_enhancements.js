@@ -159,90 +159,18 @@
 
         const viewport = parent;
         viewport.classList.add("dashboard-table-scroll");
-
-        if (!viewport.querySelector(":scope > .dashboard-horizontal-scroll")) {
-            const bar = document.createElement("div");
-            bar.className = "dashboard-horizontal-scroll";
-            bar.setAttribute("role", "region");
-            bar.setAttribute("tabindex", "0");
-            const tableLabel = table.getAttribute("aria-label")
-                || (table.caption && table.caption.textContent.trim())
-                || table.dataset.label
-                || "table";
-            bar.setAttribute("aria-label", "Horizontal scroll for " + tableLabel);
-            bar.setAttribute("aria-description", "Use the left and right arrow keys to scroll horizontally.");
-            const spacer = document.createElement("div");
-            spacer.className = "dashboard-horizontal-spacer";
-            bar.appendChild(spacer);
-            viewport.appendChild(bar);
-
-            const syncWidth = () => {
-                spacer.style.width = `${table.scrollWidth}px`;
-                bar.style.display = table.scrollWidth > viewport.clientWidth ? "block" : "none";
-                if (Math.abs(bar.scrollLeft - viewport.scrollLeft) > 1) bar.scrollLeft = viewport.scrollLeft;
-            };
-            let syncing = false;
-            bar.addEventListener("scroll", () => {
-                if (syncing) return;
-                syncing = true;
-                viewport.scrollLeft = bar.scrollLeft;
-                requestAnimationFrame(() => { syncing = false; });
-            });
-            viewport.addEventListener("scroll", () => {
-                if (syncing) return;
-                syncing = true;
-                bar.scrollLeft = viewport.scrollLeft;
-                requestAnimationFrame(() => { syncing = false; });
-            });
-            if (window.ResizeObserver) {
-                // One observer per table is sufficient; retain it so removed tables
-                // can release their observed elements instead of leaking observers.
-                const resizeObserver = new ResizeObserver(syncWidth);
-                resizeObserver.observe(viewport);
-                resizeObserver.observe(table);
-                table._dashboardResizeObserver = resizeObserver;
-            }
-            syncWidth();
-        }
+        viewport.setAttribute("role", "region");
+        viewport.setAttribute("tabindex", "0");
+        const tableLabel = table.getAttribute("aria-label")
+            || (table.caption && table.caption.textContent.trim())
+            || table.dataset.label
+            || "table";
+        viewport.setAttribute("aria-label", "Scrollable table: " + tableLabel);
+        viewport.setAttribute("aria-description", "Use the left and right arrow keys to scroll horizontally.");
     }
 
     function enhanceAllTables() {
         document.querySelectorAll(SORTABLE_TABLE_SELECTOR).forEach(enhanceTable);
-    }
-
-    // Coalesce DOM-driven scrollbar measurements so a burst of text/row mutations
-    // performs at most one layout pass per animation frame.
-    const pendingScrollbarTables = new Set();
-    let scrollbarSyncFrame = null;
-
-    function scheduleHorizontalScrollbarSync(tables) {
-        tables.forEach(table => pendingScrollbarTables.add(table));
-        if (scrollbarSyncFrame !== null) return;
-        scrollbarSyncFrame = window.requestAnimationFrame(() => {
-            scrollbarSyncFrame = null;
-            const changedTables = Array.from(pendingScrollbarTables);
-            pendingScrollbarTables.clear();
-            syncHorizontalScrollbars(changedTables);
-        });
-    }
-
-    function syncHorizontalScrollbars(tables) {
-        const bars = tables
-            ? Array.from(tables, table => table && table.parentElement
-                ? table.parentElement.querySelector(":scope > .dashboard-horizontal-scroll")
-                : null).filter(Boolean)
-            : Array.from(document.querySelectorAll(".dashboard-horizontal-scroll"));
-        bars.forEach(bar => {
-            const viewport = bar.parentElement;
-            const table = viewport && viewport.querySelector(":scope > table");
-            const spacer = bar.firstElementChild;
-            if (!viewport || !table || !spacer) return;
-            spacer.style.width = `${table.scrollWidth}px`;
-            bar.style.display = table.scrollWidth > viewport.clientWidth ? "block" : "none";
-            if (Math.abs(bar.scrollLeft - viewport.scrollLeft) > 1) {
-                bar.scrollLeft = viewport.scrollLeft;
-            }
-        });
     }
 
     function installTelegramPing() {
@@ -294,28 +222,7 @@
             // Collect candidates first so nested/overlapping inserted subtrees do
             // not cause the same table to be inspected repeatedly in one batch.
             const tablesToEnhance = new Set();
-            const tablesToSync = new Set();
             for (const mutation of mutations) {
-                const target = mutation.target.nodeType === Node.ELEMENT_NODE
-                    ? mutation.target
-                    : mutation.target.parentElement;
-                const changedTable = target && target.closest(SORTABLE_TABLE_SELECTOR);
-                if (changedTable && changedTable.dataset.dashboardEnhanced === "1") {
-                    tablesToSync.add(changedTable);
-                }
-                for (const node of mutation.removedNodes) {
-                    if (node.nodeType !== Node.ELEMENT_NODE) continue;
-                    const removedTables = [];
-                    if (node.matches(SORTABLE_TABLE_SELECTOR)) removedTables.push(node);
-                    node.querySelectorAll(SORTABLE_TABLE_SELECTOR).forEach(table => removedTables.push(table));
-                    removedTables.forEach(table => {
-                        // A table may be moved rather than removed; only release observers
-                        // after the DOM mutation batch has left it disconnected.
-                        if (table.isConnected || !table._dashboardResizeObserver) return;
-                        table._dashboardResizeObserver.disconnect();
-                        delete table._dashboardResizeObserver;
-                    });
-                }
                 for (const node of mutation.addedNodes) {
                     if (node.nodeType !== Node.ELEMENT_NODE) continue;
                     if (node.matches(SORTABLE_TABLE_SELECTOR)) tablesToEnhance.add(node);
@@ -323,24 +230,18 @@
                 }
             }
             tablesToEnhance.forEach(enhanceTable);
-            // Older browsers without ResizeObserver still need their scrollbar
-            // width refreshed when API-driven table content changes.
-            if (tablesToSync.size) scheduleHorizontalScrollbarSync(tablesToSync);
             // App may be initialized after this enhancement script loads.
             installTelegramPing();
         });
         observer.observe(document.body, { childList: true, characterData: true, subtree: true });
-        // Coalesce resize bursts into one layout pass per animation frame.
-        // Window resize can fire many times while a user drags the browser edge.
+        // Revisit table enhancements after viewport changes without creating
+        // additional scroll tracks; each table uses its native scroll container.
         let resizeFrame = null;
         window.addEventListener("resize", () => {
             if (resizeFrame !== null) return;
             resizeFrame = window.requestAnimationFrame(() => {
                 resizeFrame = null;
                 enhanceAllTables();
-                // ResizeObserver is not available in some older browsers; refresh
-                // existing scrollbars explicitly as a fallback after viewport changes.
-                syncHorizontalScrollbars();
             });
         });
     }

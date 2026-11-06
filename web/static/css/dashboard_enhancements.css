@@ -12,6 +12,11 @@
     min-width: max-content;
 }
 
+.dashboard-table-scroll:focus-visible {
+    outline: 2px solid var(--dashboard-focus, #38bdf8);
+    outline-offset: -2px;
+}
+
 /* The page disables accidental selection globally; keep dashboard table data copyable. */
 .dashboard-table-scroll td,
 .dashboard-table-scroll th {
@@ -69,34 +74,6 @@
     font-weight: 800;
 }
 
-.dashboard-horizontal-scroll {
-    position: sticky;
-    bottom: 0;
-    z-index: 20;
-    display: none;
-    width: 100%;
-    height: 10px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    margin-top: 2px;
-    border-radius: 999px;
-    background: #0b0f17;
-    scrollbar-width: thin;
-}
-
-/* Keep keyboard focus visible inside the scroll container's overflow clipping. */
-.dashboard-horizontal-scroll:focus-visible {
-    outline: 2px solid var(--dashboard-focus, #38bdf8);
-    outline-offset: -2px;
-}
-
-.dashboard-horizontal-scroll::-webkit-scrollbar {
-    height: 8px;
-}
-
-.dashboard-horizontal-spacer {
-    height: 1px;
-}
 
 @media (max-width: 768px) {
     .dashboard-table-scroll {
@@ -243,10 +220,6 @@
     background-color: #e0f2fe;
     color: #075985;
     border-left-color: #0284c7;
-}
-
-:root[data-theme="light"] .dashboard-horizontal-scroll {
-    background: #e2e8f0;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -553,6 +526,9 @@
 }
 
 @media (forced-colors: active) {
+    .dashboard-table-scroll:focus-visible {
+        outline-color: Highlight;
+    }
     #main-content:focus-visible {
         outline-color: Highlight;
     }
@@ -577,9 +553,6 @@
         box-shadow: none;
     }
 
-    .dashboard-horizontal-scroll {
-        border: 1px solid CanvasText;
-    }
 }
 
 

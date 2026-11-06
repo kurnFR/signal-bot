@@ -627,14 +627,16 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('if ((event.key === "Enter" || event.key === " ") && !event.repeat)', self.dashboard_enhancements_js)
         self.assertRegex(self.index_html, r"dashboard_enhancements\.js\?v=[^\"]+")
 
-    def test_horizontal_table_scroll_region_is_keyboard_accessible(self):
-        self.assertIn('bar.setAttribute("role", "region")', self.dashboard_enhancements_js)
-        self.assertIn('bar.setAttribute("tabindex", "0")', self.dashboard_enhancements_js)
+    def test_horizontal_table_scroll_uses_one_keyboard_accessible_native_region(self):
+        self.assertIn('viewport.classList.add("dashboard-table-scroll")', self.dashboard_enhancements_js)
+        self.assertIn('viewport.setAttribute("role", "region")', self.dashboard_enhancements_js)
+        self.assertIn('viewport.setAttribute("tabindex", "0")', self.dashboard_enhancements_js)
         self.assertIn('table.getAttribute("aria-label")', self.dashboard_enhancements_js)
         self.assertIn('table.caption.textContent.trim()', self.dashboard_enhancements_js)
         self.assertIn('table.dataset.label', self.dashboard_enhancements_js)
-        self.assertIn('bar.setAttribute("aria-label", "Horizontal scroll for " + tableLabel)', self.dashboard_enhancements_js)
-        self.assertIn('bar.setAttribute("aria-description", "Use the left and right arrow keys to scroll horizontally.")', self.dashboard_enhancements_js)
+        self.assertIn('viewport.setAttribute("aria-label", "Scrollable table: " + tableLabel)', self.dashboard_enhancements_js)
+        self.assertIn('viewport.setAttribute("aria-description", "Use the left and right arrow keys to scroll horizontally.")', self.dashboard_enhancements_js)
+        self.assertNotIn("dashboard-horizontal-scroll", self.dashboard_enhancements_js)
         self.assertRegex(self.index_html, r"dashboard_enhancements\.js\?v=[^\"]+")
 
     def test_ml_data_refresh_button_has_explicit_accessible_name(self):
@@ -1042,8 +1044,7 @@ class TestDashboardForcedColorsAccessibility(unittest.TestCase):
         self.assertIn("background-color: Highlight;", forced_colors)
         self.assertIn("background: Canvas;", forced_colors)
         self.assertIn("color: CanvasText;", forced_colors)
-        self.assertIn(".dashboard-horizontal-scroll", forced_colors)
-        self.assertIn("border: 1px solid CanvasText;", forced_colors)
+        self.assertNotIn(".dashboard-horizontal-scroll", css)
 
 
 
@@ -1098,7 +1099,7 @@ class TestDashboardEnhancementObserver(unittest.TestCase):
     def test_mutation_observer_enhances_only_added_table_subtrees(self):
         enhancements = DASHBOARD_ENHANCEMENTS_JS.read_text(encoding="utf-8")
         init_start = enhancements.index("    function init() {")
-        init_end = enhancements.index("\n    if (document.readyState === \"loading\")", init_start)
+        init_end = enhancements.index("    if (document.readyState", init_start)
         init = enhancements[init_start:init_end]
         self.assertIn("new MutationObserver(mutations => {", init)
         self.assertIn("for (const mutation of mutations)", init)
@@ -1136,55 +1137,21 @@ class TestDashboardMutationBatchDeduplication(unittest.TestCase):
         self.assertIn("tablesToEnhance.forEach(enhanceTable);", init)
 
 
-class TestDashboardHorizontalScrollResizeFallback(unittest.TestCase):
-    def test_resize_refreshes_existing_horizontal_scrollbars_without_reenhancing_tables(self):
+class TestDashboardNativeHorizontalScroll(unittest.TestCase):
+    def test_resize_and_content_updates_do_not_create_a_second_scrollbar(self):
         enhancements = DASHBOARD_ENHANCEMENTS_JS.read_text(encoding="utf-8")
-        self.assertIn('function syncHorizontalScrollbars(tables) {', enhancements)
-        self.assertIn('Array.from(document.querySelectorAll(".dashboard-horizontal-scroll"))', enhancements)
-        self.assertIn('viewport.querySelector(":scope > table")', enhancements)
+        self.assertNotIn("dashboard-horizontal-scroll", enhancements)
+        self.assertNotIn("syncHorizontalScrollbars", enhancements)
+        self.assertNotIn("scheduleHorizontalScrollbarSync", enhancements)
         init_start = enhancements.index("    function init() {")
-        init_end = enhancements.index("\n    if (document.readyState === \"loading\")", init_start)
+        init_end = enhancements.index("    if (document.readyState", init_start)
         init = enhancements[init_start:init_end]
-        self.assertIn("syncHorizontalScrollbars();", init)
-        self.assertIn("enhanceAllTables();\n                // ResizeObserver is not available", init)
+        self.assertIn("observer.observe(document.body, { childList: true, characterData: true, subtree: true });", init)
+        self.assertIn("tablesToEnhance.forEach(enhanceTable);", init)
+        self.assertNotIn("tablesToSync", init)
+        self.assertIn("enhanceAllTables();", init)
+        self.assertNotIn("syncHorizontalScrollbars", init)
 
-
-class TestDashboardResizeObserverLifecycle(unittest.TestCase):
-    def test_table_resize_observer_is_shared_and_released_when_table_is_removed(self):
-        enhancements = DASHBOARD_ENHANCEMENTS_JS.read_text(encoding="utf-8")
-        observer_start = enhancements.index("if (window.ResizeObserver) {")
-        observer_end = enhancements.index("            syncWidth();", observer_start)
-        observer_setup = enhancements[observer_start:observer_end]
-        self.assertIn("const resizeObserver = new ResizeObserver(syncWidth);", observer_setup)
-        self.assertIn("resizeObserver.observe(viewport);", observer_setup)
-        self.assertIn("resizeObserver.observe(table);", observer_setup)
-        self.assertIn("table._dashboardResizeObserver = resizeObserver;", observer_setup)
-        self.assertEqual(observer_setup.count("new ResizeObserver("), 1)
-
-        init_start = enhancements.index("    function init() {")
-        init_end = enhancements.index("\n    if (document.readyState === \"loading\")", init_start)
-        init = enhancements[init_start:init_end]
-        self.assertIn("for (const node of mutation.removedNodes)", init)
-        self.assertIn("if (table.isConnected || !table._dashboardResizeObserver) return;", init)
-        self.assertIn("table._dashboardResizeObserver.disconnect();", init)
-        self.assertIn("delete table._dashboardResizeObserver;", init)
-
-
-class TestDashboardScrollbarContentUpdates(unittest.TestCase):
-    def test_mutation_observer_resyncs_scrollbars_for_changed_enhanced_tables(self):
-        enhancements = DASHBOARD_ENHANCEMENTS_JS.read_text(encoding="utf-8")
-        self.assertIn("function syncHorizontalScrollbars(tables) {", enhancements)
-        self.assertIn("const tablesToSync = new Set();", enhancements)
-        self.assertIn("observer.observe(document.body, { childList: true, characterData: true, subtree: true });", enhancements)
-        self.assertIn("const changedTable = target && target.closest(SORTABLE_TABLE_SELECTOR);", enhancements)
-        self.assertIn('changedTable.dataset.dashboardEnhanced === "1"', enhancements)
-        self.assertIn("tablesToSync.add(changedTable);", enhancements)
-        self.assertIn("if (tablesToSync.size) scheduleHorizontalScrollbarSync(tablesToSync);", enhancements)
-        self.assertIn('table.parentElement.querySelector(":scope > .dashboard-horizontal-scroll")', enhancements)
-        self.assertIn("const pendingScrollbarTables = new Set();", enhancements)
-        self.assertIn("if (scrollbarSyncFrame !== null) return;", enhancements)
-        self.assertIn("window.requestAnimationFrame(() => {", enhancements)
-        self.assertIn("pendingScrollbarTables.clear();", enhancements)
 
 class TestMobileHeaderIconButtonAccessibility(unittest.TestCase):
     @classmethod
@@ -1236,14 +1203,11 @@ class TestResponsiveMobileTableScrollHeight(unittest.TestCase):
         self.assertIn("max-height: min(440px, 55dvh);", mobile_rules)
 
 
-class TestHorizontalScrollbarKeyboardFocus(unittest.TestCase):
-    def test_horizontal_scroll_region_keeps_focus_ring_inside_overflow_clip(self):
+class TestHorizontalTableViewportFocus(unittest.TestCase):
+    def test_native_table_scroll_region_keeps_visible_keyboard_focus(self):
         dashboard_css = DASHBOARD_CSS.read_text(encoding="utf-8")
-        focus_start = dashboard_css.index(".dashboard-horizontal-scroll:focus-visible {")
-        focus_end = dashboard_css.index("\n}", focus_start)
-        focus_rules = dashboard_css[focus_start:focus_end]
-        self.assertIn("outline: 2px solid var(--dashboard-focus, #38bdf8);", focus_rules)
-        self.assertIn("outline-offset: -2px;", focus_rules)
+        self.assertIn(".dashboard-table-scroll:focus-visible", dashboard_css)
+        self.assertIn("outline: 2px solid var(--dashboard-focus, #38bdf8);", dashboard_css)
 
 
 if __name__ == "__main__":
