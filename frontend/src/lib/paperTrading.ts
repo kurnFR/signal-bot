@@ -1,4 +1,6 @@
-import { getJson } from "./api";
+import { assertApiPath, getJson } from "./api";
+import { parseTelegramDeliveryStatus, type TelegramDeliveryOutcome } from "./telegram";
+export { parseTelegramDeliveryStatus, type TelegramDeliveryOutcome };
 
 export interface PaperPosition { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; direction: string; entry_price: number; current_price: number; stop_loss: number | null; take_profit: number | null; quantity: number; unrealized_pnl_pct: number | null; unrealized_r: number | null; allocated_capital: number; status: string; last_update_time: number }
 export interface PaperConfig { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; is_active: boolean; allocated_capital: number; risk_per_trade_pct: number; telegram_enabled: boolean; report_enabled: boolean; created_at: string }
@@ -7,6 +9,95 @@ export interface PaperTrade { id: number; symbol: string; market: string; timefr
 export interface PaperMetrics { totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number; byStrategy: Array<{ strategy: string; totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number }> }
 export interface PaperCircuitBreaker { status: string; emergency_stop_active: boolean; emergency_stop_reason: string | null; active_positions: number; max_concurrent_positions: number; today_realized_pnl_usd: number | null; max_daily_loss_usd: number; open_notional_usd: number | null; max_total_notional_usd: number; can_open_new_position: boolean; message: string }
 export interface PaperTradingSnapshot { positions: PaperPosition[]; configs: PaperConfig[]; orders: PaperOrder[]; trades: PaperTrade[]; metrics: PaperMetrics; breaker: PaperCircuitBreaker }
+
+export interface DeployPaperStrategyRequest {
+  symbol: string;
+  market: "spot" | "futures";
+  timeframe: "15m" | "1h" | "4h" | "1d";
+  strategy_name: string;
+  allocated_capital: number;
+  risk_per_trade_pct: number;
+  send_telegram: boolean;
+  rank?: number | null;
+  rank_score?: number | null;
+  ml_model_id?: string | null;
+}
+
+export interface DeployPaperStrategyResponse {
+  status: "success" | "partial";
+  message: string;
+  config: unknown;
+  telegramAlert?: unknown;
+  telegram?: unknown;
+  syncResult?: unknown;
+}
+
+export class PaperTradingActionError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "PaperTradingActionError";
+    this.status = status;
+  }
+}
+
+function tokenFromStorage(): string | null {
+  try {
+    const token = window.localStorage.getItem("token");
+    if (!token) return null;
+    const trimmed = token.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function paperMutationRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  assertApiPath(path);
+  const token = tokenFromStorage();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    ...(options.headers as Record<string, string> | undefined),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (options.body !== undefined && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const response = await fetch(path, {
+    ...options,
+    credentials: "same-origin",
+    headers,
+  });
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (response.status === 401) {
+    try { window.localStorage.removeItem("token"); } catch { /* Session expired reset */ }
+    window.dispatchEvent(new Event("signal-bot:session-expired"));
+    throw new PaperTradingActionError(401, "Your session has expired. Sign in again.");
+  }
+
+  if (!response.ok) {
+    let message = `Request failed (HTTP ${response.status})`;
+    if (isRecord(payload) && typeof payload.detail === "string" && payload.detail.trim().length > 0) {
+      message = payload.detail.trim();
+    }
+    throw new PaperTradingActionError(response.status, message);
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new PaperTradingActionError(502, "Server returned a non-JSON response");
+  }
+
+  return payload as T;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -93,4 +184,108 @@ export async function fetchPaperTradingSnapshot(signal?: AbortSignal): Promise<P
     throw new Error("Paper trading API returned an invalid response; risk status is not verified");
   }
   return { positions: positions.positions, configs: configs.configs, orders: orders.orders, trades: trades.trades, metrics: metrics.metrics, breaker };
+}
+
+/** Cancel a pending paper order. Protected by actor attribution and transition conflict detection. */
+export async function cancelPaperOrder(orderId: number, signal?: AbortSignal): Promise<{ status: string; order_id: number }> {
+  if (!positiveId(orderId)) {
+    throw new PaperTradingActionError(400, "Invalid paper order ID");
+  }
+  const payload = await paperMutationRequest<unknown>(`/api/paper/orders/${orderId}/cancel`, {
+    method: "POST",
+    signal,
+  });
+  if (!isRecord(payload) || payload.status !== "cancelled" || payload.order_id !== orderId) {
+    throw new PaperTradingActionError(502, "Server returned an invalid cancellation response");
+  }
+  return { status: "cancelled", order_id: orderId };
+}
+
+/** Manually close an active paper position at simulated market price. */
+export async function closePaperPosition(positionId: number, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  if (!positiveId(positionId)) {
+    throw new PaperTradingActionError(400, "Invalid paper position ID");
+  }
+  const payload = await paperMutationRequest<unknown>(`/api/paper/positions/${positionId}/close`, {
+    method: "POST",
+    signal,
+  });
+  if (!isRecord(payload)) {
+    throw new PaperTradingActionError(502, "Server returned an invalid position close response");
+  }
+  return payload;
+}
+
+/** Deploy a strategy to live paper trading with explicit risk and optional Telegram preferences. */
+export async function deployPaperStrategy(
+  req: DeployPaperStrategyRequest,
+  signal?: AbortSignal,
+): Promise<DeployPaperStrategyResponse> {
+  if (!requiredText(req.symbol) || !requiredText(req.strategy_name)) {
+    throw new PaperTradingActionError(400, "Symbol and strategy name are required");
+  }
+  if (!finite(req.allocated_capital) || req.allocated_capital < 100) {
+    throw new PaperTradingActionError(400, "Allocated capital must be at least $100");
+  }
+  if (!finite(req.risk_per_trade_pct) || req.risk_per_trade_pct < 0.1 || req.risk_per_trade_pct > 10.0) {
+    throw new PaperTradingActionError(400, "Risk per trade must be between 0.1% and 10.0%");
+  }
+  const payload = await paperMutationRequest<unknown>("/api/paper/deploy", {
+    method: "POST",
+    body: JSON.stringify({
+      symbol: req.symbol.trim().toUpperCase(),
+      market: req.market,
+      timeframe: req.timeframe,
+      strategy_name: req.strategy_name.trim(),
+      allocated_capital: req.allocated_capital,
+      risk_per_trade_pct: req.risk_per_trade_pct,
+      send_telegram: req.send_telegram,
+      rank: req.rank ?? undefined,
+      rank_score: req.rank_score ?? undefined,
+      ml_model_id: req.ml_model_id ?? undefined,
+    }),
+    signal,
+  });
+  if (!isRecord(payload) || (payload.status !== "success" && payload.status !== "partial") || typeof payload.message !== "string") {
+    throw new PaperTradingActionError(502, "Server returned an invalid deployment response");
+  }
+  const telegramStatus = payload.telegramAlert !== undefined ? payload.telegramAlert : payload.telegram;
+  return {
+    status: payload.status,
+    message: payload.message,
+    config: payload.config,
+    telegramAlert: telegramStatus,
+    telegram: telegramStatus,
+    syncResult: payload.syncResult,
+  };
+}
+
+/** Trip the emergency stop circuit breaker to halt new paper entries immediately. */
+export async function tripPaperCircuitBreaker(
+  reason = "Manual emergency stop via Web Dashboard",
+  signal?: AbortSignal,
+): Promise<{ status: string; message: string; breaker: PaperCircuitBreaker }> {
+  const query = new URLSearchParams({ reason });
+  const payload = await paperMutationRequest<unknown>(`/api/paper/circuit-breakers/emergency-stop?${query.toString()}`, {
+    method: "POST",
+    signal,
+  });
+  if (!isRecord(payload) || payload.status !== "success" || !validBreaker(payload.breaker)) {
+    throw new PaperTradingActionError(502, "Server returned an invalid circuit breaker trip response");
+  }
+  return { status: "success", message: String(payload.message || reason), breaker: payload.breaker };
+}
+
+/** Reset the emergency stop circuit breaker to re-enable new paper entries. */
+export async function resetPaperCircuitBreaker(
+  signal?: AbortSignal,
+): Promise<{ status: string; message: string; breaker: PaperCircuitBreaker }> {
+  const payload = await paperMutationRequest<unknown>("/api/paper/circuit-breakers/reset", {
+    method: "POST",
+    signal,
+  });
+  if (!isRecord(payload) || payload.status !== "success" || !validBreaker(payload.breaker)) {
+    throw new PaperTradingActionError(502, "Server returned an invalid circuit breaker reset response");
+  }
+  return { status: "success", message: String(payload.message || "Circuit breaker reset"), breaker: payload.breaker };
 }

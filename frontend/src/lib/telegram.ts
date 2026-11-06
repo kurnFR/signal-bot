@@ -12,6 +12,34 @@ export interface TelegramTestResult {
   error?: string | null;
   note?: string;
 }
+
+export type TelegramDeliveryOutcome =
+  | { status: "success"; messageId?: number | string }
+  | { status: "failed"; error?: string }
+  | { status: "unconfirmed" };
+
+/** Parses a Telegram deployment alert response into a structured outcome. */
+export function parseTelegramDeliveryStatus(raw: unknown): TelegramDeliveryOutcome {
+  if (raw === true) {
+    return { status: "success" };
+  }
+  if (raw === false) {
+    return { status: "failed" };
+  }
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const obj = raw as Record<string, unknown>;
+    if (obj.success === true) {
+      const msgId = typeof obj.message_id === "number" || typeof obj.message_id === "string" ? obj.message_id : undefined;
+      return { status: "success", messageId: msgId };
+    }
+    if (obj.success === false) {
+      const err = typeof obj.error === "string" && obj.error.trim().length > 0 ? obj.error.trim() : undefined;
+      return { status: "failed", error: err };
+    }
+    return { status: "unconfirmed" };
+  }
+  return { status: "unconfirmed" };
+}
 export class TelegramActionError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);

@@ -232,7 +232,7 @@ class DeployStrategyRequest(BaseModel):
     strategy_name: str = Field(..., max_length=50, json_schema_extra={"example": "confluence_ensemble_v1"})
     allocated_capital: float = Field(5000.0, ge=100.0)
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
-    send_telegram: bool = Field(True)
+    send_telegram: bool = Field(False)
     rank: Optional[int] = None
     rank_score: Optional[float] = None
     ml_model_id: Optional[str] = Field(None, max_length=100)
@@ -296,7 +296,8 @@ def deploy_strategy(req: DeployStrategyRequest):
                 allocated_capital=req.allocated_capital,
                 risk_per_trade_pct=req.risk_per_trade_pct,
                 rank=req.rank,
-                rank_score=req.rank_score
+                rank_score=req.rank_score,
+                max_retries=1,
             )
         except Exception as e:
             # Raw exceptions may contain token-bearing URLs or request details.
@@ -321,6 +322,7 @@ def deploy_strategy(req: DeployStrategyRequest):
         "message": f"Strategy '{req.strategy_name}' deployed to Live Paper Trading on {req.symbol} ({req.timeframe}).",
         "config": res,
         "telegramAlert": telegram_res,
+        "telegram": telegram_res,
         "syncResult": eval_res
     }
 

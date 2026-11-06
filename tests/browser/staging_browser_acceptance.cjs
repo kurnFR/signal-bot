@@ -710,7 +710,27 @@ print(json.dumps({"status": "ok", "active_db": active_db, "seeded_ids": seeded_i
     const viewerTelegramStatus = await apiRequest("GET", "/api/telegram/status", viewerToken);
     assert(viewerTelegramStatus.status === 200, `Viewer GET /api/telegram/status must return 200, got: ${viewerTelegramStatus.status}`);
     assert(viewerTelegramStatus.data.chatId === null, `Viewer Telegram status must mask chatId to null, got: ${viewerTelegramStatus.data.chatId}`);
-    console.log("  [✓] Direct API check: Viewer strictly denied 403 on user management and Telegram test; chatId masked to null.");
+
+    // 2b. Viewer mutation rejections (403 Forbidden for all protected mutations)
+    const viewerWalletTrack = await apiRequest("POST", "/api/wallets/tracked", viewerToken, { chain: "eth", wallet: "0x0000000000000000000000000000000000001234" });
+    assert(viewerWalletTrack.status === 403, `Viewer POST /api/wallets/tracked must return 403, got: ${viewerWalletTrack.status}`);
+
+    const viewerWalletUntrack = await apiRequest("DELETE", "/api/wallets/tracked/1", viewerToken);
+    assert(viewerWalletUntrack.status === 403, `Viewer DELETE /api/wallets/tracked/1 must return 403, got: ${viewerWalletUntrack.status}`);
+
+    const viewerWalletSettings = await apiRequest("PUT", "/api/wallets/settings", viewerToken, { enabled: true, networks: ["eth"], pools_per_network: 4, min_trade_usd: 10000, min_net_usd: 150000, auto_track_net_usd: 500000, poll_interval_seconds: 300, retention_days: 8, api_delay_seconds: 4, token_mode: "all", token_addresses: [] });
+    assert(viewerWalletSettings.status === 403, `Viewer PUT /api/wallets/settings must return 403, got: ${viewerWalletSettings.status}`);
+
+    const viewerMLDeploy = await apiRequest("POST", "/api/ml/deploy-to-paper", viewerToken, { model_id: "test", allocated_capital: 1000, risk_per_trade_pct: 1.0, send_telegram: false });
+    assert(viewerMLDeploy.status === 403, `Viewer POST /api/ml/deploy-to-paper must return 403, got: ${viewerMLDeploy.status}`);
+
+    const viewerMLTrain = await apiRequest("POST", "/api/ml/run-experiment", viewerToken, { symbol: "BTCUSDT", market: "spot", timeframe: "1h", strategy_name: "trend_ema_v1" });
+    assert(viewerMLTrain.status === 403, `Viewer POST /api/ml/run-experiment must return 403, got: ${viewerMLTrain.status}`);
+
+    const viewerClosePositions = await apiRequest("POST", "/api/paper-trading/positions/close-all", viewerToken, {});
+    assert(viewerClosePositions.status === 403, `Viewer POST /api/paper-trading/positions/close-all must return 403, got: ${viewerClosePositions.status}`);
+
+    console.log("  [✓] Direct API check: Viewer strictly denied 403 on user management, Telegram test, and all protected mutations.");
 
     // 3. Trader direct API checks: user create -> 403, telegram test -> 403
     const traderUserCreate = await apiRequest("POST", "/api/users", traderToken, { username: "hack", password: "pwd", role: "admin" });
@@ -723,6 +743,91 @@ print(json.dumps({"status": "ok", "active_db": active_db, "seeded_ids": seeded_i
     assert(traderTelegramStatus.status === 200, `Trader GET /api/telegram/status must return 200, got: ${traderTelegramStatus.status}`);
     assert(traderTelegramStatus.data.chatId === null, `Trader Telegram status must mask chatId to null, got: ${traderTelegramStatus.data.chatId}`);
     console.log("  [✓] Direct API check: Trader strictly denied 403 on user management and Telegram test; chatId masked to null.");
+
+    // 3b. Trader mutations: wallet track/untrack contract & Birdeye key preservation
+    const trackedAddr = "0x000000000000000000000000000000000000abcd";
+    const traderTrackRes = await apiRequest("POST", "/api/wallets/tracked", traderToken, {
+      chain: "eth",
+      wallet: trackedAddr,
+      label: `staging-test-${RUN_ID}`,
+    });
+    assert(traderTrackRes.status === 200 && traderTrackRes.data && traderTrackRes.data.status === "ok", `Trader POST /api/wallets/tracked failed: ${JSON.stringify(traderTrackRes.data)}`);
+    console.log("  [✓] Direct API check: Trader successfully tracked monitored wallet.");
+
+    const trackedListRes = await apiRequest("GET", "/api/wallets/tracked", traderToken);
+    assert(trackedListRes.status === 200 && Array.isArray(trackedListRes.data.tracked), "GET /api/wallets/tracked must return { tracked: [...] }");
+    const foundWallet = trackedListRes.data.tracked.find((w) => w.wallet.toLowerCase() === trackedAddr.toLowerCase());
+    assert(foundWallet, `Tracked wallet ${trackedAddr} must exist in tracked list`);
+
+    // Untrack wallet via DELETE /api/wallets/tracked/{id}
+    const traderUntrackRes = await apiRequest("DELETE", `/api/wallets/tracked/${foundWallet.id}`, traderToken);
+    assert(traderUntrackRes.status === 200 && traderUntrackRes.data && traderUntrackRes.data.status === "ok", `Trader untrack failed: ${JSON.stringify(traderUntrackRes.data)}`);
+    assert(traderUntrackRes.data.tracked_id === foundWallet.id, `Untrack response must return tracked_id ${foundWallet.id}, got: ${traderUntrackRes.data.tracked_id}`);
+    console.log("  [✓] Direct API check: Trader successfully untracked wallet and verified {status: 'ok', tracked_id} contract.");
+
+    // Seed initial Birdeye API key
+    const initSettingsRes = await apiRequest("PUT", "/api/wallets/settings", traderToken, {
+      enabled: true,
+      networks: ["eth", "solana"],
+      pools_per_network: 4,
+      min_trade_usd: 10000,
+      min_net_usd: 150000,
+      auto_track_net_usd: 500000,
+      poll_interval_seconds: 300,
+      retention_days: 8,
+      api_delay_seconds: 4.0,
+      token_mode: "all",
+      token_addresses: [],
+      birdeye_api_key: "birdeye-key-sec-9876",
+    });
+    assert(initSettingsRes.status === 200 && initSettingsRes.data.has_birdeye_key === true, "Settings save with Birdeye key failed");
+    assert(initSettingsRes.data.birdeye_api_key_masked === "••••••••9876", `Birdeye key masking failed: ${initSettingsRes.data.birdeye_api_key_masked}`);
+
+    // Update settings with unrelated change (8 networks, omit birdeye_api_key)
+    const eightNetworks = ["eth", "base", "bsc", "arbitrum", "polygon_pos", "optimism", "avalanche", "solana"];
+    const updateSettingsRes = await apiRequest("PUT", "/api/wallets/settings", traderToken, {
+      enabled: true,
+      networks: eightNetworks,
+      pools_per_network: 5,
+      min_trade_usd: 12500,
+      min_net_usd: 150000,
+      auto_track_net_usd: 500000,
+      poll_interval_seconds: 300,
+      retention_days: 8,
+      api_delay_seconds: 4.0,
+      token_mode: "all",
+      token_addresses: [],
+    });
+    assert(updateSettingsRes.status === 200, `Settings update failed: ${updateSettingsRes.status}`);
+    assert(updateSettingsRes.data.networks.length === 8, `Networks length must be 8, got: ${updateSettingsRes.data.networks.length}`);
+    assert(updateSettingsRes.data.has_birdeye_key === true, "Unrelated settings update must preserve existing Birdeye key");
+    assert(updateSettingsRes.data.birdeye_api_key_masked === "••••••••9876", "Unrelated settings update must preserve masked Birdeye key");
+    assert(!("birdeye_api_key" in updateSettingsRes.data), "Raw birdeye_api_key must never be exposed in settings response");
+
+    // Read back settings to verify database state
+    const readSettingsRes = await apiRequest("GET", "/api/wallets/settings", traderToken);
+    assert(readSettingsRes.status === 200 && readSettingsRes.data.has_birdeye_key === true, "GET /api/wallets/settings must confirm Birdeye key preserved");
+    assert(readSettingsRes.data.birdeye_api_key_masked === "••••••••9876", "Masked Birdeye key verified after read back");
+    assert(readSettingsRes.data.min_trade_usd === 12500, "Updated min_trade_usd verified after read back");
+    console.log("  [✓] Direct API check: Birdeye API credentials survive unrelated settings updates across 8 networks.");
+
+    // Explicitly clear Birdeye key
+    const clearSettingsRes = await apiRequest("PUT", "/api/wallets/settings", traderToken, {
+      enabled: true,
+      networks: ["eth"],
+      pools_per_network: 4,
+      min_trade_usd: 10000,
+      min_net_usd: 150000,
+      auto_track_net_usd: 500000,
+      poll_interval_seconds: 300,
+      retention_days: 8,
+      api_delay_seconds: 4.0,
+      token_mode: "all",
+      token_addresses: [],
+      clear_birdeye_api_key: true,
+    });
+    assert(clearSettingsRes.status === 200 && clearSettingsRes.data.has_birdeye_key === false, "Explicit clear of Birdeye key failed");
+    console.log("  [✓] Direct API check: Birdeye API key explicitly cleared when clear_birdeye_api_key=true.");
 
     // 4. Admin read-only API check: user listing -> 200
     const adminUserList = await apiRequest("GET", "/api/users", adminToken);
@@ -881,6 +986,61 @@ print(json.dumps({"status": "ok", "active_db": active_db, "seeded_ids": seeded_i
               "[viewer] Strategy Library must display quick tests restriction notice"
             );
             console.log("      [✓] [viewer] Strategy Library verified: strategy creation and quick tests restricted.");
+          }
+        } else if (label === "Wallet Tracking") {
+          if (roleName === "admin" || roleName === "trader") {
+            await page.waitForSelector(".wallet-tracking-view:not([aria-busy='true'])", { timeout: 8000 });
+            await page.waitForSelector("button:has-text('Track wallet')", { timeout: 8000 });
+            assert(
+              (await page.locator("button:has-text('Track wallet')").count()) > 0,
+              `[${roleName}] Wallet Tracking must display Track wallet button`
+            );
+            assert(
+              (await page.locator("button:has-text('Edit settings')").count()) > 0,
+              `[${roleName}] Wallet Tracking must display Edit settings button`
+            );
+            console.log(`      [✓] [${roleName}] Wallet Tracking verified: operator mutation controls accessible.`);
+          } else {
+            // viewer
+            await page.waitForSelector(".wallet-tracking-view:not([aria-busy='true'])", { timeout: 8000 });
+            assert(
+              (await page.locator("button:has-text('Track wallet')").count()) === 0,
+              "[viewer] Wallet Tracking must NOT display Track wallet button"
+            );
+            assert(
+              (await page.locator("button:has-text('Edit settings')").count()) === 0,
+              "[viewer] Wallet Tracking must NOT display Edit settings button"
+            );
+            assert(
+              (await page.locator("button:has-text('Untrack')").count()) === 0,
+              "[viewer] Wallet Tracking must NOT display Untrack buttons"
+            );
+            assert(
+              await page.getByText("Read-only Wallet Tracking monitor").first().isVisible(),
+              "[viewer] Wallet Tracking must display read-only banner"
+            );
+            console.log("      [✓] [viewer] Wallet Tracking verified: tracking mutations hidden, read-only banner active.");
+          }
+        } else if (label === "ML Studio") {
+          if (roleName === "admin" || roleName === "trader") {
+            await page.waitForSelector(".ml-studio-view:not([aria-busy='true'])", { timeout: 8000 });
+            assert(
+              (await page.locator("button:has-text('Launch tournament')").count()) > 0,
+              `[${roleName}] ML Studio must display Launch tournament button`
+            );
+            console.log(`      [✓] [${roleName}] ML Studio verified: training experiment controls accessible.`);
+          } else {
+            // viewer
+            await page.waitForSelector(".ml-studio-view:not([aria-busy='true'])", { timeout: 8000 });
+            assert(
+              (await page.locator("button:has-text('Launch tournament')").count()) === 0,
+              "[viewer] ML Studio must NOT display Launch tournament button"
+            );
+            assert(
+              (await page.locator("button:has-text('Deploy to paper')").count()) === 0,
+              "[viewer] ML Studio must NOT display Deploy to paper buttons"
+            );
+            console.log("      [✓] [viewer] ML Studio verified: experiment training and deploy buttons suppressed for viewer.");
           }
         } else if (label === "Settings") {
           if (roleName === "admin") {

@@ -193,7 +193,7 @@ class DeployMLToPaperRequest(BaseModel):
     model_id: str = Field(..., max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
     allocated_capital: float = Field(5000.0, ge=100.0)
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
-    send_telegram: bool = Field(True)
+    send_telegram: bool = Field(False)
 
 
 @router.get("/experiments")
@@ -516,19 +516,23 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
 
         telegram_status = None
         if req.send_telegram:
-            msg = (
-                f"🧠 <b>AI/ML STRATEGY DEPLOYED TO PAPER TRADING!</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🪙 <b>Pair:</b> <code>{symbol}</code> ({market.upper()})\n"
-                f"⏱ <b>Timeframe:</b> <code>{timeframe}</code>\n"
-                f"📈 <b>Base Strategy:</b> <code>{strategy_name}</code>\n"
-                f"🤖 <b>ML Filter Model:</b> <code>{manifest.get('model_type')}</code>\n"
-                f"🎯 <b>Probability Threshold:</b> <code>{threshold * 100:.1f}%</code>\n"
-                f"💼 <b>Capital:</b> ${req.allocated_capital:,.2f} | <b>Risk:</b> {req.risk_per_trade_pct:.1f}%\n"
-                f"━━━━━━━━━━━━━━━━━━━━━\n"
-                f"<i>Signals will only be executed if AI confidence exceeds threshold.</i>"
-            )
-            telegram_status = send_telegram_message(msg)
+            try:
+                msg = (
+                    f"🧠 <b>AI/ML STRATEGY DEPLOYED TO PAPER TRADING!</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🪙 <b>Pair:</b> <code>{symbol}</code> ({market.upper()})\n"
+                    f"⏱ <b>Timeframe:</b> <code>{timeframe}</code>\n"
+                    f"📈 <b>Base Strategy:</b> <code>{strategy_name}</code>\n"
+                    f"🤖 <b>ML Filter Model:</b> <code>{manifest.get('model_type')}</code>\n"
+                    f"🎯 <b>Probability Threshold:</b> <code>{threshold * 100:.1f}%</code>\n"
+                    f"💼 <b>Capital:</b> ${req.allocated_capital:,.2f} | <b>Risk:</b> {req.risk_per_trade_pct:.1f}%\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"<i>Signals will only be executed if AI confidence exceeds threshold.</i>"
+                )
+                telegram_status = send_telegram_message(msg, max_retries=1)
+            except Exception as e:
+                logger.error("Deployment Telegram alert failed (%s)", type(e).__name__)
+                telegram_status = {"success": False, "error": "Telegram deployment alert failed"}
 
         sync_res = sync_and_evaluate_paper_trading()
 
@@ -536,7 +540,9 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
             "status": "success",
             "message": f"ML Model '{req.model_id}' successfully activated for {symbol} ({timeframe}) {strategy_name}.",
             "config": res,
+            "paper_config": res,
             "telegram": telegram_status,
+            "telegramAlert": telegram_status,
             "sync": sync_res,
         }
     except Exception as exc:

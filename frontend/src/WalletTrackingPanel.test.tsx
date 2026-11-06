@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { WalletTrackingPanel } from "./WalletTrackingPanel";
+
+const mockUseAuth = vi.fn();
+vi.mock("./AuthGate", () => ({
+  useAuth: () => mockUseAuth(),
+}));
 
 const responses: Record<string, unknown> = {
   "/api/wallets/meta": { periods_hours: [24, 72], chains: { eth: "Ethereum", solana: "Solana" }, min_net_usd: 1000, auto_track_net_usd: 5000 },
@@ -19,6 +24,7 @@ describe("WalletTrackingPanel", () => {
   beforeEach(() => {
     cleanup();
     window.localStorage.clear();
+    mockUseAuth.mockReturnValue(null);
     vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
       expect(init?.method).toBe("GET");
       return Promise.resolve(responseFor(url));
@@ -87,5 +93,285 @@ describe("WalletTrackingPanel", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
   });
+});
 
+describe("Wallet Tracking Workflows (WT-04 & WT-05) with RBAC", () => {
+  beforeEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, username: "trader_alice", role: "trader", is_active: true },
+      logout: vi.fn(),
+      logoutError: null,
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("WT-04: tracks a new wallet address", async () => {
+    let trackPayload: unknown = null;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/wallets/tracked" && method === "POST") {
+        trackPayload = JSON.parse(String(init?.body));
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              status: "ok",
+              chain: "eth",
+              wallet: "0x9876543210987654321098765432109876543210",
+              label: "Alpha Whale",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.resolve(responseFor(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WalletTrackingPanel />);
+    const trackBtn = await screen.findByRole("button", { name: /Track wallet/i });
+    fireEvent.click(trackBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Track New Wallet" });
+    expect(dialog).toBeInTheDocument();
+
+    const chainSelect = within(dialog).getByLabelText("Chain / Network");
+    fireEvent.change(chainSelect, { target: { value: "eth" } });
+
+    const addressInput = within(dialog).getByLabelText("Wallet Address");
+    fireEvent.change(addressInput, { target: { value: "0x9876543210987654321098765432109876543210" } });
+
+    const labelInput = within(dialog).getByLabelText("Label (optional)");
+    fireEvent.change(labelInput, { target: { value: "Alpha Whale" } });
+
+    const submitBtn = within(dialog).getByRole("button", { name: "Start Tracking" });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(trackPayload).not.toBeNull());
+    expect(trackPayload).toMatchObject({
+      chain: "eth",
+      wallet: "0x9876543210987654321098765432109876543210",
+      label: "Alpha Whale",
+    });
+    expect(await screen.findByText(/added to tracked wallets on eth\./i)).toBeInTheDocument();
+  });
+
+  it("WT-04: untracks a monitored wallet after confirmation using real backend contract {status: 'ok'}", async () => {
+    let untrackCalled = false;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/wallets/tracked/7" && method === "DELETE") {
+        untrackCalled = true;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ status: "ok" }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.resolve(responseFor(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WalletTrackingPanel />);
+    const untrackBtn = await screen.findByRole("button", { name: "Untrack" });
+    fireEvent.click(untrackBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Untrack Wallet" });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByText(/Test wallet/)).toBeInTheDocument();
+
+    const confirmBtn = within(dialog).getByRole("button", { name: "Untrack Wallet" });
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => expect(untrackCalled).toBe(true));
+    expect(await screen.findByText(/removed from tracked wallets\./i)).toBeInTheDocument();
+  });
+
+  it("WT-05: edits and saves wallet tracker settings without erasing existing Birdeye key", async () => {
+    let savedSettings: unknown = null;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/wallets/settings" && method === "PUT") {
+        savedSettings = JSON.parse(String(init?.body));
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...(responses["/api/wallets/settings"] as Record<string, unknown>),
+              ...(savedSettings as Record<string, unknown>),
+              has_birdeye_key: true,
+              birdeye_api_key_masked: "••••••••9999",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.resolve(responseFor(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WalletTrackingPanel />);
+    const editBtn = await screen.findByRole("button", { name: /Edit settings/i });
+    fireEvent.click(editBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Wallet Tracker Configuration" });
+    expect(dialog).toBeInTheDocument();
+
+    const minTradeInput = within(dialog).getByLabelText("Min Trade Size (USD)");
+    fireEvent.change(minTradeInput, { target: { value: "25000" } });
+
+    const submitBtn = within(dialog).getByRole("button", { name: "Save Settings" });
+    const form = submitBtn.closest("form");
+    if (form) fireEvent.submit(form);
+    else fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(savedSettings).not.toBeNull());
+    expect(savedSettings).toMatchObject({
+      enabled: true,
+      min_trade_usd: 25000,
+    });
+    // Crucial: birdeye_api_key and clear_birdeye_api_key must NOT be sent, preserving server credentials
+    expect(savedSettings).not.toHaveProperty("birdeye_api_key");
+    expect(savedSettings).not.toHaveProperty("clear_birdeye_api_key");
+    expect(await screen.findByText(/Wallet tracker settings updated successfully\./i)).toBeInTheDocument();
+  });
+
+  it("WT-05: allows setting a new Birdeye API key or explicitly clearing an existing key", async () => {
+    let savedSettings: unknown = null;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/wallets/settings" && method === "GET") {
+        return Promise.resolve(new Response(JSON.stringify({
+          ...(responses["/api/wallets/settings"] as Record<string, unknown>),
+          has_birdeye_key: true,
+          birdeye_api_key_masked: "••••••••1234",
+        }), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      if (path === "/api/wallets/settings" && method === "PUT") {
+        savedSettings = JSON.parse(String(init?.body));
+        return Promise.resolve(new Response(JSON.stringify({
+          ...(responses["/api/wallets/settings"] as Record<string, unknown>),
+          has_birdeye_key: false,
+        }), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      return Promise.resolve(responseFor(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WalletTrackingPanel />);
+    const editBtn = await screen.findByRole("button", { name: /Edit settings/i });
+    fireEvent.click(editBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Wallet Tracker Configuration" });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByText(/••••••••1234/)).toBeInTheDocument();
+
+    const clearCheckbox = within(dialog).getByLabelText("Remove / clear Birdeye API key");
+    fireEvent.click(clearCheckbox);
+
+    const submitBtn = within(dialog).getByRole("button", { name: "Save Settings" });
+    const form = submitBtn.closest("form");
+    if (form) fireEvent.submit(form);
+    else fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(savedSettings).not.toBeNull());
+    expect(savedSettings).toMatchObject({
+      clear_birdeye_api_key: true,
+    });
+  });
+
+  it("WT-05: enforces polling interval contract [15, 3600] and blocks invalid mutations", async () => {
+    let putRequestCount = 0;
+    let savedSettings: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/wallets/settings" && method === "PUT") {
+        putRequestCount++;
+        savedSettings = JSON.parse(String(init?.body));
+        return Promise.resolve(new Response(JSON.stringify({
+          ...(responses["/api/wallets/settings"] as Record<string, unknown>),
+          poll_interval_seconds: savedSettings?.poll_interval_seconds,
+        }), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      return Promise.resolve(responseFor(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WalletTrackingPanel />);
+    const editBtn = await screen.findByRole("button", { name: /Edit settings/i });
+    fireEvent.click(editBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Wallet Tracker Configuration" });
+    expect(dialog).toBeInTheDocument();
+
+    const pollInput = within(dialog).getByLabelText(/Poll Interval/i);
+    expect(pollInput).toHaveAttribute("min", "15");
+    expect(pollInput).toHaveAttribute("max", "3600");
+
+    const submitBtn = within(dialog).getByRole("button", { name: "Save Settings" });
+    const form = submitBtn.closest("form")!;
+
+    // 1. 14 seconds is rejected without API mutation request
+    fireEvent.change(pollInput, { target: { value: "14" } });
+    fireEvent.submit(form);
+    expect(within(dialog).getByText("Polling interval must be between 15 and 3600 seconds.")).toBeInTheDocument();
+    expect(putRequestCount).toBe(0);
+
+    // 2. 3601 seconds is rejected without API mutation request
+    fireEvent.change(pollInput, { target: { value: "3601" } });
+    fireEvent.submit(form);
+    expect(within(dialog).getByText("Polling interval must be between 15 and 3600 seconds.")).toBeInTheDocument();
+    expect(putRequestCount).toBe(0);
+
+    // 3. 15 seconds is accepted and generates API mutation request
+    fireEvent.change(pollInput, { target: { value: "15" } });
+    fireEvent.submit(form);
+    await waitFor(() => expect(putRequestCount).toBe(1));
+    expect(savedSettings).toMatchObject({ poll_interval_seconds: 15 });
+
+    // Reopen dialog to test 3600 seconds
+    fireEvent.click(screen.getByRole("button", { name: /Edit settings/i }));
+    const dialog2 = screen.getByRole("dialog", { name: "Wallet Tracker Configuration" });
+    const pollInput2 = within(dialog2).getByLabelText(/Poll Interval/i);
+    const form2 = within(dialog2).getByRole("button", { name: "Save Settings" }).closest("form")!;
+
+    // 4. 3600 seconds is accepted and generates API mutation request
+    fireEvent.change(pollInput2, { target: { value: "3600" } });
+    fireEvent.submit(form2);
+    await waitFor(() => expect(putRequestCount).toBe(2));
+    expect(savedSettings).toMatchObject({ poll_interval_seconds: 3600 });
+  });
+
+  it("RBAC: viewer role renders view-only badges and suppresses mutating buttons", async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 3, username: "viewer_charlie", role: "viewer", is_active: true },
+      logout: vi.fn(),
+      logoutError: null,
+    });
+
+    const fetchMock = vi.fn((url: string) => Promise.resolve(responseFor(url)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WalletTrackingPanel />);
+    expect(await screen.findByRole("heading", { name: "Tracked wallets" })).toBeInTheDocument();
+
+    // Mutating actions suppressed
+    expect(screen.queryByRole("button", { name: /Track wallet/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Edit settings/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Untrack" })).not.toBeInTheDocument();
+
+    // View only label present
+    expect(screen.getByText("View only")).toBeInTheDocument();
+  });
 });

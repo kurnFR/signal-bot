@@ -10,6 +10,8 @@ CHAINS = {
     "bsc":         {"label": "BNB Chain", "kind": "evm",   "explorer": "https://bscscan.com/address/",  "tx_explorer": "https://bscscan.com/tx/"},
     "arbitrum":    {"label": "Arbitrum", "kind": "evm",    "explorer": "https://arbiscan.io/address/",  "tx_explorer": "https://arbiscan.io/tx/"},
     "polygon_pos": {"label": "Polygon",  "kind": "evm",    "explorer": "https://polygonscan.com/address/", "tx_explorer": "https://polygonscan.com/tx/"},
+    "optimism":    {"label": "Optimism", "kind": "evm",    "explorer": "https://optimistic.etherscan.io/address/", "tx_explorer": "https://optimistic.etherscan.io/tx/"},
+    "avalanche":   {"label": "Avalanche", "kind": "evm",   "explorer": "https://snowtrace.io/address/", "tx_explorer": "https://snowtrace.io/tx/"},
     "solana":      {"label": "Solana",   "kind": "solana", "explorer": "https://solscan.io/account/",   "tx_explorer": "https://solscan.io/tx/"},
 }
 

@@ -1,4 +1,71 @@
-import { getJson } from "./api";
+import { assertApiPath, getJson } from "./api";
+
+export class ResearchActionError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ResearchActionError";
+    this.status = status;
+  }
+}
+
+function tokenFromStorage(): string | null {
+  try {
+    const token = window.localStorage.getItem("token");
+    if (!token) return null;
+    const trimmed = token.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function researchMutationRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  assertApiPath(path);
+  const token = tokenFromStorage();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    ...(options.headers as Record<string, string> | undefined),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (options.body !== undefined && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const response = await fetch(path, {
+    ...options,
+    credentials: "same-origin",
+    headers,
+  });
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (response.status === 401) {
+    try { window.localStorage.removeItem("token"); } catch { /* Session expired reset */ }
+    window.dispatchEvent(new Event("signal-bot:session-expired"));
+    throw new ResearchActionError(401, "Your session has expired. Sign in again.");
+  }
+
+  if (!response.ok) {
+    let message = `Request failed (HTTP ${response.status})`;
+    if (isRecord(payload) && typeof payload.detail === "string" && payload.detail.trim().length > 0) {
+      message = payload.detail.trim();
+    }
+    throw new ResearchActionError(response.status, message);
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new ResearchActionError(502, "Server returned a non-JSON response");
+  }
+
+  return payload as T;
+}
 
 export interface ResearchPosition {
   id: number;
@@ -168,4 +235,75 @@ export async function fetchResearchSnapshot(signal?: AbortSignal): Promise<Resea
     stats,
     strategies: strategies.strategies,
   };
+}
+
+export interface StrategyLifecycleRequest {
+  strategy_id: string;
+  mode: "shadow" | "inverse";
+  evaluation_enabled: boolean;
+  paper_enabled: boolean;
+  telegram_enabled: boolean;
+  report_enabled: boolean;
+  auto_promote_enabled?: boolean;
+}
+
+export interface StrategyLifecycleResponse {
+  status: string;
+  strategy_id: string;
+  mode: string;
+  settings: Record<string, unknown>;
+  note?: string;
+}
+
+/** Update RetailBot2 strategy lifecycle flags (evaluation, paper tracking, Telegram alerts, report visibility). */
+export async function saveStrategyLifecycle(
+  request: StrategyLifecycleRequest,
+  signal?: AbortSignal,
+): Promise<StrategyLifecycleResponse> {
+  if (!isNonEmptyString(request.strategy_id) || (request.mode !== "shadow" && request.mode !== "inverse")) {
+    throw new ResearchActionError(400, "Valid strategy ID and mode are required");
+  }
+  const payload = await researchMutationRequest<unknown>("/api/research/retailbot2/strategies", {
+    method: "POST",
+    body: JSON.stringify({
+      strategy_id: request.strategy_id,
+      mode: request.mode,
+      evaluation_enabled: Boolean(request.evaluation_enabled),
+      paper_enabled: Boolean(request.paper_enabled),
+      telegram_enabled: Boolean(request.telegram_enabled),
+      report_enabled: Boolean(request.report_enabled),
+      auto_promote_enabled: false,
+    }),
+    signal,
+  });
+  if (!isRecord(payload) || payload.status !== "ok" || payload.strategy_id !== request.strategy_id || payload.mode !== request.mode) {
+    throw new ResearchActionError(502, "Server returned an invalid strategy lifecycle response");
+  }
+  return {
+    status: "ok",
+    strategy_id: request.strategy_id,
+    mode: request.mode,
+    settings: isRecord(payload.settings) ? payload.settings : {},
+    note: typeof payload.note === "string" ? payload.note : undefined,
+  };
+}
+
+/** Stop evaluation and paper entries, disable Telegram alerts, and hide a RetailBot2 strategy from reports. */
+export async function stopAndHideStrategy(
+  strategyId: string,
+  mode: "shadow" | "inverse",
+  signal?: AbortSignal,
+): Promise<StrategyLifecycleResponse> {
+  return saveStrategyLifecycle(
+    {
+      strategy_id: strategyId,
+      mode,
+      evaluation_enabled: false,
+      paper_enabled: false,
+      telegram_enabled: false,
+      report_enabled: false,
+      auto_promote_enabled: false,
+    },
+    signal,
+  );
 }

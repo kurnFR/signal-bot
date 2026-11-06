@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchMLExperimentDetails, fetchMLExperiments, fetchMLModels } from "./mlStudio";
+import {
+  deployMLModelToPaper,
+  fetchMLExperimentDetails,
+  fetchMLExperiments,
+  fetchMLModels,
+  MLStudioActionError,
+  runMLExperiment,
+} from "./mlStudio";
 
 const experiment = {
   experiment_id: "btc-trend-test", symbol: "BTCUSDT", market: "spot", timeframe: "1h",
@@ -67,5 +74,171 @@ describe("ML Studio response contracts", () => {
   it("rejects path traversal and malformed experiment IDs before making a request", async () => {
     await expect(fetchMLExperimentDetails("../outside")).rejects.toThrow(/invalid ml experiment id/i);
     await expect(fetchMLExperimentDetails("bad/id")).rejects.toThrow(/invalid ml experiment id/i);
+  });
+});
+
+describe("ML Studio mutation contracts", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    window.localStorage.clear();
+  });
+
+  describe("runMLExperiment", () => {
+    it("submits tournament launch request and returns experiment result", async () => {
+      window.localStorage.setItem("token", "trader-token");
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          status: "success",
+          experiment_id: "exp_123",
+          result: { winner: { model_type: "random_forest" } },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await runMLExperiment({
+        symbol: "BTCUSDT",
+        market: "spot",
+        timeframe: "1h",
+        strategy_name: "trend_ema_v1",
+        model_type: "all",
+        target_type: "binary_positive_r",
+        min_validation_trades: 5,
+      });
+
+      expect(res.status).toBe("success");
+      expect(res.experiment_id).toBe("exp_123");
+      expect(fetchMock).toHaveBeenCalledWith("/api/ml/run-experiment", expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: "Bearer trader-token" }),
+      }));
+    });
+
+    it("rejects empty symbol or strategy without request", async () => {
+      await expect(runMLExperiment({
+        symbol: "",
+        market: "spot",
+        timeframe: "1h",
+        strategy_name: "trend_ema_v1",
+      })).rejects.toThrow(MLStudioActionError);
+    });
+  });
+
+  describe("deployMLModelToPaper", () => {
+    it("submits deployment request and handles actual backend response shape (config, telegram, sync)", async () => {
+      const actualBackendResponse = {
+        status: "success",
+        message: "ML Model 'valid-model-1' successfully activated for BTCUSDT (1h) trend_ema_v1.",
+        config: { model_id: "valid-model-1", allocated_capital: 5000, risk_per_trade_pct: 1.0 },
+        telegram: null,
+        sync: { status: "synced" },
+      };
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify(actualBackendResponse),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await deployMLModelToPaper({
+        model_id: "valid-model-1",
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1.0,
+        send_telegram: false,
+      });
+
+      expect(res.status).toBe("success");
+      expect(res.message).toBe("ML Model 'valid-model-1' successfully activated for BTCUSDT (1h) trend_ema_v1.");
+      expect(res.config).toEqual(actualBackendResponse.config);
+      expect(res.paper_config).toEqual(actualBackendResponse.config);
+      expect(res.telegram).toBeNull();
+      expect(res.sync).toEqual({ status: "synced" });
+      expect(fetchMock).toHaveBeenCalledWith("/api/ml/deploy-to-paper", expect.objectContaining({
+        method: "POST",
+      }));
+    });
+
+    it("supports paper_config alias for backwards compatibility", async () => {
+      const legacyResponse = {
+        status: "success",
+        message: "Deployed successfully via legacy alias",
+        paper_config: { model_id: "legacy-model-1" },
+      };
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify(legacyResponse),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await deployMLModelToPaper({
+        model_id: "legacy-model-1",
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1.0,
+        send_telegram: false,
+      });
+
+      expect(res.status).toBe("success");
+      expect(res.config).toEqual({ model_id: "legacy-model-1" });
+      expect(res.paper_config).toEqual({ model_id: "legacy-model-1" });
+    });
+
+    it("maps telegramAlert and telegram consistently when Telegram was enabled", async () => {
+      const responseWithTelegram = {
+        status: "success",
+        message: "ML Model deployed",
+        config: { model_id: "valid-model-1" },
+        telegramAlert: { success: true, message_id: 456 },
+        sync: { status: "synced" },
+      };
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify(responseWithTelegram),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await deployMLModelToPaper({
+        model_id: "valid-model-1",
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1.0,
+        send_telegram: true,
+      });
+
+      expect(res.status).toBe("success");
+      expect(res.telegramAlert).toEqual({ success: true, message_id: 456 });
+      expect(res.telegram).toEqual({ success: true, message_id: 456 });
+    });
+
+    it("rejects with 502 when backend response is missing both config and paper_config", async () => {
+      const invalidResponse = {
+        status: "success",
+        message: "Missing config fields",
+      };
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify(invalidResponse),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(deployMLModelToPaper({
+        model_id: "valid-model-1",
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1.0,
+        send_telegram: false,
+      })).rejects.toThrow("Server returned an invalid deployment response");
+    });
+
+    it("propagates 409 when model fails paper eligibility gate", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ detail: "Model is not eligible for paper trading: insufficient validation trades" }),
+        { status: 409, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(deployMLModelToPaper({
+        model_id: "ineligible-model",
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1.0,
+        send_telegram: false,
+      })).rejects.toThrow(/insufficient validation trades/);
+    });
   });
 });

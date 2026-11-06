@@ -1,9 +1,22 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getJson } = vi.hoisted(() => ({ getJson: vi.fn() }));
-vi.mock("./api", () => ({ getJson }));
+const { getJson, assertApiPath } = vi.hoisted(() => ({
+  getJson: vi.fn(),
+  assertApiPath: vi.fn((path: string) => {
+    if (!path.startsWith("/api/")) throw new TypeError("bad path");
+  }),
+}));
+vi.mock("./api", () => ({ getJson, assertApiPath }));
 
-import { fetchPaperTradingSnapshot } from "./paperTrading";
+import {
+  cancelPaperOrder,
+  closePaperPosition,
+  deployPaperStrategy,
+  fetchPaperTradingSnapshot,
+  PaperTradingActionError,
+  resetPaperCircuitBreaker,
+  tripPaperCircuitBreaker,
+} from "./paperTrading";
 
 const metrics = {
   totalTrades: 0, wins: 0, losses: 0, winRatePct: 0, cumulativeR: 0,
@@ -120,5 +133,191 @@ describe("fetchPaperTradingSnapshot response contracts", () => {
     expect(result.orders).toHaveLength(1);
     expect(result.trades).toHaveLength(1);
   });
+});
 
+describe("Paper Trading mutation contracts", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    window.localStorage.clear();
+  });
+
+  describe("cancelPaperOrder", () => {
+    it("successfully cancels an order with authentication token", async () => {
+      window.localStorage.setItem("token", "trader-token");
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ status: "cancelled", order_id: 42 }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await cancelPaperOrder(42);
+      expect(res).toEqual({ status: "cancelled", order_id: 42 });
+      expect(fetchMock).toHaveBeenCalledWith("/api/paper/orders/42/cancel", expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: "Bearer trader-token" }),
+      }));
+    });
+
+    it("rejects non-positive order IDs without network call", async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      await expect(cancelPaperOrder(0)).rejects.toThrow(PaperTradingActionError);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("handles 409 transition conflict", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ detail: "Order is already filled" }),
+        { status: 409, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(cancelPaperOrder(42)).rejects.toThrow("Order is already filled");
+    });
+  });
+
+  describe("closePaperPosition", () => {
+    it("successfully closes a position", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ status: "closed", position_id: 10 }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await closePaperPosition(10);
+      expect(res).toEqual({ status: "closed", position_id: 10 });
+      expect(fetchMock).toHaveBeenCalledWith("/api/paper/positions/10/close", expect.objectContaining({
+        method: "POST",
+      }));
+    });
+
+    it("handles 404 for missing or already closed position", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ detail: "Position not found" }),
+        { status: 404, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(closePaperPosition(999)).rejects.toThrow("Position not found");
+    });
+  });
+
+  describe("deployPaperStrategy", () => {
+    it("submits valid deploy payload and returns server result", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          status: "success",
+          message: "Strategy deployed",
+          config: { id: 1 },
+          syncResult: { evaluated_configs: 1 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await deployPaperStrategy({
+        symbol: "BTCUSDT",
+        market: "spot",
+        timeframe: "1h",
+        strategy_name: "confluence_ensemble_v1",
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1.0,
+        send_telegram: false,
+      });
+
+      expect(res.status).toBe("success");
+      expect(res.message).toBe("Strategy deployed");
+      expect(fetchMock).toHaveBeenCalledWith("/api/paper/deploy", expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          symbol: "BTCUSDT",
+          market: "spot",
+          timeframe: "1h",
+          strategy_name: "confluence_ensemble_v1",
+          allocated_capital: 5000,
+          risk_per_trade_pct: 1.0,
+          send_telegram: false,
+        }),
+      }));
+    });
+
+    it("rejects invalid capital or risk values", async () => {
+      await expect(deployPaperStrategy({
+        symbol: "BTCUSDT",
+        market: "spot",
+        timeframe: "1h",
+        strategy_name: "confluence_ensemble_v1",
+        allocated_capital: 50, // < 100
+        risk_per_trade_pct: 1.0,
+        send_telegram: false,
+      })).rejects.toThrow(/Allocated capital/);
+    });
+
+    it("maps telegramAlert and telegram consistently in response", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          status: "success",
+          message: "Strategy deployed",
+          config: { id: 10 },
+          telegramAlert: { success: true, message_id: 123 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await deployPaperStrategy({
+        symbol: "BTCUSDT",
+        market: "spot",
+        timeframe: "1h",
+        strategy_name: "confluence_ensemble_v1",
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1.0,
+        send_telegram: true,
+      });
+
+      expect(res.status).toBe("success");
+      expect(res.telegramAlert).toEqual({ success: true, message_id: 123 });
+      expect(res.telegram).toEqual({ success: true, message_id: 123 });
+    });
+  });
+
+  describe("circuit breaker trip & reset", () => {
+    it("trips emergency stop", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          status: "success",
+          message: "Emergency stop tripped",
+          breaker: { ...breaker, status: "TRIPPED", emergency_stop_active: true, can_open_new_position: false },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await tripPaperCircuitBreaker("High volatility");
+      expect(res.status).toBe("success");
+      expect(res.breaker.emergency_stop_active).toBe(true);
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/paper/circuit-breakers/emergency-stop"), expect.objectContaining({
+        method: "POST",
+      }));
+    });
+
+    it("resets circuit breaker", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          status: "success",
+          message: "Circuit breaker reset",
+          breaker: { ...breaker, status: "NORMAL", emergency_stop_active: false, can_open_new_position: true },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await resetPaperCircuitBreaker();
+      expect(res.status).toBe("success");
+      expect(res.breaker.can_open_new_position).toBe(true);
+      expect(fetchMock).toHaveBeenCalledWith("/api/paper/circuit-breakers/reset", expect.objectContaining({
+        method: "POST",
+      }));
+    });
+  });
 });
