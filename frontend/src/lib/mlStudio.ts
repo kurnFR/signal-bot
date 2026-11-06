@@ -1,4 +1,6 @@
 import { assertApiPath, getJson, postJson } from "./api";
+import { parseTelegramDeliveryStatus, type TelegramDeliveryOutcome } from "./telegram";
+export { parseTelegramDeliveryStatus, type TelegramDeliveryOutcome };
 
 export class MLStudioActionError extends Error {
   readonly status: number;
@@ -260,6 +262,7 @@ export interface DeployMLToPaperResponse {
   config: Record<string, unknown>;
   paper_config?: Record<string, unknown>;
   telegram?: boolean | Record<string, unknown> | null;
+  telegramAlert?: boolean | Record<string, unknown> | null;
   sync?: Record<string, unknown> | null;
 }
 
@@ -329,12 +332,15 @@ export async function deployMLModelToPaper(
   if (!config) {
     throw new MLStudioActionError(502, "Server returned an invalid deployment response");
   }
+  const rawTelegram = payload.telegramAlert !== undefined ? payload.telegramAlert : payload.telegram;
+  const telegramOutcome = (rawTelegram as DeployMLToPaperResponse["telegram"]) ?? null;
   return {
     status: "success",
     message: payload.message,
     config,
     paper_config: config,
-    telegram: (payload.telegram as DeployMLToPaperResponse["telegram"]) ?? null,
+    telegram: telegramOutcome,
+    telegramAlert: telegramOutcome,
     sync: isRecord(payload.sync) ? payload.sync : null,
   };
 }

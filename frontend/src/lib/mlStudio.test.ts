@@ -181,6 +181,32 @@ describe("ML Studio mutation contracts", () => {
       expect(res.paper_config).toEqual({ model_id: "legacy-model-1" });
     });
 
+    it("maps telegramAlert and telegram consistently when Telegram was enabled", async () => {
+      const responseWithTelegram = {
+        status: "success",
+        message: "ML Model deployed",
+        config: { model_id: "valid-model-1" },
+        telegramAlert: { success: true, message_id: 456 },
+        sync: { status: "synced" },
+      };
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify(responseWithTelegram),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await deployMLModelToPaper({
+        model_id: "valid-model-1",
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1.0,
+        send_telegram: true,
+      });
+
+      expect(res.status).toBe("success");
+      expect(res.telegramAlert).toEqual({ success: true, message_id: 456 });
+      expect(res.telegram).toEqual({ success: true, message_id: 456 });
+    });
+
     it("rejects with 502 when backend response is missing both config and paper_config", async () => {
       const invalidResponse = {
         status: "success",

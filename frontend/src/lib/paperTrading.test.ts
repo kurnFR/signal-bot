@@ -252,6 +252,33 @@ describe("Paper Trading mutation contracts", () => {
         send_telegram: false,
       })).rejects.toThrow(/Allocated capital/);
     });
+
+    it("maps telegramAlert and telegram consistently in response", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          status: "success",
+          message: "Strategy deployed",
+          config: { id: 10 },
+          telegramAlert: { success: true, message_id: 123 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await deployPaperStrategy({
+        symbol: "BTCUSDT",
+        market: "spot",
+        timeframe: "1h",
+        strategy_name: "confluence_ensemble_v1",
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1.0,
+        send_telegram: true,
+      });
+
+      expect(res.status).toBe("success");
+      expect(res.telegramAlert).toEqual({ success: true, message_id: 123 });
+      expect(res.telegram).toEqual({ success: true, message_id: 123 });
+    });
   });
 
   describe("circuit breaker trip & reset", () => {

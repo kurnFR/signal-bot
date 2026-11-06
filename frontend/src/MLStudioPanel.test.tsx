@@ -306,7 +306,159 @@ describe("ML Studio Workflows (ML-03 & ML-04) with RBAC", () => {
       risk_per_trade_pct: 1.0,
       send_telegram: false,
     });
-    expect(await screen.findByText(/ML model 'eligible-model' deployed to Live Paper Trading\./i)).toBeInTheDocument();
+    const successMsg = await screen.findByText(/ML model 'eligible-model' deployed to Live Paper Trading\./i);
+    expect(successMsg).toBeInTheDocument();
+    expect(successMsg.closest(".api-success")).toBeInTheDocument();
+    expect(successMsg).not.toHaveTextContent(/telegram/i);
+    expect(screen.queryByText(/Telegram notification delivered successfully/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Telegram notification failed/i)).not.toBeInTheDocument();
+  });
+
+  it("ML-04: Telegram enabled and delivery successful shows delivery success", async () => {
+    let deployPayload: unknown = null;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/ml/deploy-to-paper" && method === "POST") {
+        deployPayload = JSON.parse(String(init?.body));
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              status: "success",
+              message: "ML model 'eligible-model' deployed to Live Paper Trading.",
+              config: { id: 42, symbol: "BTCUSDT", is_active: true },
+              telegramAlert: { success: true, message_id: 12345 },
+              sync: { status: "synced" },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      if (path === "/api/ml/models") {
+        return Promise.resolve(new Response(JSON.stringify(mixedModels), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      return Promise.resolve(response(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MLStudioPanel />);
+    expect(await screen.findByText("eligible-model")).toBeInTheDocument();
+
+    const deployButtons = screen.getAllByRole("button", { name: "Deploy to paper" });
+    fireEvent.click(deployButtons[0]);
+
+    const dialog = screen.getByRole("dialog", { name: "Deploy ML Model to Paper Trading" });
+
+    // Explicitly check Telegram opt-in
+    fireEvent.click(within(dialog).getByLabelText(/Broadcast signal alerts to Telegram/i));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Deploy to Paper Trading" }));
+
+    await waitFor(() => expect(deployPayload).not.toBeNull());
+    expect(deployPayload).toMatchObject({
+      model_id: "eligible-model",
+      send_telegram: true,
+    });
+
+    // Success confirmation confirms both deployment and Telegram delivery
+    const successMsg = await screen.findByText(/Telegram notification delivered successfully/i);
+    expect(successMsg).toBeInTheDocument();
+    expect(successMsg.closest(".api-success")).toBeInTheDocument();
+    expect(screen.queryByText(/Telegram notification failed/i)).not.toBeInTheDocument();
+  });
+
+  it("ML-04: Telegram enabled and delivery failed displays warning while preserving deployment success", async () => {
+    let deployPayload: unknown = null;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/ml/deploy-to-paper" && method === "POST") {
+        deployPayload = JSON.parse(String(init?.body));
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              status: "success",
+              message: "ML model 'eligible-model' deployed to Live Paper Trading.",
+              config: { id: 42, symbol: "BTCUSDT", is_active: true },
+              telegramAlert: { success: false, error: "Telegram deployment alert failed" },
+              sync: { status: "synced" },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      if (path === "/api/ml/models") {
+        return Promise.resolve(new Response(JSON.stringify(mixedModels), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      return Promise.resolve(response(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MLStudioPanel />);
+    expect(await screen.findByText("eligible-model")).toBeInTheDocument();
+
+    const deployButtons = screen.getAllByRole("button", { name: "Deploy to paper" });
+    fireEvent.click(deployButtons[0]);
+
+    const dialog = screen.getByRole("dialog", { name: "Deploy ML Model to Paper Trading" });
+    fireEvent.click(within(dialog).getByLabelText(/Broadcast signal alerts to Telegram/i));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Deploy to Paper Trading" }));
+
+    await waitFor(() => expect(deployPayload).not.toBeNull());
+    expect(deployPayload).toMatchObject({ send_telegram: true });
+
+    // Warning is displayed stating ML paper deployment succeeded but Telegram failed
+    const warningMsg = await screen.findByText(/ML model 'eligible-model' deployed to Live Paper Trading, but Telegram notification failed: Telegram deployment alert failed/i);
+    expect(warningMsg).toBeInTheDocument();
+    expect(warningMsg.closest(".api-warning")).toBeInTheDocument();
+
+    // Zero false failure claims and no false delivery success
+    expect(screen.queryByText(/Telegram notification delivered successfully/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Failed to deploy ML model/i)).not.toBeInTheDocument();
+  });
+
+  it("ML-04: Telegram enabled but delivery result missing or malformed displays unconfirmed warning without claiming success", async () => {
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/ml/deploy-to-paper" && method === "POST") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              status: "success",
+              message: "ML model 'eligible-model' deployed to Live Paper Trading.",
+              config: { id: 42, symbol: "BTCUSDT", is_active: true },
+              telegramAlert: {}, // malformed/unconfirmed
+              sync: { status: "synced" },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      if (path === "/api/ml/models") {
+        return Promise.resolve(new Response(JSON.stringify(mixedModels), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      return Promise.resolve(response(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MLStudioPanel />);
+    expect(await screen.findByText("eligible-model")).toBeInTheDocument();
+
+    const deployButtons = screen.getAllByRole("button", { name: "Deploy to paper" });
+    fireEvent.click(deployButtons[0]);
+
+    const dialog = screen.getByRole("dialog", { name: "Deploy ML Model to Paper Trading" });
+    fireEvent.click(within(dialog).getByLabelText(/Broadcast signal alerts to Telegram/i));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Deploy to Paper Trading" }));
+
+    // Warning is displayed stating delivery status is unconfirmed
+    const warningMsg = await screen.findByText(/ML model 'eligible-model' deployed to Live Paper Trading, but Telegram delivery status is unconfirmed/i);
+    expect(warningMsg).toBeInTheDocument();
+    expect(warningMsg.closest(".api-warning")).toBeInTheDocument();
+    expect(screen.queryByText(/Telegram notification delivered successfully/i)).not.toBeInTheDocument();
   });
 
   it("RBAC: viewer role renders view-only badges and suppresses tournament/deploy buttons", async () => {

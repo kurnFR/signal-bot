@@ -9,6 +9,7 @@ import {
   deployPaperStrategy,
   fetchPaperTradingSnapshot,
   PaperTradingActionError,
+  parseTelegramDeliveryStatus,
   resetPaperCircuitBreaker,
   tripPaperCircuitBreaker,
   type PaperOrder,
@@ -288,14 +289,57 @@ export function PaperTradingPanel() {
         risk_per_trade_pct: deployRisk,
         send_telegram: deployTelegram,
       });
-      if (res.status === "partial") {
-        setActionWarning(
-          res.message
-            ? `${res.message} Configuration was saved, but immediate evaluation failed.`
-            : `Strategy '${deployStrategy}' configuration was saved, but immediate evaluation failed.`
-        );
+
+      const isEvaluationPartial = res.status === "partial";
+      const baseDeployMsg = res.message || `Strategy '${deployStrategy}' deployed to Live Paper Trading.`;
+
+      if (deployTelegram) {
+        const rawAlert = res.telegramAlert ?? res.telegram;
+        const delivery = parseTelegramDeliveryStatus(rawAlert);
+
+        if (delivery.status === "success") {
+          if (isEvaluationPartial) {
+            setActionWarning(
+              `Strategy '${deployStrategy}' configuration was saved and Telegram notification delivered, but immediate evaluation failed.`
+            );
+          } else {
+            setActionSuccess(
+              `${baseDeployMsg} Telegram notification delivered successfully.`
+            );
+          }
+        } else if (delivery.status === "failed") {
+          const errDetail = delivery.error ? `: ${delivery.error}` : "";
+          if (isEvaluationPartial) {
+            setActionWarning(
+              `Strategy '${deployStrategy}' configuration was saved, but immediate evaluation failed and Telegram notification failed${errDetail}.`
+            );
+          } else {
+            setActionWarning(
+              `Strategy '${deployStrategy}' deployed to Paper Trading, but Telegram notification failed${errDetail}.`
+            );
+          }
+        } else {
+          // delivery.status === "unconfirmed"
+          if (isEvaluationPartial) {
+            setActionWarning(
+              `Strategy '${deployStrategy}' configuration was saved, but immediate evaluation failed and Telegram delivery status is unconfirmed.`
+            );
+          } else {
+            setActionWarning(
+              `Strategy '${deployStrategy}' deployed to Paper Trading, but Telegram delivery status is unconfirmed.`
+            );
+          }
+        }
       } else {
-        setActionSuccess(res.message || `Strategy '${deployStrategy}' deployed to Paper Trading.`);
+        if (isEvaluationPartial) {
+          setActionWarning(
+            res.message
+              ? `${res.message} Configuration was saved, but immediate evaluation failed.`
+              : `Strategy '${deployStrategy}' configuration was saved, but immediate evaluation failed.`
+          );
+        } else {
+          setActionSuccess(baseDeployMsg);
+        }
       }
       closeDeployModal();
       setAttempt((v) => v + 1);

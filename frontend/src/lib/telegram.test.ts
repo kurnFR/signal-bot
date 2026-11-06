@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sendTelegramTestPing, TelegramActionError } from "./telegram";
+import { parseTelegramDeliveryStatus, sendTelegramTestPing, TelegramActionError } from "./telegram";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -58,5 +58,41 @@ describe("Telegram test result response contract", () => {
       status: 400,
       message: "TELEGRAM_BOT_TOKEN missing in .env",
     } satisfies Partial<TelegramActionError>));
+  });
+});
+
+describe("parseTelegramDeliveryStatus contract", () => {
+  it("resolves boolean true and successful objects to 'success'", () => {
+    expect(parseTelegramDeliveryStatus(true)).toEqual({ status: "success" });
+    expect(parseTelegramDeliveryStatus({ success: true, message_id: 9988 })).toEqual({
+      status: "success",
+      messageId: 9988,
+    });
+    expect(parseTelegramDeliveryStatus({ success: true })).toEqual({
+      status: "success",
+      messageId: undefined,
+    });
+  });
+
+  it("resolves boolean false and failed objects to 'failed' with error detail", () => {
+    expect(parseTelegramDeliveryStatus(false)).toEqual({ status: "failed" });
+    expect(parseTelegramDeliveryStatus({ success: false, error: "Telegram deployment alert failed" })).toEqual({
+      status: "failed",
+      error: "Telegram deployment alert failed",
+    });
+    expect(parseTelegramDeliveryStatus({ success: false })).toEqual({
+      status: "failed",
+      error: undefined,
+    });
+  });
+
+  it("resolves null, undefined, empty object, and malformed inputs to 'unconfirmed'", () => {
+    expect(parseTelegramDeliveryStatus(null)).toEqual({ status: "unconfirmed" });
+    expect(parseTelegramDeliveryStatus(undefined)).toEqual({ status: "unconfirmed" });
+    expect(parseTelegramDeliveryStatus({})).toEqual({ status: "unconfirmed" });
+    expect(parseTelegramDeliveryStatus({ status: "ok" })).toEqual({ status: "unconfirmed" });
+    expect(parseTelegramDeliveryStatus("success")).toEqual({ status: "unconfirmed" });
+    expect(parseTelegramDeliveryStatus(123)).toEqual({ status: "unconfirmed" });
+    expect(parseTelegramDeliveryStatus([])).toEqual({ status: "unconfirmed" });
   });
 });

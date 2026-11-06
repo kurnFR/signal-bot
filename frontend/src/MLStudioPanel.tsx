@@ -10,6 +10,7 @@ import {
   fetchMLExperiments,
   fetchMLModels,
   MLStudioActionError,
+  parseTelegramDeliveryStatus,
   runMLExperiment,
   type MLExperimentDetails,
   type MLExperimentSummary,
@@ -53,6 +54,7 @@ export function MLStudioPanel() {
 
   // Feedback notifications
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [actionWarning, setActionWarning] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   // ML-03: Launch tournament modal state
@@ -177,6 +179,7 @@ export function MLStudioPanel() {
     setTournamentError(null);
     setActionError(null);
     setActionSuccess(null);
+    setActionWarning(null);
 
     const cleanSymbol = tSymbol.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
     if (!cleanSymbol) {
@@ -218,6 +221,7 @@ export function MLStudioPanel() {
     setDeployError(null);
     setActionError(null);
     setActionSuccess(null);
+    setActionWarning(null);
 
     if (deployCapital < 100) {
       setDeployError("Allocated capital must be at least $100.");
@@ -236,7 +240,26 @@ export function MLStudioPanel() {
         risk_per_trade_pct: deployRisk,
         send_telegram: deployTelegram,
       });
-      setActionSuccess(res.message || `ML model '${deployModel.model_id}' deployed to Live Paper Trading.`);
+
+      const baseSuccessMsg = res.message || `ML model '${deployModel.model_id}' deployed to Live Paper Trading.`;
+
+      if (deployTelegram) {
+        const rawAlert = res.telegramAlert ?? res.telegram;
+        const delivery = parseTelegramDeliveryStatus(rawAlert);
+
+        if (delivery.status === "success") {
+          setActionSuccess(`${baseSuccessMsg} Telegram notification delivered successfully.`);
+        } else if (delivery.status === "failed") {
+          const errDetail = delivery.error ? `: ${delivery.error}` : "";
+          setActionWarning(`ML model '${deployModel.model_id}' deployed to Live Paper Trading, but Telegram notification failed${errDetail}.`);
+        } else {
+          // delivery.status === "unconfirmed"
+          setActionWarning(`ML model '${deployModel.model_id}' deployed to Live Paper Trading, but Telegram delivery status is unconfirmed.`);
+        }
+      } else {
+        setActionSuccess(baseSuccessMsg);
+      }
+
       closeDeployModal();
       setAttempt((n) => n + 1);
     } catch (cause) {
@@ -270,6 +293,18 @@ export function MLStudioPanel() {
             <span>{actionSuccess}</span>
           </div>
           <button type="button" className="icon-button" aria-label="Dismiss message" onClick={() => setActionSuccess(null)}>
+            <X size={15} />
+          </button>
+        </div>
+      )}
+
+      {actionWarning && (
+        <div className="api-warning" role="status" aria-live="polite" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <AlertTriangle size={17} />
+            <span>{actionWarning}</span>
+          </div>
+          <button type="button" className="icon-button" aria-label="Dismiss warning" onClick={() => setActionWarning(null)}>
             <X size={15} />
           </button>
         </div>

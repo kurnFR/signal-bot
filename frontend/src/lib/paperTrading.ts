@@ -1,4 +1,6 @@
 import { assertApiPath, getJson } from "./api";
+import { parseTelegramDeliveryStatus, type TelegramDeliveryOutcome } from "./telegram";
+export { parseTelegramDeliveryStatus, type TelegramDeliveryOutcome };
 
 export interface PaperPosition { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; direction: string; entry_price: number; current_price: number; stop_loss: number | null; take_profit: number | null; quantity: number; unrealized_pnl_pct: number | null; unrealized_r: number | null; allocated_capital: number; status: string; last_update_time: number }
 export interface PaperConfig { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; is_active: boolean; allocated_capital: number; risk_per_trade_pct: number; telegram_enabled: boolean; report_enabled: boolean; created_at: string }
@@ -26,6 +28,7 @@ export interface DeployPaperStrategyResponse {
   message: string;
   config: unknown;
   telegramAlert?: unknown;
+  telegram?: unknown;
   syncResult?: unknown;
 }
 
@@ -246,11 +249,13 @@ export async function deployPaperStrategy(
   if (!isRecord(payload) || (payload.status !== "success" && payload.status !== "partial") || typeof payload.message !== "string") {
     throw new PaperTradingActionError(502, "Server returned an invalid deployment response");
   }
+  const telegramStatus = payload.telegramAlert !== undefined ? payload.telegramAlert : payload.telegram;
   return {
     status: payload.status,
     message: payload.message,
     config: payload.config,
-    telegramAlert: payload.telegramAlert,
+    telegramAlert: telegramStatus,
+    telegram: telegramStatus,
     syncResult: payload.syncResult,
   };
 }

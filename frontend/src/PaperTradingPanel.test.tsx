@@ -299,7 +299,9 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
     const successMsg = await screen.findByText(/Strategy trend_ema_v1 deployed/i);
     expect(successMsg).toBeInTheDocument();
     expect(successMsg.closest(".control-success")).toBeInTheDocument();
+    expect(successMsg).not.toHaveTextContent(/telegram/i);
     expect(screen.queryByText(/Configuration was saved, but immediate evaluation failed/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Telegram notification delivered successfully/i)).not.toBeInTheDocument();
   });
 
   it("PT-09: partial deployment displays warning, refreshes configuration, and avoids automatic retries", async () => {
@@ -396,6 +398,163 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
     expect(screen.queryByText(/deployed to Live Paper Trading/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Configuration was saved/i)).not.toBeInTheDocument();
     expect(deployCalls).toBe(1);
+  });
+
+  it("PT-09: Telegram enabled and delivery successful shows delivery success", async () => {
+    let deployPayload: unknown = null;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      const path = url.pathname + url.search;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/paper/deploy" && method === "POST") {
+        deployPayload = JSON.parse(String(init?.body));
+        return Promise.resolve(json({
+          status: "success",
+          message: "Strategy 'confluence_ensemble_v1' deployed to Live Paper Trading on BTCUSDT (1d).",
+          config: { id: 101 },
+          telegramAlert: { success: true, message_id: 8888 },
+        }));
+      }
+      const payload = baseFixture[path as keyof typeof baseFixture];
+      return Promise.resolve(payload ? json(payload) : json({ detail: "Unexpected route" }, 404));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaperTradingPanel />);
+    expect(await screen.findByRole("heading", { name: "Open positions" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Deploy strategy/i }));
+    const dialog = screen.getByRole("dialog", { name: "Deploy Strategy to Paper Trading" });
+
+    // Explicitly enable Telegram
+    const telegramCheckbox = within(dialog).getByLabelText(/Broadcast signal alerts to Telegram/i);
+    fireEvent.click(telegramCheckbox);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Deploy to Paper Trading" }));
+
+    await waitFor(() => expect(deployPayload).not.toBeNull());
+    expect(deployPayload).toMatchObject({ send_telegram: true });
+
+    // Success feedback is displayed confirming Telegram delivery
+    const successMsg = await screen.findByText(/Telegram notification delivered successfully/i);
+    expect(successMsg).toBeInTheDocument();
+    expect(successMsg.closest(".control-success")).toBeInTheDocument();
+    expect(screen.queryByText(/Telegram notification failed/i)).not.toBeInTheDocument();
+  });
+
+  it("PT-09: Telegram enabled and delivery failed displays warning while preserving deployment success", async () => {
+    let deployPayload: unknown = null;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      const path = url.pathname + url.search;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/paper/deploy" && method === "POST") {
+        deployPayload = JSON.parse(String(init?.body));
+        return Promise.resolve(json({
+          status: "success",
+          message: "Strategy 'confluence_ensemble_v1' deployed to Live Paper Trading on BTCUSDT (1d).",
+          config: { id: 101 },
+          telegramAlert: { success: false, error: "Telegram deployment alert failed" },
+        }));
+      }
+      const payload = baseFixture[path as keyof typeof baseFixture];
+      return Promise.resolve(payload ? json(payload) : json({ detail: "Unexpected route" }, 404));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaperTradingPanel />);
+    expect(await screen.findByRole("heading", { name: "Open positions" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Deploy strategy/i }));
+    const dialog = screen.getByRole("dialog", { name: "Deploy Strategy to Paper Trading" });
+
+    fireEvent.click(within(dialog).getByLabelText(/Broadcast signal alerts to Telegram/i));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Deploy to Paper Trading" }));
+
+    await waitFor(() => expect(deployPayload).not.toBeNull());
+    expect(deployPayload).toMatchObject({ send_telegram: true });
+
+    // Warning is displayed preserving deployment success while reporting Telegram failure
+    const warningMsg = await screen.findByText(/deployed to Paper Trading, but Telegram notification failed: Telegram deployment alert failed/i);
+    expect(warningMsg).toBeInTheDocument();
+    expect(warningMsg.closest(".control-warning")).toBeInTheDocument();
+
+    // No success banner is rendered
+    expect(screen.queryByRole("status", { name: /CheckCircle/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Telegram notification delivered successfully/i)).not.toBeInTheDocument();
+  });
+
+  it("PT-09: Telegram enabled but delivery result missing or malformed displays unconfirmed warning without claiming success", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      const path = url.pathname + url.search;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/paper/deploy" && method === "POST") {
+        return Promise.resolve(json({
+          status: "success",
+          message: "Strategy 'confluence_ensemble_v1' deployed to Live Paper Trading on BTCUSDT (1d).",
+          config: { id: 101 },
+          telegramAlert: {}, // malformed / unconfirmed
+        }));
+      }
+      const payload = baseFixture[path as keyof typeof baseFixture];
+      return Promise.resolve(payload ? json(payload) : json({ detail: "Unexpected route" }, 404));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaperTradingPanel />);
+    expect(await screen.findByRole("heading", { name: "Open positions" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Deploy strategy/i }));
+    const dialog = screen.getByRole("dialog", { name: "Deploy Strategy to Paper Trading" });
+
+    fireEvent.click(within(dialog).getByLabelText(/Broadcast signal alerts to Telegram/i));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Deploy to Paper Trading" }));
+
+    // Warning is displayed showing unconfirmed status without claiming success
+    const warningMsg = await screen.findByText(/deployed to Paper Trading, but Telegram delivery status is unconfirmed/i);
+    expect(warningMsg).toBeInTheDocument();
+    expect(warningMsg.closest(".control-warning")).toBeInTheDocument();
+    expect(screen.queryByText(/Telegram notification delivered successfully/i)).not.toBeInTheDocument();
+  });
+
+  it("PT-09: paper evaluation partial failure plus Telegram failure displays both conditions in warning", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      const path = url.pathname + url.search;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/paper/deploy" && method === "POST") {
+        return Promise.resolve(json({
+          status: "partial",
+          message: "Strategy 'confluence_ensemble_v1' deployed to Live Paper Trading on BTCUSDT (1d).",
+          config: { id: 101 },
+          telegramAlert: { success: false, error: "Telegram deployment alert failed" },
+          syncResult: { error: "Immediate evaluation failed" },
+        }));
+      }
+      const payload = baseFixture[path as keyof typeof baseFixture];
+      return Promise.resolve(payload ? json(payload) : json({ detail: "Unexpected route" }, 404));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaperTradingPanel />);
+    expect(await screen.findByRole("heading", { name: "Open positions" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Deploy strategy/i }));
+    const dialog = screen.getByRole("dialog", { name: "Deploy Strategy to Paper Trading" });
+
+    fireEvent.click(within(dialog).getByLabelText(/Broadcast signal alerts to Telegram/i));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Deploy to Paper Trading" }));
+
+    // Warning displays both conditions: immediate evaluation failed AND Telegram notification failed
+    const warningMsg = await screen.findByText(/immediate evaluation failed and Telegram notification failed: Telegram deployment alert failed/i);
+    expect(warningMsg).toBeInTheDocument();
+    expect(warningMsg.closest(".control-warning")).toBeInTheDocument();
+    expect(screen.queryByText(/Telegram notification delivered successfully/i)).not.toBeInTheDocument();
   });
 
   it("PT-10: triggers emergency stop circuit breaker and resets", async () => {
