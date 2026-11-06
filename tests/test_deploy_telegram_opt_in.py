@@ -481,6 +481,147 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
         self.assertTrue(data["telegram"]["success"])
         self.assertEqual(data["telegram"]["message_id"], 4444)
 
+    def test_trade_close_alert_retains_three_retries_on_transport_failure(self):
+        token = "secret_close_token_999"
+        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_close"}, clear=True), \
+             patch("requests.post", side_effect=requests.ConnectionError(f"connection error {token}")) as post_mock, \
+             patch("time.sleep") as sleep_mock:
+            res_close = send_trade_close_alert(
+                symbol="BTCUSDT",
+                strategy_name="trend_ema_v1",
+                direction="LONG",
+                entry_price=50000.0,
+                exit_price=52000.0,
+                exit_reason="TP",
+                net_return_pct=4.0,
+                r_multiple=2.0,
+                holding_bars=10,
+            )
+        self.assertEqual(post_mock.call_count, 3)
+        self.assertEqual(sleep_mock.call_count, 2)
+        self.assertFalse(res_close["success"])
+        self.assertNotIn(token, str(res_close))
+
+    def test_paper_deploy_route_makes_only_one_http_attempt_on_telegram_500_response(self):
+        token = "bot987654:secret_token_paper_500"
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+        mock_resp.json.return_value = {"ok": False, "error_code": 500, "description": "Internal Server Error"}
+        with patch("web.app.authenticate_request", return_value=_user("trader")), \
+             patch("web.routes.paper_routes.set_paper_config", return_value={"id": 1, "status": "ok"}), \
+             patch("web.routes.paper_routes.sync_and_evaluate_paper_trading", return_value={"evaluated": True}), \
+             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_paper"}, clear=True), \
+             patch("requests.post", return_value=mock_resp) as post_mock, \
+             patch("time.sleep") as sleep_mock, \
+             self.assertLogs("notifications.telegram", level="WARNING") as captured:
+            response = self.client.post("/api/paper/deploy", json={
+                "symbol": "BTCUSDT",
+                "market": "spot",
+                "timeframe": "1d",
+                "strategy_name": "trend_ema_v1",
+                "allocated_capital": 5000.0,
+                "risk_per_trade_pct": 1.0,
+                "send_telegram": True,
+            })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(post_mock.call_count, 1)
+        sleep_mock.assert_not_called()
+        data = response.json()
+        self.assertEqual(data["status"], "success")
+        self.assertFalse(data["telegramAlert"]["success"])
+        self.assertFalse(data["telegram"]["success"])
+        self.assertNotIn(token, response.text)
+        self.assertNotIn(token, "\n".join(captured.output))
+
+    def test_paper_deploy_route_makes_only_one_http_attempt_on_telegram_502_response(self):
+        token = "bot987654:secret_token_paper_502"
+        mock_resp = MagicMock()
+        mock_resp.status_code = 502
+        mock_resp.json.return_value = {"ok": False, "error_code": 502, "description": "Bad Gateway"}
+        with patch("web.app.authenticate_request", return_value=_user("trader")), \
+             patch("web.routes.paper_routes.set_paper_config", return_value={"id": 1, "status": "ok"}), \
+             patch("web.routes.paper_routes.sync_and_evaluate_paper_trading", return_value={"error": "evaluation timed out"}), \
+             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_paper"}, clear=True), \
+             patch("requests.post", return_value=mock_resp) as post_mock, \
+             patch("time.sleep") as sleep_mock, \
+             self.assertLogs("notifications.telegram", level="WARNING") as captured:
+            response = self.client.post("/api/paper/deploy", json={
+                "symbol": "BTCUSDT",
+                "market": "spot",
+                "timeframe": "1d",
+                "strategy_name": "trend_ema_v1",
+                "allocated_capital": 5000.0,
+                "risk_per_trade_pct": 1.0,
+                "send_telegram": True,
+            })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(post_mock.call_count, 1)
+        sleep_mock.assert_not_called()
+        data = response.json()
+        self.assertEqual(data["status"], "partial")
+        self.assertFalse(data["telegramAlert"]["success"])
+        self.assertFalse(data["telegram"]["success"])
+        self.assertNotIn(token, response.text)
+        self.assertNotIn(token, "\n".join(captured.output))
+
+    def test_ml_deploy_route_makes_only_one_http_attempt_on_telegram_500_response(self):
+        token = "bot987654:secret_token_ml_500"
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+        mock_resp.json.return_value = {"ok": False, "error_code": 500, "description": "Internal Server Error"}
+        with patch("web.app.authenticate_request", return_value=_user("trader")), \
+             patch("web.routes.ml_routes.ML_MODELS_DIR", self.models_dir), \
+             patch("web.routes.ml_routes.set_paper_config", return_value={"id": 1, "status": "ok"}), \
+             patch("web.routes.ml_routes.sync_and_evaluate_paper_trading", return_value={"evaluated": True}), \
+             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_ml"}, clear=True), \
+             patch("requests.post", return_value=mock_resp) as post_mock, \
+             patch("time.sleep") as sleep_mock, \
+             self.assertLogs("notifications.telegram", level="WARNING") as captured:
+            response = self.client.post("/api/ml/deploy-to-paper", json={
+                "model_id": "single_attempt_model",
+                "allocated_capital": 5000.0,
+                "risk_per_trade_pct": 1.0,
+                "send_telegram": True,
+            })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(post_mock.call_count, 1)
+        sleep_mock.assert_not_called()
+        data = response.json()
+        self.assertEqual(data["status"], "success")
+        self.assertFalse(data["telegram"]["success"])
+        self.assertFalse(data["telegramAlert"]["success"])
+        self.assertNotIn(token, response.text)
+        self.assertNotIn(token, "\n".join(captured.output))
+
+    def test_ml_deploy_route_makes_only_one_http_attempt_on_telegram_502_response(self):
+        token = "bot987654:secret_token_ml_502"
+        mock_resp = MagicMock()
+        mock_resp.status_code = 502
+        mock_resp.json.return_value = {"ok": False, "error_code": 502, "description": "Bad Gateway"}
+        with patch("web.app.authenticate_request", return_value=_user("trader")), \
+             patch("web.routes.ml_routes.ML_MODELS_DIR", self.models_dir), \
+             patch("web.routes.ml_routes.set_paper_config", return_value={"id": 1, "status": "ok"}), \
+             patch("web.routes.ml_routes.sync_and_evaluate_paper_trading", return_value={"evaluated": True}), \
+             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_ml"}, clear=True), \
+             patch("requests.post", return_value=mock_resp) as post_mock, \
+             patch("time.sleep") as sleep_mock, \
+             self.assertLogs("notifications.telegram", level="WARNING") as captured:
+            response = self.client.post("/api/ml/deploy-to-paper", json={
+                "model_id": "single_attempt_model",
+                "allocated_capital": 5000.0,
+                "risk_per_trade_pct": 1.0,
+                "send_telegram": True,
+            })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(post_mock.call_count, 1)
+        sleep_mock.assert_not_called()
+        data = response.json()
+        self.assertEqual(data["status"], "success")
+        self.assertFalse(data["telegram"]["success"])
+        self.assertFalse(data["telegramAlert"]["success"])
+        self.assertNotIn(token, response.text)
+        self.assertNotIn(token, "\n".join(captured.output))
+
 
 if __name__ == "__main__":
     unittest.main()
