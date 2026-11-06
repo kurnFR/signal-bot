@@ -5,7 +5,7 @@
 **Tested HEAD SHA:** `4df758cedb507cdafccac1458082d02585084d4e`  
 **Merged PR:** [#699](https://github.com/kurnFR/signal-bot/pull/699) (`feat/modern-ui-remaining-workflows` -> `master`)  
 **Evaluation Date:** 2026-11-06  
-**Final Status:** **PASS WITH LIMITATIONS** (All acceptance gates passed; limitations documented in Section 9)
+**Final Status:** **PASS WITH LIMITATIONS** (Automated regression and staging navigation gates passed; workflow runtime mutation limitations documented in Sections 4, 9, and 10)
 
 ---
 
@@ -208,7 +208,7 @@ HTTP 403: "Upgrade to GitHub Pro or make this repository public to enable this f
 ## 9. Blockers & Non-Blocking Findings
 
 ### Blockers
-- **None.** All 1,142 backend tests, 288 frontend tests, 12 MariaDB concurrency tests, 13 staging regressions, and staging browser acceptance passed. Zero functional regressions or contract breaks detected.
+- **None.** All 1,142 backend tests, 288 frontend tests, 12 MariaDB concurrency tests, 13 staging regressions, and staging browser acceptance passed. No regressions were reported by the executed automated test suites. However, successful runtime mutations remain independently unverified for PT-08, PT-10, and ML-03, and actual persistence is not independently verified for PT-07, PT-09, ML-04, RB-03, and RB-04. These evidence limitations are documented in the workflow matrix.
 
 ### Non-Blocking Findings
 1. **Frontend Asset Bundle Warning:**
@@ -226,7 +226,7 @@ HTTP 403: "Upgrade to GitHub Pro or make this repository public to enable this f
 
 ### Status: **PASS WITH LIMITATIONS**
 
-- **Workflows Verified:** All 10 remaining workflows (PT-07–PT-10, ML-03–ML-04, RB-03–RB-04, WT-04–WT-05) are complete and operational on `master`.
+- **Workflow Status:** All 10 remaining workflows are marked implementation-complete based on the reviewed components, frontend clients, backend routes and authorization controls. Their runtime verification levels differ and are documented individually in the evidence matrix. Successful browser-driven mutation has not been independently verified for these ten workflows.
 - **System Stability:** Full backend (1,142 tests) and frontend (288 tests) test suites pass cleanly.
 - **Security & Concurrency:** Real MariaDB transaction serialization and RBAC fail-closed contracts verified.
 - **Limitations:** Modern React UI remains in preview mode at `/modern` with legacy default at `/`; production cutover is pending owner staging verification per [`docs/UIX_CUTOVER_PLAN.md`](https://github.com/kurnFR/signal-bot/blob/4df758cedb507cdafccac1458082d02585084d4e/docs/UIX_CUTOVER_PLAN.md); branch protection governance requires workflow convention due to GitHub Free private repository tier.
