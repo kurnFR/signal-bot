@@ -1,4 +1,71 @@
-import { getJson, postJson } from "./api";
+import { assertApiPath, getJson, postJson } from "./api";
+
+export class MLStudioActionError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "MLStudioActionError";
+    this.status = status;
+  }
+}
+
+function tokenFromStorage(): string | null {
+  try {
+    const token = window.localStorage.getItem("token");
+    if (!token) return null;
+    const trimmed = token.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function mlMutationRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  assertApiPath(path);
+  const token = tokenFromStorage();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    ...(options.headers as Record<string, string> | undefined),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (options.body !== undefined && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const response = await fetch(path, {
+    ...options,
+    credentials: "same-origin",
+    headers,
+  });
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (response.status === 401) {
+    try { window.localStorage.removeItem("token"); } catch { /* Session expired reset */ }
+    window.dispatchEvent(new Event("signal-bot:session-expired"));
+    throw new MLStudioActionError(401, "Your session has expired. Sign in again.");
+  }
+
+  if (!response.ok) {
+    let message = `Request failed (HTTP ${response.status})`;
+    if (isRecord(payload) && typeof payload.detail === "string" && payload.detail.trim().length > 0) {
+      message = payload.detail.trim();
+    }
+    throw new MLStudioActionError(response.status, message);
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new MLStudioActionError(502, "Server returned a non-JSON response");
+  }
+
+  return payload as T;
+}
 
 export interface MLExperimentSummary {
   experiment_id: string;
@@ -162,4 +229,98 @@ export async function runMLGeneratorExperiment(
     throw new Error("ML generator experiment returned an invalid response");
   }
   return payload as unknown as MLGeneratorExperimentResponse;
+}
+
+export interface RunMLExperimentRequest {
+  symbol: string;
+  market: "spot" | "futures";
+  timeframe: "15m" | "1h" | "4h" | "1d";
+  strategy_name: string;
+  model_type?: string;
+  target_type?: string;
+  min_validation_trades?: number;
+}
+
+export interface RunMLExperimentResponse {
+  status: "success";
+  experiment_id: string;
+  result: Record<string, unknown>;
+}
+
+export interface DeployMLToPaperRequest {
+  model_id: string;
+  allocated_capital: number;
+  risk_per_trade_pct: number;
+  send_telegram: boolean;
+}
+
+export interface DeployMLToPaperResponse {
+  status: "success";
+  message: string;
+  paper_config: Record<string, unknown>;
+}
+
+/** Launch an execution-aware ML tournament experiment across multiple classification models. */
+export async function runMLExperiment(
+  request: RunMLExperimentRequest,
+  signal?: AbortSignal,
+): Promise<RunMLExperimentResponse> {
+  if (!isNonEmptyString(request.symbol) || !isNonEmptyString(request.strategy_name)) {
+    throw new MLStudioActionError(400, "Symbol and strategy name are required");
+  }
+  const payload = await mlMutationRequest<unknown>("/api/ml/run-experiment", {
+    method: "POST",
+    body: JSON.stringify({
+      symbol: request.symbol.trim().toUpperCase(),
+      market: request.market,
+      timeframe: request.timeframe,
+      strategy_name: request.strategy_name.trim(),
+      model_type: request.model_type?.trim().toLowerCase() || "all",
+      target_type: request.target_type?.trim() || "binary_positive_r",
+      min_validation_trades: request.min_validation_trades ?? 5,
+    }),
+    signal,
+  });
+  if (!isRecord(payload) || payload.status !== "success" || !isNonEmptyString(payload.experiment_id) || !isRecord(payload.result)) {
+    throw new MLStudioActionError(502, "Server returned an invalid tournament response");
+  }
+  return {
+    status: "success",
+    experiment_id: payload.experiment_id,
+    result: payload.result,
+  };
+}
+
+/** Deploy an eligible trained ML model to Live Paper Trading as a signal filter. */
+export async function deployMLModelToPaper(
+  request: DeployMLToPaperRequest,
+  signal?: AbortSignal,
+): Promise<DeployMLToPaperResponse> {
+  if (!isNonEmptyString(request.model_id) || !SAFE_ML_ID.test(request.model_id)) {
+    throw new MLStudioActionError(400, "Invalid model ID");
+  }
+  if (!isFiniteNumber(request.allocated_capital) || request.allocated_capital < 100) {
+    throw new MLStudioActionError(400, "Allocated capital must be at least $100");
+  }
+  if (!isFiniteNumber(request.risk_per_trade_pct) || request.risk_per_trade_pct < 0.1 || request.risk_per_trade_pct > 10.0) {
+    throw new MLStudioActionError(400, "Risk per trade must be between 0.1% and 10.0%");
+  }
+  const payload = await mlMutationRequest<unknown>("/api/ml/deploy-to-paper", {
+    method: "POST",
+    body: JSON.stringify({
+      model_id: request.model_id.trim(),
+      allocated_capital: request.allocated_capital,
+      risk_per_trade_pct: request.risk_per_trade_pct,
+      send_telegram: request.send_telegram,
+    }),
+    signal,
+  });
+  if (!isRecord(payload) || payload.status !== "success" || !isNonEmptyString(payload.message) || !isRecord(payload.paper_config)) {
+    throw new MLStudioActionError(502, "Server returned an invalid deployment response");
+  }
+  return {
+    status: "success",
+    message: payload.message,
+    paper_config: payload.paper_config,
+  };
 }

@@ -1,4 +1,71 @@
-import { getJson } from "./api";
+import { assertApiPath, getJson } from "./api";
+
+export class WalletActionError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "WalletActionError";
+    this.status = status;
+  }
+}
+
+function tokenFromStorage(): string | null {
+  try {
+    const token = window.localStorage.getItem("token");
+    if (!token) return null;
+    const trimmed = token.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function walletMutationRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  assertApiPath(path);
+  const token = tokenFromStorage();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    ...(options.headers as Record<string, string> | undefined),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (options.body !== undefined && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const response = await fetch(path, {
+    ...options,
+    credentials: "same-origin",
+    headers,
+  });
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (response.status === 401) {
+    try { window.localStorage.removeItem("token"); } catch { /* Session expired reset */ }
+    window.dispatchEvent(new Event("signal-bot:session-expired"));
+    throw new WalletActionError(401, "Your session has expired. Sign in again.");
+  }
+
+  if (!response.ok) {
+    let message = `Request failed (HTTP ${response.status})`;
+    if (isRecord(payload) && typeof payload.detail === "string" && payload.detail.trim().length > 0) {
+      message = payload.detail.trim();
+    }
+    throw new WalletActionError(response.status, message);
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new WalletActionError(502, "Server returned a non-JSON response");
+  }
+
+  return payload as T;
+}
 
 export interface WalletMeta {
   periods_hours: number[];
@@ -259,4 +326,86 @@ export async function fetchWalletTrackingSnapshot(signal?: AbortSignal): Promise
     flows: flows.flows,
     events: events.events,
   };
+}
+
+export interface WalletSettingsRequest {
+  enabled: boolean;
+  networks: string[];
+  pools_per_network: number;
+  min_trade_usd: number;
+  min_net_usd: number;
+  auto_track_net_usd: number;
+  poll_interval_seconds: number;
+  retention_days: number;
+  api_delay_seconds: number;
+  token_mode: "all" | "selected";
+  token_addresses: string[];
+  birdeye_api_key?: string;
+}
+
+/** Add a wallet address to the monitored Smart Money checklist. */
+export async function trackWallet(
+  chain: string,
+  wallet: string,
+  label?: string | null,
+  signal?: AbortSignal,
+): Promise<{ status: string; chain: string; wallet: string }> {
+  if (!isNonEmptyString(chain) || !isNonEmptyString(wallet)) {
+    throw new WalletActionError(400, "Chain and wallet address are required");
+  }
+  const payload = await walletMutationRequest<unknown>("/api/wallets/tracked", {
+    method: "POST",
+    body: JSON.stringify({ chain: chain.trim().toLowerCase(), wallet: wallet.trim(), label: label?.trim() || null }),
+    signal,
+  });
+  if (!isRecord(payload) || payload.status !== "ok" || typeof payload.chain !== "string" || typeof payload.wallet !== "string") {
+    throw new WalletActionError(502, "Server returned an invalid wallet track response");
+  }
+  return { status: "ok", chain: payload.chain, wallet: payload.wallet };
+}
+
+/** Stop monitoring a wallet by removing it from the Smart Money checklist. */
+export async function untrackWallet(
+  trackedId: number,
+  signal?: AbortSignal,
+): Promise<{ status: string; tracked_id: number }> {
+  if (!isCount(trackedId) || trackedId <= 0) {
+    throw new WalletActionError(400, "Invalid tracked wallet ID");
+  }
+  const payload = await walletMutationRequest<unknown>(`/api/wallets/tracked/${encodeURIComponent(trackedId)}`, {
+    method: "DELETE",
+    signal,
+  });
+  if (!isRecord(payload) || payload.status !== "ok" || payload.tracked_id !== trackedId) {
+    throw new WalletActionError(502, "Server returned an invalid wallet untrack response");
+  }
+  return { status: "ok", tracked_id: trackedId };
+}
+
+/** Save wallet scanner and alert threshold settings. Outbound alerts require explicit user confirmation. */
+export async function saveWalletSettings(
+  settings: WalletSettingsRequest,
+  signal?: AbortSignal,
+): Promise<WalletSettings> {
+  if (!Array.isArray(settings.networks) || settings.networks.length === 0) {
+    throw new WalletActionError(400, "Select at least one supported network");
+  }
+  if (!isFiniteNumber(settings.min_trade_usd) || settings.min_trade_usd <= 0) {
+    throw new WalletActionError(400, "Minimum trade size must be greater than zero");
+  }
+  if (!isFiniteNumber(settings.min_net_usd) || settings.min_net_usd <= 0) {
+    throw new WalletActionError(400, "Minimum net flow must be greater than zero");
+  }
+  if (!isFiniteNumber(settings.auto_track_net_usd) || settings.auto_track_net_usd < settings.min_net_usd) {
+    throw new WalletActionError(400, "Auto-track threshold must be greater than or equal to minimum net flow");
+  }
+  const payload = await walletMutationRequest<unknown>("/api/wallets/settings", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+    signal,
+  });
+  if (!validSettings(payload)) {
+    throw new WalletActionError(502, "Server returned invalid wallet settings after save");
+  }
+  return payload;
 }

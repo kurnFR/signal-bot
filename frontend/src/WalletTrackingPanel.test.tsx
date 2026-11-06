@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { WalletTrackingPanel } from "./WalletTrackingPanel";
+
+const mockUseAuth = vi.fn();
+vi.mock("./AuthGate", () => ({
+  useAuth: () => mockUseAuth(),
+}));
 
 const responses: Record<string, unknown> = {
   "/api/wallets/meta": { periods_hours: [24, 72], chains: { eth: "Ethereum", solana: "Solana" }, min_net_usd: 1000, auto_track_net_usd: 5000 },
@@ -19,6 +24,7 @@ describe("WalletTrackingPanel", () => {
   beforeEach(() => {
     cleanup();
     window.localStorage.clear();
+    mockUseAuth.mockReturnValue(null);
     vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
       expect(init?.method).toBe("GET");
       return Promise.resolve(responseFor(url));
@@ -87,5 +93,170 @@ describe("WalletTrackingPanel", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
   });
+});
 
+describe("Wallet Tracking Workflows (WT-04 & WT-05) with RBAC", () => {
+  beforeEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, username: "trader_alice", role: "trader", is_active: true },
+      logout: vi.fn(),
+      logoutError: null,
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("WT-04: tracks a new wallet address", async () => {
+    let trackPayload: unknown = null;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/wallets/tracked" && method === "POST") {
+        trackPayload = JSON.parse(String(init?.body));
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              status: "ok",
+              chain: "eth",
+              wallet: "0x9876543210987654321098765432109876543210",
+              label: "Alpha Whale",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.resolve(responseFor(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WalletTrackingPanel />);
+    const trackBtn = await screen.findByRole("button", { name: /Track wallet/i });
+    fireEvent.click(trackBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Track New Wallet" });
+    expect(dialog).toBeInTheDocument();
+
+    const chainSelect = within(dialog).getByLabelText("Chain / Network");
+    fireEvent.change(chainSelect, { target: { value: "eth" } });
+
+    const addressInput = within(dialog).getByLabelText("Wallet Address");
+    fireEvent.change(addressInput, { target: { value: "0x9876543210987654321098765432109876543210" } });
+
+    const labelInput = within(dialog).getByLabelText("Label (optional)");
+    fireEvent.change(labelInput, { target: { value: "Alpha Whale" } });
+
+    const submitBtn = within(dialog).getByRole("button", { name: "Start Tracking" });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(trackPayload).not.toBeNull());
+    expect(trackPayload).toMatchObject({
+      chain: "eth",
+      wallet: "0x9876543210987654321098765432109876543210",
+      label: "Alpha Whale",
+    });
+    expect(await screen.findByText(/added to tracked wallets on eth\./i)).toBeInTheDocument();
+  });
+
+  it("WT-04: untracks a monitored wallet after confirmation", async () => {
+    let untrackCalled = false;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/wallets/tracked/7" && method === "DELETE") {
+        untrackCalled = true;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ status: "ok", tracked_id: 7 }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.resolve(responseFor(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WalletTrackingPanel />);
+    const untrackBtn = await screen.findByRole("button", { name: "Untrack" });
+    fireEvent.click(untrackBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Untrack Wallet" });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByText(/Test wallet/)).toBeInTheDocument();
+
+    const confirmBtn = within(dialog).getByRole("button", { name: "Untrack Wallet" });
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => expect(untrackCalled).toBe(true));
+    expect(await screen.findByText(/removed from tracked wallets\./i)).toBeInTheDocument();
+  });
+
+  it("WT-05: edits and saves wallet tracker settings", async () => {
+    let savedSettings: unknown = null;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/wallets/settings" && method === "PUT") {
+        savedSettings = JSON.parse(String(init?.body));
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...(responses["/api/wallets/settings"] as Record<string, unknown>),
+              ...(savedSettings as Record<string, unknown>),
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.resolve(responseFor(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WalletTrackingPanel />);
+    const editBtn = await screen.findByRole("button", { name: /Edit settings/i });
+    fireEvent.click(editBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Wallet Tracker Configuration" });
+    expect(dialog).toBeInTheDocument();
+
+    const minTradeInput = within(dialog).getByLabelText("Min Trade Size (USD)");
+    fireEvent.change(minTradeInput, { target: { value: "25000" } });
+
+    const submitBtn = within(dialog).getByRole("button", { name: "Save Settings" });
+    const form = submitBtn.closest("form");
+    if (form) fireEvent.submit(form);
+    else fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(savedSettings).not.toBeNull());
+    expect(savedSettings).toMatchObject({
+      enabled: true,
+      min_trade_usd: 25000,
+    });
+    expect(await screen.findByText(/Wallet tracker settings updated successfully\./i)).toBeInTheDocument();
+  });
+
+  it("RBAC: viewer role renders view-only badges and suppresses mutating buttons", async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 3, username: "viewer_charlie", role: "viewer", is_active: true },
+      logout: vi.fn(),
+      logoutError: null,
+    });
+
+    const fetchMock = vi.fn((url: string) => Promise.resolve(responseFor(url)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WalletTrackingPanel />);
+    expect(await screen.findByRole("heading", { name: "Tracked wallets" })).toBeInTheDocument();
+
+    // Mutating actions suppressed
+    expect(screen.queryByRole("button", { name: /Track wallet/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Edit settings/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Untrack" })).not.toBeInTheDocument();
+
+    // View only label present
+    expect(screen.getByText("View only")).toBeInTheDocument();
+  });
 });

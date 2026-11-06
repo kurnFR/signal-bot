@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchWalletTrackingSnapshot } from "./walletTracking";
+import {
+  fetchWalletTrackingSnapshot,
+  saveWalletSettings,
+  trackWallet,
+  untrackWallet,
+  WalletActionError,
+} from "./walletTracking";
 
 const responses: Record<string, unknown> = {
   "/api/wallets/meta": { periods_hours: [24, 72], chains: { eth: "Ethereum" }, min_net_usd: 1000, auto_track_net_usd: 5000 },
@@ -63,5 +69,109 @@ describe("Wallet Tracking response contracts", () => {
   it("rejects malformed settings rather than accepting unsafe configuration types", async () => {
     installFetch({ "/api/wallets/settings": { ...responses["/api/wallets/settings"] as object, enabled: "true" } });
     await expect(fetchWalletTrackingSnapshot()).rejects.toThrow(/settings returned an invalid response/i);
+  });
+});
+
+describe("Wallet Tracking mutation contracts", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    window.localStorage.clear();
+  });
+
+  describe("trackWallet", () => {
+    it("submits track request and returns normalized response", async () => {
+      window.localStorage.setItem("token", "trader-jwt");
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ status: "ok", chain: "eth", wallet: "0x1234567890123456789012345678901234567890" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await trackWallet("eth", "0x1234567890123456789012345678901234567890", "Whale 1");
+      expect(res.status).toBe("ok");
+      expect(res.wallet).toBe("0x1234567890123456789012345678901234567890");
+      expect(fetchMock).toHaveBeenCalledWith("/api/wallets/tracked", expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: "Bearer trader-jwt" }),
+      }));
+    });
+
+    it("rejects empty wallet without making network call", async () => {
+      await expect(trackWallet("eth", "")).rejects.toThrow(WalletActionError);
+    });
+  });
+
+  describe("untrackWallet", () => {
+    it("sends delete request for tracked ID", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ status: "ok", tracked_id: 15 }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await untrackWallet(15);
+      expect(res.status).toBe("ok");
+      expect(res.tracked_id).toBe(15);
+      expect(fetchMock).toHaveBeenCalledWith("/api/wallets/tracked/15", expect.objectContaining({
+        method: "DELETE",
+      }));
+    });
+
+    it("handles 404 when wallet is not found", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ detail: "Monitored wallet not found" }),
+        { status: 404, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(untrackWallet(999)).rejects.toThrow("Monitored wallet not found");
+    });
+  });
+
+  describe("saveWalletSettings", () => {
+    it("saves valid settings and returns updated config", async () => {
+      const updatedSettings = {
+        enabled: true,
+        networks: ["eth", "solana"],
+        pools_per_network: 5,
+        min_trade_usd: 15000,
+        min_net_usd: 200000,
+        auto_track_net_usd: 600000,
+        poll_interval_seconds: 120,
+        retention_days: 14,
+        api_delay_seconds: 2.0,
+        token_mode: "all" as const,
+        token_addresses: [],
+        has_birdeye_key: false,
+      };
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify(updatedSettings),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await saveWalletSettings(updatedSettings);
+      expect(res.min_trade_usd).toBe(15000);
+      expect(res.networks).toEqual(["eth", "solana"]);
+      expect(fetchMock).toHaveBeenCalledWith("/api/wallets/settings", expect.objectContaining({
+        method: "PUT",
+      }));
+    });
+
+    it("rejects auto_track threshold lower than min_net_usd without network call", async () => {
+      await expect(saveWalletSettings({
+        enabled: true,
+        networks: ["eth"],
+        pools_per_network: 4,
+        min_trade_usd: 10000,
+        min_net_usd: 500000,
+        auto_track_net_usd: 100000, // < 500000
+        poll_interval_seconds: 300,
+        retention_days: 8,
+        api_delay_seconds: 4.0,
+        token_mode: "all",
+        token_addresses: [],
+      })).rejects.toThrow(/Auto-track threshold must be greater than or equal to minimum net flow/);
+    });
   });
 });

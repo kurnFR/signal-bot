@@ -1512,7 +1512,7 @@ class TestLightThemeSortIndicatorContrast(unittest.TestCase):
 
     def test_light_theme_sort_indicator_change_bumps_stylesheet_cache_token(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
-        self.assertIn('dashboard_enhancements.css?v=20261103-36', html)
+        self.assertIn('dashboard_enhancements.css?v=20261104-1', html)
 
 
 class TestForcedPasswordModalFocusTrap(unittest.TestCase):
@@ -1544,4 +1544,4 @@ class TestResponsiveDashboardWorkspace(unittest.TestCase):
 
     def test_responsive_stylesheet_change_bumps_cache_token(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
-        self.assertIn('dashboard_enhancements.css?v=20261103-36', html)
+        self.assertIn('dashboard_enhancements.css?v=20261104-1', html)

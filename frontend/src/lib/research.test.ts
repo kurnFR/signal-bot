@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchResearchSnapshot } from "./research";
+import {
+  fetchResearchSnapshot,
+  ResearchActionError,
+  saveStrategyLifecycle,
+  stopAndHideStrategy,
+} from "./research";
 
 const responses: Record<string, unknown> = {
   "/api/research/retailbot2/positions?limit=100": {
@@ -61,5 +66,96 @@ describe("Research response contracts", () => {
       "/api/research/retailbot2/strategies": { strategies: [{ strategy_id: "BB_REV_INV", mode: "inverse", evaluation_enabled: "true", paper_enabled: true, telegram_enabled: false, report_enabled: true, auto_promote_enabled: false }] },
     });
     await expect(fetchResearchSnapshot()).rejects.toThrow(/strategies returned an invalid response/i);
+  });
+});
+
+describe("Research strategy lifecycle mutation contracts", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    window.localStorage.clear();
+  });
+
+  describe("saveStrategyLifecycle", () => {
+    it("submits lifecycle flags and returns updated settings", async () => {
+      window.localStorage.setItem("token", "trader-jwt");
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          status: "ok",
+          strategy_id: "BB_REV_INV",
+          mode: "inverse",
+          settings: { evaluation_enabled: true, paper_enabled: false, telegram_enabled: false, report_enabled: true },
+          note: "Applied on next cycle",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await saveStrategyLifecycle({
+        strategy_id: "BB_REV_INV",
+        mode: "inverse",
+        evaluation_enabled: true,
+        paper_enabled: false,
+        telegram_enabled: false,
+        report_enabled: true,
+      });
+
+      expect(res.status).toBe("ok");
+      expect(res.strategy_id).toBe("BB_REV_INV");
+      expect(res.mode).toBe("inverse");
+      expect(fetchMock).toHaveBeenCalledWith("/api/research/retailbot2/strategies", expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: "Bearer trader-jwt" }),
+        body: JSON.stringify({
+          strategy_id: "BB_REV_INV",
+          mode: "inverse",
+          evaluation_enabled: true,
+          paper_enabled: false,
+          telegram_enabled: false,
+          report_enabled: true,
+          auto_promote_enabled: false,
+        }),
+      }));
+    });
+
+    it("rejects invalid mode without making network call", async () => {
+      await expect(saveStrategyLifecycle({
+        strategy_id: "BB_REV_INV",
+        mode: "invalid_mode" as unknown as "shadow",
+        evaluation_enabled: true,
+        paper_enabled: true,
+        telegram_enabled: false,
+        report_enabled: true,
+      })).rejects.toThrow(ResearchActionError);
+    });
+  });
+
+  describe("stopAndHideStrategy", () => {
+    it("sets all lifecycle flags to false and invokes save", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          status: "ok",
+          strategy_id: "BB_REV",
+          mode: "shadow",
+          settings: { evaluation_enabled: false, paper_enabled: false, telegram_enabled: false, report_enabled: false },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await stopAndHideStrategy("BB_REV", "shadow");
+      expect(res.status).toBe("ok");
+      expect(fetchMock).toHaveBeenCalledWith("/api/research/retailbot2/strategies", expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          strategy_id: "BB_REV",
+          mode: "shadow",
+          evaluation_enabled: false,
+          paper_enabled: false,
+          telegram_enabled: false,
+          report_enabled: false,
+          auto_promote_enabled: false,
+        }),
+      }));
+    });
   });
 });

@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MLStudioPanel } from "./MLStudioPanel";
+
+const mockUseAuth = vi.fn();
+vi.mock("./AuthGate", () => ({
+  useAuth: () => mockUseAuth(),
+}));
 
 const experiments = { experiments: [{
   experiment_id: "btc-trend-test", symbol: "BTCUSDT", market: "spot", timeframe: "1h",
@@ -24,6 +29,7 @@ describe("MLStudioPanel", () => {
   beforeEach(() => {
     cleanup();
     window.localStorage.clear();
+    mockUseAuth.mockReturnValue(null);
     vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
       expect(init?.method).toBe("GET");
       return Promise.resolve(response(url));
@@ -154,6 +160,171 @@ describe("MLStudioPanel", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/longer history or different model settings/i);
     expect(screen.queryByText("internal training details")).not.toBeInTheDocument();
   });
+});
 
+describe("ML Studio Workflows (ML-03 & ML-04) with RBAC", () => {
+  const mixedModels = {
+    models: [
+      {
+        model_id: "eligible-model",
+        experiment_id: "btc-trend-test",
+        model_type: "hist_gradient_boosting",
+        base_strategy: "trend_ema_v1",
+        threshold: 0.25,
+        eligible_for_paper: true,
+        has_weights: true,
+        eligibility: { eligible: true, reasons: [] },
+      },
+      {
+        model_id: "ineligible-model",
+        experiment_id: "btc-trend-test",
+        model_type: "random_forest",
+        base_strategy: "trend_ema_v1",
+        threshold: 0.2,
+        eligible_for_paper: false,
+        has_weights: false,
+        eligibility: { eligible: false, reasons: ["manifest is not flagged eligible_for_paper"] },
+      },
+    ],
+  };
 
+  beforeEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, username: "trader_alice", role: "trader", is_active: true },
+      logout: vi.fn(),
+      logoutError: null,
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("ML-03: launches tournament modal, submits experiment, and refreshes catalog", async () => {
+    let tournamentPayload: unknown = null;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/ml/run-experiment" && method === "POST") {
+        tournamentPayload = JSON.parse(String(init?.body));
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              status: "success",
+              experiment_id: "tournament-eth-1",
+              result: { winner: { model_type: "hist_gradient_boosting" } },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.resolve(response(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MLStudioPanel />);
+    expect(await screen.findByRole("heading", { name: "Completed experiments" })).toBeInTheDocument();
+
+    const launchBtn = screen.getByRole("button", { name: /Launch tournament/i });
+    fireEvent.click(launchBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Launch ML Tournament" });
+    expect(dialog).toBeInTheDocument();
+
+    const symbolInput = within(dialog).getByLabelText("Symbol");
+    fireEvent.change(symbolInput, { target: { value: "ETHUSDT" } });
+
+    const submitBtn = within(dialog).getByRole("button", { name: "Launch Tournament" });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(tournamentPayload).not.toBeNull());
+    expect(tournamentPayload).toMatchObject({
+      symbol: "ETHUSDT",
+      market: "spot",
+      timeframe: "1h",
+      strategy_name: "trend_ema_v1",
+      model_type: "all",
+      target_type: "binary_positive_r",
+      min_validation_trades: 5,
+    });
+    expect(await screen.findByText(/Tournament completed successfully \(ID: tournament-eth-1\)\. Winner: hist_gradient_boosting\./i)).toBeInTheDocument();
+  });
+
+  it("ML-04: deploys eligible ML model to live paper trading and disables ineligible models", async () => {
+    let deployPayload: unknown = null;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/ml/deploy-to-paper" && method === "POST") {
+        deployPayload = JSON.parse(String(init?.body));
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              status: "success",
+              message: "ML model 'eligible-model' deployed to Live Paper Trading.",
+              paper_config: { id: 42 },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      if (path === "/api/ml/models") {
+        return Promise.resolve(new Response(JSON.stringify(mixedModels), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      return Promise.resolve(response(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MLStudioPanel />);
+    expect(await screen.findByText("eligible-model")).toBeInTheDocument();
+    expect(screen.getByText("ineligible-model")).toBeInTheDocument();
+
+    const deployButtons = screen.getAllByRole("button", { name: "Deploy to paper" });
+    // First row (eligible-model) is enabled
+    expect(deployButtons[0]).not.toBeDisabled();
+    // Second row (ineligible-model) is disabled
+    expect(deployButtons[1]).toBeDisabled();
+    expect(deployButtons[1]).toHaveAttribute("title", "Model does not meet paper deployment criteria");
+
+    // Open deploy dialog for eligible model
+    fireEvent.click(deployButtons[0]);
+
+    const dialog = screen.getByRole("dialog", { name: "Deploy ML Model to Paper Trading" });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByText(/eligible-model/)).toBeInTheDocument();
+
+    const submitBtn = within(dialog).getByRole("button", { name: "Deploy to Paper Trading" });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(deployPayload).not.toBeNull());
+    expect(deployPayload).toMatchObject({
+      model_id: "eligible-model",
+      allocated_capital: 10000,
+      risk_per_trade_pct: 1.0,
+      send_telegram: false,
+    });
+    expect(await screen.findByText(/ML model 'eligible-model' deployed to Live Paper Trading\./i)).toBeInTheDocument();
+  });
+
+  it("RBAC: viewer role renders view-only badges and suppresses tournament/deploy buttons", async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 3, username: "viewer_charlie", role: "viewer", is_active: true },
+      logout: vi.fn(),
+      logoutError: null,
+    });
+
+    const fetchMock = vi.fn((url: string) => Promise.resolve(response(url)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MLStudioPanel />);
+    expect(await screen.findByRole("heading", { name: "Completed experiments" })).toBeInTheDocument();
+
+    // Mutating actions suppressed
+    expect(screen.queryByRole("button", { name: /Launch tournament/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deploy to paper" })).not.toBeInTheDocument();
+
+    // View only label present
+    expect(screen.getByText("View only")).toBeInTheDocument();
+  });
 });

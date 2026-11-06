@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchMLExperimentDetails, fetchMLExperiments, fetchMLModels } from "./mlStudio";
+import {
+  deployMLModelToPaper,
+  fetchMLExperimentDetails,
+  fetchMLExperiments,
+  fetchMLModels,
+  MLStudioActionError,
+  runMLExperiment,
+} from "./mlStudio";
 
 const experiment = {
   experiment_id: "btc-trend-test", symbol: "BTCUSDT", market: "spot", timeframe: "1h",
@@ -67,5 +74,95 @@ describe("ML Studio response contracts", () => {
   it("rejects path traversal and malformed experiment IDs before making a request", async () => {
     await expect(fetchMLExperimentDetails("../outside")).rejects.toThrow(/invalid ml experiment id/i);
     await expect(fetchMLExperimentDetails("bad/id")).rejects.toThrow(/invalid ml experiment id/i);
+  });
+});
+
+describe("ML Studio mutation contracts", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    window.localStorage.clear();
+  });
+
+  describe("runMLExperiment", () => {
+    it("submits tournament launch request and returns experiment result", async () => {
+      window.localStorage.setItem("token", "trader-token");
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          status: "success",
+          experiment_id: "exp_123",
+          result: { winner: { model_type: "random_forest" } },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await runMLExperiment({
+        symbol: "BTCUSDT",
+        market: "spot",
+        timeframe: "1h",
+        strategy_name: "trend_ema_v1",
+        model_type: "all",
+        target_type: "binary_positive_r",
+        min_validation_trades: 5,
+      });
+
+      expect(res.status).toBe("success");
+      expect(res.experiment_id).toBe("exp_123");
+      expect(fetchMock).toHaveBeenCalledWith("/api/ml/run-experiment", expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: "Bearer trader-token" }),
+      }));
+    });
+
+    it("rejects empty symbol or strategy without request", async () => {
+      await expect(runMLExperiment({
+        symbol: "",
+        market: "spot",
+        timeframe: "1h",
+        strategy_name: "trend_ema_v1",
+      })).rejects.toThrow(MLStudioActionError);
+    });
+  });
+
+  describe("deployMLModelToPaper", () => {
+    it("submits deployment request for eligible model", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          status: "success",
+          message: "Deployed successfully",
+          paper_config: { model_id: "valid-model-1" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await deployMLModelToPaper({
+        model_id: "valid-model-1",
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1.0,
+        send_telegram: false,
+      });
+
+      expect(res.status).toBe("success");
+      expect(res.message).toBe("Deployed successfully");
+      expect(fetchMock).toHaveBeenCalledWith("/api/ml/deploy-to-paper", expect.objectContaining({
+        method: "POST",
+      }));
+    });
+
+    it("propagates 409 when model fails paper eligibility gate", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ detail: "Model is not eligible for paper trading: insufficient validation trades" }),
+        { status: 409, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(deployMLModelToPaper({
+        model_id: "ineligible-model",
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1.0,
+        send_telegram: false,
+      })).rejects.toThrow(/insufficient validation trades/);
+    });
   });
 });
