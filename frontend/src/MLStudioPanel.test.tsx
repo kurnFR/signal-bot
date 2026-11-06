@@ -263,7 +263,9 @@ describe("ML Studio Workflows (ML-03 & ML-04) with RBAC", () => {
             JSON.stringify({
               status: "success",
               message: "ML model 'eligible-model' deployed to Live Paper Trading.",
-              paper_config: { id: 42 },
+              config: { id: 42, symbol: "BTCUSDT", is_active: true },
+              telegram: null,
+              sync: { status: "synced" },
             }),
             { status: 200, headers: { "content-type": "application/json" } },
           ),

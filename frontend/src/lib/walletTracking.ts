@@ -341,6 +341,7 @@ export interface WalletSettingsRequest {
   token_mode: "all" | "selected";
   token_addresses: string[];
   birdeye_api_key?: string;
+  clear_birdeye_api_key?: boolean;
 }
 
 /** Add a wallet address to the monitored Smart Money checklist. */
@@ -376,10 +377,11 @@ export async function untrackWallet(
     method: "DELETE",
     signal,
   });
-  if (!isRecord(payload) || payload.status !== "ok" || payload.tracked_id !== trackedId) {
+  if (!isRecord(payload) || payload.status !== "ok") {
     throw new WalletActionError(502, "Server returned an invalid wallet untrack response");
   }
-  return { status: "ok", tracked_id: trackedId };
+  const resolvedTrackedId = typeof payload.tracked_id === "number" ? payload.tracked_id : trackedId;
+  return { status: "ok", tracked_id: resolvedTrackedId };
 }
 
 /** Save wallet scanner and alert threshold settings. Outbound alerts require explicit user confirmation. */
@@ -389,6 +391,9 @@ export async function saveWalletSettings(
 ): Promise<WalletSettings> {
   if (!Array.isArray(settings.networks) || settings.networks.length === 0) {
     throw new WalletActionError(400, "Select at least one supported network");
+  }
+  if (settings.networks.length > 8) {
+    throw new WalletActionError(400, "Cannot select more than 8 supported networks");
   }
   if (!isFiniteNumber(settings.min_trade_usd) || settings.min_trade_usd <= 0) {
     throw new WalletActionError(400, "Minimum trade size must be greater than zero");

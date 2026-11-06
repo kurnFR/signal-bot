@@ -102,9 +102,9 @@ describe("Wallet Tracking mutation contracts", () => {
   });
 
   describe("untrackWallet", () => {
-    it("sends delete request for tracked ID", async () => {
+    it("handles actual backend response shape {status: 'ok'} without tracked_id in payload", async () => {
       const fetchMock = vi.fn().mockResolvedValue(new Response(
-        JSON.stringify({ status: "ok", tracked_id: 15 }),
+        JSON.stringify({ status: "ok" }),
         { status: 200, headers: { "content-type": "application/json" } },
       ));
       vi.stubGlobal("fetch", fetchMock);
@@ -115,6 +115,28 @@ describe("Wallet Tracking mutation contracts", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/wallets/tracked/15", expect.objectContaining({
         method: "DELETE",
       }));
+    });
+
+    it("handles backend response with explicit tracked_id in payload", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ status: "ok", tracked_id: 15 }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await untrackWallet(15);
+      expect(res.status).toBe("ok");
+      expect(res.tracked_id).toBe(15);
+    });
+
+    it("throws 502 if backend returns unexpected status", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ status: "failed" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(untrackWallet(15)).rejects.toThrow("Server returned an invalid wallet untrack response");
     });
 
     it("handles 404 when wallet is not found", async () => {
@@ -156,6 +178,101 @@ describe("Wallet Tracking mutation contracts", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/wallets/settings", expect.objectContaining({
         method: "PUT",
       }));
+    });
+
+    it("accepts up to 8 supported networks and includes them in payload", async () => {
+      const eightNetworks = ["eth", "base", "bsc", "arbitrum", "polygon_pos", "optimism", "avalanche", "solana"];
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          enabled: true,
+          networks: eightNetworks,
+          pools_per_network: 4,
+          min_trade_usd: 10000,
+          min_net_usd: 150000,
+          auto_track_net_usd: 500000,
+          poll_interval_seconds: 300,
+          retention_days: 8,
+          api_delay_seconds: 4.0,
+          token_mode: "all",
+          token_addresses: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await saveWalletSettings({
+        enabled: true,
+        networks: eightNetworks,
+        pools_per_network: 4,
+        min_trade_usd: 10000,
+        min_net_usd: 150000,
+        auto_track_net_usd: 500000,
+        poll_interval_seconds: 300,
+        retention_days: 8,
+        api_delay_seconds: 4.0,
+        token_mode: "all",
+        token_addresses: [],
+      });
+      expect(res.networks).toHaveLength(8);
+    });
+
+    it("rejects more than 8 networks before making network call", async () => {
+      const nineNetworks = ["eth", "base", "bsc", "arbitrum", "polygon_pos", "optimism", "avalanche", "solana", "extra"];
+      await expect(saveWalletSettings({
+        enabled: true,
+        networks: nineNetworks,
+        pools_per_network: 4,
+        min_trade_usd: 10000,
+        min_net_usd: 150000,
+        auto_track_net_usd: 500000,
+        poll_interval_seconds: 300,
+        retention_days: 8,
+        api_delay_seconds: 4.0,
+        token_mode: "all",
+        token_addresses: [],
+      })).rejects.toThrow("Cannot select more than 8 supported networks");
+    });
+
+    it("passes clear_birdeye_api_key in payload when requested", async () => {
+      let sentBody: unknown = null;
+      const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+        sentBody = JSON.parse(String(init?.body));
+        return Promise.resolve(new Response(
+          JSON.stringify({
+            enabled: true,
+            networks: ["eth"],
+            pools_per_network: 4,
+            min_trade_usd: 10000,
+            min_net_usd: 150000,
+            auto_track_net_usd: 500000,
+            poll_interval_seconds: 300,
+            retention_days: 8,
+            api_delay_seconds: 4.0,
+            token_mode: "all",
+            token_addresses: [],
+            has_birdeye_key: false,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ));
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await saveWalletSettings({
+        enabled: true,
+        networks: ["eth"],
+        pools_per_network: 4,
+        min_trade_usd: 10000,
+        min_net_usd: 150000,
+        auto_track_net_usd: 500000,
+        poll_interval_seconds: 300,
+        retention_days: 8,
+        api_delay_seconds: 4.0,
+        token_mode: "all",
+        token_addresses: [],
+        clear_birdeye_api_key: true,
+      });
+
+      expect(sentBody).toMatchObject({ clear_birdeye_api_key: true });
     });
 
     it("rejects auto_track threshold lower than min_net_usd without network call", async () => {

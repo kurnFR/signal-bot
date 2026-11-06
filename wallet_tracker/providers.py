@@ -294,6 +294,8 @@ BIRDEYE_CHAIN_IDS = {
     "bsc": "bsc",
     "arbitrum": "arbitrum",
     "polygon_pos": "polygon",
+    "optimism": "optimism",
+    "avalanche": "avalanche",
 }
 
 
@@ -472,6 +474,8 @@ DEXSCREENER_CHAIN_IDS = {
     "bsc": ("bsc", ["bsc", "BNB", "USDT"]),
     "arbitrum": ("arbitrum", ["arbitrum", "ARB", "USDC"]),
     "polygon_pos": ("polygon", ["polygon", "MATIC", "USDC"]),
+    "optimism": ("optimism", ["OP", "WETH", "USDC"]),
+    "avalanche": ("avalanche", ["AVAX", "WAVAX", "USDC"]),
 }
 
 

@@ -69,6 +69,8 @@ export function WalletTrackingPanel() {
   const [sMinNet, setSMinNet] = useState(150000);
   const [sAutoTrackNet, setSAutoTrackNet] = useState(500000);
   const [sPollInterval, setSPollInterval] = useState(300);
+  const [sBirdeyeKey, setSBirdeyeKey] = useState("");
+  const [sClearBirdeyeKey, setSClearBirdeyeKey] = useState(false);
   const settingsDialogRef = useRef<HTMLDialogElement | null>(null);
   const settingsTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -169,6 +171,8 @@ export function WalletTrackingPanel() {
       setSMinNet(data.settings.min_net_usd);
       setSAutoTrackNet(data.settings.auto_track_net_usd);
       setSPollInterval(data.settings.poll_interval_seconds);
+      setSBirdeyeKey("");
+      setSClearBirdeyeKey(false);
     }
     setSettingsError(null);
     setSettingsOpen(true);
@@ -262,7 +266,7 @@ export function WalletTrackingPanel() {
 
     setSettingsBusy(true);
     try {
-      await saveWalletSettings({
+      const payload: Parameters<typeof saveWalletSettings>[0] = {
         enabled: sEnabled,
         networks: sNetworks,
         min_trade_usd: sMinTrade,
@@ -274,7 +278,13 @@ export function WalletTrackingPanel() {
         api_delay_seconds: data.settings.api_delay_seconds,
         token_mode: data.settings.token_mode,
         token_addresses: data.settings.token_addresses,
-      });
+      };
+      if (sClearBirdeyeKey) {
+        payload.clear_birdeye_api_key = true;
+      } else if (sBirdeyeKey.trim().length > 0) {
+        payload.birdeye_api_key = sBirdeyeKey.trim();
+      }
+      await saveWalletSettings(payload);
       setActionSuccess("Wallet tracker settings updated successfully.");
       closeSettingsModal();
       setAttempt((n) => n + 1);
@@ -793,6 +803,47 @@ export function WalletTrackingPanel() {
                   style={{ width: "100%", padding: "6px 8px" }}
                 />
               </div>
+            </div>
+
+            <div style={{ marginBottom: "14px" }}>
+              <label htmlFor="s-birdeye-key" style={{ display: "block", fontSize: "0.8rem", marginBottom: "4px", fontWeight: 600 }}>
+                Birdeye API Key (Optional)
+              </label>
+              {data?.settings?.has_birdeye_key ? (
+                <div style={{ marginBottom: "6px" }}>
+                  <div style={{ fontSize: "0.8rem", color: "var(--color-muted, #888)", marginBottom: "4px" }}>
+                    Configured key: <code>{data?.settings?.birdeye_api_key_masked}</code>
+                  </div>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "0.85rem", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={sClearBirdeyeKey}
+                      disabled={settingsBusy}
+                      onChange={(e) => {
+                        setSClearBirdeyeKey(e.target.checked);
+                        if (e.target.checked) setSBirdeyeKey("");
+                      }}
+                    />
+                    <span>Remove / clear Birdeye API key</span>
+                  </label>
+                </div>
+              ) : (
+                <p style={{ fontSize: "0.75rem", color: "var(--color-muted, #888)", margin: "0 0 6px 0" }}>
+                  No Birdeye API key configured. DEX Screener fallback is used.
+                </p>
+              )}
+              {!sClearBirdeyeKey && (
+                <input
+                  id="s-birdeye-key"
+                  type="password"
+                  placeholder={data?.settings?.has_birdeye_key ? "Leave blank to keep existing key" : "Enter Birdeye API key"}
+                  value={sBirdeyeKey}
+                  onChange={(e) => setSBirdeyeKey(e.target.value)}
+                  disabled={settingsBusy}
+                  style={{ width: "100%", padding: "6px 8px" }}
+                  autoComplete="off"
+                />
+              )}
             </div>
 
             {settingsError && (

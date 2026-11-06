@@ -159,7 +159,7 @@ describe("Wallet Tracking Workflows (WT-04 & WT-05) with RBAC", () => {
     expect(await screen.findByText(/added to tracked wallets on eth\./i)).toBeInTheDocument();
   });
 
-  it("WT-04: untracks a monitored wallet after confirmation", async () => {
+  it("WT-04: untracks a monitored wallet after confirmation using real backend contract {status: 'ok'}", async () => {
     let untrackCalled = false;
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       const path = new URL(url, "http://localhost").pathname;
@@ -169,7 +169,7 @@ describe("Wallet Tracking Workflows (WT-04 & WT-05) with RBAC", () => {
         untrackCalled = true;
         return Promise.resolve(
           new Response(
-            JSON.stringify({ status: "ok", tracked_id: 7 }),
+            JSON.stringify({ status: "ok" }),
             { status: 200, headers: { "content-type": "application/json" } },
           ),
         );
@@ -193,7 +193,7 @@ describe("Wallet Tracking Workflows (WT-04 & WT-05) with RBAC", () => {
     expect(await screen.findByText(/removed from tracked wallets\./i)).toBeInTheDocument();
   });
 
-  it("WT-05: edits and saves wallet tracker settings", async () => {
+  it("WT-05: edits and saves wallet tracker settings without erasing existing Birdeye key", async () => {
     let savedSettings: unknown = null;
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       const path = new URL(url, "http://localhost").pathname;
@@ -206,6 +206,8 @@ describe("Wallet Tracking Workflows (WT-04 & WT-05) with RBAC", () => {
             JSON.stringify({
               ...(responses["/api/wallets/settings"] as Record<string, unknown>),
               ...(savedSettings as Record<string, unknown>),
+              has_birdeye_key: true,
+              birdeye_api_key_masked: "••••••••9999",
             }),
             { status: 200, headers: { "content-type": "application/json" } },
           ),
@@ -235,7 +237,56 @@ describe("Wallet Tracking Workflows (WT-04 & WT-05) with RBAC", () => {
       enabled: true,
       min_trade_usd: 25000,
     });
+    // Crucial: birdeye_api_key and clear_birdeye_api_key must NOT be sent, preserving server credentials
+    expect(savedSettings).not.toHaveProperty("birdeye_api_key");
+    expect(savedSettings).not.toHaveProperty("clear_birdeye_api_key");
     expect(await screen.findByText(/Wallet tracker settings updated successfully\./i)).toBeInTheDocument();
+  });
+
+  it("WT-05: allows setting a new Birdeye API key or explicitly clearing an existing key", async () => {
+    let savedSettings: unknown = null;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/wallets/settings" && method === "GET") {
+        return Promise.resolve(new Response(JSON.stringify({
+          ...(responses["/api/wallets/settings"] as Record<string, unknown>),
+          has_birdeye_key: true,
+          birdeye_api_key_masked: "••••••••1234",
+        }), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      if (path === "/api/wallets/settings" && method === "PUT") {
+        savedSettings = JSON.parse(String(init?.body));
+        return Promise.resolve(new Response(JSON.stringify({
+          ...(responses["/api/wallets/settings"] as Record<string, unknown>),
+          has_birdeye_key: false,
+        }), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      return Promise.resolve(responseFor(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WalletTrackingPanel />);
+    const editBtn = await screen.findByRole("button", { name: /Edit settings/i });
+    fireEvent.click(editBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Wallet Tracker Configuration" });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByText(/••••••••1234/)).toBeInTheDocument();
+
+    const clearCheckbox = within(dialog).getByLabelText("Remove / clear Birdeye API key");
+    fireEvent.click(clearCheckbox);
+
+    const submitBtn = within(dialog).getByRole("button", { name: "Save Settings" });
+    const form = submitBtn.closest("form");
+    if (form) fireEvent.submit(form);
+    else fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(savedSettings).not.toBeNull());
+    expect(savedSettings).toMatchObject({
+      clear_birdeye_api_key: true,
+    });
   });
 
   it("RBAC: viewer role renders view-only badges and suppresses mutating buttons", async () => {

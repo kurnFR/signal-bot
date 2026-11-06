@@ -125,13 +125,16 @@ describe("ML Studio mutation contracts", () => {
   });
 
   describe("deployMLModelToPaper", () => {
-    it("submits deployment request for eligible model", async () => {
+    it("submits deployment request and handles actual backend response shape (config, telegram, sync)", async () => {
+      const actualBackendResponse = {
+        status: "success",
+        message: "ML Model 'valid-model-1' successfully activated for BTCUSDT (1h) trend_ema_v1.",
+        config: { model_id: "valid-model-1", allocated_capital: 5000, risk_per_trade_pct: 1.0 },
+        telegram: null,
+        sync: { status: "synced" },
+      };
       const fetchMock = vi.fn().mockResolvedValue(new Response(
-        JSON.stringify({
-          status: "success",
-          message: "Deployed successfully",
-          paper_config: { model_id: "valid-model-1" },
-        }),
+        JSON.stringify(actualBackendResponse),
         { status: 200, headers: { "content-type": "application/json" } },
       ));
       vi.stubGlobal("fetch", fetchMock);
@@ -144,10 +147,57 @@ describe("ML Studio mutation contracts", () => {
       });
 
       expect(res.status).toBe("success");
-      expect(res.message).toBe("Deployed successfully");
+      expect(res.message).toBe("ML Model 'valid-model-1' successfully activated for BTCUSDT (1h) trend_ema_v1.");
+      expect(res.config).toEqual(actualBackendResponse.config);
+      expect(res.paper_config).toEqual(actualBackendResponse.config);
+      expect(res.telegram).toBeNull();
+      expect(res.sync).toEqual({ status: "synced" });
       expect(fetchMock).toHaveBeenCalledWith("/api/ml/deploy-to-paper", expect.objectContaining({
         method: "POST",
       }));
+    });
+
+    it("supports paper_config alias for backwards compatibility", async () => {
+      const legacyResponse = {
+        status: "success",
+        message: "Deployed successfully via legacy alias",
+        paper_config: { model_id: "legacy-model-1" },
+      };
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify(legacyResponse),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await deployMLModelToPaper({
+        model_id: "legacy-model-1",
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1.0,
+        send_telegram: false,
+      });
+
+      expect(res.status).toBe("success");
+      expect(res.config).toEqual({ model_id: "legacy-model-1" });
+      expect(res.paper_config).toEqual({ model_id: "legacy-model-1" });
+    });
+
+    it("rejects with 502 when backend response is missing both config and paper_config", async () => {
+      const invalidResponse = {
+        status: "success",
+        message: "Missing config fields",
+      };
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify(invalidResponse),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(deployMLModelToPaper({
+        model_id: "valid-model-1",
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1.0,
+        send_telegram: false,
+      })).rejects.toThrow("Server returned an invalid deployment response");
     });
 
     it("propagates 409 when model fails paper eligibility gate", async () => {

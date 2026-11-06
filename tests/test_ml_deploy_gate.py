@@ -145,6 +145,13 @@ class TestDeployEndpoint(unittest.TestCase):
         res = self._deploy("good-model")
         self.assertEqual(res.status_code, 200, res.text)
         self.mocks[2].assert_called_once()  # set_paper_config
+        payload = res.json()
+        self.assertEqual(payload["status"], "success")
+        self.assertIn("successfully activated", payload["message"])
+        self.assertIn("config", payload)
+        self.assertIn("paper_config", payload)
+        self.assertIn("telegram", payload)
+        self.assertIn("sync", payload)
 
     def test_flagged_ineligible_model_is_blocked(self):
         self._write("flagged-off", eligible=False)

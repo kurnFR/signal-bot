@@ -536,6 +536,7 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
             "status": "success",
             "message": f"ML Model '{req.model_id}' successfully activated for {symbol} ({timeframe}) {strategy_name}.",
             "config": res,
+            "paper_config": res,
             "telegram": telegram_status,
             "sync": sync_res,
         }

@@ -20,7 +20,7 @@ logger = logging.getLogger("web.wallet_routes")
 
 class WalletSettingsRequest(BaseModel):
     enabled: bool = True
-    networks: list[str] = Field(min_length=1, max_length=6)
+    networks: list[str] = Field(min_length=1, max_length=8)
     pools_per_network: int = Field(4, ge=1, le=100)
     min_trade_usd: float = Field(10000, ge=0, le=1e12)
     min_net_usd: float = Field(150000, ge=0, le=1e12)
@@ -30,7 +30,8 @@ class WalletSettingsRequest(BaseModel):
     api_delay_seconds: float = Field(4.0, ge=0.5, le=60)
     token_mode: Literal["all", "selected"] = "all"
     token_addresses: list[str] = Field(default_factory=list, max_length=500)
-    birdeye_api_key: Optional[str] = Field(default="", max_length=255)
+    birdeye_api_key: Optional[str] = Field(default=None, max_length=255)
+    clear_birdeye_api_key: Optional[bool] = Field(default=False)
 
     @model_validator(mode="after")
     def validate_thresholds(self):
@@ -115,13 +116,22 @@ def wallets_save_settings(req: WalletSettingsRequest):
     settings["networks"] = networks
     settings["token_addresses"] = selectors
 
-    # Preserve existing secret if input is masked or unchanged
+    # Preserve existing secret if input is omitted, masked, or unchanged
     current = store.get_settings()
-    key_input = (req.birdeye_api_key or "").strip()
-    if key_input.startswith("•") or key_input.startswith("*"):
-        settings["birdeye_api_key"] = current.get("birdeye_api_key", "")
+    existing_key = current.get("birdeye_api_key", "")
+
+    if req.clear_birdeye_api_key:
+        settings["birdeye_api_key"] = ""
+    elif req.birdeye_api_key is None:
+        settings["birdeye_api_key"] = existing_key
     else:
-        settings["birdeye_api_key"] = key_input
+        key_input = req.birdeye_api_key.strip()
+        if not key_input or key_input.startswith("•") or key_input.startswith("*"):
+            settings["birdeye_api_key"] = existing_key
+        else:
+            settings["birdeye_api_key"] = key_input
+
+    settings.pop("clear_birdeye_api_key", None)
 
     try:
         store.save_settings(settings)
@@ -259,7 +269,7 @@ def wallets_untrack(tracked_id: int):
     try:
         if not store.untrack_wallet(tracked_id):
             raise HTTPException(status_code=404, detail="Monitored wallet not found")
-        return {"status": "ok"}
+        return {"status": "ok", "tracked_id": tracked_id}
     except HTTPException:
         raise
     except Exception as e:

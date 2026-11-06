@@ -25,9 +25,9 @@ In accordance with the workflow parity audit ([`docs/ANTIGRAVITY_UI_PARITY_AUDIT
 - **Workflow Parity Status:** 59 Workflows `COMPLETE`, 0 `LEGACY_ONLY`, 0 `MISSING` (59 Total).
 - **View-Level Breakdown:** 11 Views `COMPLETE`, 0 Views `PARTIAL`, 0 `MISSING`.
 - **Backend API Endpoints Covered:** 93 unique API method/path routes mapped across 13 FastAPI modules.
-- **Automated Frontend Test Suite:** 31 test files, 262 unit/component tests passing (`npm test`).
+- **Automated Frontend Test Suite:** 31 test files, 270 unit/component tests passing (`npm test`).
 - **End-to-End Browser Tests:** 28 Playwright tests passing across Desktop Chrome, responsive mobile, tablet, and dark/light themes (`npx playwright test`; 100% using mocked API routes).
-- **Backend Test Suite:** 1,113 unit/integration tests passing (`pytest`).
+- **Backend Test Suite:** 1,119 unit/integration tests passing (`pytest`).
 
 ---
 
@@ -410,7 +410,7 @@ All parity implementations have been validated through four comprehensive automa
 1. **Frontend Unit & Component Testing (`Vitest`):**
    - **Command:** `cd frontend && npm test -- --run`
    - **Tested Commit:** `4b01e7fe22c7a72d31221b2ba78887e494b2da9f`
-   - **Result:** 31 test files passed, 262 tests passed, 0 failed in 8.16s.
+   - **Result:** 31 test files passed, 270 tests passed, 0 failed in 9.11s.
    - **Coverage:** AuthGate, App, SystemStatus, Screener, ScreenerControls, PaperTrading, StrategyLibrary, WalletTracking, BacktestStudio, PromotionPolicy, MLStudio, MLGeneratorTraining, Research, NewsAI, MasterData, Settings, User Management client & UI, dialog focus traps, and mutation client contracts.
 
 2. **Frontend Production Type-check & Build (`TypeScript + Vite`):**

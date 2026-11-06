@@ -257,7 +257,10 @@ export interface DeployMLToPaperRequest {
 export interface DeployMLToPaperResponse {
   status: "success";
   message: string;
-  paper_config: Record<string, unknown>;
+  config: Record<string, unknown>;
+  paper_config?: Record<string, unknown>;
+  telegram?: boolean | Record<string, unknown> | null;
+  sync?: Record<string, unknown> | null;
 }
 
 /** Launch an execution-aware ML tournament experiment across multiple classification models. */
@@ -315,12 +318,23 @@ export async function deployMLModelToPaper(
     }),
     signal,
   });
-  if (!isRecord(payload) || payload.status !== "success" || !isNonEmptyString(payload.message) || !isRecord(payload.paper_config)) {
+  if (!isRecord(payload) || payload.status !== "success" || !isNonEmptyString(payload.message)) {
+    throw new MLStudioActionError(502, "Server returned an invalid deployment response");
+  }
+  const config = isRecord(payload.config)
+    ? payload.config
+    : isRecord(payload.paper_config)
+      ? payload.paper_config
+      : null;
+  if (!config) {
     throw new MLStudioActionError(502, "Server returned an invalid deployment response");
   }
   return {
     status: "success",
     message: payload.message,
-    paper_config: payload.paper_config,
+    config,
+    paper_config: config,
+    telegram: (payload.telegram as DeployMLToPaperResponse["telegram"]) ?? null,
+    sync: isRecord(payload.sync) ? payload.sync : null,
   };
 }
