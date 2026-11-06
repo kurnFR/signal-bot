@@ -27,7 +27,7 @@ In accordance with the workflow parity audit ([`docs/ANTIGRAVITY_UI_PARITY_AUDIT
 - **Backend API Endpoints Covered:** 93 unique API method/path routes mapped across 13 FastAPI modules.
 - **Automated Frontend Test Suite:** 31 test files, 288 unit/component tests passing (`npm test`).
 - **End-to-End Browser Tests:** 28 Playwright tests passing across Desktop Chrome, responsive mobile, tablet, and dark/light themes (`npx playwright test`; 100% using mocked API routes).
-- **Backend Test Suite:** 1,137 unit/integration tests passing (`pytest`).
+- **Backend Test Suite:** 1,142 unit/integration tests passing (`pytest`).
 
 ---
 
@@ -409,13 +409,13 @@ All parity implementations have been validated through four comprehensive automa
 
 1. **Frontend Unit & Component Testing (`Vitest`):**
    - **Command:** `cd frontend && npm test -- --run`
-   - **Tested Commit:** `e5b1ca1483685100c5189df1cfc42451523bcc84`
-   - **Result:** 31 test files passed, 288 tests passed, 0 failed in 8.52s.
+   - **Tested Commit:** `2bf8638195c514975c7c37f76b08362ab5aca691`
+   - **Result:** 31 test files passed, 288 tests passed, 0 failed in 8.73s.
    - **Coverage:** AuthGate, App, SystemStatus, Screener, ScreenerControls, PaperTrading, StrategyLibrary, WalletTracking, BacktestStudio, PromotionPolicy, MLStudio, MLGeneratorTraining, Research, NewsAI, MasterData, Settings, User Management client & UI, dialog focus traps, partial deployment feedback warnings, Telegram delivery feedback warnings, Telegram opt-in safety and single-attempt delivery, polling interval range validation, and mutation client contracts.
 
 2. **Frontend Production Type-check & Build (`TypeScript + Vite`):**
    - **Command:** `cd frontend && npm run typecheck && npm run build`
-   - **Tested Commit:** `e5b1ca1483685100c5189df1cfc42451523bcc84`
+   - **Tested Commit:** `2bf8638195c514975c7c37f76b08362ab5aca691`
    - **Result:** TypeScript compile passed with zero errors (`tsc --noEmit`). Production bundle built in `frontend/dist/` (1,610 modules transformed in 4.31s).
 
 3. **End-to-End Browser Testing (`Playwright 1.64.1 Chromium`):**
@@ -426,17 +426,17 @@ All parity implementations have been validated through four comprehensive automa
 
 4. **Backend Regression Testing (`pytest`):**
    - **Command:** `PYTHONPATH=$PWD python3 -m pytest -q`
-   - **Tested Commit:** `e5b1ca1483685100c5189df1cfc42451523bcc84`
-   - **Result:** 1,137 passed, 18 skipped, 6 warnings, 0 failed in 15.08s.
+   - **Tested Commit:** `2bf8638195c514975c7c37f76b08362ab5aca691`
+   - **Result:** 1,142 passed, 18 skipped, 6 warnings, 0 failed in 15.34s.
 
 5. **MariaDB Concurrency & Security Testing:**
    - **Command:** `python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py`
-   - **Tested Commit:** `e5b1ca1483685100c5189df1cfc42451523bcc84`
+   - **Tested Commit:** `2bf8638195c514975c7c37f76b08362ab5aca691`
    - **Result:** 12 passed in 4.41s across consecutive runs against authorized `signal_bot_test`.
 
 6. **Tracked Staging Browser Acceptance:**
    - **Command:** `node tests/browser/staging_browser_acceptance.cjs`
-   - **Tested Commit:** `e5b1ca1483685100c5189df1cfc42451523bcc84`
+   - **Tested Commit:** `2bf8638195c514975c7c37f76b08362ab5aca691`
    - **Result:** 11 views verified across 3 roles (`admin`, `trader`, `viewer`), child process identity verified, controlled test mutations in `signal_bot_test` (zero production operations), 0 console errors, 0 network errors in 15.2s.
 
 ---
