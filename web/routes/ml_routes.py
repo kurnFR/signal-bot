@@ -283,6 +283,8 @@ def list_saved_models() -> Dict[str, Any]:
             if resolved.parent != models_root or not resolved.is_file():
                 logger.warning("Skipping model manifest outside model directory: %s", candidate.name)
                 continue
+            if candidate.name in {"retraining_registry.json", "retraining_state.json"} or candidate.name.startswith("."):
+                continue
             safe_manifest_files.append(resolved)
         except (OSError, RuntimeError):
             logger.warning("Skipping unresolved model manifest: %s", candidate.name)
@@ -291,6 +293,12 @@ def list_saved_models() -> Dict[str, Any]:
     for safe_manifest in sorted(safe_manifest_files, key=lambda f: f.stat().st_mtime, reverse=True):
         try:
             data = read_model_manifest_file(safe_manifest)
+            if not isinstance(data, dict):
+                continue
+            model_id = data.get("model_id")
+            if not isinstance(model_id, str) or not model_id.strip():
+                logger.debug("Skipping JSON without valid model_id: %s", safe_manifest.name)
+                continue
             if data.get("task_type") == "signal_generator_v1":
                 continue
             joblib_file = (models_root / f"{safe_manifest.stem}.joblib").resolve()
