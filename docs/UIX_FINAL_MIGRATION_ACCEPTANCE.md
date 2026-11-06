@@ -61,8 +61,8 @@ To eliminate ambiguity between dashboard views and individual user workflows:
 
 ### Validation Summary
 - **Frontend Typecheck:** PASS (`tsc --noEmit`, 0 errors).
-- **Frontend Unit & Component Suite:** PASS (31 test files, 224 tests passed, 0 failed in 8.08s).
-- **Frontend Production Build:** PASS (`vite build`, 1,609 modules transformed, clean bundle in `frontend/dist/` in 4.42s).
+- **Frontend Unit & Component Suite:** PASS (31 test files, 224 tests passed, 0 failed in 7.40s).
+- **Frontend Production Build:** PASS (`vite build`, 1,609 modules transformed, clean bundle in `frontend/dist/` in 4.03s).
 - **Playwright Browser Tests (Mocked API):** PASS (28 tests passed across Desktop, Tablet, Mobile 375px viewports, and both Dark/Light themes in 28.6s; 100% of tests use deterministic API route mocking via `page.route()`).
 - **Backend Test Suite:** PASS (`python3 -m pytest -q`: 1,115 passed, 18 skipped, 6 warnings, 0 failed in 34.64s).
 - **MariaDB Concurrency & Security Suite:** PASS (`python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py`: 12 passed in 4.88s across consecutive runs against authorized `signal_bot_test`, proving deterministic lock contention, exact second thread ID `LOCK WAIT` state in `information_schema.innodb_trx` across demotion, deactivation, deletion, trader promotion vs deletion, admin activation vs deactivation, and same-target role update vs deletion, genuine worker failure handling via MariaDB lock wait timeout, explicit rollbacks, connection reuse, surviving executor and future tracking retention on incomplete teardown, per-thread join exception isolation, strict shared deadline enforcement, and verified visible pool cleanup).
@@ -114,7 +114,7 @@ Backend authorization remains the authoritative security boundary. The React fro
 cd frontend && npm test -- --run
 Test Files  31 passed (31)
 Tests       224 passed (224)
-Duration    8.08s
+Duration    7.40s
 ```
 - Covered components: `App`, `AuthGate`, `SystemStatusPanel`, `ScreenerPanel`, `ScreenerControlsPanel`, `PaperTradingPanel`, `StrategyLibraryPanel`, `WalletTrackingPanel`, `BacktestStudioPanel`, `PromotionPolicyEditor`, `PromotionStatusPanel`, `MLStudioPanel`, `MLGeneratorTrainingPanel`, `ResearchPanel`, `NewsAIPanel`, `MasterDataPanel`, `SettingsPanel`, `lib/users`.
 
@@ -125,9 +125,9 @@ cd frontend && npm run typecheck && npm run build
 > vite build
 ✓ 1609 modules transformed.
 dist/index.html                   0.43 kB │ gzip:   0.30 kB
-dist/assets/index-CJm7x4VF.css   39.25 kB │ gzip:   7.66 kB
-dist/assets/index-glxrdXh3.js   444.64 kB │ gzip: 112.87 kB │ map: 1,528.42 kB
-✓ built in 4.42s
+dist/assets/index-BmYd18P9.css   39.68 kB │ gzip:   7.75 kB
+dist/assets/index-BKRzWRq9.js   448.30 kB │ gzip: 113.76 kB │ map: 1,542.25 kB
+✓ built in 4.03s
 ```
 
 ### 4.3 End-to-End Browser Tests (`Playwright 1.64.1 Chromium`)
@@ -320,9 +320,9 @@ SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY i
 | **MariaDB concurrency** | `python3 -m unittest -v tests/test_user_management_mariadb_concurrency.py` | `98817a100bfe89e35237676f09c308c374ea0305` | 0 | **PASS** | `12 passed in 4.88s across consecutive runs` | Linux, MariaDB (authorized `signal_bot_test`). Proves deterministic MariaDB `LOCK WAIT` on exact second thread ID across demotions, deactivations, deletions, trader promotion vs deletion, admin activation vs deactivation, same-target role update vs deletion, genuine worker failure under contention via MariaDB lock wait timeout, explicit executor lifecycle management with strictly bounded future wait (5.0s) and thread join (3.0s strict shared deadline), non-aborting shutdown signaling on unfinished futures, surviving executor and future tracking retention, per-thread join exception isolation, surviving thread safety, zero silent suppression, serialized rejections, explicit rollback, connection reuse. | Run by Antigravity |
 | **Telegram authorization** | `PYTHONPATH=$PWD python3 -m pytest tests/test_telegram_route_contracts.py -v` | `98817a100bfe89e35237676f09c308c374ea0305` | 0 | **PASS** | `7 passed in 2.16s` | Linux, Python 3.12.14. `POST /api/telegram/test` is admin-only; `GET /api/telegram/status` masks `chatId: null` for trader/viewer. Real Telegram sends mocked. | Run by Antigravity |
 | **Staging lifecycle regressions** | `node tests/browser/test_staging_lifecycle_regressions.cjs` | `98817a100bfe89e35237676f09c308c374ea0305` | 0 | **PASS** | `13 passed in 1.4s` | Linux, Node.js v22.23.2. Proves child process identity proof, port collision rejection, alien identity rejection, premature exit detection, socket error propagation, mandatory PID verification, missing/null/mismatched PID rejection, SIGKILL fallback, unconfirmed exit results ({ exited: false }, {}, null) strictly preserving fixtures, and extracted cleanup orchestration verifying failure reporting, fixture preservation on failure, exact-ID deletion on success, browser close, and error propagation. | Run by Antigravity |
-| **Frontend typecheck** | `cd frontend && npm run typecheck` | `98817a100bfe89e35237676f09c308c374ea0305` | 0 | **PASS** | `tsc --noEmit (0 errors)` | Node v22.23.2, TypeScript 5.8.2. | Run by Antigravity |
-| **Frontend unit tests** | `cd frontend && npm test -- --run` | `HEAD` | 0 | **PASS** | `Test Files 31 passed (31), Tests 224 passed (224) in 8.08s` | Node v22.23.2, Vitest 3.1.3. Component and client logic unit tests, accessible dialog workflows, focus management, and mutation response contracts. | Run by Antigravity |
-| **Frontend build** | `cd frontend && npm run build` | `98817a100bfe89e35237676f09c308c374ea0305` | 0 | **PASS** | `1,609 modules transformed, built in 4.42s` | Production Vite bundle generated in `frontend/dist/`. | Run by Antigravity |
+| **Frontend typecheck** | `cd frontend && npm run typecheck` | `8e78ce92edab4d4361a2852f8275e0a6077efc3b` | 0 | **PASS** | `tsc --noEmit (0 errors)` | Node v22.23.2, TypeScript 5.8.2. | Run by Antigravity |
+| **Frontend unit tests** | `cd frontend && npm test -- --run` | `8e78ce92edab4d4361a2852f8275e0a6077efc3b` | 0 | **PASS** | `Test Files 31 passed (31), Tests 224 passed (224) in 7.40s` | Node v22.23.2, Vitest 3.1.3. Component and client logic unit tests, accessible dialog workflows, focus management, and mutation response contracts. | Run by Antigravity |
+| **Frontend build** | `cd frontend && npm run build` | `8e78ce92edab4d4361a2852f8275e0a6077efc3b` | 0 | **PASS** | `1,609 modules transformed, built in 4.03s` | Production Vite bundle generated in `frontend/dist/`. | Run by Antigravity |
 | **Mocked Playwright** | `cd frontend && npx playwright test` | `98817a100bfe89e35237676f09c308c374ea0305` | 0 | **PASS** | `28 passed in 28.6s` | Chromium headless (6 workers). 100% mocked API routes via `page.route()`. | Run by Antigravity |
 | **Real-backend browser acceptance** | `node tests/browser/staging_browser_acceptance.cjs` | `98817a100bfe89e35237676f09c308c374ea0305` | 0 | **PASS** | `All 3 roles passed, verified direct backend RBAC, child process identity verified (run_id + PID), executable assertions verified for all 11 views across admin/trader/viewer, role controls verified, viewer 403 RBAC documented, extracted orchestrateStagingCleanup confirmed termination and exact-ID cleanup, 0 console errors, 0 network failures, 0 unexpected HTTP errors in 15.2s` | Real FastAPI backend on port 8055, Chromium headless, authorized MariaDB `signal_bot_test`. Zero operational mutations. | Run by Antigravity |
 | **MariaDB migration** | `MYSQL_DATABASE=signal_bot_test python3 -m db.migrate --status` | `98817a100bfe89e35237676f09c308c374ea0305` | 0 | **PASS** | `025_users_role_active_index applied successfully` | Applied to `signal_bot_test`. Schema table `schema_version` updated. | Run by Antigravity |

@@ -209,9 +209,9 @@ Every result below reflects local validation on the remediation branch:
 
 | Test category | Exact command | Tested Commit SHA | Environment | Result | Artifact / log | Limitations |
 |---|---|:---:|---|---|---|---|
-| **Typecheck** | `cd frontend && npm run typecheck` | `98817a100bfe89e35237676f09c308c374ea0305` | Linux, Node v22.23.2, TypeScript 5.8.2 | **PASS (0 errors)** | Terminal output | None |
-| **Unit / component** | `cd frontend && npm test -- --run` | `HEAD` | Linux, Node v22.23.2, Vitest 3.1.3 | **PASS (31/31 files, 224/224 passed in 8.08s)** | Vitest runner log | None |
-| **Production build** | `cd frontend && npm run build` | `98817a100bfe89e35237676f09c308c374ea0305` | Linux, Node v22.23.2, Vite 6.3.5 | **PASS (1,609 modules in 4.42s)** | `frontend/dist/` clean production bundle | None |
+| **Typecheck** | `cd frontend && npm run typecheck` | `8e78ce92edab4d4361a2852f8275e0a6077efc3b` | Linux, Node v22.23.2, TypeScript 5.8.2 | **PASS (0 errors)** | Terminal output | None |
+| **Unit / component** | `cd frontend && npm test -- --run` | `8e78ce92edab4d4361a2852f8275e0a6077efc3b` | Linux, Node v22.23.2, Vitest 3.1.3 | **PASS (31/31 files, 224/224 passed in 7.40s)** | Vitest runner log | None |
+| **Production build** | `cd frontend && npm run build` | `8e78ce92edab4d4361a2852f8275e0a6077efc3b` | Linux, Node v22.23.2, Vite 6.3.5 | **PASS (1,609 modules in 4.03s)** | `frontend/dist/` clean production bundle | None |
 | **Backend regression** | `PYTHONPATH=$PWD python3 -m pytest -q` | `98817a100bfe89e35237676f09c308c374ea0305` | Linux, Python 3.12.14, pytest 8.3.5 | **PASS (1,115 passed, 18 skipped, 6 warnings, 0 failed in 34.64s)** | Pytest test runner log | Authorized test DB `signal_bot_test`; external APIs mocked |
 | **Playwright E2E** | `cd frontend && npx playwright test` | `98817a100bfe89e35237676f09c308c374ea0305` | Linux, Chromium 1.64.1 (6 workers) | **PASS (28/28 passed in 28.6s)** | Playwright reporter | Chromium headless; 100% mocked API routes via `page.route()` |
 | **API RBAC Sweep** | `python3 -m pytest tests/test_route_authorization_sweep.py -v` | `98817a100bfe89e35237676f09c308c374ea0305` | Linux, Python 3.12.14 | **PASS (12/12 passed in 3.05s)** | Pytest log | Verifies all routes fail-closed and test identity loopback restriction |
