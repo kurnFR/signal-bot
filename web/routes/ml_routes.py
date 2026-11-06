@@ -529,7 +529,7 @@ def deploy_ml_model_to_paper(req: DeployMLToPaperRequest):
                     f"━━━━━━━━━━━━━━━━━━━━━\n"
                     f"<i>Signals will only be executed if AI confidence exceeds threshold.</i>"
                 )
-                telegram_status = send_telegram_message(msg)
+                telegram_status = send_telegram_message(msg, max_retries=1)
             except Exception as e:
                 logger.error("Deployment Telegram alert failed (%s)", type(e).__name__)
                 telegram_status = {"success": False, "error": "Telegram deployment alert failed"}

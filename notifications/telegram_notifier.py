@@ -299,9 +299,14 @@ def send_deployment_alert(
     allocated_capital: float,
     risk_per_trade_pct: float,
     rank: Optional[int] = None,
-    rank_score: Optional[float] = None
+    rank_score: Optional[float] = None,
+    max_retries: int = 1,
 ) -> Dict[str, Any]:
-    """Notifies when a top-performing strategy is deployed to live paper trading."""
+    """Notifies when a top-performing strategy is deployed to live paper trading.
+
+    Deployment notifications default to a single delivery attempt (max_retries=1)
+    to prevent duplicate alerts during interactive operator deployments.
+    """
     rank_badge = f"🥇 Rank #{rank}" if rank == 1 else (f"🥈 Rank #{rank}" if rank == 2 else (f"🥉 Rank #{rank}" if rank == 3 else "⚡ Strategy"))
     now_wib = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M WIB")
 
@@ -325,4 +330,4 @@ def send_deployment_alert(
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"<i>Signals triggered by this strategy will be broadcast directly here.</i>"
     )
-    return send_telegram_message(msg)
+    return send_telegram_message(msg, max_retries=max_retries)

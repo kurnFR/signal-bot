@@ -296,7 +296,8 @@ def deploy_strategy(req: DeployStrategyRequest):
                 allocated_capital=req.allocated_capital,
                 risk_per_trade_pct=req.risk_per_trade_pct,
                 rank=req.rank,
-                rank_score=req.rank_score
+                rank_score=req.rank_score,
+                max_retries=1,
             )
         except Exception as e:
             # Raw exceptions may contain token-bearing URLs or request details.
