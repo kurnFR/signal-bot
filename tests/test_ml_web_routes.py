@@ -94,6 +94,48 @@ class TestMLWebRoutes(unittest.TestCase):
         self.assertIn("models", data)
         self.assertIsInstance(data["models"], list)
 
+    def test_list_models_skips_retraining_registry_and_non_manifest_json(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            # Create a retraining registry file
+            registry_file = tmp_path / "retraining_registry.json"
+            registry_file.write_text(json.dumps({"last_run": "2026-11-06T00:00:00", "entries": []}), encoding="utf-8")
+
+            # Create an arbitrary non-manifest JSON
+            misc_file = tmp_path / "other_operational_data.json"
+            misc_file.write_text(json.dumps({"some_key": "some_value"}), encoding="utf-8")
+
+            # Create a valid model manifest
+            valid_manifest = tmp_path / "valid-model-1.json"
+            valid_manifest.write_text(json.dumps({
+                "model_id": "valid-model-1",
+                "experiment_id": "exp-1",
+                "model_type": "random_forest",
+                "base_strategy": "trend_ema_v1",
+                "feature_columns": ["f1", "f2"],
+                "strategy_params": {},
+                "model_params": {},
+                "threshold": 0.5,
+                "train_metrics": {},
+                "validation_metrics": {},
+                "test_metrics": {"total_trades": 35, "profit_factor": 1.5, "max_drawdown": 0.15, "net_pnl": 500},
+                "eligible_for_paper": True,
+                "evaluation_protocol_version": "purged_exit_time_v1"
+            }), encoding="utf-8")
+
+            with patch("web.routes.ml_routes.ML_MODELS_DIR", tmp_path):
+                res = self.client.get("/api/ml/models", headers=self.headers)
+                self.assertEqual(res.status_code, 200)
+                data = res.json()
+                self.assertIn("models", data)
+                model_ids = [m["model_id"] for m in data["models"]]
+                self.assertIn("valid-model-1", model_ids)
+                self.assertNotIn("retraining_registry", model_ids)
+                self.assertNotIn("other_operational_data", model_ids)
+                for model in data["models"]:
+                    self.assertIsInstance(model.get("model_id"), str)
+                    self.assertTrue(len(model["model_id"]) > 0)
+
     @patch("paper.circuit_breaker.get_circuit_breaker_status", return_value={
         "status": "normal", "can_open_new_position": True,
         "max_concurrent_positions": 5,
