@@ -1,9 +1,10 @@
 """
 Telegram API Routes for status, testing, and alerting diagnostics.
 """
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
+from web.auth import require_admin
 from notifications.telegram_notifier import (
     get_telegram_config,
     test_telegram_connection,
@@ -30,7 +31,7 @@ def get_status(request: Request):
 
 
 @router.post("/test")
-def run_test(req: Optional[TelegramTestRequest] = None):
+def run_test(req: Optional[TelegramTestRequest] = None, admin: dict = Depends(require_admin)):
     res = test_telegram_connection()
     if not res.get("success") and not res.get("bot"):
         raise HTTPException(status_code=400, detail=res.get("error", "Telegram test failed"))

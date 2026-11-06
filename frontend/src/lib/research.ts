@@ -143,10 +143,13 @@ function validStrategy(value: unknown): value is ResearchStrategy {
 
 /** Read-only Research snapshot. Validate the real FastAPI/DB serializer contracts before rendering. */
 export async function fetchResearchSnapshot(signal?: AbortSignal): Promise<ResearchSnapshot> {
-  const [positions, trades, stats, strategies] = await Promise.all([
+  // Batch requests in 2 concurrent pairs to stay well within retailbot2_pool size (pool_size=3)
+  const [positions, stats] = await Promise.all([
     getJson<unknown>("/api/research/retailbot2/positions?limit=100", signal),
-    getJson<unknown>("/api/research/retailbot2/trades?limit=50", signal),
     getJson<unknown>("/api/research/retailbot2/stats", signal),
+  ]);
+  const [trades, strategies] = await Promise.all([
+    getJson<unknown>("/api/research/retailbot2/trades?limit=50", signal),
     getJson<unknown>("/api/research/retailbot2/strategies", signal),
   ]);
   if (!isRecord(positions) || !Array.isArray(positions.positions) || !positions.positions.every(validPosition)) {

@@ -1,8 +1,18 @@
-import { MessageCircle, Moon, RefreshCw, ShieldCheck, Sun, UserRound } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Key, MessageCircle, Moon, Plus, RefreshCw, ShieldCheck, Sun, Trash2, UserPlus, UserRound, Users } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError } from "./lib/api";
+import { changePassword, AuthRequestError } from "./lib/auth";
 import { fetchTelegramStatus, sendTelegramTestPing, TelegramActionError, type TelegramStatus } from "./lib/telegram";
 import { fetchAdminSystemStatus, type AdminSystemStatusResponse } from "./lib/systemStatus";
+import {
+  createUser,
+  deleteUser,
+  fetchUsers,
+  resetUserPassword,
+  updateUser,
+  UserActionError,
+  type ManagedUser,
+} from "./lib/users";
 import type { ReactNode } from "react";
 
 type Theme = "dark" | "light";
@@ -13,13 +23,37 @@ interface SettingsPanelProps {
   role?: string;
 }
 
+function trapFocus(e: React.KeyboardEvent<HTMLDialogElement>) {
+  if (e.key !== "Tab") return;
+  const dialog = e.currentTarget;
+  const focusable = dialog.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  );
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (e.shiftKey) {
+    if (document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    }
+  } else {
+    if (document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+}
+
 function PreferenceRow({ icon, title, description, children }: { icon: ReactNode; title: string; description: string; children: ReactNode }) {
   return <div className="settings-preference-row"><div className="settings-preference-icon" aria-hidden="true">{icon}</div><div className="settings-preference-copy"><strong>{title}</strong><p>{description}</p></div><div className="settings-preference-control">{children}</div></div>;
 }
 
-/** Admin-only diagnostics are rendered without raw database errors or secrets; remaining server settings stay on the legacy dashboard. */
+/** Settings & Users panel supporting appearance, profile, password change, and full admin user management. */
 export function SettingsPanel({ theme, onToggleTheme, username, role }: SettingsPanelProps) {
   const isAdmin = (role ?? "").toLowerCase() === "admin";
+
+  // Appearance & Session
   const [telegramStatus, setTelegramStatus] = useState<TelegramStatus | null>(null);
   const [telegramLoading, setTelegramLoading] = useState(false);
   const [telegramError, setTelegramError] = useState<string | null>(null);
@@ -28,11 +62,150 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
   const [telegramTestBusy, setTelegramTestBusy] = useState(false);
   const [telegramTestError, setTelegramTestError] = useState<string | null>(null);
   const [telegramTestMessage, setTelegramTestMessage] = useState<string | null>(null);
+  const telegramDialogRef = useRef<HTMLDialogElement | null>(null);
+  const telegramCancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const telegramTriggerRef = useRef<HTMLElement | null>(null);
+
+  // Diagnostics
   const [adminDiagnostics, setAdminDiagnostics] = useState<AdminSystemStatusResponse | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
   const [diagnosticsAttempt, setDiagnosticsAttempt] = useState(0);
 
+  // Self Password Change
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordChangeBusy, setPasswordChangeBusy] = useState(false);
+  const [passwordChangeError, setPasswordChangeError] = useState<string | null>(null);
+  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState<string | null>(null);
+
+  // User Management (Admin Only)
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [usersAttempt, setUsersAttempt] = useState(0);
+  const [userActionError, setUserActionError] = useState<string | null>(null);
+  const [userActionSuccess, setUserActionSuccess] = useState<string | null>(null);
+  const [togglingUserId, setTogglingUserId] = useState<number | null>(null);
+
+  // Create User Form State
+  const [newUsername, setNewUsername] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [newUserRole, setNewUserRole] = useState<"trader" | "admin" | "viewer">("trader");
+  const [createUserBusy, setCreateUserBusy] = useState(false);
+  const [createUserError, setCreateUserError] = useState<string | null>(null);
+  const [createUserSuccess, setCreateUserSuccess] = useState<string | null>(null);
+
+  // Action states and refs for Reset Password Dialog
+  const [selectedUserForReset, setSelectedUserForReset] = useState<ManagedUser | null>(null);
+  const [adminNewPassword, setAdminNewPassword] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const resetDialogRef = useRef<HTMLDialogElement | null>(null);
+  const resetInputRef = useRef<HTMLInputElement | null>(null);
+  const resetTriggerRef = useRef<HTMLElement | null>(null);
+
+  // Action states and refs for Delete User Dialog
+  const [selectedUserForDelete, setSelectedUserForDelete] = useState<ManagedUser | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteDialogRef = useRef<HTMLDialogElement | null>(null);
+  const deleteCancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const deleteTriggerRef = useRef<HTMLElement | null>(null);
+
+  // Focus management and modal lifecycle for Reset Password Dialog
+  useEffect(() => {
+    if (selectedUserForReset && resetDialogRef.current) {
+      if (!resetDialogRef.current.open) {
+        if (typeof resetDialogRef.current.showModal === "function") {
+          resetDialogRef.current.showModal();
+        } else {
+          resetDialogRef.current.setAttribute("open", "");
+        }
+      }
+      resetInputRef.current?.focus();
+    }
+  }, [selectedUserForReset]);
+
+  // Focus management and modal lifecycle for Delete User Dialog
+  useEffect(() => {
+    if (selectedUserForDelete && deleteDialogRef.current) {
+      if (!deleteDialogRef.current.open) {
+        if (typeof deleteDialogRef.current.showModal === "function") {
+          deleteDialogRef.current.showModal();
+        } else {
+          deleteDialogRef.current.setAttribute("open", "");
+        }
+      }
+      deleteCancelButtonRef.current?.focus();
+    }
+  }, [selectedUserForDelete]);
+
+  // Focus management and modal lifecycle for Telegram Test Confirmation Dialog
+  useEffect(() => {
+    if (confirmTelegramTest && telegramDialogRef.current) {
+      if (!telegramDialogRef.current.open) {
+        if (typeof telegramDialogRef.current.showModal === "function") {
+          telegramDialogRef.current.showModal();
+        } else {
+          telegramDialogRef.current.setAttribute("open", "");
+        }
+      }
+      telegramCancelButtonRef.current?.focus();
+    }
+  }, [confirmTelegramTest]);
+
+  const closeResetDialog = () => {
+    if (resetDialogRef.current?.open) {
+      if (typeof resetDialogRef.current.close === "function") {
+        resetDialogRef.current.close();
+      } else {
+        resetDialogRef.current.removeAttribute("open");
+      }
+    }
+    setSelectedUserForReset(null);
+    setAdminNewPassword("");
+    setResetError(null);
+    const trigger = resetTriggerRef.current;
+    if (trigger && document.body.contains(trigger)) {
+      trigger.focus();
+    }
+  };
+
+  const closeDeleteDialog = () => {
+    if (deleteDialogRef.current?.open) {
+      if (typeof deleteDialogRef.current.close === "function") {
+        deleteDialogRef.current.close();
+      } else {
+        deleteDialogRef.current.removeAttribute("open");
+      }
+    }
+    setSelectedUserForDelete(null);
+    setDeleteError(null);
+    const trigger = deleteTriggerRef.current;
+    if (trigger && document.body.contains(trigger)) {
+      trigger.focus();
+    }
+  };
+
+  const closeTelegramDialog = () => {
+    if (telegramDialogRef.current?.open) {
+      if (typeof telegramDialogRef.current.close === "function") {
+        telegramDialogRef.current.close();
+      } else {
+        telegramDialogRef.current.removeAttribute("open");
+      }
+    }
+    setConfirmTelegramTest(false);
+    const trigger = telegramTriggerRef.current;
+    if (trigger && document.body.contains(trigger)) {
+      trigger.focus();
+    }
+  };
+
+  // Load Telegram Status (Admin Only)
   useEffect(() => {
     if (!isAdmin) {
       setTelegramStatus(null);
@@ -58,6 +231,7 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
     return () => controller.abort();
   }, [isAdmin, telegramRefreshAttempt]);
 
+  // Load Diagnostics (Admin Only)
   useEffect(() => {
     if (!isAdmin) {
       setAdminDiagnostics(null);
@@ -83,12 +257,161 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
     return () => controller.abort();
   }, [isAdmin, diagnosticsAttempt]);
 
+  // Load Users Catalog (Admin Only)
+  useEffect(() => {
+    if (!isAdmin) {
+      setUsers([]);
+      setUsersLoading(false);
+      setUsersError(null);
+      return;
+    }
+    const controller = new AbortController();
+    setUsersLoading(true);
+    setUsersError(null);
+    fetchUsers(controller.signal).then((catalog) => {
+      if (!controller.signal.aborted) setUsers(catalog);
+    }).catch((cause: unknown) => {
+      if (!controller.signal.aborted) {
+        setUsers([]);
+        if (cause instanceof UserActionError && cause.status === 401) {
+          setUsersError("Your session has expired. Sign in again to view user accounts.");
+        } else if (cause instanceof UserActionError && cause.status === 403) {
+          setUsersError("Only administrators can view user management accounts.");
+        } else {
+          setUsersError("User accounts could not be loaded. Please check backend connection and retry.");
+        }
+      }
+    }).finally(() => {
+      if (!controller.signal.aborted) setUsersLoading(false);
+    });
+    return () => controller.abort();
+  }, [isAdmin, usersAttempt]);
+
+  const handleSelfPasswordChange = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setPasswordChangeError(null);
+    setPasswordChangeSuccess(null);
+
+    if (newPassword.length < 10) {
+      setPasswordChangeError("New password must be at least 10 characters long.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordChangeError("New passwords do not match.");
+      return;
+    }
+
+    setPasswordChangeBusy(true);
+    try {
+      await changePassword(oldPassword, newPassword);
+      setPasswordChangeSuccess("Password updated successfully. Your new session is active.");
+      setOldPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (cause) {
+      setPasswordChangeError(cause instanceof AuthRequestError ? cause.message : "Password change failed. Check your current password.");
+    } finally {
+      setPasswordChangeBusy(false);
+    }
+  };
+
+  const handleCreateUser = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setCreateUserError(null);
+    setCreateUserSuccess(null);
+
+    if (!newUsername.trim()) {
+      setCreateUserError("Username is required.");
+      return;
+    }
+    if (newUserPassword.length < 10) {
+      setCreateUserError("Password must be at least 10 characters.");
+      return;
+    }
+
+    setCreateUserBusy(true);
+    try {
+      const created = await createUser({
+        username: newUsername.trim(),
+        email: newEmail.trim() || null,
+        password: newUserPassword,
+        role: newUserRole,
+      });
+      setCreateUserSuccess(`User '${created.username}' created successfully.`);
+      setNewUsername("");
+      setNewEmail("");
+      setNewUserPassword("");
+      setNewUserRole("trader");
+      setUsersAttempt((v) => v + 1);
+    } catch (cause) {
+      setCreateUserError(cause instanceof UserActionError ? cause.message : "Could not create user account.");
+    } finally {
+      setCreateUserBusy(false);
+    }
+  };
+
+  const handleToggleUserStatus = async (user: ManagedUser) => {
+    setUserActionError(null);
+    setUserActionSuccess(null);
+    setTogglingUserId(user.id);
+    try {
+      const message = await updateUser(user.id, { is_active: !user.is_active });
+      setUserActionSuccess(message);
+      setUsersAttempt((v) => v + 1);
+    } catch (cause) {
+      setUserActionError(cause instanceof UserActionError ? cause.message : "Failed to update user status.");
+    } finally {
+      setTogglingUserId(null);
+    }
+  };
+
+  const handleResetUserPassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedUserForReset || resetBusy) return;
+    setResetError(null);
+
+    if (adminNewPassword.length < 10) {
+      setResetError("Password must be at least 10 characters.");
+      return;
+    }
+
+    setResetBusy(true);
+    try {
+      const message = await resetUserPassword(selectedUserForReset.id, adminNewPassword);
+      setUserActionSuccess(message);
+      setUsersAttempt((v) => v + 1);
+      closeResetDialog();
+    } catch (cause) {
+      setResetError(cause instanceof UserActionError ? cause.message : "Failed to reset password.");
+    } finally {
+      setResetBusy(false);
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!selectedUserForDelete || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      const message = await deleteUser(selectedUserForDelete.id);
+      setUserActionSuccess(message);
+      setUsersAttempt((v) => v + 1);
+      closeDeleteDialog();
+    } catch (cause) {
+      setDeleteError(cause instanceof UserActionError ? cause.message : "Failed to delete user.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   const runTelegramTest = async () => {
-    if (!isAdmin || !confirmTelegramTest || !telegramStatus?.hasToken) return;
-    setTelegramTestBusy(true); setTelegramTestError(null); setTelegramTestMessage(null);
+    if (!isAdmin || !confirmTelegramTest || telegramTestBusy || !telegramStatus?.hasToken) return;
+    setTelegramTestBusy(true);
+    setTelegramTestError(null);
+    setTelegramTestMessage(null);
     try {
       const result = await sendTelegramTestPing();
-      setConfirmTelegramTest(false);
+      closeTelegramDialog();
       if (result.success) {
         setTelegramTestMessage(result.chat_id
           ? `Test ping sent to the configured Telegram chat${result.bot?.username ? ` via @${result.bot.username}` : ""}.`
@@ -97,19 +420,27 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
         setTelegramTestError(result.error || "Telegram test failed. Check bot and chat configuration.");
       }
     } catch (cause) {
+      closeTelegramDialog();
       if (cause instanceof TelegramActionError && cause.status === 403) setTelegramTestError("Only admins can send a Telegram test ping.");
       else if (cause instanceof TelegramActionError && cause.status === 401) setTelegramTestError("Your session has expired. Sign in again before testing Telegram.");
       else setTelegramTestError(cause instanceof Error ? cause.message : "Telegram test failed. Please retry.");
-    } finally { setTelegramTestBusy(false); }
+    } finally {
+      setTelegramTestBusy(false);
+    }
   };
+
   return <div className="settings-view">
-    <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>Workspace preferences</strong><p>This preview exposes local appearance preferences, session identity, admin-only system diagnostics, and a confirmed Telegram test control. Detailed connection metadata is restricted to admins; raw database errors, bot tokens, API credentials, and user administration remain hidden.</p></div><span className="panel-counter">SAFE PREVIEW</span></section>
+    <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>Workspace preferences</strong><p>Manage workspace appearance, session credentials, password rotation, and administrator user controls. Server-side permissions are authoritative; credentials and raw database details remain protected.</p></div><span className="panel-counter">SETTINGS & USERS</span></section>
+
+    {/* Appearance Preferences */}
     <section className="panel" aria-labelledby="settings-appearance-title">
       <div className="panel-heading"><div><h2 id="settings-appearance-title">Appearance</h2><p>Personalize the dashboard without changing backend configuration.</p></div><span className="panel-counter">LOCAL PREFERENCE</span></div>
       <PreferenceRow icon={theme === "dark" ? <Moon size={19} /> : <Sun size={19} />} title="Color theme" description={theme === "dark" ? "Dark theme is active. Your preference is saved in this browser when storage is available." : "Light theme is active. Your preference is saved in this browser when storage is available."}>
         <button className="button button-secondary" onClick={onToggleTheme} aria-label={"Switch to " + (theme === "dark" ? "light" : "dark") + " theme"}>Switch to {theme === "dark" ? "light" : "dark"}</button>
       </PreferenceRow>
     </section>
+
+    {/* Current Session Identity */}
     <section className="panel" aria-labelledby="settings-session-title">
       <div className="panel-heading"><div><h2 id="settings-session-title">Current session</h2><p>Identity information returned by the existing authentication gate.</p></div><span className="panel-counter">READ ONLY</span></div>
       <PreferenceRow icon={<UserRound size={19} />} title="Signed-in user" description="User identity is provided by the server-side authentication flow; no token or credential is displayed.">
@@ -119,6 +450,343 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
         <span className="settings-readonly-tag">Server enforced</span>
       </PreferenceRow>
     </section>
+
+    {/* Self Password Change */}
+    <section className="panel" aria-labelledby="settings-password-title">
+      <div className="panel-heading"><div><h2 id="settings-password-title"><Key size={17} className="inline-icon" /> Change My Password</h2><p>Update your account password with immediate session renewal.</p></div><span className="panel-counter">AUTHENTICATED</span></div>
+      <form onSubmit={handleSelfPasswordChange} className="screener-control-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+        <div className="screener-control-field">
+          <label htmlFor="self-old-password">Current Password</label>
+          <input id="self-old-password" type="password" required value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} placeholder="••••••••" />
+        </div>
+        <div className="screener-control-field">
+          <label htmlFor="self-new-password">New Password (min 10 chars)</label>
+          <input id="self-new-password" type="password" required minLength={10} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="••••••••" />
+        </div>
+        <div className="screener-control-field">
+          <label htmlFor="self-confirm-password">Confirm New Password</label>
+          <input id="self-confirm-password" type="password" required minLength={10} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••••" />
+        </div>
+        <div style={{ display: "flex", alignItems: "flex-end" }}>
+          <button type="submit" className="button button-primary" disabled={passwordChangeBusy || !oldPassword || !newPassword}>
+            {passwordChangeBusy ? "Updating…" : "Update Password"}
+          </button>
+        </div>
+      </form>
+      {passwordChangeError && <div className="api-error" role="alert" style={{ marginTop: 14 }}><div><strong>Password change failed</strong><p>{passwordChangeError}</p></div></div>}
+      {passwordChangeSuccess && <p className="control-feedback control-success" role="status">{passwordChangeSuccess}</p>}
+    </section>
+
+    {/* Admin-Only User Management */}
+    {isAdmin && <section className="panel" aria-labelledby="settings-users-title" aria-busy={usersLoading}>
+      <div className="panel-heading">
+        <div>
+          <h2 id="settings-users-title"><Users size={17} className="inline-icon" /> User Accounts & Access Control</h2>
+          <p>Manage operator credentials, role assignments, password resets, and account activation.</p>
+        </div>
+        <span className="panel-counter">{users.length} ACCOUNTS</span>
+      </div>
+
+      {usersError && <div className="api-error" role="alert"><div><strong>User management unavailable</strong><p>{usersError}</p></div><button className="button button-secondary" type="button" onClick={() => setUsersAttempt((v) => v + 1)}><RefreshCw size={15} /> Retry</button></div>}
+
+      {userActionError && (
+        <div className="api-error" role="alert" style={{ marginTop: 12 }}>
+          <div>
+            <strong>User action failed</strong>
+            <p>{userActionError}</p>
+          </div>
+          <button className="button button-secondary" type="button" onClick={() => setUserActionError(null)}>Dismiss</button>
+        </div>
+      )}
+
+      {userActionSuccess && (
+        <p className="control-feedback control-success" role="status" style={{ marginTop: 12 }}>
+          {userActionSuccess}
+        </p>
+      )}
+
+      {/* Users Catalog Table */}
+      <div className="status-table-wrap">
+        <table className="status-table">
+          <thead>
+            <tr>
+              <th scope="col">ID</th>
+              <th scope="col">Username</th>
+              <th scope="col">Email</th>
+              <th scope="col">Role</th>
+              <th scope="col">Status</th>
+              <th scope="col">Created</th>
+              <th scope="col" style={{ textAlign: "right" }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {usersLoading && !users.length ? (
+              <tr><td colSpan={7} className="empty-state" style={{ textAlign: "center" }}>Loading user accounts…</td></tr>
+            ) : users.length ? users.map((u) => {
+              const isSelf = (username ?? "").toLowerCase() === u.username.toLowerCase();
+              return <tr key={u.id}>
+                <td><strong>#{u.id}</strong></td>
+                <td><span style={{ fontWeight: 600, color: "var(--color-accent)" }}>{u.username}</span></td>
+                <td>{u.email || "—"}</td>
+                <td><span className="status-pill" style={{ textTransform: "uppercase" }}>{u.role}</span></td>
+                <td>
+                  <span className={u.is_active ? "status-pill status-positive" : "status-pill status-warning"}>
+                    {u.is_active ? "Active" : "Disabled"}
+                  </span>
+                  {u.must_change_password && <span className="status-pill" style={{ marginLeft: 6 }}>Must reset</span>}
+                </td>
+                <td><span className="heartbeat-time">{u.created_at.slice(0, 10)}</span></td>
+                <td style={{ textAlign: "right" }}>
+                  <div style={{ display: "inline-flex", gap: 6 }}>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      style={{ padding: "4px 8px", fontSize: 11 }}
+                      aria-label={`Reset password for ${u.username}`}
+                      onClick={(e) => {
+                        resetTriggerRef.current = e.currentTarget;
+                        setAdminNewPassword("");
+                        setResetError(null);
+                        setSelectedUserForReset(u);
+                      }}
+                    >
+                      Reset Pass
+                    </button>
+                    {!isSelf && (
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        style={{ padding: "4px 8px", fontSize: 11 }}
+                        aria-label={`${u.is_active ? "Disable" : "Enable"} user ${u.username}`}
+                        disabled={togglingUserId === u.id}
+                        onClick={() => void handleToggleUserStatus(u)}
+                      >
+                        {togglingUserId === u.id ? "Updating…" : u.is_active ? "Disable" : "Enable"}
+                      </button>
+                    )}
+                    {!isSelf && (
+                      <button
+                        type="button"
+                        className="button button-danger"
+                        style={{ padding: "4px 8px", fontSize: 11 }}
+                        aria-label={`Delete user ${u.username}`}
+                        onClick={(e) => {
+                          deleteTriggerRef.current = e.currentTarget;
+                          setDeleteError(null);
+                          setSelectedUserForDelete(u);
+                        }}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>;
+            }) : (
+              <tr><td colSpan={7} className="empty-state" style={{ textAlign: "center" }}>No user accounts found.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Accessible Native HTML Modal Dialog: Reset Password */}
+      {selectedUserForReset && (
+        <dialog
+          ref={resetDialogRef}
+          className="settings-dialog"
+          aria-labelledby="reset-dialog-title"
+          aria-describedby="reset-dialog-desc"
+          onCancel={(e) => {
+            e.preventDefault();
+            closeResetDialog();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              closeResetDialog();
+            } else {
+              trapFocus(e);
+            }
+          }}
+        >
+          <div className="panel-heading">
+            <div>
+              <h3 id="reset-dialog-title">Reset Password for '{selectedUserForReset.username}'</h3>
+              <p id="reset-dialog-desc">Sets a temporary password. The user will be required to change it upon their next sign-in.</p>
+            </div>
+          </div>
+          <form onSubmit={handleResetUserPassword} style={{ marginTop: 14 }}>
+            <div className="screener-control-field">
+              <label htmlFor="admin-reset-new-password">New Password (min 10 chars)</label>
+              <input
+                ref={resetInputRef}
+                id="admin-reset-new-password"
+                type="password"
+                required
+                minLength={10}
+                value={adminNewPassword}
+                disabled={resetBusy}
+                onChange={(e) => setAdminNewPassword(e.target.value)}
+                placeholder="Temporary password"
+              />
+            </div>
+            {resetError && (
+              <div className="api-error" role="alert" style={{ marginTop: 10 }}>
+                <div><p>{resetError}</p></div>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={resetBusy}
+                onClick={closeResetDialog}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="button button-primary"
+                disabled={resetBusy || adminNewPassword.length < 10}
+              >
+                {resetBusy ? "Resetting…" : "Confirm Password Reset"}
+              </button>
+            </div>
+          </form>
+        </dialog>
+      )}
+
+      {/* Accessible Native HTML Modal Dialog: Delete User */}
+      {selectedUserForDelete && (
+        <dialog
+          ref={deleteDialogRef}
+          className="settings-dialog"
+          aria-labelledby="delete-dialog-title"
+          aria-describedby="delete-dialog-desc"
+          onCancel={(e) => {
+            e.preventDefault();
+            closeDeleteDialog();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              closeDeleteDialog();
+            } else {
+              trapFocus(e);
+            }
+          }}
+        >
+          <div className="panel-heading">
+            <div>
+              <h3 id="delete-dialog-title">Delete Account '{selectedUserForDelete.username}'?</h3>
+              <p id="delete-dialog-desc">This action permanently removes the user account and revokes active sessions. This cannot be undone.</p>
+            </div>
+          </div>
+          {deleteError && (
+            <div className="api-error" role="alert" style={{ marginTop: 10 }}>
+              <div><p>{deleteError}</p></div>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
+            <button
+              ref={deleteCancelButtonRef}
+              type="button"
+              className="button button-secondary"
+              disabled={deleteBusy}
+              onClick={closeDeleteDialog}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="button button-danger"
+              disabled={deleteBusy}
+              onClick={() => void handleDeleteUser()}
+            >
+              {deleteBusy ? "Deleting…" : "Confirm Delete"}
+            </button>
+          </div>
+        </dialog>
+      )}
+
+      {/* Create New User Form */}
+      <div className="panel-subsection" style={{ marginTop: 20 }}>
+        <div className="panel-heading">
+          <div>
+            <h3><UserPlus size={15} className="inline-icon" /> Create New User Account</h3>
+            <p>Provision operator credentials with server-enforced role assignments.</p>
+          </div>
+        </div>
+        <form onSubmit={handleCreateUser}>
+          <div className="screener-control-grid">
+            <div className="screener-control-field">
+              <label htmlFor="create-username">Username</label>
+              <input
+                id="create-username"
+                required
+                maxLength={30}
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                placeholder="trader_john"
+              />
+            </div>
+            <div className="screener-control-field">
+              <label htmlFor="create-email">Email (Optional)</label>
+              <input
+                id="create-email"
+                type="email"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                placeholder="john@example.com"
+              />
+            </div>
+            <div className="screener-control-field">
+              <label htmlFor="create-password">Password (10–1024 chars)</label>
+              <input
+                id="create-password"
+                type="password"
+                required
+                minLength={10}
+                maxLength={1024}
+                value={newUserPassword}
+                onChange={(e) => setNewUserPassword(e.target.value)}
+                placeholder="••••••••••••"
+              />
+            </div>
+            <div className="screener-control-field">
+              <label htmlFor="create-role">Assigned Role</label>
+              <select
+                id="create-role"
+                value={newUserRole}
+                onChange={(e) => setNewUserRole(e.target.value as typeof newUserRole)}
+                style={{
+                  minHeight: 38,
+                  padding: "0 10px",
+                  borderRadius: 7,
+                  border: "1px solid var(--color-border)",
+                  background: "var(--color-elevated)",
+                  color: "var(--color-text)",
+                }}
+              >
+                <option value="trader">Trader (Full Operations)</option>
+                <option value="admin">Administrator (Full Access)</option>
+                <option value="viewer">Viewer (Read Only)</option>
+              </select>
+            </div>
+          </div>
+          <div className="screener-control-footer">
+            <button type="submit" className="button button-primary" disabled={createUserBusy || !newUsername.trim() || newUserPassword.length < 10}>
+              <Plus size={15} />
+              {createUserBusy ? "Creating User…" : "Add User Account"}
+            </button>
+          </div>
+        </form>
+        {createUserError && <div className="api-error" role="alert" style={{ marginTop: 14 }}><div><strong>Creation failed</strong><p>{createUserError}</p></div></div>}
+        {createUserSuccess && <p className="control-feedback control-success" role="status">{createUserSuccess}</p>}
+      </div>
+    </section>}
+
+    {/* Telegram Integration Panel (Admin Only) */}
     <section className="panel" aria-labelledby="settings-telegram-title" aria-busy={telegramLoading || telegramTestBusy}>
       <div className="panel-heading"><div><h2 id="settings-telegram-title"><MessageCircle size={17} className="inline-icon" /> Telegram status and test</h2><p>Read-only configuration status and an explicit test-ping workflow. A confirmed test may send a real Telegram message.</p></div><span className="panel-counter">{isAdmin ? "ADMIN ONLY" : "RESTRICTED"}</span></div>
       {!isAdmin ? <p className="empty-state">Telegram status and test controls are restricted to admins. This role does not fetch or display the configured chat ID.</p> : <>
@@ -132,10 +800,61 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
         </div>}
         {telegramTestError && <div className="api-error" role="alert"><div><strong>Telegram test failed</strong><p>{telegramTestError}</p></div><button className="button button-secondary" type="button" onClick={() => setTelegramTestError(null)}>Dismiss</button></div>}
         {telegramTestMessage && <p className="control-feedback control-success" role="status">{telegramTestMessage}</p>}
-        <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={telegramLoading || telegramTestBusy || !telegramStatus?.hasToken} onClick={() => { setConfirmTelegramTest(true); setTelegramTestError(null); setTelegramTestMessage(null); }}>Review Telegram test</button></div>
-        {confirmTelegramTest && <section className="panel" aria-labelledby="settings-telegram-confirm-title"><div className="panel-heading"><div><h3 id="settings-telegram-confirm-title">Confirm Telegram test ping</h3><p>{telegramStatus?.chatId ? "This sends a real test message to the configured Telegram chat. Continue only if you intend to send that message." : "No chat ID is configured. This will verify the bot token but should not send a message."}</p></div></div><div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={telegramTestBusy} onClick={() => setConfirmTelegramTest(false)}>Cancel test</button><button className="button button-primary" type="button" disabled={telegramTestBusy || !telegramStatus?.hasToken} onClick={() => void runTelegramTest()}>{telegramTestBusy ? "Testing…" : "Send test ping"}</button></div></section>}
+        <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={telegramLoading || telegramTestBusy || !telegramStatus?.hasToken} onClick={(e) => { telegramTriggerRef.current = e.currentTarget; setConfirmTelegramTest(true); setTelegramTestError(null); setTelegramTestMessage(null); }}>Review Telegram test</button></div>
+        {confirmTelegramTest && (
+          <dialog
+            ref={telegramDialogRef}
+            className="settings-dialog"
+            aria-labelledby="settings-telegram-confirm-title"
+            aria-describedby="settings-telegram-confirm-desc"
+            onCancel={(e) => {
+              e.preventDefault();
+              closeTelegramDialog();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                closeTelegramDialog();
+              } else {
+                trapFocus(e);
+              }
+            }}
+          >
+            <div className="panel-heading">
+              <div>
+                <h3 id="settings-telegram-confirm-title">Confirm Telegram test ping</h3>
+                <p id="settings-telegram-confirm-desc">
+                  {telegramStatus?.chatId
+                    ? "This sends a real test message to the configured Telegram chat. Continue only if you intend to send that message."
+                    : "No chat ID is configured. This will verify the bot token but should not send a message."}
+                </p>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
+              <button
+                ref={telegramCancelButtonRef}
+                type="button"
+                className="button button-secondary"
+                disabled={telegramTestBusy}
+                onClick={closeTelegramDialog}
+              >
+                Cancel test
+              </button>
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={telegramTestBusy || !telegramStatus?.hasToken}
+                onClick={() => void runTelegramTest()}
+              >
+                {telegramTestBusy ? "Testing…" : "Send test ping"}
+              </button>
+            </div>
+          </dialog>
+        )}
       </>}
     </section>
+
+    {/* Admin-Only Detailed System Diagnostics */}
     {isAdmin && <section className="panel" aria-labelledby="settings-diagnostics-title" aria-busy={diagnosticsLoading}>
       <div className="panel-heading"><div><h2 id="settings-diagnostics-title">Detailed system diagnostics</h2><p>Admin-only connection metadata and collector health. Raw database exception text is never displayed.</p></div><span className="panel-counter">ADMIN ONLY</span></div>
       {diagnosticsError && <div className="api-error" role="alert"><div><strong>Diagnostics unavailable</strong><p>{diagnosticsError}</p></div><button className="button button-secondary" type="button" onClick={() => setDiagnosticsAttempt((value) => value + 1)}><RefreshCw size={15} /> Retry</button></div>}
@@ -157,9 +876,5 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
       </>}
       <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={diagnosticsLoading} onClick={() => setDiagnosticsAttempt((value) => value + 1)}><RefreshCw size={15} /> Refresh diagnostics</button></div>
     </section>}
-    <section className="panel preview-placeholder" aria-labelledby="settings-not-migrated-title">
-      <div className="panel-heading"><div><h2 id="settings-not-migrated-title">Administrative settings</h2><p>Intentionally not connected in this migration slice.</p></div><span className="panel-counter">LEGACY UI</span></div>
-      <p className="empty-state">User management, credential settings, and other consequential controls remain in the legacy dashboard until their permissions and side effects are migrated and tested separately.</p>
-    </section>
   </div>;
 }

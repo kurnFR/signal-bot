@@ -4,7 +4,7 @@ Strictly parameterized SQL queries throughout to eliminate SQL injection vectors
 """
 import re
 import logging
-from typing import Optional, List
+from typing import Optional, List, Callable, Any
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel, Field
 
@@ -47,6 +47,13 @@ def _write_required_audit(action: str, username: str, user_id: Optional[int] = N
         )
 
 
+# Test-only hooks for deterministic transaction synchronization tests.
+# Must remain None in production.
+_test_before_admin_lock_hook: Optional[Callable[[Any, Any, int], None]] = None
+_test_after_admin_lock_hook: Optional[Callable[[Any, Any, int], None]] = None
+_test_active_admin_filter: Optional[Callable[[dict], bool]] = None
+
+
 def _commit_with_audit(conn, cur, action: str, username: str,
                        user_id: Optional[int] = None, details: Optional[dict] = None,
                        ip_address: Optional[str] = None) -> None:
@@ -57,6 +64,7 @@ def _commit_with_audit(conn, cur, action: str, username: str,
     except Exception as exc:
         try:
             conn.rollback()
+            setattr(conn, "_rolled_back", True)
         except Exception:
             pass
         logger.error("Required audit transaction failed for %s (%s)", action, type(exc).__name__)
@@ -447,6 +455,33 @@ def create_user(req: CreateUserRequest, admin: dict = Depends(require_admin)):
             (clean_username, clean_email, new_hash, clean_role)
         )
         new_id = cur.lastrowid
+
+        cur.execute(
+            """
+            SELECT id, username, email, role, is_active, must_change_password, created_at, updated_at
+            FROM users
+            WHERE id = %s
+            """,
+            (new_id,)
+        )
+        created_user = cur.fetchone()
+        if not created_user:
+            created_user = {
+                "id": new_id,
+                "username": clean_username,
+                "email": clean_email,
+                "role": clean_role,
+                "is_active": True,
+                "must_change_password": False,
+                "created_at": "",
+                "updated_at": "",
+            }
+        else:
+            created_user["is_active"] = bool(created_user.get("is_active", 1))
+            created_user["must_change_password"] = bool(created_user.get("must_change_password", 0))
+            created_user["created_at"] = str(created_user["created_at"]) if created_user.get("created_at") is not None else ""
+            created_user["updated_at"] = str(created_user["updated_at"]) if created_user.get("updated_at") is not None else ""
+
         _commit_with_audit(
             conn, cur, "USER_CREATED", admin["username"], admin["id"],
             {"created_user": clean_username, "created_user_id": new_id, "role": clean_role},
@@ -454,16 +489,27 @@ def create_user(req: CreateUserRequest, admin: dict = Depends(require_admin)):
 
         return {
             "status": "success",
-            "user": {
-                "id": new_id,
-                "username": clean_username,
-                "email": clean_email,
-                "role": clean_role,
-                "is_active": True,
-            }
+            "user": created_user,
         }
+    except HTTPException:
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
+        raise
+    except Exception:
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
+        raise
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 @router.post("/users/{user_id}/reset-password")
@@ -491,32 +537,80 @@ def reset_user_password(user_id: int, req: ResetPasswordRequest, admin: dict = D
             "status": "success",
             "message": f"Password reset successfully for user '{target['username']}'"
         }
+    except HTTPException:
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
+        raise
+    except Exception:
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
+        raise
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 @router.put("/users/{user_id}")
 def update_user(user_id: int, req: UpdateUserRequest, admin: dict = Depends(require_admin)):
+    if req.role is not None and req.role not in ("admin", "trader", "viewer"):
+        raise HTTPException(status_code=400, detail="Invalid role")
+
     conn = _get_required_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT id, username, role, is_active FROM users WHERE id = %s", (user_id,))
+        # Consistent serialization protocol: serialize role changes, active-state changes,
+        # and deletions against the active-admin set.
+        # Acquire locks on all active administrator rows with SELECT ... FOR UPDATE
+        # in deterministic ascending ID order. Retain locks until commit/rollback.
+        if _test_before_admin_lock_hook is not None:
+            _test_before_admin_lock_hook(conn, cur, user_id)
+        cur.execute(
+            "SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY id FOR UPDATE"
+        )
+        if _test_after_admin_lock_hook is not None:
+            _test_after_admin_lock_hook(conn, cur, user_id)
+        active_admins = cur.fetchall() or []
+        if _test_active_admin_filter is not None:
+            active_admins = [u for u in active_admins if _test_active_admin_filter(u)]
+
+        # Read the target user state under lock
+        cur.execute("SELECT id, username, role, is_active FROM users WHERE id = %s FOR UPDATE", (user_id,))
         target = cur.fetchone()
         if not target:
             raise HTTPException(status_code=404, detail="Target user not found")
 
+        # 1. Admin self-demotion protection: an admin cannot change their own role
+        if target["id"] == admin["id"] and req.role is not None and req.role != "admin":
+            raise HTTPException(status_code=400, detail="Cannot change your own role from admin")
+
+        # 2. Admin self-deactivation protection: an admin cannot deactivate their own account
+        if target["id"] == admin["id"] and req.is_active is False:
+            raise HTTPException(status_code=400, detail="Cannot deactivate your own admin account")
+
+        # 3. Last-admin protection: prevent any mutation from leaving zero active administrators.
+        target_is_active_admin = (target.get("role") == "admin" and bool(target.get("is_active")))
+        demoting_target = (req.role is not None and req.role != "admin")
+        deactivating_target = (req.is_active is False)
+        if target_is_active_admin and (demoting_target or deactivating_target):
+            other_active_admins = [u for u in active_admins if u["id"] != user_id]
+            if len(other_active_admins) == 0:
+                raise HTTPException(status_code=400, detail="Cannot demote or deactivate the last active administrator")
+
         updates = []
         params = []
         if req.role is not None:
-            if req.role not in ("admin", "trader", "viewer"):
-                raise HTTPException(status_code=400, detail="Invalid role")
             updates.append("role = %s")
             params.append(req.role)
 
         if req.is_active is not None:
-            # Prevent admin deactivating self
-            if target["id"] == admin["id"] and not req.is_active:
-                raise HTTPException(status_code=400, detail="Cannot deactivate your own admin account")
             updates.append("is_active = %s")
             params.append(1 if req.is_active else 0)
 
@@ -532,8 +626,25 @@ def update_user(user_id: int, req: UpdateUserRequest, admin: dict = Depends(requ
             {"target_user": target["username"], "target_id": user_id, "role": req.role, "is_active": req.is_active},
         )
         return {"status": "success", "message": f"User '{target['username']}' updated"}
+    except HTTPException:
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
+        raise
+    except Exception:
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
+        raise
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 @router.delete("/users/{user_id}")
@@ -544,10 +655,32 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
     conn = _get_required_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT username FROM users WHERE id = %s", (user_id,))
+        # Consistent serialization protocol: serialize deletion against the active-admin set.
+        # Acquire locks on all active administrator rows with SELECT ... FOR UPDATE
+        # in deterministic ascending ID order. Retain locks until commit/rollback.
+        if _test_before_admin_lock_hook is not None:
+            _test_before_admin_lock_hook(conn, cur, user_id)
+        cur.execute(
+            "SELECT id, username FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY id FOR UPDATE"
+        )
+        if _test_after_admin_lock_hook is not None:
+            _test_after_admin_lock_hook(conn, cur, user_id)
+        active_admins = cur.fetchall() or []
+        if _test_active_admin_filter is not None:
+            active_admins = [u for u in active_admins if _test_active_admin_filter(u)]
+
+        # Read the target state under lock
+        cur.execute("SELECT id, username, role, is_active FROM users WHERE id = %s FOR UPDATE", (user_id,))
         target = cur.fetchone()
         if not target:
             raise HTTPException(status_code=404, detail="User not found")
+
+        # Last-admin protection: cannot delete an active admin if no other active admin exists.
+        target_is_active_admin = (target.get("role") == "admin" and bool(target.get("is_active")))
+        if target_is_active_admin:
+            other_active_admins = [u for u in active_admins if u["id"] != user_id]
+            if len(other_active_admins) == 0:
+                raise HTTPException(status_code=400, detail="Cannot delete the last active administrator")
 
         cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
         _commit_with_audit(
@@ -556,5 +689,22 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
         )
         cur.close()
         return {"status": "success", "message": f"User '{target['username']}' deleted"}
+    except HTTPException:
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
+        raise
+    except Exception:
+        if conn is not None and not getattr(conn, "_rolled_back", False):
+            try:
+                conn.rollback()
+                setattr(conn, "_rolled_back", True)
+            except Exception:
+                pass
+        raise
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()

@@ -1,45 +1,50 @@
 # Signal Bot — Legacy to Modern UI Parity Inventory
 
-**Repository:** `kurnFR/signal-bot`  
-**Target:** Complete parity verification between the legacy dashboard (`web/static/`) and the modern React + TypeScript frontend (`frontend/src/`).  
-**Status:** COMPLETE (All 11 views, modals, and operational workflows verified)  
-**Date:** November 2026  
-**Reference:** [`docs/ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md`](ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md)  
+**Repository:** `kurnFR/signal-bot`
+**Target:** Complete parity verification between the legacy dashboard (`web/static/`) and the modern React + TypeScript frontend (`frontend/src/`).
+**Status:** AUDITED — Parity Rebuilt (6 Views Complete, 5 Views Partial with Read-Only Monitors, 0 Missing)
+**Date:** November 2026
+**Baseline Commit:** `53bd8713d20e3348a5d23d951737037e916ba67f` (Independent UI remediation review baseline)
+**Reviewed Implementation Baseline:** `32348c2042f0c8d028e98f977b4d224d3bc33a58` (PR #697 independent review baseline)
+**Previous Independently Reviewed Baseline:** `577544e4578ae46988a2cba96bcdc6338ba7b59f` (PR #697 acceptance blockers review)
+**Intermediate Remediation Commit:** `a72f81f34e1e9013e1b05e9bbdff751d6f6741f6` (Full 11-view browser acceptance & process termination)
+**Final Implementation Commit:** `98817a100bfe89e35237676f09c308c374ea0305` (Complete user profile contract, active-admin serialization, loopback staging identity, and final review remediation)
+**Reference:** [`docs/ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md`](ANTIGRAVITY_MODERN_UI_MIGRATION_PLAN.md), [`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md)
 
 ---
 
 ## 1. Executive Summary
 
-This document establishes the exhaustive feature-by-feature parity inventory between the legacy dashboard (`web/static/index.html`, `web/static/js/app.js`) and the modern React/TypeScript frontend (`frontend/src/`).
+This document establishes the feature-by-feature parity inventory between the legacy dashboard (`web/static/index.html`, `web/static/js/app.js`) and the modern React/TypeScript frontend (`frontend/src/`).
 
-Every view, sub-menu, interactive control, form, data table, modal dialog, and backend API contract has been inspected and mapped. The modern frontend preserves all authorized business operations while maintaining strict defense-in-depth role gating, safety confirmation workflows, and separation between research activities, paper execution, and Telegram notifications.
+In accordance with the workflow parity audit ([`docs/ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md`](ANTIGRAVITY_UI_PARITY_AUDIT_WORKSHEET.md)), views are audited at the individual workflow level. Modern preview views that operate as read-only monitors (e.g. Paper Trading, Research Bots, Wallet Tracking) are accurately designated as `PARTIAL` rather than overstated as 100% complete.
 
 ### Summary Metrics
 - **Navigation Views Audited:** 11 / 11 views mapped and verified.
-- **Interactive Modals & Dialogs:** 7 / 7 modals mapped and implemented with accessible dialog semantics.
+- **Workflow Parity Status:** 49 Workflows COMPLETE, 10 Specialized Mutations LEGACY_ONLY, 0 MISSING (59 Total).
+- **View-Level Breakdown:** 6 Views COMPLETE, 5 Views PARTIAL (Read-only monitoring complete; execution mutations intentionally legacy-only), 0 MISSING.
 - **Backend API Endpoints Covered:** 81 unique API method/path routes mapped across 13 FastAPI modules.
-- **Parity Status:** 11 Views COMPLETE, 0 MISSING, 0 UNAPPROVED REMOVALS.
-- **Automated Frontend Test Suite:** 30 test files, 202 unit/component tests passing (`npm test`).
-- **End-to-End Browser Tests:** 28 Playwright tests passing across Desktop Chrome, responsive mobile, tablet, and dark/light themes (`npx playwright test`).
-- **Backend Test Suite:** 1,087 unit/integration tests passing (`pytest`).
+- **Automated Frontend Test Suite:** 31 test files, 224 unit/component tests passing (`npm test`).
+- **End-to-End Browser Tests:** 28 Playwright tests passing across Desktop Chrome, responsive mobile, tablet, and dark/light themes (`npx playwright test`; 100% using mocked API routes).
+- **Backend Test Suite:** 1,115 unit/integration tests passing (`pytest`).
 
 ---
 
 ## 2. Navigation & View Mapping Matrix
 
-| # | Legacy Menu / View ID | Modern UI Navigation Label | Primary React Component | Status | Test Coverage |
+| # | Legacy Menu / View ID | Modern UI Navigation Label | Primary React Component | Status | Detailed Workflow Parity |
 |---|---|---|---|---|---|
-| 1 | `view-home` ("Home & Overview") | **Overview** | `SystemStatusPanel.tsx` | `COMPLETE` | `SystemStatusPanel.test.tsx`, `lib/systemStatus.test.ts`, Playwright |
-| 2 | `view-master-data` ("Master Data") | **Master Data** | `MasterDataPanel.tsx` | `COMPLETE` | `MasterDataPanel.test.tsx`, Playwright |
-| 3 | `view-backtest` ("Backtest Studio") | **Backtest Studio** | `BacktestStudioPanel.tsx` | `COMPLETE` | `BacktestStudioPanel.test.tsx`, `PromotionPolicyEditor.test.tsx`, Playwright |
-| 4 | `view-paper` ("Paper Trading") | **Paper Trading** | `PaperTradingPanel.tsx` | `COMPLETE` | `PaperTradingPanel.test.tsx`, `lib/paperTrading.test.ts`, Playwright |
-| 5 | `view-ml-studio` ("ML Forecast Studio") | **ML Studio** | `MLStudioPanel.tsx`, `MLGeneratorTrainingPanel.tsx` | `COMPLETE` | `MLStudioPanel.test.tsx`, `lib/mlStudio.test.ts`, Playwright |
-| 6 | `view-strategies` ("Strategy Library") | **Strategy Library** | `StrategyLibraryPanel.tsx` | `COMPLETE` | `StrategyLibraryPanel.test.tsx`, `lib/strategyLibrary.test.ts`, Playwright |
-| 7 | `view-news-ai` ("News AI Signals") | **News AI** | `NewsAIPanel.tsx` | `COMPLETE` | `NewsAIPanel.test.tsx`, `lib/news.test.ts`, Playwright |
-| 8 | `view-research` ("Research Bots") | **Research** | `ResearchPanel.tsx`, `PromotionStatusPanel.tsx` | `COMPLETE` | `ResearchPanel.test.tsx`, `lib/research.test.ts`, Playwright |
-| 9 | `view-market-screener` ("Market Screener") | **Market Screener** | `ScreenerPanel.tsx`, `ScreenerControlsPanel.tsx` | `COMPLETE` | `ScreenerPanel.test.tsx`, `ScreenerControlsPanel.test.tsx`, Playwright |
-| 10 | `view-wallet-tracking` ("Wallet Tracking") | **Wallet Tracking** | `WalletTrackingPanel.tsx` | `COMPLETE` | `WalletTrackingPanel.test.tsx`, Playwright |
-| 11 | `view-settings` ("Settings & Users") | **Settings** | `SettingsPanel.tsx`, `AuthGate.tsx` | `COMPLETE` | `SettingsPanel.test.tsx`, `AuthGate.test.tsx`, `lib/auth.test.ts`, Playwright |
+| 1 | `view-home` ("Home & Overview") | **Overview** | `SystemStatusPanel.tsx` | `COMPLETE` | Health KPIs, MariaDB pool status, collector threads, open positions count. |
+| 2 | `view-master-data` ("Master Data") | **Master Data** | `MasterDataPanel.tsx` | `COMPLETE` | Coverage inspector, backfill launch modal, feature build modal, jobs polling. |
+| 3 | `view-backtest` ("Backtest Studio") | **Backtest Studio** | `BacktestStudioPanel.tsx`, `PromotionPolicyEditor.tsx` | `COMPLETE` | Multi-factor backtest form, run execution, closed trades ledger, saved runs, auto-promotion policy. |
+| 4 | `view-paper` ("Paper Trading") | **Paper Trading** | `PaperTradingPanel.tsx` | `PARTIAL` | **Complete:** Positions, orders, performance, circuit breaker reads.<br>**Legacy Only:** Order cancellation, manual position close, deploy bot, trip/reset breaker. |
+| 5 | `view-ml-studio` ("ML Forecast Studio") | **ML Studio** | `MLStudioPanel.tsx`, `MLGeneratorTrainingPanel.tsx` | `PARTIAL` | **Complete:** Tournament results, model inspection, independent ML Signal Generator training.<br>**Legacy Only:** Battle royale tournament launch modal, deploy ML filter modal. |
+| 6 | `view-strategies` ("Strategy Library") | **Strategy Library** | `StrategyLibraryPanel.tsx` | `COMPLETE` | Strategy catalog, custom rule architect, quick-test simulation, AI draft generator, delete confirmation. |
+| 7 | `view-news-ai` ("News AI Signals") | **News AI** | `NewsAIPanel.tsx` | `COMPLETE` | Aggregate sentiment index, real-time news feed, macroeconomic calendar, sentiment trade signals. |
+| 8 | `view-research` ("Research Bots") | **Research** | `ResearchPanel.tsx`, `PromotionStatusPanel.tsx` | `PARTIAL` | **Complete:** RetailBot2 positions, trades, bot lifecycle state, stats.<br>**Legacy Only:** Lifecycle settings toggle, stop/hide bot. |
+| 9 | `view-market-screener` ("Market Screener") | **Market Screener** | `ScreenerPanel.tsx`, `ScreenerControlsPanel.tsx` | `COMPLETE` | Real-time multi-pair quantitative signals, worker pause/resume, threshold controls, Telegram alert gate. |
+| 10 | `view-wallet-tracking` ("Wallet Tracking") | **Wallet Tracking** | `WalletTrackingPanel.tsx` | `PARTIAL` | **Complete:** Tracked wallets table, token transfers feed, multi-chain filters, summary metrics.<br>**Legacy Only:** Track/untrack address mutations, wallet alert settings save. |
+| 11 | `view-settings` ("Settings & Users") | **Settings** | `SettingsPanel.tsx`, `AuthGate.tsx`, `lib/users.ts` | `COMPLETE` | Live user accounts catalog, create user, reset password, toggle active status, delete user, change password form, Telegram test ping (admin only), diagnostics. |
 
 ---
 
@@ -288,32 +293,42 @@ Every view, sub-menu, interactive control, form, data table, modal dialog, and b
 - **Components & Layout:**
   - Theme Selector: Instant toggle between Dark and Light mode, persisted in `localStorage`.
   - Session Profile: Username, Role badge, Session expiration indicator.
-  - Password Change Form: Current password, new password, confirm new password with length and match validation.
-  - User Management Table (Admin only): Username, Role, Created date, Must change password flag.
-  - Add User Modal (Admin only): Form with username, temporary password, role selector (`admin`, `trader`, `viewer`).
-  - Telegram Test Alert (Admin/Trader only): "Send Test Ping" with confirmation dialog.
+  - Self Password Change Form: Current password, new password, confirm new password with length and match validation (`POST /api/auth/change-password`).
+  - User Accounts Administration Table (Admin only): Live catalog displaying User ID, username, email, role badge, active status, creation timestamp, and action buttons (`GET /api/users`).
+  - Create User Form / Modal (Admin only): Interactive form with fields for username, email, password, and role selector (`trader`, `admin`, `viewer`) (`POST /api/users`).
+  - Password Reset Action (Admin only): Modal confirmation form accepting a new password (min 10 chars) submitted via `POST /api/users/{id}/reset-password`. The backend updates the password hash, increments `session_version` (revoking existing sessions), and sets `must_change_password = 1` requiring the user to change their password upon their next login.
+  - Toggle Active Status (Admin only): Instant enable/disable for accounts with self-disable and last-admin protections preventing administrator lockout (`PUT /api/users/{id}`).
+  - Delete User Action (Admin only): Two-step confirmation dialog with self-deletion and last-admin protections preventing an admin from deleting their own session or the system's last administrator (`DELETE /api/users/{id}`).
+  - Telegram Status & Test Alert: Telegram card displays configuration state. `GET /api/telegram/status` is accessible to all authenticated roles (admin receives `chatId`; trader/viewer receive `200 OK` with `chatId: null`). `POST /api/telegram/test` ("Send Test Ping") is strictly restricted to the `admin` role by explicit backend `require_admin` dependency and middleware enforcement, disallowing test message broadcasts from non-admins.
   - System Diagnostics Card (Admin only): CPU usage, Memory allocation, DB latency, MariaDB thread pool, version details. Sanitized against leaking environment variables or credentials.
   - Forced Password Change Modal (`AuthGate`): Appears immediately upon sign-in if `must_change_password` is `true`. Blocks dashboard navigation until updated.
 - **Interactive Controls:**
   - `Theme Toggle`: Updates UI theme and `data-theme` attribute.
   - `Change Password`: Calls `POST /api/auth/change-password`.
-  - `Create User`: Calls `POST /api/users`.
-  - `Send Test Ping`: Calls `POST /api/telegram/test`.
+  - `Create User`: Submits `POST /api/users`.
+  - `Reset Password`: Submits `POST /api/users/{id}/reset-password`.
+  - `Toggle Status`: Submits `PUT /api/users/{id}` (`is_active: boolean`).
+  - `Delete User`: Submits `DELETE /api/users/{id}`.
+  - `Send Test Ping`: Submits `POST /api/telegram/test` (Admin only).
   - `Sign Out`: Clears token and session storage, dispatches logout.
 - **API Contracts:**
   - `POST /api/auth/login`
   - `GET /api/auth/me`
   - `POST /api/auth/logout`
   - `POST /api/auth/change-password`
-  - `GET /api/users`
-  - `POST /api/users`
-  - `POST /api/telegram/test`
-  - `GET /api/settings/diagnostics`
+  - `GET /api/users` (Admin only)
+  - `POST /api/users` (Admin only)
+  - `POST /api/users/{id}/reset-password` (Admin only)
+  - `PUT /api/users/{id}` (Admin only)
+  - `DELETE /api/users/{id}` (Admin only)
+  - `GET /api/telegram/status` (Authenticated: admin receives `chatId`, trader/viewer receive `chatId: null`)
+  - `POST /api/telegram/test` (Admin only)
+  - `GET /api/settings/diagnostics` (Admin only)
 - **Roles & RBAC:**
-  - Viewer: Theme toggle, profile info, password change.
-  - Trader: Above plus Telegram test ping.
-  - Admin: Full access including user management and system diagnostics.
-- **Safety & Error Behavior:** Strict backend authentication enforcement; token auto-revocation on 401; password fields masked with input type `password`.
+  - Viewer: Theme toggle, profile info, own password change. (Telegram status returns masked `chatId: null`; no access to user management, system diagnostics, or Telegram test ping).
+  - Trader: Theme toggle, profile info, own password change. (Telegram status returns masked `chatId: null`; no access to user management, system diagnostics, or Telegram test ping).
+  - Admin: Full access including user administration (create, reset password, toggle active, delete), Telegram test ping, and system diagnostics.
+- **Safety & Error Behavior:** Strict backend authentication enforcement; token auto-revocation on 401; password fields masked with input type `password`; server-side guards against self-deletion, self-deactivation, self-demotion, and last-active-admin lockout.
 - **Status:** `COMPLETE`.
 
 ---
@@ -329,6 +344,9 @@ Every view, sub-menu, interactive control, form, data table, modal dialog, and b
 | 5 | `modal-run-ml` | `MLStudioPanel.tsx` | `COMPLETE` | Clear research-only label, no automatic paper or Telegram activation |
 | 6 | Strategy Quick Test Modal | `StrategyLibraryPanel.tsx` | `COMPLETE` | In-memory 1,000 candle simulation; no database writes |
 | 7 | Strategy Delete Confirmation | `StrategyLibraryPanel.tsx` | `COMPLETE` | Explicit name verification required before deletion |
+| 8 | User Delete Confirmation | `SettingsPanel.tsx` | `COMPLETE` | Accessible native HTML `<dialog>` modal; initial cancel focus, keyboard trap, Escape dismissal, focus restoration to trigger, prevents self-deletion |
+| 9 | Password Reset Confirmation | `SettingsPanel.tsx` | `COMPLETE` | Accessible native HTML `<dialog>` modal prompting administrator for new password (min 10 chars); input focus, keyboard trap, Escape dismissal, and focus restoration |
+| 10 | Telegram Test Ping Confirmation | `SettingsPanel.tsx` | `COMPLETE` | Accessible native HTML `<dialog>` modal confirming outbound broadcast; cancel focus, Escape dismissal without sending ping, and focus restoration |
 
 ---
 
@@ -338,25 +356,26 @@ All parity implementations have been validated through three comprehensive autom
 
 1. **Frontend Unit & Component Testing (`Vitest`):**
    - **Command:** `cd frontend && npm test -- --run`
-   - **Result:** 30 test files passed, 202 tests passed, 0 failed.
-   - **Coverage:** AuthGate, App, SystemStatus, Screener, ScreenerControls, PaperTrading, StrategyLibrary, WalletTracking, BacktestStudio, PromotionPolicy, MLStudio, MLGeneratorTraining, Research, NewsAI, MasterData, Settings.
+   - **Result:** 31 test files passed, 224 tests passed, 0 failed.
+   - **Coverage:** AuthGate, App, SystemStatus, Screener, ScreenerControls, PaperTrading, StrategyLibrary, WalletTracking, BacktestStudio, PromotionPolicy, MLStudio, MLGeneratorTraining, Research, NewsAI, MasterData, Settings, User Management client & UI.
 
 2. **Frontend Production Type-check & Build (`TypeScript + Vite`):**
    - **Command:** `cd frontend && npm run typecheck && npm run build`
-   - **Result:** TypeScript compile passed with zero errors (`tsc --noEmit`). Production bundle built in `frontend/dist/` (1,608 modules transformed).
+   - **Result:** TypeScript compile passed with zero errors (`tsc --noEmit`). Production bundle built in `frontend/dist/` (1,609 modules transformed).
 
 3. **End-to-End Browser Testing (`Playwright 1.64.1 Chromium`):**
    - **Command:** `cd frontend && npx playwright test`
-   - **Result:** 28 passed in 27.9s across all 11 views, mobile viewport (375px), tablet (768px), desktop (1440px), and dark/light themes.
+   - **Result:** 28 passed across all 11 views, mobile viewport (375px), tablet (768px), desktop (1440px), and dark/light themes.
+   - **Execution Boundary:** All 28 Playwright tests use deterministic client-side API route mocking via `page.route("**/api/**")`. They validate browser rendering, user interaction, accessibility, and client-side error states without executing live backend code or touching database records.
 
 4. **Backend Regression Testing (`pytest`):**
    - **Command:** `python3 -m pytest -q`
-   - **Result:** 1,087 passed, 18 skipped, 0 failed in 19.20s.
+   - **Result:** 1,115 passed, 18 skipped, 6 warnings, 0 failed.
 
 ---
 
-## 6. Conclusion & Recommendations
+## 6. Audit Conclusion & Reconciliation
 
-The legacy dashboard features have achieved 100% functional parity in the modern React application. All 11 navigation views, operational controls, form validations, data tables, and confirmation dialogs are implemented, role-gated, and verified by passing automated unit, component, browser, and backend regression test suites.
+The modern React application implements 49 complete workflows across 6 complete views and 5 partial views with complete read-only monitors. Ten specialized execution mutations remain legacy-only (order cancellation, manual position close, deploy bot, trip/reset circuit breaker, ML tournament launch, ML filter deploy, bot lifecycle settings toggle, bot stop/hide, wallet track/untrack, wallet settings save).
 
-The application is fully prepared for independent review and subsequent controlled cutover under the separate cutover plan.
+Full modern UI parity is **not** claimed while these ten specialized mutations remain legacy-only. The system operates in preview mode (`/modern`) alongside the authoritative default legacy dashboard (`/`), with production cutover remaining an explicitly approved, owner-led action.

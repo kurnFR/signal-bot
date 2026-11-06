@@ -74,6 +74,15 @@ class TestTelegramRouteContracts(unittest.TestCase):
         self.assertEqual(viewer.status_code, 403)
         test_helper.assert_not_called()
 
+    def test_unauthenticated_request_is_denied(self):
+        with patch("web.routes.telegram_routes.test_telegram_connection") as test_helper:
+            status = self.client.get("/api/telegram/status")
+            test = self.client.post("/api/telegram/test", json={})
+
+        self.assertEqual(status.status_code, 401)
+        self.assertEqual(test.status_code, 401)
+        test_helper.assert_not_called()
+
     def test_forced_password_change_blocks_telegram_status_and_test(self):
         with patch("web.routes.telegram_routes.get_telegram_config") as get_config, \
              patch("web.routes.telegram_routes.test_telegram_connection") as test_helper:

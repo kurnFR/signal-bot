@@ -17,3 +17,18 @@ Number.prototype.toLocaleString = function (locales?: string | string[], options
   return originalNumberToLocaleString.call(this, locales || "en-US", options);
 };
 
+// Polyfill HTMLDialogElement showModal and close for JSDOM
+if (typeof HTMLDialogElement !== "undefined") {
+  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+    this.open = true;
+    this.setAttribute("open", "");
+  };
+  HTMLDialogElement.prototype.close = function (this: HTMLDialogElement, returnValue?: string) {
+    this.open = false;
+    this.removeAttribute("open");
+    if (returnValue !== undefined) {
+      this.returnValue = returnValue;
+    }
+    this.dispatchEvent(new Event("close"));
+  };
+}

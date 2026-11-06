@@ -14,7 +14,7 @@ from web.app import app, _role_allowed
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 # Mutating endpoints every authenticated user (incl. viewer) legitimately needs.
 VIEWER_ALLOWED_MUTATIONS = {"/api/auth/logout", "/api/auth/change-password"}
-PUBLIC = {("POST", "/api/auth/login")}
+PUBLIC = {("POST", "/api/auth/login"), ("GET", "/api/system/test-identity")}
 
 
 def _collect_routes(routes):
@@ -156,6 +156,30 @@ class TestRouteAuthorizationSweep(unittest.TestCase):
             # Empty body reaches the handler's validation (422) instead of the 403 gate.
             res = self.client.post("/api/auth/change-password", json={})
             self.assertEqual(res.status_code, 422)
+
+    def test_test_identity_endpoint_security(self):
+        with patch.dict("os.environ", {}, clear=True):
+            res_unset = self.client.get("/api/system/test-identity")
+            self.assertEqual(res_unset.status_code, 404)
+
+        with patch.dict("os.environ", {"SIGNAL_BOT_TEST_RUN_ID": "test_run_sweep_123"}):
+            res_ok = self.client.get("/api/system/test-identity")
+            self.assertEqual(res_ok.status_code, 200)
+            data = res_ok.json()
+            self.assertEqual(data.get("status"), "ok")
+            self.assertEqual(data.get("run_id"), "test_run_sweep_123")
+            self.assertIsInstance(data.get("pid"), int)
+
+        with patch.dict("os.environ", {"SIGNAL_BOT_TEST_RUN_ID": "test_run_sweep_123"}):
+            with patch("starlette.requests.Request.client", new_callable=unittest.mock.PropertyMock) as mock_client:
+                mock_client.return_value = unittest.mock.Mock(host="192.168.1.100")
+                res_remote = self.client.get("/api/system/test-identity")
+                self.assertEqual(res_remote.status_code, 404)
+
+            with patch("starlette.requests.Request.client", new_callable=unittest.mock.PropertyMock) as mock_client:
+                mock_client.return_value = None
+                res_none = self.client.get("/api/system/test-identity")
+                self.assertEqual(res_none.status_code, 404)
 
 
 if __name__ == "__main__":
