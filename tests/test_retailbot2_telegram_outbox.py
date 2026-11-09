@@ -272,3 +272,18 @@ def test_disabled_trade_never_enqueues_entry_even_if_alert_payload_is_passed():
     assert len(cursor.calls) == 1
     assert "INSERT INTO rdt_telegram_outbox" not in cursor.calls[0][0]
     assert conn.commits == 1
+
+
+def test_claim_dead_letters_invalid_payload_instead_of_retrying_forever():
+    event = {
+        "id": 9, "trade_id": 19, "event_type": "entry",
+        "payload_json": "{not-json", "attempts": 0,
+    }
+    cursor = Cursor(event=event)
+    conn = Connection(cursor)
+    db = db_for(conn)
+
+    assert db.claim_telegram_outbox_event() is None
+    assert "SET status='dead'" in cursor.calls[3][0]
+    assert conn.commits == 1
+    assert conn.rollbacks == 0
