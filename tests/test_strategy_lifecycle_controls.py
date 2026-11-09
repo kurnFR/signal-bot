@@ -296,6 +296,8 @@ def test_legacy_open_trade_without_persisted_telegram_decision_fails_closed():
 
     bot._close_trade(7, 110.0, "target", "shadow")
 
+    bot.db.close_trade_and_update_stats.assert_called_once()
+    assert bot.db.close_trade_and_update_stats.call_args.kwargs["exit_alert"] is None
     bot.tg.send_exit.assert_not_called()
     assert 7 not in bot.active_shadow
     assert bot.equity_shadow == 1020.0
@@ -306,7 +308,11 @@ def test_exit_alert_uses_persisted_entry_promotion_decision():
 
     bot._close_trade(7, 110.0, "target", "shadow")
 
-    bot.tg.send_exit.assert_called_once()
+    bot.db.close_trade_and_update_stats.assert_called_once()
+    queued = bot.db.close_trade_and_update_stats.call_args.kwargs["exit_alert"]
+    assert queued["telegram_enabled"] is True
+    assert queued["trade"]["id"] == 7
+    bot.tg.send_exit.assert_not_called()
 
 
 def _bot_for_open_trade(settings):
@@ -375,10 +381,11 @@ def test_unpromoted_strategy_still_paper_trades_without_telegram_alert():
     bot.db.save_trade.assert_called_once()
     assert bot.db.save_trade.call_args.args[0]["telegram_enabled"] is False
     bot.tg.send_entry.assert_not_called()
+    assert bot.db.save_trade.call_args.kwargs["entry_alert"] is None
     assert 42 in bot.active_shadow
 
 
-def test_promoted_strategy_paper_trades_and_sends_telegram_entry():
+def test_promoted_strategy_paper_trades_and_queues_telegram_entry():
     bot = _bot_for_open_trade({"telegram_enabled": True})
 
     result = bot._open_trade(_sample_signal(), "shadow")
@@ -386,7 +393,10 @@ def test_promoted_strategy_paper_trades_and_sends_telegram_entry():
     assert result == 42
     bot.db.save_trade.assert_called_once()
     assert bot.db.save_trade.call_args.args[0]["telegram_enabled"] is True
-    bot.tg.send_entry.assert_called_once()
+    bot.tg.send_entry.assert_not_called()
+    queued = bot.db.save_trade.call_args.kwargs["entry_alert"]
+    assert queued["mode"] == "shadow"
+    assert queued["signal"]["symbol"] == "BTC/USDT"
     assert 42 in bot.active_shadow
 
 

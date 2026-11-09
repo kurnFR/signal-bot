@@ -307,7 +307,18 @@ class TelegramAlert:
                 self._last_send_time = time.time()
 
                 if resp.status_code == 200:
-                    return True
+                    try:
+                        response_data = resp.json()
+                    except Exception:
+                        response_data = {}
+                    if response_data.get('ok') is True:
+                        return True
+                    err_desc = response_data.get('description', 'Telegram response did not confirm success')
+                    self.logger.warning("Telegram returned HTTP 200 without ok=true: %s", err_desc)
+                    if attempt < retries:
+                        time.sleep(2 ** attempt)
+                        continue
+                    return False
 
                 # Parse error
                 try:
@@ -346,7 +357,11 @@ class TelegramAlert:
                             },
                             timeout=10,
                         )
-                        return plain_resp.status_code == 200
+                        try:
+                            plain_data = plain_resp.json()
+                        except Exception:
+                            plain_data = {}
+                        return plain_resp.status_code == 200 and plain_data.get('ok') is True
                     return False
 
                 elif resp.status_code == 401:
@@ -1128,7 +1143,7 @@ class DatabaseManager:
             raise RuntimeError("RetailBot2 database connection is unavailable")
         try:
             cur = conn.cursor(dictionary=True)
-            required_tables = ("rdt_trades", "rdt_strategy_stats", "bot_control", "rdt_strategy_lifecycle")
+            required_tables = ("rdt_trades", "rdt_strategy_stats", "bot_control", "rdt_strategy_lifecycle", "rdt_telegram_outbox")
             placeholders = ", ".join(["%s"] * len(required_tables))
             cur.execute(
                 f"""SELECT TABLE_NAME AS table_name
@@ -1244,7 +1259,7 @@ class DatabaseManager:
             self.logger.error(f"❌ DB conn error: {e}")
             return None
 
-    def save_trade(self, signal: Dict, units: float, mode: str) -> Optional[int]:
+    def save_trade(self, signal: Dict, units: float, mode: str, entry_alert: Optional[Dict] = None) -> Optional[int]:
         conn = self.get_conn()
         if not conn:
             return None
@@ -1268,10 +1283,22 @@ class DatabaseManager:
                 signal.get('candle_close_time', datetime.now(timezone.utc).replace(tzinfo=None)),
             ))
             tid = c.lastrowid
+            if bool(signal.get('telegram_enabled', False)) and entry_alert:
+                c.execute(
+                    """INSERT INTO rdt_telegram_outbox
+                       (event_key, trade_id, event_type, payload_json, status, attempts, next_attempt_at)
+                       VALUES (%s, %s, 'entry', %s, 'pending', 0, UTC_TIMESTAMP())
+                       ON DUPLICATE KEY UPDATE event_key=VALUES(event_key)""",
+                    (f"retailbot2:entry:{tid}", tid, json.dumps(entry_alert, default=str)),
+                )
             conn.commit()
             c.close()
             return tid
         except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             self.logger.error(f"❌ save_trade: {e}")
             return None
         finally:
@@ -1310,7 +1337,8 @@ class DatabaseManager:
 
     def close_trade_and_update_stats(
             self, trade_id: int, exit_price: float, reason: str,
-            pnl: float, pnl_pct: float, strategy: str, mode: str) -> bool:
+            pnl: float, pnl_pct: float, strategy: str, mode: str,
+            exit_alert: Optional[Dict] = None) -> bool:
         """Atomically close a trade and update its strategy statistics.
 
         Both writes use the same DB connection and transaction. No caller
@@ -1351,6 +1379,16 @@ class DatabaseManager:
                 1 if pnl > 0 else 0, 0 if pnl > 0 else 1, pnl,
             ))
 
+            if exit_alert and bool(exit_alert.get('telegram_enabled', False)):
+                payload = dict(exit_alert)
+                payload.pop('telegram_enabled', None)
+                cursor.execute(
+                    """INSERT INTO rdt_telegram_outbox
+                       (event_key, trade_id, event_type, payload_json, status, attempts, next_attempt_at)
+                       VALUES (%s, %s, 'exit', %s, 'pending', 0, UTC_TIMESTAMP())
+                       ON DUPLICATE KEY UPDATE event_key=VALUES(event_key)""",
+                    (f"retailbot2:exit:{trade_id}", trade_id, json.dumps(payload, default=str)),
+                )
             conn.commit()
             return True
         except Exception as e:
@@ -1537,6 +1575,120 @@ class DatabaseManager:
             self.logger.error(f"❌ get_last_trade_times: {e}")
             return {}
         finally:
+            conn.close()
+
+
+    def claim_telegram_outbox_event(self, lease_seconds: int = 90) -> Optional[Dict]:
+        """Atomically claim one due event; expired leases are recoverable after restart."""
+        conn = self.get_conn()
+        if not conn:
+            return None
+        cursor = None
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("START TRANSACTION")
+            # An expired final-attempt lease must not be sent again after a crash.
+            cursor.execute(
+                """UPDATE rdt_telegram_outbox
+                   SET status='dead', locked_until=NULL,
+                       last_error=COALESCE(last_error, 'delivery lease expired at max attempts')
+                   WHERE status='processing' AND locked_until <= UTC_TIMESTAMP()
+                     AND attempts >= 8"""
+            )
+            cursor.execute(
+                """SELECT id, trade_id, event_type, payload_json, attempts
+                   FROM rdt_telegram_outbox
+                   WHERE attempts < 8 AND (
+                       (status='pending' AND next_attempt_at <= UTC_TIMESTAMP())
+                       OR (status='processing' AND locked_until <= UTC_TIMESTAMP())
+                   )
+                   ORDER BY next_attempt_at, id LIMIT 1 FOR UPDATE"""
+            )
+            event = cursor.fetchone()
+            if not event:
+                conn.commit()
+                return None
+            try:
+                payload = json.loads(event.get('payload_json') or '{}')
+            except (TypeError, ValueError) as exc:
+                cursor.execute(
+                    """UPDATE rdt_telegram_outbox
+                       SET status='dead', locked_until=NULL, last_error=%s
+                       WHERE id=%s""",
+                    (f"invalid payload JSON: {exc}"[:1000], event['id']),
+                )
+                conn.commit()
+                return None
+            cursor.execute(
+                """UPDATE rdt_telegram_outbox
+                   SET status='processing', attempts=attempts+1,
+                       locked_until=DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s SECOND),
+                       last_error=NULL WHERE id=%s""",
+                (max(1, int(lease_seconds)), event['id']),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("outbox claim lost before update")
+            conn.commit()
+            event['attempts'] = int(event.get('attempts') or 0) + 1
+            event.pop('payload_json', None)
+            event['payload'] = payload
+            return event
+        except Exception as exc:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            self.logger.error("Telegram outbox claim failed: %s", exc)
+            return None
+        finally:
+            if cursor is not None:
+                cursor.close()
+            conn.close()
+
+    def mark_telegram_outbox_sent(self, event_id: int) -> bool:
+        return self._update_telegram_outbox(
+            """UPDATE rdt_telegram_outbox
+               SET status='sent', sent_at=UTC_TIMESTAMP(), locked_until=NULL,
+                   last_error=NULL WHERE id=%s AND status='processing'""",
+            (event_id,),
+        )
+
+    def retry_telegram_outbox_event(self, event_id: int, attempts: int, error: str,
+                                    max_attempts: int = 8) -> bool:
+        attempts = max(1, int(attempts))
+        dead = attempts >= max_attempts
+        delay = min(3600, 15 * (2 ** min(attempts - 1, 8)))
+        return self._update_telegram_outbox(
+            """UPDATE rdt_telegram_outbox
+               SET status=%s, next_attempt_at=DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s SECOND),
+                   locked_until=NULL, last_error=%s
+               WHERE id=%s AND status='processing'""",
+            ('dead' if dead else 'pending', delay, str(error)[:1000], event_id),
+        )
+
+    def _update_telegram_outbox(self, sql: str, params: tuple) -> bool:
+        conn = self.get_conn()
+        if not conn:
+            return False
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            if cursor.rowcount != 1:
+                conn.rollback()
+                return False
+            conn.commit()
+            return True
+        except Exception as exc:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            self.logger.error("Telegram outbox update failed: %s", exc)
+            return False
+        finally:
+            if cursor is not None:
+                cursor.close()
             conn.close()
 
 
@@ -1942,7 +2094,18 @@ class RetailDeathTrapBot:
         if units <= 0:
             return None
 
-        tid = self.db.save_trade(signal, units, mode)
+        risk_pct = self.config.risk_per_trade * 100
+        entry_alert = {
+            "signal": {
+                key: signal.get(key) for key in (
+                    "side", "symbol", "candle_close_time", "entry", "stop",
+                    "target", "rr", "strategies_triggered", "strategy",
+                    "confluence_score", "reason"
+                )
+            },
+            "units": units, "risk_amt": risk_amt, "risk_pct": risk_pct, "mode": mode,
+        } if lifecycle['telegram_enabled'] else None
+        tid = self.db.save_trade(signal, units, mode, entry_alert=entry_alert)
         if tid is None:
             return None
 
@@ -1970,9 +2133,6 @@ class RetailDeathTrapBot:
             self.last_trade_time[signal['symbol']] = {'shadow': {}, 'inverse': {}}
         self.last_trade_time[signal['symbol']][mode][strategy_id] = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        risk_pct = self.config.risk_per_trade * 100
-        if lifecycle['telegram_enabled']:
-            self.tg.send_entry(signal, tid, units, risk_amt, risk_pct, mode)
         self.logger.info(
             f"✅ [{mode.upper()}] #{tid} {signal['symbol']} {signal['side']} "
             f"| Entry: {signal['entry']:.4f} "
@@ -2000,9 +2160,14 @@ class RetailDeathTrapBot:
 
         # Persistence is the commit boundary. Do not mutate in-memory
         # equity or remove the active trade until both DB writes commit.
+        exit_alert = {
+            "trade": dict(trade), "exit_price": exit_price, "reason": reason,
+            "pnl": pnl, "pnl_pct": pnl_pct,
+            "telegram_enabled": bool(trade.get('telegram_enabled', False)),
+        } if trade.get('telegram_enabled', False) else None
         persisted = self.db.close_trade_and_update_stats(
             tid, exit_price, reason, pnl, pnl_pct,
-            trade['strategy'], mode
+            trade['strategy'], mode, exit_alert=exit_alert
         )
         if not persisted:
             self.logger.error(
@@ -2019,8 +2184,6 @@ class RetailDeathTrapBot:
 
         del active[tid]
 
-        if trade.get('telegram_enabled', False):
-            self.tg.send_exit(trade, exit_price, reason, pnl, pnl_pct)
         result_icon = "✅" if pnl > 0 else "❌"
         self.logger.info(
             f"🛑 [{mode.upper()}] #{tid} {trade['symbol']} closed: "
@@ -2173,6 +2336,48 @@ class RetailDeathTrapBot:
     # MAIN LOOP
     # ──────────────────────────────────────────────────────────────
 
+    def _dispatch_telegram_outbox(self, limit: int = 2):
+        """Deliver persisted events; delivery is at-least-once, not exactly-once."""
+        if not getattr(self.tg, "enabled", False):
+            return 0
+        delivered = 0
+        for _ in range(max(0, int(limit))):
+            event = self.db.claim_telegram_outbox_event()
+            if not event:
+                break
+            try:
+                payload = event.get("payload") or {}
+                if event.get("event_type") == "entry":
+                    signal = payload.get("signal") or {}
+                    signal.setdefault("candle_close_time", "N/A")
+                    ok = self.tg.send_entry(
+                        signal, int(event["trade_id"]), float(payload["units"]),
+                        float(payload["risk_amt"]), float(payload["risk_pct"]),
+                        str(payload["mode"]),
+                    )
+                elif event.get("event_type") == "exit":
+                    ok = self.tg.send_exit(
+                        payload.get("trade") or {}, float(payload["exit_price"]),
+                        str(payload["reason"]), float(payload["pnl"]),
+                        float(payload["pnl_pct"]),
+                    )
+                else:
+                    raise ValueError("unsupported RetailBot2 Telegram event type")
+                if ok:
+                    if self.db.mark_telegram_outbox_sent(int(event["id"])):
+                        delivered += 1
+                else:
+                    self.db.retry_telegram_outbox_event(
+                        int(event["id"]), int(event.get("attempts") or 1),
+                        "Telegram API did not confirm message delivery",
+                    )
+            except Exception as exc:
+                self.db.retry_telegram_outbox_event(
+                    int(event["id"]), int(event.get("attempts") or 1), str(exc),
+                )
+                self.logger.exception("RetailBot2 Telegram outbox dispatch failed")
+        return delivered
+
     def run(self):
         self.logger.info("🚀 Bot running — CTRL+C to stop")
         loop_count = 0
@@ -2186,6 +2391,7 @@ class RetailDeathTrapBot:
                 self.check_exits()
                 if self.trading_enabled:
                     self.scan()
+                self._dispatch_telegram_outbox()
 
                 # Heartbeat every 60s
                 hb_loops = self.config.heartbeat_interval // self.config.exit_check_interval
