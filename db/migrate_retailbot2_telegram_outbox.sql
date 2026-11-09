@@ -15,7 +15,5 @@ CREATE TABLE IF NOT EXISTS rdt_telegram_outbox (
     PRIMARY KEY (id),
     UNIQUE KEY uk_rdt_telegram_outbox_event (event_key),
     KEY idx_rdt_telegram_outbox_due (status, next_attempt_at, locked_until, id),
-    KEY idx_rdt_telegram_outbox_trade (trade_id),
-    CONSTRAINT chk_rdt_telegram_outbox_type CHECK (event_type IN ('entry', 'exit')),
-    CONSTRAINT chk_rdt_telegram_outbox_status CHECK (status IN ('pending', 'processing', 'sent', 'dead'))
+    KEY idx_rdt_telegram_outbox_trade (trade_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
