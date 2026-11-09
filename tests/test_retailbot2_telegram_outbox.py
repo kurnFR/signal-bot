@@ -149,8 +149,10 @@ def test_claim_event_uses_transaction_and_reclaims_expired_lease():
     assert claimed["id"] == 5
     assert claimed["attempts"] == 3
     assert claimed["payload"] == {"mode": "shadow"}
-    assert "FOR UPDATE" in cursor.calls[1][0]
-    assert "locked_until <= UTC_TIMESTAMP()" in cursor.calls[1][0]
+    assert "UPDATE rdt_telegram_outbox" in cursor.calls[1][0]
+    assert "attempts >= 8" in cursor.calls[1][0]
+    assert "FOR UPDATE" in cursor.calls[2][0]
+    assert "locked_until <= UTC_TIMESTAMP()" in cursor.calls[2][0]
     assert conn.commits == 1
     assert conn.rollbacks == 0
 
@@ -237,3 +239,36 @@ def test_telegram_send_requires_api_ok_true_even_when_http_200():
     with patch("paper.retailbot2.requests.post", return_value=response), \\
          patch("paper.retailbot2.time.sleep"):
         assert telegram.send("message", retries=0) is False
+
+
+def test_telegram_send_accepts_only_http_200_with_api_ok_true():
+    telegram = object.__new__(TelegramAlert)
+    telegram.enabled = True
+    telegram.base_url = "https://api.telegram.org/botTEST"
+    telegram.chat_id = "123"
+    telegram.logger = Mock()
+    telegram._last_send_time = 0.0
+    telegram._min_interval = 0.0
+
+    response = Mock(status_code=200)
+    response.json.return_value = {"ok": True, "result": {"message_id": 77}}
+    with patch("paper.retailbot2.requests.post", return_value=response):
+        assert telegram.send("message", retries=0) is True
+
+
+def test_disabled_trade_never_enqueues_entry_even_if_alert_payload_is_passed():
+    cursor = Cursor(lastrowid=321)
+    conn = Connection(cursor)
+    db = db_for(conn)
+    signal = {
+        "symbol": "BTC/USDT", "side": "LONG", "entry": 100.0,
+        "stop": 95.0, "target": 110.0, "atr": 2.0, "rr": 2.0,
+        "telegram_enabled": False,
+    }
+
+    assert db.save_trade(
+        signal, 2.0, "shadow", entry_alert={"signal": {"symbol": "BTC/USDT"}}
+    ) == 321
+    assert len(cursor.calls) == 1
+    assert "INSERT INTO rdt_telegram_outbox" not in cursor.calls[0][0]
+    assert conn.commits == 1
