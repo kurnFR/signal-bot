@@ -15,6 +15,7 @@ class TestRetailBot2MigrationManagedStartup(unittest.TestCase):
     def test_retailbot2_schema_migration_is_registered(self):
         versions = [migration.version for migration in MIGRATIONS]
         self.assertIn("022_retailbot2_runtime_schema", versions)
+        self.assertIn("026_retailbot2_telegram_outbox", versions)
 
     def test_web_lifespan_does_not_construct_schema_manager_or_run_ddl_helper(self):
         source = inspect.getsource(lifespan)
