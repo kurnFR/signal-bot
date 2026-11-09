@@ -34,6 +34,7 @@ class TestRetailBot2MigrationManagedStartup(unittest.TestCase):
             {"table_name": "rdt_strategy_stats"},
             {"table_name": "bot_control"},
             {"table_name": "rdt_strategy_lifecycle"},
+            {"table_name": "rdt_telegram_outbox"},
         ]
         cursor.fetchone.return_value = {"column_name": "telegram_enabled"}
         conn = Mock()
