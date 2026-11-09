@@ -4,8 +4,9 @@
  * Independently exercises and verifies the ten migrated Modern UI workflows
  * against a live FastAPI backend connected strictly to 'signal_bot_test'.
  *
- * Baseline tested commit: 4df758cedb507cdafccac1458082d02585084d4e
- * Master baseline: 927d41c1cef0d0810b670b5edc8130ed9f0941f7
+ * Original defect-discovery baseline: 4df758cedb507cdafccac1458082d02585084d4e
+ * Current master baseline: 4623e72c563f866854b3e6e599d7ff363b9ccc14
+ * PR: #704 (Branch: test/modern-ui-staging-acceptance)
  *
  * Safety & Isolation Guarantees:
  *   - Strictly connects to 'signal_bot_test'; refuses 'crypto_signals'.
@@ -279,8 +280,8 @@ async function run() {
   try {
     console.log(`\n======================================================================`);
     console.log(` MODERN UI STAGING ACCEPTANCE WORKFLOW SUITE`);
-    console.log(` Baseline Target: 4df758cedb507cdafccac1458082d02585084d4e`);
-    console.log(` Current Master:  927d41c1cef0d0810b670b5edc8130ed9f0941f7`);
+    console.log(` Defect Discovery Baseline: 4df758cedb507cdafccac1458082d02585084d4e`);
+    console.log(` Current Master Baseline:   4623e72c563f866854b3e6e599d7ff363b9ccc14`);
     console.log(` Target Database: ${TARGET_DB} (strictly isolated)`);
     console.log(` Port: ${STAGING_PORT} | Run ID: ${RUN_ID}`);
     console.log(`======================================================================\n`);
@@ -307,9 +308,13 @@ cur.execute("SELECT DATABASE() as active_db")
 active_db = cur.fetchone()["active_db"]
 assert active_db == "signal_bot_test", f"Database mismatch: {active_db}"
 
-# A. Read pre-existing emergency stop flag
-cur.execute("SELECT flag_name, is_active, reason FROM system_flags WHERE flag_name = 'emergency_stop'")
+# A. Read complete pre-existing emergency stop row
+cur.execute("SELECT * FROM system_flags WHERE flag_name = 'emergency_stop'")
 emergency_stop = cur.fetchone()
+if emergency_stop:
+    for k in list(emergency_stop.keys()):
+        if hasattr(emergency_stop[k], "isoformat"):
+            emergency_stop[k] = emergency_stop[k].isoformat()
 
 # B. Read all columns of pre-existing wallet_tracker_settings
 cur.execute("SELECT * FROM wallet_tracker_settings WHERE id = 1")
@@ -321,12 +326,20 @@ if wallet_settings:
         elif hasattr(wallet_settings[k], "__float__"):
             wallet_settings[k] = float(wallet_settings[k])
 
-# C. Read pre-existing lifecycle settings for test strategies
+# C. Read all columns of pre-existing lifecycle settings for test strategies
 cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
 rb03_row = cur.fetchone()
+if rb03_row:
+    for k in list(rb03_row.keys()):
+        if hasattr(rb03_row[k], "isoformat"):
+            rb03_row[k] = rb03_row[k].isoformat()
 
 cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
 rb04_row = cur.fetchone()
+if rb04_row:
+    for k in list(rb04_row.keys()):
+        if hasattr(rb04_row[k], "isoformat"):
+            rb04_row[k] = rb04_row[k].isoformat()
 
 # D. Seed run-unique users
 seeded_ids = []
@@ -746,93 +759,108 @@ print(json.dumps({"after_config": row}, default=str))
     console.log(`\n[=== PT-10: Circuit Breaker Trip and Reset ===]`);
     console.log(`  [1] Pre-test DB state: system_flags 'emergency_stop' = ${JSON.stringify(originalEmergencyStop)}.`);
 
-    // Ensure circuit breaker is ready for trip test
-    if (originalEmergencyStop && originalEmergencyStop.is_active === 1) {
-      console.log(`  [*] Note: Emergency stop flag was already active initially; will exercise trip & reset while strictly preserving original state.`);
-    }
+    if (!originalEmergencyStop) {
+      console.log(`  [!] Skipping PT-10: 'emergency_stop' row does not exist in system_flags; skipped to prevent creating untracked global state.`);
+      workflowResults["PT-10"] = {
+        classification: "SKIPPED_PRECONDITION",
+        reason: "Pre-existing 'emergency_stop' row missing in system_flags; skipped to prevent creating untracked global state.",
+        before: null,
+      };
+    } else if (originalEmergencyStop.is_active !== 0) {
+      console.log(`  [!] Skipping PT-10: emergency stop is already active (is_active=${originalEmergencyStop.is_active}); skipped to avoid mutating active emergency stop.`);
+      workflowResults["PT-10"] = {
+        classification: "SKIPPED_PRECONDITION",
+        reason: `Emergency stop already active in system_flags (is_active=${originalEmergencyStop.is_active}); skipped without clicking Trip or Reset.`,
+        before: originalEmergencyStop,
+      };
+    } else {
+      // Trip Emergency Stop via UI
+      const tripBtn = page.locator("button:has-text('Emergency Stop')").first();
+      await tripBtn.waitFor({ state: "visible", timeout: 8000 });
+      await tripBtn.click();
 
-    // Trip Emergency Stop via UI
-    const tripBtn = page.locator("button:has-text('Emergency Stop')").first();
-    await tripBtn.waitFor({ state: "visible", timeout: 8000 });
-    await tripBtn.click();
+      // Verify trip modal
+      await page.waitForSelector("#breaker-dialog-title", { timeout: 5000 });
+      await page.screenshot({ path: path.join(SCREENSHOT_DIR, "pt10_trip_modal.png") });
 
-    // Verify trip modal
-    await page.waitForSelector("#breaker-dialog-title", { timeout: 5000 });
-    await page.screenshot({ path: path.join(SCREENSHOT_DIR, "pt10_trip_modal.png") });
+      // Confirm trip
+      await page.locator("button:has-text('Trigger Emergency Stop')").first().click();
 
-    // Confirm trip
-    await page.locator("button:has-text('Trigger Emergency Stop')").first().click();
+      // Verify feedback
+      await page.waitForSelector(".control-feedback.control-warning, .control-feedback.control-success", { timeout: 8000 });
+      const tripFeedback = await page.locator(".control-feedback").first().innerText();
+      assert(tripFeedback.includes("Emergency stop activated"), `Unexpected feedback: ${tripFeedback}`);
+      await page.screenshot({ path: path.join(SCREENSHOT_DIR, "pt10_circuit_breaker_tripped.png") });
+      console.log(`  [2] Circuit breaker tripped via UI: "${tripFeedback.trim()}".`);
 
-    // Verify feedback
-    await page.waitForSelector(".control-feedback.control-warning, .control-feedback.control-success", { timeout: 8000 });
-    const tripFeedback = await page.locator(".control-feedback").first().innerText();
-    assert(tripFeedback.includes("Emergency stop activated"), `Unexpected feedback: ${tripFeedback}`);
-    await page.screenshot({ path: path.join(SCREENSHOT_DIR, "pt10_circuit_breaker_tripped.png") });
-    console.log(`  [2] Circuit breaker tripped via UI: "${tripFeedback.trim()}".`);
-
-    // Verify tripped DB state
-    const pt10TripScript = `
+      // Verify tripped DB state
+      const pt10TripScript = `
 import json, sys, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("SELECT flag_name, is_active, reason FROM system_flags WHERE flag_name = 'emergency_stop'")
+cur.execute("SELECT * FROM system_flags WHERE flag_name = 'emergency_stop'")
 tripped_state = cur.fetchone()
+if tripped_state and hasattr(tripped_state.get("updated_at"), "isoformat"):
+    tripped_state["updated_at"] = tripped_state["updated_at"].isoformat()
 cur.close(); conn.close()
 print(json.dumps({"tripped_state": tripped_state}, default=str))
 `;
-    const pt10TripRes = await runPythonHelper(pt10TripScript);
-    assert(pt10TripRes.tripped_state && pt10TripRes.tripped_state.is_active === 1, `Expected is_active=1, got: ${JSON.stringify(pt10TripRes.tripped_state)}`);
-    console.log(`  [3] Database persistence verified: system_flags is_active = 1.`);
+      const pt10TripRes = await runPythonHelper(pt10TripScript);
+      assert(pt10TripRes.tripped_state && pt10TripRes.tripped_state.is_active === 1, `Expected is_active=1, got: ${JSON.stringify(pt10TripRes.tripped_state)}`);
+      console.log(`  [3] Database persistence verified: system_flags is_active = 1.`);
 
-    // Reset Circuit Breaker via UI
-    const resetBtn = page.locator("button:has-text('Reset Circuit Breaker')").first();
-    await resetBtn.waitFor({ state: "visible", timeout: 8000 });
-    await resetBtn.click();
+      // Reset Circuit Breaker via UI
+      const resetBtn = page.locator("button:has-text('Reset Circuit Breaker')").first();
+      await resetBtn.waitFor({ state: "visible", timeout: 8000 });
+      await resetBtn.click();
 
-    // Verify reset modal
-    await page.waitForSelector("#breaker-dialog-title", { timeout: 5000 });
-    await page.screenshot({ path: path.join(SCREENSHOT_DIR, "pt10_reset_modal.png") });
+      // Verify reset modal
+      await page.waitForSelector("#breaker-dialog-title", { timeout: 5000 });
+      await page.screenshot({ path: path.join(SCREENSHOT_DIR, "pt10_reset_modal.png") });
 
-    // Confirm reset
-    await page.locator("button:has-text('Reset Breaker')").first().click();
+      // Confirm reset
+      await page.locator("button:has-text('Reset Breaker')").first().click();
 
-    // Verify reset feedback
-    await page.waitForSelector(".control-feedback.control-success", { timeout: 8000 });
-    const resetFeedback = await page.locator(".control-feedback.control-success").first().innerText();
-    assert(resetFeedback.includes("Circuit breaker reset"), `Unexpected feedback: ${resetFeedback}`);
-    await page.screenshot({ path: path.join(SCREENSHOT_DIR, "pt10_circuit_breaker_reset.png") });
-    console.log(`  [4] Circuit breaker reset via UI: "${resetFeedback.trim()}".`);
+      // Verify reset feedback
+      await page.waitForSelector(".control-feedback.control-success", { timeout: 8000 });
+      const resetFeedback = await page.locator(".control-feedback.control-success").first().innerText();
+      assert(resetFeedback.includes("Circuit breaker reset"), `Unexpected feedback: ${resetFeedback}`);
+      await page.screenshot({ path: path.join(SCREENSHOT_DIR, "pt10_circuit_breaker_reset.png") });
+      console.log(`  [4] Circuit breaker reset via UI: "${resetFeedback.trim()}".`);
 
-    // Verify reset DB state
-    const pt10ResetScript = `
+      // Verify reset DB state
+      const pt10ResetScript = `
 import json, sys, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("SELECT flag_name, is_active, reason FROM system_flags WHERE flag_name = 'emergency_stop'")
+cur.execute("SELECT * FROM system_flags WHERE flag_name = 'emergency_stop'")
 reset_state = cur.fetchone()
+if reset_state and hasattr(reset_state.get("updated_at"), "isoformat"):
+    reset_state["updated_at"] = reset_state["updated_at"].isoformat()
 cur.close(); conn.close()
 print(json.dumps({"reset_state": reset_state}, default=str))
 `;
-    const pt10ResetRes = await runPythonHelper(pt10ResetScript);
-    assert(pt10ResetRes.reset_state && pt10ResetRes.reset_state.is_active === 0, `Expected is_active=0, got: ${JSON.stringify(pt10ResetRes.reset_state)}`);
-    console.log(`  [5] Database persistence verified: system_flags is_active = 0.`);
+      const pt10ResetRes = await runPythonHelper(pt10ResetScript);
+      assert(pt10ResetRes.reset_state && pt10ResetRes.reset_state.is_active === 0, `Expected is_active=0, got: ${JSON.stringify(pt10ResetRes.reset_state)}`);
+      console.log(`  [5] Database persistence verified: system_flags is_active = 0.`);
 
-    // RBAC check: Viewer denied 403 on exact frontend endpoints POST /api/paper/circuit-breakers/emergency-stop and /reset
-    const viewerTripRes = await apiRequest("POST", "/api/paper/circuit-breakers/emergency-stop?reason=test", viewerToken);
-    assert(viewerTripRes.status === 403, `Viewer trip must return 403, got: ${viewerTripRes.status}`);
-    const viewerResetRes = await apiRequest("POST", "/api/paper/circuit-breakers/reset", viewerToken);
-    assert(viewerResetRes.status === 403, `Viewer reset must return 403, got: ${viewerResetRes.status}`);
-    console.log(`  [6] RBAC contract verified: Viewer rejected with HTTP 403 Forbidden on exact frontend circuit breaker endpoints.`);
+      // RBAC check: Viewer denied 403 on exact frontend endpoints POST /api/paper/circuit-breakers/emergency-stop and /reset
+      const viewerTripRes = await apiRequest("POST", "/api/paper/circuit-breakers/emergency-stop?reason=test", viewerToken);
+      assert(viewerTripRes.status === 403, `Viewer trip must return 403, got: ${viewerTripRes.status}`);
+      const viewerResetRes = await apiRequest("POST", "/api/paper/circuit-breakers/reset", viewerToken);
+      assert(viewerResetRes.status === 403, `Viewer reset must return 403, got: ${viewerResetRes.status}`);
+      console.log(`  [6] RBAC contract verified: Viewer rejected with HTTP 403 Forbidden on exact frontend circuit breaker endpoints.`);
 
-    workflowResults["PT-10"] = {
-      classification: "BROWSER_E2E_VERIFIED",
-      before: originalEmergencyStop,
-      tripped: pt10TripRes.tripped_state,
-      after: pt10ResetRes.reset_state,
-      rbac: "Viewer 403 Verified (POST /api/paper/circuit-breakers/...)",
-    };
+      workflowResults["PT-10"] = {
+        classification: "BROWSER_E2E_VERIFIED",
+        before: originalEmergencyStop,
+        tripped: pt10TripRes.tripped_state,
+        after: pt10ResetRes.reset_state,
+        rbac: "Viewer 403 Verified (POST /api/paper/circuit-breakers/emergency-stop and /reset)",
+      };
+    }
 
     // =================================================================
     // WORKFLOW 5: ML-03 — Launch Battle Royale Tournament
@@ -843,13 +871,18 @@ print(json.dumps({"reset_state": reset_state}, default=str))
     await page.locator("button:has-text('ML Studio')").first().click();
     await page.waitForSelector(".ml-studio-view", { timeout: 8000 });
 
-    // Check for baseline ML Studio loading status (with retraining_registry.json present)
-    const errorBanner = page.locator(".api-error");
-    if (await errorBanner.isVisible()) {
-      const errText = await errorBanner.innerText();
-      console.log(`  [*] Known baseline application finding detected in ML Studio: "${errText.trim()}".`);
-      await page.screenshot({ path: path.join(SCREENSHOT_DIR, "ml03_baseline_manifest_glob_defect.png") });
-    }
+    // Open Tournament modal in browser
+    const launchTourneyBtn = page.locator("button:has-text('Launch tournament')").first();
+    await launchTourneyBtn.waitFor({ state: "visible", timeout: 8000 });
+    await launchTourneyBtn.click();
+
+    // Verify tournament modal rendered
+    await page.waitForSelector("#tournament-modal-title", { timeout: 5000 });
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, "ml03_tournament_modal.png") });
+    console.log(`  [1] Battle Royale tournament modal opened and captured.`);
+
+    // Close dialog
+    await page.locator("dialog[open] button:has-text('Cancel')").first().click();
 
     // Direct API contract verification for ML-03 (POST /api/ml/run-experiment)
     console.log(`  [*] Testing tournament execution API contract (POST /api/ml/run-experiment)...`);
@@ -863,7 +896,7 @@ print(json.dumps({"reset_state": reset_state}, default=str))
       min_validation_trades: 10,
     };
     const experimentRes = await apiRequest("POST", "/api/ml/run-experiment", traderToken, tournamentPayload);
-    // On empty OHLCV dataset in test DB, server raises RuntimeError (500)
+    // On empty OHLCV dataset in test DB, server raises handled error (500)
     console.log(`  [*] Direct API response status: HTTP ${experimentRes.status}.`);
 
     // RBAC check: Viewer denied 403 on exact frontend endpoint POST /api/ml/run-experiment
@@ -873,7 +906,7 @@ print(json.dumps({"reset_state": reset_state}, default=str))
 
     workflowResults["ML-03"] = {
       classification: "API_CONTRACT_ONLY / RBAC_ONLY",
-      boundaryReason: "Full model training execution bypassed on empty staging database to prevent worker starvation and CPU exhaustion. Handled error response observed; RBAC strictly verified with Viewer 403.",
+      boundaryReason: "Full model training execution bypassed on empty staging database to prevent worker starvation and CPU exhaustion. Modal rendering and handled API error response observed; RBAC strictly verified with Viewer 403.",
       rbac: "Viewer 403 Verified (POST /api/ml/run-experiment)",
     };
 
@@ -1284,66 +1317,46 @@ print(json.dumps({"untracked_row": row}, default=str))
     await page.locator("#s-poll").fill("350");
     await page.locator("#s-birdeye-key").fill(wt05TestKey);
 
-    // Check HTML5 stepMismatch constraint on baseline without injecting noValidate
-    const stepMismatch = await page.locator("#s-min-trade").evaluate((el) => el.validity.stepMismatch);
-    let browserSubmitted = false;
+    // Assert native HTML5 validity state on all inputs (validating PR #703 min=0 fix)
+    const tradeValid = await page.locator("#s-min-trade").evaluate((el) => el.validity.valid);
+    const netValid = await page.locator("#s-min-net").evaluate((el) => el.validity.valid);
+    const autoTrackValid = await page.locator("#s-auto-track").evaluate((el) => el.validity.valid);
+    const pollValid = await page.locator("#s-poll").evaluate((el) => el.validity.valid);
+    assert(tradeValid && netValid && autoTrackValid && pollValid, "HTML5 native validity checks failed on form inputs");
+    console.log(`  [*] Native browser form validation passed: all input fields are valid without bypass.`);
 
-    if (stepMismatch) {
-      console.log(`  [*] Known baseline application finding detected: HTML5 stepMismatch on #s-min-trade (min=1, step=100 blocks value '16500').`);
-      console.log(`      Remediation implemented in separate PR #703 (fix/wallet-settings-html5-validation).`);
-      await page.screenshot({ path: path.join(SCREENSHOT_DIR, "wt05_baseline_step_mismatch_defect.png") });
-      await page.locator("dialog[open] button:has-text('Cancel')").first().click();
-    } else {
-      // If remediated, submit through normal browser click
-      console.log(`  [*] Submitting settings form via native browser click...`);
-      await page.locator("dialog[open] button[type='submit']").first().click();
-      await page.waitForSelector(".api-success", { timeout: 8000 });
-      const wt05Feedback = await page.locator(".api-success").innerText();
-      assert(wt05Feedback.includes("Wallet tracker settings updated successfully"), `Unexpected feedback: ${wt05Feedback}`);
-      await page.screenshot({ path: path.join(SCREENSHOT_DIR, "wt05_settings_saved.png") });
-      browserSubmitted = true;
-      console.log(`  [2] UI feedback verified: "${wt05Feedback.trim()}".`);
-    }
+    // Submit settings form via native browser click
+    console.log(`  [*] Submitting settings form via native browser click...`);
+    await page.locator("dialog[open] button[type='submit']").first().click();
+    await page.waitForSelector(".api-success", { timeout: 8000 });
+    const wt05Feedback = await page.locator(".api-success").innerText();
+    assert(wt05Feedback.includes("Wallet tracker settings updated successfully"), `Unexpected feedback: ${wt05Feedback}`);
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, "wt05_settings_saved.png") });
+    console.log(`  [2] UI feedback verified: "${wt05Feedback.trim()}".`);
 
-    // Direct API mutation & persistence verification (PUT /api/wallets/settings)
-    console.log(`  [*] Exercising direct API contract for persistence and credential masking...`);
-    const saveApiRes = await apiRequest("PUT", "/api/wallets/settings", traderToken, {
-      enabled: true,
-      networks: ["eth"],
-      pools_per_network: 4,
-      min_trade_usd: 16500.0,
-      min_net_usd: 180000.0,
-      auto_track_net_usd: 550000.0,
-      poll_interval_seconds: 350,
-      retention_days: 8,
-      api_delay_seconds: 4.0,
-      token_mode: "all",
-      token_addresses: [],
-      birdeye_api_key: wt05TestKey,
-    });
-    assert(saveApiRes.status === 200, `Settings PUT failed: ${saveApiRes.status}`);
-
-    // Verify DB persistence of modified fields
+    // Verify DB persistence directly from the browser submission
     const wt05VerifyScript = `
 import json, sys, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("SELECT id, enabled, networks, min_trade_usd, min_net_usd, auto_track_net_usd, poll_interval_seconds, birdeye_api_key FROM wallet_tracker_settings WHERE id = 1")
+cur.execute("SELECT id, enabled, networks, pools_per_network, min_trade_usd, min_net_usd, auto_track_net_usd, poll_interval_seconds, retention_days, api_delay_seconds, token_mode, token_addresses, birdeye_api_key FROM wallet_tracker_settings WHERE id = 1")
 row = cur.fetchone()
-if row and hasattr(row.get("min_trade_usd"), "__float__"):
-    row["min_trade_usd"] = float(row["min_trade_usd"])
-if row and hasattr(row.get("min_net_usd"), "__float__"):
-    row["min_net_usd"] = float(row["min_net_usd"])
-if row and hasattr(row.get("auto_track_net_usd"), "__float__"):
-    row["auto_track_net_usd"] = float(row["auto_track_net_usd"])
+if row:
+    for k in ["min_trade_usd", "min_net_usd", "auto_track_net_usd", "api_delay_seconds"]:
+        if hasattr(row.get(k), "__float__"):
+            row[k] = float(row[k])
 cur.close(); conn.close()
 print(json.dumps({"settings": row}, default=str))
 `;
     const wt05VerifyRes = await runPythonHelper(wt05VerifyScript);
-    assert(wt05VerifyRes.settings && wt05VerifyRes.settings.min_trade_usd === 16500.0, `Min trade USD mismatch: ${wt05VerifyRes.settings.min_trade_usd}`);
+    assert(wt05VerifyRes.settings, "wallet_tracker_settings row 1 missing");
+    assert(wt05VerifyRes.settings.min_trade_usd === 16500.0, `Min trade USD mismatch: ${wt05VerifyRes.settings.min_trade_usd}`);
+    assert(wt05VerifyRes.settings.min_net_usd === 180000.0, `Min net USD mismatch: ${wt05VerifyRes.settings.min_net_usd}`);
+    assert(wt05VerifyRes.settings.auto_track_net_usd === 550000.0, `Auto track USD mismatch: ${wt05VerifyRes.settings.auto_track_net_usd}`);
     assert(wt05VerifyRes.settings.poll_interval_seconds === 350, `Poll interval mismatch: ${wt05VerifyRes.settings.poll_interval_seconds}`);
-    console.log(`  [3] Database persistence verified: min_trade_usd = 16,500, poll_interval = 350s.`);
+    assert(wt05VerifyRes.settings.birdeye_api_key === wt05TestKey, "Birdeye API key mismatch in DB");
+    console.log(`  [3] Database persistence verified directly from browser submission: min_trade=16,500, poll=350s, birdeye_api_key persisted.`);
 
     // Read back via API to verify credential masking
     const readSettingsRes = await apiRequest("GET", "/api/wallets/settings", traderToken);
@@ -1358,8 +1371,8 @@ print(json.dumps({"settings": row}, default=str))
     console.log(`  [5] RBAC contract verified: Viewer rejected with HTTP 403 Forbidden on exact frontend endpoint.`);
 
     workflowResults["WT-05"] = {
-      classification: browserSubmitted ? "BROWSER_E2E_VERIFIED" : "API_PERSISTENCE_VERIFIED",
-      browserStatus: browserSubmitted ? "Verified" : "Gated on baseline by HTML5 stepMismatch defect (remediated in PR #703)",
+      classification: "BROWSER_E2E_VERIFIED",
+      browserStatus: "Verified via native browser click (HTML5 min=0 validated)",
       before: originalWalletSettings,
       after: {
         db: { ...wt05VerifyRes.settings, birdeye_api_key: "[REDACTED]" },
@@ -1482,15 +1495,21 @@ except Exception as e:
 # 7. Restore system_flags emergency_stop to exact pre-test state
 try:
     init_flag = payload["init_emergency_stop"]
-    if init_flag:
+    if init_flag is None:
+        cur.execute("DELETE FROM system_flags WHERE flag_name = 'emergency_stop'")
+        cur.execute("SELECT flag_name FROM system_flags WHERE flag_name = 'emergency_stop'")
+        assert cur.fetchone() is None, "Emergency stop row should not exist after cleanup"
+    else:
         cur.execute(
             "UPDATE system_flags SET is_active = %s, reason = %s WHERE flag_name = 'emergency_stop'",
             (init_flag["is_active"], init_flag["reason"])
         )
-        cur.execute("SELECT flag_name, is_active, reason FROM system_flags WHERE flag_name = 'emergency_stop'")
+        cur.execute("SELECT * FROM system_flags WHERE flag_name = 'emergency_stop'")
         verified_flag = cur.fetchone()
+        assert verified_flag is not None, "Emergency stop row missing after restore"
+        assert verified_flag["flag_name"] == init_flag["flag_name"], "Emergency stop flag_name mismatch"
         assert verified_flag["is_active"] == init_flag["is_active"], "Emergency stop is_active not restored"
-        assert verified_flag["reason"] == init_flag["reason"], "Emergency stop reason not restored"
+        assert (verified_flag["reason"] or "") == (init_flag["reason"] or ""), "Emergency stop reason not restored"
     results["circuitBreaker"] = True
 except Exception as e:
     results["circuitBreaker"] = False
@@ -1502,23 +1521,39 @@ try:
     orig_rb03 = payload["orig_rb03_row"]
     if orig_rb03 is None:
         cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
+        cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
+        assert cur.fetchone() is None, "RSI_CTR/shadow should not exist after cleanup"
     else:
         cur.execute('''
             UPDATE rdt_strategy_lifecycle
             SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s
             WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'
         ''', (orig_rb03["evaluation_enabled"], orig_rb03["paper_enabled"], orig_rb03["telegram_enabled"], orig_rb03["report_enabled"], orig_rb03["auto_promote_enabled"]))
+        assert cur.rowcount >= 0, "Failed to update pre-existing RSI_CTR row"
+        cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
+        rb03_after = cur.fetchone()
+        assert rb03_after is not None, "RSI_CTR/shadow missing after restore"
+        for col in ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled"]:
+            assert rb03_after[col] == orig_rb03[col], f"RSI_CTR {col} mismatch: {rb03_after[col]} vs {orig_rb03[col]}"
 
     # RB-04
     orig_rb04 = payload["orig_rb04_row"]
     if orig_rb04 is None:
         cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
+        cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
+        assert cur.fetchone() is None, "DBL_PAT_INV/inverse should not exist after cleanup"
     else:
         cur.execute('''
             UPDATE rdt_strategy_lifecycle
             SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s
             WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'
         ''', (orig_rb04["evaluation_enabled"], orig_rb04["paper_enabled"], orig_rb04["telegram_enabled"], orig_rb04["report_enabled"], orig_rb04["auto_promote_enabled"]))
+        assert cur.rowcount >= 0, "Failed to update pre-existing DBL_PAT_INV row"
+        cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
+        rb04_after = cur.fetchone()
+        assert rb04_after is not None, "DBL_PAT_INV/inverse missing after restore"
+        for col in ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled"]:
+            assert rb04_after[col] == orig_rb04[col], f"DBL_PAT_INV {col} mismatch: {rb04_after[col]} vs {orig_rb04[col]}"
 
     conn.commit()
     results["lifecycle"] = True
@@ -1529,7 +1564,11 @@ except Exception as e:
 # 9. Restore ALL columns of wallet_tracker_settings (id=1)
 try:
     init_s = payload["init_wallet_settings"]
-    if init_s:
+    if init_s is None:
+        cur.execute("DELETE FROM wallet_tracker_settings WHERE id = 1")
+        cur.execute("SELECT id FROM wallet_tracker_settings WHERE id = 1")
+        assert cur.fetchone() is None, "wallet_tracker_settings row 1 should not exist after cleanup"
+    else:
         cur.execute('''
             UPDATE wallet_tracker_settings
             SET enabled=%s, networks=%s, pools_per_network=%s, min_trade_usd=%s, min_net_usd=%s,
@@ -1544,15 +1583,22 @@ try:
         ))
         conn.commit()
 
-        # Read back and assert all fields restored
+        # Read back and assert all 12 columns restored
         cur.execute("SELECT * FROM wallet_tracker_settings WHERE id = 1")
         verified_s = cur.fetchone()
-        assert verified_s["enabled"] == init_s["enabled"], "wallet_tracker_settings.enabled mismatch"
-        assert verified_s["poll_interval_seconds"] == init_s["poll_interval_seconds"], "poll_interval mismatch"
-        assert float(verified_s["min_trade_usd"]) == float(init_s["min_trade_usd"]), "min_trade_usd mismatch"
-        assert float(verified_s["min_net_usd"]) == float(init_s["min_net_usd"]), "min_net_usd mismatch"
-        assert float(verified_s["auto_track_net_usd"]) == float(init_s["auto_track_net_usd"]), "auto_track_net_usd mismatch"
-        assert verified_s["birdeye_api_key"] == init_s["birdeye_api_key"], "birdeye_api_key mismatch"
+        assert verified_s is not None, "wallet_tracker_settings row 1 missing after restore"
+        assert verified_s["enabled"] == init_s["enabled"], f"enabled mismatch: {verified_s['enabled']} vs {init_s['enabled']}"
+        assert verified_s["networks"] == init_s["networks"], f"networks mismatch: {verified_s['networks']} vs {init_s['networks']}"
+        assert verified_s["pools_per_network"] == init_s["pools_per_network"], f"pools_per_network mismatch: {verified_s['pools_per_network']} vs {init_s['pools_per_network']}"
+        assert float(verified_s["min_trade_usd"]) == float(init_s["min_trade_usd"]), f"min_trade_usd mismatch: {verified_s['min_trade_usd']} vs {init_s['min_trade_usd']}"
+        assert float(verified_s["min_net_usd"]) == float(init_s["min_net_usd"]), f"min_net_usd mismatch: {verified_s['min_net_usd']} vs {init_s['min_net_usd']}"
+        assert float(verified_s["auto_track_net_usd"]) == float(init_s["auto_track_net_usd"]), f"auto_track_net_usd mismatch: {verified_s['auto_track_net_usd']} vs {init_s['auto_track_net_usd']}"
+        assert verified_s["poll_interval_seconds"] == init_s["poll_interval_seconds"], f"poll_interval_seconds mismatch: {verified_s['poll_interval_seconds']} vs {init_s['poll_interval_seconds']}"
+        assert verified_s["retention_days"] == init_s["retention_days"], f"retention_days mismatch: {verified_s['retention_days']} vs {init_s['retention_days']}"
+        assert float(verified_s["api_delay_seconds"]) == float(init_s["api_delay_seconds"]), f"api_delay_seconds mismatch: {verified_s['api_delay_seconds']} vs {init_s['api_delay_seconds']}"
+        assert verified_s["token_mode"] == init_s["token_mode"], f"token_mode mismatch: {verified_s['token_mode']} vs {init_s['token_mode']}"
+        assert (verified_s["token_addresses"] or "") == (init_s["token_addresses"] or ""), f"token_addresses mismatch: {verified_s['token_addresses']} vs {init_s['token_addresses']}"
+        assert (verified_s["birdeye_api_key"] or "") == (init_s["birdeye_api_key"] or ""), f"birdeye_api_key mismatch: {verified_s['birdeye_api_key']} vs {init_s['birdeye_api_key']}"
 
     results["walletSettings"] = True
 except Exception as e:
