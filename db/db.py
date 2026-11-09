@@ -1286,8 +1286,12 @@ def ensure_retailbot2_lifecycle_table():
 
 
 def get_retailbot2_strategy_lifecycle_settings():
-    """Read UI-managed strategy settings. An empty table is valid and means
-    worker defaults apply; no promotion is implicitly enabled."""
+    """Read UI-managed strategy settings.
+
+    An empty table is valid and means worker defaults apply; no promotion is
+    implicitly enabled. Query/connection errors propagate so callers cannot
+    mistake an unavailable persistence layer for an empty configuration.
+    """
     conn = get_retailbot2_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
@@ -1300,10 +1304,8 @@ def get_retailbot2_strategy_lifecycle_settings():
                 ORDER BY strategy_id, mode
             """)
             rows = cur.fetchall()
-        except Exception as exc:
-            logger.debug("rdt_strategy_lifecycle query defaulted to empty: %s", exc)
-            rows = []
-        cur.close()
+        finally:
+            cur.close()
         for row in rows:
             for key in ("evaluation_enabled", "paper_enabled", "telegram_enabled",
                         "report_enabled", "auto_promote_enabled"):

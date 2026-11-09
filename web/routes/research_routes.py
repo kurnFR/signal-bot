@@ -264,11 +264,48 @@ def retailbot2_strategies_set(req: StrategyLifecycleRequest):
         raise HTTPException(status_code=400, detail="Automatic promotion is not available yet")
     try:
         set_retailbot2_strategy_lifecycle_setting(req.strategy_id, req.mode, settings)
-        return {"status": "ok", "strategy_id": req.strategy_id, "mode": req.mode,
-                "settings": settings, "note": "Runtime worker applies settings on its next lifecycle refresh."}
     except Exception as e:
         logger.error("retailbot2_strategies_set failed (%s)", type(e).__name__)
         raise HTTPException(status_code=500, detail="Failed to save strategy lifecycle settings")
+
+    # A committed write is not enough to tell the UI that the Telegram toggle
+    # was saved. Read the row back through the same persistence path and fail
+    # closed if it is missing, malformed, or different from the submitted flags.
+    try:
+        persisted = get_retailbot2_strategy_lifecycle_settings()
+    except Exception as e:
+        logger.error("retailbot2_strategies_readback failed (%s)", type(e).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="Settings may have been written, but persisted readback could not be verified. Refresh before retrying.",
+        )
+
+    saved = next(
+        (
+            row for row in persisted
+            if row.get("strategy_id") == req.strategy_id and row.get("mode") == req.mode
+        ),
+        None,
+    )
+    if saved is None or any(saved.get(key) is not expected for key, expected in settings.items()):
+        logger.error(
+            "retailbot2_strategies_readback_mismatch strategy=%s mode=%s",
+            req.strategy_id,
+            req.mode,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Settings were submitted but persisted readback did not match. Refresh and verify the saved values before retrying.",
+        )
+
+    verified_settings = {key: saved[key] for key in settings}
+    return {
+        "status": "ok",
+        "strategy_id": req.strategy_id,
+        "mode": req.mode,
+        "settings": verified_settings,
+        "note": "Settings were persisted and read back. Runtime worker applies them on its next lifecycle refresh.",
+    }
 
 
 @router.get("/retailbot2/control")
