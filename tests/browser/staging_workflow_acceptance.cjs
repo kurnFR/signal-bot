@@ -341,7 +341,8 @@ print(json.dumps({
 async function executeStagingDatabaseCleanup(payload, options = {}) {
   const mergedPayload = {
     ...payload,
-    inject_failure_in: options.injectFailureIn || null,
+    inject_failure_in: options.injectFailureIn || payload.inject_failure_in || null,
+    simulate_flag_corruption: options.simulateFlagCorruption || payload.simulate_flag_corruption || null,
   };
   const cleanupScript = `
 import json, sys, mysql.connector
@@ -453,25 +454,38 @@ except Exception as e:
 
 # 8. Restore system_flags emergency_stop
 try:
+    if payload.get("inject_failure_in") == "circuitBreaker":
+        raise RuntimeError("Injected circuit breaker restoration failure")
     if not snapshot_captured:
         raise RuntimeError("Refusing to restore system_flags: original state was never captured!")
     em_state = snapshot_state.get("emergencyStop", {})
     em_status = em_state.get("status")
+    target_flag = em_state.get("flag_name") or (em_state.get("row") and em_state["row"].get("flag_name")) or "emergency_stop"
     if em_status == "ABSENT":
-        cur.execute("DELETE FROM system_flags WHERE flag_name = 'emergency_stop'")
-        cur.execute("SELECT id FROM system_flags WHERE flag_name = 'emergency_stop'")
-        assert cur.fetchone() is None
+        cur.execute("DELETE FROM system_flags WHERE flag_name = %s", (target_flag,))
+        cur.execute("SELECT flag_name FROM system_flags WHERE flag_name = %s", (target_flag,))
+        assert cur.fetchone() is None, f"{target_flag} row should not exist after cleanup"
         results["circuitBreaker"] = True
     elif em_status == "EXISTS":
         init_em = em_state["row"]
+        assert init_em is not None, f"Missing snapshot row for EXISTS {target_flag}"
         cur.execute(
-            "UPDATE system_flags SET is_active = %s, reason = %s, updated_at = %s WHERE flag_name = 'emergency_stop'",
-            (init_em["is_active"], init_em["reason"], init_em["updated_at"])
+            "UPDATE system_flags SET is_active = %s, reason = %s, updated_at = %s WHERE flag_name = %s",
+            (init_em["is_active"], init_em["reason"], init_em["updated_at"], target_flag)
         )
-        cur.execute("SELECT is_active, reason, updated_at FROM system_flags WHERE flag_name = 'emergency_stop'")
+        if payload.get("simulate_flag_corruption"):
+            s_corrupt = payload["simulate_flag_corruption"]
+            cur.execute(f"UPDATE system_flags SET {s_corrupt['field']} = %s WHERE flag_name = %s", (s_corrupt["value"], target_flag))
+        cur.execute("SELECT flag_name, is_active, reason, updated_at FROM system_flags WHERE flag_name = %s", (target_flag,))
         v_em = cur.fetchone()
-        assert v_em["is_active"] == init_em["is_active"]
-        assert (v_em["reason"] or "") == (init_em["reason"] or "")
+        assert v_em is not None, f"system_flags row '{target_flag}' missing after restore"
+        expected_flag = init_em.get("flag_name") or target_flag
+        assert v_em["flag_name"] == expected_flag, f"{target_flag} flag_name mismatch: {v_em['flag_name']} vs {expected_flag}"
+        assert v_em["is_active"] == init_em["is_active"], f"{target_flag} is_active mismatch: {v_em['is_active']} vs {init_em['is_active']}"
+        assert v_em["reason"] == init_em["reason"], f"{target_flag} reason mismatch: {v_em['reason']!r} vs {init_em['reason']!r}"
+        v_up = v_em["updated_at"].isoformat() if hasattr(v_em["updated_at"], "isoformat") else str(v_em["updated_at"])
+        i_up = init_em["updated_at"].isoformat() if hasattr(init_em["updated_at"], "isoformat") else str(init_em["updated_at"])
+        assert v_up.replace(" ", "T") == i_up.replace(" ", "T"), f"{target_flag} updated_at mismatch: {v_up} vs {i_up}"
         results["circuitBreaker"] = True
     else:
         raise ValueError(f"Invalid emergencyStop snapshot status: {em_status}")
@@ -733,7 +747,7 @@ print(json.dumps({
     "active_db": active_db,
     "seeded_ids": seeded_ids,
     "pre_audit_rows": pre_audit_rows,
-    "emergency_stop": {"status": "EXISTS" if emergency_stop else "ABSENT", "row": emergency_stop},
+    "emergency_stop": {"status": "EXISTS" if emergency_stop else "ABSENT", "row": emergency_stop, "flag_name": "emergency_stop"},
     "wallet_settings": {"status": "EXISTS" if wallet_settings else "ABSENT", "row": wallet_settings},
     "rb03_row": {"status": "EXISTS" if rb03_row else "ABSENT", "row": rb03_row},
     "rb04_row": {"status": "EXISTS" if rb04_row else "ABSENT", "row": rb04_row}

@@ -186,6 +186,8 @@ except Exception as e:
 
 # 7. Restore system_flags emergency_stop to exact pre-test state
 try:
+    if payload.get("inject_failure_in") == "circuitBreaker":
+        raise RuntimeError("Injected circuit breaker restoration failure")
     if not snapshot_captured:
         results["circuitBreaker"] = False
         print("[-] Pre-test snapshot was never captured; skipping system_flags restoration to prevent deletion of shared data.", file=sys.stderr)
@@ -205,14 +207,20 @@ try:
                 "UPDATE system_flags SET is_active = %s, reason = %s, updated_at = %s WHERE flag_name = %s",
                 (init_flag["is_active"], init_flag["reason"], init_flag["updated_at"], flag_name)
             )
+            if payload.get("simulate_flag_corruption"):
+                s_corrupt = payload["simulate_flag_corruption"]
+                cur.execute(f"UPDATE system_flags SET {s_corrupt['field']} = %s WHERE flag_name = %s", (s_corrupt["value"], flag_name))
             conn.commit()
-            cur.execute("SELECT * FROM system_flags WHERE flag_name = %s", (flag_name,))
+            cur.execute("SELECT flag_name, is_active, reason, updated_at FROM system_flags WHERE flag_name = %s", (flag_name,))
             verified_flag = cur.fetchone()
             assert verified_flag is not None, f"{flag_name} row missing after restore"
-            assert verified_flag["flag_name"] == init_flag["flag_name"], f"{flag_name} flag_name mismatch: {verified_flag['flag_name']} vs {init_flag['flag_name']}"
+            expected_flag = init_flag.get("flag_name") or flag_name
+            assert verified_flag["flag_name"] == expected_flag, f"{flag_name} flag_name mismatch: {verified_flag['flag_name']} vs {expected_flag}"
             assert verified_flag["is_active"] == init_flag["is_active"], f"{flag_name} is_active mismatch: {verified_flag['is_active']} vs {init_flag['is_active']}"
-            assert (verified_flag["reason"] or "") == (init_flag["reason"] or ""), f"{flag_name} reason mismatch: {verified_flag['reason']} vs {init_flag['reason']}"
-            assert verified_flag["updated_at"].isoformat() == init_flag["updated_at"], f"{flag_name} updated_at mismatch: {verified_flag['updated_at'].isoformat()} vs {init_flag['updated_at']}"
+            assert verified_flag["reason"] == init_flag["reason"], f"{flag_name} reason mismatch: {verified_flag['reason']!r} vs {init_flag['reason']!r}"
+            v_up = verified_flag["updated_at"].isoformat() if hasattr(verified_flag["updated_at"], "isoformat") else str(verified_flag["updated_at"])
+            i_up = init_flag["updated_at"].isoformat() if hasattr(init_flag["updated_at"], "isoformat") else str(init_flag["updated_at"])
+            assert v_up.replace(" ", "T") == i_up.replace(" ", "T"), f"{flag_name} updated_at mismatch: {v_up} vs {i_up}"
             results["circuitBreaker"] = True
         else:
             raise ValueError(f"Invalid emergencyStop snapshot status: {status}")
@@ -1008,67 +1016,397 @@ conn.commit(); cur.close(); conn.close()
     }
 
     // --------------------------------------------------------------------------
-    // TEST 2: Exact system_flags restoration & Non-Destructive ABSENT Check
+    // TEST 2: Comprehensive system_flags restoration & error detection (Requirements A-H)
     // --------------------------------------------------------------------------
-    console.log("\n=== Test 2: Full system_flags restoration with updated_at readback & non-destructive ABSENT check ===");
+    console.log("\n=== Test 2: Full system_flags restoration & deliberate error detection (Requirements A-H) ===");
     {
+      const { executeStagingDatabaseCleanup } = require("./staging_workflow_acceptance.cjs");
+
+      // Snapshot shared emergency_stop to verify isolation and preservation
       const origFlagSnap = await getSystemFlagSnapshot("emergency_stop");
       assert(origFlagSnap.status === "EXISTS" && origFlagSnap.row !== null, "emergency_stop row missing in test DB");
       const origFlag = origFlagSnap.row;
 
+      // Use a run-unique test flag for mutations to ensure complete non-destructive isolation
+      const testFlagName = `SAFE_FLG_${RUN_ID}`;
+      globalRegistry.registerFlag(testFlagName);
+
       try {
-        const mutatedIsActive = origFlag.is_active === 1 ? 0 : 1;
-        const mutateScript = `
-import json, mysql.connector
+        // Seed unique test flag with distinctive initial values
+        const initialReason = "stg_flags_test_reason";
+        const initialUpdatedAt = "2025-07-20 14:30:00";
+        await runPythonHelper(`
+import mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
-conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("UPDATE system_flags SET is_active = %s, reason = 'mutated_by_test', updated_at = '2023-01-01 00:00:00' WHERE flag_name = 'emergency_stop'", (${mutatedIsActive},))
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${testFlagName}',))
+cur.execute(
+    "INSERT INTO system_flags (flag_name, is_active, reason, updated_at) VALUES (%s, 0, %s, %s)",
+    ('${testFlagName}', '${initialReason}', '${initialUpdatedAt}')
+)
 conn.commit(); cur.close(); conn.close()
-print(json.dumps({"mutated": True}))
-`;
-        await runPythonHelper(mutateScript);
+`);
 
-        const cleanupRes = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
+        const validSnapshot = {
+          status: "EXISTS",
+          flag_name: testFlagName,
+          row: {
+            flag_name: testFlagName,
+            is_active: 0,
+            reason: initialReason,
+            updated_at: initialUpdatedAt,
+          },
+        };
+
+        // ------------------------------------------------------------------
+        // Requirement A: All system_flags fields restore correctly
+        // ------------------------------------------------------------------
+        // Mutate in DB: set is_active = 1, reason = "mutated", updated_at = "2026-02-02 02:02:02"
+        await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute(
+    "UPDATE system_flags SET is_active = 1, reason = 'mutated_by_test', updated_at = '2026-02-02 02:02:02' WHERE flag_name = %s",
+    ('${testFlagName}',)
+)
+conn.commit(); cur.close(); conn.close()
+`);
+
+        // Execute the ACTUAL cleanup function
+        const cleanPayloadA = {
           target_db: TARGET_DB,
           snapshot_captured: true,
           snapshot_state: {
-            emergencyStop: { status: "EXISTS", row: origFlag, flag_name: "emergency_stop" },
+            emergencyStop: validSnapshot,
             walletSettings: { status: "NOT_CAPTURED", row: null },
             rb03Row: { status: "NOT_CAPTURED", row: null },
             rb04Row: { status: "NOT_CAPTURED", row: null },
           },
-        });
+        };
+        const resA = await executeStagingDatabaseCleanup(cleanPayloadA);
+        assert(resA.cleanup_results.circuitBreaker === true, `Expected circuitBreaker restoration to succeed, got: ${JSON.stringify(resA)}`);
 
-        assert(cleanupRes.cleanup_results.circuitBreaker === true, "circuitBreaker restoration failed");
+        // Readback and assert all fields restored
+        const snapA = await getSystemFlagSnapshot(testFlagName);
+        assert(snapA.status === "EXISTS" && snapA.row !== null, `Expected ${testFlagName} to exist after restore`);
+        assert(snapA.row.flag_name === testFlagName, `flag_name mismatch: ${snapA.row.flag_name} vs ${testFlagName}`);
+        assert(snapA.row.is_active === 0, `is_active mismatch: ${snapA.row.is_active} vs 0`);
+        assert(snapA.row.reason === initialReason, `reason mismatch: ${snapA.row.reason} vs ${initialReason}`);
+        assert(snapA.row.updated_at.replace(" ", "T") === initialUpdatedAt.replace(" ", "T"), `updated_at mismatch: ${snapA.row.updated_at} vs ${initialUpdatedAt}`);
+        console.log("  [✓] Requirement A: All system_flags fields restore correctly with updated_at readback comparison.");
 
-        const readbackSnap = await getSystemFlagSnapshot("emergency_stop");
-        const restored = readbackSnap.row;
-        assert(restored.flag_name === origFlag.flag_name, `flag_name mismatch: ${restored.flag_name} vs ${origFlag.flag_name}`);
-        assert(restored.is_active === origFlag.is_active, `is_active mismatch: ${restored.is_active} vs ${origFlag.is_active}`);
-        assert((restored.reason || "") === (origFlag.reason || ""), `reason mismatch: ${restored.reason} vs ${origFlag.reason}`);
-        assert(restored.updated_at === origFlag.updated_at, `updated_at mismatch: ${restored.updated_at} vs ${origFlag.updated_at}`);
-        console.log("  [✓] system_flags fully restored with all columns and updated_at identically verified.");
-      } finally {
-        await restoreSystemFlagDirect(origFlagSnap);
-      }
-
-      // Non-destructive ABSENT flag deletion check using run-unique flag
-      const testFlagName = `SAFE_FLG_${RUN_ID}`;
-      globalRegistry.registerFlag(testFlagName);
-      try {
-        const seedAbsentFlag = `
-import json, mysql.connector
+        // ------------------------------------------------------------------
+        // Work Order 83626: Exact NULL/Empty-String reason restoration cases (A-E)
+        // ------------------------------------------------------------------
+        // Case A: Snapshot reason NULL, restore NULL: pass.
+        const flagA = `SAFE_FLG_NULL_PASS_${RUN_ID}`;
+        globalRegistry.registerFlag(flagA);
+        try {
+          await runPythonHelper(`
+import mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
-conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("INSERT INTO system_flags (flag_name, is_active, reason, updated_at) VALUES (%s, 1, 'absent_test', '2025-01-01 00:00:00')", ('${testFlagName}',))
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${flagA}',))
+cur.execute("INSERT INTO system_flags (flag_name, is_active, reason, updated_at) VALUES (%s, 0, 'mutated_pre_reason', '2025-05-01 10:00:00')", ('${flagA}',))
 conn.commit(); cur.close(); conn.close()
-print(json.dumps({"seeded": True}))
-`;
-        await runPythonHelper(seedAbsentFlag);
+`);
+          const snapPayloadA = {
+            target_db: TARGET_DB,
+            snapshot_captured: true,
+            snapshot_state: {
+              emergencyStop: {
+                status: "EXISTS",
+                flag_name: flagA,
+                row: { flag_name: flagA, is_active: 0, reason: null, updated_at: "2025-05-01 10:00:00" },
+              },
+            },
+          };
+          const resNullA = await executeStagingDatabaseCleanup(snapPayloadA);
+          assert(resNullA.cleanup_results.circuitBreaker === true, "Case A: Expected NULL reason restore to succeed");
+          const dbA = await getSystemFlagSnapshot(flagA);
+          assert(dbA.status === "EXISTS" && dbA.row !== null, "Case A: Flag row missing in DB");
+          assert(dbA.row.reason === null, `Case A: Expected DB reason to be strictly null, got: ${JSON.stringify(dbA.row.reason)}`);
+          console.log("  [✓] Case A: Snapshot reason NULL, restored NULL (DB verified strictly null).");
+        } finally {
+          await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${flagA}',))
+conn.commit(); cur.close(); conn.close()
+`);
+          globalRegistry.unregisterFlag(flagA);
+        }
 
-        const cleanupAbsentRes = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
+        // Case B: Snapshot reason empty string, restore empty string: pass.
+        const flagB = `SAFE_FLG_EMPTY_PASS_${RUN_ID}`;
+        globalRegistry.registerFlag(flagB);
+        try {
+          await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${flagB}',))
+cur.execute("INSERT INTO system_flags (flag_name, is_active, reason, updated_at) VALUES (%s, 0, 'mutated_pre_reason', '2025-05-01 10:00:00')", ('${flagB}',))
+conn.commit(); cur.close(); conn.close()
+`);
+          const snapPayloadB = {
+            target_db: TARGET_DB,
+            snapshot_captured: true,
+            snapshot_state: {
+              emergencyStop: {
+                status: "EXISTS",
+                flag_name: flagB,
+                row: { flag_name: flagB, is_active: 0, reason: "", updated_at: "2025-05-01 10:00:00" },
+              },
+            },
+          };
+          const resEmptyB = await executeStagingDatabaseCleanup(snapPayloadB);
+          assert(resEmptyB.cleanup_results.circuitBreaker === true, "Case B: Expected empty string reason restore to succeed");
+          const dbB = await getSystemFlagSnapshot(flagB);
+          assert(dbB.status === "EXISTS" && dbB.row !== null, "Case B: Flag row missing in DB");
+          assert(dbB.row.reason === "", `Case B: Expected DB reason to be strictly empty string '', got: ${JSON.stringify(dbB.row.reason)}`);
+          console.log("  [✓] Case B: Snapshot reason empty string, restored empty string (DB verified strictly empty string).");
+        } finally {
+          await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${flagB}',))
+conn.commit(); cur.close(); conn.close()
+`);
+          globalRegistry.unregisterFlag(flagB);
+        }
+
+        // Case C: Snapshot reason NULL, deliberately corrupt to empty string: fail.
+        const flagC = `SAFE_FLG_NULL_FAIL_${RUN_ID}`;
+        globalRegistry.registerFlag(flagC);
+        try {
+          await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${flagC}',))
+cur.execute("INSERT INTO system_flags (flag_name, is_active, reason, updated_at) VALUES (%s, 0, NULL, '2025-05-01 10:00:00')", ('${flagC}',))
+conn.commit(); cur.close(); conn.close()
+`);
+          const snapPayloadC = {
+            target_db: TARGET_DB,
+            snapshot_captured: true,
+            snapshot_state: {
+              emergencyStop: {
+                status: "EXISTS",
+                flag_name: flagC,
+                row: { flag_name: flagC, is_active: 0, reason: null, updated_at: "2025-05-01 10:00:00" },
+              },
+            },
+          };
+          const resC = await executeStagingDatabaseCleanup(snapPayloadC, {
+            simulateFlagCorruption: { field: "reason", value: "" },
+          });
+          assert(resC.cleanup_results.circuitBreaker === false, "Case C: Expected circuitBreaker cleanup failure when NULL is corrupted to empty string");
+          const dbC = await getSystemFlagSnapshot(flagC);
+          assert(dbC.row.reason === "", `Case C: Expected corrupted DB reason to be empty string '', got: ${JSON.stringify(dbC.row.reason)}`);
+          console.log("  [✓] Case C: Snapshot reason NULL corrupted to empty string strictly detected (DB inspected).");
+        } finally {
+          await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${flagC}',))
+conn.commit(); cur.close(); conn.close()
+`);
+          globalRegistry.unregisterFlag(flagC);
+        }
+
+        // Case D: Snapshot reason empty string, deliberately corrupt to NULL: fail.
+        const flagD = `SAFE_FLG_EMPTY_FAIL_${RUN_ID}`;
+        globalRegistry.registerFlag(flagD);
+        try {
+          await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${flagD}',))
+cur.execute("INSERT INTO system_flags (flag_name, is_active, reason, updated_at) VALUES (%s, 0, '', '2025-05-01 10:00:00')", ('${flagD}',))
+conn.commit(); cur.close(); conn.close()
+`);
+          const snapPayloadD = {
+            target_db: TARGET_DB,
+            snapshot_captured: true,
+            snapshot_state: {
+              emergencyStop: {
+                status: "EXISTS",
+                flag_name: flagD,
+                row: { flag_name: flagD, is_active: 0, reason: "", updated_at: "2025-05-01 10:00:00" },
+              },
+            },
+          };
+          const resD = await executeStagingDatabaseCleanup(snapPayloadD, {
+            simulateFlagCorruption: { field: "reason", value: null },
+          });
+          assert(resD.cleanup_results.circuitBreaker === false, "Case D: Expected circuitBreaker cleanup failure when empty string is corrupted to NULL");
+          const dbD = await getSystemFlagSnapshot(flagD);
+          assert(dbD.row.reason === null, `Case D: Expected corrupted DB reason to be null, got: ${JSON.stringify(dbD.row.reason)}`);
+          console.log("  [✓] Case D: Snapshot reason empty string corrupted to NULL strictly detected (DB inspected).");
+        } finally {
+          await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${flagD}',))
+conn.commit(); cur.close(); conn.close()
+`);
+          globalRegistry.unregisterFlag(flagD);
+        }
+
+        // Case E: Snapshot reason non-empty string, deliberately corrupt to another value: fail.
+        const flagE = `SAFE_FLG_VAL_FAIL_${RUN_ID}`;
+        globalRegistry.registerFlag(flagE);
+        try {
+          const validReasonE = "valid_non_empty_reason_e";
+          const corruptReasonE = "corrupted_different_reason_val";
+          await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${flagE}',))
+cur.execute("INSERT INTO system_flags (flag_name, is_active, reason, updated_at) VALUES (%s, 0, %s, '2025-05-01 10:00:00')", ('${flagE}', '${validReasonE}'))
+conn.commit(); cur.close(); conn.close()
+`);
+          const snapPayloadE = {
+            target_db: TARGET_DB,
+            snapshot_captured: true,
+            snapshot_state: {
+              emergencyStop: {
+                status: "EXISTS",
+                flag_name: flagE,
+                row: { flag_name: flagE, is_active: 0, reason: validReasonE, updated_at: "2025-05-01 10:00:00" },
+              },
+            },
+          };
+          const resE = await executeStagingDatabaseCleanup(snapPayloadE, {
+            simulateFlagCorruption: { field: "reason", value: corruptReasonE },
+          });
+          assert(resE.cleanup_results.circuitBreaker === false, "Case E: Expected circuitBreaker cleanup failure when reason is corrupted to another value");
+          const dbE = await getSystemFlagSnapshot(flagE);
+          assert(dbE.row.reason === corruptReasonE, `Case E: Expected corrupted DB reason to be ${corruptReasonE}, got: ${JSON.stringify(dbE.row.reason)}`);
+          console.log("  [✓] Case E: Snapshot reason non-empty string corrupted to different value strictly detected (DB inspected).");
+        } finally {
+          await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${flagE}',))
+conn.commit(); cur.close(); conn.close()
+`);
+          globalRegistry.unregisterFlag(flagE);
+        }
+
+        // ------------------------------------------------------------------
+        // Requirement B: Deliberately corrupted is_active is detected
+        // ------------------------------------------------------------------
+        const resB = await executeStagingDatabaseCleanup(cleanPayloadA, {
+          simulateFlagCorruption: { field: "is_active", value: 1 },
+        });
+        assert(resB.cleanup_results.circuitBreaker === false, "Deliberately corrupted is_active should cause circuitBreaker cleanup failure!");
+        console.log("  [✓] Requirement B: Deliberately corrupted is_active is strictly detected.");
+
+        // Restore clean state after B
+        await executeStagingDatabaseCleanup(cleanPayloadA);
+
+        // ------------------------------------------------------------------
+        // Requirement C: Deliberately corrupted reason is detected
+        // ------------------------------------------------------------------
+        const resC = await executeStagingDatabaseCleanup(cleanPayloadA, {
+          simulateFlagCorruption: { field: "reason", value: "deliberately_corrupted_reason_string" },
+        });
+        assert(resC.cleanup_results.circuitBreaker === false, "Deliberately corrupted reason should cause circuitBreaker cleanup failure!");
+        console.log("  [✓] Requirement C: Deliberately corrupted reason is strictly detected.");
+
+        // Restore clean state after C
+        await executeStagingDatabaseCleanup(cleanPayloadA);
+
+        // ------------------------------------------------------------------
+        // Requirement D: Deliberately corrupted updated_at is detected
+        // ------------------------------------------------------------------
+        const resD = await executeStagingDatabaseCleanup(cleanPayloadA, {
+          simulateFlagCorruption: { field: "updated_at", value: "2025-12-31 23:59:59" },
+        });
+        assert(resD.cleanup_results.circuitBreaker === false, "Deliberately corrupted updated_at should cause circuitBreaker cleanup failure!");
+        console.log("  [✓] Requirement D: Deliberately corrupted updated_at is strictly detected.");
+
+        // Restore clean state after D
+        await executeStagingDatabaseCleanup(cleanPayloadA);
+
+        // ------------------------------------------------------------------
+        // Requirement E: Incorrect flag_name or missing row is detected
+        // ------------------------------------------------------------------
+        // E.1 Missing row: delete testFlagName from DB, then attempt restore
+        await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${testFlagName}',))
+conn.commit(); cur.close(); conn.close()
+`);
+        const resE1 = await executeStagingDatabaseCleanup(cleanPayloadA);
+        assert(resE1.cleanup_results.circuitBreaker === false, "Missing system_flags row should cause circuitBreaker cleanup failure!");
+
+        // Re-insert testFlagName for E.2
+        await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute(
+    "INSERT INTO system_flags (flag_name, is_active, reason, updated_at) VALUES (%s, 0, %s, %s)",
+    ('${testFlagName}', '${initialReason}', '${initialUpdatedAt}')
+)
+conn.commit(); cur.close(); conn.close()
+`);
+
+        // E.2 Incorrect flag_name in snapshot: row has WRONG_NAME
+        const wrongNameSnapshot = {
+          status: "EXISTS",
+          flag_name: testFlagName,
+          row: {
+            flag_name: "WRONG_FLAG_NAME",
+            is_active: 0,
+            reason: initialReason,
+            updated_at: initialUpdatedAt,
+          },
+        };
+        const resE2 = await executeStagingDatabaseCleanup({
+          target_db: TARGET_DB,
+          snapshot_captured: true,
+          snapshot_state: { emergencyStop: wrongNameSnapshot },
+        });
+        assert(resE2.cleanup_results.circuitBreaker === false, "Incorrect flag_name mismatch should cause circuitBreaker cleanup failure!");
+        console.log("  [✓] Requirement E: Missing row and incorrect flag_name are strictly detected.");
+
+        // ------------------------------------------------------------------
+        // Requirement F: ABSENT snapshot remains absent after cleanup
+        // ------------------------------------------------------------------
+        // Ensure testFlagName exists in DB before cleanup
+        const checkBeforeF = await getSystemFlagSnapshot(testFlagName);
+        assert(checkBeforeF.status === "EXISTS", `Expected ${testFlagName} to exist before ABSENT cleanup test`);
+
+        const absentPayload = {
           target_db: TARGET_DB,
           snapshot_captured: true,
           snapshot_state: {
@@ -1077,17 +1415,63 @@ print(json.dumps({"seeded": True}))
             rb03Row: { status: "NOT_CAPTURED", row: null },
             rb04Row: { status: "NOT_CAPTURED", row: null },
           },
+        };
+        const resF = await executeStagingDatabaseCleanup(absentPayload);
+        assert(resF.cleanup_results.circuitBreaker === true, "ABSENT cleanup should report success");
+
+        const checkAfterF = await getSystemFlagSnapshot(testFlagName);
+        assert(checkAfterF.status === "ABSENT", `Flag ${testFlagName} was not cleanly deleted after ABSENT cleanup!`);
+        console.log("  [✓] Requirement F: ABSENT snapshot remains absent after cleanup.");
+
+        // ------------------------------------------------------------------
+        // Requirement G: Cleanup failure still allows independent restoration stages to execute
+        // ------------------------------------------------------------------
+        // Seed a test user to verify user cleanup executes even when circuit breaker restoration fails
+        const seedTestUserRes = await runPythonHelper(`
+import json, mysql.connector
+from config import MYSQL_CONFIG
+from web.auth import hash_password
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+pwd_hash = hash_password("StagePass123!")
+cur.execute("INSERT INTO users (username, email, password_hash, role, is_active, must_change_password) VALUES ('test_g_stage_${RUN_ID}', 'test_g@test.internal', %s, 'viewer', 1, 0)", (pwd_hash,))
+uid = cur.lastrowid
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"uid": uid}))
+`);
+        const testUserG = seedTestUserRes.uid;
+        globalRegistry.registerUser(testUserG);
+
+        const resG = await executeStagingDatabaseCleanup({
+          target_db: TARGET_DB,
+          snapshot_captured: true,
+          user_ids: [testUserG],
+          snapshot_state: {
+            emergencyStop: { status: "EXISTS", flag_name: "NONEXISTENT_FLAG_TRIGGERING_FAILURE", row: { flag_name: "NONEXISTENT_FLAG_TRIGGERING_FAILURE", is_active: 1, reason: "x", updated_at: "2025-01-01 00:00:00" } },
+            walletSettings: { status: "NOT_CAPTURED", row: null },
+            rb03Row: { status: "NOT_CAPTURED", row: null },
+            rb04Row: { status: "NOT_CAPTURED", row: null },
+          },
         });
-        assert(cleanupAbsentRes.cleanup_results.circuitBreaker === true, "ABSENT flag cleanup failed");
+        assert(resG.cleanup_results.circuitBreaker === false, "circuitBreaker restoration was expected to fail");
+        assert(resG.cleanup_results.users === true, "users stage should succeed independently even when circuitBreaker fails!");
+        console.log("  [✓] Requirement G: Cleanup failure still allows independent restoration stages (users, etc.) to execute.");
+        globalRegistry.unregisterUser(testUserG);
 
-        const verifyAbsentSnap = await getSystemFlagSnapshot(testFlagName);
-        assert(verifyAbsentSnap.status === "ABSENT", `Flag ${testFlagName} was not cleanly deleted!`);
+        // ------------------------------------------------------------------
+        // Requirement H: Pre-existing records remain unchanged
+        // ------------------------------------------------------------------
+        const checkSharedFlag = await getSystemFlagSnapshot("emergency_stop");
+        assert(checkSharedFlag.status === "EXISTS" && checkSharedFlag.row !== null, "Shared emergency_stop missing!");
+        assert(checkSharedFlag.row.flag_name === origFlag.flag_name, `Shared emergency_stop flag_name changed: ${checkSharedFlag.row.flag_name}`);
+        assert(checkSharedFlag.row.is_active === origFlag.is_active, `Shared emergency_stop is_active changed: ${checkSharedFlag.row.is_active} vs ${origFlag.is_active}`);
+        assert((checkSharedFlag.row.reason || "") === (origFlag.reason || ""), `Shared emergency_stop reason changed: ${checkSharedFlag.row.reason} vs ${origFlag.reason}`);
+        assert(checkSharedFlag.row.updated_at === origFlag.updated_at, `Shared emergency_stop updated_at changed: ${checkSharedFlag.row.updated_at} vs ${origFlag.updated_at}`);
+        console.log("  [✓] Requirement H: Pre-existing shared emergency_stop records remain 100% unchanged.");
 
-        const sharedFlagSnap = await getSystemFlagSnapshot("emergency_stop");
-        assert(sharedFlagSnap.status === "EXISTS" && sharedFlagSnap.row.updated_at === origFlag.updated_at, "Shared emergency_stop flag was affected during ABSENT test!");
-        console.log("  [✓] Non-destructive ABSENT flag deletion verified without touching shared emergency_stop.");
         passed++;
       } finally {
+        // Ensure test flag is deleted and shared flag is restored
         await runPythonHelper(`
 import mysql.connector
 from config import MYSQL_CONFIG
@@ -1097,6 +1481,7 @@ cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${testFlagName}',
 conn.commit(); cur.close(); conn.close()
 `);
         globalRegistry.unregisterFlag(testFlagName);
+        await restoreSystemFlagDirect(origFlagSnap);
       }
     }
 
@@ -2649,7 +3034,7 @@ print(json.dumps({"found": found}))
           audit_log_ids: t13Fixtures.auditLogs,
           snapshot_captured: true,
           snapshot_state: {
-            emergencyStop: { status: "EXISTS", row: { is_active: 0, reason: "", updated_at: "2026-11-09 00:00:00" } },
+            emergencyStop: { status: "EXISTS", flag_name: "emergency_stop", row: { flag_name: "emergency_stop", is_active: 0, reason: "", updated_at: "2026-11-09 00:00:00" } },
             walletSettings: { status: "EXISTS", row: { id: 1, enabled: 1, networks: "eth", pools_per_network: 4, min_trade_usd: 10000, min_net_usd: 180000, auto_track_net_usd: 550000, poll_interval_seconds: 350, retention_days: 8, api_delay_seconds: 4, token_mode: "all", token_addresses: "", birdeye_api_key: "", updated_at: "2026-11-09 00:00:00" } },
             rb03Row: { status: "ABSENT" },
             rb04Row: { status: "ABSENT" },
@@ -3044,7 +3429,7 @@ async function main() {
     tracked_wallet_ids: [],
     snapshot_captured: true,
     snapshot_state: {
-      emergencyStop: { status: "EXISTS", row: { is_active: 0, reason: "", updated_at: "2026-11-09 00:00:00" } },
+      emergencyStop: { status: "EXISTS", flag_name: "emergency_stop", row: { flag_name: "emergency_stop", is_active: 0, reason: "", updated_at: "2026-11-09 00:00:00" } },
       walletSettings: { status: "EXISTS", row: { id: 1, enabled: 1, networks: "eth", pools_per_network: 4, min_trade_usd: 10000, min_net_usd: 180000, auto_track_net_usd: 550000, poll_interval_seconds: 350, retention_days: 8, api_delay_seconds: 4, token_mode: "all", token_addresses: "", birdeye_api_key: "", updated_at: "2026-11-09 00:00:00" } },
       rb03Row: { status: "ABSENT" },
       rb04Row: { status: "ABSENT" },
