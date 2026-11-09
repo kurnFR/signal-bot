@@ -1587,11 +1587,21 @@ class DatabaseManager:
         try:
             cursor = conn.cursor(dictionary=True)
             cursor.execute("START TRANSACTION")
+            # An expired final-attempt lease must not be sent again after a crash.
+            cursor.execute(
+                """UPDATE rdt_telegram_outbox
+                   SET status='dead', locked_until=NULL,
+                       last_error=COALESCE(last_error, 'delivery lease expired at max attempts')
+                   WHERE status='processing' AND locked_until <= UTC_TIMESTAMP()
+                     AND attempts >= 8"""
+            )
             cursor.execute(
                 """SELECT id, trade_id, event_type, payload_json, attempts
                    FROM rdt_telegram_outbox
-                   WHERE (status='pending' AND next_attempt_at <= UTC_TIMESTAMP())
-                      OR (status='processing' AND locked_until <= UTC_TIMESTAMP())
+                   WHERE attempts < 8 AND (
+                       (status='pending' AND next_attempt_at <= UTC_TIMESTAMP())
+                       OR (status='processing' AND locked_until <= UTC_TIMESTAMP())
+                   )
                    ORDER BY next_attempt_at, id LIMIT 1 FOR UPDATE"""
             )
             event = cursor.fetchone()
