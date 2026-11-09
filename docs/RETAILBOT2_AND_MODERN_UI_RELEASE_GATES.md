@@ -46,10 +46,10 @@ Run only against the dedicated staging instance and `signal_bot_test`. Confirm t
 Record the exact checked-out commit. Confirm the isolated database identity without printing credentials:
 
 ```sh
-MYSQL_HOST=127.0.0.1 MYSQL_DATABASE=signal_bot_test PYTHONPATH=$PWD \
+MYSQL_HOST=127.0.0.1 MYSQL_PORT=3306 MYSQL_USER=cms MYSQL_DATABASE=signal_bot_test PYTHONPATH=$PWD \
   python3 -m db.migrate --status
 
-MYSQL_HOST=127.0.0.1 MYSQL_DATABASE=signal_bot_test PYTHONPATH=$PWD \
+MYSQL_HOST=127.0.0.1 MYSQL_PORT=3306 MYSQL_USER=cms MYSQL_DATABASE=signal_bot_test PYTHONPATH=$PWD \
   python3 -m db.migrate --dry-run
 ```
 
@@ -77,14 +77,15 @@ Do not edit shared lifecycle rows manually unless the staging operator has recor
 
 The existing acceptance report `docs/MODERN_UI_STAGING_ACCEPTANCE_REPORT.md` records prior evidence on an older master baseline. It must not be presented as a fresh run on this candidate.
 
-Run the existing staging acceptance harnesses from the candidate checkout, with their documented environment guards and only against `signal_bot_test`:
+Run the existing staging acceptance harnesses from the candidate checkout, with their documented environment guards and only against the local `127.0.0.1:3306/signal_bot_test` instance. Both harnesses now override inherited `MYSQL_HOST`/`MYSQL_PORT` values for every Python helper and staging-server child process, so a production host in `.env` cannot silently redirect the test. The workflow harness also accepts `STAGING_SCREENSHOT_DIR`; use a fresh temporary directory so existing or locally edited screenshots in `docs/screenshots/` are never overwritten:
 
 ```sh
+export STAGING_SCREENSHOT_DIR="$(mktemp -d /tmp/signal-bot-staging-shots.XXXXXX)"
 node tests/browser/staging_workflow_acceptance.cjs
 node tests/browser/staging_browser_acceptance.cjs
 ```
 
-Record the commit SHA, database identity, role coverage, workflow outcomes, browser console/network errors, cleanup register, and confirmation that no production database or external Telegram endpoint was used. Do not mark skipped workflows as passed. The ML-03 tournament remains unverified unless a controlled, adequately resourced staging dataset is used and actual tournament execution is observed.
+Record the commit SHA, database identity, screenshot output directory, role coverage, workflow outcomes, browser console/network errors, cleanup register, and confirmation that no production database or external Telegram endpoint was used. Keep the temporary screenshot directory for evidence review; do not copy over tracked screenshots without reviewing them first. Do not mark skipped workflows as passed. The ML-03 tournament remains unverified unless a controlled, adequately resourced staging dataset is used and actual tournament execution is observed.
 
 The existing Playwright suite that mocks `/api/**` is useful for frontend rendering and interaction regressions, but it is not a substitute for these real-backend staging checks.
 
