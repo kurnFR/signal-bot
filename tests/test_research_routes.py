@@ -229,18 +229,74 @@ class TestResearchRoutes(unittest.TestCase):
                     )
         save.assert_not_called()
 
-    def test_strategy_lifecycle_saves_user_selected_telegram_promotion(self):
-        with patch("web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting") as save:
+    def test_strategy_lifecycle_saves_and_reads_back_user_selected_telegram_promotion(self):
+        saved_rows = []
+
+        def save_setting(strategy_id, mode, settings):
+            saved_rows[:] = [{
+                "strategy_id": strategy_id,
+                "mode": mode,
+                **settings,
+                "updated_at": "2026-11-09 00:00:00",
+            }]
+
+        with patch(
+            "web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting",
+            side_effect=save_setting,
+        ) as save, patch(
+            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
+            side_effect=lambda: [dict(row) for row in saved_rows],
+        ):
             res = self.client.post("/api/research/retailbot2/strategies", headers=self.headers, json={
                 "strategy_id": "BB_REV_INV", "mode": "inverse",
                 "evaluation_enabled": True, "paper_enabled": True,
                 "telegram_enabled": True, "report_enabled": True,
             })
+
         self.assertEqual(res.status_code, 200)
         args = save.call_args.args
         self.assertEqual(args[0:2], ("BB_REV_INV", "inverse"))
         self.assertTrue(args[2]["telegram_enabled"])
         self.assertFalse(args[2]["auto_promote_enabled"])
+        self.assertTrue(res.json()["settings"]["telegram_enabled"])
+
+    def test_strategy_lifecycle_does_not_claim_success_when_readback_is_missing(self):
+        with patch("web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting"), patch(
+            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
+            return_value=[],
+        ):
+            res = self.client.post("/api/research/retailbot2/strategies", headers=self.headers, json={
+                "strategy_id": "BB_REV_INV", "mode": "inverse",
+                "evaluation_enabled": True, "paper_enabled": True,
+                "telegram_enabled": True, "report_enabled": True,
+            })
+
+        self.assertEqual(res.status_code, 503)
+        self.assertIn("readback", res.json()["detail"].lower())
+
+    def test_strategy_lifecycle_readback_failure_is_not_reported_as_success(self):
+        with patch("web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting"), patch(
+            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
+            side_effect=RuntimeError("database read unavailable"),
+        ):
+            res = self.client.post("/api/research/retailbot2/strategies", headers=self.headers, json={
+                "strategy_id": "BB_REV_INV", "mode": "inverse",
+                "evaluation_enabled": True, "paper_enabled": True,
+                "telegram_enabled": True, "report_enabled": True,
+            })
+
+        self.assertEqual(res.status_code, 503)
+        self.assertIn("could not be verified", res.json()["detail"].lower())
+
+    def test_strategy_lifecycle_get_surfaces_persistence_read_failure(self):
+        with patch(
+            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
+            side_effect=RuntimeError("database read unavailable"),
+        ):
+            res = self.client.get("/api/research/retailbot2/strategies", headers=self.headers)
+
+        self.assertEqual(res.status_code, 500)
+        self.assertIn("failed to load", res.json()["detail"].lower())
 
     def test_strategy_lifecycle_stop_and_hide_persist_across_dashboard_reload(self):
         saved_rows = []
