@@ -467,8 +467,7 @@ def test_worker_refreshes_changed_lifecycle_settings_without_process_restart():
     assert bot.db.get_strategy_lifecycle_settings.call_count == 2
 
 
-
-def test_mixed_strategies_only_enqueue_telegram_for_the_promoted_strategy():
+def test_mixed_strategies_only_pass_entry_alert_for_promoted_strategy():
     bot = _bot_for_open_trade({"telegram_enabled": True})
     bot.db.save_trade.side_effect = [42, 43]
     bot.strategy_lifecycle[("DBL_PAT", "shadow")] = {
