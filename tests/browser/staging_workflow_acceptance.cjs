@@ -34,7 +34,9 @@ const STAGING_PORT = process.env.STAGING_PORT ? parseInt(process.env.STAGING_POR
 const BASE_URL = `http://127.0.0.1:${STAGING_PORT}/modern`;
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const TARGET_DB = "signal_bot_test";
-const SCREENSHOT_DIR = path.resolve(REPO_ROOT, "docs/screenshots");
+const SCREENSHOT_DIR = process.env.STAGING_SCREENSHOT_DIR
+  ? path.resolve(process.env.STAGING_SCREENSHOT_DIR)
+  : path.resolve(REPO_ROOT, "docs/screenshots");
 
 const RUN_ID = crypto.randomBytes(4).toString("hex");
 const STAGING_PASSWORD = process.env.STAGING_TEST_PASSWORD || `Stg_${crypto.randomBytes(8).toString("hex")}!Aa1`;
