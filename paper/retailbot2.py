@@ -1608,6 +1608,17 @@ class DatabaseManager:
             if not event:
                 conn.commit()
                 return None
+            try:
+                payload = json.loads(event.get('payload_json') or '{}')
+            except (TypeError, ValueError) as exc:
+                cursor.execute(
+                    """UPDATE rdt_telegram_outbox
+                       SET status='dead', locked_until=NULL, last_error=%s
+                       WHERE id=%s""",
+                    (f"invalid payload JSON: {exc}"[:1000], event['id']),
+                )
+                conn.commit()
+                return None
             cursor.execute(
                 """UPDATE rdt_telegram_outbox
                    SET status='processing', attempts=attempts+1,
@@ -1619,7 +1630,8 @@ class DatabaseManager:
                 raise RuntimeError("outbox claim lost before update")
             conn.commit()
             event['attempts'] = int(event.get('attempts') or 0) + 1
-            event['payload'] = json.loads(event.pop('payload_json') or '{}')
+            event.pop('payload_json', None)
+            event['payload'] = payload
             return event
         except Exception as exc:
             try:
