@@ -88,6 +88,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("023_screener_runtime_schema", "migrate_screener_runtime_schema.sql", "Move Smart Money Screener schema upgrades out of runtime startup"),
     Migration("024_paper_generator_instances", "migrate_paper_generator_instances.sql", "Isolate independent ML generator paper config instances"),
     Migration("025_users_role_active_index", "migrate_users_role_active_index.sql", "Index active administrator lookups for concurrency serialization"),
+    Migration("026_retailbot2_telegram_outbox", "migrate_retailbot2_telegram_outbox.sql", "Persist and retry RetailBot2 Telegram notifications"),
 )
 
 
