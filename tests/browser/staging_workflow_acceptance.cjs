@@ -243,7 +243,7 @@ function terminateChildProcess(proc, sigtermTimeoutMs = 5000, sigkillTimeoutMs =
 }
 
 // Function to verify complete baseline audit record identity across all columns
-async function verifyAuditBaselineIdentity(baselineRows, registeredAuditIds = []) {
+async function verifyAuditBaselineIdentity(baselineRows, registeredAuditIds = [], testUserIds = []) {
   const script = `
 import json, sys, mysql.connector
 from config import MYSQL_CONFIG
@@ -252,6 +252,7 @@ payload = json.loads(sys.stdin.read())
 db_name = payload["target_db"]
 baseline_rows = payload["baseline_rows"]
 registered_ids = payload["registered_ids"]
+test_user_ids = payload.get("test_user_ids", [])
 
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = db_name
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
@@ -282,7 +283,7 @@ current_map = {r["id"]: r for r in current_rows}
 
 mismatches = []
 
-# Compare each baseline row across all columns
+# 3. Compare each pre-existing baseline row across all seven columns
 for b_id, b_row in baseline_map.items():
     if b_id not in current_map:
         mismatches.append(f"Baseline audit row ID {b_id} is missing from database")
@@ -290,19 +291,39 @@ for b_id, b_row in baseline_map.items():
         c_row = current_map[b_id]
         diffs = []
         for col in ["user_id", "username", "action", "details", "ip_address", "created_at"]:
-            if c_row.get(col) != b_row.get(col):
-                diffs.append(f"{col}: expected {b_row.get(col)!r} got {c_row.get(col)!r}")
+            b_val = b_row.get(col)
+            c_val = c_row.get(col)
+            if col == "created_at" and b_val and c_val:
+                b_val = str(b_val).replace(" ", "T")
+                c_val = str(c_val).replace(" ", "T")
+            if c_val != b_val:
+                diffs.append(f"{col}: expected {b_val!r} got {c_val!r}")
         if diffs:
             mismatches.append(f"Baseline audit row ID {b_id} modified: {', '.join(diffs)}")
 
-# Check for unexpected non-baseline rows
-unexpected_ids = sorted(list(set(current_map.keys()) - set(baseline_map.keys())))
-if unexpected_ids:
-    mismatches.append(f"Unexpected non-baseline audit row IDs present: {unexpected_ids}")
+# 4. Check non-baseline rows
+# Test-owned audit records created by unique test users must be cleaned up.
+# Unrelated concurrent audit records created by other users or background processes
+# must be preserved and must NOT cause a test failure.
+leftover_test_user_audits = []
+preserved_unrelated_audits = []
+
+for c_id, c_row in current_map.items():
+    if c_id not in baseline_map:
+        if test_user_ids and c_row.get("user_id") in test_user_ids:
+            leftover_test_user_audits.append(c_id)
+            mismatches.append(f"Leftover test-owned audit row ID {c_id} (user_id={c_row.get('user_id')}, action={c_row.get('action')}) was not cleaned up")
+        else:
+            preserved_unrelated_audits.append(c_id)
+
+if leftover_registered:
+    mismatches.append(f"Registered audit IDs still present in DB: {leftover_registered}")
 
 print(json.dumps({
     "leftover_registered": leftover_registered,
-    "baseline_intact": len(mismatches) == 0 and len(leftover_registered) == 0,
+    "leftover_test_user_audits": leftover_test_user_audits,
+    "preserved_unrelated_audits": preserved_unrelated_audits,
+    "baseline_intact": len(mismatches) == 0,
     "mismatches": mismatches,
     "baseline_count": len(baseline_rows),
     "current_count": len(current_rows)
@@ -312,6 +333,7 @@ print(json.dumps({
     target_db: TARGET_DB,
     baseline_rows: baselineRows,
     registered_ids: registeredAuditIds,
+    test_user_ids: testUserIds,
   });
 }
 
@@ -461,25 +483,50 @@ except Exception as e:
 try:
     if not snapshot_captured:
         raise RuntimeError("Refusing to restore rdt_strategy_lifecycle: original state was never captured!")
-    for key, strat_id, mode in [("rb03Row", "RSI_CTR", "shadow"), ("rb04Row", "DBL_PAT_INV", "inverse")]:
+    for key, def_strat, def_mode in [("rb03Row", "RSI_CTR", "shadow"), ("rb04Row", "DBL_PAT_INV", "inverse")]:
         row_state = snapshot_state.get(key, {})
         row_status = row_state.get("status")
+        strat_id = row_state.get("strategy_id") or (row_state.get("row") and row_state["row"].get("strategy_id")) or def_strat
+        mode = row_state.get("mode") or (row_state.get("row") and row_state["row"].get("mode")) or def_mode
         if row_status == "ABSENT":
             cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (strat_id, mode))
             cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (strat_id, mode))
             assert cur.fetchone() is None
         elif row_status == "EXISTS":
             init_r = row_state["row"]
+            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (strat_id, mode))
+            if cur.fetchone():
+                cur.execute('''
+                    UPDATE rdt_strategy_lifecycle
+                    SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
+                    WHERE strategy_id=%s AND mode=%s
+                ''', (init_r["evaluation_enabled"], init_r["paper_enabled"], init_r["telegram_enabled"],
+                      init_r["report_enabled"], init_r.get("auto_promote_enabled", 0), init_r["updated_at"], strat_id, mode))
+            else:
+                cur.execute('''
+                    INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ''', (strat_id, mode, init_r["evaluation_enabled"], init_r["paper_enabled"], init_r["telegram_enabled"],
+                      init_r["report_enabled"], init_r.get("auto_promote_enabled", 0), init_r["updated_at"]))
+
             cur.execute('''
-                UPDATE rdt_strategy_lifecycle
-                SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
-                WHERE strategy_id=%s AND mode=%s
-            ''', (init_r["evaluation_enabled"], init_r["paper_enabled"], init_r["telegram_enabled"],
-                  init_r["report_enabled"], init_r.get("auto_promote_enabled", 0), init_r["updated_at"], strat_id, mode))
-            cur.execute("SELECT evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, updated_at FROM rdt_strategy_lifecycle WHERE strategy_id=%s AND mode=%s", (strat_id, mode))
+                SELECT strategy_id, mode, evaluation_enabled, paper_enabled,
+                       telegram_enabled, report_enabled, auto_promote_enabled, updated_at
+                FROM rdt_strategy_lifecycle
+                WHERE strategy_id = %s AND mode = %s
+            ''', (strat_id, mode))
             v_r = cur.fetchone()
-            assert v_r["evaluation_enabled"] == init_r["evaluation_enabled"]
-            assert v_r["paper_enabled"] == init_r["paper_enabled"]
+            assert v_r is not None, f"rdt_strategy_lifecycle row ({strat_id}, {mode}) missing after restore"
+            assert v_r["strategy_id"] == strat_id, f"strategy_id mismatch: {v_r['strategy_id']} vs {strat_id}"
+            assert v_r["mode"] == mode, f"mode mismatch: {v_r['mode']} vs {mode}"
+            assert v_r["evaluation_enabled"] == init_r["evaluation_enabled"], f"evaluation_enabled mismatch: {v_r['evaluation_enabled']} vs {init_r['evaluation_enabled']}"
+            assert v_r["paper_enabled"] == init_r["paper_enabled"], f"paper_enabled mismatch: {v_r['paper_enabled']} vs {init_r['paper_enabled']}"
+            assert v_r["telegram_enabled"] == init_r["telegram_enabled"], f"telegram_enabled mismatch: {v_r['telegram_enabled']} vs {init_r['telegram_enabled']}"
+            assert v_r["report_enabled"] == init_r["report_enabled"], f"report_enabled mismatch: {v_r['report_enabled']} vs {init_r['report_enabled']}"
+            assert v_r["auto_promote_enabled"] == init_r.get("auto_promote_enabled", 0), f"auto_promote_enabled mismatch: {v_r['auto_promote_enabled']} vs {init_r.get('auto_promote_enabled', 0)}"
+            v_up = v_r["updated_at"].isoformat() if hasattr(v_r["updated_at"], "isoformat") else str(v_r["updated_at"])
+            i_up = init_r["updated_at"].isoformat() if hasattr(init_r["updated_at"], "isoformat") else str(init_r["updated_at"])
+            assert v_up.replace(" ", "T") == i_up.replace(" ", "T"), f"updated_at mismatch: {v_up} vs {i_up}"
         else:
             raise ValueError(f"Invalid lifecycle snapshot status for {strat_id}: {row_status}")
     results["lifecycle"] = True
@@ -1833,6 +1880,36 @@ print(json.dumps({"settings": row}, default=str))
       console.log(`[+] Staging server terminated.`);
     }
 
+    // Before executing cleanup, discover and register any additional application-generated
+    // audit records created by our unique staging test users (beyond the login event)
+    try {
+      if (seededUserIds && seededUserIds.length > 0) {
+        const findTestAuditsScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+uids = ${JSON.stringify(seededUserIds)}
+p = ",".join(["%s"] * len(uids))
+cur.execute(f"SELECT id FROM audit_logs WHERE user_id IN ({p})", tuple(uids))
+found_ids = [r["id"] for r in cur.fetchall()]
+cur.close(); conn.close()
+print(json.dumps({"found_ids": found_ids}))
+`;
+        const findRes = await runPythonHelper(findTestAuditsScript);
+        if (findRes && findRes.found_ids) {
+          for (const fid of findRes.found_ids) {
+            if (!testFixtures.auditLogs.includes(fid)) {
+              testFixtures.auditLogs.push(fid);
+              console.log(`  [+] Registered additional staging test user audit record ID ${fid}`);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("[-] Error discovering test user audit records:", e);
+    }
+
     // Execute database fixture cleanup and state restoration
     try {
       const cleanupOutput = await executeStagingDatabaseCleanup({
@@ -1856,15 +1933,27 @@ print(json.dumps({"settings": row}, default=str))
       console.error("[-] DB fixture cleanup execution error:", e);
     }
 
-    // Independent post-cleanup audit check: confirm all registered audit IDs deleted and complete baseline identity intact
+    // Independent post-cleanup audit check: confirm all registered audit IDs deleted,
+    // pre-existing baseline identity intact, and preserved unrelated records untampered
     try {
-      const verifyAuditRes = await verifyAuditBaselineIdentity(baselineAuditRows, testFixtures.auditLogs || []);
+      const verifyAuditRes = await verifyAuditBaselineIdentity(
+        baselineAuditRows,
+        testFixtures.auditLogs || [],
+        seededUserIds || []
+      );
       if (verifyAuditRes) {
         if (verifyAuditRes.leftover_registered && verifyAuditRes.leftover_registered.length > 0) {
           console.error(`[-] Registered audit logs not deleted: ${JSON.stringify(verifyAuditRes.leftover_registered)}`);
           cleanupStatus.auditLogs = false;
         } else {
           console.log(`[+] Verified: All ${testFixtures.auditLogs.length} registered audit logs cleanly deleted.`);
+        }
+        if (verifyAuditRes.leftover_test_user_audits && verifyAuditRes.leftover_test_user_audits.length > 0) {
+          console.error(`[-] Test-owned audit logs not cleaned up: ${JSON.stringify(verifyAuditRes.leftover_test_user_audits)}`);
+          cleanupStatus.auditLogs = false;
+        }
+        if (verifyAuditRes.preserved_unrelated_audits && verifyAuditRes.preserved_unrelated_audits.length > 0) {
+          console.log(`[+] Preserved ${verifyAuditRes.preserved_unrelated_audits.length} unrelated concurrent audit record(s) without failure.`);
         }
         if (!verifyAuditRes.baseline_intact) {
           console.error(`[-] Baseline audit log integrity failure detected (${verifyAuditRes.mismatches?.length || 0} mismatch(es)):`);

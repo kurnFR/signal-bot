@@ -9,9 +9,9 @@
  * 2. Exact system_flags restoration: All columns (flag_name, is_active, reason, updated_at)
  *    are restored and verified via readback comparison, and ABSENT flags are cleanly deleted.
  * 3. Exact rdt_strategy_lifecycle restoration: All columns (evaluation_enabled, paper_enabled,
- *    telegram_enabled, report_enabled, auto_promote_enabled, updated_at) are restored,
- *    and ABSENT rows are deleted and asserted absent, using run-unique strategy IDs to guarantee
- *    pre-existing shared data is NEVER deleted.
+ *    telegram_enabled, report_enabled, auto_promote_enabled, updated_at) plus strategy_id and mode
+ *    are restored and verified via readback comparison, ABSENT rows are deleted and asserted absent,
+ *    and deliberate readback mismatches across every field are strictly detected.
  * 4. Exact wallet_tracker_settings restoration: All 12 columns + updated_at are restored
  *    and verified via readback comparison (id=1).
  * 4B. Regression Test A: Wallet restoration with non-default target ID (99) and distinctive
@@ -35,14 +35,16 @@
  * 12. Normalized source-level regression check (Regression Test F): Scans both staging harnesses
  *     across normalized multi-line SQL to guarantee zero broad or indirect audit-log deletions.
  * 13. Staging Workflow Audit Fixture Isolation & Concurrent Event Immunity: Proves staging logins
- *     produce registered audit IDs, concurrent unrelated audit events are neither registered nor deleted,
- *     exact cleanup deletes registered records, unregistered records survive cleanup, and pre-existing
- *     records remain unchanged.
- * 14. Complete Baseline Audit Identity Verification: Proves full column-level baseline identity and
- *     verifies that any mutation to a baseline audit row is immediately detected.
+ *     produce registered audit IDs, application-generated events on test users are discovered and
+ *     registered by exact ID, exact cleanup deletes registered records, concurrent unrelated audit
+ *     events strictly survive and do NOT fail baseline verification, and uncleaned test-owned records strictly fail.
+ * 14. Complete Baseline Audit Identity Verification & Concurrent Preservation: Proves full column-level
+ *     baseline identity, verifies that any mutation to a baseline audit row is immediately detected,
+ *     and confirms that preserved unrelated concurrent audit events do not cause verification failure.
  * 15. Real Staging Cleanup Failure & Exit Code Propagation: Exercises the real cleanup function in an
- *     actual spawned process with injected failure, verifying cleanupStatus.auditLogs=false, independent
- *     stages execute, aggregate cleanup fails, actual process exits non-zero, and pre-existing data is preserved.
+ *     actual spawned process with injected failure, verifying cleanupStatus.auditLogs=false, all independent
+ *     stages (users, circuitBreaker, lifecycle, walletSettings) still execute, aggregate cleanup fails,
+ *     actual process exits non-zero, and pre-existing data is preserved.
  *
  * Run command:
  *   node tests/browser/test_staging_harness_safety.cjs
@@ -236,24 +238,39 @@ try:
             cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb03_strat, rb03_mode))
             assert cur.fetchone() is None, f"{rb03_strat}/{rb03_mode} should not exist after cleanup"
         elif rb03_status == "EXISTS" and orig_rb03 is not None:
-            cur.execute('''
-                UPDATE rdt_strategy_lifecycle
-                SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
-                WHERE strategy_id = %s AND mode = %s
-            ''', (
-                orig_rb03["evaluation_enabled"], orig_rb03["paper_enabled"],
-                orig_rb03["telegram_enabled"], orig_rb03["report_enabled"],
-                orig_rb03["auto_promote_enabled"], orig_rb03["updated_at"],
-                rb03_strat, rb03_mode
-            ))
-            assert cur.rowcount >= 0, f"Failed to update pre-existing {rb03_strat} row"
+            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb03_strat, rb03_mode))
+            if cur.fetchone():
+                cur.execute('''
+                    UPDATE rdt_strategy_lifecycle
+                    SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
+                    WHERE strategy_id = %s AND mode = %s
+                ''', (
+                    orig_rb03["evaluation_enabled"], orig_rb03["paper_enabled"],
+                    orig_rb03["telegram_enabled"], orig_rb03["report_enabled"],
+                    orig_rb03.get("auto_promote_enabled", 0), orig_rb03["updated_at"],
+                    rb03_strat, rb03_mode
+                ))
+            else:
+                cur.execute('''
+                    INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ''', (
+                    rb03_strat, rb03_mode,
+                    orig_rb03["evaluation_enabled"], orig_rb03["paper_enabled"],
+                    orig_rb03["telegram_enabled"], orig_rb03["report_enabled"],
+                    orig_rb03.get("auto_promote_enabled", 0), orig_rb03["updated_at"]
+                ))
             conn.commit()
             cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb03_strat, rb03_mode))
             rb03_after = cur.fetchone()
             assert rb03_after is not None, f"{rb03_strat}/{rb03_mode} missing after restore"
+            assert rb03_after["strategy_id"] == rb03_strat, f"{rb03_strat} strategy_id mismatch"
+            assert rb03_after["mode"] == rb03_mode, f"{rb03_strat} mode mismatch"
             for col in ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled"]:
-                assert rb03_after[col] == orig_rb03[col], f"{rb03_strat} {col} mismatch: {rb03_after[col]} vs {orig_rb03[col]}"
-            assert rb03_after["updated_at"].isoformat() == orig_rb03["updated_at"], f"{rb03_strat} updated_at mismatch: {rb03_after['updated_at'].isoformat()} vs {orig_rb03['updated_at']}"
+                assert rb03_after[col] == orig_rb03.get(col, 0), f"{rb03_strat} {col} mismatch: {rb03_after[col]} vs {orig_rb03.get(col, 0)}"
+            a_up = rb03_after["updated_at"].isoformat() if hasattr(rb03_after["updated_at"], "isoformat") else str(rb03_after["updated_at"])
+            o_up = orig_rb03["updated_at"].isoformat() if hasattr(orig_rb03["updated_at"], "isoformat") else str(orig_rb03["updated_at"])
+            assert a_up.replace(" ", "T") == o_up.replace(" ", "T"), f"{rb03_strat} updated_at mismatch: {a_up} vs {o_up}"
         else:
             raise ValueError(f"Invalid rb03Row snapshot status: {rb03_status}")
 
@@ -269,24 +286,39 @@ try:
             cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb04_strat, rb04_mode))
             assert cur.fetchone() is None, f"{rb04_strat}/{rb04_mode} should not exist after cleanup"
         elif rb04_status == "EXISTS" and orig_rb04 is not None:
-            cur.execute('''
-                UPDATE rdt_strategy_lifecycle
-                SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
-                WHERE strategy_id = %s AND mode = %s
-            ''', (
-                orig_rb04["evaluation_enabled"], orig_rb04["paper_enabled"],
-                orig_rb04["telegram_enabled"], orig_rb04["report_enabled"],
-                orig_rb04["auto_promote_enabled"], orig_rb04["updated_at"],
-                rb04_strat, rb04_mode
-            ))
-            assert cur.rowcount >= 0, f"Failed to update pre-existing {rb04_strat} row"
+            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb04_strat, rb04_mode))
+            if cur.fetchone():
+                cur.execute('''
+                    UPDATE rdt_strategy_lifecycle
+                    SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
+                    WHERE strategy_id = %s AND mode = %s
+                ''', (
+                    orig_rb04["evaluation_enabled"], orig_rb04["paper_enabled"],
+                    orig_rb04["telegram_enabled"], orig_rb04["report_enabled"],
+                    orig_rb04.get("auto_promote_enabled", 0), orig_rb04["updated_at"],
+                    rb04_strat, rb04_mode
+                ))
+            else:
+                cur.execute('''
+                    INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ''', (
+                    rb04_strat, rb04_mode,
+                    orig_rb04["evaluation_enabled"], orig_rb04["paper_enabled"],
+                    orig_rb04["telegram_enabled"], orig_rb04["report_enabled"],
+                    orig_rb04.get("auto_promote_enabled", 0), orig_rb04["updated_at"]
+                ))
             conn.commit()
             cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb04_strat, rb04_mode))
             rb04_after = cur.fetchone()
             assert rb04_after is not None, f"{rb04_strat}/{rb04_mode} missing after restore"
+            assert rb04_after["strategy_id"] == rb04_strat, f"{rb04_strat} strategy_id mismatch"
+            assert rb04_after["mode"] == rb04_mode, f"{rb04_strat} mode mismatch"
             for col in ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled"]:
-                assert rb04_after[col] == orig_rb04[col], f"{rb04_strat} {col} mismatch: {rb04_after[col]} vs {orig_rb04[col]}"
-            assert rb04_after["updated_at"].isoformat() == orig_rb04["updated_at"], f"{rb04_strat} updated_at mismatch: {rb04_after['updated_at'].isoformat()} vs {orig_rb04['updated_at']}"
+                assert rb04_after[col] == orig_rb04.get(col, 0), f"{rb04_strat} {col} mismatch: {rb04_after[col]} vs {orig_rb04.get(col, 0)}"
+            a_up = rb04_after["updated_at"].isoformat() if hasattr(rb04_after["updated_at"], "isoformat") else str(rb04_after["updated_at"])
+            o_up = orig_rb04["updated_at"].isoformat() if hasattr(orig_rb04["updated_at"], "isoformat") else str(orig_rb04["updated_at"])
+            assert a_up.replace(" ", "T") == o_up.replace(" ", "T"), f"{rb04_strat} updated_at mismatch: {a_up} vs {o_up}"
         else:
             raise ValueError(f"Invalid rb04Row snapshot status: {rb04_status}")
 
@@ -1226,6 +1258,95 @@ print(json.dumps({"r3": r3, "r4": r4}))
           assert(readbackRes.r4[k] === origRow2[k], `${stratExist2} ${k} mismatch: ${readbackRes.r4[k]} vs ${origRow2[k]}`);
         }
         console.log("  [✓] All lifecycle columns and updated_at restored and asserted identical.");
+
+        // Deliberate lifecycle readback mismatch tests (Work Order Finding 1 & Requirement 3B)
+        const mismatchScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+
+orig = json.loads('''${JSON.stringify(origRow1)}''')
+strat = "${stratExist1}"
+
+def verify_readback(expected_row):
+    cur.execute('''
+        SELECT strategy_id, mode, evaluation_enabled, paper_enabled,
+               telegram_enabled, report_enabled, auto_promote_enabled, updated_at
+        FROM rdt_strategy_lifecycle
+        WHERE strategy_id = %s AND mode = 'shadow'
+    ''', (strat,))
+    v_r = cur.fetchone()
+    assert v_r is not None, "Row missing"
+    assert v_r["strategy_id"] == strat, "strategy_id mismatch"
+    assert v_r["mode"] == "shadow", "mode mismatch"
+    assert v_r["evaluation_enabled"] == expected_row["evaluation_enabled"], "evaluation_enabled mismatch"
+    assert v_r["paper_enabled"] == expected_row["paper_enabled"], "paper_enabled mismatch"
+    assert v_r["telegram_enabled"] == expected_row["telegram_enabled"], "telegram_enabled mismatch"
+    assert v_r["report_enabled"] == expected_row["report_enabled"], "report_enabled mismatch"
+    assert v_r["auto_promote_enabled"] == expected_row.get("auto_promote_enabled", 0), "auto_promote_enabled mismatch"
+    v_up = v_r["updated_at"].isoformat() if hasattr(v_r["updated_at"], "isoformat") else str(v_r["updated_at"])
+    i_up = expected_row["updated_at"].isoformat() if hasattr(expected_row["updated_at"], "isoformat") else str(expected_row["updated_at"])
+    assert v_up.replace(" ", "T") == i_up.replace(" ", "T"), "updated_at mismatch"
+
+results = {}
+
+# 1. Clean verification passes
+try:
+    verify_readback(orig)
+    results["clean"] = True
+except Exception as e:
+    results["clean"] = False
+
+# 2. Test each field mutation in DB detects mismatch
+for col, bad_val in [
+    ("evaluation_enabled", 0),
+    ("paper_enabled", 1),
+    ("telegram_enabled", 0),
+    ("report_enabled", 1),
+    ("auto_promote_enabled", 1),
+    ("updated_at", "2025-12-31 23:59:59"),
+]:
+    cur.execute(f"UPDATE rdt_strategy_lifecycle SET {col} = %s WHERE strategy_id = %s AND mode = 'shadow'", (bad_val, strat))
+    conn.commit()
+    try:
+        verify_readback(orig)
+        results[f"detect_{col}"] = False
+    except AssertionError:
+        results[f"detect_{col}"] = True
+
+    # Restore col
+    cur.execute(f"UPDATE rdt_strategy_lifecycle SET {col} = %s WHERE strategy_id = %s AND mode = 'shadow'", (orig[col], strat))
+    conn.commit()
+
+# 3. Test missing row detects mismatch
+cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = 'shadow'", (strat,))
+conn.commit()
+try:
+    verify_readback(orig)
+    results["detect_missing_row"] = False
+except AssertionError:
+    results["detect_missing_row"] = True
+
+# 4. Re-insert and verify clean
+cur.execute('''
+    INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
+    VALUES (%s, 'shadow', %s, %s, %s, %s, %s, %s)
+''', (strat, orig["evaluation_enabled"], orig["paper_enabled"], orig["telegram_enabled"], orig["report_enabled"], orig["auto_promote_enabled"], orig["updated_at"]))
+conn.commit(); cur.close(); conn.close()
+
+print(json.dumps(results))
+`;
+        const mismatchRes = await runPythonHelper(mismatchScript);
+        assert(mismatchRes.clean === true, "Initial clean lifecycle readback failed");
+        assert(mismatchRes.detect_evaluation_enabled === true, "evaluation_enabled mismatch not detected");
+        assert(mismatchRes.detect_paper_enabled === true, "paper_enabled mismatch not detected");
+        assert(mismatchRes.detect_telegram_enabled === true, "telegram_enabled mismatch not detected");
+        assert(mismatchRes.detect_report_enabled === true, "report_enabled mismatch not detected");
+        assert(mismatchRes.detect_auto_promote_enabled === true, "auto_promote_enabled mismatch not detected");
+        assert(mismatchRes.detect_updated_at === true, "updated_at mismatch not detected");
+        assert(mismatchRes.detect_missing_row === true, "missing row not detected");
+        console.log("  [✓] Verified: Deliberately incorrect lifecycle readbacks across all fields (evaluation, paper, telegram, report, auto-promote, updated_at, missing row) are strictly detected.");
         passed++;
       } finally {
         await runPythonHelper(`
@@ -2483,20 +2604,42 @@ print(json.dumps({"rows": rows}))
         console.log(`  [✓] Requirement A: Staging login produced registered audit ID ${t13LoginAuditId}.`);
         console.log(`  [✓] Verified: Unrelated audit event ${t13UnrelAuditId} during capture window was NOT registered.`);
 
-        // Attach an unregistered audit record to the test user (Demonstrating C)
-        const seedUnregScript = `
+        // Attach an additional application-generated audit record to the test user beyond login (Demonstrating Requirement D)
+        const seedExtraScript = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, 'UNREGISTERED_TEST_USER_ACTION', json_object('type', 'unregistered'))",
+cur.execute("INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, 'APPLICATION_EXTRA_ACTION', json_object('type', 'extra'))",
             (${t13TestUserId}, '${t13TestUser}'))
-unreg_aid = cur.lastrowid
+extra_aid = cur.lastrowid
 conn.commit(); cur.close(); conn.close()
-print(json.dumps({"unreg_aid": unreg_aid}))
+print(json.dumps({"extra_aid": extra_aid}))
 `;
-        const seedUnregRes = await runPythonHelper(seedUnregScript);
-        t13UnregAuditId = seedUnregRes.unreg_aid;
+        const seedExtraRes = await runPythonHelper(seedExtraScript);
+        t13UnregAuditId = seedExtraRes.extra_aid;
+
+        // Discover and register all test-owned audit records using unique staging test user ownership
+        const discoverScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT id FROM audit_logs WHERE user_id = %s", (${t13TestUserId},))
+found = [r["id"] for r in cur.fetchall()]
+cur.close(); conn.close()
+print(json.dumps({"found": found}))
+`;
+        const discoverRes = await runPythonHelper(discoverScript);
+        assert(discoverRes.found.includes(t13UnregAuditId), "Test-generated audit record not found by test user ID");
+        assert(!discoverRes.found.includes(t13UnrelAuditId), "Unrelated concurrent audit record incorrectly registered!");
+        for (const fid of discoverRes.found) {
+          if (!t13Fixtures.auditLogs.includes(fid)) {
+            t13Fixtures.auditLogs.push(fid);
+          }
+        }
+        assert(t13Fixtures.auditLogs.includes(t13UnregAuditId), "Requirement D failed: extra test audit record not registered by exact ID");
+        console.log(`  [✓] Requirement D: Application-generated audit record ${t13UnregAuditId} on test user registered by exact ID.`);
 
         // Execute cleanup passing ONLY registered audit IDs and test user IDs
         const { executeStagingDatabaseCleanup, verifyAuditBaselineIdentity } = require("./staging_workflow_acceptance.cjs");
@@ -2514,22 +2657,22 @@ print(json.dumps({"unreg_aid": unreg_aid}))
         });
         assert(cleanupExecRes.cleanup_results && cleanupExecRes.cleanup_results.auditLogs === true, "Cleanup failed to report auditLogs success");
 
-        // Demonstration B: Final cleanup deletes all registered login audit records
+        // Demonstration B: Final cleanup deletes all registered test audit records
         const checkRegDeletedScript = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("SELECT id FROM audit_logs WHERE id = %s", (${t13LoginAuditId},))
-row = cur.fetchone()
+cur.execute("SELECT id FROM audit_logs WHERE id IN (%s, %s)", (${t13LoginAuditId}, ${t13UnregAuditId}))
+rows = cur.fetchall()
 cur.close(); conn.close()
-print(json.dumps({"exists": row is not None}))
+print(json.dumps({"leftover": [r["id"] for r in rows]}))
 `;
         const checkRegDeletedRes = await runPythonHelper(checkRegDeletedScript);
-        assert(checkRegDeletedRes.exists === false, "Requirement B failed: registered login audit record still exists");
-        console.log(`  [✓] Requirement B: Final cleanup deleted registered login audit record ${t13LoginAuditId}.`);
+        assert(checkRegDeletedRes.leftover.length === 0, `Requirement B failed: registered audit records still exist: ${JSON.stringify(checkRegDeletedRes.leftover)}`);
+        console.log(`  [✓] Requirement B: Final cleanup deleted registered test audit records [${t13LoginAuditId}, ${t13UnregAuditId}] by exact ID.`);
 
-        // Concurrent Unrelated Event & Unregistered Audit Record Survival:
+        // Concurrent Unrelated Event Survival & Baseline Verification
         const checkSurvivorsScript = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
@@ -2537,23 +2680,64 @@ cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
 cur.execute("SELECT id, action FROM audit_logs WHERE id = %s", (${t13UnrelAuditId},))
 unrel_row = cur.fetchone()
-cur.execute("SELECT id, action FROM audit_logs WHERE id = %s", (${t13UnregAuditId},))
-unreg_row = cur.fetchone()
 cur.close(); conn.close()
 print(json.dumps({
     "unrel_exists": unrel_row is not None,
-    "unreg_exists": unreg_row is not None,
-    "unreg_action": unreg_row["action"] if unreg_row else None
+    "unrel_action": unrel_row["action"] if unrel_row else None
 }))
 `;
         const checkSurvivorsRes = await runPythonHelper(checkSurvivorsScript);
         assert(checkSurvivorsRes.unrel_exists === true, "Unrelated concurrent audit event was improperly deleted by cleanup!");
-        console.log(`  [✓] Verified: Unrelated concurrent audit record ${t13UnrelAuditId} strictly survived cleanup (not deleted).`);
+        console.log(`  [✓] Requirement C: Unrelated concurrent audit record ${t13UnrelAuditId} strictly survived cleanup (not deleted).`);
 
-        // Demonstration C: Unregistered audit record attached to test user survives cleanup
-        assert(checkSurvivorsRes.unreg_exists === true, "Requirement C failed: unregistered audit record was deleted!");
-        assert(checkSurvivorsRes.unreg_action === "UNREGISTERED_TEST_USER_ACTION", "Unregistered audit action altered");
-        console.log(`  [✓] Requirement C: Unregistered audit record ${t13UnregAuditId} attached to test user strictly survived cleanup.`);
+        // Verify baseline integrity and confirm preserved unrelated audit event does NOT fail verification
+        const getBaselineAndCurrentScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT id, user_id, username, action, details, ip_address, created_at FROM audit_logs WHERE id = %s", (${t13PreAuditId},))
+pre_row = cur.fetchone()
+if hasattr(pre_row.get("created_at"), "isoformat"):
+    pre_row["created_at"] = pre_row["created_at"].isoformat()
+if pre_row.get("details"):
+    pre_row["details"] = json.loads(pre_row["details"])
+cur.close(); conn.close()
+print(json.dumps({"pre_row": pre_row}))
+`;
+        const baselineRes = await runPythonHelper(getBaselineAndCurrentScript);
+        const verifyWithUnrelated = await verifyAuditBaselineIdentity(
+          [baselineRes.pre_row],
+          t13Fixtures.auditLogs,
+          [t13TestUserId]
+        );
+        assert(verifyWithUnrelated.baseline_intact === true, `Preserved unrelated event caused unexpected failure: ${JSON.stringify(verifyWithUnrelated.mismatches)}`);
+        assert(verifyWithUnrelated.preserved_unrelated_audits.includes(t13UnrelAuditId), "Unrelated event not recognized as preserved unrelated audit");
+        console.log(`  [✓] Verified: verifyAuditBaselineIdentity preserved unrelated concurrent audit event without test failure.`);
+
+        // Test that an uncleaned test user audit record IS detected as a failure
+        const seedUncleanedScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, 'LEFTOVER_TEST_ACTION', json_object('type', 'leftover'))",
+            (${t13TestUserId}, '${t13TestUser}'))
+leftover_aid = cur.lastrowid
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"leftover_aid": leftover_aid}))
+`;
+        const seedUncleanedRes = await runPythonHelper(seedUncleanedScript);
+        const uncleanedAid = seedUncleanedRes.leftover_aid;
+
+        const verifyWithUncleaned = await verifyAuditBaselineIdentity(
+          [baselineRes.pre_row],
+          t13Fixtures.auditLogs,
+          [t13TestUserId]
+        );
+        assert(verifyWithUncleaned.baseline_intact === false, "Uncleaned test user audit log was not flagged as failure!");
+        assert(verifyWithUncleaned.leftover_test_user_audits.includes(uncleanedAid), "Leftover test user audit ID not reported in leftover_test_user_audits");
+        console.log(`  [✓] Verified: Uncleaned test-user audit record ${uncleanedAid} was strictly detected as cleanup failure.`);
 
         // Demonstration D: Pre-existing audit records remain unchanged
         const checkPreIntactScript = `
@@ -2568,15 +2752,15 @@ print(json.dumps({"exists": row is not None, "action": row["action"] if row else
 `;
         const checkPreRes = await runPythonHelper(checkPreIntactScript);
         assert(checkPreRes.exists === true && checkPreRes.action === "PRE_EXISTING_BASELINE_ACTION", "Requirement D failed: pre-existing audit record damaged!");
-        console.log(`  [✓] Requirement D: Pre-existing audit record ${t13PreAuditId} remains completely intact.`);
+        console.log(`  [✓] Requirement E: Pre-existing baseline audit record ${t13PreAuditId} remains completely intact across all columns.`);
 
-        // Clean up the unregistered and unrelated fixtures before Requirement F assertion
+        // Clean up the leftover, unregistered, and unrelated fixtures before Requirement F assertion
         await runPythonHelper(`
 import mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor()
-cur.execute("DELETE FROM audit_logs WHERE id IN (%s, %s)", (${t13UnregAuditId}, ${t13UnrelAuditId}))
+cur.execute("DELETE FROM audit_logs WHERE id IN (%s, %s)", (${uncleanedAid}, ${t13UnrelAuditId}))
 conn.commit(); cur.close(); conn.close()
 `);
         t13UnregAuditId = null;
@@ -2588,7 +2772,7 @@ import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("SELECT COUNT(*) as cnt FROM audit_logs WHERE id IN (%s, %s)", (${t13LoginAuditId}, ${seedUnregRes.unreg_aid}))
+cur.execute("SELECT COUNT(*) as cnt FROM audit_logs WHERE id IN (%s, %s, %s)", (${t13LoginAuditId}, ${seedExtraRes.extra_aid}, ${uncleanedAid}))
 cnt = cur.fetchone()["cnt"]
 cur.close(); conn.close()
 print(json.dumps({"leftover_cnt": cnt}))
@@ -2733,9 +2917,40 @@ conn = mysql.connector.connect(**cfg); cur = conn.cursor()
 cur.execute("UPDATE audit_logs SET action = 'BASELINE_ORIGINAL_ACTION', ip_address = '127.0.0.1' WHERE id = %s", (${t14AuditId},))
 conn.commit(); cur.close(); conn.close()
 `);
-        const restoredVerify = await verifyAuditBaselineIdentity(baselineSnapshot, []);
+        const restoredVerify = await verifyAuditBaselineIdentity(baselineSnapshot, [], [t14UserId]);
         assert(restoredVerify.baseline_intact === true && restoredVerify.mismatches.length === 0, `Verification after restore failed: ${JSON.stringify(restoredVerify.mismatches)}`);
         console.log("  [✓] Verified: Restoring baseline row returned verification to 100% clean.");
+
+        // 5. Insert an unrelated concurrent audit event and verify verifyAuditBaselineIdentity preserves it without failure
+        let unrelatedAid = null;
+        try {
+          const insertUnrelRes = await runPythonHelper(`
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("INSERT INTO audit_logs (username, action, details, ip_address) VALUES ('system_cron', 'PERIODIC_HEARTBEAT', json_object('tick', 1), '127.0.0.1')")
+aid = cur.lastrowid
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"aid": aid}))
+`);
+          unrelatedAid = insertUnrelRes.aid;
+          const verifyWithUnrelated = await verifyAuditBaselineIdentity(baselineSnapshot, [], [t14UserId]);
+          assert(verifyWithUnrelated.baseline_intact === true, `Unrelated concurrent audit event caused unexpected failure: ${JSON.stringify(verifyWithUnrelated.mismatches)}`);
+          assert(verifyWithUnrelated.preserved_unrelated_audits.includes(unrelatedAid), "Unrelated concurrent event not listed in preserved_unrelated_audits");
+          console.log("  [✓] Verified: Concurrent unrelated audit event is strictly preserved without failing baseline verification.");
+        } finally {
+          if (unrelatedAid !== null) {
+            await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM audit_logs WHERE id = %s", (${unrelatedAid},))
+conn.commit(); cur.close(); conn.close()
+`);
+          }
+        }
 
         passed++;
       } finally {
@@ -2876,10 +3091,12 @@ main().catch(err => {
         assert(childOutput.cleanupStatus.auditLogs === false, "cleanupStatus.auditLogs should be false");
         console.log("  [✓] Verified: cleanupStatus.auditLogs became false.");
 
-        // 3. Verify other independent cleanup stages still executed (users, circuitBreaker, etc.)
+        // 3. Verify other independent cleanup and restoration stages still executed (users, circuitBreaker, lifecycle, walletSettings)
         assert(childOutput.cleanupStatus.users === true, "Independent stage users should have succeeded");
         assert(childOutput.cleanupStatus.circuitBreaker === true, "Independent stage circuitBreaker should have succeeded");
-        console.log("  [✓] Verified: Other independent cleanup stages (users, circuitBreaker, etc.) still executed successfully.");
+        assert(childOutput.cleanupStatus.lifecycle === true, "Independent stage lifecycle should have succeeded");
+        assert(childOutput.cleanupStatus.walletSettings === true, "Independent stage walletSettings should have succeeded");
+        console.log("  [✓] Verified: All independent cleanup & restoration stages (users, circuitBreaker, lifecycle, walletSettings) still executed successfully.");
 
         // 4. Verify final aggregate cleanup status is unsuccessful
         assert(childOutput.allCleanedUp === false, "allCleanedUp should be false");
