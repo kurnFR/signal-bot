@@ -253,6 +253,7 @@ async function run() {
     paperConfigs: [],
     mlFiles: [],
     trackedWallets: [],
+    auditLogs: [],
   };
 
   // State preservation registers and snapshot capture marker
@@ -1447,12 +1448,18 @@ results = {}
 snapshot_captured = payload.get("snapshot_captured", False)
 snapshot_state = payload.get("snapshot_state", {})
 
-# 1. Delete users
+# 1. Delete users and individually registered audit logs
 try:
-    user_ids = payload["user_ids"]
+    audit_ids = payload.get("audit_log_ids", [])
+    if audit_ids:
+        placeholders = ",".join(["%s"] * len(audit_ids))
+        cur.execute(f"DELETE FROM audit_logs WHERE id IN ({placeholders})", tuple(audit_ids))
+        cur.execute(f"SELECT COUNT(*) as cnt FROM audit_logs WHERE id IN ({placeholders})", tuple(audit_ids))
+        assert cur.fetchone()["cnt"] == 0, "Registered audit logs not fully deleted"
+
+    user_ids = payload.get("user_ids", [])
     if user_ids:
         placeholders = ",".join(["%s"] * len(user_ids))
-        cur.execute(f"DELETE FROM audit_logs WHERE user_id IN ({placeholders})", tuple(user_ids))
         cur.execute(f"DELETE FROM users WHERE id IN ({placeholders})", tuple(user_ids))
         # Verify deletion
         cur.execute(f"SELECT COUNT(*) as cnt FROM users WHERE id IN ({placeholders})", tuple(user_ids))
@@ -1673,31 +1680,10 @@ try:
             ))
             conn.commit()
 
-            # Read back and assert all 12 columns restored
+            # Read back and assert all 12 columns + updated_at restored
             cur.execute("SELECT * FROM wallet_tracker_settings WHERE id = %s", (target_id,))
             verified_s = cur.fetchone()
             assert verified_s is not None, f"wallet_tracker_settings row {target_id} missing after restore"
-            results["walletSettings"] = True
-        elif wt_status == "EXISTS" and init_s is not None:
-            cur.execute('''
-                UPDATE wallet_tracker_settings
-                SET enabled=%s, networks=%s, pools_per_network=%s, min_trade_usd=%s, min_net_usd=%s,
-                    auto_track_net_usd=%s, poll_interval_seconds=%s, retention_days=%s, api_delay_seconds=%s,
-                    token_mode=%s, token_addresses=%s, birdeye_api_key=%s, updated_at=%s
-                WHERE id = 1
-            ''', (
-                init_s["enabled"], init_s["networks"], init_s["pools_per_network"],
-                init_s["min_trade_usd"], init_s["min_net_usd"], init_s["auto_track_net_usd"],
-                init_s["poll_interval_seconds"], init_s["retention_days"], init_s["api_delay_seconds"],
-                init_s["token_mode"], init_s["token_addresses"], init_s["birdeye_api_key"],
-                init_s["updated_at"]
-            ))
-            conn.commit()
-
-            # Read back and assert all 12 columns + updated_at restored
-            cur.execute("SELECT * FROM wallet_tracker_settings WHERE id = 1")
-            verified_s = cur.fetchone()
-            assert verified_s is not None, "wallet_tracker_settings row 1 missing after restore"
             assert verified_s["enabled"] == init_s["enabled"], f"enabled mismatch: {verified_s['enabled']} vs {init_s['enabled']}"
             assert verified_s["networks"] == init_s["networks"], f"networks mismatch: {verified_s['networks']} vs {init_s['networks']}"
             assert verified_s["pools_per_network"] == init_s["pools_per_network"], f"pools_per_network mismatch: {verified_s['pools_per_network']} vs {init_s['pools_per_network']}"
@@ -1710,7 +1696,9 @@ try:
             assert verified_s["token_mode"] == init_s["token_mode"], f"token_mode mismatch: {verified_s['token_mode']} vs {init_s['token_mode']}"
             assert (verified_s["token_addresses"] or "") == (init_s["token_addresses"] or ""), f"token_addresses mismatch: {verified_s['token_addresses']} vs {init_s['token_addresses']}"
             assert (verified_s["birdeye_api_key"] or "") == (init_s["birdeye_api_key"] or ""), f"birdeye_api_key mismatch: {verified_s['birdeye_api_key']} vs {init_s['birdeye_api_key']}"
-            assert verified_s["updated_at"].isoformat() == init_s["updated_at"], f"updated_at mismatch: {verified_s['updated_at'].isoformat()} vs {init_s['updated_at']}"
+            v_updated = verified_s["updated_at"].isoformat() if hasattr(verified_s["updated_at"], "isoformat") else str(verified_s["updated_at"])
+            i_updated = init_s["updated_at"].isoformat() if hasattr(init_s["updated_at"], "isoformat") else str(init_s["updated_at"])
+            assert v_updated.replace(" ", "T") == i_updated.replace(" ", "T"), f"updated_at mismatch: {v_updated} vs {i_updated}"
             results["walletSettings"] = True
         else:
             raise ValueError(f"Invalid walletSettings snapshot status: {wt_status}")
@@ -1727,6 +1715,7 @@ print(json.dumps({"status": "ok", "cleanup_results": results}))
       const cleanupOutput = await runPythonHelper(cleanupScript, {}, {
         target_db: TARGET_DB,
         user_ids: seededUserIds,
+        audit_log_ids: testFixtures.auditLogs || [],
         paper_order_ids: testFixtures.paperOrders,
         paper_trade_ids: testFixtures.paperTrades,
         paper_position_ids: testFixtures.paperPositions,

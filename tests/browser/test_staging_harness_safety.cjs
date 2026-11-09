@@ -13,7 +13,9 @@
  *    and ABSENT rows are deleted and asserted absent, using run-unique strategy IDs to guarantee
  *    pre-existing shared data is NEVER deleted.
  * 4. Exact wallet_tracker_settings restoration: All 12 columns + updated_at are restored
- *    and verified via readback comparison.
+ *    and verified via readback comparison (id=1).
+ * 4B. Regression Test A: Wallet restoration with non-default target ID (99) and distinctive
+ *    values across all 12 columns + updated_at, including non-destructive ABSENT verification.
  * 5. Harness cleanup failure propagation: Any cleanup failure sets non-zero exit code.
  * 6. ML-03 handled error API contract: POST /api/ml/run-experiment returns HTTP 500 with
  *    exact detail "ML experiment execution failed; check server logs for diagnostics",
@@ -21,12 +23,15 @@
  * 7. Pre-existing lifecycle row survival (Requirement 8): Pre-existing lifecycle rows seeded
  *    with distinctive values survive an entire test mutation and harness cleanup cycle completely
  *    unharmed and identically verified across all columns.
- * 8. Regression Test A: Existing SAFE-prefixed records (lifecycle, system_flags, users, audit_logs)
- *    survive exact-ownership cleanup without being deleted or mutated.
- * 9. Regression Test B: Current-run fixtures are removed by exact ID verification.
- * 10. Regression Test C: Failure-safe global restoration continues after an injected failure,
- *     aggregates errors, detects unrecovered state, and suppresses false success messages.
- * 11. Regression Test D: End-to-end database purity & baseline integrity verification.
+ * 8. Existing SAFE-prefixed records (lifecycle, system_flags, users, audit_logs) survive
+ *    exact-ownership cleanup without being deleted or mutated.
+ * 9. Regression Test B: Exact audit-log ownership: registered audit log is deleted, while
+ *    unregistered audit log associated with test user and pre-existing audit log remain intact.
+ * 10. Regression Test C: Failure-safe global restoration continues after an injected failure in
+ *     auditLogCleanup, postRestoreVerification detects unrecovered audit log, later stages execute,
+ *     and unhandled failures cause nonzero process exit without suppressing errors.
+ * 11. Regression Test D: Full baseline integrity verification across audit_logs, wallet_tracker_settings,
+ *     system_flags, and rdt_strategy_lifecycle.
  *
  * Run command:
  *   node tests/browser/test_staging_harness_safety.cjs
@@ -146,12 +151,18 @@ results = {}
 snapshot_captured = payload.get("snapshot_captured", False)
 snapshot_state = payload.get("snapshot_state", {})
 
-# 1. Delete users and related audit logs (exact IDs only)
+# 1. Delete individually registered audit logs and users (exact IDs only)
 try:
+    audit_ids = payload.get("audit_log_ids", [])
+    if audit_ids:
+        placeholders = ",".join(["%s"] * len(audit_ids))
+        cur.execute(f"DELETE FROM audit_logs WHERE id IN ({placeholders})", tuple(audit_ids))
+        cur.execute(f"SELECT COUNT(*) as cnt FROM audit_logs WHERE id IN ({placeholders})", tuple(audit_ids))
+        assert cur.fetchone()["cnt"] == 0, "Registered audit logs not fully deleted"
+
     user_ids = payload.get("user_ids", [])
     if user_ids:
         placeholders = ",".join(["%s"] * len(user_ids))
-        cur.execute(f"DELETE FROM audit_logs WHERE user_id IN ({placeholders})", tuple(user_ids))
         cur.execute(f"DELETE FROM users WHERE id IN ({placeholders})", tuple(user_ids))
         cur.execute(f"SELECT COUNT(*) as cnt FROM users WHERE id IN ({placeholders})", tuple(user_ids))
         assert cur.fetchone()["cnt"] == 0, "Users not fully deleted"
@@ -322,7 +333,9 @@ try:
             assert verified_s["token_mode"] == init_s["token_mode"], f"token_mode mismatch: {verified_s['token_mode']} vs {init_s['token_mode']}"
             assert (verified_s["token_addresses"] or "") == (init_s["token_addresses"] or ""), f"token_addresses mismatch: {verified_s['token_addresses']} vs {init_s['token_addresses']}"
             assert (verified_s["birdeye_api_key"] or "") == (init_s["birdeye_api_key"] or ""), f"birdeye_api_key mismatch: {verified_s['birdeye_api_key']} vs {init_s['birdeye_api_key']}"
-            assert verified_s["updated_at"].isoformat() == init_s["updated_at"], f"updated_at mismatch: {verified_s['updated_at'].isoformat()} vs {init_s['updated_at']}"
+            v_updated = verified_s["updated_at"].isoformat() if hasattr(verified_s["updated_at"], "isoformat") else str(verified_s["updated_at"])
+            i_updated = init_s["updated_at"].isoformat() if hasattr(init_s["updated_at"], "isoformat") else str(init_s["updated_at"])
+            assert v_updated.replace(" ", "T") == i_updated.replace(" ", "T"), f"updated_at mismatch: {v_updated} vs {i_updated}"
             results["walletSettings"] = True
         else:
             raise ValueError(f"Invalid walletSettings snapshot status: {wt_status}")
@@ -448,12 +461,13 @@ print(json.dumps({"status": "EXISTS" if row else "ABSENT", "id": ${id}, "row": r
 
 // Helper: Directly restore wallet settings snapshot
 async function restoreWalletSettingsDirect(snap) {
+  const targetId = snap.id || (snap.row && snap.row.id) || 1;
   const script = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-target_id = ${snap.id}
+target_id = ${targetId}
 if "${snap.status}" == "ABSENT":
     cur.execute("DELETE FROM wallet_tracker_settings WHERE id = %s", (target_id,))
 else:
@@ -503,6 +517,25 @@ print(json.dumps({"rows": rows}))
   return res.rows || [];
 }
 
+// Helper: Query all current rows in audit_logs
+async function getAllAuditLogs() {
+  const script = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT id, user_id, username, action, details, ip_address, created_at FROM audit_logs ORDER BY id")
+rows = cur.fetchall()
+for r in rows:
+    if hasattr(r.get("created_at"), "isoformat"):
+        r["created_at"] = r["created_at"].isoformat()
+cur.close(); conn.close()
+print(json.dumps({"rows": rows}))
+`;
+  const res = await runPythonHelper(script);
+  return res.rows || [];
+}
+
 // Failure-safe global restoration function that attempts each operation independently
 async function executeFailureSafeGlobalRestoration(baselineSnapshot, registry, options = {}) {
   const { injectFailureIn = null } = options;
@@ -522,22 +555,19 @@ async function executeFailureSafeGlobalRestoration(baselineSnapshot, registry, o
       throw new Error("Synthetic injected failure in auditLogCleanup");
     }
     const auditIds = Array.from(registry.auditLogIds);
-    const userIds = Array.from(registry.userIds);
-    if (auditIds.length > 0 || userIds.length > 0) {
+    if (auditIds.length > 0) {
       await runPythonHelper(`
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
 audit_ids = ${JSON.stringify(auditIds)}
-user_ids = ${JSON.stringify(userIds)}
-if audit_ids:
-    p = ",".join(["%s"] * len(audit_ids))
-    cur.execute(f"DELETE FROM audit_logs WHERE id IN ({p})", tuple(audit_ids))
-if user_ids:
-    p = ",".join(["%s"] * len(user_ids))
-    cur.execute(f"DELETE FROM audit_logs WHERE user_id IN ({p})", tuple(user_ids))
+p = ",".join(["%s"] * len(audit_ids))
+cur.execute(f"DELETE FROM audit_logs WHERE id IN ({p})", tuple(audit_ids))
+cur.execute(f"SELECT COUNT(*) as cnt FROM audit_logs WHERE id IN ({p})", tuple(audit_ids))
+remaining = cur.fetchone()["cnt"]
 conn.commit(); cur.close(); conn.close()
+assert remaining == 0, f"Audit logs not fully deleted, remaining: {remaining}"
 print(json.dumps({"cleaned": True}))
 `);
     }
@@ -676,12 +706,13 @@ print(json.dumps({"cleaned": True}))
     }
     if (baselineSnapshot && baselineSnapshot.wallet) {
       await restoreWalletSettingsDirect(baselineSnapshot.wallet);
-      const wVer = await getWalletSettingsSnapshot(1);
+      const targetWId = baselineSnapshot.wallet.id || (baselineSnapshot.wallet.row && baselineSnapshot.wallet.row.id) || 1;
+      const wVer = await getWalletSettingsSnapshot(targetWId);
       if (baselineSnapshot.wallet.status === "ABSENT") {
-        if (wVer.status !== "ABSENT") throw new Error("wallet_tracker_settings should be ABSENT after restore");
+        if (wVer.status !== "ABSENT") throw new Error(`wallet_tracker_settings row ${targetWId} should be ABSENT after restore`);
       } else {
-        if (wVer.status !== "EXISTS") throw new Error("wallet_tracker_settings missing after restore");
-        for (const col of ["enabled", "networks", "pools_per_network", "min_trade_usd", "min_net_usd", "auto_track_net_usd", "poll_interval_seconds", "retention_days", "api_delay_seconds", "token_mode", "updated_at"]) {
+        if (wVer.status !== "EXISTS") throw new Error(`wallet_tracker_settings row ${targetWId} missing after restore`);
+        for (const col of ["enabled", "networks", "pools_per_network", "min_trade_usd", "min_net_usd", "auto_track_net_usd", "poll_interval_seconds", "retention_days", "api_delay_seconds", "token_mode", "token_addresses", "birdeye_api_key", "updated_at"]) {
           assert(wVer.row[col] === baselineSnapshot.wallet.row[col], `wallet_tracker_settings ${col} mismatch`);
         }
       }
@@ -709,7 +740,8 @@ print(json.dumps({"cleaned": True}))
 
     // B. Check wallet_tracker_settings
     if (baselineSnapshot && baselineSnapshot.wallet) {
-      const curW = await getWalletSettingsSnapshot(1);
+      const targetWId = baselineSnapshot.wallet.id || (baselineSnapshot.wallet.row && baselineSnapshot.wallet.row.id) || 1;
+      const curW = await getWalletSettingsSnapshot(targetWId);
       if (JSON.stringify(curW.row) !== JSON.stringify(baselineSnapshot.wallet.row)) {
         mismatches.push(`wallet_tracker_settings mismatch: current=${JSON.stringify(curW.row)} baseline=${JSON.stringify(baselineSnapshot.wallet.row)}`);
       }
@@ -743,7 +775,27 @@ print(json.dumps({"found": [r["id"] for r in rows]}))
       }
     }
 
-    // E. Check exact test strategy fixtures are absent (if not in baseline)
+    // E. Check exact registered audit log IDs are absent (Finding 3 Requirements 1, 2, 3)
+    if (registry.auditLogIds.size > 0) {
+      const checkAuditScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+aids = ${JSON.stringify(Array.from(registry.auditLogIds))}
+p = ",".join(["%s"] * len(aids))
+cur.execute(f"SELECT id FROM audit_logs WHERE id IN ({p})", tuple(aids))
+rows = cur.fetchall()
+cur.close(); conn.close()
+print(json.dumps({"found": [r["id"] for r in rows]}))
+`;
+      const curA = await runPythonHelper(checkAuditScript);
+      if (curA.found && curA.found.length > 0) {
+        mismatches.push(`Leftover registered audit log IDs found in DB: ${JSON.stringify(curA.found)}`);
+      }
+    }
+
+    // F. Check exact test strategy fixtures are absent (if not in baseline)
     for (const sf of registry.strategyLifecycles.values()) {
       const checkL = await getLifecycleRowSnapshot(sf.strategy_id, sf.mode);
       if (checkL.status === "EXISTS") {
@@ -755,13 +807,32 @@ print(json.dumps({"found": [r["id"] for r in rows]}))
       }
     }
 
-    // F. Check exact test flag fixtures are absent (if not in baseline)
+    // G. Check exact test flag fixtures are absent (if not in baseline)
     for (const ff of registry.systemFlags) {
       const checkF = await getSystemFlagSnapshot(ff);
       if (checkF.status === "EXISTS") {
         const wasInBaseline = baselineSnapshot && baselineSnapshot.flags && baselineSnapshot.flags.flag_name === ff && baselineSnapshot.flags.status === "EXISTS";
         if (!wasInBaseline) {
           mismatches.push(`Leftover test system flag found: ${ff}`);
+        }
+      }
+    }
+
+    // H. Check pre-existing audit logs remain unchanged (Finding 3 Requirement 4)
+    if (baselineSnapshot && baselineSnapshot.auditLogs) {
+      const curAudit = await getAllAuditLogs();
+      const baseMap = new Map(baselineSnapshot.auditLogs.map(a => [a.id, a]));
+      for (const cur of curAudit) {
+        if (baseMap.has(cur.id)) {
+          const base = baseMap.get(cur.id);
+          if (JSON.stringify(cur) !== JSON.stringify(base)) {
+            mismatches.push(`Pre-existing audit log ID ${cur.id} modified: current=${JSON.stringify(cur)} baseline=${JSON.stringify(base)}`);
+          }
+        }
+      }
+      for (const base of baselineSnapshot.auditLogs) {
+        if (!curAudit.some(c => c.id === base.id)) {
+          mismatches.push(`Pre-existing audit log ID ${base.id} missing from DB`);
         }
       }
     }
@@ -807,7 +878,8 @@ async function runAllSafetyTests() {
   const baselineLifecycleRsi = await getLifecycleRowSnapshot("RSI_CTR", "shadow");
   const baselineLifecycleDbl = await getLifecycleRowSnapshot("DBL_PAT_INV", "inverse");
   const baselineAllLifecycle = await getAllLifecycleRows();
-  console.log("  [✓] Pre-suite baseline captured successfully.\n");
+  const baselineAuditLogs = await getAllAuditLogs();
+  console.log(`  [✓] Pre-suite baseline captured successfully (${baselineAuditLogs.length} audit logs recorded).\n`);
 
   const baselineSnapshot = {
     flags: baselineFlags,
@@ -815,6 +887,7 @@ async function runAllSafetyTests() {
     lifecycleRsi: baselineLifecycleRsi,
     lifecycleDbl: baselineLifecycleDbl,
     allLifecycleRows: baselineAllLifecycle,
+    auditLogs: baselineAuditLogs,
   };
 
   try {
@@ -1192,13 +1265,135 @@ print(json.dumps({"mutated": True}))
 
         const readbackSnap = await getWalletSettingsSnapshot(1);
         const restored = readbackSnap.row;
-        for (const col of ["enabled", "networks", "pools_per_network", "min_trade_usd", "min_net_usd", "auto_track_net_usd", "poll_interval_seconds", "retention_days", "api_delay_seconds", "token_mode", "updated_at"]) {
+        for (const col of ["enabled", "networks", "pools_per_network", "min_trade_usd", "min_net_usd", "auto_track_net_usd", "poll_interval_seconds", "retention_days", "api_delay_seconds", "token_mode", "token_addresses", "birdeye_api_key", "updated_at"]) {
           assert(restored[col] === origWallet[col], `wallet_tracker_settings ${col} mismatch: ${restored[col]} vs ${origWallet[col]}`);
         }
-        console.log("  [✓] wallet_tracker_settings fully restored with all 12 columns + updated_at verified.");
+        console.log("  [✓] wallet_tracker_settings (id=1) fully restored with all 12 columns + updated_at verified.");
         passed++;
       } finally {
         await restoreWalletSettingsDirect(walletSnap);
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // Regression Test A: Wallet restoration with a non-default ID & distinctive values across all 12 columns
+    // --------------------------------------------------------------------------
+    console.log("\n=== Regression Test A: Wallet restoration with non-default ID (99) and distinctive values across all 12 columns ===");
+    {
+      const nonDefaultId = 99;
+      // Pre-check row 99 does not exist
+      const initialSnap = await getWalletSettingsSnapshot(nonDefaultId);
+      assert(initialSnap.status === "ABSENT", `wallet_tracker_settings row ${nonDefaultId} already exists!`);
+
+      const distinctiveWallet = {
+        id: nonDefaultId,
+        enabled: 0,
+        networks: "solana,arbitrum,base",
+        pools_per_network: 7,
+        min_trade_usd: 12345.67,
+        min_net_usd: 23456.78,
+        auto_track_net_usd: 34567.89,
+        poll_interval_seconds: 450,
+        retention_days: 14,
+        api_delay_seconds: 5.5,
+        token_mode: "selected",
+        token_addresses: "0x1111111111111111,0x2222222222222222",
+        birdeye_api_key: "test_secret_birdeye_key_99",
+        updated_at: "2025-08-08 08:08:08",
+      };
+
+      try {
+        // Seed distinctive non-default wallet row
+        await runPythonHelper(`
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("""
+    INSERT INTO wallet_tracker_settings
+    (id, enabled, networks, pools_per_network, min_trade_usd, min_net_usd, auto_track_net_usd,
+     poll_interval_seconds, retention_days, api_delay_seconds, token_mode, token_addresses,
+     birdeye_api_key, updated_at)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+""", (
+    ${nonDefaultId}, ${distinctiveWallet.enabled}, '${distinctiveWallet.networks}',
+    ${distinctiveWallet.pools_per_network}, ${distinctiveWallet.min_trade_usd}, ${distinctiveWallet.min_net_usd},
+    ${distinctiveWallet.auto_track_net_usd}, ${distinctiveWallet.poll_interval_seconds},
+    ${distinctiveWallet.retention_days}, ${distinctiveWallet.api_delay_seconds}, '${distinctiveWallet.token_mode}',
+    '${distinctiveWallet.token_addresses}', '${distinctiveWallet.birdeye_api_key}', '${distinctiveWallet.updated_at}'
+))
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"seeded": True}))
+`);
+
+        const snapExists = await getWalletSettingsSnapshot(nonDefaultId);
+        assert(snapExists.status === "EXISTS", `wallet_tracker_settings row ${nonDefaultId} missing after seed`);
+
+        // Mutate the non-default row in DB
+        await runPythonHelper(`
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("UPDATE wallet_tracker_settings SET enabled=1, min_trade_usd=99999.00, updated_at='2026-12-31 23:59:59' WHERE id = %s", (${nonDefaultId},))
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"mutated": True}))
+`);
+
+        // Execute cleanup restoring snapshot with target_id = 99
+        const cleanupRes = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
+          target_db: TARGET_DB,
+          snapshot_captured: true,
+          snapshot_state: {
+            emergencyStop: { status: "NOT_CAPTURED", row: null },
+            walletSettings: snapExists,
+            rb03Row: { status: "NOT_CAPTURED", row: null },
+            rb04Row: { status: "NOT_CAPTURED", row: null },
+          },
+        });
+        assert(cleanupRes.cleanup_results.walletSettings === true, `walletSettings restoration failed for ID ${nonDefaultId}`);
+
+        // Readback and assert all 12 columns + updated_at match distinctive values
+        const readbackSnap = await getWalletSettingsSnapshot(nonDefaultId);
+        assert(readbackSnap.status === "EXISTS", `wallet_tracker_settings row ${nonDefaultId} missing after restore`);
+        const r = readbackSnap.row;
+        for (const col of ["enabled", "networks", "pools_per_network", "min_trade_usd", "min_net_usd", "auto_track_net_usd", "poll_interval_seconds", "retention_days", "api_delay_seconds", "token_mode", "token_addresses", "birdeye_api_key"]) {
+          assert(r[col] === distinctiveWallet[col], `ID ${nonDefaultId} ${col} mismatch: ${r[col]} vs ${distinctiveWallet[col]}`);
+        }
+        assert(r.updated_at.replace(" ", "T") === distinctiveWallet.updated_at.replace(" ", "T"), `ID ${nonDefaultId} updated_at mismatch`);
+
+        // Also test non-destructive ABSENT cleanup for non-default ID:
+        // Ensure default row (id=1) is unaffected when ABSENT id=99 is cleaned up
+        const cleanupAbsentRes = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
+          target_db: TARGET_DB,
+          snapshot_captured: true,
+          snapshot_state: {
+            emergencyStop: { status: "NOT_CAPTURED", row: null },
+            walletSettings: { status: "ABSENT", id: nonDefaultId, row: null },
+            rb03Row: { status: "NOT_CAPTURED", row: null },
+            rb04Row: { status: "NOT_CAPTURED", row: null },
+          },
+        });
+        assert(cleanupAbsentRes.cleanup_results.walletSettings === true, `ABSENT cleanup failed for ID ${nonDefaultId}`);
+        const postAbsentSnap = await getWalletSettingsSnapshot(nonDefaultId);
+        assert(postAbsentSnap.status === "ABSENT", `Row ${nonDefaultId} should be absent after ABSENT cleanup`);
+
+        // Verify row 1 still exists and is untouched
+        const row1Snap = await getWalletSettingsSnapshot(1);
+        assert(row1Snap.status === "EXISTS", "Row 1 was erroneously affected by ID 99 ABSENT cleanup!");
+
+        console.log("  [✓] Verified: Non-default wallet ID (99) with distinctive values across all 12 columns + updated_at restored and ABSENT-tested cleanly.");
+        passed++;
+      } finally {
+        // Ensure nonDefaultId is deleted
+        await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM wallet_tracker_settings WHERE id = %s", (${nonDefaultId},))
+conn.commit(); cur.close(); conn.close()
+`);
       }
     }
 
@@ -1655,127 +1850,248 @@ conn.commit(); cur.close(); conn.close()
     }
 
     // --------------------------------------------------------------------------
-    // TEST 9: Regression Test B — Current-run fixtures removed by exact ID
+    // TEST 9: Regression Test B — Exact audit-log ownership (registered vs unregistered vs pre-existing)
     // --------------------------------------------------------------------------
-    console.log("\n=== Test 9: Regression Test B — Current-run fixtures removed by exact ID verification ===");
+    console.log("\n=== Test 9: Regression Test B — Exact audit-log ownership (registered vs unregistered vs pre-existing) ===");
     {
-      const runStrat = `SAFE_RUN_B_STRAT_${RUN_ID}`;
-      const runFlag = `SAFE_RUN_B_FLAG_${RUN_ID}`;
-      const runUsername = `safe_run_b_usr_${RUN_ID}`;
-      let runUserId = null;
-      let runAuditId = null;
+      const preUsername = `safe_b_pre_${RUN_ID}`;
+      const testUsername = `safe_b_test_${RUN_ID}`;
+      let preUserId = null;
+      let preAuditId = null;
+      let testUserId = null;
+      let registeredAuditId = null;
+      let unregisteredAuditId = null;
 
       try {
-        const seedScript = `
+        const seedB = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
 from web.auth import hash_password
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
 
-cur.execute("INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, updated_at) VALUES (%s, 'shadow', 1, 1, '2025-03-03 12:00:00')", ('${runStrat}',))
-cur.execute("INSERT INTO system_flags (flag_name, is_active, reason, updated_at) VALUES (%s, 1, 'run_b_flag', '2025-03-03 12:00:00')", ('${runFlag}',))
-pwd_hash = hash_password("RunBPass123!")
+# 1. Pre-existing user and pre-existing audit log
+pwd_pre = hash_password("PrePassB123!")
+cur.execute("INSERT INTO users (username, email, password_hash, role, is_active, must_change_password) VALUES (%s, %s, %s, 'viewer', 1, 0)",
+            ('${preUsername}', '${preUsername}@test.internal', pwd_pre))
+pre_uid = cur.lastrowid
+cur.execute("INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, 'PRE_EXISTING_AUDIT_ACTION', json_object('type', 'pre_existing'))",
+            (pre_uid, '${preUsername}'))
+pre_aid = cur.lastrowid
+
+# 2. Test user
+pwd_test = hash_password("TestPassB123!")
 cur.execute("INSERT INTO users (username, email, password_hash, role, is_active, must_change_password) VALUES (%s, %s, %s, 'trader', 1, 0)",
-            ('${runUsername}', '${runUsername}@test.internal', pwd_hash))
-uid = cur.lastrowid
-cur.execute("INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, 'RUN_B_ACTION', json_object('info', 'run_b_details'))", (uid, '${runUsername}'))
-aid = cur.lastrowid
+            ('${testUsername}', '${testUsername}@test.internal', pwd_test))
+test_uid = cur.lastrowid
+
+# 3. Two audit logs associated with test user: one registered, one unregistered
+cur.execute("INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, 'REGISTERED_AUDIT_ACTION', json_object('type', 'registered'))",
+            (test_uid, '${testUsername}'))
+reg_aid = cur.lastrowid
+
+cur.execute("INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, 'UNREGISTERED_AUDIT_ACTION', json_object('type', 'unregistered'))",
+            (test_uid, '${testUsername}'))
+unreg_aid = cur.lastrowid
 
 conn.commit(); cur.close(); conn.close()
-print(json.dumps({"uid": uid, "aid": aid}))
+print(json.dumps({
+    "pre_uid": pre_uid, "pre_aid": pre_aid,
+    "test_uid": test_uid, "reg_aid": reg_aid, "unreg_aid": unreg_aid
+}))
 `;
-        const res = await runPythonHelper(seedScript);
-        runUserId = res.uid;
-        runAuditId = res.aid;
+        const resB = await runPythonHelper(seedB);
+        preUserId = resB.pre_uid;
+        preAuditId = resB.pre_aid;
+        testUserId = resB.test_uid;
+        registeredAuditId = resB.reg_aid;
+        unregisteredAuditId = resB.unreg_aid;
 
-        // Verify ownership before deletion
-        const snapL = await getLifecycleRowSnapshot(runStrat, "shadow");
-        const snapF = await getSystemFlagSnapshot(runFlag);
-        assert(snapL.status === "EXISTS", "Fixture strategy lifecycle missing before deletion");
-        assert(snapF.status === "EXISTS", "Fixture flag missing before deletion");
+        console.log(`  [1] Seeded: Pre-user ${preUserId} (audit ${preAuditId}), Test-user ${testUserId} (registered audit ${registeredAuditId}, unregistered audit ${unregisteredAuditId})`);
 
-        const testReg = new FixtureRegistry();
-        testReg.registerStrategy(runStrat, "shadow");
-        testReg.registerFlag(runFlag);
-        testReg.registerUser(runUserId);
-        testReg.registerAuditLog(runAuditId);
+        // Registry tracks ONLY testUserId and registeredAuditId
+        // Notice unregisteredAuditId is intentionally NOT in registry.auditLogIds!
+        const testRegistryB = new FixtureRegistry();
+        testRegistryB.registerUser(testUserId);
+        testRegistryB.registerAuditLog(registeredAuditId);
 
-        const cleanupRes = await executeFailureSafeGlobalRestoration(null, testReg);
-        assert(cleanupRes.results.fixtureCleanup.success === true, "fixtureCleanup failed");
-        assert(cleanupRes.results.userCleanup.success === true, "userCleanup failed");
-        assert(cleanupRes.results.auditLogCleanup.success === true, "auditLogCleanup failed");
+        // Execute failure-safe restoration targeting testRegistryB
+        const cleanupResB = await executeFailureSafeGlobalRestoration(null, testRegistryB);
+        assert(cleanupResB.results.auditLogCleanup.success === true, "auditLogCleanup failed in Test B");
+        assert(cleanupResB.results.userCleanup.success === true, "userCleanup failed in Test B");
 
-        // Verify exact test-owned records are absent after cleanup
-        const afterL = await getLifecycleRowSnapshot(runStrat, "shadow");
-        const afterF = await getSystemFlagSnapshot(runFlag);
-        assert(afterL.status === "ABSENT", `Strategy ${runStrat} still exists after exact-ownership cleanup!`);
-        assert(afterF.status === "ABSENT", `Flag ${runFlag} still exists after exact-ownership cleanup!`);
-
-        const verifyUserAbsence = `
+        // Query database to assert exact audit log presence/absence
+        const verifyB = await runPythonHelper(`
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("SELECT id FROM users WHERE id = %s", (${runUserId},))
-u = cur.fetchone()
-cur.execute("SELECT id FROM audit_logs WHERE id = %s", (${runAuditId},))
-a = cur.fetchone()
-cur.close(); conn.close()
-print(json.dumps({"user_exists": u is not None, "audit_exists": a is not None}))
-`;
-        const checkAbsence = await runPythonHelper(verifyUserAbsence);
-        assert(checkAbsence.user_exists === false, `User ${runUserId} still exists after exact-ID cleanup!`);
-        assert(checkAbsence.audit_exists === false, `Audit log ${runAuditId} still exists after exact-ID cleanup!`);
 
-        console.log("  [✓] Verified: Exact-ownership cleanup deleted only current-run fixtures and confirmed complete absence.");
+cur.execute("SELECT id, action FROM audit_logs WHERE id = %s", (${registeredAuditId},))
+reg_row = cur.fetchone()
+
+cur.execute("SELECT id, action FROM audit_logs WHERE id = %s", (${unregisteredAuditId},))
+unreg_row = cur.fetchone()
+
+cur.execute("SELECT id, action FROM audit_logs WHERE id = %s", (${preAuditId},))
+pre_row = cur.fetchone()
+
+cur.execute("SELECT id FROM users WHERE id = %s", (${testUserId},))
+test_u_row = cur.fetchone()
+
+cur.execute("SELECT id FROM users WHERE id = %s", (${preUserId},))
+pre_u_row = cur.fetchone()
+
+cur.close(); conn.close()
+print(json.dumps({
+    "reg_exists": reg_row is not None,
+    "unreg_exists": unreg_row is not None,
+    "pre_exists": pre_row is not None,
+    "test_u_exists": test_u_row is not None,
+    "pre_u_exists": pre_u_row is not None,
+    "unreg_action": unreg_row["action"] if unreg_row else None,
+    "pre_action": pre_row["action"] if pre_row else None
+}))
+`);
+        // ONLY the registered audit ID may be absent!
+        assert(verifyB.reg_exists === false, `Registered audit ID ${registeredAuditId} was NOT deleted!`);
+        assert(verifyB.unreg_exists === true, `Unregistered audit ID ${unregisteredAuditId} was incorrectly deleted by user_id cascade!`);
+        assert(verifyB.unreg_action === "UNREGISTERED_AUDIT_ACTION", "Unregistered audit action altered");
+        assert(verifyB.pre_exists === true, `Pre-existing audit ID ${preAuditId} was incorrectly deleted!`);
+        assert(verifyB.pre_action === "PRE_EXISTING_AUDIT_ACTION", "Pre-existing audit action altered");
+
+        assert(verifyB.test_u_exists === false, `Test user ${testUserId} was NOT deleted!`);
+        assert(verifyB.pre_u_exists === true, `Pre-existing user ${preUserId} was incorrectly deleted!`);
+
+        console.log("  [✓] Verified: ONLY the registered audit ID was deleted; unregistered audit log on test user and pre-existing audit log were preserved intact.");
         passed++;
       } finally {
-        if (runUserId) {
-          await runPythonHelper(`
+        await runPythonHelper(`
 import mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor()
-cur.execute("DELETE FROM audit_logs WHERE id = %s", (${runAuditId},))
-cur.execute("DELETE FROM users WHERE id = %s", (${runUserId},))
-cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = 'shadow'", ('${runStrat}',))
-cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${runFlag}',))
+if ${registeredAuditId || 'None'} is not None:
+    cur.execute("DELETE FROM audit_logs WHERE id = %s", (${registeredAuditId},))
+if ${unregisteredAuditId || 'None'} is not None:
+    cur.execute("DELETE FROM audit_logs WHERE id = %s", (${unregisteredAuditId},))
+if ${preAuditId || 'None'} is not None:
+    cur.execute("DELETE FROM audit_logs WHERE id = %s", (${preAuditId},))
+if ${testUserId || 'None'} is not None:
+    cur.execute("DELETE FROM users WHERE id = %s", (${testUserId},))
+if ${preUserId || 'None'} is not None:
+    cur.execute("DELETE FROM users WHERE id = %s", (${preUserId},))
 conn.commit(); cur.close(); conn.close()
 `);
-        }
       }
     }
 
     // --------------------------------------------------------------------------
-    // TEST 10: Regression Test C — Restoration continues after injected failure
+    // TEST 10: Regression Test C — Injected audit cleanup failure detection & later-stage execution
     // --------------------------------------------------------------------------
-    console.log("\n=== Test 10: Regression Test C — Restoration continues after injected failure ===");
+    console.log("\n=== Test 10: Regression Test C — Injected audit cleanup failure detection & later-stage execution ===");
     {
-      const dummyReg = new FixtureRegistry();
-      // Inject failure into the first operation: auditLogCleanup
-      const restoreRes = await executeFailureSafeGlobalRestoration(
-        baselineSnapshot,
-        dummyReg,
-        { injectFailureIn: "auditLogCleanup" }
-      );
+      const testUsernameC = `safe_c_inj_${RUN_ID}`;
+      let testUserIdC = null;
+      let auditIdC = null;
 
-      // 1. Injected failure must be caught and recorded
-      assert(restoreRes.allSucceeded === false, "allSucceeded should be false when an operation fails");
-      assert(restoreRes.results.auditLogCleanup.success === false, "auditLogCleanup should have failed");
-      assert(restoreRes.results.auditLogCleanup.error.includes("Synthetic injected failure in auditLogCleanup"), "Expected error message not found");
+      try {
+        const seedC = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+from web.auth import hash_password
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+pwd_test = hash_password("InjPassC123!")
+cur.execute("INSERT INTO users (username, email, password_hash, role, is_active, must_change_password) VALUES (%s, %s, %s, 'trader', 1, 0)",
+            ('${testUsernameC}', '${testUsernameC}@test.internal', pwd_test))
+uid = cur.lastrowid
+cur.execute("INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, 'INJECTED_AUDIT_ACTION', json_object('test', 'c'))",
+            (uid, '${testUsernameC}'))
+aid = cur.lastrowid
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"uid": uid, "aid": aid}))
+`;
+        const resC = await runPythonHelper(seedC);
+        testUserIdC = resC.uid;
+        auditIdC = resC.aid;
 
-      // 2. All subsequent operations MUST have been attempted and succeeded
-      assert(restoreRes.results.userCleanup.success === true, "userCleanup should have been attempted and succeeded");
-      assert(restoreRes.results.fixtureCleanup.success === true, "fixtureCleanup should have been attempted and succeeded");
-      assert(restoreRes.results.systemFlagsRestore.success === true, "systemFlagsRestore should have been attempted and succeeded");
-      assert(restoreRes.results.lifecycleRestore.success === true, "lifecycleRestore should have been attempted and succeeded");
-      assert(restoreRes.results.walletSettingsRestore.success === true, "walletSettingsRestore should have been attempted and succeeded");
-      assert(restoreRes.results.postRestoreVerification.success === true, "postRestoreVerification should have been attempted and succeeded");
+        const regC = new FixtureRegistry();
+        regC.registerUser(testUserIdC);
+        regC.registerAuditLog(auditIdC);
 
-      console.log("  [✓] Verified: Failure in early stage (auditLogCleanup) was isolated; all remaining restoration stages completed successfully.");
-      console.log("  [✓] Verified: Overall restoration failure accurately aggregated (allSucceeded = false) without suppressing error.");
-      passed++;
+        // Run restoration with injected failure in auditLogCleanup
+        const restoreResC = await executeFailureSafeGlobalRestoration(
+          baselineSnapshot,
+          regC,
+          { injectFailureIn: "auditLogCleanup" }
+        );
+
+        // 1. Verify auditLogCleanup failed
+        assert(restoreResC.results.auditLogCleanup.success === false, "auditLogCleanup should have failed");
+        assert(restoreResC.allSucceeded === false, "allSucceeded should be false");
+
+        // 2. Verify audit record remains in database
+        const checkAuditInDb = await runPythonHelper(`
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT id FROM audit_logs WHERE id = %s", (${auditIdC},))
+row = cur.fetchone()
+cur.close(); conn.close()
+print(json.dumps({"exists": row is not None}))
+`);
+        assert(checkAuditInDb.exists === true, `Audit record ${auditIdC} should remain in DB due to failed cleanup!`);
+
+        // 3. Verify postRestoreVerification detected the remaining audit log
+        assert(restoreResC.results.postRestoreVerification.success === false, "postRestoreVerification should have failed");
+        const mismatches = restoreResC.results.postRestoreVerification.mismatches || [];
+        const foundAuditMismatch = mismatches.some(m => m.includes(`${auditIdC}`));
+        assert(foundAuditMismatch, `postRestoreVerification mismatches did not report remaining audit log ID ${auditIdC}: ${JSON.stringify(mismatches)}`);
+
+        // 4. Verify all later stages still executed
+        assert(restoreResC.results.userCleanup.success === true, "userCleanup should have executed successfully");
+        assert(restoreResC.results.fixtureCleanup.success === true, "fixtureCleanup should have executed successfully");
+        assert(restoreResC.results.systemFlagsRestore.success === true, "systemFlagsRestore should have executed successfully");
+        assert(restoreResC.results.lifecycleRestore.success === true, "lifecycleRestore should have executed successfully");
+        assert(restoreResC.results.walletSettingsRestore.success === true, "walletSettingsRestore should have executed successfully");
+
+        // 5. Verify final process status is nonzero when unhandled failure occurs
+        const childProcScript = `
+const { executeFailureSafeGlobalRestoration, FixtureRegistry } = require('./tests/browser/test_staging_harness_safety.cjs');
+(async () => {
+  const reg = new FixtureRegistry();
+  reg.registerAuditLog(${auditIdC});
+  const res = await executeFailureSafeGlobalRestoration(null, reg, { injectFailureIn: "auditLogCleanup" });
+  if (!res.allSucceeded) {
+    process.exit(1);
+  }
+  process.exit(0);
+})();
+`;
+        const { spawnSync } = require("child_process");
+        const childRes = spawnSync(process.execPath, ["-e", childProcScript], {
+          cwd: process.cwd(),
+          env: process.env,
+        });
+        assert(childRes.status !== 0, `Expected nonzero process exit code, got: ${childRes.status}`);
+
+        console.log("  [✓] Verified: Audit record remained in DB, postRestoreVerification detected it, later stages executed, and final process status was nonzero.");
+        passed++;
+      } finally {
+        await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+if ${auditIdC || 'None'} is not None:
+    cur.execute("DELETE FROM audit_logs WHERE id = %s", (${auditIdC},))
+if ${testUserIdC || 'None'} is not None:
+    cur.execute("DELETE FROM users WHERE id = %s", (${testUserIdC},))
+conn.commit(); cur.close(); conn.close()
+`);
+      }
     }
 
     // --------------------------------------------------------------------------
@@ -1783,45 +2099,79 @@ conn.commit(); cur.close(); conn.close()
     // --------------------------------------------------------------------------
     console.log("\n=== Test 11: Regression Test D — Full baseline integrity verification ===");
     {
+      // 1. Audit logs baseline comparison
+      const currentAuditLogs = await getAllAuditLogs();
+      assert(
+        currentAuditLogs.length === baselineAuditLogs.length,
+        `Audit log count mismatch: baseline has ${baselineAuditLogs.length}, current has ${currentAuditLogs.length}`
+      );
+      const baseAuditMap = new Map(baselineAuditLogs.map(a => [a.id, a]));
+      for (const cur of currentAuditLogs) {
+        assert(baseAuditMap.has(cur.id), `Unexpected new audit log ID ${cur.id} present in DB!`);
+        const base = baseAuditMap.get(cur.id);
+        assert(cur.username === base.username, `Audit log ID ${cur.id} username mismatch: ${cur.username} vs ${base.username}`);
+        assert(cur.action === base.action, `Audit log ID ${cur.id} action mismatch: ${cur.action} vs ${base.action}`);
+        assert(cur.details === base.details, `Audit log ID ${cur.id} details mismatch`);
+        assert(cur.user_id === base.user_id, `Audit log ID ${cur.id} user_id mismatch`);
+      }
+      console.log(`  [✓] Audit logs integrity verified: all ${baselineAuditLogs.length} pre-existing audit logs remain unchanged.`);
+
+      // 2. Wallet tracker settings baseline comparison across all 12 columns + updated_at
+      const currentWallet = await getWalletSettingsSnapshot(1);
+      assert(currentWallet.status === "EXISTS", "wallet_tracker_settings row 1 missing");
+      for (const col of ["enabled", "networks", "pools_per_network", "min_trade_usd", "min_net_usd", "auto_track_net_usd", "poll_interval_seconds", "retention_days", "api_delay_seconds", "token_mode", "token_addresses", "birdeye_api_key", "updated_at"]) {
+        assert(
+          currentWallet.row[col] === baselineWallet.row[col],
+          `wallet_tracker_settings ${col} drifted from baseline: ${currentWallet.row[col]} vs ${baselineWallet.row[col]}`
+        );
+      }
+      console.log("  [✓] Wallet tracker settings integrity verified: all 12 columns + updated_at match baseline.");
+
+      // 3. System flags baseline comparison
       const currentFlags = await getSystemFlagSnapshot("emergency_stop");
       assert(
         JSON.stringify(currentFlags.row) === JSON.stringify(baselineFlags.row),
         `emergency_stop drifted from baseline: ${JSON.stringify(currentFlags.row)} vs ${JSON.stringify(baselineFlags.row)}`
       );
+      console.log("  [✓] System flags integrity verified: matches baseline.");
 
-      const currentWallet = await getWalletSettingsSnapshot(1);
-      assert(
-        JSON.stringify(currentWallet.row) === JSON.stringify(baselineWallet.row),
-        `wallet_tracker_settings drifted from baseline: ${JSON.stringify(currentWallet.row)} vs ${JSON.stringify(baselineWallet.row)}`
-      );
-
+      // 4. Strategy lifecycle rows baseline comparison
       const currentLifecycleRows = await getAllLifecycleRows();
       assert(
         JSON.stringify(currentLifecycleRows) === JSON.stringify(baselineAllLifecycle),
         `Lifecycle rows drifted from baseline: ${JSON.stringify(currentLifecycleRows)} vs ${JSON.stringify(baselineAllLifecycle)}`
       );
+      console.log("  [✓] Strategy lifecycle integrity verified: matches baseline.");
 
-      if (globalRegistry.userIds.size > 0) {
-        const checkTestUsersScript = `
+      // 5. Global registry test fixtures verification
+      if (globalRegistry.userIds.size > 0 || globalRegistry.auditLogIds.size > 0) {
+        const uids = Array.from(globalRegistry.userIds);
+        const aids = Array.from(globalRegistry.auditLogIds);
+        const checkRes = await runPythonHelper(`
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-uids = ${JSON.stringify(Array.from(globalRegistry.userIds))}
-p = ",".join(["%s"] * len(uids))
-cur.execute(f"SELECT COUNT(*) as cnt FROM users WHERE id IN ({p})", tuple(uids))
-user_cnt = cur.fetchone()["cnt"]
-cur.execute(f"SELECT COUNT(*) as cnt FROM audit_logs WHERE user_id IN ({p})", tuple(uids))
-audit_cnt = cur.fetchone()["cnt"]
+uids = ${JSON.stringify(uids)}
+aids = ${JSON.stringify(aids)}
+user_cnt = 0
+if uids:
+    p = ",".join(["%s"] * len(uids))
+    cur.execute(f"SELECT COUNT(*) as cnt FROM users WHERE id IN ({p})", tuple(uids))
+    user_cnt = cur.fetchone()["cnt"]
+audit_cnt = 0
+if aids:
+    p = ",".join(["%s"] * len(aids))
+    cur.execute(f"SELECT COUNT(*) as cnt FROM audit_logs WHERE id IN ({p})", tuple(aids))
+    audit_cnt = cur.fetchone()["cnt"]
 cur.close(); conn.close()
 print(json.dumps({"user_cnt": user_cnt, "audit_cnt": audit_cnt}))
-`;
-        const checkRes = await runPythonHelper(checkTestUsersScript);
-        assert(checkRes.user_cnt === 0, `Test users still present in DB: ${checkRes.user_cnt}`);
-        assert(checkRes.audit_cnt === 0, `Test audit logs still present in DB: ${checkRes.audit_cnt}`);
+`);
+        assert(checkRes.user_cnt === 0, `Global registry test users still present: ${checkRes.user_cnt}`);
+        assert(checkRes.audit_cnt === 0, `Global registry test audit logs still present: ${checkRes.audit_cnt}`);
       }
 
-      console.log("  [✓] Verified: 100% baseline identity confirmed across system_flags, rdt_strategy_lifecycle, wallet_tracker_settings, users, and audit_logs.");
+      console.log("  [✓] Verified: 100% baseline identity confirmed across audit_logs, wallet_tracker_settings, system_flags, and rdt_strategy_lifecycle.");
       passed++;
     }
 
