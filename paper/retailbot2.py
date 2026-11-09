@@ -357,7 +357,11 @@ class TelegramAlert:
                             },
                             timeout=10,
                         )
-                        return plain_resp.status_code == 200
+                        try:
+                            plain_data = plain_resp.json()
+                        except Exception:
+                            plain_data = {}
+                        return plain_resp.status_code == 200 and plain_data.get('ok') is True
                     return False
 
                 elif resp.status_code == 401:
@@ -1291,6 +1295,10 @@ class DatabaseManager:
             c.close()
             return tid
         except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             self.logger.error(f"❌ save_trade: {e}")
             return None
         finally:
