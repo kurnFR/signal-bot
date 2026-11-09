@@ -1536,25 +1536,26 @@ try:
         snap_item = snapshot_state.get("emergencyStop", {"status": "NOT_CAPTURED", "row": None})
         status = snap_item.get("status")
         init_flag = snap_item.get("row")
+        flag_name = snap_item.get("flag_name") or (init_flag.get("flag_name") if init_flag else "emergency_stop")
         if status == "ABSENT":
-            cur.execute("DELETE FROM system_flags WHERE flag_name = 'emergency_stop'")
+            cur.execute("DELETE FROM system_flags WHERE flag_name = %s", (flag_name,))
             conn.commit()
-            cur.execute("SELECT flag_name FROM system_flags WHERE flag_name = 'emergency_stop'")
-            assert cur.fetchone() is None, "Emergency stop row should not exist after cleanup"
+            cur.execute("SELECT flag_name FROM system_flags WHERE flag_name = %s", (flag_name,))
+            assert cur.fetchone() is None, f"{flag_name} row should not exist after cleanup"
             results["circuitBreaker"] = True
         elif status == "EXISTS" and init_flag is not None:
             cur.execute(
-                "UPDATE system_flags SET is_active = %s, reason = %s, updated_at = %s WHERE flag_name = 'emergency_stop'",
-                (init_flag["is_active"], init_flag["reason"], init_flag["updated_at"])
+                "UPDATE system_flags SET is_active = %s, reason = %s, updated_at = %s WHERE flag_name = %s",
+                (init_flag["is_active"], init_flag["reason"], init_flag["updated_at"], flag_name)
             )
             conn.commit()
-            cur.execute("SELECT * FROM system_flags WHERE flag_name = 'emergency_stop'")
+            cur.execute("SELECT * FROM system_flags WHERE flag_name = %s", (flag_name,))
             verified_flag = cur.fetchone()
-            assert verified_flag is not None, "Emergency stop row missing after restore"
-            assert verified_flag["flag_name"] == init_flag["flag_name"], f"Emergency stop flag_name mismatch: {verified_flag['flag_name']} vs {init_flag['flag_name']}"
-            assert verified_flag["is_active"] == init_flag["is_active"], f"Emergency stop is_active mismatch: {verified_flag['is_active']} vs {init_flag['is_active']}"
-            assert (verified_flag["reason"] or "") == (init_flag["reason"] or ""), f"Emergency stop reason mismatch: {verified_flag['reason']} vs {init_flag['reason']}"
-            assert verified_flag["updated_at"].isoformat() == init_flag["updated_at"], f"Emergency stop updated_at mismatch: {verified_flag['updated_at'].isoformat()} vs {init_flag['updated_at']}"
+            assert verified_flag is not None, f"{flag_name} row missing after restore"
+            assert verified_flag["flag_name"] == init_flag["flag_name"], f"{flag_name} flag_name mismatch: {verified_flag['flag_name']} vs {init_flag['flag_name']}"
+            assert verified_flag["is_active"] == init_flag["is_active"], f"{flag_name} is_active mismatch: {verified_flag['is_active']} vs {init_flag['is_active']}"
+            assert (verified_flag["reason"] or "") == (init_flag["reason"] or ""), f"{flag_name} reason mismatch: {verified_flag['reason']} vs {init_flag['reason']}"
+            assert verified_flag["updated_at"].isoformat() == init_flag["updated_at"], f"{flag_name} updated_at mismatch: {verified_flag['updated_at'].isoformat()} vs {init_flag['updated_at']}"
             results["circuitBreaker"] = True
         else:
             raise ValueError(f"Invalid emergencyStop snapshot status: {status}")
@@ -1572,29 +1573,32 @@ try:
         rb03_snap = snapshot_state.get("rb03Row", {"status": "NOT_CAPTURED", "row": None})
         rb03_status = rb03_snap.get("status")
         orig_rb03 = rb03_snap.get("row")
+        rb03_strat = rb03_snap.get("strategy_id") or (orig_rb03.get("strategy_id") if orig_rb03 else "RSI_CTR")
+        rb03_mode = rb03_snap.get("mode") or (orig_rb03.get("mode") if orig_rb03 else "shadow")
         if rb03_status == "ABSENT":
-            cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
+            cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb03_strat, rb03_mode))
             conn.commit()
-            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
-            assert cur.fetchone() is None, "RSI_CTR/shadow should not exist after cleanup"
+            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb03_strat, rb03_mode))
+            assert cur.fetchone() is None, f"{rb03_strat}/{rb03_mode} should not exist after cleanup"
         elif rb03_status == "EXISTS" and orig_rb03 is not None:
             cur.execute('''
                 UPDATE rdt_strategy_lifecycle
                 SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
-                WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'
+                WHERE strategy_id = %s AND mode = %s
             ''', (
                 orig_rb03["evaluation_enabled"], orig_rb03["paper_enabled"],
                 orig_rb03["telegram_enabled"], orig_rb03["report_enabled"],
-                orig_rb03["auto_promote_enabled"], orig_rb03["updated_at"]
+                orig_rb03["auto_promote_enabled"], orig_rb03["updated_at"],
+                rb03_strat, rb03_mode
             ))
-            assert cur.rowcount >= 0, "Failed to update pre-existing RSI_CTR row"
+            assert cur.rowcount >= 0, f"Failed to update pre-existing {rb03_strat} row"
             conn.commit()
-            cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
+            cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb03_strat, rb03_mode))
             rb03_after = cur.fetchone()
-            assert rb03_after is not None, "RSI_CTR/shadow missing after restore"
+            assert rb03_after is not None, f"{rb03_strat}/{rb03_mode} missing after restore"
             for col in ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled"]:
-                assert rb03_after[col] == orig_rb03[col], f"RSI_CTR {col} mismatch: {rb03_after[col]} vs {orig_rb03[col]}"
-            assert rb03_after["updated_at"].isoformat() == orig_rb03["updated_at"], f"RSI_CTR updated_at mismatch: {rb03_after['updated_at'].isoformat()} vs {orig_rb03['updated_at']}"
+                assert rb03_after[col] == orig_rb03[col], f"{rb03_strat} {col} mismatch: {rb03_after[col]} vs {orig_rb03[col]}"
+            assert rb03_after["updated_at"].isoformat() == orig_rb03["updated_at"], f"{rb03_strat} updated_at mismatch: {rb03_after['updated_at'].isoformat()} vs {orig_rb03['updated_at']}"
         else:
             raise ValueError(f"Invalid rb03Row snapshot status: {rb03_status}")
 
@@ -1602,29 +1606,32 @@ try:
         rb04_snap = snapshot_state.get("rb04Row", {"status": "NOT_CAPTURED", "row": None})
         rb04_status = rb04_snap.get("status")
         orig_rb04 = rb04_snap.get("row")
+        rb04_strat = rb04_snap.get("strategy_id") or (orig_rb04.get("strategy_id") if orig_rb04 else "DBL_PAT_INV")
+        rb04_mode = rb04_snap.get("mode") or (orig_rb04.get("mode") if orig_rb04 else "inverse")
         if rb04_status == "ABSENT":
-            cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
+            cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb04_strat, rb04_mode))
             conn.commit()
-            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
-            assert cur.fetchone() is None, "DBL_PAT_INV/inverse should not exist after cleanup"
+            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb04_strat, rb04_mode))
+            assert cur.fetchone() is None, f"{rb04_strat}/{rb04_mode} should not exist after cleanup"
         elif rb04_status == "EXISTS" and orig_rb04 is not None:
             cur.execute('''
                 UPDATE rdt_strategy_lifecycle
                 SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
-                WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'
+                WHERE strategy_id = %s AND mode = %s
             ''', (
                 orig_rb04["evaluation_enabled"], orig_rb04["paper_enabled"],
                 orig_rb04["telegram_enabled"], orig_rb04["report_enabled"],
-                orig_rb04["auto_promote_enabled"], orig_rb04["updated_at"]
+                orig_rb04["auto_promote_enabled"], orig_rb04["updated_at"],
+                rb04_strat, rb04_mode
             ))
-            assert cur.rowcount >= 0, "Failed to update pre-existing DBL_PAT_INV row"
+            assert cur.rowcount >= 0, f"Failed to update pre-existing {rb04_strat} row"
             conn.commit()
-            cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
+            cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb04_strat, rb04_mode))
             rb04_after = cur.fetchone()
-            assert rb04_after is not None, "DBL_PAT_INV/inverse missing after restore"
+            assert rb04_after is not None, f"{rb04_strat}/{rb04_mode} missing after restore"
             for col in ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled"]:
-                assert rb04_after[col] == orig_rb04[col], f"DBL_PAT_INV {col} mismatch: {rb04_after[col]} vs {orig_rb04[col]}"
-            assert rb04_after["updated_at"].isoformat() == orig_rb04["updated_at"], f"DBL_PAT_INV updated_at mismatch: {rb04_after['updated_at'].isoformat()} vs {orig_rb04['updated_at']}"
+                assert rb04_after[col] == orig_rb04[col], f"{rb04_strat} {col} mismatch: {rb04_after[col]} vs {orig_rb04[col]}"
+            assert rb04_after["updated_at"].isoformat() == orig_rb04["updated_at"], f"{rb04_strat} updated_at mismatch: {rb04_after['updated_at'].isoformat()} vs {orig_rb04['updated_at']}"
         else:
             raise ValueError(f"Invalid rb04Row snapshot status: {rb04_status}")
 
@@ -1643,11 +1650,33 @@ try:
         wt_snap = snapshot_state.get("walletSettings", {"status": "NOT_CAPTURED", "row": None})
         wt_status = wt_snap.get("status")
         init_s = wt_snap.get("row")
+        target_id = wt_snap.get("id") or (init_s.get("id") if init_s else 1)
         if wt_status == "ABSENT":
-            cur.execute("DELETE FROM wallet_tracker_settings WHERE id = 1")
+            cur.execute("DELETE FROM wallet_tracker_settings WHERE id = %s", (target_id,))
             conn.commit()
-            cur.execute("SELECT id FROM wallet_tracker_settings WHERE id = 1")
-            assert cur.fetchone() is None, "wallet_tracker_settings row 1 should not exist after cleanup"
+            cur.execute("SELECT id FROM wallet_tracker_settings WHERE id = %s", (target_id,))
+            assert cur.fetchone() is None, f"wallet_tracker_settings row {target_id} should not exist after cleanup"
+            results["walletSettings"] = True
+        elif wt_status == "EXISTS" and init_s is not None:
+            cur.execute('''
+                UPDATE wallet_tracker_settings
+                SET enabled=%s, networks=%s, pools_per_network=%s, min_trade_usd=%s, min_net_usd=%s,
+                    auto_track_net_usd=%s, poll_interval_seconds=%s, retention_days=%s, api_delay_seconds=%s,
+                    token_mode=%s, token_addresses=%s, birdeye_api_key=%s, updated_at=%s
+                WHERE id = %s
+            ''', (
+                init_s["enabled"], init_s["networks"], init_s["pools_per_network"],
+                init_s["min_trade_usd"], init_s["min_net_usd"], init_s["auto_track_net_usd"],
+                init_s["poll_interval_seconds"], init_s["retention_days"], init_s["api_delay_seconds"],
+                init_s["token_mode"], init_s["token_addresses"], init_s["birdeye_api_key"],
+                init_s["updated_at"], target_id
+            ))
+            conn.commit()
+
+            # Read back and assert all 12 columns restored
+            cur.execute("SELECT * FROM wallet_tracker_settings WHERE id = %s", (target_id,))
+            verified_s = cur.fetchone()
+            assert verified_s is not None, f"wallet_tracker_settings row {target_id} missing after restore"
             results["walletSettings"] = True
         elif wt_status == "EXISTS" and init_s is not None:
             cur.execute('''
