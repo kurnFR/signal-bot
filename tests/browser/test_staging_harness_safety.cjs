@@ -21,8 +21,12 @@
  * 7. Pre-existing lifecycle row survival (Requirement 8): Pre-existing lifecycle rows seeded
  *    with distinctive values survive an entire test mutation and harness cleanup cycle completely
  *    unharmed and identically verified across all columns.
- * 8. End-to-end database purity: Zero test artifacts remain and initial database baseline
- *    is fully preserved.
+ * 8. Regression Test A: Existing SAFE-prefixed records (lifecycle, system_flags, users, audit_logs)
+ *    survive exact-ownership cleanup without being deleted or mutated.
+ * 9. Regression Test B: Current-run fixtures are removed by exact ID verification.
+ * 10. Regression Test C: Failure-safe global restoration continues after an injected failure,
+ *     aggregates errors, detects unrecovered state, and suppresses false success messages.
+ * 11. Regression Test D: End-to-end database purity & baseline integrity verification.
  *
  * Run command:
  *   node tests/browser/test_staging_harness_safety.cjs
@@ -83,6 +87,50 @@ function runPythonHelper(scriptContent, stdinJson = null) {
   });
 }
 
+// Global exact-ownership fixture registry
+class FixtureRegistry {
+  constructor() {
+    this.strategyLifecycles = new Map(); // key "stratId:::mode" -> { strategy_id, mode }
+    this.systemFlags = new Set();         // flag_name
+    this.userIds = new Set();             // user_id integer
+    this.auditLogIds = new Set();         // audit_log_id integer
+  }
+
+  registerStrategy(strategy_id, mode) {
+    this.strategyLifecycles.set(`${strategy_id}:::${mode}`, { strategy_id, mode });
+  }
+
+  unregisterStrategy(strategy_id, mode) {
+    this.strategyLifecycles.delete(`${strategy_id}:::${mode}`);
+  }
+
+  registerFlag(flag_name) {
+    this.systemFlags.add(flag_name);
+  }
+
+  unregisterFlag(flag_name) {
+    this.systemFlags.delete(flag_name);
+  }
+
+  registerUser(user_id) {
+    this.userIds.add(user_id);
+  }
+
+  unregisterUser(user_id) {
+    this.userIds.delete(user_id);
+  }
+
+  registerAuditLog(audit_log_id) {
+    this.auditLogIds.add(audit_log_id);
+  }
+
+  unregisterAuditLog(audit_log_id) {
+    this.auditLogIds.delete(audit_log_id);
+  }
+}
+
+const globalRegistry = new FixtureRegistry();
+
 const CLEANUP_PYTHON_SNIPPET = `
 import json, sys, mysql.connector
 from config import MYSQL_CONFIG
@@ -98,7 +146,7 @@ results = {}
 snapshot_captured = payload.get("snapshot_captured", False)
 snapshot_state = payload.get("snapshot_state", {})
 
-# 1. Delete users
+# 1. Delete users and related audit logs (exact IDs only)
 try:
     user_ids = payload.get("user_ids", [])
     if user_ids:
@@ -443,7 +491,7 @@ import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("SELECT * FROM rdt_strategy_lifecycle")
+cur.execute("SELECT * FROM rdt_strategy_lifecycle ORDER BY strategy_id, mode")
 rows = cur.fetchall()
 for r in rows:
     if hasattr(r.get("updated_at"), "isoformat"):
@@ -453,6 +501,283 @@ print(json.dumps({"rows": rows}))
 `;
   const res = await runPythonHelper(script);
   return res.rows || [];
+}
+
+// Failure-safe global restoration function that attempts each operation independently
+async function executeFailureSafeGlobalRestoration(baselineSnapshot, registry, options = {}) {
+  const { injectFailureIn = null } = options;
+  const results = {
+    auditLogCleanup: { success: false, error: null },
+    userCleanup: { success: false, error: null },
+    fixtureCleanup: { success: false, error: null },
+    systemFlagsRestore: { success: false, error: null },
+    lifecycleRestore: { success: false, error: null },
+    walletSettingsRestore: { success: false, error: null },
+    postRestoreVerification: { success: false, error: null, mismatches: [] },
+  };
+
+  // Stage 1: auditLogCleanup (Exact IDs only)
+  try {
+    if (injectFailureIn === "auditLogCleanup") {
+      throw new Error("Synthetic injected failure in auditLogCleanup");
+    }
+    const auditIds = Array.from(registry.auditLogIds);
+    const userIds = Array.from(registry.userIds);
+    if (auditIds.length > 0 || userIds.length > 0) {
+      await runPythonHelper(`
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+audit_ids = ${JSON.stringify(auditIds)}
+user_ids = ${JSON.stringify(userIds)}
+if audit_ids:
+    p = ",".join(["%s"] * len(audit_ids))
+    cur.execute(f"DELETE FROM audit_logs WHERE id IN ({p})", tuple(audit_ids))
+if user_ids:
+    p = ",".join(["%s"] * len(user_ids))
+    cur.execute(f"DELETE FROM audit_logs WHERE user_id IN ({p})", tuple(user_ids))
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"cleaned": True}))
+`);
+    }
+    results.auditLogCleanup.success = true;
+  } catch (err) {
+    results.auditLogCleanup.error = err.message;
+    console.error("  [-] Stage auditLogCleanup failed:", err.message);
+  }
+
+  // Stage 2: userCleanup (Exact IDs only)
+  try {
+    if (injectFailureIn === "userCleanup") {
+      throw new Error("Synthetic injected failure in userCleanup");
+    }
+    const userIds = Array.from(registry.userIds);
+    if (userIds.length > 0) {
+      const delUserRes = await runPythonHelper(`
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+user_ids = ${JSON.stringify(userIds)}
+p = ",".join(["%s"] * len(user_ids))
+cur.execute(f"DELETE FROM users WHERE id IN ({p})", tuple(user_ids))
+cur.execute(f"SELECT COUNT(*) as cnt FROM users WHERE id IN ({p})", tuple(user_ids))
+cnt = cur.fetchone()["cnt"]
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"remaining": cnt}))
+`);
+      if (delUserRes.remaining !== 0) {
+        throw new Error(`Users not fully deleted, remaining count: ${delUserRes.remaining}`);
+      }
+    }
+    results.userCleanup.success = true;
+  } catch (err) {
+    results.userCleanup.error = err.message;
+    console.error("  [-] Stage userCleanup failed:", err.message);
+  }
+
+  // Stage 3: fixtureCleanup (Exact strategy and flag fixtures only)
+  try {
+    if (injectFailureIn === "fixtureCleanup") {
+      throw new Error("Synthetic injected failure in fixtureCleanup");
+    }
+    const stratFixtures = Array.from(registry.strategyLifecycles.values());
+    const flagFixtures = Array.from(registry.systemFlags);
+    if (stratFixtures.length > 0 || flagFixtures.length > 0) {
+      await runPythonHelper(`
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+strat_fixtures = ${JSON.stringify(stratFixtures)}
+flag_fixtures = ${JSON.stringify(flagFixtures)}
+for sf in strat_fixtures:
+    cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (sf["strategy_id"], sf["mode"]))
+for ff in flag_fixtures:
+    cur.execute("DELETE FROM system_flags WHERE flag_name = %s", (ff,))
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"cleaned": True}))
+`);
+    }
+    results.fixtureCleanup.success = true;
+  } catch (err) {
+    results.fixtureCleanup.error = err.message;
+    console.error("  [-] Stage fixtureCleanup failed:", err.message);
+  }
+
+  // Stage 4: systemFlagsRestore
+  try {
+    if (injectFailureIn === "systemFlagsRestore") {
+      throw new Error("Synthetic injected failure in systemFlagsRestore");
+    }
+    if (baselineSnapshot && baselineSnapshot.flags) {
+      await restoreSystemFlagDirect(baselineSnapshot.flags);
+      const verified = await getSystemFlagSnapshot(baselineSnapshot.flags.flag_name);
+      if (baselineSnapshot.flags.status === "ABSENT") {
+        if (verified.status !== "ABSENT") throw new Error("Flag should be ABSENT after restore");
+      } else {
+        if (verified.status !== "EXISTS") throw new Error("Flag missing after restore");
+        const b = baselineSnapshot.flags.row;
+        const v = verified.row;
+        assert(v.flag_name === b.flag_name, "flag_name mismatch");
+        assert(v.is_active === b.is_active, "is_active mismatch");
+        assert((v.reason || "") === (b.reason || ""), "reason mismatch");
+        assert(v.updated_at === b.updated_at, "updated_at mismatch");
+      }
+    }
+    results.systemFlagsRestore.success = true;
+  } catch (err) {
+    results.systemFlagsRestore.error = err.message;
+    console.error("  [-] Stage systemFlagsRestore failed:", err.message);
+  }
+
+  // Stage 5: lifecycleRestore
+  try {
+    if (injectFailureIn === "lifecycleRestore") {
+      throw new Error("Synthetic injected failure in lifecycleRestore");
+    }
+    if (baselineSnapshot) {
+      if (baselineSnapshot.lifecycleRsi) {
+        await restoreLifecycleRowDirect(baselineSnapshot.lifecycleRsi);
+        const rsiVer = await getLifecycleRowSnapshot("RSI_CTR", "shadow");
+        if (baselineSnapshot.lifecycleRsi.status === "ABSENT") {
+          if (rsiVer.status !== "ABSENT") throw new Error("RSI_CTR should be ABSENT after restore");
+        } else {
+          if (rsiVer.status !== "EXISTS") throw new Error("RSI_CTR missing after restore");
+          for (const col of ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled", "updated_at"]) {
+            assert(rsiVer.row[col] === baselineSnapshot.lifecycleRsi.row[col], `RSI_CTR ${col} mismatch`);
+          }
+        }
+      }
+      if (baselineSnapshot.lifecycleDbl) {
+        await restoreLifecycleRowDirect(baselineSnapshot.lifecycleDbl);
+        const dblVer = await getLifecycleRowSnapshot("DBL_PAT_INV", "inverse");
+        if (baselineSnapshot.lifecycleDbl.status === "ABSENT") {
+          if (dblVer.status !== "ABSENT") throw new Error("DBL_PAT_INV should be ABSENT after restore");
+        } else {
+          if (dblVer.status !== "EXISTS") throw new Error("DBL_PAT_INV missing after restore");
+          for (const col of ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled", "updated_at"]) {
+            assert(dblVer.row[col] === baselineSnapshot.lifecycleDbl.row[col], `DBL_PAT_INV ${col} mismatch`);
+          }
+        }
+      }
+    }
+    results.lifecycleRestore.success = true;
+  } catch (err) {
+    results.lifecycleRestore.error = err.message;
+    console.error("  [-] Stage lifecycleRestore failed:", err.message);
+  }
+
+  // Stage 6: walletSettingsRestore
+  try {
+    if (injectFailureIn === "walletSettingsRestore") {
+      throw new Error("Synthetic injected failure in walletSettingsRestore");
+    }
+    if (baselineSnapshot && baselineSnapshot.wallet) {
+      await restoreWalletSettingsDirect(baselineSnapshot.wallet);
+      const wVer = await getWalletSettingsSnapshot(1);
+      if (baselineSnapshot.wallet.status === "ABSENT") {
+        if (wVer.status !== "ABSENT") throw new Error("wallet_tracker_settings should be ABSENT after restore");
+      } else {
+        if (wVer.status !== "EXISTS") throw new Error("wallet_tracker_settings missing after restore");
+        for (const col of ["enabled", "networks", "pools_per_network", "min_trade_usd", "min_net_usd", "auto_track_net_usd", "poll_interval_seconds", "retention_days", "api_delay_seconds", "token_mode", "updated_at"]) {
+          assert(wVer.row[col] === baselineSnapshot.wallet.row[col], `wallet_tracker_settings ${col} mismatch`);
+        }
+      }
+    }
+    results.walletSettingsRestore.success = true;
+  } catch (err) {
+    results.walletSettingsRestore.error = err.message;
+    console.error("  [-] Stage walletSettingsRestore failed:", err.message);
+  }
+
+  // Stage 7: postRestoreVerification (Fresh DB reads across all shared tables & fixtures)
+  try {
+    if (injectFailureIn === "postRestoreVerification") {
+      throw new Error("Synthetic injected failure in postRestoreVerification");
+    }
+    const mismatches = [];
+
+    // A. Check system_flags
+    if (baselineSnapshot && baselineSnapshot.flags) {
+      const curFlag = await getSystemFlagSnapshot(baselineSnapshot.flags.flag_name);
+      if (JSON.stringify(curFlag.row) !== JSON.stringify(baselineSnapshot.flags.row)) {
+        mismatches.push(`system_flags mismatch: current=${JSON.stringify(curFlag.row)} baseline=${JSON.stringify(baselineSnapshot.flags.row)}`);
+      }
+    }
+
+    // B. Check wallet_tracker_settings
+    if (baselineSnapshot && baselineSnapshot.wallet) {
+      const curW = await getWalletSettingsSnapshot(1);
+      if (JSON.stringify(curW.row) !== JSON.stringify(baselineSnapshot.wallet.row)) {
+        mismatches.push(`wallet_tracker_settings mismatch: current=${JSON.stringify(curW.row)} baseline=${JSON.stringify(baselineSnapshot.wallet.row)}`);
+      }
+    }
+
+    // C. Check rdt_strategy_lifecycle
+    if (baselineSnapshot && baselineSnapshot.allLifecycleRows) {
+      const curL = await getAllLifecycleRows();
+      if (JSON.stringify(curL) !== JSON.stringify(baselineSnapshot.allLifecycleRows)) {
+        mismatches.push(`rdt_strategy_lifecycle mismatch: count current=${curL.length} baseline=${baselineSnapshot.allLifecycleRows.length}`);
+      }
+    }
+
+    // D. Check exact test users are absent
+    if (registry.userIds.size > 0) {
+      const checkUsersScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+uids = ${JSON.stringify(Array.from(registry.userIds))}
+p = ",".join(["%s"] * len(uids))
+cur.execute(f"SELECT id FROM users WHERE id IN ({p})", tuple(uids))
+rows = cur.fetchall()
+cur.close(); conn.close()
+print(json.dumps({"found": [r["id"] for r in rows]}))
+`;
+      const curU = await runPythonHelper(checkUsersScript);
+      if (curU.found.length > 0) {
+        mismatches.push(`Leftover test user IDs found in DB: ${JSON.stringify(curU.found)}`);
+      }
+    }
+
+    // E. Check exact test strategy fixtures are absent (if not in baseline)
+    for (const sf of registry.strategyLifecycles.values()) {
+      const checkL = await getLifecycleRowSnapshot(sf.strategy_id, sf.mode);
+      if (checkL.status === "EXISTS") {
+        const wasInBaseline = baselineSnapshot && baselineSnapshot.allLifecycleRows &&
+          baselineSnapshot.allLifecycleRows.some(r => r.strategy_id === sf.strategy_id && r.mode === sf.mode);
+        if (!wasInBaseline) {
+          mismatches.push(`Leftover test strategy lifecycle row found: ${sf.strategy_id}/${sf.mode}`);
+        }
+      }
+    }
+
+    // F. Check exact test flag fixtures are absent (if not in baseline)
+    for (const ff of registry.systemFlags) {
+      const checkF = await getSystemFlagSnapshot(ff);
+      if (checkF.status === "EXISTS") {
+        const wasInBaseline = baselineSnapshot && baselineSnapshot.flags && baselineSnapshot.flags.flag_name === ff && baselineSnapshot.flags.status === "EXISTS";
+        if (!wasInBaseline) {
+          mismatches.push(`Leftover test system flag found: ${ff}`);
+        }
+      }
+    }
+
+    results.postRestoreVerification.mismatches = mismatches;
+    if (mismatches.length > 0) {
+      throw new Error(`Post-restore verification detected ${mismatches.length} mismatch(es):\n${mismatches.join("\n")}`);
+    }
+    results.postRestoreVerification.success = true;
+  } catch (err) {
+    results.postRestoreVerification.error = err.message;
+    console.error("  [-] Stage postRestoreVerification failed:", err.message);
+  }
+
+  const allSucceeded = Object.values(results).every(r => r.success === true);
+  return { allSucceeded, results };
 }
 
 async function getAvailablePort() {
@@ -475,7 +800,7 @@ async function runAllSafetyTests() {
 
   let passed = 0;
 
-  // Capture global pre-suite baseline
+  // Capture global pre-suite baseline snapshot
   console.log("[*] Capturing global pre-suite baseline snapshot...");
   const baselineFlags = await getSystemFlagSnapshot("emergency_stop");
   const baselineWallet = await getWalletSettingsSnapshot(1);
@@ -484,6 +809,14 @@ async function runAllSafetyTests() {
   const baselineAllLifecycle = await getAllLifecycleRows();
   console.log("  [✓] Pre-suite baseline captured successfully.\n");
 
+  const baselineSnapshot = {
+    flags: baselineFlags,
+    wallet: baselineWallet,
+    lifecycleRsi: baselineLifecycleRsi,
+    lifecycleDbl: baselineLifecycleDbl,
+    allLifecycleRows: baselineAllLifecycle,
+  };
+
   try {
     // --------------------------------------------------------------------------
     // TEST 1: Pre-snapshot failure safety guard (Job 1)
@@ -491,8 +824,8 @@ async function runAllSafetyTests() {
     console.log("=== Test 1: Pre-snapshot failure prevents deletion of shared tables ===");
     {
       const test1Strat = `SAFE_PRE_${RUN_ID}`;
+      globalRegistry.registerStrategy(test1Strat, "shadow");
       try {
-        // A. Seed run-unique row in rdt_strategy_lifecycle
         const seedScript = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
@@ -507,7 +840,6 @@ print(json.dumps({"status": "seeded"}))
 `;
         await runPythonHelper(seedScript);
 
-        // B. Run cleanup with snapshot_captured = false (simulating pre-snapshot failure)
         const cleanupRes = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
           target_db: TARGET_DB,
           user_ids: [],
@@ -532,7 +864,6 @@ print(json.dumps({"status": "seeded"}))
         assert(r.walletSettings === false, `Expected walletSettings=false, got: ${r.walletSettings}`);
         console.log("  [✓] Cleanup correctly reported failure for shared tables when snapshot_captured=false.");
 
-        // C. Assert seeded row was NOT deleted!
         const verifyScript = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
@@ -548,20 +879,20 @@ print(json.dumps({"persisted": row is not None}))
         console.log("  [✓] Shared table row remained intact (never deleted).");
         passed++;
       } finally {
-        // Test-level cleanup: delete only the run-unique row created by this test
         await runPythonHelper(`
 import mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor()
-cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s", ('${test1Strat}',))
+cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = 'shadow'", ('${test1Strat}',))
 conn.commit(); cur.close(); conn.close()
 `);
+        globalRegistry.unregisterStrategy(test1Strat, "shadow");
       }
     }
 
     // --------------------------------------------------------------------------
-    // TEST 2: Exact system_flags restoration (Job 2) & Non-Destructive ABSENT Deletion
+    // TEST 2: Exact system_flags restoration & Non-Destructive ABSENT Check
     // --------------------------------------------------------------------------
     console.log("\n=== Test 2: Full system_flags restoration with updated_at readback & non-destructive ABSENT check ===");
     {
@@ -569,7 +900,6 @@ conn.commit(); cur.close(); conn.close()
       assert(origFlagSnap.status === "EXISTS" && origFlagSnap.row !== null, "emergency_stop row missing in test DB");
       const origFlag = origFlagSnap.row;
 
-      // Part 2A: Full EXISTS restoration with updated_at verification
       try {
         const mutatedIsActive = origFlag.is_active === 1 ? 0 : 1;
         const mutateScript = `
@@ -596,7 +926,6 @@ print(json.dumps({"mutated": True}))
 
         assert(cleanupRes.cleanup_results.circuitBreaker === true, "circuitBreaker restoration failed");
 
-        // Read back and assert all columns match
         const readbackSnap = await getSystemFlagSnapshot("emergency_stop");
         const restored = readbackSnap.row;
         assert(restored.flag_name === origFlag.flag_name, `flag_name mismatch: ${restored.flag_name} vs ${origFlag.flag_name}`);
@@ -608,8 +937,9 @@ print(json.dumps({"mutated": True}))
         await restoreSystemFlagDirect(origFlagSnap);
       }
 
-      // Part 2B: Non-destructive ABSENT flag deletion check using run-unique flag
+      // Non-destructive ABSENT flag deletion check using run-unique flag
       const testFlagName = `SAFE_FLG_${RUN_ID}`;
+      globalRegistry.registerFlag(testFlagName);
       try {
         const seedAbsentFlag = `
 import json, mysql.connector
@@ -637,7 +967,6 @@ print(json.dumps({"seeded": True}))
         const verifyAbsentSnap = await getSystemFlagSnapshot(testFlagName);
         assert(verifyAbsentSnap.status === "ABSENT", `Flag ${testFlagName} was not cleanly deleted!`);
 
-        // Confirm shared emergency_stop flag was completely untouched
         const sharedFlagSnap = await getSystemFlagSnapshot("emergency_stop");
         assert(sharedFlagSnap.status === "EXISTS" && sharedFlagSnap.row.updated_at === origFlag.updated_at, "Shared emergency_stop flag was affected during ABSENT test!");
         console.log("  [✓] Non-destructive ABSENT flag deletion verified without touching shared emergency_stop.");
@@ -651,21 +980,22 @@ conn = mysql.connector.connect(**cfg); cur = conn.cursor()
 cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${testFlagName}',))
 conn.commit(); cur.close(); conn.close()
 `);
+        globalRegistry.unregisterFlag(testFlagName);
       }
     }
 
     // --------------------------------------------------------------------------
-    // TEST 3: Exact rdt_strategy_lifecycle restoration (Job 3) — NON-DESTRUCTIVE
+    // TEST 3: Exact rdt_strategy_lifecycle restoration & ABSENT row deletion
     // --------------------------------------------------------------------------
     console.log("\n=== Test 3: Full rdt_strategy_lifecycle restoration & ABSENT row deletion (Non-Destructive) ===");
     {
-      // Run-unique strategy identifiers guarantee ZERO interaction with pre-existing shared data
       const stratAbsent1 = `SAFE_ABS1_${RUN_ID}`;
       const stratAbsent2 = `SAFE_ABS2_${RUN_ID}`;
       const stratExist1 = `SAFE_EX1_${RUN_ID}`;
       const stratExist2 = `SAFE_EX2_${RUN_ID}`;
 
-      // Test 3A: ABSENT row deletion using run-unique identifiers
+      globalRegistry.registerStrategy(stratAbsent1, "shadow");
+      globalRegistry.registerStrategy(stratAbsent2, "inverse");
       try {
         const absentSeed = `
 import json, mysql.connector
@@ -697,7 +1027,6 @@ print(json.dumps({"seeded": True}))
         });
         assert(cleanupResAbsent.cleanup_results.lifecycle === true, "ABSENT lifecycle cleanup failed");
 
-        // Verify deletion
         const verifyAbsent = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
@@ -720,9 +1049,11 @@ conn = mysql.connector.connect(**cfg); cur = conn.cursor()
 cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id IN (%s, %s)", ('${stratAbsent1}', '${stratAbsent2}'))
 conn.commit(); cur.close(); conn.close()
 `);
+        globalRegistry.unregisterStrategy(stratAbsent1, "shadow");
+        globalRegistry.unregisterStrategy(stratAbsent2, "inverse");
       }
 
-      // Test 3B: EXISTS restoration using run-unique identifiers
+      // Test 3B: EXISTS restoration
       const origRow1 = {
         strategy_id: stratExist1,
         mode: "shadow",
@@ -744,6 +1075,8 @@ conn.commit(); cur.close(); conn.close()
         updated_at: "2024-03-01T11:00:00",
       };
 
+      globalRegistry.registerStrategy(stratExist1, "shadow");
+      globalRegistry.registerStrategy(stratExist2, "inverse");
       try {
         const existsSeed = `
 import json, mysql.connector
@@ -763,7 +1096,6 @@ print(json.dumps({"seeded": True}))
 `;
         await runPythonHelper(existsSeed);
 
-        // Mutate
         const mutateLifecycle = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
@@ -776,7 +1108,6 @@ print(json.dumps({"mutated": True}))
 `;
         await runPythonHelper(mutateLifecycle);
 
-        // Restore via cleanup
         const cleanupResExists = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
           target_db: TARGET_DB,
           snapshot_captured: true,
@@ -789,7 +1120,6 @@ print(json.dumps({"mutated": True}))
         });
         assert(cleanupResExists.cleanup_results.lifecycle === true, "EXISTS lifecycle cleanup failed");
 
-        // Verify all columns restored
         const readbackLifecycle = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
@@ -822,11 +1152,13 @@ conn = mysql.connector.connect(**cfg); cur = conn.cursor()
 cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id IN (%s, %s)", ('${stratExist1}', '${stratExist2}'))
 conn.commit(); cur.close(); conn.close()
 `);
+        globalRegistry.unregisterStrategy(stratExist1, "shadow");
+        globalRegistry.unregisterStrategy(stratExist2, "inverse");
       }
     }
 
     // --------------------------------------------------------------------------
-    // TEST 4: Exact wallet_tracker_settings restoration (Job 3 part 2)
+    // TEST 4: Exact wallet_tracker_settings restoration
     // --------------------------------------------------------------------------
     console.log("\n=== Test 4: Full wallet_tracker_settings restoration with updated_at readback ===");
     {
@@ -835,7 +1167,6 @@ conn.commit(); cur.close(); conn.close()
       const origWallet = walletSnap.row;
 
       try {
-        // Mutate row
         const mutateWalletScript = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
@@ -847,7 +1178,6 @@ print(json.dumps({"mutated": True}))
 `;
         await runPythonHelper(mutateWalletScript);
 
-        // Run cleanup with snapshot_captured = true
         const cleanupRes = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
           target_db: TARGET_DB,
           snapshot_captured: true,
@@ -860,7 +1190,6 @@ print(json.dumps({"mutated": True}))
         });
         assert(cleanupRes.cleanup_results.walletSettings === true, "walletSettings restoration failed");
 
-        // Read back and assert all columns match
         const readbackSnap = await getWalletSettingsSnapshot(1);
         const restored = readbackSnap.row;
         for (const col of ["enabled", "networks", "pools_per_network", "min_trade_usd", "min_net_usd", "auto_track_net_usd", "poll_interval_seconds", "retention_days", "api_delay_seconds", "token_mode", "updated_at"]) {
@@ -897,7 +1226,7 @@ print(json.dumps({"mutated": True}))
     }
 
     // --------------------------------------------------------------------------
-    // TEST 6: ML-03 Handled Error Contract & RBAC (Job 4)
+    // TEST 6: ML-03 Handled Error Contract & Viewer RBAC
     // --------------------------------------------------------------------------
     console.log("\n=== Test 6: ML-03 handled error API contract and Viewer RBAC ===");
     {
@@ -920,10 +1249,9 @@ print(json.dumps({"mutated": True}))
         stdio: ["pipe", "pipe", "pipe"],
       });
 
-      const createdUserIds = [];
+      const localUserIds = [];
 
       try {
-        // Wait for server to respond
         let ready = false;
         for (let i = 0; i < 30; i++) {
           try {
@@ -943,7 +1271,6 @@ print(json.dumps({"mutated": True}))
         }
         assert(ready, "Staging server failed to become ready for Test 6");
 
-        // Obtain trader and viewer tokens with run-unique usernames
         async function login(username, role) {
           const seedUserScript = `
 import json, mysql.connector
@@ -960,7 +1287,8 @@ print(json.dumps({"uid": uid}))
 `;
           const seedRes = await runPythonHelper(seedUserScript);
           const uid = seedRes.uid;
-          createdUserIds.push(uid);
+          localUserIds.push(uid);
+          globalRegistry.registerUser(uid);
 
           const loginPayload = JSON.stringify({ username, password: "TestPass123!" });
           const loginRes = await new Promise((resolve, reject) => {
@@ -996,7 +1324,6 @@ print(json.dumps({"uid": uid}))
           min_validation_trades: 10,
         });
 
-        // Trader POST /api/ml/run-experiment -> HTTP 500 with exact detail
         const traderRes = await new Promise((resolve, reject) => {
           const req = http.request(`http://127.0.0.1:${testPort}/api/ml/run-experiment`, {
             method: "POST",
@@ -1025,7 +1352,6 @@ print(json.dumps({"uid": uid}))
         );
         console.log(`  [✓] Direct API response contract verified: HTTP 500 with handled error "${traderRes.body.detail}".`);
 
-        // Viewer POST /api/ml/run-experiment -> HTTP 403 Forbidden
         const viewerRes = await new Promise((resolve, reject) => {
           const req = http.request(`http://127.0.0.1:${testPort}/api/ml/run-experiment`, {
             method: "POST",
@@ -1046,18 +1372,20 @@ print(json.dumps({"uid": uid}))
         console.log("  [✓] RBAC contract verified: Viewer denied HTTP 403 Forbidden on exact endpoint.");
         passed++;
       } finally {
-        // Clean up test users using exact-ID cleanup
-        if (createdUserIds.length > 0) {
-          const placeholders = createdUserIds.map(() => "%s").join(", ");
+        if (localUserIds.length > 0) {
+          const placeholders = localUserIds.map(() => "%s").join(", ");
           await runPythonHelper(`
 import mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor()
-cur.execute("DELETE FROM audit_logs WHERE user_id IN (${placeholders})", tuple(${JSON.stringify(createdUserIds)}))
-cur.execute("DELETE FROM users WHERE id IN (${placeholders})", tuple(${JSON.stringify(createdUserIds)}))
+cur.execute("DELETE FROM audit_logs WHERE user_id IN (${placeholders})", tuple(${JSON.stringify(localUserIds)}))
+cur.execute("DELETE FROM users WHERE id IN (${placeholders})", tuple(${JSON.stringify(localUserIds)}))
 conn.commit(); cur.close(); conn.close()
 `);
+          for (const uid of localUserIds) {
+            globalRegistry.unregisterUser(uid);
+          }
         }
         serverProc.kill("SIGKILL");
         await new Promise((r) => serverProc.on("close", r));
@@ -1069,12 +1397,10 @@ conn.commit(); cur.close(); conn.close()
     // --------------------------------------------------------------------------
     console.log("\n=== Test 7: Pre-existing lifecycle rows survival test (Requirement 8) ===");
     {
-      // 1. Snapshot initial state of RSI_CTR and DBL_PAT_INV prior to Test 7
       const preTestRsiSnap = await getLifecycleRowSnapshot("RSI_CTR", "shadow");
       const preTestDblSnap = await getLifecycleRowSnapshot("DBL_PAT_INV", "inverse");
 
       try {
-        // 2. Seed distinctive, recognizable pre-existing rows for RSI_CTR and DBL_PAT_INV
         const distinctiveRsi = {
           strategy_id: "RSI_CTR",
           mode: "shadow",
@@ -1135,13 +1461,11 @@ print(json.dumps({"seeded": True}))
 `;
         await runPythonHelper(seedDistinctiveScript);
 
-        // 3. Harness snapshots the pre-existing state before test run
         const runSnapRsi = await getLifecycleRowSnapshot("RSI_CTR", "shadow");
         const runSnapDbl = await getLifecycleRowSnapshot("DBL_PAT_INV", "inverse");
         assert(runSnapRsi.status === "EXISTS", "RSI_CTR distinctive row missing after seed");
         assert(runSnapDbl.status === "EXISTS", "DBL_PAT_INV distinctive row missing after seed");
 
-        // 4. Test run executes and mutates both rows
         const mutateTestScript = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
@@ -1154,7 +1478,6 @@ print(json.dumps({"mutated": True}))
 `;
         await runPythonHelper(mutateTestScript);
 
-        // 5. Harness cleanup executes with the captured snapshot
         const cleanupRes = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
           target_db: TARGET_DB,
           snapshot_captured: true,
@@ -1167,7 +1490,6 @@ print(json.dumps({"mutated": True}))
         });
         assert(cleanupRes.status === "ok" && cleanupRes.cleanup_results.lifecycle === true, "Harness cleanup failed to restore pre-existing lifecycle rows");
 
-        // 6. Read back and verify that the distinctive pre-existing rows survived and match 100% across all columns
         const readbackRsi = await getLifecycleRowSnapshot("RSI_CTR", "shadow");
         const readbackDbl = await getLifecycleRowSnapshot("DBL_PAT_INV", "inverse");
         assert(readbackRsi.status === "EXISTS", "Pre-existing RSI_CTR row was destroyed/deleted!");
@@ -1180,16 +1502,286 @@ print(json.dumps({"mutated": True}))
         console.log("  [✓] Pre-existing lifecycle rows with distinctive values survived mutation and were verified 100% identical after cleanup.");
         passed++;
       } finally {
-        // Restore whatever was in RSI_CTR and DBL_PAT_INV prior to Test 7
         await restoreLifecycleRowDirect(preTestRsiSnap);
         await restoreLifecycleRowDirect(preTestDblSnap);
       }
     }
 
     // --------------------------------------------------------------------------
-    // TEST 8: Database purity & baseline integrity verification
+    // TEST 8: Regression Test A — Existing SAFE-prefixed records survive
     // --------------------------------------------------------------------------
-    console.log("\n=== Test 8: End-to-end database purity & baseline integrity verification ===");
+    console.log("\n=== Test 8: Regression Test A — Existing SAFE-prefixed records survive exact-ownership cleanup ===");
+    {
+      const preLifeStrat = `SAFE_PRE_EXIST_${RUN_ID}`;
+      const preFlagName = `SAFE_PRE_FLAG_${RUN_ID}`;
+      const preUsername = `safe_pre_usr_${RUN_ID}`;
+      let preUserId = null;
+      let preAuditId = null;
+
+      try {
+        const seedPreExistingScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+from web.auth import hash_password
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+
+# Pre-existing lifecycle row
+cur.execute('''
+INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
+VALUES (%s, 'shadow', 1, 0, 1, 0, 1, '2024-01-01 10:00:00')
+''', ('${preLifeStrat}',))
+
+# Pre-existing system flag
+cur.execute('''
+INSERT INTO system_flags (flag_name, is_active, reason, updated_at)
+VALUES (%s, 1, 'pre_existing_flag_reason', '2024-01-01 10:00:00')
+''', ('${preFlagName}',))
+
+# Pre-existing user
+pwd_hash = hash_password("PrePass123!")
+cur.execute("INSERT INTO users (username, email, password_hash, role, is_active, must_change_password) VALUES (%s, %s, %s, 'trader', 1, 0)",
+            ('${preUsername}', '${preUsername}@test.internal', pwd_hash))
+uid = cur.lastrowid
+
+# Pre-existing audit log
+cur.execute("INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, 'PRE_EXISTING_ACTION', json_object('info', 'pre_details'))", (uid, '${preUsername}'))
+aid = cur.lastrowid
+
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"uid": uid, "aid": aid}))
+`;
+        const preRes = await runPythonHelper(seedPreExistingScript);
+        preUserId = preRes.uid;
+        preAuditId = preRes.aid;
+        console.log(`  [1] Seeded pre-existing SAFE-prefixed records: strategy ${preLifeStrat}, flag ${preFlagName}, user ${preUsername} (ID ${preUserId}), audit log ${preAuditId}.`);
+
+        // Simulate a separate test run that creates its OWN separate fixtures with exact registration
+        const runStrat = `SAFE_RUN_SEPARATE_${RUN_ID}`;
+        const runFlag = `SAFE_RUN_FLAG_${RUN_ID}`;
+        const runUser = `safe_run_user_${RUN_ID}`;
+
+        const seedRunScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+from web.auth import hash_password
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+
+cur.execute("INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, updated_at) VALUES (%s, 'shadow', 0, 1, '2025-02-02 12:00:00')", ('${runStrat}',))
+cur.execute("INSERT INTO system_flags (flag_name, is_active, reason, updated_at) VALUES (%s, 1, 'run_flag', '2025-02-02 12:00:00')", ('${runFlag}',))
+pwd_hash = hash_password("RunPass123!")
+cur.execute("INSERT INTO users (username, email, password_hash, role, is_active, must_change_password) VALUES (%s, %s, %s, 'viewer', 1, 0)",
+            ('${runUser}', '${runUser}@test.internal', pwd_hash))
+run_uid = cur.lastrowid
+cur.execute("INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, 'RUN_ACTION', json_object('info', 'run_details'))", (run_uid, '${runUser}'))
+run_aid = cur.lastrowid
+
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"run_uid": run_uid, "run_aid": run_aid}))
+`;
+        const runRes = await runPythonHelper(seedRunScript);
+        const runUserId = runRes.run_uid;
+        const runAuditId = runRes.run_aid;
+
+        // Local registry tracking ONLY the run-created fixtures
+        const localRunRegistry = new FixtureRegistry();
+        localRunRegistry.registerStrategy(runStrat, "shadow");
+        localRunRegistry.registerFlag(runFlag);
+        localRunRegistry.registerUser(runUserId);
+        localRunRegistry.registerAuditLog(runAuditId);
+
+        // Execute exact-ownership cleanup targeting ONLY this localRunRegistry
+        const cleanupLocalRes = await executeFailureSafeGlobalRestoration(null, localRunRegistry);
+        assert(cleanupLocalRes.results.fixtureCleanup.success === true, "fixtureCleanup failed");
+        assert(cleanupLocalRes.results.userCleanup.success === true, "userCleanup failed");
+        assert(cleanupLocalRes.results.auditLogCleanup.success === true, "auditLogCleanup failed");
+
+        // Assert run fixtures were removed
+        const checkRunStrat = await getLifecycleRowSnapshot(runStrat, "shadow");
+        assert(checkRunStrat.status === "ABSENT", `Run strategy ${runStrat} should have been deleted`);
+        const checkRunFlag = await getSystemFlagSnapshot(runFlag);
+        assert(checkRunFlag.status === "ABSENT", `Run flag ${runFlag} should have been deleted`);
+
+        // Assert pre-existing SAFE-prefixed records REMAIN 100% INTACT!
+        const checkPreStrat = await getLifecycleRowSnapshot(preLifeStrat, "shadow");
+        assert(checkPreStrat.status === "EXISTS", `Pre-existing SAFE strategy ${preLifeStrat} was destroyed!`);
+        assert(checkPreStrat.row.evaluation_enabled === 1, "Pre-existing strategy evaluation_enabled altered");
+        assert(checkPreStrat.row.paper_enabled === 0, "Pre-existing strategy paper_enabled altered");
+        assert(checkPreStrat.row.telegram_enabled === 1, "Pre-existing strategy telegram_enabled altered");
+        assert(checkPreStrat.row.report_enabled === 0, "Pre-existing strategy report_enabled altered");
+        assert(checkPreStrat.row.auto_promote_enabled === 1, "Pre-existing strategy auto_promote_enabled altered");
+        assert(checkPreStrat.row.updated_at === "2024-01-01T10:00:00", `Pre-existing strategy updated_at altered: ${checkPreStrat.row.updated_at}`);
+
+        const checkPreFlag = await getSystemFlagSnapshot(preFlagName);
+        assert(checkPreFlag.status === "EXISTS", `Pre-existing SAFE flag ${preFlagName} was destroyed!`);
+        assert(checkPreFlag.row.is_active === 1, "Pre-existing flag is_active altered");
+        assert(checkPreFlag.row.reason === "pre_existing_flag_reason", "Pre-existing flag reason altered");
+        assert(checkPreFlag.row.updated_at === "2024-01-01T10:00:00", `Pre-existing flag updated_at altered: ${checkPreFlag.row.updated_at}`);
+
+        const checkPreUserScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT id, username, email FROM users WHERE id = %s", (${preUserId},))
+u = cur.fetchone()
+cur.execute("SELECT id, action, details FROM audit_logs WHERE id = %s", (${preAuditId},))
+a = cur.fetchone()
+cur.close(); conn.close()
+print(json.dumps({"user": u, "audit": a}))
+`;
+        const checkPreUserRes = await runPythonHelper(checkPreUserScript);
+        assert(checkPreUserRes.user !== null && checkPreUserRes.user.username === preUsername, "Pre-existing user was destroyed or modified!");
+        assert(checkPreUserRes.audit !== null && checkPreUserRes.audit.action === "PRE_EXISTING_ACTION", "Pre-existing audit log was destroyed or modified!");
+
+        console.log("  [✓] Verified: Existing SAFE-prefixed lifecycle, system flag, user, and audit log survived completely intact.");
+        passed++;
+      } finally {
+        if (preUserId) {
+          await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM audit_logs WHERE user_id = %s", (${preUserId},))
+cur.execute("DELETE FROM users WHERE id = %s", (${preUserId},))
+cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = 'shadow'", ('${preLifeStrat}',))
+cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${preFlagName}',))
+conn.commit(); cur.close(); conn.close()
+`);
+        }
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // TEST 9: Regression Test B — Current-run fixtures removed by exact ID
+    // --------------------------------------------------------------------------
+    console.log("\n=== Test 9: Regression Test B — Current-run fixtures removed by exact ID verification ===");
+    {
+      const runStrat = `SAFE_RUN_B_STRAT_${RUN_ID}`;
+      const runFlag = `SAFE_RUN_B_FLAG_${RUN_ID}`;
+      const runUsername = `safe_run_b_usr_${RUN_ID}`;
+      let runUserId = null;
+      let runAuditId = null;
+
+      try {
+        const seedScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+from web.auth import hash_password
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+
+cur.execute("INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, updated_at) VALUES (%s, 'shadow', 1, 1, '2025-03-03 12:00:00')", ('${runStrat}',))
+cur.execute("INSERT INTO system_flags (flag_name, is_active, reason, updated_at) VALUES (%s, 1, 'run_b_flag', '2025-03-03 12:00:00')", ('${runFlag}',))
+pwd_hash = hash_password("RunBPass123!")
+cur.execute("INSERT INTO users (username, email, password_hash, role, is_active, must_change_password) VALUES (%s, %s, %s, 'trader', 1, 0)",
+            ('${runUsername}', '${runUsername}@test.internal', pwd_hash))
+uid = cur.lastrowid
+cur.execute("INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, 'RUN_B_ACTION', json_object('info', 'run_b_details'))", (uid, '${runUsername}'))
+aid = cur.lastrowid
+
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"uid": uid, "aid": aid}))
+`;
+        const res = await runPythonHelper(seedScript);
+        runUserId = res.uid;
+        runAuditId = res.aid;
+
+        // Verify ownership before deletion
+        const snapL = await getLifecycleRowSnapshot(runStrat, "shadow");
+        const snapF = await getSystemFlagSnapshot(runFlag);
+        assert(snapL.status === "EXISTS", "Fixture strategy lifecycle missing before deletion");
+        assert(snapF.status === "EXISTS", "Fixture flag missing before deletion");
+
+        const testReg = new FixtureRegistry();
+        testReg.registerStrategy(runStrat, "shadow");
+        testReg.registerFlag(runFlag);
+        testReg.registerUser(runUserId);
+        testReg.registerAuditLog(runAuditId);
+
+        const cleanupRes = await executeFailureSafeGlobalRestoration(null, testReg);
+        assert(cleanupRes.results.fixtureCleanup.success === true, "fixtureCleanup failed");
+        assert(cleanupRes.results.userCleanup.success === true, "userCleanup failed");
+        assert(cleanupRes.results.auditLogCleanup.success === true, "auditLogCleanup failed");
+
+        // Verify exact test-owned records are absent after cleanup
+        const afterL = await getLifecycleRowSnapshot(runStrat, "shadow");
+        const afterF = await getSystemFlagSnapshot(runFlag);
+        assert(afterL.status === "ABSENT", `Strategy ${runStrat} still exists after exact-ownership cleanup!`);
+        assert(afterF.status === "ABSENT", `Flag ${runFlag} still exists after exact-ownership cleanup!`);
+
+        const verifyUserAbsence = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT id FROM users WHERE id = %s", (${runUserId},))
+u = cur.fetchone()
+cur.execute("SELECT id FROM audit_logs WHERE id = %s", (${runAuditId},))
+a = cur.fetchone()
+cur.close(); conn.close()
+print(json.dumps({"user_exists": u is not None, "audit_exists": a is not None}))
+`;
+        const checkAbsence = await runPythonHelper(verifyUserAbsence);
+        assert(checkAbsence.user_exists === false, `User ${runUserId} still exists after exact-ID cleanup!`);
+        assert(checkAbsence.audit_exists === false, `Audit log ${runAuditId} still exists after exact-ID cleanup!`);
+
+        console.log("  [✓] Verified: Exact-ownership cleanup deleted only current-run fixtures and confirmed complete absence.");
+        passed++;
+      } finally {
+        if (runUserId) {
+          await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM audit_logs WHERE id = %s", (${runAuditId},))
+cur.execute("DELETE FROM users WHERE id = %s", (${runUserId},))
+cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = 'shadow'", ('${runStrat}',))
+cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${runFlag}',))
+conn.commit(); cur.close(); conn.close()
+`);
+        }
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // TEST 10: Regression Test C — Restoration continues after injected failure
+    // --------------------------------------------------------------------------
+    console.log("\n=== Test 10: Regression Test C — Restoration continues after injected failure ===");
+    {
+      const dummyReg = new FixtureRegistry();
+      // Inject failure into the first operation: auditLogCleanup
+      const restoreRes = await executeFailureSafeGlobalRestoration(
+        baselineSnapshot,
+        dummyReg,
+        { injectFailureIn: "auditLogCleanup" }
+      );
+
+      // 1. Injected failure must be caught and recorded
+      assert(restoreRes.allSucceeded === false, "allSucceeded should be false when an operation fails");
+      assert(restoreRes.results.auditLogCleanup.success === false, "auditLogCleanup should have failed");
+      assert(restoreRes.results.auditLogCleanup.error.includes("Synthetic injected failure in auditLogCleanup"), "Expected error message not found");
+
+      // 2. All subsequent operations MUST have been attempted and succeeded
+      assert(restoreRes.results.userCleanup.success === true, "userCleanup should have been attempted and succeeded");
+      assert(restoreRes.results.fixtureCleanup.success === true, "fixtureCleanup should have been attempted and succeeded");
+      assert(restoreRes.results.systemFlagsRestore.success === true, "systemFlagsRestore should have been attempted and succeeded");
+      assert(restoreRes.results.lifecycleRestore.success === true, "lifecycleRestore should have been attempted and succeeded");
+      assert(restoreRes.results.walletSettingsRestore.success === true, "walletSettingsRestore should have been attempted and succeeded");
+      assert(restoreRes.results.postRestoreVerification.success === true, "postRestoreVerification should have been attempted and succeeded");
+
+      console.log("  [✓] Verified: Failure in early stage (auditLogCleanup) was isolated; all remaining restoration stages completed successfully.");
+      console.log("  [✓] Verified: Overall restoration failure accurately aggregated (allSucceeded = false) without suppressing error.");
+      passed++;
+    }
+
+    // --------------------------------------------------------------------------
+    // TEST 11: Regression Test D — Full baseline integrity verification
+    // --------------------------------------------------------------------------
+    console.log("\n=== Test 11: Regression Test D — Full baseline integrity verification ===");
     {
       const currentFlags = await getSystemFlagSnapshot("emergency_stop");
       assert(
@@ -1204,47 +1796,62 @@ print(json.dumps({"mutated": True}))
       );
 
       const currentLifecycleRows = await getAllLifecycleRows();
-      // Assert no run-specific or test artifacts remain
-      const leftoverSafeRows = currentLifecycleRows.filter(r => r.strategy_id.startsWith("SAFE_"));
-      assert(leftoverSafeRows.length === 0, `Leftover SAFE_* rows found: ${JSON.stringify(leftoverSafeRows)}`);
-
-      // Assert lifecycle rows equal pre-suite baseline
       assert(
         JSON.stringify(currentLifecycleRows) === JSON.stringify(baselineAllLifecycle),
         `Lifecycle rows drifted from baseline: ${JSON.stringify(currentLifecycleRows)} vs ${JSON.stringify(baselineAllLifecycle)}`
       );
 
-      console.log("  [✓] Database purity verified: zero test artifacts remain and pre-suite state is fully preserved.");
+      if (globalRegistry.userIds.size > 0) {
+        const checkTestUsersScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+uids = ${JSON.stringify(Array.from(globalRegistry.userIds))}
+p = ",".join(["%s"] * len(uids))
+cur.execute(f"SELECT COUNT(*) as cnt FROM users WHERE id IN ({p})", tuple(uids))
+user_cnt = cur.fetchone()["cnt"]
+cur.execute(f"SELECT COUNT(*) as cnt FROM audit_logs WHERE user_id IN ({p})", tuple(uids))
+audit_cnt = cur.fetchone()["cnt"]
+cur.close(); conn.close()
+print(json.dumps({"user_cnt": user_cnt, "audit_cnt": audit_cnt}))
+`;
+        const checkRes = await runPythonHelper(checkTestUsersScript);
+        assert(checkRes.user_cnt === 0, `Test users still present in DB: ${checkRes.user_cnt}`);
+        assert(checkRes.audit_cnt === 0, `Test audit logs still present in DB: ${checkRes.audit_cnt}`);
+      }
+
+      console.log("  [✓] Verified: 100% baseline identity confirmed across system_flags, rdt_strategy_lifecycle, wallet_tracker_settings, users, and audit_logs.");
       passed++;
     }
 
     console.log(`\n[+] ALL ${passed} HARNESS SAFETY & EVIDENCE ACCURACY TESTS PASSED SUCCESSFULLY!`);
   } finally {
-    console.log("\n[*] Running global post-suite safety restoration guard...");
-    await runPythonHelper(`
-import mysql.connector
-from config import MYSQL_CONFIG
-cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
-conn = mysql.connector.connect(**cfg); cur = conn.cursor()
-cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id LIKE 'SAFE_%'")
-cur.execute("DELETE FROM system_flags WHERE flag_name LIKE 'SAFE_%'")
-cur.execute("DELETE FROM audit_logs WHERE user_id IN (SELECT id FROM users WHERE username LIKE 'safe_%')")
-cur.execute("DELETE FROM users WHERE username LIKE 'safe_%'")
-conn.commit(); cur.close(); conn.close()
-`);
-    await restoreSystemFlagDirect(baselineFlags);
-    await restoreWalletSettingsDirect(baselineWallet);
-    await restoreLifecycleRowDirect(baselineLifecycleRsi);
-    await restoreLifecycleRowDirect(baselineLifecycleDbl);
-    console.log("[+] Global baseline state restored.\n");
+    console.log("\n[*] Running failure-safe global restoration guard...");
+    const { allSucceeded, results } = await executeFailureSafeGlobalRestoration(
+      baselineSnapshot,
+      globalRegistry
+    );
+
+    if (!allSucceeded) {
+      console.error("\n[-] CRITICAL: Global restoration encountered failures:");
+      for (const [op, res] of Object.entries(results)) {
+        if (!res.success) {
+          console.error(`  [-] ${op}: ${res.error}`);
+        }
+      }
+      throw new Error("Post-suite global restoration failed");
+    } else {
+      console.log("[+] Global baseline state successfully restored and verified.\n");
+    }
   }
 }
 
 if (require.main === module) {
   runAllSafetyTests().catch((err) => {
-    console.error("\n[-] Safety regression tests failed:", err);
+    console.error("\n[-] Safety regression tests failed:", err.message);
     process.exit(1);
   });
 }
 
-module.exports = { runAllSafetyTests };
+module.exports = { runAllSafetyTests, executeFailureSafeGlobalRestoration, FixtureRegistry };
