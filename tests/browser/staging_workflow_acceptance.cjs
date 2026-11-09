@@ -482,7 +482,7 @@ try:
         expected_flag = init_em.get("flag_name") or target_flag
         assert v_em["flag_name"] == expected_flag, f"{target_flag} flag_name mismatch: {v_em['flag_name']} vs {expected_flag}"
         assert v_em["is_active"] == init_em["is_active"], f"{target_flag} is_active mismatch: {v_em['is_active']} vs {init_em['is_active']}"
-        assert (v_em["reason"] or "") == (init_em["reason"] or ""), f"{target_flag} reason mismatch: {v_em['reason']} vs {init_em['reason']}"
+        assert v_em["reason"] == init_em["reason"], f"{target_flag} reason mismatch: {v_em['reason']!r} vs {init_em['reason']!r}"
         v_up = v_em["updated_at"].isoformat() if hasattr(v_em["updated_at"], "isoformat") else str(v_em["updated_at"])
         i_up = init_em["updated_at"].isoformat() if hasattr(init_em["updated_at"], "isoformat") else str(init_em["updated_at"])
         assert v_up.replace(" ", "T") == i_up.replace(" ", "T"), f"{target_flag} updated_at mismatch: {v_up} vs {i_up}"
