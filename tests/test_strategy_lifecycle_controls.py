@@ -465,3 +465,41 @@ def test_worker_refreshes_changed_lifecycle_settings_without_process_restart():
     assert refreshed["telegram_enabled"] is True
     assert refreshed["report_enabled"] is False
     assert bot.db.get_strategy_lifecycle_settings.call_count == 2
+
+
+def test_mixed_strategies_only_pass_entry_alert_for_promoted_strategy():
+    bot = _bot_for_open_trade({"telegram_enabled": True})
+    bot.db.save_trade.side_effect = [42, 43]
+    bot.strategy_lifecycle[("DBL_PAT", "shadow")] = {
+        "evaluation_enabled": True,
+        "paper_enabled": True,
+        "telegram_enabled": False,
+        "report_enabled": True,
+        "auto_promote_enabled": False,
+    }
+
+    promoted_signal = _sample_signal()
+    unpromoted_signal = {
+        **_sample_signal(),
+        "strategy": "DBL_PAT",
+        "strategies_triggered": ["DBL_PAT"],
+    }
+
+    promoted_trade_id = bot._open_trade(promoted_signal, "shadow")
+    unpromoted_trade_id = bot._open_trade(unpromoted_signal, "shadow")
+
+    assert promoted_trade_id == 42
+    assert unpromoted_trade_id == 43
+    assert bot.db.save_trade.call_count == 2
+
+    promoted_call, unpromoted_call = bot.db.save_trade.call_args_list
+    assert promoted_call.args[0]["telegram_enabled"] is True
+    assert promoted_call.kwargs["entry_alert"] is not None
+    assert promoted_call.kwargs["entry_alert"]["signal"]["strategy"] == "BB_REV"
+
+    # The non-promoted strategy continues paper trading, but no alert enters
+    # the durable outbox because its entry_alert is deliberately absent.
+    assert unpromoted_call.args[0]["telegram_enabled"] is False
+    assert unpromoted_call.kwargs["entry_alert"] is None
+    assert 42 in bot.active_shadow
+    assert 43 in bot.active_shadow
