@@ -236,7 +236,7 @@ def test_telegram_send_requires_api_ok_true_even_when_http_200():
 
     response = Mock(status_code=200)
     response.json.return_value = {"ok": False, "description": "rejected"}
-    with patch("paper.retailbot2.requests.post", return_value=response), \\
+    with patch("paper.retailbot2.requests.post", return_value=response), \
          patch("paper.retailbot2.time.sleep"):
         assert telegram.send("message", retries=0) is False
 
