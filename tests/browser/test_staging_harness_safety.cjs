@@ -17,21 +17,23 @@
  * 4B. Regression Test A: Wallet restoration with non-default target ID (99) and distinctive
  *    values across all 12 columns + updated_at, including non-destructive ABSENT verification.
  * 5. Harness cleanup failure propagation: Any cleanup failure sets non-zero exit code.
- * 6. ML-03 handled error API contract: POST /api/ml/run-experiment returns HTTP 500 with
- *    exact detail "ML experiment execution failed; check server logs for diagnostics",
- *    and Viewer is rejected with HTTP 403 Forbidden.
+ * 6. ML-03 handled error API contract & Regression Test A (Test 6 cleanup): POST /api/ml/run-experiment
+ *    returns HTTP 500 with exact detail, Viewer is rejected with HTTP 403, and Test 6 cleanup
+ *    deletes only registered audit IDs while strictly preserving unregistered audit logs on its users.
  * 7. Pre-existing lifecycle row survival (Requirement 8): Pre-existing lifecycle rows seeded
  *    with distinctive values survive an entire test mutation and harness cleanup cycle completely
  *    unharmed and identically verified across all columns.
- * 8. Existing SAFE-prefixed records (lifecycle, system_flags, users, audit_logs) survive
- *    exact-ownership cleanup without being deleted or mutated.
- * 9. Regression Test B: Exact audit-log ownership: registered audit log is deleted, while
+ * 8. Regression Test B (Test 8 cleanup): Existing SAFE-prefixed records survive exact-ownership
+ *    cleanup, and cleanup strictly preserves unrelated audit records associated with test-created users.
+ * 9. Exact audit-log ownership (Regression Test C): Registered audit log is deleted, while
  *    unregistered audit log associated with test user and pre-existing audit log remain intact.
- * 10. Regression Test C: Failure-safe global restoration continues after an injected failure in
- *     auditLogCleanup, postRestoreVerification detects unrecovered audit log, later stages execute,
- *     and unhandled failures cause nonzero process exit without suppressing errors.
- * 11. Regression Test D: Full baseline integrity verification across audit_logs, wallet_tracker_settings,
- *     system_flags, and rdt_strategy_lifecycle.
+ * 10. Injected audit failure detection (Regression Test D): Failure-safe global restoration
+ *     continues after injected failure in auditLogCleanup, postRestoreVerification detects unrecovered
+ *     audit record, later stages execute, and unhandled failures cause nonzero process exit.
+ * 11. Baseline integrity verification (Regression Test E): 100% baseline identity verified across
+ *     audit_logs, wallet_tracker_settings (all 12 columns + updated_at), system_flags, and rdt_strategy_lifecycle.
+ * 12. Source-level regression check (Regression Test F): Scans both staging harnesses to guarantee
+ *     zero broad audit-log deletions (DELETE FROM audit_logs WHERE user_id ...) are reintroduced.
  *
  * Run command:
  *   node tests/browser/test_staging_harness_safety.cjs
@@ -1445,6 +1447,9 @@ conn.commit(); cur.close(); conn.close()
       });
 
       const localUserIds = [];
+      const localAuditIds = [];
+      let test6RegAuditId = null;
+      let test6UnregAuditId = null;
 
       try {
         let ready = false;
@@ -1503,11 +1508,48 @@ print(json.dumps({"uid": uid}))
             req.end();
           });
           assert(loginRes.status === 200 && loginRes.body.token, `Login failed for ${username}: ${JSON.stringify(loginRes.body)}`);
+
+          // Reliably capture application-generated audit log created by login for this test user
+          const captureLoginAuditScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT id FROM audit_logs WHERE user_id = %s AND action = 'LOGIN_SUCCESS' ORDER BY id DESC LIMIT 1", (${uid},))
+row = cur.fetchone()
+cur.close(); conn.close()
+print(json.dumps({"audit_id": row["id"] if row else None}))
+`;
+          const auditCaptureRes = await runPythonHelper(captureLoginAuditScript);
+          if (auditCaptureRes && auditCaptureRes.audit_id) {
+            localAuditIds.push(auditCaptureRes.audit_id);
+            globalRegistry.registerAuditLog(auditCaptureRes.audit_id);
+          }
+
           return { uid, token: loginRes.body.token };
         }
 
         const trader = await login(`safe_trd_${RUN_ID}`, "trader");
         const viewer = await login(`safe_vw_${RUN_ID}`, "viewer");
+
+        // Explicitly seed audit records for Test 6 to verify exact-ownership and preservation
+        const seedTest6AuditScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, 'TEST6_REGISTERED_ACTION', json_object('info', 'test6_reg'))", (${trader.uid}, 'safe_trd_${RUN_ID}'))
+reg_id = cur.lastrowid
+cur.execute("INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, 'TEST6_UNREGISTERED_ACTION', json_object('info', 'test6_unreg'))", (${trader.uid}, 'safe_trd_${RUN_ID}'))
+unreg_id = cur.lastrowid
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"reg_id": reg_id, "unreg_id": unreg_id}))
+`;
+        const test6AuditRes = await runPythonHelper(seedTest6AuditScript);
+        test6RegAuditId = test6AuditRes.reg_id;
+        test6UnregAuditId = test6AuditRes.unreg_id;
+        localAuditIds.push(test6RegAuditId);
+        globalRegistry.registerAuditLog(test6RegAuditId);
 
         const payload = JSON.stringify({
           symbol: "BTCUSDT",
@@ -1567,23 +1609,74 @@ print(json.dumps({"uid": uid}))
         console.log("  [✓] RBAC contract verified: Viewer denied HTTP 403 Forbidden on exact endpoint.");
         passed++;
       } finally {
-        if (localUserIds.length > 0) {
-          const placeholders = localUserIds.map(() => "%s").join(", ");
-          await runPythonHelper(`
+        try {
+          if (localAuditIds.length > 0) {
+            const auditPlaceholders = localAuditIds.map(() => "%s").join(", ");
+            await runPythonHelper(`
 import mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor()
-cur.execute("DELETE FROM audit_logs WHERE user_id IN (${placeholders})", tuple(${JSON.stringify(localUserIds)}))
+cur.execute("DELETE FROM audit_logs WHERE id IN (${auditPlaceholders})", tuple(${JSON.stringify(localAuditIds)}))
+conn.commit(); cur.close(); conn.close()
+`);
+            for (const aid of localAuditIds) {
+              globalRegistry.unregisterAuditLog(aid);
+            }
+          }
+
+          if (localUserIds.length > 0) {
+            const placeholders = localUserIds.map(() => "%s").join(", ");
+            await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
 cur.execute("DELETE FROM users WHERE id IN (${placeholders})", tuple(${JSON.stringify(localUserIds)}))
 conn.commit(); cur.close(); conn.close()
 `);
-          for (const uid of localUserIds) {
-            globalRegistry.unregisterUser(uid);
+            for (const uid of localUserIds) {
+              globalRegistry.unregisterUser(uid);
+            }
           }
+
+          // Verify exact deletion of registered audit ID and preservation of unregistered audit record
+          if (test6RegAuditId && test6UnregAuditId) {
+            const verifyTest6Res = await runPythonHelper(`
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT id FROM audit_logs WHERE id = %s", (${test6RegAuditId},))
+reg_row = cur.fetchone()
+cur.execute("SELECT id, action FROM audit_logs WHERE id = %s", (${test6UnregAuditId},))
+unreg_row = cur.fetchone()
+cur.close(); conn.close()
+print(json.dumps({
+    "registered_exists": reg_row is not None,
+    "unregistered_exists": unreg_row is not None,
+    "unreg_action": unreg_row["action"] if unreg_row else None
+}))
+`);
+            assert(verifyTest6Res.registered_exists === false, `Registered audit ID ${test6RegAuditId} was NOT deleted by Test 6 cleanup`);
+            assert(verifyTest6Res.unregistered_exists === true, `Unregistered audit ID ${test6UnregAuditId} was incorrectly deleted by Test 6 cleanup!`);
+            assert(verifyTest6Res.unreg_action === "TEST6_UNREGISTERED_ACTION", "Unregistered audit log was corrupted");
+            console.log("  [✓] Verified: Test 6 cleanup deleted only registered audit ID and preserved unregistered audit log on test user.");
+          }
+        } finally {
+          if (test6UnregAuditId) {
+            await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM audit_logs WHERE id = %s", (${test6UnregAuditId},))
+conn.commit(); cur.close(); conn.close()
+`);
+          }
+          serverProc.kill("SIGKILL");
+          await new Promise((r) => serverProc.on("close", r));
         }
-        serverProc.kill("SIGKILL");
-        await new Promise((r) => serverProc.on("close", r));
       }
     }
 
@@ -1712,6 +1805,7 @@ print(json.dumps({"mutated": True}))
       const preUsername = `safe_pre_usr_${RUN_ID}`;
       let preUserId = null;
       let preAuditId = null;
+      let runUnregAuditId = null;
 
       try {
         const seedPreExistingScript = `
@@ -1771,15 +1865,18 @@ cur.execute("INSERT INTO users (username, email, password_hash, role, is_active,
 run_uid = cur.lastrowid
 cur.execute("INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, 'RUN_ACTION', json_object('info', 'run_details'))", (run_uid, '${runUser}'))
 run_aid = cur.lastrowid
+cur.execute("INSERT INTO audit_logs (user_id, username, action, details) VALUES (%s, %s, 'RUN_UNREGISTERED_ACTION', json_object('info', 'run_unreg_details'))", (run_uid, '${runUser}'))
+run_unreg_aid = cur.lastrowid
 
 conn.commit(); cur.close(); conn.close()
-print(json.dumps({"run_uid": run_uid, "run_aid": run_aid}))
+print(json.dumps({"run_uid": run_uid, "run_aid": run_aid, "run_unreg_aid": run_unreg_aid}))
 `;
         const runRes = await runPythonHelper(seedRunScript);
         const runUserId = runRes.run_uid;
         const runAuditId = runRes.run_aid;
+        runUnregAuditId = runRes.run_unreg_aid;
 
-        // Local registry tracking ONLY the run-created fixtures
+        // Local registry tracking ONLY the run-created fixtures (runUnregAuditId is intentionally omitted)
         const localRunRegistry = new FixtureRegistry();
         localRunRegistry.registerStrategy(runStrat, "shadow");
         localRunRegistry.registerFlag(runFlag);
@@ -1797,6 +1894,25 @@ print(json.dumps({"run_uid": run_uid, "run_aid": run_aid}))
         assert(checkRunStrat.status === "ABSENT", `Run strategy ${runStrat} should have been deleted`);
         const checkRunFlag = await getSystemFlagSnapshot(runFlag);
         assert(checkRunFlag.status === "ABSENT", `Run flag ${runFlag} should have been deleted`);
+
+        // Assert registered audit log was deleted and UNREGISTERED audit log associated with test user was preserved
+        const verifyRunAuditScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT id FROM audit_logs WHERE id = %s", (${runAuditId},))
+reg_a = cur.fetchone()
+cur.execute("SELECT id, action FROM audit_logs WHERE id = %s", (${runUnregAuditId},))
+unreg_a = cur.fetchone()
+cur.close(); conn.close()
+print(json.dumps({"reg_exists": reg_a is not None, "unreg_exists": unreg_a is not None, "unreg_action": unreg_a["action"] if unreg_a else None}))
+`;
+        const runAuditCheck = await runPythonHelper(verifyRunAuditScript);
+        assert(runAuditCheck.reg_exists === false, `Run registered audit ${runAuditId} should have been deleted`);
+        assert(runAuditCheck.unreg_exists === true, `Run unregistered audit ${runUnregAuditId} on test user was incorrectly deleted!`);
+        assert(runAuditCheck.unreg_action === "RUN_UNREGISTERED_ACTION", "Run unregistered audit log modified");
+        console.log("  [✓] Verified: Test 8 cleanup preserved unrelated audit record associated with its test-created user.");
 
         // Assert pre-existing SAFE-prefixed records REMAIN 100% INTACT!
         const checkPreStrat = await getLifecycleRowSnapshot(preLifeStrat, "shadow");
@@ -1833,19 +1949,21 @@ print(json.dumps({"user": u, "audit": a}))
         console.log("  [✓] Verified: Existing SAFE-prefixed lifecycle, system flag, user, and audit log survived completely intact.");
         passed++;
       } finally {
-        if (preUserId) {
-          await runPythonHelper(`
+        await runPythonHelper(`
 import mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor()
-cur.execute("DELETE FROM audit_logs WHERE user_id = %s", (${preUserId},))
-cur.execute("DELETE FROM users WHERE id = %s", (${preUserId},))
+if ${preAuditId || 'None'} is not None:
+    cur.execute("DELETE FROM audit_logs WHERE id = %s", (${preAuditId},))
+if ${runUnregAuditId || 'None'} is not None:
+    cur.execute("DELETE FROM audit_logs WHERE id = %s", (${runUnregAuditId},))
+if ${preUserId || 'None'} is not None:
+    cur.execute("DELETE FROM users WHERE id = %s", (${preUserId},))
 cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = 'shadow'", ('${preLifeStrat}',))
 cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${preFlagName}',))
 conn.commit(); cur.close(); conn.close()
 `);
-        }
       }
     }
 
@@ -2172,6 +2290,52 @@ print(json.dumps({"user_cnt": user_cnt, "audit_cnt": audit_cnt}))
       }
 
       console.log("  [✓] Verified: 100% baseline identity confirmed across audit_logs, wallet_tracker_settings, system_flags, and rdt_strategy_lifecycle.");
+      passed++;
+    }
+
+    // --------------------------------------------------------------------------
+    // TEST 12: Regression Test E — Source-level check for broad audit-log deletions
+    // --------------------------------------------------------------------------
+    console.log("\n=== Test 12: Regression Test E — Source-level check for broad audit-log deletions ===");
+    {
+      const harnessFiles = [
+        path.join(REPO_ROOT, "tests/browser/staging_workflow_acceptance.cjs"),
+        path.join(REPO_ROOT, "tests/browser/test_staging_harness_safety.cjs"),
+      ];
+
+      // Disallows DELETE FROM audit_logs WHERE user_id ... or any WHERE clause not filtering by exact id (id IN or id =)
+      const broadAuditDeleteRegex = new RegExp(
+        "DELETE\\s+FROM\\s+audit_logs\\s+WHERE\\s+(?!id\\s*(?:IN|=))",
+        "i"
+      );
+
+      for (const filePath of harnessFiles) {
+        assert(fs.existsSync(filePath), `Harness file missing: ${filePath}`);
+        const content = fs.readFileSync(filePath, "utf8");
+        const lines = content.split("\n");
+
+        lines.forEach((line, idx) => {
+          const trimmed = line.trim();
+          if (
+            trimmed.startsWith("*") ||
+            trimmed.startsWith("//") ||
+            trimmed.includes("broadAuditDeleteRegex") ||
+            trimmed.includes("RegExp(")
+          ) {
+            return;
+          }
+
+          if (broadAuditDeleteRegex.test(line)) {
+            throw new Error(
+              `Broad audit-log deletion detected in ${path.basename(filePath)}:${idx + 1}:\n` +
+              `  Line: ${trimmed}\n` +
+              `  Exact-ownership rule violation: only exact registered ID filtering (id IN or id =) is permitted.`
+            );
+          }
+        });
+      }
+
+      console.log("  [✓] Source-level regression check passed: zero broad audit-log deletions found in either staging harness.");
       passed++;
     }
 
