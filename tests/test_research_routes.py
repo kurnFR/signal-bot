@@ -274,6 +274,29 @@ class TestResearchRoutes(unittest.TestCase):
         self.assertEqual(res.status_code, 503)
         self.assertIn("readback", res.json()["detail"].lower())
 
+    def test_strategy_lifecycle_does_not_claim_success_when_saved_telegram_flag_differs(self):
+        persisted = [{
+            "strategy_id": "BB_REV_INV",
+            "mode": "inverse",
+            "evaluation_enabled": True,
+            "paper_enabled": True,
+            "telegram_enabled": False,
+            "report_enabled": True,
+            "auto_promote_enabled": False,
+        }]
+        with patch("web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting"), patch(
+            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
+            return_value=persisted,
+        ):
+            res = self.client.post("/api/research/retailbot2/strategies", headers=self.headers, json={
+                "strategy_id": "BB_REV_INV", "mode": "inverse",
+                "evaluation_enabled": True, "paper_enabled": True,
+                "telegram_enabled": True, "report_enabled": True,
+            })
+
+        self.assertEqual(res.status_code, 503)
+        self.assertIn("did not match", res.json()["detail"].lower())
+
     def test_strategy_lifecycle_readback_failure_is_not_reported_as_success(self):
         with patch("web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting"), patch(
             "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
