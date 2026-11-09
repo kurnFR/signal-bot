@@ -255,7 +255,15 @@ async function run() {
     trackedWallets: [],
   };
 
-  // State preservation registers
+  // State preservation registers and snapshot capture marker
+  let snapshotCaptured = false;
+  const snapshotState = {
+    emergencyStop: { status: "NOT_CAPTURED", row: null },
+    walletSettings: { status: "NOT_CAPTURED", row: null },
+    rb03Row: { status: "NOT_CAPTURED", row: null },
+    rb04Row: { status: "NOT_CAPTURED", row: null },
+  };
+
   let originalEmergencyStop = null;
   let originalWalletSettings = null;
   let originalRb03Row = null;
@@ -358,10 +366,10 @@ print(json.dumps({
     "status": "ok",
     "active_db": active_db,
     "seeded_ids": seeded_ids,
-    "emergency_stop": emergency_stop,
-    "wallet_settings": wallet_settings,
-    "rb03_row": rb03_row,
-    "rb04_row": rb04_row
+    "emergency_stop": {"status": "EXISTS" if emergency_stop else "ABSENT", "row": emergency_stop},
+    "wallet_settings": {"status": "EXISTS" if wallet_settings else "ABSENT", "row": wallet_settings},
+    "rb03_row": {"status": "EXISTS" if rb03_row else "ABSENT", "row": rb03_row},
+    "rb04_row": {"status": "EXISTS" if rb04_row else "ABSENT", "row": rb04_row}
 }, default=str))
 `;
 
@@ -375,17 +383,32 @@ print(json.dumps({
     };
 
     const initResult = await runPythonHelper(initScript, {}, initPayload);
-    seededUserIds = initResult.seeded_ids;
-    originalEmergencyStop = initResult.emergency_stop;
-    originalWalletSettings = initResult.wallet_settings;
-    originalRb03Row = initResult.rb03_row;
-    originalRb04Row = initResult.rb04_row;
+    assert(initResult && initResult.status === "ok", "Database initialization snapshot failed");
+    seededUserIds = initResult.seeded_ids || [];
 
-    console.log(`[+] Pre-existing database state recorded:`);
-    console.log(`    - Emergency Stop: is_active=${originalEmergencyStop?.is_active ?? 'null'}`);
-    console.log(`    - Wallet Settings (id=1): min_trade=${originalWalletSettings?.min_trade_usd}, poll=${originalWalletSettings?.poll_interval_seconds}`);
-    console.log(`    - RB-03 Strategy (RSI_CTR/shadow): ${originalRb03Row ? 'exists' : 'does not exist'}`);
-    console.log(`    - RB-04 Strategy (DBL_PAT_INV/inverse): ${originalRb04Row ? 'exists' : 'does not exist'}`);
+    snapshotState.emergencyStop = initResult.emergency_stop;
+    snapshotState.walletSettings = initResult.wallet_settings;
+    snapshotState.rb03Row = initResult.rb03_row;
+    snapshotState.rb04Row = initResult.rb04_row;
+
+    // Strict assertions on snapshot status
+    assert(["EXISTS", "ABSENT"].includes(snapshotState.emergencyStop?.status), "Invalid emergencyStop status");
+    assert(["EXISTS", "ABSENT"].includes(snapshotState.walletSettings?.status), "Invalid walletSettings status");
+    assert(["EXISTS", "ABSENT"].includes(snapshotState.rb03Row?.status), "Invalid rb03Row status");
+    assert(["EXISTS", "ABSENT"].includes(snapshotState.rb04Row?.status), "Invalid rb04Row status");
+
+    originalEmergencyStop = snapshotState.emergencyStop.row;
+    originalWalletSettings = snapshotState.walletSettings.row;
+    originalRb03Row = snapshotState.rb03Row.row;
+    originalRb04Row = snapshotState.rb04Row.row;
+
+    snapshotCaptured = true;
+
+    console.log(`[+] Pre-existing database state safely recorded (snapshotCaptured = true):`);
+    console.log(`    - Emergency Stop: status=${snapshotState.emergencyStop.status}, is_active=${originalEmergencyStop?.is_active ?? 'null'}`);
+    console.log(`    - Wallet Settings (id=1): status=${snapshotState.walletSettings.status}, min_trade=${originalWalletSettings?.min_trade_usd}, poll=${originalWalletSettings?.poll_interval_seconds}`);
+    console.log(`    - RB-03 Strategy (RSI_CTR/shadow): status=${snapshotState.rb03Row.status}`);
+    console.log(`    - RB-04 Strategy (DBL_PAT_INV/inverse): status=${snapshotState.rb04Row.status}`);
     console.log(`[+] Seeded run-unique test accounts: ${ADMIN_USER}, ${TRADER_USER}, ${VIEWER_USER} (IDs: ${seededUserIds.join(", ")})`);
 
     // 2. Spawn Staging Server
@@ -898,15 +921,25 @@ print(json.dumps({"reset_state": reset_state}, default=str))
     const experimentRes = await apiRequest("POST", "/api/ml/run-experiment", traderToken, tournamentPayload);
     // On empty OHLCV dataset in test DB, server raises handled error (500)
     console.log(`  [*] Direct API response status: HTTP ${experimentRes.status}.`);
+    assert(experimentRes.status === 500, `Expected HTTP 500 from run-experiment on empty dataset, got: ${experimentRes.status}`);
+    assert(
+      experimentRes.data && experimentRes.data.detail === "ML experiment execution failed; check server logs for diagnostics",
+      `Expected handled error detail, got: ${JSON.stringify(experimentRes.data)}`
+    );
+    console.log(`  [2] Handled error response contract verified: HTTP 500 with detail "${experimentRes.data.detail}".`);
 
     // RBAC check: Viewer denied 403 on exact frontend endpoint POST /api/ml/run-experiment
     const viewerExperimentRes = await apiRequest("POST", "/api/ml/run-experiment", viewerToken, tournamentPayload);
     assert(viewerExperimentRes.status === 403, `Viewer run-experiment must return 403, got: ${viewerExperimentRes.status}`);
-    console.log(`  [2] RBAC contract verified: Viewer rejected with HTTP 403 Forbidden on exact frontend endpoint.`);
+    console.log(`  [3] RBAC contract verified: Viewer rejected with HTTP 403 Forbidden on exact frontend endpoint.`);
 
     workflowResults["ML-03"] = {
       classification: "API_CONTRACT_ONLY / RBAC_ONLY",
-      boundaryReason: "Full model training execution bypassed on empty staging database to prevent worker starvation and CPU exhaustion. Modal rendering and handled API error response observed; RBAC strictly verified with Viewer 403.",
+      boundaryReason: "Full model training execution unverified on staging; empty OHLCV dataset triggers expected handled HTTP 500 error contract. Browser verified modal render and cancel (no browser-driven error recovery); Trader direct API verified handled HTTP 500 error response (detail: 'ML experiment execution failed; check server logs for diagnostics'); RBAC strictly verified with Viewer 403.",
+      apiContract: {
+        status: experimentRes.status,
+        detail: experimentRes.data?.detail,
+      },
       rbac: "Viewer 403 Verified (POST /api/ml/run-experiment)",
     };
 
@@ -1411,6 +1444,8 @@ cfg = MYSQL_CONFIG.copy(); cfg["database"] = db_name
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
 
 results = {}
+snapshot_captured = payload.get("snapshot_captured", False)
+snapshot_state = payload.get("snapshot_state", {})
 
 # 1. Delete users
 try:
@@ -1494,113 +1529,162 @@ except Exception as e:
 
 # 7. Restore system_flags emergency_stop to exact pre-test state
 try:
-    init_flag = payload["init_emergency_stop"]
-    if init_flag is None:
-        cur.execute("DELETE FROM system_flags WHERE flag_name = 'emergency_stop'")
-        cur.execute("SELECT flag_name FROM system_flags WHERE flag_name = 'emergency_stop'")
-        assert cur.fetchone() is None, "Emergency stop row should not exist after cleanup"
+    if not snapshot_captured:
+        results["circuitBreaker"] = False
+        print("[-] Pre-test snapshot was never captured; skipping system_flags restoration to prevent deletion of shared data.", file=sys.stderr)
     else:
-        cur.execute(
-            "UPDATE system_flags SET is_active = %s, reason = %s WHERE flag_name = 'emergency_stop'",
-            (init_flag["is_active"], init_flag["reason"])
-        )
-        cur.execute("SELECT * FROM system_flags WHERE flag_name = 'emergency_stop'")
-        verified_flag = cur.fetchone()
-        assert verified_flag is not None, "Emergency stop row missing after restore"
-        assert verified_flag["flag_name"] == init_flag["flag_name"], "Emergency stop flag_name mismatch"
-        assert verified_flag["is_active"] == init_flag["is_active"], "Emergency stop is_active not restored"
-        assert (verified_flag["reason"] or "") == (init_flag["reason"] or ""), "Emergency stop reason not restored"
-    results["circuitBreaker"] = True
+        snap_item = snapshot_state.get("emergencyStop", {"status": "NOT_CAPTURED", "row": None})
+        status = snap_item.get("status")
+        init_flag = snap_item.get("row")
+        if status == "ABSENT":
+            cur.execute("DELETE FROM system_flags WHERE flag_name = 'emergency_stop'")
+            conn.commit()
+            cur.execute("SELECT flag_name FROM system_flags WHERE flag_name = 'emergency_stop'")
+            assert cur.fetchone() is None, "Emergency stop row should not exist after cleanup"
+            results["circuitBreaker"] = True
+        elif status == "EXISTS" and init_flag is not None:
+            cur.execute(
+                "UPDATE system_flags SET is_active = %s, reason = %s, updated_at = %s WHERE flag_name = 'emergency_stop'",
+                (init_flag["is_active"], init_flag["reason"], init_flag["updated_at"])
+            )
+            conn.commit()
+            cur.execute("SELECT * FROM system_flags WHERE flag_name = 'emergency_stop'")
+            verified_flag = cur.fetchone()
+            assert verified_flag is not None, "Emergency stop row missing after restore"
+            assert verified_flag["flag_name"] == init_flag["flag_name"], f"Emergency stop flag_name mismatch: {verified_flag['flag_name']} vs {init_flag['flag_name']}"
+            assert verified_flag["is_active"] == init_flag["is_active"], f"Emergency stop is_active mismatch: {verified_flag['is_active']} vs {init_flag['is_active']}"
+            assert (verified_flag["reason"] or "") == (init_flag["reason"] or ""), f"Emergency stop reason mismatch: {verified_flag['reason']} vs {init_flag['reason']}"
+            assert verified_flag["updated_at"].isoformat() == init_flag["updated_at"], f"Emergency stop updated_at mismatch: {verified_flag['updated_at'].isoformat()} vs {init_flag['updated_at']}"
+            results["circuitBreaker"] = True
+        else:
+            raise ValueError(f"Invalid emergencyStop snapshot status: {status}")
 except Exception as e:
     results["circuitBreaker"] = False
     print(f"[-] Circuit breaker flag restoration error: {e}", file=sys.stderr)
 
 # 8. Restore rdt_strategy_lifecycle to exact pre-test state
 try:
-    # RB-03
-    orig_rb03 = payload["orig_rb03_row"]
-    if orig_rb03 is None:
-        cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
-        cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
-        assert cur.fetchone() is None, "RSI_CTR/shadow should not exist after cleanup"
+    if not snapshot_captured:
+        results["lifecycle"] = False
+        print("[-] Pre-test snapshot was never captured; skipping rdt_strategy_lifecycle restoration to prevent deletion of shared data.", file=sys.stderr)
     else:
-        cur.execute('''
-            UPDATE rdt_strategy_lifecycle
-            SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s
-            WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'
-        ''', (orig_rb03["evaluation_enabled"], orig_rb03["paper_enabled"], orig_rb03["telegram_enabled"], orig_rb03["report_enabled"], orig_rb03["auto_promote_enabled"]))
-        assert cur.rowcount >= 0, "Failed to update pre-existing RSI_CTR row"
-        cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
-        rb03_after = cur.fetchone()
-        assert rb03_after is not None, "RSI_CTR/shadow missing after restore"
-        for col in ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled"]:
-            assert rb03_after[col] == orig_rb03[col], f"RSI_CTR {col} mismatch: {rb03_after[col]} vs {orig_rb03[col]}"
+        # RB-03
+        rb03_snap = snapshot_state.get("rb03Row", {"status": "NOT_CAPTURED", "row": None})
+        rb03_status = rb03_snap.get("status")
+        orig_rb03 = rb03_snap.get("row")
+        if rb03_status == "ABSENT":
+            cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
+            conn.commit()
+            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
+            assert cur.fetchone() is None, "RSI_CTR/shadow should not exist after cleanup"
+        elif rb03_status == "EXISTS" and orig_rb03 is not None:
+            cur.execute('''
+                UPDATE rdt_strategy_lifecycle
+                SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
+                WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'
+            ''', (
+                orig_rb03["evaluation_enabled"], orig_rb03["paper_enabled"],
+                orig_rb03["telegram_enabled"], orig_rb03["report_enabled"],
+                orig_rb03["auto_promote_enabled"], orig_rb03["updated_at"]
+            ))
+            assert cur.rowcount >= 0, "Failed to update pre-existing RSI_CTR row"
+            conn.commit()
+            cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
+            rb03_after = cur.fetchone()
+            assert rb03_after is not None, "RSI_CTR/shadow missing after restore"
+            for col in ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled"]:
+                assert rb03_after[col] == orig_rb03[col], f"RSI_CTR {col} mismatch: {rb03_after[col]} vs {orig_rb03[col]}"
+            assert rb03_after["updated_at"].isoformat() == orig_rb03["updated_at"], f"RSI_CTR updated_at mismatch: {rb03_after['updated_at'].isoformat()} vs {orig_rb03['updated_at']}"
+        else:
+            raise ValueError(f"Invalid rb03Row snapshot status: {rb03_status}")
 
-    # RB-04
-    orig_rb04 = payload["orig_rb04_row"]
-    if orig_rb04 is None:
-        cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
-        cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
-        assert cur.fetchone() is None, "DBL_PAT_INV/inverse should not exist after cleanup"
-    else:
-        cur.execute('''
-            UPDATE rdt_strategy_lifecycle
-            SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s
-            WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'
-        ''', (orig_rb04["evaluation_enabled"], orig_rb04["paper_enabled"], orig_rb04["telegram_enabled"], orig_rb04["report_enabled"], orig_rb04["auto_promote_enabled"]))
-        assert cur.rowcount >= 0, "Failed to update pre-existing DBL_PAT_INV row"
-        cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
-        rb04_after = cur.fetchone()
-        assert rb04_after is not None, "DBL_PAT_INV/inverse missing after restore"
-        for col in ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled"]:
-            assert rb04_after[col] == orig_rb04[col], f"DBL_PAT_INV {col} mismatch: {rb04_after[col]} vs {orig_rb04[col]}"
+        # RB-04
+        rb04_snap = snapshot_state.get("rb04Row", {"status": "NOT_CAPTURED", "row": None})
+        rb04_status = rb04_snap.get("status")
+        orig_rb04 = rb04_snap.get("row")
+        if rb04_status == "ABSENT":
+            cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
+            conn.commit()
+            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
+            assert cur.fetchone() is None, "DBL_PAT_INV/inverse should not exist after cleanup"
+        elif rb04_status == "EXISTS" and orig_rb04 is not None:
+            cur.execute('''
+                UPDATE rdt_strategy_lifecycle
+                SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
+                WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'
+            ''', (
+                orig_rb04["evaluation_enabled"], orig_rb04["paper_enabled"],
+                orig_rb04["telegram_enabled"], orig_rb04["report_enabled"],
+                orig_rb04["auto_promote_enabled"], orig_rb04["updated_at"]
+            ))
+            assert cur.rowcount >= 0, "Failed to update pre-existing DBL_PAT_INV row"
+            conn.commit()
+            cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
+            rb04_after = cur.fetchone()
+            assert rb04_after is not None, "DBL_PAT_INV/inverse missing after restore"
+            for col in ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled"]:
+                assert rb04_after[col] == orig_rb04[col], f"DBL_PAT_INV {col} mismatch: {rb04_after[col]} vs {orig_rb04[col]}"
+            assert rb04_after["updated_at"].isoformat() == orig_rb04["updated_at"], f"DBL_PAT_INV updated_at mismatch: {rb04_after['updated_at'].isoformat()} vs {orig_rb04['updated_at']}"
+        else:
+            raise ValueError(f"Invalid rb04Row snapshot status: {rb04_status}")
 
-    conn.commit()
-    results["lifecycle"] = True
+        conn.commit()
+        results["lifecycle"] = True
 except Exception as e:
     results["lifecycle"] = False
     print(f"[-] Lifecycle restoration error: {e}", file=sys.stderr)
 
 # 9. Restore ALL columns of wallet_tracker_settings (id=1)
 try:
-    init_s = payload["init_wallet_settings"]
-    if init_s is None:
-        cur.execute("DELETE FROM wallet_tracker_settings WHERE id = 1")
-        cur.execute("SELECT id FROM wallet_tracker_settings WHERE id = 1")
-        assert cur.fetchone() is None, "wallet_tracker_settings row 1 should not exist after cleanup"
+    if not snapshot_captured:
+        results["walletSettings"] = False
+        print("[-] Pre-test snapshot was never captured; skipping wallet_tracker_settings restoration to prevent deletion of shared data.", file=sys.stderr)
     else:
-        cur.execute('''
-            UPDATE wallet_tracker_settings
-            SET enabled=%s, networks=%s, pools_per_network=%s, min_trade_usd=%s, min_net_usd=%s,
-                auto_track_net_usd=%s, poll_interval_seconds=%s, retention_days=%s, api_delay_seconds=%s,
-                token_mode=%s, token_addresses=%s, birdeye_api_key=%s
-            WHERE id = 1
-        ''', (
-            init_s["enabled"], init_s["networks"], init_s["pools_per_network"],
-            init_s["min_trade_usd"], init_s["min_net_usd"], init_s["auto_track_net_usd"],
-            init_s["poll_interval_seconds"], init_s["retention_days"], init_s["api_delay_seconds"],
-            init_s["token_mode"], init_s["token_addresses"], init_s["birdeye_api_key"]
-        ))
-        conn.commit()
+        wt_snap = snapshot_state.get("walletSettings", {"status": "NOT_CAPTURED", "row": None})
+        wt_status = wt_snap.get("status")
+        init_s = wt_snap.get("row")
+        if wt_status == "ABSENT":
+            cur.execute("DELETE FROM wallet_tracker_settings WHERE id = 1")
+            conn.commit()
+            cur.execute("SELECT id FROM wallet_tracker_settings WHERE id = 1")
+            assert cur.fetchone() is None, "wallet_tracker_settings row 1 should not exist after cleanup"
+            results["walletSettings"] = True
+        elif wt_status == "EXISTS" and init_s is not None:
+            cur.execute('''
+                UPDATE wallet_tracker_settings
+                SET enabled=%s, networks=%s, pools_per_network=%s, min_trade_usd=%s, min_net_usd=%s,
+                    auto_track_net_usd=%s, poll_interval_seconds=%s, retention_days=%s, api_delay_seconds=%s,
+                    token_mode=%s, token_addresses=%s, birdeye_api_key=%s, updated_at=%s
+                WHERE id = 1
+            ''', (
+                init_s["enabled"], init_s["networks"], init_s["pools_per_network"],
+                init_s["min_trade_usd"], init_s["min_net_usd"], init_s["auto_track_net_usd"],
+                init_s["poll_interval_seconds"], init_s["retention_days"], init_s["api_delay_seconds"],
+                init_s["token_mode"], init_s["token_addresses"], init_s["birdeye_api_key"],
+                init_s["updated_at"]
+            ))
+            conn.commit()
 
-        # Read back and assert all 12 columns restored
-        cur.execute("SELECT * FROM wallet_tracker_settings WHERE id = 1")
-        verified_s = cur.fetchone()
-        assert verified_s is not None, "wallet_tracker_settings row 1 missing after restore"
-        assert verified_s["enabled"] == init_s["enabled"], f"enabled mismatch: {verified_s['enabled']} vs {init_s['enabled']}"
-        assert verified_s["networks"] == init_s["networks"], f"networks mismatch: {verified_s['networks']} vs {init_s['networks']}"
-        assert verified_s["pools_per_network"] == init_s["pools_per_network"], f"pools_per_network mismatch: {verified_s['pools_per_network']} vs {init_s['pools_per_network']}"
-        assert float(verified_s["min_trade_usd"]) == float(init_s["min_trade_usd"]), f"min_trade_usd mismatch: {verified_s['min_trade_usd']} vs {init_s['min_trade_usd']}"
-        assert float(verified_s["min_net_usd"]) == float(init_s["min_net_usd"]), f"min_net_usd mismatch: {verified_s['min_net_usd']} vs {init_s['min_net_usd']}"
-        assert float(verified_s["auto_track_net_usd"]) == float(init_s["auto_track_net_usd"]), f"auto_track_net_usd mismatch: {verified_s['auto_track_net_usd']} vs {init_s['auto_track_net_usd']}"
-        assert verified_s["poll_interval_seconds"] == init_s["poll_interval_seconds"], f"poll_interval_seconds mismatch: {verified_s['poll_interval_seconds']} vs {init_s['poll_interval_seconds']}"
-        assert verified_s["retention_days"] == init_s["retention_days"], f"retention_days mismatch: {verified_s['retention_days']} vs {init_s['retention_days']}"
-        assert float(verified_s["api_delay_seconds"]) == float(init_s["api_delay_seconds"]), f"api_delay_seconds mismatch: {verified_s['api_delay_seconds']} vs {init_s['api_delay_seconds']}"
-        assert verified_s["token_mode"] == init_s["token_mode"], f"token_mode mismatch: {verified_s['token_mode']} vs {init_s['token_mode']}"
-        assert (verified_s["token_addresses"] or "") == (init_s["token_addresses"] or ""), f"token_addresses mismatch: {verified_s['token_addresses']} vs {init_s['token_addresses']}"
-        assert (verified_s["birdeye_api_key"] or "") == (init_s["birdeye_api_key"] or ""), f"birdeye_api_key mismatch: {verified_s['birdeye_api_key']} vs {init_s['birdeye_api_key']}"
-
-    results["walletSettings"] = True
+            # Read back and assert all 12 columns + updated_at restored
+            cur.execute("SELECT * FROM wallet_tracker_settings WHERE id = 1")
+            verified_s = cur.fetchone()
+            assert verified_s is not None, "wallet_tracker_settings row 1 missing after restore"
+            assert verified_s["enabled"] == init_s["enabled"], f"enabled mismatch: {verified_s['enabled']} vs {init_s['enabled']}"
+            assert verified_s["networks"] == init_s["networks"], f"networks mismatch: {verified_s['networks']} vs {init_s['networks']}"
+            assert verified_s["pools_per_network"] == init_s["pools_per_network"], f"pools_per_network mismatch: {verified_s['pools_per_network']} vs {init_s['pools_per_network']}"
+            assert float(verified_s["min_trade_usd"]) == float(init_s["min_trade_usd"]), f"min_trade_usd mismatch: {verified_s['min_trade_usd']} vs {init_s['min_trade_usd']}"
+            assert float(verified_s["min_net_usd"]) == float(init_s["min_net_usd"]), f"min_net_usd mismatch: {verified_s['min_net_usd']} vs {init_s['min_net_usd']}"
+            assert float(verified_s["auto_track_net_usd"]) == float(init_s["auto_track_net_usd"]), f"auto_track_net_usd mismatch: {verified_s['auto_track_net_usd']} vs {init_s['auto_track_net_usd']}"
+            assert verified_s["poll_interval_seconds"] == init_s["poll_interval_seconds"], f"poll_interval_seconds mismatch: {verified_s['poll_interval_seconds']} vs {init_s['poll_interval_seconds']}"
+            assert verified_s["retention_days"] == init_s["retention_days"], f"retention_days mismatch: {verified_s['retention_days']} vs {init_s['retention_days']}"
+            assert float(verified_s["api_delay_seconds"]) == float(init_s["api_delay_seconds"]), f"api_delay_seconds mismatch: {verified_s['api_delay_seconds']} vs {init_s['api_delay_seconds']}"
+            assert verified_s["token_mode"] == init_s["token_mode"], f"token_mode mismatch: {verified_s['token_mode']} vs {init_s['token_mode']}"
+            assert (verified_s["token_addresses"] or "") == (init_s["token_addresses"] or ""), f"token_addresses mismatch: {verified_s['token_addresses']} vs {init_s['token_addresses']}"
+            assert (verified_s["birdeye_api_key"] or "") == (init_s["birdeye_api_key"] or ""), f"birdeye_api_key mismatch: {verified_s['birdeye_api_key']} vs {init_s['birdeye_api_key']}"
+            assert verified_s["updated_at"].isoformat() == init_s["updated_at"], f"updated_at mismatch: {verified_s['updated_at'].isoformat()} vs {init_s['updated_at']}"
+            results["walletSettings"] = True
+        else:
+            raise ValueError(f"Invalid walletSettings snapshot status: {wt_status}")
 except Exception as e:
     results["walletSettings"] = False
     print(f"[-] Wallet settings restoration error: {e}", file=sys.stderr)
@@ -1619,10 +1703,8 @@ print(json.dumps({"status": "ok", "cleanup_results": results}))
         paper_position_ids: testFixtures.paperPositions,
         paper_config_ids: testFixtures.paperConfigs,
         tracked_wallet_ids: testFixtures.trackedWallets,
-        init_emergency_stop: originalEmergencyStop,
-        orig_rb03_row: originalRb03Row,
-        orig_rb04_row: originalRb04Row,
-        init_wallet_settings: originalWalletSettings,
+        snapshot_captured: snapshotCaptured,
+        snapshot_state: snapshotState,
       });
 
       if (cleanupOutput && cleanupOutput.cleanup_results) {
