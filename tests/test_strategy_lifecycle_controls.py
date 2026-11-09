@@ -411,3 +411,47 @@ def test_unknown_strategy_mode_fails_closed_for_worker_lifecycle():
     assert settings["paper_enabled"] is False
     assert settings["telegram_enabled"] is False
     assert settings["auto_promote_enabled"] is False
+
+
+
+def test_worker_refreshes_changed_lifecycle_settings_without_process_restart():
+    initial_rows = [{
+        "strategy_id": "BB_REV",
+        "mode": "shadow",
+        "evaluation_enabled": True,
+        "paper_enabled": True,
+        "telegram_enabled": False,
+        "report_enabled": True,
+        "auto_promote_enabled": False,
+    }]
+    bot = _bot_for_lifecycle(initial_rows)
+    bot.db.get_strategy_lifecycle_settings = Mock(side_effect=lambda: bot.db.rows)
+
+    # The worker must keep its cached setting before the 15-second refresh
+    # boundary, then consume the persisted operator change on the next refresh.
+    with patch(
+        "paper.retailbot2.time.monotonic",
+        side_effect=[5.0, 19.9, 20.0],
+    ):
+        before_change = bot._get_strategy_lifecycle("BB_REV", "shadow")
+        bot.db.rows = [{
+            "strategy_id": "BB_REV",
+            "mode": "shadow",
+            "evaluation_enabled": False,
+            "paper_enabled": False,
+            "telegram_enabled": True,
+            "report_enabled": False,
+            "auto_promote_enabled": False,
+        }]
+        cached = bot._get_strategy_lifecycle("BB_REV", "shadow")
+        refreshed = bot._get_strategy_lifecycle("BB_REV", "shadow")
+
+    assert before_change["paper_enabled"] is True
+    assert before_change["telegram_enabled"] is False
+    assert cached["paper_enabled"] is True
+    assert cached["telegram_enabled"] is False
+    assert refreshed["evaluation_enabled"] is False
+    assert refreshed["paper_enabled"] is False
+    assert refreshed["telegram_enabled"] is True
+    assert refreshed["report_enabled"] is False
+    assert bot.db.get_strategy_lifecycle_settings.call_count == 2
