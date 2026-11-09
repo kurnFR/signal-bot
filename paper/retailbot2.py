@@ -2366,11 +2366,10 @@ class RetailDeathTrapBot:
                 loop_count += 1
 
                 self._reload_control()
-                self._dispatch_telegram_outbox()
                 self.check_exits()
-                self._dispatch_telegram_outbox()
                 if self.trading_enabled:
                     self.scan()
+                self._dispatch_telegram_outbox()
 
                 # Heartbeat every 60s
                 hb_loops = self.config.heartbeat_interval // self.config.exit_check_interval
