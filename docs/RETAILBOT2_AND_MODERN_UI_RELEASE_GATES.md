@@ -55,6 +55,18 @@ MYSQL_HOST=127.0.0.1 MYSQL_PORT=3306 MYSQL_USER=cms MYSQL_DATABASE=signal_bot_te
 
 Expected: migration 026 is already applied on this staging database and the dry-run proposes no unexpected migration. If it is pending, stop and review the migration plan before applying anything. These commands are not to be run against production.
 
+Re-run the focused regression suite from the candidate checkout:
+
+```sh
+PYTHONPATH=$PWD python3 -m pytest -q \
+  tests/test_retailbot2_telegram_outbox.py \
+  tests/test_retailbot_accounting.py \
+  tests/test_strategy_lifecycle_controls.py \
+  tests/test_retailbot2_migration_managed_startup.py
+```
+
+This suite is a regression check; it does not replace the real MariaDB smoke test or the live-backend staging acceptance below.
+
 ### 3.2 Verify persisted strategy gating
 
 Use the staging dashboard and its real authenticated API/backend, not mocked browser routes:
