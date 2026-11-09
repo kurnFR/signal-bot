@@ -242,10 +242,362 @@ function terminateChildProcess(proc, sigtermTimeoutMs = 5000, sigkillTimeoutMs =
   });
 }
 
+// Function to verify complete baseline audit record identity across all columns
+async function verifyAuditBaselineIdentity(baselineRows, registeredAuditIds = [], testUserIds = []) {
+  const script = `
+import json, sys, mysql.connector
+from config import MYSQL_CONFIG
+
+payload = json.loads(sys.stdin.read())
+db_name = payload["target_db"]
+baseline_rows = payload["baseline_rows"]
+registered_ids = payload["registered_ids"]
+test_user_ids = payload.get("test_user_ids", [])
+
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = db_name
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+
+# 1. Verify registered audit IDs are completely absent
+leftover_registered = []
+if registered_ids:
+    placeholders = ",".join(["%s"] * len(registered_ids))
+    cur.execute(f"SELECT id FROM audit_logs WHERE id IN ({placeholders})", tuple(registered_ids))
+    leftover_registered = [r["id"] for r in cur.fetchall()]
+
+# 2. Query all current rows in audit_logs with normalization
+cur.execute("SELECT id, user_id, username, action, details, ip_address, created_at FROM audit_logs ORDER BY id ASC")
+current_rows = cur.fetchall()
+for r in current_rows:
+    if hasattr(r.get("created_at"), "isoformat"):
+        r["created_at"] = r["created_at"].isoformat()
+    if r.get("details"):
+        try:
+            r["details"] = json.loads(r["details"])
+        except Exception:
+            pass
+
+cur.close(); conn.close()
+
+baseline_map = {r["id"]: r for r in baseline_rows}
+current_map = {r["id"]: r for r in current_rows}
+
+mismatches = []
+
+# 3. Compare each pre-existing baseline row across all seven columns
+for b_id, b_row in baseline_map.items():
+    if b_id not in current_map:
+        mismatches.append(f"Baseline audit row ID {b_id} is missing from database")
+    else:
+        c_row = current_map[b_id]
+        diffs = []
+        for col in ["user_id", "username", "action", "details", "ip_address", "created_at"]:
+            b_val = b_row.get(col)
+            c_val = c_row.get(col)
+            if col == "created_at" and b_val and c_val:
+                b_val = str(b_val).replace(" ", "T")
+                c_val = str(c_val).replace(" ", "T")
+            if c_val != b_val:
+                diffs.append(f"{col}: expected {b_val!r} got {c_val!r}")
+        if diffs:
+            mismatches.append(f"Baseline audit row ID {b_id} modified: {', '.join(diffs)}")
+
+# 4. Check non-baseline rows
+# Test-owned audit records created by unique test users must be cleaned up.
+# Unrelated concurrent audit records created by other users or background processes
+# must be preserved and must NOT cause a test failure.
+leftover_test_user_audits = []
+preserved_unrelated_audits = []
+
+for c_id, c_row in current_map.items():
+    if c_id not in baseline_map:
+        if test_user_ids and c_row.get("user_id") in test_user_ids:
+            leftover_test_user_audits.append(c_id)
+            mismatches.append(f"Leftover test-owned audit row ID {c_id} (user_id={c_row.get('user_id')}, action={c_row.get('action')}) was not cleaned up")
+        else:
+            preserved_unrelated_audits.append(c_id)
+
+if leftover_registered:
+    mismatches.append(f"Registered audit IDs still present in DB: {leftover_registered}")
+
+print(json.dumps({
+    "leftover_registered": leftover_registered,
+    "leftover_test_user_audits": leftover_test_user_audits,
+    "preserved_unrelated_audits": preserved_unrelated_audits,
+    "baseline_intact": len(mismatches) == 0,
+    "mismatches": mismatches,
+    "baseline_count": len(baseline_rows),
+    "current_count": len(current_rows)
+}))
+`;
+  return await runPythonHelper(script, {}, {
+    target_db: TARGET_DB,
+    baseline_rows: baselineRows,
+    registered_ids: registeredAuditIds,
+    test_user_ids: testUserIds,
+  });
+}
+
+// Function to execute the exact staging database cleanup
+async function executeStagingDatabaseCleanup(payload, options = {}) {
+  const mergedPayload = {
+    ...payload,
+    inject_failure_in: options.injectFailureIn || null,
+  };
+  const cleanupScript = `
+import json, sys, mysql.connector
+from config import MYSQL_CONFIG
+
+payload = json.loads(sys.stdin.read())
+db_name = payload["target_db"]
+assert db_name == "signal_bot_test", f"Safety refusal: {db_name}"
+
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = db_name
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+
+results = {}
+snapshot_captured = payload.get("snapshot_captured", False)
+snapshot_state = payload.get("snapshot_state", {})
+
+# 1. Delete individually registered audit logs by exact ID
+try:
+    if payload.get("inject_failure_in") == "auditLogs":
+        raise RuntimeError("Injected audit cleanup failure")
+    audit_ids = payload.get("audit_log_ids", [])
+    if audit_ids:
+        placeholders = ",".join(["%s"] * len(audit_ids))
+        cur.execute(f"DELETE FROM audit_logs WHERE id IN ({placeholders})", tuple(audit_ids))
+        cur.execute(f"SELECT COUNT(*) as cnt FROM audit_logs WHERE id IN ({placeholders})", tuple(audit_ids))
+        assert cur.fetchone()["cnt"] == 0, "Registered audit logs not fully deleted"
+    results["auditLogs"] = True
+except Exception as e:
+    results["auditLogs"] = False
+    print(f"[-] Audit logs cleanup error: {e}", file=sys.stderr)
+
+# 2. Delete test users
+try:
+    user_ids = payload.get("user_ids", [])
+    if user_ids:
+        placeholders = ",".join(["%s"] * len(user_ids))
+        cur.execute(f"DELETE FROM users WHERE id IN ({placeholders})", tuple(user_ids))
+        cur.execute(f"SELECT COUNT(*) as cnt FROM users WHERE id IN ({placeholders})", tuple(user_ids))
+        assert cur.fetchone()["cnt"] == 0, "Users not fully deleted"
+    results["users"] = True
+except Exception as e:
+    results["users"] = False
+    print(f"[-] Users cleanup error: {e}", file=sys.stderr)
+
+# 3. Delete paper orders
+try:
+    order_ids = payload.get("paper_order_ids", [])
+    if order_ids:
+        placeholders = ",".join(["%s"] * len(order_ids))
+        cur.execute(f"DELETE FROM paper_orders WHERE id IN ({placeholders})", tuple(order_ids))
+        cur.execute(f"SELECT COUNT(*) as cnt FROM paper_orders WHERE id IN ({placeholders})", tuple(order_ids))
+        assert cur.fetchone()["cnt"] == 0, "Orders not fully deleted"
+    results["orders"] = True
+except Exception as e:
+    results["orders"] = False
+    print(f"[-] Orders cleanup error: {e}", file=sys.stderr)
+
+# 4. Delete paper trades
+try:
+    trade_ids = payload.get("paper_trade_ids", [])
+    if trade_ids:
+        placeholders = ",".join(["%s"] * len(trade_ids))
+        cur.execute(f"DELETE FROM paper_trades WHERE id IN ({placeholders})", tuple(trade_ids))
+        cur.execute(f"SELECT COUNT(*) as cnt FROM paper_trades WHERE id IN ({placeholders})", tuple(trade_ids))
+        assert cur.fetchone()["cnt"] == 0, "Trades not fully deleted"
+    results["trades"] = True
+except Exception as e:
+    results["trades"] = False
+    print(f"[-] Trades cleanup error: {e}", file=sys.stderr)
+
+# 5. Delete paper positions
+try:
+    pos_ids = payload.get("paper_position_ids", [])
+    if pos_ids:
+        placeholders = ",".join(["%s"] * len(pos_ids))
+        cur.execute(f"DELETE FROM paper_positions WHERE id IN ({placeholders})", tuple(pos_ids))
+        cur.execute(f"SELECT COUNT(*) as cnt FROM paper_positions WHERE id IN ({placeholders})", tuple(pos_ids))
+        assert cur.fetchone()["cnt"] == 0, "Positions not fully deleted"
+    results["positions"] = True
+except Exception as e:
+    results["positions"] = False
+    print(f"[-] Positions cleanup error: {e}", file=sys.stderr)
+
+# 6. Delete paper configs
+try:
+    cfg_ids = payload.get("paper_config_ids", [])
+    if cfg_ids:
+        placeholders = ",".join(["%s"] * len(cfg_ids))
+        cur.execute(f"DELETE FROM paper_configs WHERE id IN ({placeholders})", tuple(cfg_ids))
+        cur.execute(f"SELECT COUNT(*) as cnt FROM paper_configs WHERE id IN ({placeholders})", tuple(cfg_ids))
+        assert cur.fetchone()["cnt"] == 0, "Configs not fully deleted"
+    results["configs"] = True
+except Exception as e:
+    results["configs"] = False
+    print(f"[-] Configs cleanup error: {e}", file=sys.stderr)
+
+# 7. Delete tracked wallets
+try:
+    wallet_ids = payload.get("tracked_wallet_ids", [])
+    if wallet_ids:
+        placeholders = ",".join(["%s"] * len(wallet_ids))
+        cur.execute(f"DELETE FROM tracked_wallets WHERE id IN ({placeholders})", tuple(wallet_ids))
+        cur.execute(f"SELECT COUNT(*) as cnt FROM tracked_wallets WHERE id IN ({placeholders})", tuple(wallet_ids))
+        assert cur.fetchone()["cnt"] == 0, "Tracked wallets not fully deleted"
+    results["wallets"] = True
+except Exception as e:
+    results["wallets"] = False
+    print(f"[-] Tracked wallets cleanup error: {e}", file=sys.stderr)
+
+# 8. Restore system_flags emergency_stop
+try:
+    if not snapshot_captured:
+        raise RuntimeError("Refusing to restore system_flags: original state was never captured!")
+    em_state = snapshot_state.get("emergencyStop", {})
+    em_status = em_state.get("status")
+    if em_status == "ABSENT":
+        cur.execute("DELETE FROM system_flags WHERE flag_name = 'emergency_stop'")
+        cur.execute("SELECT id FROM system_flags WHERE flag_name = 'emergency_stop'")
+        assert cur.fetchone() is None
+        results["circuitBreaker"] = True
+    elif em_status == "EXISTS":
+        init_em = em_state["row"]
+        cur.execute(
+            "UPDATE system_flags SET is_active = %s, reason = %s, updated_at = %s WHERE flag_name = 'emergency_stop'",
+            (init_em["is_active"], init_em["reason"], init_em["updated_at"])
+        )
+        cur.execute("SELECT is_active, reason, updated_at FROM system_flags WHERE flag_name = 'emergency_stop'")
+        v_em = cur.fetchone()
+        assert v_em["is_active"] == init_em["is_active"]
+        assert (v_em["reason"] or "") == (init_em["reason"] or "")
+        results["circuitBreaker"] = True
+    else:
+        raise ValueError(f"Invalid emergencyStop snapshot status: {em_status}")
+except Exception as e:
+    results["circuitBreaker"] = False
+    print(f"[-] Emergency stop restoration error: {e}", file=sys.stderr)
+
+# 9. Restore rdt_strategy_lifecycle
+try:
+    if not snapshot_captured:
+        raise RuntimeError("Refusing to restore rdt_strategy_lifecycle: original state was never captured!")
+    for key, def_strat, def_mode in [("rb03Row", "RSI_CTR", "shadow"), ("rb04Row", "DBL_PAT_INV", "inverse")]:
+        row_state = snapshot_state.get(key, {})
+        row_status = row_state.get("status")
+        strat_id = row_state.get("strategy_id") or (row_state.get("row") and row_state["row"].get("strategy_id")) or def_strat
+        mode = row_state.get("mode") or (row_state.get("row") and row_state["row"].get("mode")) or def_mode
+        if row_status == "ABSENT":
+            cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (strat_id, mode))
+            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (strat_id, mode))
+            assert cur.fetchone() is None
+        elif row_status == "EXISTS":
+            init_r = row_state["row"]
+            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (strat_id, mode))
+            if cur.fetchone():
+                cur.execute('''
+                    UPDATE rdt_strategy_lifecycle
+                    SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
+                    WHERE strategy_id=%s AND mode=%s
+                ''', (init_r["evaluation_enabled"], init_r["paper_enabled"], init_r["telegram_enabled"],
+                      init_r["report_enabled"], init_r.get("auto_promote_enabled", 0), init_r["updated_at"], strat_id, mode))
+            else:
+                cur.execute('''
+                    INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ''', (strat_id, mode, init_r["evaluation_enabled"], init_r["paper_enabled"], init_r["telegram_enabled"],
+                      init_r["report_enabled"], init_r.get("auto_promote_enabled", 0), init_r["updated_at"]))
+
+            cur.execute('''
+                SELECT strategy_id, mode, evaluation_enabled, paper_enabled,
+                       telegram_enabled, report_enabled, auto_promote_enabled, updated_at
+                FROM rdt_strategy_lifecycle
+                WHERE strategy_id = %s AND mode = %s
+            ''', (strat_id, mode))
+            v_r = cur.fetchone()
+            assert v_r is not None, f"rdt_strategy_lifecycle row ({strat_id}, {mode}) missing after restore"
+            assert v_r["strategy_id"] == strat_id, f"strategy_id mismatch: {v_r['strategy_id']} vs {strat_id}"
+            assert v_r["mode"] == mode, f"mode mismatch: {v_r['mode']} vs {mode}"
+            assert v_r["evaluation_enabled"] == init_r["evaluation_enabled"], f"evaluation_enabled mismatch: {v_r['evaluation_enabled']} vs {init_r['evaluation_enabled']}"
+            assert v_r["paper_enabled"] == init_r["paper_enabled"], f"paper_enabled mismatch: {v_r['paper_enabled']} vs {init_r['paper_enabled']}"
+            assert v_r["telegram_enabled"] == init_r["telegram_enabled"], f"telegram_enabled mismatch: {v_r['telegram_enabled']} vs {init_r['telegram_enabled']}"
+            assert v_r["report_enabled"] == init_r["report_enabled"], f"report_enabled mismatch: {v_r['report_enabled']} vs {init_r['report_enabled']}"
+            assert v_r["auto_promote_enabled"] == init_r.get("auto_promote_enabled", 0), f"auto_promote_enabled mismatch: {v_r['auto_promote_enabled']} vs {init_r.get('auto_promote_enabled', 0)}"
+            v_up = v_r["updated_at"].isoformat() if hasattr(v_r["updated_at"], "isoformat") else str(v_r["updated_at"])
+            i_up = init_r["updated_at"].isoformat() if hasattr(init_r["updated_at"], "isoformat") else str(init_r["updated_at"])
+            assert v_up.replace(" ", "T") == i_up.replace(" ", "T"), f"updated_at mismatch: {v_up} vs {i_up}"
+        else:
+            raise ValueError(f"Invalid lifecycle snapshot status for {strat_id}: {row_status}")
+    results["lifecycle"] = True
+except Exception as e:
+    results["lifecycle"] = False
+    print(f"[-] Lifecycle restoration error: {e}", file=sys.stderr)
+
+# 10. Restore wallet_tracker_settings (id=1)
+try:
+    if not snapshot_captured:
+        raise RuntimeError("Refusing to restore wallet_tracker_settings: original state was never captured!")
+    wt_state = snapshot_state.get("walletSettings", {})
+    wt_status = wt_state.get("status")
+    target_id = wt_state.get("target_id") or (wt_state.get("row") and wt_state["row"].get("id")) or 1
+    if wt_status == "ABSENT":
+        cur.execute("DELETE FROM wallet_tracker_settings WHERE id = %s", (target_id,))
+        cur.execute("SELECT id FROM wallet_tracker_settings WHERE id = %s", (target_id,))
+        assert cur.fetchone() is None
+        results["walletSettings"] = True
+    elif wt_status == "EXISTS":
+        init_s = wt_state["row"]
+        cur.execute('''
+            UPDATE wallet_tracker_settings
+            SET enabled=%s, networks=%s, pools_per_network=%s, min_trade_usd=%s, min_net_usd=%s,
+                auto_track_net_usd=%s, poll_interval_seconds=%s, retention_days=%s, api_delay_seconds=%s,
+                token_mode=%s, token_addresses=%s, birdeye_api_key=%s, updated_at=%s
+            WHERE id = %s
+        ''', (
+            init_s["enabled"], init_s["networks"], init_s["pools_per_network"],
+            init_s["min_trade_usd"], init_s["min_net_usd"], init_s["auto_track_net_usd"],
+            init_s["poll_interval_seconds"], init_s["retention_days"], init_s["api_delay_seconds"],
+            init_s["token_mode"], init_s["token_addresses"], init_s["birdeye_api_key"],
+            init_s["updated_at"], target_id
+        ))
+        cur.execute("SELECT id, enabled, networks, pools_per_network, min_trade_usd, min_net_usd, auto_track_net_usd, poll_interval_seconds, retention_days, api_delay_seconds, token_mode, token_addresses, birdeye_api_key, updated_at FROM wallet_tracker_settings WHERE id = %s", (target_id,))
+        verified_s = cur.fetchone()
+        assert verified_s is not None, f"wallet_tracker_settings row {target_id} missing after restore"
+        assert verified_s["enabled"] == init_s["enabled"], f"enabled mismatch: {verified_s['enabled']} vs {init_s['enabled']}"
+        assert verified_s["networks"] == init_s["networks"], f"networks mismatch: {verified_s['networks']} vs {init_s['networks']}"
+        assert verified_s["pools_per_network"] == init_s["pools_per_network"], f"pools_per_network mismatch: {verified_s['pools_per_network']} vs {init_s['pools_per_network']}"
+        assert float(verified_s["min_trade_usd"]) == float(init_s["min_trade_usd"])
+        assert float(verified_s["min_net_usd"]) == float(init_s["min_net_usd"])
+        assert float(verified_s["auto_track_net_usd"]) == float(init_s["auto_track_net_usd"])
+        assert verified_s["poll_interval_seconds"] == init_s["poll_interval_seconds"]
+        assert verified_s["retention_days"] == init_s["retention_days"]
+        assert float(verified_s["api_delay_seconds"]) == float(init_s["api_delay_seconds"])
+        assert verified_s["token_mode"] == init_s["token_mode"]
+        assert (verified_s["token_addresses"] or "") == (init_s["token_addresses"] or "")
+        assert (verified_s["birdeye_api_key"] or "") == (init_s["birdeye_api_key"] or "")
+        v_updated = verified_s["updated_at"].isoformat() if hasattr(verified_s["updated_at"], "isoformat") else str(verified_s["updated_at"])
+        i_updated = init_s["updated_at"].isoformat() if hasattr(init_s["updated_at"], "isoformat") else str(init_s["updated_at"])
+        assert v_updated.replace(" ", "T") == i_updated.replace(" ", "T"), f"updated_at mismatch: {v_updated} vs {i_updated}"
+        results["walletSettings"] = True
+    else:
+        raise ValueError(f"Invalid walletSettings snapshot status: {wt_status}")
+except Exception as e:
+    results["walletSettings"] = False
+    print(f"[-] Wallet settings restoration error: {e}", file=sys.stderr)
+
+conn.commit()
+cur.close(); conn.close()
+print(json.dumps({"status": "ok", "cleanup_results": results}))
+`;
+  return await runPythonHelper(cleanupScript, {}, mergedPayload);
+}
+
 async function run() {
   let proc = null;
   let browser = null;
   let seededUserIds = [];
+  let baselineAuditRows = [];
   const testFixtures = {
     paperOrders: [],
     paperPositions: [],
@@ -253,6 +605,7 @@ async function run() {
     paperConfigs: [],
     mlFiles: [],
     trackedWallets: [],
+    auditLogs: [],
   };
 
   // State preservation registers and snapshot capture marker
@@ -270,6 +623,7 @@ async function run() {
   let originalRb04Row = null;
 
   const cleanupStatus = {
+    auditLogs: false,
     users: false,
     orders: false,
     positions: false,
@@ -359,6 +713,18 @@ for u in payload["users"]:
     )
     seeded_ids.append(cur.lastrowid)
 
+# E. Record complete pre-existing baseline audit records with all columns
+cur.execute("SELECT id, user_id, username, action, details, ip_address, created_at FROM audit_logs ORDER BY id ASC")
+pre_audit_rows = cur.fetchall()
+for r in pre_audit_rows:
+    if hasattr(r.get("created_at"), "isoformat"):
+        r["created_at"] = r["created_at"].isoformat()
+    if r.get("details"):
+        try:
+            r["details"] = json.loads(r["details"])
+        except Exception:
+            pass
+
 conn.commit()
 cur.close(); conn.close()
 
@@ -366,6 +732,7 @@ print(json.dumps({
     "status": "ok",
     "active_db": active_db,
     "seeded_ids": seeded_ids,
+    "pre_audit_rows": pre_audit_rows,
     "emergency_stop": {"status": "EXISTS" if emergency_stop else "ABSENT", "row": emergency_stop},
     "wallet_settings": {"status": "EXISTS" if wallet_settings else "ABSENT", "row": wallet_settings},
     "rb03_row": {"status": "EXISTS" if rb03_row else "ABSENT", "row": rb03_row},
@@ -385,6 +752,10 @@ print(json.dumps({
     const initResult = await runPythonHelper(initScript, {}, initPayload);
     assert(initResult && initResult.status === "ok", "Database initialization snapshot failed");
     seededUserIds = initResult.seeded_ids || [];
+    baselineAuditRows = initResult.pre_audit_rows || [];
+    const adminUserId = seededUserIds[0];
+    const traderUserId = seededUserIds[1];
+    const viewerUserId = seededUserIds[2];
 
     snapshotState.emergencyStop = initResult.emergency_stop;
     snapshotState.walletSettings = initResult.wallet_settings;
@@ -409,7 +780,62 @@ print(json.dumps({
     console.log(`    - Wallet Settings (id=1): status=${snapshotState.walletSettings.status}, min_trade=${originalWalletSettings?.min_trade_usd}, poll=${originalWalletSettings?.poll_interval_seconds}`);
     console.log(`    - RB-03 Strategy (RSI_CTR/shadow): status=${snapshotState.rb03Row.status}`);
     console.log(`    - RB-04 Strategy (DBL_PAT_INV/inverse): status=${snapshotState.rb04Row.status}`);
+    console.log(`    - Audit Baseline: ${baselineAuditRows.length} pre-existing audit rows recorded with complete column identity.`);
     console.log(`[+] Seeded run-unique test accounts: ${ADMIN_USER}, ${TRADER_USER}, ${VIEWER_USER} (IDs: ${seededUserIds.join(", ")})`);
+
+    // Helper to capture exact application-generated audit log ID generated by an operation
+    async function withAuditCapture(expectedUserId, actionFn, label = "") {
+      assert(typeof expectedUserId === "number" && expectedUserId > 0, `Invalid expectedUserId for ${label}: ${expectedUserId}`);
+
+      const preScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT COALESCE(MAX(id), 0) as max_id FROM audit_logs")
+max_id = cur.fetchone()["max_id"]
+cur.close(); conn.close()
+print(json.dumps({"max_id": max_id}))
+`;
+      const preRes = await runPythonHelper(preScript);
+      const preMaxId = preRes?.max_id || 0;
+
+      const actionResult = await actionFn();
+
+      const postScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute(
+    "SELECT id, user_id, username, action FROM audit_logs WHERE id > %s AND user_id = %s AND action = 'LOGIN_SUCCESS' ORDER BY id ASC",
+    (${preMaxId}, ${expectedUserId})
+)
+rows = cur.fetchall()
+cur.close(); conn.close()
+print(json.dumps({"rows": rows}))
+`;
+      const postRes = await runPythonHelper(postScript);
+      const matchingRows = postRes?.rows || [];
+
+      // Require exactly the expected audit event for each successful login
+      if (matchingRows.length !== 1) {
+        throw new Error(
+          `Audit capture ownership failure for ${label}: expected exactly 1 LOGIN_SUCCESS audit row for user_id=${expectedUserId} with id > ${preMaxId}, got ${matchingRows.length}`
+        );
+      }
+
+      const matchingRow = matchingRows[0];
+      assert(matchingRow.id, `Invalid audit log id captured for ${label}`);
+      assert(matchingRow.user_id === expectedUserId, `Mismatched user_id in audit log: expected ${expectedUserId}, got ${matchingRow.user_id}`);
+      assert(matchingRow.action === "LOGIN_SUCCESS", `Mismatched action in audit log: expected LOGIN_SUCCESS, got ${matchingRow.action}`);
+
+      if (!testFixtures.auditLogs.includes(matchingRow.id)) {
+        testFixtures.auditLogs.push(matchingRow.id);
+        console.log(`  [+] Registered application audit record ID ${matchingRow.id} (LOGIN_SUCCESS for user_id=${expectedUserId}) [${label}]`);
+      }
+      return actionResult;
+    }
 
     // 2. Spawn Staging Server
     console.log(`[*] Spawning staging FastAPI server on port ${STAGING_PORT}...`);
@@ -429,17 +855,28 @@ print(json.dumps({
     const serverIdentity = await waitForServer(STAGING_PORT, proc, RUN_ID);
     console.log(`[+] Staging FastAPI server verified (run_id: ${serverIdentity.run_id}, PID: ${serverIdentity.pid}).`);
 
-    // 3. Obtain Tokens for All Three Roles
-    const adminLoginRes = await apiRequest("POST", "/api/auth/login", null, { username: ADMIN_USER, password: STAGING_PASSWORD });
+    // 3. Obtain Tokens for All Three Roles (capturing exact audit log IDs)
+    const adminLoginRes = await withAuditCapture(
+      adminUserId,
+      () => apiRequest("POST", "/api/auth/login", null, { username: ADMIN_USER, password: STAGING_PASSWORD }),
+      "Admin API Login"
+    );
     assert(adminLoginRes.status === 200 && adminLoginRes.data?.token, "Admin login failed");
     const adminToken = adminLoginRes.data.token;
 
-    const traderLoginRes = await apiRequest("POST", "/api/auth/login", null, { username: TRADER_USER, password: STAGING_PASSWORD });
+    const traderLoginRes = await withAuditCapture(
+      traderUserId,
+      () => apiRequest("POST", "/api/auth/login", null, { username: TRADER_USER, password: STAGING_PASSWORD }),
+      "Trader API Login"
+    );
     assert(traderLoginRes.status === 200 && traderLoginRes.data?.token, "Trader login failed");
     const traderToken = traderLoginRes.data.token;
-    const traderUserId = seededUserIds[1];
 
-    const viewerLoginRes = await apiRequest("POST", "/api/auth/login", null, { username: VIEWER_USER, password: STAGING_PASSWORD });
+    const viewerLoginRes = await withAuditCapture(
+      viewerUserId,
+      () => apiRequest("POST", "/api/auth/login", null, { username: VIEWER_USER, password: STAGING_PASSWORD }),
+      "Viewer API Login"
+    );
     assert(viewerLoginRes.status === 200 && viewerLoginRes.data?.token, "Viewer login failed");
     const viewerToken = viewerLoginRes.data.token;
 
@@ -453,8 +890,14 @@ print(json.dumps({
     await adminPage.waitForSelector(".auth-form", { timeout: 10000 });
     await adminPage.locator(".auth-form input[autoComplete='username']").fill(ADMIN_USER);
     await adminPage.locator(".auth-form input[type='password']").fill(STAGING_PASSWORD);
-    await adminPage.locator(".auth-form button.auth-submit").click();
-    await adminPage.waitForSelector("nav", { timeout: 10000 });
+    await withAuditCapture(
+      adminUserId,
+      async () => {
+        await adminPage.locator(".auth-form button.auth-submit").click();
+        await adminPage.waitForSelector("nav", { timeout: 10000 });
+      },
+      "Admin Browser UI Login"
+    );
     await adminPage.screenshot({ path: path.join(SCREENSHOT_DIR, "admin_session_authenticated.png") });
     console.log(`[+] Admin browser session authenticated and verified.`);
     await adminPage.close();
@@ -472,8 +915,14 @@ print(json.dumps({
     await page.waitForSelector(".auth-form", { timeout: 10000 });
     await page.locator(".auth-form input[autoComplete='username']").fill(TRADER_USER);
     await page.locator(".auth-form input[type='password']").fill(STAGING_PASSWORD);
-    await page.locator(".auth-form button.auth-submit").click();
-    await page.waitForSelector("nav", { timeout: 10000 });
+    await withAuditCapture(
+      traderUserId,
+      async () => {
+        await page.locator(".auth-form button.auth-submit").click();
+        await page.waitForSelector("nav", { timeout: 10000 });
+      },
+      "Trader Browser UI Login"
+    );
     console.log(`[+] Trader authenticated in browser.`);
 
     // =================================================================
@@ -1431,302 +1880,42 @@ print(json.dumps({"settings": row}, default=str))
       console.log(`[+] Staging server terminated.`);
     }
 
-    // Rigorous cleanup script: exact-ID deletion and exact pre-existing state restoration
-    const cleanupScript = `
-import json, sys, mysql.connector
-from config import MYSQL_CONFIG
-
-payload = json.loads(sys.stdin.read())
-db_name = payload["target_db"]
-assert db_name == "signal_bot_test", f"Safety refusal: {db_name}"
-
-cfg = MYSQL_CONFIG.copy(); cfg["database"] = db_name
-conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-
-results = {}
-snapshot_captured = payload.get("snapshot_captured", False)
-snapshot_state = payload.get("snapshot_state", {})
-
-# 1. Delete users
-try:
-    user_ids = payload["user_ids"]
-    if user_ids:
-        placeholders = ",".join(["%s"] * len(user_ids))
-        cur.execute(f"DELETE FROM audit_logs WHERE user_id IN ({placeholders})", tuple(user_ids))
-        cur.execute(f"DELETE FROM users WHERE id IN ({placeholders})", tuple(user_ids))
-        # Verify deletion
-        cur.execute(f"SELECT COUNT(*) as cnt FROM users WHERE id IN ({placeholders})", tuple(user_ids))
-        assert cur.fetchone()["cnt"] == 0, "Users not fully deleted"
-    results["users"] = True
-except Exception as e:
-    results["users"] = False
-    print(f"[-] Users cleanup error: {e}", file=sys.stderr)
-
-# 2. Delete paper orders
-try:
-    order_ids = payload["paper_order_ids"]
-    if order_ids:
-        placeholders = ",".join(["%s"] * len(order_ids))
-        cur.execute(f"DELETE FROM paper_orders WHERE id IN ({placeholders})", tuple(order_ids))
-        cur.execute(f"SELECT COUNT(*) as cnt FROM paper_orders WHERE id IN ({placeholders})", tuple(order_ids))
-        assert cur.fetchone()["cnt"] == 0, "Orders not fully deleted"
-    results["orders"] = True
-except Exception as e:
-    results["orders"] = False
-    print(f"[-] Orders cleanup error: {e}", file=sys.stderr)
-
-# 3. Delete paper trades
-try:
-    trade_ids = payload["paper_trade_ids"]
-    if trade_ids:
-        placeholders = ",".join(["%s"] * len(trade_ids))
-        cur.execute(f"DELETE FROM paper_trades WHERE id IN ({placeholders})", tuple(trade_ids))
-        cur.execute(f"SELECT COUNT(*) as cnt FROM paper_trades WHERE id IN ({placeholders})", tuple(trade_ids))
-        assert cur.fetchone()["cnt"] == 0, "Trades not fully deleted"
-    results["trades"] = True
-except Exception as e:
-    results["trades"] = False
-    print(f"[-] Trades cleanup error: {e}", file=sys.stderr)
-
-# 4. Delete paper positions
-try:
-    pos_ids = payload["paper_position_ids"]
-    if pos_ids:
-        placeholders = ",".join(["%s"] * len(pos_ids))
-        cur.execute(f"DELETE FROM paper_positions WHERE id IN ({placeholders})", tuple(pos_ids))
-        cur.execute(f"SELECT COUNT(*) as cnt FROM paper_positions WHERE id IN ({placeholders})", tuple(pos_ids))
-        assert cur.fetchone()["cnt"] == 0, "Positions not fully deleted"
-    results["positions"] = True
-except Exception as e:
-    results["positions"] = False
-    print(f"[-] Positions cleanup error: {e}", file=sys.stderr)
-
-# 5. Delete paper configs
-try:
-    config_ids = payload["paper_config_ids"]
-    if config_ids:
-        placeholders = ",".join(["%s"] * len(config_ids))
-        cur.execute(f"DELETE FROM paper_configs WHERE id IN ({placeholders})", tuple(config_ids))
-        cur.execute(f"SELECT COUNT(*) as cnt FROM paper_configs WHERE id IN ({placeholders})", tuple(config_ids))
-        assert cur.fetchone()["cnt"] == 0, "Configs not fully deleted"
-    results["configs"] = True
-except Exception as e:
-    results["configs"] = False
-    print(f"[-] Configs cleanup error: {e}", file=sys.stderr)
-
-# 6. Delete tracked wallets
-try:
-    tracked_ids = payload["tracked_wallet_ids"]
-    if tracked_ids:
-        placeholders = ",".join(["%s"] * len(tracked_ids))
-        cur.execute(f"DELETE FROM tracked_wallets WHERE id IN ({placeholders})", tuple(tracked_ids))
-        cur.execute(f"SELECT COUNT(*) as cnt FROM tracked_wallets WHERE id IN ({placeholders})", tuple(tracked_ids))
-        assert cur.fetchone()["cnt"] == 0, "Wallets not fully deleted"
-    results["wallets"] = True
-except Exception as e:
-    results["wallets"] = False
-    print(f"[-] Wallets cleanup error: {e}", file=sys.stderr)
-
-# 7. Restore system_flags emergency_stop to exact pre-test state
-try:
-    if not snapshot_captured:
-        results["circuitBreaker"] = False
-        print("[-] Pre-test snapshot was never captured; skipping system_flags restoration to prevent deletion of shared data.", file=sys.stderr)
-    else:
-        snap_item = snapshot_state.get("emergencyStop", {"status": "NOT_CAPTURED", "row": None})
-        status = snap_item.get("status")
-        init_flag = snap_item.get("row")
-        flag_name = snap_item.get("flag_name") or (init_flag.get("flag_name") if init_flag else "emergency_stop")
-        if status == "ABSENT":
-            cur.execute("DELETE FROM system_flags WHERE flag_name = %s", (flag_name,))
-            conn.commit()
-            cur.execute("SELECT flag_name FROM system_flags WHERE flag_name = %s", (flag_name,))
-            assert cur.fetchone() is None, f"{flag_name} row should not exist after cleanup"
-            results["circuitBreaker"] = True
-        elif status == "EXISTS" and init_flag is not None:
-            cur.execute(
-                "UPDATE system_flags SET is_active = %s, reason = %s, updated_at = %s WHERE flag_name = %s",
-                (init_flag["is_active"], init_flag["reason"], init_flag["updated_at"], flag_name)
-            )
-            conn.commit()
-            cur.execute("SELECT * FROM system_flags WHERE flag_name = %s", (flag_name,))
-            verified_flag = cur.fetchone()
-            assert verified_flag is not None, f"{flag_name} row missing after restore"
-            assert verified_flag["flag_name"] == init_flag["flag_name"], f"{flag_name} flag_name mismatch: {verified_flag['flag_name']} vs {init_flag['flag_name']}"
-            assert verified_flag["is_active"] == init_flag["is_active"], f"{flag_name} is_active mismatch: {verified_flag['is_active']} vs {init_flag['is_active']}"
-            assert (verified_flag["reason"] or "") == (init_flag["reason"] or ""), f"{flag_name} reason mismatch: {verified_flag['reason']} vs {init_flag['reason']}"
-            assert verified_flag["updated_at"].isoformat() == init_flag["updated_at"], f"{flag_name} updated_at mismatch: {verified_flag['updated_at'].isoformat()} vs {init_flag['updated_at']}"
-            results["circuitBreaker"] = True
-        else:
-            raise ValueError(f"Invalid emergencyStop snapshot status: {status}")
-except Exception as e:
-    results["circuitBreaker"] = False
-    print(f"[-] Circuit breaker flag restoration error: {e}", file=sys.stderr)
-
-# 8. Restore rdt_strategy_lifecycle to exact pre-test state
-try:
-    if not snapshot_captured:
-        results["lifecycle"] = False
-        print("[-] Pre-test snapshot was never captured; skipping rdt_strategy_lifecycle restoration to prevent deletion of shared data.", file=sys.stderr)
-    else:
-        # RB-03
-        rb03_snap = snapshot_state.get("rb03Row", {"status": "NOT_CAPTURED", "row": None})
-        rb03_status = rb03_snap.get("status")
-        orig_rb03 = rb03_snap.get("row")
-        rb03_strat = rb03_snap.get("strategy_id") or (orig_rb03.get("strategy_id") if orig_rb03 else "RSI_CTR")
-        rb03_mode = rb03_snap.get("mode") or (orig_rb03.get("mode") if orig_rb03 else "shadow")
-        if rb03_status == "ABSENT":
-            cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb03_strat, rb03_mode))
-            conn.commit()
-            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb03_strat, rb03_mode))
-            assert cur.fetchone() is None, f"{rb03_strat}/{rb03_mode} should not exist after cleanup"
-        elif rb03_status == "EXISTS" and orig_rb03 is not None:
-            cur.execute('''
-                UPDATE rdt_strategy_lifecycle
-                SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
-                WHERE strategy_id = %s AND mode = %s
-            ''', (
-                orig_rb03["evaluation_enabled"], orig_rb03["paper_enabled"],
-                orig_rb03["telegram_enabled"], orig_rb03["report_enabled"],
-                orig_rb03["auto_promote_enabled"], orig_rb03["updated_at"],
-                rb03_strat, rb03_mode
-            ))
-            assert cur.rowcount >= 0, f"Failed to update pre-existing {rb03_strat} row"
-            conn.commit()
-            cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb03_strat, rb03_mode))
-            rb03_after = cur.fetchone()
-            assert rb03_after is not None, f"{rb03_strat}/{rb03_mode} missing after restore"
-            for col in ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled"]:
-                assert rb03_after[col] == orig_rb03[col], f"{rb03_strat} {col} mismatch: {rb03_after[col]} vs {orig_rb03[col]}"
-            assert rb03_after["updated_at"].isoformat() == orig_rb03["updated_at"], f"{rb03_strat} updated_at mismatch: {rb03_after['updated_at'].isoformat()} vs {orig_rb03['updated_at']}"
-        else:
-            raise ValueError(f"Invalid rb03Row snapshot status: {rb03_status}")
-
-        # RB-04
-        rb04_snap = snapshot_state.get("rb04Row", {"status": "NOT_CAPTURED", "row": None})
-        rb04_status = rb04_snap.get("status")
-        orig_rb04 = rb04_snap.get("row")
-        rb04_strat = rb04_snap.get("strategy_id") or (orig_rb04.get("strategy_id") if orig_rb04 else "DBL_PAT_INV")
-        rb04_mode = rb04_snap.get("mode") or (orig_rb04.get("mode") if orig_rb04 else "inverse")
-        if rb04_status == "ABSENT":
-            cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb04_strat, rb04_mode))
-            conn.commit()
-            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb04_strat, rb04_mode))
-            assert cur.fetchone() is None, f"{rb04_strat}/{rb04_mode} should not exist after cleanup"
-        elif rb04_status == "EXISTS" and orig_rb04 is not None:
-            cur.execute('''
-                UPDATE rdt_strategy_lifecycle
-                SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
-                WHERE strategy_id = %s AND mode = %s
-            ''', (
-                orig_rb04["evaluation_enabled"], orig_rb04["paper_enabled"],
-                orig_rb04["telegram_enabled"], orig_rb04["report_enabled"],
-                orig_rb04["auto_promote_enabled"], orig_rb04["updated_at"],
-                rb04_strat, rb04_mode
-            ))
-            assert cur.rowcount >= 0, f"Failed to update pre-existing {rb04_strat} row"
-            conn.commit()
-            cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb04_strat, rb04_mode))
-            rb04_after = cur.fetchone()
-            assert rb04_after is not None, f"{rb04_strat}/{rb04_mode} missing after restore"
-            for col in ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled"]:
-                assert rb04_after[col] == orig_rb04[col], f"{rb04_strat} {col} mismatch: {rb04_after[col]} vs {orig_rb04[col]}"
-            assert rb04_after["updated_at"].isoformat() == orig_rb04["updated_at"], f"{rb04_strat} updated_at mismatch: {rb04_after['updated_at'].isoformat()} vs {orig_rb04['updated_at']}"
-        else:
-            raise ValueError(f"Invalid rb04Row snapshot status: {rb04_status}")
-
-        conn.commit()
-        results["lifecycle"] = True
-except Exception as e:
-    results["lifecycle"] = False
-    print(f"[-] Lifecycle restoration error: {e}", file=sys.stderr)
-
-# 9. Restore ALL columns of wallet_tracker_settings (id=1)
-try:
-    if not snapshot_captured:
-        results["walletSettings"] = False
-        print("[-] Pre-test snapshot was never captured; skipping wallet_tracker_settings restoration to prevent deletion of shared data.", file=sys.stderr)
-    else:
-        wt_snap = snapshot_state.get("walletSettings", {"status": "NOT_CAPTURED", "row": None})
-        wt_status = wt_snap.get("status")
-        init_s = wt_snap.get("row")
-        target_id = wt_snap.get("id") or (init_s.get("id") if init_s else 1)
-        if wt_status == "ABSENT":
-            cur.execute("DELETE FROM wallet_tracker_settings WHERE id = %s", (target_id,))
-            conn.commit()
-            cur.execute("SELECT id FROM wallet_tracker_settings WHERE id = %s", (target_id,))
-            assert cur.fetchone() is None, f"wallet_tracker_settings row {target_id} should not exist after cleanup"
-            results["walletSettings"] = True
-        elif wt_status == "EXISTS" and init_s is not None:
-            cur.execute('''
-                UPDATE wallet_tracker_settings
-                SET enabled=%s, networks=%s, pools_per_network=%s, min_trade_usd=%s, min_net_usd=%s,
-                    auto_track_net_usd=%s, poll_interval_seconds=%s, retention_days=%s, api_delay_seconds=%s,
-                    token_mode=%s, token_addresses=%s, birdeye_api_key=%s, updated_at=%s
-                WHERE id = %s
-            ''', (
-                init_s["enabled"], init_s["networks"], init_s["pools_per_network"],
-                init_s["min_trade_usd"], init_s["min_net_usd"], init_s["auto_track_net_usd"],
-                init_s["poll_interval_seconds"], init_s["retention_days"], init_s["api_delay_seconds"],
-                init_s["token_mode"], init_s["token_addresses"], init_s["birdeye_api_key"],
-                init_s["updated_at"], target_id
-            ))
-            conn.commit()
-
-            # Read back and assert all 12 columns restored
-            cur.execute("SELECT * FROM wallet_tracker_settings WHERE id = %s", (target_id,))
-            verified_s = cur.fetchone()
-            assert verified_s is not None, f"wallet_tracker_settings row {target_id} missing after restore"
-            results["walletSettings"] = True
-        elif wt_status == "EXISTS" and init_s is not None:
-            cur.execute('''
-                UPDATE wallet_tracker_settings
-                SET enabled=%s, networks=%s, pools_per_network=%s, min_trade_usd=%s, min_net_usd=%s,
-                    auto_track_net_usd=%s, poll_interval_seconds=%s, retention_days=%s, api_delay_seconds=%s,
-                    token_mode=%s, token_addresses=%s, birdeye_api_key=%s, updated_at=%s
-                WHERE id = 1
-            ''', (
-                init_s["enabled"], init_s["networks"], init_s["pools_per_network"],
-                init_s["min_trade_usd"], init_s["min_net_usd"], init_s["auto_track_net_usd"],
-                init_s["poll_interval_seconds"], init_s["retention_days"], init_s["api_delay_seconds"],
-                init_s["token_mode"], init_s["token_addresses"], init_s["birdeye_api_key"],
-                init_s["updated_at"]
-            ))
-            conn.commit()
-
-            # Read back and assert all 12 columns + updated_at restored
-            cur.execute("SELECT * FROM wallet_tracker_settings WHERE id = 1")
-            verified_s = cur.fetchone()
-            assert verified_s is not None, "wallet_tracker_settings row 1 missing after restore"
-            assert verified_s["enabled"] == init_s["enabled"], f"enabled mismatch: {verified_s['enabled']} vs {init_s['enabled']}"
-            assert verified_s["networks"] == init_s["networks"], f"networks mismatch: {verified_s['networks']} vs {init_s['networks']}"
-            assert verified_s["pools_per_network"] == init_s["pools_per_network"], f"pools_per_network mismatch: {verified_s['pools_per_network']} vs {init_s['pools_per_network']}"
-            assert float(verified_s["min_trade_usd"]) == float(init_s["min_trade_usd"]), f"min_trade_usd mismatch: {verified_s['min_trade_usd']} vs {init_s['min_trade_usd']}"
-            assert float(verified_s["min_net_usd"]) == float(init_s["min_net_usd"]), f"min_net_usd mismatch: {verified_s['min_net_usd']} vs {init_s['min_net_usd']}"
-            assert float(verified_s["auto_track_net_usd"]) == float(init_s["auto_track_net_usd"]), f"auto_track_net_usd mismatch: {verified_s['auto_track_net_usd']} vs {init_s['auto_track_net_usd']}"
-            assert verified_s["poll_interval_seconds"] == init_s["poll_interval_seconds"], f"poll_interval_seconds mismatch: {verified_s['poll_interval_seconds']} vs {init_s['poll_interval_seconds']}"
-            assert verified_s["retention_days"] == init_s["retention_days"], f"retention_days mismatch: {verified_s['retention_days']} vs {init_s['retention_days']}"
-            assert float(verified_s["api_delay_seconds"]) == float(init_s["api_delay_seconds"]), f"api_delay_seconds mismatch: {verified_s['api_delay_seconds']} vs {init_s['api_delay_seconds']}"
-            assert verified_s["token_mode"] == init_s["token_mode"], f"token_mode mismatch: {verified_s['token_mode']} vs {init_s['token_mode']}"
-            assert (verified_s["token_addresses"] or "") == (init_s["token_addresses"] or ""), f"token_addresses mismatch: {verified_s['token_addresses']} vs {init_s['token_addresses']}"
-            assert (verified_s["birdeye_api_key"] or "") == (init_s["birdeye_api_key"] or ""), f"birdeye_api_key mismatch: {verified_s['birdeye_api_key']} vs {init_s['birdeye_api_key']}"
-            assert verified_s["updated_at"].isoformat() == init_s["updated_at"], f"updated_at mismatch: {verified_s['updated_at'].isoformat()} vs {init_s['updated_at']}"
-            results["walletSettings"] = True
-        else:
-            raise ValueError(f"Invalid walletSettings snapshot status: {wt_status}")
-except Exception as e:
-    results["walletSettings"] = False
-    print(f"[-] Wallet settings restoration error: {e}", file=sys.stderr)
-
-conn.commit()
-cur.close(); conn.close()
-print(json.dumps({"status": "ok", "cleanup_results": results}))
-`;
-
+    // Before executing cleanup, discover and register any additional application-generated
+    // audit records created by our unique staging test users (beyond the login event)
     try {
-      const cleanupOutput = await runPythonHelper(cleanupScript, {}, {
+      if (seededUserIds && seededUserIds.length > 0) {
+        const findTestAuditsScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+uids = ${JSON.stringify(seededUserIds)}
+p = ",".join(["%s"] * len(uids))
+cur.execute(f"SELECT id FROM audit_logs WHERE user_id IN ({p})", tuple(uids))
+found_ids = [r["id"] for r in cur.fetchall()]
+cur.close(); conn.close()
+print(json.dumps({"found_ids": found_ids}))
+`;
+        const findRes = await runPythonHelper(findTestAuditsScript);
+        if (findRes && findRes.found_ids) {
+          for (const fid of findRes.found_ids) {
+            if (!testFixtures.auditLogs.includes(fid)) {
+              testFixtures.auditLogs.push(fid);
+              console.log(`  [+] Registered additional staging test user audit record ID ${fid}`);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("[-] Error discovering test user audit records:", e);
+    }
+
+    // Execute database fixture cleanup and state restoration
+    try {
+      const cleanupOutput = await executeStagingDatabaseCleanup({
         target_db: TARGET_DB,
         user_ids: seededUserIds,
+        audit_log_ids: testFixtures.auditLogs || [],
         paper_order_ids: testFixtures.paperOrders,
         paper_trade_ids: testFixtures.paperTrades,
         paper_position_ids: testFixtures.paperPositions,
@@ -1742,6 +1931,45 @@ print(json.dumps({"status": "ok", "cleanup_results": results}))
       console.log(`[+] Database fixture cleanup and state restoration results:`, JSON.stringify(cleanupStatus));
     } catch (e) {
       console.error("[-] DB fixture cleanup execution error:", e);
+    }
+
+    // Independent post-cleanup audit check: confirm all registered audit IDs deleted,
+    // pre-existing baseline identity intact, and preserved unrelated records untampered
+    try {
+      const verifyAuditRes = await verifyAuditBaselineIdentity(
+        baselineAuditRows,
+        testFixtures.auditLogs || [],
+        seededUserIds || []
+      );
+      if (verifyAuditRes) {
+        if (verifyAuditRes.leftover_registered && verifyAuditRes.leftover_registered.length > 0) {
+          console.error(`[-] Registered audit logs not deleted: ${JSON.stringify(verifyAuditRes.leftover_registered)}`);
+          cleanupStatus.auditLogs = false;
+        } else {
+          console.log(`[+] Verified: All ${testFixtures.auditLogs.length} registered audit logs cleanly deleted.`);
+        }
+        if (verifyAuditRes.leftover_test_user_audits && verifyAuditRes.leftover_test_user_audits.length > 0) {
+          console.error(`[-] Test-owned audit logs not cleaned up: ${JSON.stringify(verifyAuditRes.leftover_test_user_audits)}`);
+          cleanupStatus.auditLogs = false;
+        }
+        if (verifyAuditRes.preserved_unrelated_audits && verifyAuditRes.preserved_unrelated_audits.length > 0) {
+          console.log(`[+] Preserved ${verifyAuditRes.preserved_unrelated_audits.length} unrelated concurrent audit record(s) without failure.`);
+        }
+        if (!verifyAuditRes.baseline_intact) {
+          console.error(`[-] Baseline audit log integrity failure detected (${verifyAuditRes.mismatches?.length || 0} mismatch(es)):`);
+          if (verifyAuditRes.mismatches) {
+            for (const m of verifyAuditRes.mismatches) {
+              console.error(`  - ${m}`);
+            }
+          }
+          cleanupStatus.auditLogs = false;
+        } else {
+          console.log(`[+] Verified: All ${verifyAuditRes.baseline_count} pre-existing baseline audit logs remain 100% intact across all columns.`);
+        }
+      }
+    } catch (e) {
+      console.error("[-] Post-cleanup audit verification error:", e);
+      cleanupStatus.auditLogs = false;
     }
 
     // Clean up temporary ML files
@@ -1789,3 +2017,9 @@ if (require.main === module) {
     process.exit(1);
   });
 }
+
+module.exports = {
+  run,
+  executeStagingDatabaseCleanup,
+  verifyAuditBaselineIdentity,
+};
