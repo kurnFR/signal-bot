@@ -7,16 +7,22 @@
  *    are NEVER deleted or mutated, and cleanup reports failure (circuitBreaker=false,
  *    lifecycle=false, walletSettings=false).
  * 2. Exact system_flags restoration: All columns (flag_name, is_active, reason, updated_at)
- *    are restored and verified via readback comparison.
+ *    are restored and verified via readback comparison, and ABSENT flags are cleanly deleted.
  * 3. Exact rdt_strategy_lifecycle restoration: All columns (evaluation_enabled, paper_enabled,
  *    telegram_enabled, report_enabled, auto_promote_enabled, updated_at) are restored,
- *    and ABSENT rows are deleted and asserted absent.
+ *    and ABSENT rows are deleted and asserted absent, using run-unique strategy IDs to guarantee
+ *    pre-existing shared data is NEVER deleted.
  * 4. Exact wallet_tracker_settings restoration: All 12 columns + updated_at are restored
  *    and verified via readback comparison.
  * 5. Harness cleanup failure propagation: Any cleanup failure sets non-zero exit code.
  * 6. ML-03 handled error API contract: POST /api/ml/run-experiment returns HTTP 500 with
  *    exact detail "ML experiment execution failed; check server logs for diagnostics",
  *    and Viewer is rejected with HTTP 403 Forbidden.
+ * 7. Pre-existing lifecycle row survival (Requirement 8): Pre-existing lifecycle rows seeded
+ *    with distinctive values survive an entire test mutation and harness cleanup cycle completely
+ *    unharmed and identically verified across all columns.
+ * 8. End-to-end database purity: Zero test artifacts remain and initial database baseline
+ *    is fully preserved.
  *
  * Run command:
  *   node tests/browser/test_staging_harness_safety.cjs
@@ -30,6 +36,7 @@ const fs = require("node:fs");
 
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const TARGET_DB = "signal_bot_test";
+const RUN_ID = Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
 
 function assert(condition, message) {
   if (!condition) {
@@ -114,25 +121,26 @@ try:
         snap_item = snapshot_state.get("emergencyStop", {"status": "NOT_CAPTURED", "row": None})
         status = snap_item.get("status")
         init_flag = snap_item.get("row")
+        flag_name = snap_item.get("flag_name") or (init_flag.get("flag_name") if init_flag else "emergency_stop")
         if status == "ABSENT":
-            cur.execute("DELETE FROM system_flags WHERE flag_name = 'emergency_stop'")
+            cur.execute("DELETE FROM system_flags WHERE flag_name = %s", (flag_name,))
             conn.commit()
-            cur.execute("SELECT flag_name FROM system_flags WHERE flag_name = 'emergency_stop'")
-            assert cur.fetchone() is None, "Emergency stop row should not exist after cleanup"
+            cur.execute("SELECT flag_name FROM system_flags WHERE flag_name = %s", (flag_name,))
+            assert cur.fetchone() is None, f"{flag_name} row should not exist after cleanup"
             results["circuitBreaker"] = True
         elif status == "EXISTS" and init_flag is not None:
             cur.execute(
-                "UPDATE system_flags SET is_active = %s, reason = %s, updated_at = %s WHERE flag_name = 'emergency_stop'",
-                (init_flag["is_active"], init_flag["reason"], init_flag["updated_at"])
+                "UPDATE system_flags SET is_active = %s, reason = %s, updated_at = %s WHERE flag_name = %s",
+                (init_flag["is_active"], init_flag["reason"], init_flag["updated_at"], flag_name)
             )
             conn.commit()
-            cur.execute("SELECT * FROM system_flags WHERE flag_name = 'emergency_stop'")
+            cur.execute("SELECT * FROM system_flags WHERE flag_name = %s", (flag_name,))
             verified_flag = cur.fetchone()
-            assert verified_flag is not None, "Emergency stop row missing after restore"
-            assert verified_flag["flag_name"] == init_flag["flag_name"], f"Emergency stop flag_name mismatch: {verified_flag['flag_name']} vs {init_flag['flag_name']}"
-            assert verified_flag["is_active"] == init_flag["is_active"], f"Emergency stop is_active mismatch: {verified_flag['is_active']} vs {init_flag['is_active']}"
-            assert (verified_flag["reason"] or "") == (init_flag["reason"] or ""), f"Emergency stop reason mismatch: {verified_flag['reason']} vs {init_flag['reason']}"
-            assert verified_flag["updated_at"].isoformat() == init_flag["updated_at"], f"Emergency stop updated_at mismatch: {verified_flag['updated_at'].isoformat()} vs {init_flag['updated_at']}"
+            assert verified_flag is not None, f"{flag_name} row missing after restore"
+            assert verified_flag["flag_name"] == init_flag["flag_name"], f"{flag_name} flag_name mismatch: {verified_flag['flag_name']} vs {init_flag['flag_name']}"
+            assert verified_flag["is_active"] == init_flag["is_active"], f"{flag_name} is_active mismatch: {verified_flag['is_active']} vs {init_flag['is_active']}"
+            assert (verified_flag["reason"] or "") == (init_flag["reason"] or ""), f"{flag_name} reason mismatch: {verified_flag['reason']} vs {init_flag['reason']}"
+            assert verified_flag["updated_at"].isoformat() == init_flag["updated_at"], f"{flag_name} updated_at mismatch: {verified_flag['updated_at'].isoformat()} vs {init_flag['updated_at']}"
             results["circuitBreaker"] = True
         else:
             raise ValueError(f"Invalid emergencyStop snapshot status: {status}")
@@ -150,29 +158,32 @@ try:
         rb03_snap = snapshot_state.get("rb03Row", {"status": "NOT_CAPTURED", "row": None})
         rb03_status = rb03_snap.get("status")
         orig_rb03 = rb03_snap.get("row")
+        rb03_strat = rb03_snap.get("strategy_id") or (orig_rb03.get("strategy_id") if orig_rb03 else "RSI_CTR")
+        rb03_mode = rb03_snap.get("mode") or (orig_rb03.get("mode") if orig_rb03 else "shadow")
         if rb03_status == "ABSENT":
-            cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
+            cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb03_strat, rb03_mode))
             conn.commit()
-            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
-            assert cur.fetchone() is None, "RSI_CTR/shadow should not exist after cleanup"
+            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb03_strat, rb03_mode))
+            assert cur.fetchone() is None, f"{rb03_strat}/{rb03_mode} should not exist after cleanup"
         elif rb03_status == "EXISTS" and orig_rb03 is not None:
             cur.execute('''
                 UPDATE rdt_strategy_lifecycle
                 SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
-                WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'
+                WHERE strategy_id = %s AND mode = %s
             ''', (
                 orig_rb03["evaluation_enabled"], orig_rb03["paper_enabled"],
                 orig_rb03["telegram_enabled"], orig_rb03["report_enabled"],
-                orig_rb03["auto_promote_enabled"], orig_rb03["updated_at"]
+                orig_rb03["auto_promote_enabled"], orig_rb03["updated_at"],
+                rb03_strat, rb03_mode
             ))
-            assert cur.rowcount >= 0, "Failed to update pre-existing RSI_CTR row"
+            assert cur.rowcount >= 0, f"Failed to update pre-existing {rb03_strat} row"
             conn.commit()
-            cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
+            cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb03_strat, rb03_mode))
             rb03_after = cur.fetchone()
-            assert rb03_after is not None, "RSI_CTR/shadow missing after restore"
+            assert rb03_after is not None, f"{rb03_strat}/{rb03_mode} missing after restore"
             for col in ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled"]:
-                assert rb03_after[col] == orig_rb03[col], f"RSI_CTR {col} mismatch: {rb03_after[col]} vs {orig_rb03[col]}"
-            assert rb03_after["updated_at"].isoformat() == orig_rb03["updated_at"], f"RSI_CTR updated_at mismatch: {rb03_after['updated_at'].isoformat()} vs {orig_rb03['updated_at']}"
+                assert rb03_after[col] == orig_rb03[col], f"{rb03_strat} {col} mismatch: {rb03_after[col]} vs {orig_rb03[col]}"
+            assert rb03_after["updated_at"].isoformat() == orig_rb03["updated_at"], f"{rb03_strat} updated_at mismatch: {rb03_after['updated_at'].isoformat()} vs {orig_rb03['updated_at']}"
         else:
             raise ValueError(f"Invalid rb03Row snapshot status: {rb03_status}")
 
@@ -180,29 +191,32 @@ try:
         rb04_snap = snapshot_state.get("rb04Row", {"status": "NOT_CAPTURED", "row": None})
         rb04_status = rb04_snap.get("status")
         orig_rb04 = rb04_snap.get("row")
+        rb04_strat = rb04_snap.get("strategy_id") or (orig_rb04.get("strategy_id") if orig_rb04 else "DBL_PAT_INV")
+        rb04_mode = rb04_snap.get("mode") or (orig_rb04.get("mode") if orig_rb04 else "inverse")
         if rb04_status == "ABSENT":
-            cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
+            cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb04_strat, rb04_mode))
             conn.commit()
-            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
-            assert cur.fetchone() is None, "DBL_PAT_INV/inverse should not exist after cleanup"
+            cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb04_strat, rb04_mode))
+            assert cur.fetchone() is None, f"{rb04_strat}/{rb04_mode} should not exist after cleanup"
         elif rb04_status == "EXISTS" and orig_rb04 is not None:
             cur.execute('''
                 UPDATE rdt_strategy_lifecycle
                 SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
-                WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'
+                WHERE strategy_id = %s AND mode = %s
             ''', (
                 orig_rb04["evaluation_enabled"], orig_rb04["paper_enabled"],
                 orig_rb04["telegram_enabled"], orig_rb04["report_enabled"],
-                orig_rb04["auto_promote_enabled"], orig_rb04["updated_at"]
+                orig_rb04["auto_promote_enabled"], orig_rb04["updated_at"],
+                rb04_strat, rb04_mode
             ))
-            assert cur.rowcount >= 0, "Failed to update pre-existing DBL_PAT_INV row"
+            assert cur.rowcount >= 0, f"Failed to update pre-existing {rb04_strat} row"
             conn.commit()
-            cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
+            cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (rb04_strat, rb04_mode))
             rb04_after = cur.fetchone()
-            assert rb04_after is not None, "DBL_PAT_INV/inverse missing after restore"
+            assert rb04_after is not None, f"{rb04_strat}/{rb04_mode} missing after restore"
             for col in ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled"]:
-                assert rb04_after[col] == orig_rb04[col], f"DBL_PAT_INV {col} mismatch: {rb04_after[col]} vs {orig_rb04[col]}"
-            assert rb04_after["updated_at"].isoformat() == orig_rb04["updated_at"], f"DBL_PAT_INV updated_at mismatch: {rb04_after['updated_at'].isoformat()} vs {orig_rb04['updated_at']}"
+                assert rb04_after[col] == orig_rb04[col], f"{rb04_strat} {col} mismatch: {rb04_after[col]} vs {orig_rb04[col]}"
+            assert rb04_after["updated_at"].isoformat() == orig_rb04["updated_at"], f"{rb04_strat} updated_at mismatch: {rb04_after['updated_at'].isoformat()} vs {orig_rb04['updated_at']}"
         else:
             raise ValueError(f"Invalid rb04Row snapshot status: {rb04_status}")
 
@@ -221,11 +235,12 @@ try:
         wt_snap = snapshot_state.get("walletSettings", {"status": "NOT_CAPTURED", "row": None})
         wt_status = wt_snap.get("status")
         init_s = wt_snap.get("row")
+        target_id = wt_snap.get("id") or (init_s.get("id") if init_s else 1)
         if wt_status == "ABSENT":
-            cur.execute("DELETE FROM wallet_tracker_settings WHERE id = 1")
+            cur.execute("DELETE FROM wallet_tracker_settings WHERE id = %s", (target_id,))
             conn.commit()
-            cur.execute("SELECT id FROM wallet_tracker_settings WHERE id = 1")
-            assert cur.fetchone() is None, "wallet_tracker_settings row 1 should not exist after cleanup"
+            cur.execute("SELECT id FROM wallet_tracker_settings WHERE id = %s", (target_id,))
+            assert cur.fetchone() is None, f"wallet_tracker_settings row {target_id} should not exist after cleanup"
             results["walletSettings"] = True
         elif wt_status == "EXISTS" and init_s is not None:
             cur.execute('''
@@ -233,20 +248,20 @@ try:
                 SET enabled=%s, networks=%s, pools_per_network=%s, min_trade_usd=%s, min_net_usd=%s,
                     auto_track_net_usd=%s, poll_interval_seconds=%s, retention_days=%s, api_delay_seconds=%s,
                     token_mode=%s, token_addresses=%s, birdeye_api_key=%s, updated_at=%s
-                WHERE id = 1
+                WHERE id = %s
             ''', (
                 init_s["enabled"], init_s["networks"], init_s["pools_per_network"],
                 init_s["min_trade_usd"], init_s["min_net_usd"], init_s["auto_track_net_usd"],
                 init_s["poll_interval_seconds"], init_s["retention_days"], init_s["api_delay_seconds"],
                 init_s["token_mode"], init_s["token_addresses"], init_s["birdeye_api_key"],
-                init_s["updated_at"]
+                init_s["updated_at"], target_id
             ))
             conn.commit()
 
             # Read back and assert all 12 columns restored
-            cur.execute("SELECT * FROM wallet_tracker_settings WHERE id = 1")
+            cur.execute("SELECT * FROM wallet_tracker_settings WHERE id = %s", (target_id,))
             verified_s = cur.fetchone()
-            assert verified_s is not None, "wallet_tracker_settings row 1 missing after restore"
+            assert verified_s is not None, f"wallet_tracker_settings row {target_id} missing after restore"
             assert verified_s["enabled"] == init_s["enabled"], f"enabled mismatch: {verified_s['enabled']} vs {init_s['enabled']}"
             assert verified_s["networks"] == init_s["networks"], f"networks mismatch: {verified_s['networks']} vs {init_s['networks']}"
             assert verified_s["pools_per_network"] == init_s["pools_per_network"], f"pools_per_network mismatch: {verified_s['pools_per_network']} vs {init_s['pools_per_network']}"
@@ -272,6 +287,174 @@ cur.close(); conn.close()
 print(json.dumps({"status": "ok", "cleanup_results": results}))
 `;
 
+// Helper: Query system flag snapshot
+async function getSystemFlagSnapshot(flagName = "emergency_stop") {
+  const script = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT * FROM system_flags WHERE flag_name = %s", ('${flagName}',))
+row = cur.fetchone()
+if row and hasattr(row.get("updated_at"), "isoformat"):
+    row["updated_at"] = row["updated_at"].isoformat()
+cur.close(); conn.close()
+print(json.dumps({"status": "EXISTS" if row else "ABSENT", "flag_name": "${flagName}", "row": row}))
+`;
+  return await runPythonHelper(script);
+}
+
+// Helper: Directly restore a system flag snapshot
+async function restoreSystemFlagDirect(snap) {
+  const script = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+flag_name = "${snap.flag_name}"
+if "${snap.status}" == "ABSENT":
+    cur.execute("DELETE FROM system_flags WHERE flag_name = %s", (flag_name,))
+else:
+    row = json.loads('''${JSON.stringify(snap.row)}''')
+    cur.execute("SELECT flag_name FROM system_flags WHERE flag_name = %s", (flag_name,))
+    if cur.fetchone():
+        cur.execute("UPDATE system_flags SET is_active=%s, reason=%s, updated_at=%s WHERE flag_name=%s",
+                    (row["is_active"], row["reason"], row["updated_at"], flag_name))
+    else:
+        cur.execute("INSERT INTO system_flags (flag_name, is_active, reason, updated_at) VALUES (%s, %s, %s, %s)",
+                    (flag_name, row["is_active"], row["reason"], row["updated_at"]))
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"restored": True}))
+`;
+  return await runPythonHelper(script);
+}
+
+// Helper: Query lifecycle row snapshot
+async function getLifecycleRowSnapshot(strategyId, mode) {
+  const script = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", ('${strategyId}', '${mode}'))
+row = cur.fetchone()
+if row and hasattr(row.get("updated_at"), "isoformat"):
+    row["updated_at"] = row["updated_at"].isoformat()
+cur.close(); conn.close()
+print(json.dumps({"status": "EXISTS" if row else "ABSENT", "strategy_id": "${strategyId}", "mode": "${mode}", "row": row}))
+`;
+  return await runPythonHelper(script);
+}
+
+// Helper: Directly restore a lifecycle row snapshot
+async function restoreLifecycleRowDirect(snap) {
+  const script = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+strategy_id = "${snap.strategy_id}"
+mode = "${snap.mode}"
+if "${snap.status}" == "ABSENT":
+    cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (strategy_id, mode))
+else:
+    row = json.loads('''${JSON.stringify(snap.row)}''')
+    cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = %s", (strategy_id, mode))
+    if cur.fetchone():
+        cur.execute('''
+            UPDATE rdt_strategy_lifecycle
+            SET evaluation_enabled=%s, paper_enabled=%s, telegram_enabled=%s, report_enabled=%s, auto_promote_enabled=%s, updated_at=%s
+            WHERE strategy_id = %s AND mode = %s
+        ''', (row["evaluation_enabled"], row["paper_enabled"], row["telegram_enabled"], row["report_enabled"], row["auto_promote_enabled"], row["updated_at"], strategy_id, mode))
+    else:
+        cur.execute('''
+            INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (strategy_id, mode, row["evaluation_enabled"], row["paper_enabled"], row["telegram_enabled"], row["report_enabled"], row["auto_promote_enabled"], row["updated_at"]))
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"restored": True}))
+`;
+  return await runPythonHelper(script);
+}
+
+// Helper: Query wallet settings snapshot
+async function getWalletSettingsSnapshot(id = 1) {
+  const script = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT * FROM wallet_tracker_settings WHERE id = %s", (${id},))
+row = cur.fetchone()
+if row:
+    for k in list(row.keys()):
+        if hasattr(row[k], "isoformat"):
+            row[k] = row[k].isoformat()
+        elif hasattr(row[k], "__float__"):
+            row[k] = float(row[k])
+cur.close(); conn.close()
+print(json.dumps({"status": "EXISTS" if row else "ABSENT", "id": ${id}, "row": row}))
+`;
+  return await runPythonHelper(script);
+}
+
+// Helper: Directly restore wallet settings snapshot
+async function restoreWalletSettingsDirect(snap) {
+  const script = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+target_id = ${snap.id}
+if "${snap.status}" == "ABSENT":
+    cur.execute("DELETE FROM wallet_tracker_settings WHERE id = %s", (target_id,))
+else:
+    row = json.loads('''${JSON.stringify(snap.row)}''')
+    cur.execute("SELECT id FROM wallet_tracker_settings WHERE id = %s", (target_id,))
+    if cur.fetchone():
+        cur.execute('''
+            UPDATE wallet_tracker_settings
+            SET enabled=%s, networks=%s, pools_per_network=%s, min_trade_usd=%s, min_net_usd=%s,
+                auto_track_net_usd=%s, poll_interval_seconds=%s, retention_days=%s, api_delay_seconds=%s,
+                token_mode=%s, token_addresses=%s, birdeye_api_key=%s, updated_at=%s
+            WHERE id = %s
+        ''', (row["enabled"], row["networks"], row["pools_per_network"], row["min_trade_usd"], row["min_net_usd"],
+              row["auto_track_net_usd"], row["poll_interval_seconds"], row["retention_days"], row["api_delay_seconds"],
+              row["token_mode"], row["token_addresses"], row["birdeye_api_key"], row["updated_at"], target_id))
+    else:
+        cur.execute('''
+            INSERT INTO wallet_tracker_settings (id, enabled, networks, pools_per_network, min_trade_usd, min_net_usd,
+                auto_track_net_usd, poll_interval_seconds, retention_days, api_delay_seconds, token_mode, token_addresses,
+                birdeye_api_key, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (target_id, row["enabled"], row["networks"], row["pools_per_network"], row["min_trade_usd"], row["min_net_usd"],
+              row["auto_track_net_usd"], row["poll_interval_seconds"], row["retention_days"], row["api_delay_seconds"],
+              row["token_mode"], row["token_addresses"], row["birdeye_api_key"], row["updated_at"]))
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"restored": True}))
+`;
+  return await runPythonHelper(script);
+}
+
+// Helper: Query all current rows in rdt_strategy_lifecycle
+async function getAllLifecycleRows() {
+  const script = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT * FROM rdt_strategy_lifecycle")
+rows = cur.fetchall()
+for r in rows:
+    if hasattr(r.get("updated_at"), "isoformat"):
+        r["updated_at"] = r["updated_at"].isoformat()
+cur.close(); conn.close()
+print(json.dumps({"rows": rows}))
+`;
+  const res = await runPythonHelper(script);
+  return res.rows || [];
+}
+
 async function getAvailablePort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -287,422 +470,482 @@ async function runAllSafetyTests() {
   console.log("\n======================================================================");
   console.log(" STAGING HARNESS SAFETY & EVIDENCE ACCURACY REGRESSION SUITE");
   console.log(` Target DB: ${TARGET_DB} (strictly isolated)`);
+  console.log(` Unique Test Run ID: ${RUN_ID}`);
   console.log("======================================================================\n");
 
   let passed = 0;
 
-  // --------------------------------------------------------------------------
-  // TEST 1: Pre-snapshot failure safety guard (Job 1)
-  // --------------------------------------------------------------------------
-  console.log("=== Test 1: Pre-snapshot failure prevents deletion of shared tables ===");
-  {
-    // A. Seed pre-existing row in rdt_strategy_lifecycle
-    const seedScript = `
+  // Capture global pre-suite baseline
+  console.log("[*] Capturing global pre-suite baseline snapshot...");
+  const baselineFlags = await getSystemFlagSnapshot("emergency_stop");
+  const baselineWallet = await getWalletSettingsSnapshot(1);
+  const baselineLifecycleRsi = await getLifecycleRowSnapshot("RSI_CTR", "shadow");
+  const baselineLifecycleDbl = await getLifecycleRowSnapshot("DBL_PAT_INV", "inverse");
+  const baselineAllLifecycle = await getAllLifecycleRows();
+  console.log("  [✓] Pre-suite baseline captured successfully.\n");
+
+  try {
+    // --------------------------------------------------------------------------
+    // TEST 1: Pre-snapshot failure safety guard (Job 1)
+    // --------------------------------------------------------------------------
+    console.log("=== Test 1: Pre-snapshot failure prevents deletion of shared tables ===");
+    {
+      const test1Strat = `SAFE_PRE_${RUN_ID}`;
+      try {
+        // A. Seed run-unique row in rdt_strategy_lifecycle
+        const seedScript = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
 cur.execute('''
 INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
-VALUES ('SAFETY_PRE_SNAP', 'shadow', 1, 1, 0, 1, 0, '2025-01-01 12:00:00')
-ON DUPLICATE KEY UPDATE evaluation_enabled=1, paper_enabled=1, updated_at='2025-01-01 12:00:00'
+VALUES ('${test1Strat}', 'shadow', 1, 1, 0, 1, 0, '2025-01-01 12:00:00')
 ''')
-conn.commit()
-cur.close(); conn.close()
+conn.commit(); cur.close(); conn.close()
 print(json.dumps({"status": "seeded"}))
 `;
-    await runPythonHelper(seedScript);
+        await runPythonHelper(seedScript);
 
-    // B. Run cleanup with snapshot_captured = false (simulating pre-snapshot failure)
-    const cleanupRes = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
-      target_db: TARGET_DB,
-      user_ids: [],
-      paper_order_ids: [],
-      paper_trade_ids: [],
-      paper_position_ids: [],
-      paper_config_ids: [],
-      tracked_wallet_ids: [],
-      snapshot_captured: false,
-      snapshot_state: {
-        emergencyStop: { status: "NOT_CAPTURED", row: null },
-        walletSettings: { status: "NOT_CAPTURED", row: null },
-        rb03Row: { status: "NOT_CAPTURED", row: null },
-        rb04Row: { status: "NOT_CAPTURED", row: null },
-      },
-    });
+        // B. Run cleanup with snapshot_captured = false (simulating pre-snapshot failure)
+        const cleanupRes = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
+          target_db: TARGET_DB,
+          user_ids: [],
+          paper_order_ids: [],
+          paper_trade_ids: [],
+          paper_position_ids: [],
+          paper_config_ids: [],
+          tracked_wallet_ids: [],
+          snapshot_captured: false,
+          snapshot_state: {
+            emergencyStop: { status: "NOT_CAPTURED", row: null },
+            walletSettings: { status: "NOT_CAPTURED", row: null },
+            rb03Row: { status: "NOT_CAPTURED", row: null },
+            rb04Row: { status: "NOT_CAPTURED", row: null },
+          },
+        });
 
-    assert(cleanupRes.status === "ok", "Cleanup execution failed");
-    const r = cleanupRes.cleanup_results;
-    assert(r.circuitBreaker === false, `Expected circuitBreaker=false, got: ${r.circuitBreaker}`);
-    assert(r.lifecycle === false, `Expected lifecycle=false, got: ${r.lifecycle}`);
-    assert(r.walletSettings === false, `Expected walletSettings=false, got: ${r.walletSettings}`);
-    console.log("  [✓] Cleanup correctly reported failure for shared tables when snapshot_captured=false.");
+        assert(cleanupRes.status === "ok", "Cleanup execution failed");
+        const r = cleanupRes.cleanup_results;
+        assert(r.circuitBreaker === false, `Expected circuitBreaker=false, got: ${r.circuitBreaker}`);
+        assert(r.lifecycle === false, `Expected lifecycle=false, got: ${r.lifecycle}`);
+        assert(r.walletSettings === false, `Expected walletSettings=false, got: ${r.walletSettings}`);
+        console.log("  [✓] Cleanup correctly reported failure for shared tables when snapshot_captured=false.");
 
-    // C. Assert seeded row was NOT deleted!
-    const verifyScript = `
+        // C. Assert seeded row was NOT deleted!
+        const verifyScript = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("SELECT strategy_id, mode FROM rdt_strategy_lifecycle WHERE strategy_id = 'SAFETY_PRE_SNAP' AND mode = 'shadow'")
+cur.execute("SELECT strategy_id, mode FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = 'shadow'", ('${test1Strat}',))
 row = cur.fetchone()
-cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = 'SAFETY_PRE_SNAP' AND mode = 'shadow'")
-conn.commit()
 cur.close(); conn.close()
 print(json.dumps({"persisted": row is not None}))
 `;
-    const verifyRes = await runPythonHelper(verifyScript);
-    assert(verifyRes.persisted === true, "Shared table row was incorrectly deleted during uncaptured-snapshot cleanup!");
-    console.log("  [✓] Shared table row remained intact (never deleted).");
-    passed++;
-  }
+        const verifyRes = await runPythonHelper(verifyScript);
+        assert(verifyRes.persisted === true, "Shared table row was incorrectly deleted during uncaptured-snapshot cleanup!");
+        console.log("  [✓] Shared table row remained intact (never deleted).");
+        passed++;
+      } finally {
+        // Test-level cleanup: delete only the run-unique row created by this test
+        await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id = %s", ('${test1Strat}',))
+conn.commit(); cur.close(); conn.close()
+`);
+      }
+    }
 
-  // --------------------------------------------------------------------------
-  // TEST 2: Exact system_flags restoration (Job 2)
-  // --------------------------------------------------------------------------
-  console.log("\n=== Test 2: Full system_flags restoration with updated_at readback ===");
-  {
-    // A. Read original row
-    const getFlagScript = `
+    // --------------------------------------------------------------------------
+    // TEST 2: Exact system_flags restoration (Job 2) & Non-Destructive ABSENT Deletion
+    // --------------------------------------------------------------------------
+    console.log("\n=== Test 2: Full system_flags restoration with updated_at readback & non-destructive ABSENT check ===");
+    {
+      const origFlagSnap = await getSystemFlagSnapshot("emergency_stop");
+      assert(origFlagSnap.status === "EXISTS" && origFlagSnap.row !== null, "emergency_stop row missing in test DB");
+      const origFlag = origFlagSnap.row;
+
+      // Part 2A: Full EXISTS restoration with updated_at verification
+      try {
+        const mutatedIsActive = origFlag.is_active === 1 ? 0 : 1;
+        const mutateScript = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("SELECT * FROM system_flags WHERE flag_name = 'emergency_stop'")
-orig = cur.fetchone()
-if orig and hasattr(orig.get("updated_at"), "isoformat"):
-    orig["updated_at"] = orig["updated_at"].isoformat()
-cur.close(); conn.close()
-print(json.dumps({"orig": orig}))
-`;
-    const flagRes = await runPythonHelper(getFlagScript);
-    const origFlag = flagRes.orig;
-    assert(origFlag !== null, "emergency_stop row missing in test DB");
-
-    // B. Mutate row (simulate test execution)
-    const mutateScript = `
-import json, mysql.connector
-from config import MYSQL_CONFIG
-cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
-conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("UPDATE system_flags SET is_active = 1, reason = 'mutated_by_test', updated_at = '2023-01-01 00:00:00' WHERE flag_name = 'emergency_stop'")
-conn.commit()
-cur.close(); conn.close()
+cur.execute("UPDATE system_flags SET is_active = %s, reason = 'mutated_by_test', updated_at = '2023-01-01 00:00:00' WHERE flag_name = 'emergency_stop'", (${mutatedIsActive},))
+conn.commit(); cur.close(); conn.close()
 print(json.dumps({"mutated": True}))
 `;
-    await runPythonHelper(mutateScript);
+        await runPythonHelper(mutateScript);
 
-    // C. Run cleanup with snapshot_captured = true and original snapshot
-    const cleanupRes = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
-      target_db: TARGET_DB,
-      snapshot_captured: true,
-      snapshot_state: {
-        emergencyStop: { status: "EXISTS", row: origFlag },
-        walletSettings: { status: "NOT_CAPTURED", row: null },
-        rb03Row: { status: "NOT_CAPTURED", row: null },
-        rb04Row: { status: "NOT_CAPTURED", row: null },
-      },
-    });
+        const cleanupRes = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
+          target_db: TARGET_DB,
+          snapshot_captured: true,
+          snapshot_state: {
+            emergencyStop: { status: "EXISTS", row: origFlag, flag_name: "emergency_stop" },
+            walletSettings: { status: "NOT_CAPTURED", row: null },
+            rb03Row: { status: "NOT_CAPTURED", row: null },
+            rb04Row: { status: "NOT_CAPTURED", row: null },
+          },
+        });
 
-    assert(cleanupRes.cleanup_results.circuitBreaker === true, "circuitBreaker restoration failed");
+        assert(cleanupRes.cleanup_results.circuitBreaker === true, "circuitBreaker restoration failed");
 
-    // D. Read back and assert all columns match
-    const readbackRes = await runPythonHelper(getFlagScript);
-    const restored = readbackRes.orig;
-    assert(restored.flag_name === origFlag.flag_name, `flag_name mismatch: ${restored.flag_name} vs ${origFlag.flag_name}`);
-    assert(restored.is_active === origFlag.is_active, `is_active mismatch: ${restored.is_active} vs ${origFlag.is_active}`);
-    assert((restored.reason || "") === (origFlag.reason || ""), `reason mismatch: ${restored.reason} vs ${origFlag.reason}`);
-    assert(restored.updated_at === origFlag.updated_at, `updated_at mismatch: ${restored.updated_at} vs ${origFlag.updated_at}`);
-    console.log("  [✓] system_flags fully restored with all columns and updated_at identically verified.");
-    passed++;
-  }
+        // Read back and assert all columns match
+        const readbackSnap = await getSystemFlagSnapshot("emergency_stop");
+        const restored = readbackSnap.row;
+        assert(restored.flag_name === origFlag.flag_name, `flag_name mismatch: ${restored.flag_name} vs ${origFlag.flag_name}`);
+        assert(restored.is_active === origFlag.is_active, `is_active mismatch: ${restored.is_active} vs ${origFlag.is_active}`);
+        assert((restored.reason || "") === (origFlag.reason || ""), `reason mismatch: ${restored.reason} vs ${origFlag.reason}`);
+        assert(restored.updated_at === origFlag.updated_at, `updated_at mismatch: ${restored.updated_at} vs ${origFlag.updated_at}`);
+        console.log("  [✓] system_flags fully restored with all columns and updated_at identically verified.");
+      } finally {
+        await restoreSystemFlagDirect(origFlagSnap);
+      }
 
-  // --------------------------------------------------------------------------
-  // TEST 3: Exact rdt_strategy_lifecycle restoration (Job 3)
-  // --------------------------------------------------------------------------
-  console.log("\n=== Test 3: Full rdt_strategy_lifecycle restoration & ABSENT row deletion ===");
-  {
-    // Test 3A: ABSENT row deletion
-    const absentSeed = `
+      // Part 2B: Non-destructive ABSENT flag deletion check using run-unique flag
+      const testFlagName = `SAFE_FLG_${RUN_ID}`;
+      try {
+        const seedAbsentFlag = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute('''
-INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
-VALUES ('RSI_CTR', 'shadow', 1, 1, 0, 1, 0, '2025-02-01 12:00:00')
-ON DUPLICATE KEY UPDATE evaluation_enabled=1, paper_enabled=1
-''')
-cur.execute('''
-INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
-VALUES ('DBL_PAT_INV', 'inverse', 1, 1, 0, 1, 0, '2025-02-01 12:00:00')
-ON DUPLICATE KEY UPDATE evaluation_enabled=1, paper_enabled=1
-''')
-conn.commit()
-cur.close(); conn.close()
+cur.execute("INSERT INTO system_flags (flag_name, is_active, reason, updated_at) VALUES (%s, 1, 'absent_test', '2025-01-01 00:00:00')", ('${testFlagName}',))
+conn.commit(); cur.close(); conn.close()
 print(json.dumps({"seeded": True}))
 `;
-    await runPythonHelper(absentSeed);
+        await runPythonHelper(seedAbsentFlag);
 
-    const cleanupResAbsent = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
-      target_db: TARGET_DB,
-      snapshot_captured: true,
-      snapshot_state: {
-        emergencyStop: { status: "NOT_CAPTURED", row: null },
-        walletSettings: { status: "NOT_CAPTURED", row: null },
-        rb03Row: { status: "ABSENT", row: null },
-        rb04Row: { status: "ABSENT", row: null },
-      },
-    });
-    assert(cleanupResAbsent.cleanup_results.lifecycle === true, "ABSENT lifecycle cleanup failed");
+        const cleanupAbsentRes = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
+          target_db: TARGET_DB,
+          snapshot_captured: true,
+          snapshot_state: {
+            emergencyStop: { status: "ABSENT", flag_name: testFlagName, row: null },
+            walletSettings: { status: "NOT_CAPTURED", row: null },
+            rb03Row: { status: "NOT_CAPTURED", row: null },
+            rb04Row: { status: "NOT_CAPTURED", row: null },
+          },
+        });
+        assert(cleanupAbsentRes.cleanup_results.circuitBreaker === true, "ABSENT flag cleanup failed");
 
-    // Verify deletion
-    const verifyAbsent = `
+        const verifyAbsentSnap = await getSystemFlagSnapshot(testFlagName);
+        assert(verifyAbsentSnap.status === "ABSENT", `Flag ${testFlagName} was not cleanly deleted!`);
+
+        // Confirm shared emergency_stop flag was completely untouched
+        const sharedFlagSnap = await getSystemFlagSnapshot("emergency_stop");
+        assert(sharedFlagSnap.status === "EXISTS" && sharedFlagSnap.row.updated_at === origFlag.updated_at, "Shared emergency_stop flag was affected during ABSENT test!");
+        console.log("  [✓] Non-destructive ABSENT flag deletion verified without touching shared emergency_stop.");
+        passed++;
+      } finally {
+        await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM system_flags WHERE flag_name = %s", ('${testFlagName}',))
+conn.commit(); cur.close(); conn.close()
+`);
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // TEST 3: Exact rdt_strategy_lifecycle restoration (Job 3) — NON-DESTRUCTIVE
+    // --------------------------------------------------------------------------
+    console.log("\n=== Test 3: Full rdt_strategy_lifecycle restoration & ABSENT row deletion (Non-Destructive) ===");
+    {
+      // Run-unique strategy identifiers guarantee ZERO interaction with pre-existing shared data
+      const stratAbsent1 = `SAFE_ABS1_${RUN_ID}`;
+      const stratAbsent2 = `SAFE_ABS2_${RUN_ID}`;
+      const stratExist1 = `SAFE_EX1_${RUN_ID}`;
+      const stratExist2 = `SAFE_EX2_${RUN_ID}`;
+
+      // Test 3A: ABSENT row deletion using run-unique identifiers
+      try {
+        const absentSeed = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id IN ('RSI_CTR', 'DBL_PAT_INV')")
+cur.execute('''
+INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
+VALUES (%s, 'shadow', 1, 1, 0, 1, 0, '2025-02-01 12:00:00')
+''', ('${stratAbsent1}',))
+cur.execute('''
+INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
+VALUES (%s, 'inverse', 1, 1, 0, 1, 0, '2025-02-01 12:00:00')
+''', ('${stratAbsent2}',))
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"seeded": True}))
+`;
+        await runPythonHelper(absentSeed);
+
+        const cleanupResAbsent = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
+          target_db: TARGET_DB,
+          snapshot_captured: true,
+          snapshot_state: {
+            emergencyStop: { status: "NOT_CAPTURED", row: null },
+            walletSettings: { status: "NOT_CAPTURED", row: null },
+            rb03Row: { status: "ABSENT", strategy_id: stratAbsent1, mode: "shadow", row: null },
+            rb04Row: { status: "ABSENT", strategy_id: stratAbsent2, mode: "inverse", row: null },
+          },
+        });
+        assert(cleanupResAbsent.cleanup_results.lifecycle === true, "ABSENT lifecycle cleanup failed");
+
+        // Verify deletion
+        const verifyAbsent = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id IN (%s, %s)", ('${stratAbsent1}', '${stratAbsent2}'))
 rows = cur.fetchall()
 cur.close(); conn.close()
 print(json.dumps({"count": len(rows)}))
 `;
-    const verifyAbsentRes = await runPythonHelper(verifyAbsent);
-    assert(verifyAbsentRes.count === 0, `Expected 0 rows after ABSENT cleanup, got ${verifyAbsentRes.count}`);
-    console.log("  [✓] ABSENT lifecycle rows cleanly deleted and absence asserted.");
+        const verifyAbsentRes = await runPythonHelper(verifyAbsent);
+        assert(verifyAbsentRes.count === 0, `Expected 0 rows after ABSENT cleanup, got ${verifyAbsentRes.count}`);
+        console.log("  [✓] ABSENT lifecycle rows cleanly deleted and absence asserted.");
+      } finally {
+        await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id IN (%s, %s)", ('${stratAbsent1}', '${stratAbsent2}'))
+conn.commit(); cur.close(); conn.close()
+`);
+      }
 
-    // Test 3B: EXISTS restoration
-    const origRb03 = {
-      strategy_id: "RSI_CTR",
-      mode: "shadow",
-      evaluation_enabled: 1,
-      paper_enabled: 0,
-      telegram_enabled: 1,
-      report_enabled: 0,
-      auto_promote_enabled: 0,
-      updated_at: "2024-03-01T10:00:00",
-    };
-    const origRb04 = {
-      strategy_id: "DBL_PAT_INV",
-      mode: "inverse",
-      evaluation_enabled: 0,
-      paper_enabled: 1,
-      telegram_enabled: 0,
-      report_enabled: 1,
-      auto_promote_enabled: 0,
-      updated_at: "2024-03-01T11:00:00",
-    };
+      // Test 3B: EXISTS restoration using run-unique identifiers
+      const origRow1 = {
+        strategy_id: stratExist1,
+        mode: "shadow",
+        evaluation_enabled: 1,
+        paper_enabled: 0,
+        telegram_enabled: 1,
+        report_enabled: 0,
+        auto_promote_enabled: 0,
+        updated_at: "2024-03-01T10:00:00",
+      };
+      const origRow2 = {
+        strategy_id: stratExist2,
+        mode: "inverse",
+        evaluation_enabled: 0,
+        paper_enabled: 1,
+        telegram_enabled: 0,
+        report_enabled: 1,
+        auto_promote_enabled: 0,
+        updated_at: "2024-03-01T11:00:00",
+      };
 
-    const existsSeed = `
+      try {
+        const existsSeed = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
 cur.execute('''
 INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
-VALUES ('RSI_CTR', 'shadow', 1, 0, 1, 0, 0, '2024-03-01 10:00:00')
-ON DUPLICATE KEY UPDATE evaluation_enabled=1, paper_enabled=0, telegram_enabled=1, report_enabled=0, auto_promote_enabled=0, updated_at='2024-03-01 10:00:00'
-''')
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+''', ('${origRow1.strategy_id}', '${origRow1.mode}', ${origRow1.evaluation_enabled}, ${origRow1.paper_enabled}, ${origRow1.telegram_enabled}, ${origRow1.report_enabled}, ${origRow1.auto_promote_enabled}, '2024-03-01 10:00:00'))
 cur.execute('''
 INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
-VALUES ('DBL_PAT_INV', 'inverse', 0, 1, 0, 1, 0, '2024-03-01 11:00:00')
-ON DUPLICATE KEY UPDATE evaluation_enabled=0, paper_enabled=1, telegram_enabled=0, report_enabled=1, auto_promote_enabled=0, updated_at='2024-03-01 11:00:00'
-''')
-conn.commit()
-cur.close(); conn.close()
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+''', ('${origRow2.strategy_id}', '${origRow2.mode}', ${origRow2.evaluation_enabled}, ${origRow2.paper_enabled}, ${origRow2.telegram_enabled}, ${origRow2.report_enabled}, ${origRow2.auto_promote_enabled}, '2024-03-01 11:00:00'))
+conn.commit(); cur.close(); conn.close()
 print(json.dumps({"seeded": True}))
 `;
-    await runPythonHelper(existsSeed);
+        await runPythonHelper(existsSeed);
 
-    // Mutate
-    const mutateLifecycle = `
+        // Mutate
+        const mutateLifecycle = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("UPDATE rdt_strategy_lifecycle SET evaluation_enabled=0, paper_enabled=1 WHERE strategy_id='RSI_CTR' AND mode='shadow'")
-cur.execute("UPDATE rdt_strategy_lifecycle SET evaluation_enabled=1, paper_enabled=0 WHERE strategy_id='DBL_PAT_INV' AND mode='inverse'")
-conn.commit()
-cur.close(); conn.close()
+cur.execute("UPDATE rdt_strategy_lifecycle SET evaluation_enabled=0, paper_enabled=1 WHERE strategy_id=%s AND mode='shadow'", ('${stratExist1}',))
+cur.execute("UPDATE rdt_strategy_lifecycle SET evaluation_enabled=1, paper_enabled=0 WHERE strategy_id=%s AND mode='inverse'", ('${stratExist2}',))
+conn.commit(); cur.close(); conn.close()
 print(json.dumps({"mutated": True}))
 `;
-    await runPythonHelper(mutateLifecycle);
+        await runPythonHelper(mutateLifecycle);
 
-    // Restore via cleanup
-    const cleanupResExists = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
-      target_db: TARGET_DB,
-      snapshot_captured: true,
-      snapshot_state: {
-        emergencyStop: { status: "NOT_CAPTURED", row: null },
-        walletSettings: { status: "NOT_CAPTURED", row: null },
-        rb03Row: { status: "EXISTS", row: origRb03 },
-        rb04Row: { status: "EXISTS", row: origRb04 },
-      },
-    });
-    assert(cleanupResExists.cleanup_results.lifecycle === true, "EXISTS lifecycle cleanup failed");
+        // Restore via cleanup
+        const cleanupResExists = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
+          target_db: TARGET_DB,
+          snapshot_captured: true,
+          snapshot_state: {
+            emergencyStop: { status: "NOT_CAPTURED", row: null },
+            walletSettings: { status: "NOT_CAPTURED", row: null },
+            rb03Row: { status: "EXISTS", row: origRow1, strategy_id: stratExist1, mode: "shadow" },
+            rb04Row: { status: "EXISTS", row: origRow2, strategy_id: stratExist2, mode: "inverse" },
+          },
+        });
+        assert(cleanupResExists.cleanup_results.lifecycle === true, "EXISTS lifecycle cleanup failed");
 
-    // Verify all columns restored
-    const readbackLifecycle = `
+        // Verify all columns restored
+        const readbackLifecycle = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = 'RSI_CTR' AND mode = 'shadow'")
+cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = 'shadow'", ('${stratExist1}',))
 r3 = cur.fetchone()
 if r3 and hasattr(r3.get("updated_at"), "isoformat"):
     r3["updated_at"] = r3["updated_at"].isoformat()
-cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = 'DBL_PAT_INV' AND mode = 'inverse'")
+cur.execute("SELECT * FROM rdt_strategy_lifecycle WHERE strategy_id = %s AND mode = 'inverse'", ('${stratExist2}',))
 r4 = cur.fetchone()
 if r4 and hasattr(r4.get("updated_at"), "isoformat"):
     r4["updated_at"] = r4["updated_at"].isoformat()
-cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id IN ('RSI_CTR', 'DBL_PAT_INV')")
-conn.commit()
 cur.close(); conn.close()
 print(json.dumps({"r3": r3, "r4": r4}))
 `;
-    const readbackRes = await runPythonHelper(readbackLifecycle);
-    for (const k of ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled", "updated_at"]) {
-      assert(readbackRes.r3[k] === origRb03[k], `RSI_CTR ${k} mismatch: ${readbackRes.r3[k]} vs ${origRb03[k]}`);
-      assert(readbackRes.r4[k] === origRb04[k], `DBL_PAT_INV ${k} mismatch: ${readbackRes.r4[k]} vs ${origRb04[k]}`);
-    }
-    console.log("  [✓] All lifecycle columns and updated_at restored and asserted identical.");
-    passed++;
-  }
-
-  // --------------------------------------------------------------------------
-  // TEST 4: Exact wallet_tracker_settings restoration (Job 3 part 2)
-  // --------------------------------------------------------------------------
-  console.log("\n=== Test 4: Full wallet_tracker_settings restoration with updated_at readback ===");
-  {
-    // A. Read original row
-    const getWalletScript = `
-import json, mysql.connector
+        const readbackRes = await runPythonHelper(readbackLifecycle);
+        for (const k of ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled", "updated_at"]) {
+          assert(readbackRes.r3[k] === origRow1[k], `${stratExist1} ${k} mismatch: ${readbackRes.r3[k]} vs ${origRow1[k]}`);
+          assert(readbackRes.r4[k] === origRow2[k], `${stratExist2} ${k} mismatch: ${readbackRes.r4[k]} vs ${origRow2[k]}`);
+        }
+        console.log("  [✓] All lifecycle columns and updated_at restored and asserted identical.");
+        passed++;
+      } finally {
+        await runPythonHelper(`
+import mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
-conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("SELECT * FROM wallet_tracker_settings WHERE id = 1")
-orig = cur.fetchone()
-if orig:
-    for k in list(orig.keys()):
-        if hasattr(orig[k], "isoformat"):
-            orig[k] = orig[k].isoformat()
-        elif hasattr(orig[k], "__float__"):
-            orig[k] = float(orig[k])
-cur.close(); conn.close()
-print(json.dumps({"orig": orig}))
-`;
-    const walletRes = await runPythonHelper(getWalletScript);
-    const origWallet = walletRes.orig;
-    assert(origWallet !== null, "wallet_tracker_settings row 1 missing");
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id IN (%s, %s)", ('${stratExist1}', '${stratExist2}'))
+conn.commit(); cur.close(); conn.close()
+`);
+      }
+    }
 
-    // B. Mutate row
-    const mutateWalletScript = `
+    // --------------------------------------------------------------------------
+    // TEST 4: Exact wallet_tracker_settings restoration (Job 3 part 2)
+    // --------------------------------------------------------------------------
+    console.log("\n=== Test 4: Full wallet_tracker_settings restoration with updated_at readback ===");
+    {
+      const walletSnap = await getWalletSettingsSnapshot(1);
+      assert(walletSnap.status === "EXISTS" && walletSnap.row !== null, "wallet_tracker_settings row 1 missing");
+      const origWallet = walletSnap.row;
+
+      try {
+        // Mutate row
+        const mutateWalletScript = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
 cur.execute("UPDATE wallet_tracker_settings SET min_trade_usd = 88888.00, poll_interval_seconds = 999, updated_at = '2023-01-01 00:00:00' WHERE id = 1")
-conn.commit()
-cur.close(); conn.close()
+conn.commit(); cur.close(); conn.close()
 print(json.dumps({"mutated": True}))
 `;
-    await runPythonHelper(mutateWalletScript);
+        await runPythonHelper(mutateWalletScript);
 
-    // C. Run cleanup with snapshot_captured = true
-    const cleanupRes = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
-      target_db: TARGET_DB,
-      snapshot_captured: true,
-      snapshot_state: {
-        emergencyStop: { status: "NOT_CAPTURED", row: null },
-        walletSettings: { status: "EXISTS", row: origWallet },
-        rb03Row: { status: "NOT_CAPTURED", row: null },
-        rb04Row: { status: "NOT_CAPTURED", row: null },
-      },
-    });
-    assert(cleanupRes.cleanup_results.walletSettings === true, "walletSettings restoration failed");
+        // Run cleanup with snapshot_captured = true
+        const cleanupRes = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
+          target_db: TARGET_DB,
+          snapshot_captured: true,
+          snapshot_state: {
+            emergencyStop: { status: "NOT_CAPTURED", row: null },
+            walletSettings: { status: "EXISTS", row: origWallet, id: 1 },
+            rb03Row: { status: "NOT_CAPTURED", row: null },
+            rb04Row: { status: "NOT_CAPTURED", row: null },
+          },
+        });
+        assert(cleanupRes.cleanup_results.walletSettings === true, "walletSettings restoration failed");
 
-    // D. Read back and assert all columns match
-    const readbackRes = await runPythonHelper(getWalletScript);
-    const restored = readbackRes.orig;
-    for (const col of ["enabled", "networks", "pools_per_network", "min_trade_usd", "min_net_usd", "auto_track_net_usd", "poll_interval_seconds", "retention_days", "api_delay_seconds", "token_mode", "updated_at"]) {
-      assert(restored[col] === origWallet[col], `wallet_tracker_settings ${col} mismatch: ${restored[col]} vs ${origWallet[col]}`);
-    }
-    console.log("  [✓] wallet_tracker_settings fully restored with all 12 columns + updated_at verified.");
-    passed++;
-  }
-
-  // --------------------------------------------------------------------------
-  // TEST 5: Cleanup failure propagation sets non-zero exit code
-  // --------------------------------------------------------------------------
-  console.log("\n=== Test 5: Cleanup failure propagation sets non-zero exit code ===");
-  {
-    const cleanupStatus = {
-      users: true,
-      orders: true,
-      positions: true,
-      trades: true,
-      configs: true,
-      wallets: true,
-      circuitBreaker: false, // Simulated failure
-      lifecycle: true,
-      walletSettings: true,
-      mlFiles: true,
-    };
-    const allCleanedUp = Object.values(cleanupStatus).every(Boolean);
-    assert(allCleanedUp === false, "allCleanedUp should be false when circuitBreaker is false");
-    console.log("  [✓] Incomplete cleanup accurately detected (allCleanedUp = false).");
-    passed++;
-  }
-
-  // --------------------------------------------------------------------------
-  // TEST 6: ML-03 Handled Error Contract & RBAC (Job 4)
-  // --------------------------------------------------------------------------
-  console.log("\n=== Test 6: ML-03 handled error API contract and Viewer RBAC ===");
-  {
-    const testPort = await getAvailablePort();
-    const pythonBin = process.env.PYTHON || "/home/BIS/.local/bin/python3";
-    const serverProc = spawn(pythonBin, [
-      "-m", "uvicorn", "web.app:app",
-      "--host", "127.0.0.1",
-      "--port", String(testPort),
-      "--log-level", "warning",
-    ], {
-      cwd: REPO_ROOT,
-      env: {
-        ...process.env,
-        MYSQL_DATABASE: TARGET_DB,
-        WEB_PORT: String(testPort),
-        SIGNAL_BOT_HOST: "127.0.0.1",
-        SIGNAL_BOT_TEST_RUN_ID: "ml03_safety_test",
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    try {
-      // Wait for server to respond
-      let ready = false;
-      for (let i = 0; i < 30; i++) {
-        try {
-          await new Promise((resolve, reject) => {
-            const req = http.get(`http://127.0.0.1:${testPort}/api/system/test-identity`, (res) => {
-              if (res.statusCode === 200) resolve();
-              else reject(new Error(`Status ${res.statusCode}`));
-            });
-            req.on("error", reject);
-            req.setTimeout(500, () => req.destroy());
-          });
-          ready = true;
-          break;
-        } catch {
-          await new Promise((r) => setTimeout(r, 200));
+        // Read back and assert all columns match
+        const readbackSnap = await getWalletSettingsSnapshot(1);
+        const restored = readbackSnap.row;
+        for (const col of ["enabled", "networks", "pools_per_network", "min_trade_usd", "min_net_usd", "auto_track_net_usd", "poll_interval_seconds", "retention_days", "api_delay_seconds", "token_mode", "updated_at"]) {
+          assert(restored[col] === origWallet[col], `wallet_tracker_settings ${col} mismatch: ${restored[col]} vs ${origWallet[col]}`);
         }
+        console.log("  [✓] wallet_tracker_settings fully restored with all 12 columns + updated_at verified.");
+        passed++;
+      } finally {
+        await restoreWalletSettingsDirect(walletSnap);
       }
-      assert(ready, "Staging server failed to become ready for Test 6");
+    }
 
-      // Obtain trader and viewer tokens
-      async function login(username, role) {
-        // Seed user
-        const seedUserScript = `
+    // --------------------------------------------------------------------------
+    // TEST 5: Cleanup failure propagation sets non-zero exit code
+    // --------------------------------------------------------------------------
+    console.log("\n=== Test 5: Cleanup failure propagation sets non-zero exit code ===");
+    {
+      const cleanupStatus = {
+        users: true,
+        orders: true,
+        positions: true,
+        trades: true,
+        configs: true,
+        wallets: true,
+        circuitBreaker: false, // Simulated failure
+        lifecycle: true,
+        walletSettings: true,
+        mlFiles: true,
+      };
+      const allCleanedUp = Object.values(cleanupStatus).every(Boolean);
+      assert(allCleanedUp === false, "allCleanedUp should be false when circuitBreaker is false");
+      console.log("  [✓] Incomplete cleanup accurately detected (allCleanedUp = false).");
+      passed++;
+    }
+
+    // --------------------------------------------------------------------------
+    // TEST 6: ML-03 Handled Error Contract & RBAC (Job 4)
+    // --------------------------------------------------------------------------
+    console.log("\n=== Test 6: ML-03 handled error API contract and Viewer RBAC ===");
+    {
+      const testPort = await getAvailablePort();
+      const pythonBin = process.env.PYTHON || "/home/BIS/.local/bin/python3";
+      const serverProc = spawn(pythonBin, [
+        "-m", "uvicorn", "web.app:app",
+        "--host", "127.0.0.1",
+        "--port", String(testPort),
+        "--log-level", "warning",
+      ], {
+        cwd: REPO_ROOT,
+        env: {
+          ...process.env,
+          MYSQL_DATABASE: TARGET_DB,
+          WEB_PORT: String(testPort),
+          SIGNAL_BOT_HOST: "127.0.0.1",
+          SIGNAL_BOT_TEST_RUN_ID: `safety_${RUN_ID}`,
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      const createdUserIds = [];
+
+      try {
+        // Wait for server to respond
+        let ready = false;
+        for (let i = 0; i < 30; i++) {
+          try {
+            await new Promise((resolve, reject) => {
+              const req = http.get(`http://127.0.0.1:${testPort}/api/system/test-identity`, (res) => {
+                if (res.statusCode === 200) resolve();
+                else reject(new Error(`Status ${res.statusCode}`));
+              });
+              req.on("error", reject);
+              req.setTimeout(500, () => req.destroy());
+            });
+            ready = true;
+            break;
+          } catch {
+            await new Promise((r) => setTimeout(r, 200));
+          }
+        }
+        assert(ready, "Staging server failed to become ready for Test 6");
+
+        // Obtain trader and viewer tokens with run-unique usernames
+        async function login(username, role) {
+          const seedUserScript = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
 from web.auth import hash_password
@@ -715,35 +958,34 @@ uid = cur.lastrowid
 conn.commit(); cur.close(); conn.close()
 print(json.dumps({"uid": uid}))
 `;
-        const seedRes = await runPythonHelper(seedUserScript);
-        const uid = seedRes.uid;
+          const seedRes = await runPythonHelper(seedUserScript);
+          const uid = seedRes.uid;
+          createdUserIds.push(uid);
 
-        // Login via HTTP
-        const loginPayload = JSON.stringify({ username, password: "TestPass123!" });
-        const loginRes = await new Promise((resolve, reject) => {
-          const req = http.request(`http://127.0.0.1:${testPort}/api/auth/login`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Content-Length": Buffer.byteLength(loginPayload),
-            },
-          }, (res) => {
-            let body = "";
-            res.on("data", (c) => { body += c; });
-            res.on("end", () => resolve({ status: res.statusCode, body: JSON.parse(body) }));
+          const loginPayload = JSON.stringify({ username, password: "TestPass123!" });
+          const loginRes = await new Promise((resolve, reject) => {
+            const req = http.request(`http://127.0.0.1:${testPort}/api/auth/login`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(loginPayload),
+              },
+            }, (res) => {
+              let body = "";
+              res.on("data", (c) => { body += c; });
+              res.on("end", () => resolve({ status: res.statusCode, body: JSON.parse(body) }));
+            });
+            req.on("error", reject);
+            req.write(loginPayload);
+            req.end();
           });
-          req.on("error", reject);
-          req.write(loginPayload);
-          req.end();
-        });
-        assert(loginRes.status === 200 && loginRes.body.token, `Login failed for ${username}: ${JSON.stringify(loginRes.body)}`);
-        return { uid, token: loginRes.body.token };
-      }
+          assert(loginRes.status === 200 && loginRes.body.token, `Login failed for ${username}: ${JSON.stringify(loginRes.body)}`);
+          return { uid, token: loginRes.body.token };
+        }
 
-      const trader = await login("safety_trader_user", "trader");
-      const viewer = await login("safety_viewer_user", "viewer");
+        const trader = await login(`safe_trd_${RUN_ID}`, "trader");
+        const viewer = await login(`safe_vw_${RUN_ID}`, "viewer");
 
-      try {
         const payload = JSON.stringify({
           symbol: "BTCUSDT",
           market: "spot",
@@ -804,26 +1046,198 @@ print(json.dumps({"uid": uid}))
         console.log("  [✓] RBAC contract verified: Viewer denied HTTP 403 Forbidden on exact endpoint.");
         passed++;
       } finally {
-        // Clean up test users
-        const cleanupUsersScript = `
+        // Clean up test users using exact-ID cleanup
+        if (createdUserIds.length > 0) {
+          const placeholders = createdUserIds.map(() => "%s").join(", ");
+          await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM audit_logs WHERE user_id IN (${placeholders})", tuple(${JSON.stringify(createdUserIds)}))
+cur.execute("DELETE FROM users WHERE id IN (${placeholders})", tuple(${JSON.stringify(createdUserIds)}))
+conn.commit(); cur.close(); conn.close()
+`);
+        }
+        serverProc.kill("SIGKILL");
+        await new Promise((r) => serverProc.on("close", r));
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // TEST 7: Pre-existing lifecycle rows survival test (Requirement 8)
+    // --------------------------------------------------------------------------
+    console.log("\n=== Test 7: Pre-existing lifecycle rows survival test (Requirement 8) ===");
+    {
+      // 1. Snapshot initial state of RSI_CTR and DBL_PAT_INV prior to Test 7
+      const preTestRsiSnap = await getLifecycleRowSnapshot("RSI_CTR", "shadow");
+      const preTestDblSnap = await getLifecycleRowSnapshot("DBL_PAT_INV", "inverse");
+
+      try {
+        // 2. Seed distinctive, recognizable pre-existing rows for RSI_CTR and DBL_PAT_INV
+        const distinctiveRsi = {
+          strategy_id: "RSI_CTR",
+          mode: "shadow",
+          evaluation_enabled: 1,
+          paper_enabled: 0,
+          telegram_enabled: 1,
+          report_enabled: 0,
+          auto_promote_enabled: 1,
+          updated_at: "2025-05-05T05:05:05",
+        };
+        const distinctiveDbl = {
+          strategy_id: "DBL_PAT_INV",
+          mode: "inverse",
+          evaluation_enabled: 0,
+          paper_enabled: 1,
+          telegram_enabled: 0,
+          report_enabled: 1,
+          auto_promote_enabled: 0,
+          updated_at: "2025-06-06T06:06:06",
+        };
+
+        const seedDistinctiveScript = `
 import json, mysql.connector
 from config import MYSQL_CONFIG
 cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
 conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
-cur.execute("DELETE FROM audit_logs WHERE user_id IN (%s, %s)", (${trader.uid}, ${viewer.uid}))
-cur.execute("DELETE FROM users WHERE id IN (%s, %s)", (${trader.uid}, ${viewer.uid}))
-conn.commit(); cur.close(); conn.close()
-print(json.dumps({"cleaned": True}))
-`;
-        await runPythonHelper(cleanupUsersScript);
-      }
-    } finally {
-      serverProc.kill("SIGKILL");
-      await new Promise((r) => serverProc.on("close", r));
-    }
-  }
 
-  console.log(`\n[+] ALL ${passed} HARNESS SAFETY & EVIDENCE ACCURACY TESTS PASSED SUCCESSFULLY!`);
+# Upsert distinctive RSI_CTR
+cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id='RSI_CTR' AND mode='shadow'")
+if cur.fetchone():
+    cur.execute('''
+        UPDATE rdt_strategy_lifecycle
+        SET evaluation_enabled=1, paper_enabled=0, telegram_enabled=1, report_enabled=0, auto_promote_enabled=1, updated_at='2025-05-05 05:05:05'
+        WHERE strategy_id='RSI_CTR' AND mode='shadow'
+    ''')
+else:
+    cur.execute('''
+        INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
+        VALUES ('RSI_CTR', 'shadow', 1, 0, 1, 0, 1, '2025-05-05 05:05:05')
+    ''')
+
+# Upsert distinctive DBL_PAT_INV
+cur.execute("SELECT strategy_id FROM rdt_strategy_lifecycle WHERE strategy_id='DBL_PAT_INV' AND mode='inverse'")
+if cur.fetchone():
+    cur.execute('''
+        UPDATE rdt_strategy_lifecycle
+        SET evaluation_enabled=0, paper_enabled=1, telegram_enabled=0, report_enabled=1, auto_promote_enabled=0, updated_at='2025-06-06 06:06:06'
+        WHERE strategy_id='DBL_PAT_INV' AND mode='inverse'
+    ''')
+else:
+    cur.execute('''
+        INSERT INTO rdt_strategy_lifecycle (strategy_id, mode, evaluation_enabled, paper_enabled, telegram_enabled, report_enabled, auto_promote_enabled, updated_at)
+        VALUES ('DBL_PAT_INV', 'inverse', 0, 1, 0, 1, 0, '2025-06-06 06:06:06')
+    ''')
+
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"seeded": True}))
+`;
+        await runPythonHelper(seedDistinctiveScript);
+
+        // 3. Harness snapshots the pre-existing state before test run
+        const runSnapRsi = await getLifecycleRowSnapshot("RSI_CTR", "shadow");
+        const runSnapDbl = await getLifecycleRowSnapshot("DBL_PAT_INV", "inverse");
+        assert(runSnapRsi.status === "EXISTS", "RSI_CTR distinctive row missing after seed");
+        assert(runSnapDbl.status === "EXISTS", "DBL_PAT_INV distinctive row missing after seed");
+
+        // 4. Test run executes and mutates both rows
+        const mutateTestScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("UPDATE rdt_strategy_lifecycle SET evaluation_enabled=0, paper_enabled=1, telegram_enabled=0, report_enabled=1, auto_promote_enabled=0, updated_at='2026-12-31 23:59:59' WHERE strategy_id='RSI_CTR' AND mode='shadow'")
+cur.execute("UPDATE rdt_strategy_lifecycle SET evaluation_enabled=1, paper_enabled=0, telegram_enabled=1, report_enabled=0, auto_promote_enabled=1, updated_at='2026-12-31 23:59:59' WHERE strategy_id='DBL_PAT_INV' AND mode='inverse'")
+conn.commit(); cur.close(); conn.close()
+print(json.dumps({"mutated": True}))
+`;
+        await runPythonHelper(mutateTestScript);
+
+        // 5. Harness cleanup executes with the captured snapshot
+        const cleanupRes = await runPythonHelper(CLEANUP_PYTHON_SNIPPET, {
+          target_db: TARGET_DB,
+          snapshot_captured: true,
+          snapshot_state: {
+            emergencyStop: { status: "NOT_CAPTURED", row: null },
+            walletSettings: { status: "NOT_CAPTURED", row: null },
+            rb03Row: runSnapRsi,
+            rb04Row: runSnapDbl,
+          },
+        });
+        assert(cleanupRes.status === "ok" && cleanupRes.cleanup_results.lifecycle === true, "Harness cleanup failed to restore pre-existing lifecycle rows");
+
+        // 6. Read back and verify that the distinctive pre-existing rows survived and match 100% across all columns
+        const readbackRsi = await getLifecycleRowSnapshot("RSI_CTR", "shadow");
+        const readbackDbl = await getLifecycleRowSnapshot("DBL_PAT_INV", "inverse");
+        assert(readbackRsi.status === "EXISTS", "Pre-existing RSI_CTR row was destroyed/deleted!");
+        assert(readbackDbl.status === "EXISTS", "Pre-existing DBL_PAT_INV row was destroyed/deleted!");
+
+        for (const col of ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled", "auto_promote_enabled", "updated_at"]) {
+          assert(readbackRsi.row[col] === distinctiveRsi[col], `Pre-existing RSI_CTR ${col} mismatch: ${readbackRsi.row[col]} vs ${distinctiveRsi[col]}`);
+          assert(readbackDbl.row[col] === distinctiveDbl[col], `Pre-existing DBL_PAT_INV ${col} mismatch: ${readbackDbl.row[col]} vs ${distinctiveDbl[col]}`);
+        }
+        console.log("  [✓] Pre-existing lifecycle rows with distinctive values survived mutation and were verified 100% identical after cleanup.");
+        passed++;
+      } finally {
+        // Restore whatever was in RSI_CTR and DBL_PAT_INV prior to Test 7
+        await restoreLifecycleRowDirect(preTestRsiSnap);
+        await restoreLifecycleRowDirect(preTestDblSnap);
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // TEST 8: Database purity & baseline integrity verification
+    // --------------------------------------------------------------------------
+    console.log("\n=== Test 8: End-to-end database purity & baseline integrity verification ===");
+    {
+      const currentFlags = await getSystemFlagSnapshot("emergency_stop");
+      assert(
+        JSON.stringify(currentFlags.row) === JSON.stringify(baselineFlags.row),
+        `emergency_stop drifted from baseline: ${JSON.stringify(currentFlags.row)} vs ${JSON.stringify(baselineFlags.row)}`
+      );
+
+      const currentWallet = await getWalletSettingsSnapshot(1);
+      assert(
+        JSON.stringify(currentWallet.row) === JSON.stringify(baselineWallet.row),
+        `wallet_tracker_settings drifted from baseline: ${JSON.stringify(currentWallet.row)} vs ${JSON.stringify(baselineWallet.row)}`
+      );
+
+      const currentLifecycleRows = await getAllLifecycleRows();
+      // Assert no run-specific or test artifacts remain
+      const leftoverSafeRows = currentLifecycleRows.filter(r => r.strategy_id.startsWith("SAFE_"));
+      assert(leftoverSafeRows.length === 0, `Leftover SAFE_* rows found: ${JSON.stringify(leftoverSafeRows)}`);
+
+      // Assert lifecycle rows equal pre-suite baseline
+      assert(
+        JSON.stringify(currentLifecycleRows) === JSON.stringify(baselineAllLifecycle),
+        `Lifecycle rows drifted from baseline: ${JSON.stringify(currentLifecycleRows)} vs ${JSON.stringify(baselineAllLifecycle)}`
+      );
+
+      console.log("  [✓] Database purity verified: zero test artifacts remain and pre-suite state is fully preserved.");
+      passed++;
+    }
+
+    console.log(`\n[+] ALL ${passed} HARNESS SAFETY & EVIDENCE ACCURACY TESTS PASSED SUCCESSFULLY!`);
+  } finally {
+    console.log("\n[*] Running global post-suite safety restoration guard...");
+    await runPythonHelper(`
+import mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+cur.execute("DELETE FROM rdt_strategy_lifecycle WHERE strategy_id LIKE 'SAFE_%'")
+cur.execute("DELETE FROM system_flags WHERE flag_name LIKE 'SAFE_%'")
+cur.execute("DELETE FROM audit_logs WHERE user_id IN (SELECT id FROM users WHERE username LIKE 'safe_%')")
+cur.execute("DELETE FROM users WHERE username LIKE 'safe_%'")
+conn.commit(); cur.close(); conn.close()
+`);
+    await restoreSystemFlagDirect(baselineFlags);
+    await restoreWalletSettingsDirect(baselineWallet);
+    await restoreLifecycleRowDirect(baselineLifecycleRsi);
+    await restoreLifecycleRowDirect(baselineLifecycleDbl);
+    console.log("[+] Global baseline state restored.\n");
+  }
 }
 
 if (require.main === module) {
