@@ -749,7 +749,7 @@ export function WalletTrackingPanel() {
                 <input
                   id="s-min-trade"
                   type="number"
-                  min={1}
+                  min={0}
                   step={100}
                   required
                   value={sMinTrade}
@@ -764,7 +764,7 @@ export function WalletTrackingPanel() {
                 <input
                   id="s-min-net"
                   type="number"
-                  min={1}
+                  min={0}
                   step={1000}
                   required
                   value={sMinNet}
