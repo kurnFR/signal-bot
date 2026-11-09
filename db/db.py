@@ -1300,10 +1300,8 @@ def get_retailbot2_strategy_lifecycle_settings():
                 ORDER BY strategy_id, mode
             """)
             rows = cur.fetchall()
-        except Exception as exc:
-            logger.debug("rdt_strategy_lifecycle query defaulted to empty: %s", exc)
-            rows = []
-        cur.close()
+        finally:
+            cur.close()
         for row in rows:
             for key in ("evaluation_enabled", "paper_enabled", "telegram_enabled",
                         "report_enabled", "auto_promote_enabled"):
