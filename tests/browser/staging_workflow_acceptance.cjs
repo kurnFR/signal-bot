@@ -55,13 +55,13 @@ function runPythonHelper(scriptContent, envOverrides = {}, stdinJson = null) {
   return new Promise((resolve, reject) => {
     const env = {
       ...process.env,
-      // Fail closed to the local isolated MariaDB instance; never inherit a
-      // production MYSQL_HOST from the developer's .env or shell environment.
+      ...envOverrides,
+      // Fail closed to the local isolated MariaDB instance; never inherit or
+      // allow a helper override to redirect this harness to another database.
       MYSQL_HOST: "127.0.0.1",
       MYSQL_PORT: "3306",
       MYSQL_DATABASE: TARGET_DB,
       PATH: process.env.PATH || "/home/BIS/.local/bin:/usr/local/bin:/usr/bin:/bin",
-      ...envOverrides,
     };
     const pythonBin = process.env.PYTHON || "python3";
     const proc = spawn(pythonBin, ["-c", scriptContent], {
