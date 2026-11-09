@@ -475,7 +475,10 @@ try:
         )
         if payload.get("simulate_flag_corruption"):
             s_corrupt = payload["simulate_flag_corruption"]
-            cur.execute(f"UPDATE system_flags SET {s_corrupt['field']} = %s WHERE flag_name = %s", (s_corrupt["value"], target_flag))
+            c_field = s_corrupt.get("field")
+            if c_field not in {"reason", "is_active", "updated_at"}:
+                raise ValueError(f"Unsupported simulate_flag_corruption field: {c_field}")
+            cur.execute(f"UPDATE system_flags SET {c_field} = %s WHERE flag_name = %s", (s_corrupt.get("value"), target_flag))
         cur.execute("SELECT flag_name, is_active, reason, updated_at FROM system_flags WHERE flag_name = %s", (target_flag,))
         v_em = cur.fetchone()
         assert v_em is not None, f"system_flags row '{target_flag}' missing after restore"
