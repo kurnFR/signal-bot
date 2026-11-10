@@ -9,7 +9,7 @@ Guarantees:
 - Never marks sent unless Telegram API explicitly returns HTTP 200 with ok=true.
 - Preserves at-least-once delivery semantics (duplicate Telegram messages remain
   possible when Telegram accepts a request but the acknowledgement cannot be persisted).
-- Note: D-state processes can outlive SIGKILL and the cleanup deadline. The 60-second
+- Note: D-state processes can outlive SIGKILL and the cleanup deadline. The 90-second
   lease is a normal-path recovery margin, not proof of safety under every kernel or network failure.
 """
 

@@ -12,7 +12,7 @@ Important:
 - At-least-once delivery semantics: duplicate Telegram messages remain possible when
   Telegram accepts a request but the acknowledgement cannot be persisted.
 - Do not claim a universal 15-second maximum process lifetime. D-state processes can outlive
-  SIGKILL and the cleanup deadline. The 60-second lease is a normal-path recovery margin,
+  SIGKILL and the cleanup deadline. The 90-second lease is a normal-path recovery margin,
   not proof of safety under every kernel or network failure.
 """
 
@@ -26,6 +26,7 @@ import signal
 import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -70,6 +71,36 @@ class LockLostError(RuntimeError):
     pass
 
 
+class ProcessInspectionError(RuntimeError):
+    """Raised when process group state cannot be reliably verified."""
+    pass
+
+
+class ProcessInspectionStatus(str, Enum):
+    CONFIRMED_EMPTY = "confirmed_empty"
+    LIVE_PROCESSES_PRESENT = "live_processes_present"
+    STATE_UNVERIFIED = "state_unverified"
+
+
+@dataclass(frozen=True)
+class ProcessInspectionResult:
+    status: ProcessInspectionStatus
+    live_pids: List[int] = field(default_factory=list)
+    error: Optional[str] = None
+
+    @property
+    def is_confirmed_empty(self) -> bool:
+        return self.status == ProcessInspectionStatus.CONFIRMED_EMPTY
+
+    @property
+    def is_live(self) -> bool:
+        return self.status == ProcessInspectionStatus.LIVE_PROCESSES_PRESENT
+
+    @property
+    def is_unverified(self) -> bool:
+        return self.status == ProcessInspectionStatus.STATE_UNVERIFIED
+
+
 def verify_database_identity(conn, allowed_databases: Tuple[str, ...]) -> str:
     """Query SELECT DATABASE() on conn and assert it matches allowed_databases."""
     cursor = conn.cursor()
@@ -88,36 +119,150 @@ def verify_database_identity(conn, allowed_databases: Tuple[str, ...]) -> str:
     return actual_db
 
 
-def get_live_pids_in_pgid(pgid: int, proc_root: str = "/proc") -> List[int]:
-    """Scan /proc to find all PIDs belonging to process group `pgid` that are NOT zombies ('Z')."""
-    live_pids = []
-    if not os.path.exists(proc_root):
-        # Fallback if procfs not mounted: check pgid with killpg
-        try:
-            os.killpg(pgid, 0)
-            return [pgid]
-        except (ProcessLookupError, PermissionError):
-            return []
+def inspect_process_group(pgid: int, proc_root: str = "/proc") -> ProcessInspectionResult:
+    """Inspect process group `pgid` via procfs.
 
-    for entry in os.listdir(proc_root):
+    Returns:
+    - CONFIRMED_EMPTY if no live processes in `pgid` exist (zombies filtered out).
+    - LIVE_PROCESSES_PRESENT if one or more live non-zombie processes in `pgid` exist.
+    - STATE_UNVERIFIED if inspection fails (unreadable procfs, permission error on
+      potential target, or malformed stat data).
+    """
+    if not os.path.exists(proc_root):
+        return ProcessInspectionResult(
+            status=ProcessInspectionStatus.STATE_UNVERIFIED,
+            error=f"Process filesystem {proc_root!r} does not exist",
+        )
+
+    try:
+        entries = os.listdir(proc_root)
+    except (PermissionError, OSError) as exc:
+        return ProcessInspectionResult(
+            status=ProcessInspectionStatus.STATE_UNVERIFIED,
+            error=f"Cannot list process filesystem {proc_root!r}: {exc}",
+        )
+
+    live_pids: List[int] = []
+    unverified_reasons: List[str] = []
+
+    for entry in entries:
         if not entry.isdigit():
             continue
         pid = int(entry)
+        stat_path = os.path.join(proc_root, str(pid), "stat")
         try:
-            stat_path = os.path.join(proc_root, str(pid), "stat")
             with open(stat_path, "r") as f:
                 stat_content = f.read()
-            rparen_idx = stat_content.rfind(")")
-            if rparen_idx == -1:
-                continue
-            fields = stat_content[rparen_idx + 2:].split()
-            state = fields[0]      # Field 3: process state
-            pgrp = int(fields[2])  # Field 5: process group ID
-            if pgrp == pgid and state != "Z":
-                live_pids.append(pid)
-        except (FileNotFoundError, ProcessLookupError, PermissionError):
+        except (FileNotFoundError, ProcessLookupError):
+            # Process exited during directory traversal; safe and expected
             continue
-    return live_pids
+        except PermissionError as exc:
+            # Check if this process belongs to our target PGID
+            if proc_root == "/proc":
+                try:
+                    actual_pgid = os.getpgid(pid)
+                    if actual_pgid != pgid:
+                        # Confirmed unrelated process group; safe to ignore
+                        continue
+                except (FileNotFoundError, ProcessLookupError):
+                    continue
+                except (PermissionError, OSError):
+                    unverified_reasons.append(
+                        f"Permission denied reading stat for PID {pid} and getpgid failed: {exc}"
+                    )
+                    continue
+            unverified_reasons.append(
+                f"Permission denied reading stat for PID {pid}: {exc}"
+            )
+            continue
+        except OSError as exc:
+            unverified_reasons.append(
+                f"OS error reading stat for PID {pid}: {exc}"
+            )
+            continue
+
+        rparen_idx = stat_content.rfind(")")
+        if rparen_idx == -1:
+            if proc_root == "/proc":
+                try:
+                    actual_pgid = os.getpgid(pid)
+                    if actual_pgid != pgid:
+                        continue
+                except (FileNotFoundError, ProcessLookupError):
+                    continue
+                except (PermissionError, OSError):
+                    pass
+            unverified_reasons.append(
+                f"Malformed stat data for PID {pid}: missing closing parenthesis"
+            )
+            continue
+
+        fields = stat_content[rparen_idx + 2:].split()
+        if len(fields) < 3:
+            if proc_root == "/proc":
+                try:
+                    actual_pgid = os.getpgid(pid)
+                    if actual_pgid != pgid:
+                        continue
+                except (FileNotFoundError, ProcessLookupError):
+                    continue
+                except (PermissionError, OSError):
+                    pass
+            unverified_reasons.append(
+                f"Malformed stat data for PID {pid}: insufficient fields ({len(fields)} < 3)"
+            )
+            continue
+
+        state = fields[0]      # Field 3: process state
+        try:
+            pgrp = int(fields[2])  # Field 5: process group ID
+        except ValueError:
+            if proc_root == "/proc":
+                try:
+                    actual_pgid = os.getpgid(pid)
+                    if actual_pgid != pgid:
+                        continue
+                except (FileNotFoundError, ProcessLookupError):
+                    continue
+                except (PermissionError, OSError):
+                    pass
+            unverified_reasons.append(
+                f"Malformed stat data for PID {pid}: non-integer pgrp {fields[2]!r}"
+            )
+            continue
+
+        if pgrp == pgid and state != "Z":
+            live_pids.append(pid)
+
+    if unverified_reasons:
+        return ProcessInspectionResult(
+            status=ProcessInspectionStatus.STATE_UNVERIFIED,
+            live_pids=live_pids,
+            error="; ".join(unverified_reasons),
+        )
+
+    if live_pids:
+        return ProcessInspectionResult(
+            status=ProcessInspectionStatus.LIVE_PROCESSES_PRESENT,
+            live_pids=live_pids,
+        )
+
+    return ProcessInspectionResult(
+        status=ProcessInspectionStatus.CONFIRMED_EMPTY,
+        live_pids=[],
+    )
+
+
+def get_live_pids_in_pgid(pgid: int, proc_root: str = "/proc") -> List[int]:
+    """Scan /proc to find all PIDs belonging to process group `pgid` that are NOT zombies ('Z').
+
+    Returns a list of live PIDs (empty list if confirmed empty).
+    Raises ProcessInspectionError if process group state cannot be verified.
+    """
+    res = inspect_process_group(pgid, proc_root=proc_root)
+    if res.status == ProcessInspectionStatus.STATE_UNVERIFIED:
+        raise ProcessInspectionError(res.error or "Process state cannot be verified")
+    return list(res.live_pids)
 
 
 def _child_preexec_pdeathsig(expected_parent_pid: int):
@@ -200,6 +345,7 @@ def dispatch_event_via_subprocess(
     transport_payload: Dict[str, Any],
     timeout_sec: float = 10.0,
     cleanup_grace_sec: float = 1.5,
+    proc_root: str = "/proc",
 ) -> Dict[str, Any]:
     """Execute Telegram transport in an isolated subprocess group with bounded cleanup."""
     parent_pid = os.getpid()
@@ -269,11 +415,11 @@ def dispatch_event_via_subprocess(
 
     # A direct child may exit while a descendant in the same process group survives.
     # Do not merely lock out in that case: explicitly terminate the remaining group.
-    live_descendants = get_live_pids_in_pgid(pgid)
-    if live_descendants:
+    inspection = inspect_process_group(pgid, proc_root=proc_root)
+    if inspection.status == ProcessInspectionStatus.LIVE_PROCESSES_PRESENT:
         logger.warning(
             "Direct transport child exited but live descendants %r remain in PGID %d; terminating group",
-            live_descendants, pgid
+            inspection.live_pids, pgid
         )
         try:
             os.killpg(pgid, signal.SIGTERM)
@@ -281,35 +427,48 @@ def dispatch_event_via_subprocess(
             pass
         group_deadline = time.monotonic() + max(0.0, cleanup_grace_sec)
         while time.monotonic() < group_deadline:
-            live_descendants = get_live_pids_in_pgid(pgid)
-            if not live_descendants:
+            inspection = inspect_process_group(pgid, proc_root=proc_root)
+            if inspection.status != ProcessInspectionStatus.LIVE_PROCESSES_PRESENT:
                 break
             time.sleep(0.02)
-        if live_descendants:
+        if inspection.status == ProcessInspectionStatus.LIVE_PROCESSES_PRESENT:
             try:
                 os.killpg(pgid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 pass
             group_deadline = time.monotonic() + max(0.0, cleanup_grace_sec)
             while time.monotonic() < group_deadline:
-                live_descendants = get_live_pids_in_pgid(pgid)
-                if not live_descendants:
+                inspection = inspect_process_group(pgid, proc_root=proc_root)
+                if inspection.status != ProcessInspectionStatus.LIVE_PROCESSES_PRESENT:
                     break
                 time.sleep(0.02)
 
     # Process-group verification: ensure NO live descendants remain in PGID.
-    live_descendants = get_live_pids_in_pgid(pgid)
-    if live_descendants:
+    final_inspection = inspect_process_group(pgid, proc_root=proc_root)
+    if final_inspection.status == ProcessInspectionStatus.LIVE_PROCESSES_PRESENT:
         logger.critical(
             "Transport cleanup failed: live descendants %r still active in PGID %d after SIGKILL escalation",
-            live_descendants, pgid
+            final_inspection.live_pids, pgid
         )
         return {
             "status": STATUS_CLEANUP_FAILED,
-            "error": f"Live descendants remaining after SIGKILL: {live_descendants}",
-            "live_pids": live_descendants,
+            "error": f"Live descendants remaining after SIGKILL: {final_inspection.live_pids}",
+            "live_pids": final_inspection.live_pids,
             "pgid": pgid,
         }
+    elif final_inspection.status == ProcessInspectionStatus.STATE_UNVERIFIED:
+        logger.critical(
+            "Transport cleanup failed: process state cannot be verified for PGID %d: %s",
+            pgid, final_inspection.error
+        )
+        return {
+            "status": STATUS_CLEANUP_FAILED,
+            "error": f"Process state cannot be verified for PGID {pgid}: {final_inspection.error}",
+            "live_pids": final_inspection.live_pids,
+            "pgid": pgid,
+        }
+    else:
+        logger.info("Confirmed no live processes remain in PGID %d", pgid)
 
     if timed_out:
         return {
@@ -466,6 +625,7 @@ class OutboxWorker:
         lease_seconds: int = 90,
         max_attempts: int = 8,
         mock_transport_response: Optional[Dict[str, Any]] = None,
+        proc_root: str = "/proc",
     ):
         self.session_mgr = OutboxSessionManager(db_config, allowed_databases)
         self.telegram_token = telegram_token
@@ -476,18 +636,19 @@ class OutboxWorker:
         self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
         self.mock_transport_response = mock_transport_response
+        self.proc_root = proc_root
         self.state = OutboxWorkerState.INITIALIZING
         self._shutdown_requested = False
         self._fatal_pgid: Optional[int] = None
 
+    def _handle_signal(self, signum, frame):
+        logger.info("Signal %d received; requesting graceful outbox worker shutdown", signum)
+        self._shutdown_requested = True
+
     def setup_signals(self):
         """Register graceful shutdown handlers for SIGINT and SIGTERM."""
-        def _handler(signum, frame):
-            logger.info("Signal %d received; requesting graceful outbox worker shutdown", signum)
-            self._shutdown_requested = True
-
-        signal.signal(signal.SIGINT, _handler)
-        signal.signal(signal.SIGTERM, _handler)
+        signal.signal(signal.SIGINT, self._handle_signal)
+        signal.signal(signal.SIGTERM, self._handle_signal)
 
     def format_event_text(self, event: Dict[str, Any]) -> str:
         """Format entry or exit payload into Telegram HTML text."""
@@ -503,6 +664,10 @@ class OutboxWorker:
 
     def process_one_event(self) -> bool:
         """Claim and process at most one due event. Returns True if an event was processed."""
+        if self.state == OutboxWorkerState.FATAL_LOCKOUT:
+            logger.critical("process_one_event called while in FATAL_LOCKOUT; refusing claims")
+            return False
+
         if not self.session_mgr.check_lock_owned():
             logger.error("Advisory lock ownership lost during event loop; stopping worker")
             self.state = OutboxWorkerState.STOPPED
@@ -539,6 +704,7 @@ class OutboxWorker:
             transport_input,
             timeout_sec=self.transport_timeout_sec,
             cleanup_grace_sec=self.cleanup_grace_sec,
+            proc_root=self.proc_root,
         )
 
         status = outcome.get("status")
@@ -548,10 +714,10 @@ class OutboxWorker:
             self.state = OutboxWorkerState.FATAL_LOCKOUT
             self._fatal_pgid = int(outcome.get("pgid") or 0) or None
             logger.critical(
-                "FATAL: Transport cleanup failed for event %d (PGID=%s); entering STATE_FATAL_LOCKOUT. "
+                "FATAL: Transport cleanup failed for event %d (PGID=%s, error=%s); entering STATE_FATAL_LOCKOUT. "
                 "Retaining advisory lock on S_lock. Shutdown requests will not release ownership while "
                 "live transport processes remain. Operator intervention required.",
-                event_id, self._fatal_pgid
+                event_id, self._fatal_pgid, outcome.get("error")
             )
             return True
 
@@ -598,14 +764,18 @@ class OutboxWorker:
 
     def run(self):
         """Main worker execution loop."""
-        self.state = OutboxWorkerState.ACQUIRING_LOCK
-        acquired = self.session_mgr.connect_and_acquire()
-        if not acquired:
-            self.state = OutboxWorkerState.STOPPED
-            logger.error("Could not acquire advisory lock; exiting worker")
-            return 1
+        if not self.session_mgr.check_lock_owned():
+            self.state = OutboxWorkerState.ACQUIRING_LOCK
+            acquired = self.session_mgr.connect_and_acquire()
+            if not acquired:
+                self.state = OutboxWorkerState.STOPPED
+                logger.error("Could not acquire advisory lock; exiting worker")
+                return 1
 
-        self.state = OutboxWorkerState.RUNNING
+        if self._fatal_pgid or self.state == OutboxWorkerState.FATAL_LOCKOUT:
+            self.state = OutboxWorkerState.FATAL_LOCKOUT
+        else:
+            self.state = OutboxWorkerState.RUNNING
         logger.info("Outbox worker running in state %s", self.state.value)
 
         try:
@@ -620,14 +790,34 @@ class OutboxWorker:
                         # The DB session has already been lost; advisory-lock retention is no longer possible.
                         logger.critical("S_lock connection lost during FATAL_LOCKOUT; transport exclusion is no longer guaranteed")
                         return 75
-                    if self._fatal_pgid and not get_live_pids_in_pgid(self._fatal_pgid):
-                        logger.warning("No live transport processes remain in PGID %s; fatal lockout can be cleared", self._fatal_pgid)
-                        self._fatal_pgid = None
-                        self.state = OutboxWorkerState.STOPPING if self._shutdown_requested else OutboxWorkerState.RUNNING
+
+                    if self._fatal_pgid:
+                        inspection = inspect_process_group(self._fatal_pgid, proc_root=self.proc_root)
+                        if inspection.status == ProcessInspectionStatus.CONFIRMED_EMPTY:
+                            logger.info(
+                                "Confirmed no live transport processes remain in PGID %s; fatal lockout cleared",
+                                self._fatal_pgid
+                            )
+                            self._fatal_pgid = None
+                            self.state = OutboxWorkerState.STOPPING if self._shutdown_requested else OutboxWorkerState.RUNNING
+                        elif inspection.status == ProcessInspectionStatus.LIVE_PROCESSES_PRESENT:
+                            logger.warning(
+                                "Live transport processes %r still present in PGID %s; retaining FATAL_LOCKOUT and S_lock",
+                                inspection.live_pids, self._fatal_pgid
+                            )
+                            time.sleep(min(self.poll_interval_sec, 5.0))
+                            continue
+                        else:  # ProcessInspectionStatus.STATE_UNVERIFIED
+                            logger.critical(
+                                "Process state cannot be verified for PGID %s (%s); retaining FATAL_LOCKOUT and S_lock (fail-closed)",
+                                self._fatal_pgid, inspection.error
+                            )
+                            time.sleep(min(self.poll_interval_sec, 5.0))
+                            continue
                     else:
-                        # Even SIGTERM/SIGINT must not release the lock while transport survival is unresolved.
-                        time.sleep(min(self.poll_interval_sec, 5.0))
-                        continue
+                        if not self._shutdown_requested:
+                            time.sleep(min(self.poll_interval_sec, 5.0))
+                            continue
 
                 if self._shutdown_requested:
                     logger.info("Graceful shutdown finished; releasing advisory lock")

@@ -4,7 +4,9 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
+from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,12 +19,63 @@ from paper.outbox_worker import (
     STATUS_CLEANUP_FAILED,
     OutboxWorker,
     OutboxWorkerState,
+    ProcessInspectionError,
+    ProcessInspectionResult,
+    ProcessInspectionStatus,
     _child_preexec_pdeathsig,
     dispatch_event_via_subprocess,
     drain_pipes_bounded,
     get_live_pids_in_pgid,
+    inspect_process_group,
     reap_child_bounded,
 )
+
+
+class ControlledSessionManager:
+    """Thread-safe controlled session manager simulating held MariaDB advisory lock."""
+
+    def __init__(self, conn_id: int = 101):
+        self.conn_id = conn_id
+        self.lock_held = True
+        self.heartbeat_count = 0
+        self.close_count = 0
+        self.claim_count = 0
+        self._lock = threading.Lock()
+
+    def connect_and_acquire(self, timeout_sec: float = 0.0) -> bool:
+        with self._lock:
+            self.lock_held = True
+            return True
+
+    def check_lock_owned(self) -> bool:
+        with self._lock:
+            return self.lock_held
+
+    def heartbeat(self) -> bool:
+        with self._lock:
+            if not self.lock_held:
+                return False
+            self.heartbeat_count += 1
+            return True
+
+    def claim_event(self, lease_seconds: int = 90):
+        with self._lock:
+            self.claim_count += 1
+            return None
+
+    def mark_sent(self, event_id: int, claim_token: str) -> bool:
+        return True
+
+    def mark_retry(self, event_id: int, claim_token: str, attempts: int, error_desc: str, delay: Optional[int] = None) -> bool:
+        return True
+
+    def mark_dead(self, event_id: int, claim_token: str, error_desc: str) -> bool:
+        return True
+
+    def close(self):
+        with self._lock:
+            self.lock_held = False
+            self.close_count += 1
 
 
 class TestProcessLifecycleAndCleanup:
@@ -154,99 +207,317 @@ _child_preexec_pdeathsig(os.getppid() + 9999)
         # Escalates to SIGKILL; grandchild is killed; no live process remains
         assert res["status"] != STATUS_CLEANUP_FAILED
 
-    def test_unkillable_descendant_enters_fatal_lockout_and_refuses_claims(self):
+    def test_sigterm_during_fatal_lockout_retains_lock_until_descendant_terminated(self):
+        # A. Start a real descendant process in its own session/process group
+        bg_proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            start_new_session=True,
+        )
+        pgid = bg_proc.pid
+        assert os.getpgid(bg_proc.pid) == pgid
+
+        session_mgr = ControlledSessionManager()
         worker = OutboxWorker(
             db_config={},
             telegram_token="token",
             telegram_chat_id="chat",
             allowed_databases=("signal_bot_test",),
+            poll_interval_sec=0.02,
         )
-        worker.session_mgr = MagicMock()
-        worker.session_mgr.check_lock_owned.return_value = True
-        worker.session_mgr.claim_event.return_value = {
-            "id": 999,
-            "claim_token": "token999",
-            "event_type": "entry",
-            "payload": {
-                "signal": {"symbol": "BTC/USDT", "side": "LONG"},
-                "units": 1.0,
-                "risk_amt": 100.0,
-                "risk_pct": 1.0,
-                "mode": "shadow",
-            },
-            "attempts": 1,
-        }
+        worker.session_mgr = session_mgr
+        worker.state = OutboxWorkerState.FATAL_LOCKOUT
+        worker._fatal_pgid = pgid
 
-        # Simulate cleanup failure from subprocess
-        with patch("paper.outbox_worker.dispatch_event_via_subprocess", return_value={
-            "status": STATUS_CLEANUP_FAILED,
-            "pgid": 88888,
-            "error": "Descendant PID 88888 unkillable",
-        }):
-            worker.process_one_event()
-
-        assert worker.state == OutboxWorkerState.FATAL_LOCKOUT
-        assert worker._fatal_pgid == 88888
-
-        # In fatal lockout, claims are blocked
-        worker.session_mgr.claim_event.reset_mock()
-        assert worker.state == OutboxWorkerState.FATAL_LOCKOUT
-
-    def test_sigterm_during_fatal_lockout_retains_lock_while_process_lives(self):
-        # Spawn real background process with its own PGID to act as live descendant in _fatal_pgid
-        bg_proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(10)"], start_new_session=True)
+        worker_thread = threading.Thread(target=worker.run)
         try:
+            worker_thread.start()
+
+            # Wait until the worker execution loop runs and executes at least one heartbeat
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline and session_mgr.heartbeat_count < 1:
+                time.sleep(0.02)
+            assert session_mgr.heartbeat_count >= 1
+
+            # Send SIGTERM via worker signal handler
+            worker._handle_signal(signal.SIGTERM, None)
+            assert worker._shutdown_requested is True
+
+            # Verify that while descendant remains live, the worker continues running in FATAL_LOCKOUT
+            time.sleep(0.15)
+            assert worker_thread.is_alive() is True
+            assert worker.state == OutboxWorkerState.FATAL_LOCKOUT
+            assert session_mgr.lock_held is True
+            assert session_mgr.close_count == 0
+            assert session_mgr.heartbeat_count >= 2
+
+            # Now terminate the descendant process
+            os.killpg(pgid, signal.SIGKILL)
+            bg_proc.wait(timeout=3.0)
+
+            # Once the descendant is terminated, worker loop detects confirmed empty group,
+            # clears fatal lockout, performs clean graceful shutdown, and releases S_lock
+            worker_thread.join(timeout=3.0)
+            assert worker_thread.is_alive() is False
+            assert worker.state == OutboxWorkerState.STOPPED
+            assert session_mgr.lock_held is False
+            assert session_mgr.close_count == 1
+        finally:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except OSError:
+                pass
+            bg_proc.wait()
+            if worker_thread.is_alive():
+                worker._shutdown_requested = True
+                worker._fatal_pgid = None
+                worker_thread.join(timeout=2.0)
+
+    def test_clean_shutdown_after_descendant_termination(self):
+        # B. Create the process group correctly using start_new_session=True
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            start_new_session=True,
+        )
+        pgid = proc.pid
+        # Ensure the PID being checked is actually the process-group ID
+        assert os.getpgid(proc.pid) == pgid
+
+        try:
+            # Confirm the inspection detects a live process before termination
+            res_live = inspect_process_group(pgid)
+            assert res_live.status == ProcessInspectionStatus.LIVE_PROCESSES_PRESENT
+            assert proc.pid in res_live.live_pids
+            assert proc.pid in get_live_pids_in_pgid(pgid)
+
+            # Terminate the process group
+            os.killpg(pgid, signal.SIGKILL)
+            proc.wait(timeout=3.0)
+
+            # Confirm the inspection detects no live processes after termination
+            res_dead = inspect_process_group(pgid)
+            assert res_dead.status == ProcessInspectionStatus.CONFIRMED_EMPTY
+            assert res_dead.live_pids == []
+            assert get_live_pids_in_pgid(pgid) == []
+
+            # Verify worker releases the lock only after confirmed cleanup
+            session_mgr = ControlledSessionManager()
             worker = OutboxWorker(
                 db_config={},
                 telegram_token="token",
                 telegram_chat_id="chat",
                 allowed_databases=("signal_bot_test",),
-                poll_interval_sec=0.05,
+                poll_interval_sec=0.02,
             )
+            worker.session_mgr = session_mgr
             worker.state = OutboxWorkerState.FATAL_LOCKOUT
-            worker._fatal_pgid = bg_proc.pid
-            worker._shutdown_requested = True  # Simulate SIGTERM arrival
-            worker.session_mgr = MagicMock()
-            worker.session_mgr.heartbeat.return_value = True
+            worker._fatal_pgid = pgid
+            worker._shutdown_requested = True
 
-            # In FATAL_LOCKOUT, as long as bg_proc is alive, worker refuses to exit or release S_lock
-            live = get_live_pids_in_pgid(worker._fatal_pgid)
-            assert bg_proc.pid in live
-
-            # Heartbeat is maintained, session is not closed
-            assert worker.session_mgr.heartbeat() is True
-            worker.session_mgr.close.assert_not_called()
+            exit_code = worker.run()
+            assert exit_code == 0
+            assert worker.state == OutboxWorkerState.STOPPED
+            assert session_mgr.lock_held is False
+            assert session_mgr.close_count == 1
         finally:
             try:
-                os.killpg(bg_proc.pid, signal.SIGKILL)
+                os.killpg(pgid, signal.SIGKILL)
             except OSError:
                 pass
-            bg_proc.wait()
+            proc.wait()
 
-    def test_when_remaining_process_exits_shutdown_completes_and_releases_lock(self):
-        bg_proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.1)"])
-        bg_proc.wait()  # Wait for it to exit
+    def test_fatal_lockout_entered_via_execution_path_prevents_claims_and_shutdown(self):
+        # C. Spawn real background process with its own PGID
+        bg_proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            start_new_session=True,
+        )
+        pgid = bg_proc.pid
 
+        session_mgr = ControlledSessionManager()
         worker = OutboxWorker(
             db_config={},
             telegram_token="token",
             telegram_chat_id="chat",
             allowed_databases=("signal_bot_test",),
-            poll_interval_sec=0.05,
+            poll_interval_sec=0.02,
         )
+        worker.session_mgr = session_mgr
+
+        # Mock event claim for the first event
+        claim_mock = MagicMock(return_value={
+            "id": 1001,
+            "claim_token": "token-1001",
+            "event_type": "entry",
+            "payload": {
+                "signal": {"symbol": "BTC/USDT", "side": "LONG"},
+                "units": 1.0,
+                "risk_amt": 50.0,
+                "risk_pct": 1.0,
+                "mode": "shadow",
+            },
+            "attempts": 1,
+        })
+        session_mgr.claim_event = claim_mock
+
+        worker_thread = None
+        try:
+            # Enter FATAL_LOCKOUT through the ACTUAL worker execution path
+            with patch("paper.outbox_worker.dispatch_event_via_subprocess", return_value={
+                "status": STATUS_CLEANUP_FAILED,
+                "pgid": pgid,
+                "error": "Descendant process surviving after SIGKILL",
+                "live_pids": [pgid],
+            }):
+                processed = worker.process_one_event()
+                assert processed is True
+
+            assert worker.state == OutboxWorkerState.FATAL_LOCKOUT
+            assert worker._fatal_pgid == pgid
+
+            # Attempt to continue polling directly: process_one_event must refuse claims
+            claim_mock.reset_mock()
+            assert worker.process_one_event() is False
+            claim_mock.assert_not_called()
+
+            # Start worker execution loop in background thread to verify continuous polling
+            worker_thread = threading.Thread(target=worker.run)
+            worker_thread.start()
+
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline and session_mgr.heartbeat_count < 1:
+                time.sleep(0.02)
+            assert session_mgr.heartbeat_count >= 1
+
+            # While process group remains unresolved, verify NO claims occur
+            claim_mock.assert_not_called()
+
+            # Request SIGTERM
+            worker._handle_signal(signal.SIGTERM, None)
+            assert worker._shutdown_requested is True
+
+            # Verify the worker does NOT exit merely because SIGTERM was requested
+            time.sleep(0.1)
+            assert worker_thread.is_alive() is True
+            assert worker.state == OutboxWorkerState.FATAL_LOCKOUT
+            assert session_mgr.lock_held is True
+            assert session_mgr.close_count == 0
+            claim_mock.assert_not_called()
+
+            # Now terminate descendant and verify clean exit
+            os.killpg(pgid, signal.SIGKILL)
+            bg_proc.wait(timeout=3.0)
+
+            worker_thread.join(timeout=3.0)
+            assert worker_thread.is_alive() is False
+            assert worker.state == OutboxWorkerState.STOPPED
+            assert session_mgr.close_count == 1
+        finally:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except OSError:
+                pass
+            bg_proc.wait()
+            if worker_thread and worker_thread.is_alive():
+                worker._shutdown_requested = True
+                worker._fatal_pgid = None
+                worker_thread.join(timeout=2.0)
+
+    def test_process_inspection_failure_fails_closed_and_retains_lock(self, tmp_path):
+        # D. 1. Missing proc directory
+        missing_root = tmp_path / "nonexistent_proc"
+        res_missing = inspect_process_group(12345, proc_root=str(missing_root))
+        assert res_missing.status == ProcessInspectionStatus.STATE_UNVERIFIED
+        assert "does not exist" in res_missing.error
+        with pytest.raises(ProcessInspectionError) as exc_info:
+            get_live_pids_in_pgid(12345, proc_root=str(missing_root))
+        assert "does not exist" in str(exc_info.value)
+
+        # 2. Permission failure on proc directory or stat file
+        perm_root = tmp_path / "proc_perm"
+        perm_root.mkdir()
+        pid_dir = perm_root / "999"
+        pid_dir.mkdir()
+        stat_file = pid_dir / "stat"
+        stat_file.write_text("999 (python3) S 1 12345 100 0 0 0\n")
+        stat_file.chmod(0o000)
+
+        try:
+            res_perm = inspect_process_group(12345, proc_root=str(perm_root))
+            assert res_perm.status == ProcessInspectionStatus.STATE_UNVERIFIED
+            assert "Permission denied" in res_perm.error
+            with pytest.raises(ProcessInspectionError):
+                get_live_pids_in_pgid(12345, proc_root=str(perm_root))
+        finally:
+            stat_file.chmod(0o644)
+
+        # 3. Malformed stat file (missing closing parenthesis)
+        malformed_root = tmp_path / "proc_malformed"
+        malformed_root.mkdir()
+        pid_dir2 = malformed_root / "888"
+        pid_dir2.mkdir()
+        (pid_dir2 / "stat").write_text("888 python3_without_parens S 1 12345 100\n")
+
+        res_malformed = inspect_process_group(12345, proc_root=str(malformed_root))
+        assert res_malformed.status == ProcessInspectionStatus.STATE_UNVERIFIED
+        assert "missing closing parenthesis" in res_malformed.error
+        with pytest.raises(ProcessInspectionError):
+            get_live_pids_in_pgid(12345, proc_root=str(malformed_root))
+
+        # 4. Malformed stat file (insufficient fields)
+        malformed_root3 = tmp_path / "proc_fields"
+        malformed_root3.mkdir()
+        pid_dir3 = malformed_root3 / "777"
+        pid_dir3.mkdir()
+        (pid_dir3 / "stat").write_text("777 (python3) S\n")
+
+        res_fields = inspect_process_group(12345, proc_root=str(malformed_root3))
+        assert res_fields.status == ProcessInspectionStatus.STATE_UNVERIFIED
+        assert "insufficient fields" in res_fields.error
+
+        # 5. Worker retains lock ownership and remains in fail-closed state under inspection failure
+        session_mgr = ControlledSessionManager()
+        worker = OutboxWorker(
+            db_config={},
+            telegram_token="token",
+            telegram_chat_id="chat",
+            allowed_databases=("signal_bot_test",),
+            poll_interval_sec=0.02,
+            proc_root=str(malformed_root),
+        )
+        worker.session_mgr = session_mgr
         worker.state = OutboxWorkerState.FATAL_LOCKOUT
-        worker._fatal_pgid = bg_proc.pid
+        worker._fatal_pgid = 12345
         worker._shutdown_requested = True
-        worker.session_mgr = MagicMock()
-        worker.session_mgr.heartbeat.return_value = True
 
-        # Process has exited: get_live_pids_in_pgid returns []
-        assert get_live_pids_in_pgid(worker._fatal_pgid) == []
+        worker_thread = threading.Thread(target=worker.run)
+        try:
+            worker_thread.start()
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline and session_mgr.heartbeat_count < 1:
+                time.sleep(0.02)
+            assert session_mgr.heartbeat_count >= 1
 
-        # Worker run loop completes shutdown and releases S_lock
-        with patch.object(worker.session_mgr, "connect_and_acquire", return_value=True):
-            exit_code = worker.run()
+            # Inspection failed: worker must NOT interpret as empty group
+            # Must remain in FATAL_LOCKOUT, retain lock, and refuse to exit
+            time.sleep(0.1)
+            assert worker_thread.is_alive() is True
+            assert worker.state == OutboxWorkerState.FATAL_LOCKOUT
+            assert worker._fatal_pgid == 12345
+            assert session_mgr.lock_held is True
+            assert session_mgr.close_count == 0
 
-        assert exit_code == 0
-        assert worker.state == OutboxWorkerState.STOPPED
-        worker.session_mgr.close.assert_called_once()
+            # Point to empty proc root to simulate resolved cleanup
+            empty_root = tmp_path / "proc_empty"
+            empty_root.mkdir()
+            worker.proc_root = str(empty_root)
+
+            worker_thread.join(timeout=3.0)
+            assert worker_thread.is_alive() is False
+            assert worker.state == OutboxWorkerState.STOPPED
+            assert session_mgr.lock_held is False
+            assert session_mgr.close_count == 1
+        finally:
+            if worker_thread and worker_thread.is_alive():
+                worker._shutdown_requested = True
+                worker._fatal_pgid = None
+                worker_thread.join(timeout=2.0)
