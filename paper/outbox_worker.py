@@ -433,8 +433,10 @@ def dispatch_event_via_subprocess(
 
     # A direct child may exit while a descendant in the same process group survives.
     # Do not merely lock out in that case: explicitly terminate the remaining group.
+    captured_descendants: List[int] = []
     inspection = inspect_process_group(pgid, proc_root=proc_root)
     if inspection.status == ProcessInspectionStatus.LIVE_PROCESSES_PRESENT:
+        captured_descendants.extend(inspection.live_pids)
         logger.warning(
             "Direct transport child exited but live descendants %r remain in PGID %d; terminating group",
             inspection.live_pids, pgid
@@ -489,28 +491,40 @@ def dispatch_event_via_subprocess(
         logger.info("Confirmed no live processes remain in PGID %d", pgid)
 
     if timed_out:
-        return {
+        out = {
             "status": STATUS_DELIVERY_UNKNOWN,
             "error": f"Transport exceeded deadline {timeout_sec:.1f}s",
             "stderr": stderr_bytes.decode("utf-8", errors="replace")[:500],
         }
+        if captured_descendants:
+            out["captured_descendants"] = captured_descendants
+        return out
 
     # Child completed before deadline; parse JSON result
     try:
         stdout_text = stdout_bytes.decode("utf-8").strip()
         if not stdout_text:
-            return {
+            out = {
                 "status": STATUS_DELIVERY_UNKNOWN,
                 "error": "Empty stdout from transport child",
                 "stderr": stderr_bytes.decode("utf-8", errors="replace")[:500],
             }
-        return json.loads(stdout_text)
+            if captured_descendants:
+                out["captured_descendants"] = captured_descendants
+            return out
+        parsed = json.loads(stdout_text)
+        if isinstance(parsed, dict) and captured_descendants:
+            parsed["captured_descendants"] = captured_descendants
+        return parsed
     except Exception as exc:
-        return {
+        out = {
             "status": STATUS_DELIVERY_UNKNOWN,
             "error": f"Failed to parse transport child JSON: {exc}",
             "raw_stdout": stdout_bytes.decode("utf-8", errors="replace")[:500],
         }
+        if captured_descendants:
+            out["captured_descendants"] = captured_descendants
+        return out
 
 
 class OutboxSessionManager:

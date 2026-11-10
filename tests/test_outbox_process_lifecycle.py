@@ -179,33 +179,63 @@ _child_preexec_pdeathsig(os.getppid() + 9999)
         res = subprocess.run([sys.executable, "-c", script])
         assert res.returncode == 1
 
-    def test_direct_child_exits_while_grandchild_survives_and_is_terminated_by_sigterm(self):
+    def test_direct_child_exits_while_grandchild_survives_and_is_terminated_by_sigterm(self, tmp_path):
         # Direct child exits immediately while grandchild stays alive in same PGID
+        pid_file = tmp_path / "grandchild_sigterm.pid"
         payload = {
             "token": "123:test_token",
             "chat_id": "-1001",
             "text": "Grandchild test",
             "mock_response": {
-                "fork_descendant": {"sleep": 10.0, "ignore_sigterm": False}
+                "fork_descendant": {
+                    "sleep": 10.0,
+                    "ignore_sigterm": False,
+                    "pid_file": str(pid_file),
+                }
             },
         }
         res = dispatch_event_via_subprocess(payload, timeout_sec=0.5, cleanup_grace_sec=0.5)
         # Supervisor terminates grandchild on SIGTERM and verifies 0 live processes remain
         assert res["status"] != STATUS_CLEANUP_FAILED
+        assert pid_file.exists(), "Grandchild PID file was not created"
+        grandchild_pid = int(pid_file.read_text().strip())
+        assert grandchild_pid > 0
+        assert grandchild_pid in res.get("captured_descendants", []), f"Grandchild PID {grandchild_pid} was not captured in {res}"
+        # Verify grandchild process is no longer running
+        try:
+            os.kill(grandchild_pid, 0)
+            assert False, f"Grandchild PID {grandchild_pid} is still alive after SIGTERM cleanup"
+        except ProcessLookupError:
+            pass
 
-    def test_grandchild_ignoring_sigterm_is_escalated_to_sigkill_and_verified(self):
+    def test_grandchild_ignoring_sigterm_is_escalated_to_sigkill_and_verified(self, tmp_path):
         # Direct child exits, grandchild ignores SIGTERM; supervisor escalates to SIGKILL
+        pid_file = tmp_path / "grandchild_sigkill.pid"
         payload = {
             "token": "123:test_token",
             "chat_id": "-1001",
             "text": "Grandchild ignore SIGTERM test",
             "mock_response": {
-                "fork_descendant": {"sleep": 10.0, "ignore_sigterm": True}
+                "fork_descendant": {
+                    "sleep": 10.0,
+                    "ignore_sigterm": True,
+                    "pid_file": str(pid_file),
+                }
             },
         }
         res = dispatch_event_via_subprocess(payload, timeout_sec=0.3, cleanup_grace_sec=0.3)
         # Escalates to SIGKILL; grandchild is killed; no live process remains
         assert res["status"] != STATUS_CLEANUP_FAILED
+        assert pid_file.exists(), "Grandchild PID file was not created"
+        grandchild_pid = int(pid_file.read_text().strip())
+        assert grandchild_pid > 0
+        assert grandchild_pid in res.get("captured_descendants", []), f"Grandchild PID {grandchild_pid} was not captured in {res}"
+        # Verify grandchild process is no longer running after SIGKILL escalation
+        try:
+            os.kill(grandchild_pid, 0)
+            assert False, f"Grandchild PID {grandchild_pid} is still alive after SIGKILL cleanup"
+        except ProcessLookupError:
+            pass
 
     def test_sigterm_during_fatal_lockout_retains_lock_until_descendant_terminated(self):
         # A. Start a real descendant process in its own session/process group

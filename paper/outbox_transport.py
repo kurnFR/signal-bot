@@ -15,6 +15,7 @@ Guarantees:
 
 import json
 import socket
+import subprocess
 import sys
 from typing import Any, Dict, Optional, Tuple
 
@@ -258,12 +259,20 @@ def _execute_mock(mock: Dict[str, Any]) -> Dict[str, Any]:
         desc = mock["fork_descendant"]
         sleep_sec = float(desc.get("sleep", 10.0))
         ignore_term = bool(desc.get("ignore_sigterm", False))
+        pid_file = desc.get("pid_file")
         code = (
-            f"import signal, time; "
+            f"import os, signal, time; "
+            f"{f'open({pid_file!r}, \"w\").write(str(os.getpid())); ' if pid_file else ''}"
             f"{'signal.signal(signal.SIGTERM, signal.SIG_IGN); ' if ignore_term else ''}"
             f"time.sleep({sleep_sec})"
         )
-        subprocess.Popen([sys.executable, "-c", code])
+        p = subprocess.Popen([sys.executable, "-c", code])
+        if pid_file:
+            try:
+                with open(pid_file, "w") as f:
+                    f.write(str(p.pid))
+            except Exception:
+                pass
         sys.exit(0)
 
     if "sleep" in mock:
