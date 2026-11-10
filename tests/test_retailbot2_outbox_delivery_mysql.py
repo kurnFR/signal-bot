@@ -17,7 +17,6 @@ The test account needs SELECT, INSERT, UPDATE, DELETE on signal_bot_test.
 import logging
 import os
 import uuid
-from unittest.mock import Mock
 
 import mysql.connector
 import pytest
