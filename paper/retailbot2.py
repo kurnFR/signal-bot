@@ -2470,34 +2470,31 @@ class RetailDeathTrapBot:
     # ──────────────────────────────────────────────────────────────
 
     def _dispatch_telegram_outbox(self, limit: int = 2):
-        """Deliver persisted events; delivery is at-least-once, not exactly-once."""
+        """Deliver persisted events while holding the shared outbox lock on the same DB session."""
         if not getattr(self.tg, "enabled", False):
             return 0
 
-        # Attempt to acquire advisory lock on an independent connection for mutual exclusion
-        lock_conn = None
-        if hasattr(self.db, "get_conn") and hasattr(self.db, "acquire_outbox_lock"):
-            try:
-                candidate = self.db.get_conn()
-                if candidate:
-                    if self.db.acquire_outbox_lock(candidate, timeout_seconds=0):
-                        lock_conn = candidate
-                    else:
-                        try:
-                            candidate.close()
-                        except Exception:
-                            pass
-                        self.logger.debug(
-                            "RetailBot2 outbox lock is held by standalone worker or another session; skipping dispatch"
-                        )
-                        return 0
-            except Exception as exc:
-                self.logger.warning("Failed outbox lock preflight check: %s", exc)
+        # Fail closed: dispatch must never proceed without the shared advisory lock.
+        if not (hasattr(self.db, "get_conn") and hasattr(self.db, "acquire_outbox_lock")):
+            self.logger.error("Outbox dispatch disabled: database manager cannot provide advisory-lock ownership")
+            return 0
 
-        delivered = 0
+        lock_conn = None
         try:
+            lock_conn = self.db.get_conn()
+            if not lock_conn or not self.db.acquire_outbox_lock(lock_conn, timeout_seconds=0):
+                if lock_conn:
+                    try:
+                        lock_conn.close()
+                    except Exception:
+                        pass
+                self.logger.debug("RetailBot2 outbox lock is held by another worker; skipping dispatch")
+                return 0
+
+            delivered = 0
             for _ in range(max(0, int(limit))):
-                event = self.db.claim_telegram_outbox_event()
+                # Claim, acknowledge and retry must all use the exact connection owning GET_LOCK().
+                event = self.db.claim_telegram_outbox_event(conn=lock_conn)
                 if not event:
                     break
                 try:
@@ -2519,19 +2516,25 @@ class RetailDeathTrapBot:
                     else:
                         raise ValueError("unsupported RetailBot2 Telegram event type")
                     if ok:
-                        if self.db.mark_telegram_outbox_sent(int(event["id"]), str(event["claim_token"])):
+                        if self.db.mark_telegram_outbox_sent(
+                            int(event["id"]), str(event["claim_token"]), conn=lock_conn
+                        ):
                             delivered += 1
                     else:
                         self.db.retry_telegram_outbox_event(
                             int(event["id"]), str(event["claim_token"]), int(event.get("attempts") or 1),
-                            "Telegram API did not confirm message delivery",
+                            "Telegram API did not confirm message delivery", conn=lock_conn,
                         )
                 except Exception as exc:
                     self.db.retry_telegram_outbox_event(
-                        int(event["id"]), str(event["claim_token"]), int(event.get("attempts") or 1), str(exc),
+                        int(event["id"]), str(event["claim_token"]), int(event.get("attempts") or 1),
+                        str(exc), conn=lock_conn,
                     )
                     self.logger.exception("RetailBot2 Telegram outbox dispatch failed")
             return delivered
+        except Exception as exc:
+            self.logger.error("RetailBot2 outbox dispatch failed closed: %s", exc)
+            return 0
         finally:
             if lock_conn:
                 try:
