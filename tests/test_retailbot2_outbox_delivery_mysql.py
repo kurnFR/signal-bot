@@ -193,7 +193,7 @@ def _expire_lease(event_id):
         conn.close()
 
 
-def _cleanup(db, trade_id):
+def _cleanup(db, trade_id, strategy=None):
     conn = _connection()
     try:
         cursor = conn.cursor()
@@ -202,6 +202,11 @@ def _cleanup(db, trade_id):
             (trade_id,),
         )
         cursor.execute("DELETE FROM rdt_trades WHERE id=%s", (trade_id,))
+        if strategy:
+            cursor.execute(
+                "DELETE FROM rdt_strategy_stats WHERE strategy=%s AND mode='shadow'",
+                (strategy,),
+            )
         conn.commit()
         cursor.close()
     finally:
@@ -284,3 +289,92 @@ def test_dispatcher_recovers_expired_claim_after_worker_interruption():
     finally:
         if trade_id is not None:
             _cleanup(db, trade_id)
+
+
+def test_closed_trade_persists_exit_event_and_dispatches_confirmed_delivery():
+    if os.getenv("SIGNAL_BOT_RUN_RETAILBOT2_DB_INTEGRATION") != "1":
+        pytest.skip("opt-in isolated signal_bot_test integration test")
+
+    db = _db()
+    trade_id = None
+    strategy = f"OUTBOX_EXIT_{uuid.uuid4().hex[:12].upper()}"
+    try:
+        _assert_outbox_idle()
+        symbol = f"OTX{uuid.uuid4().hex[:10].upper()}USDT"
+        trade = {
+            "symbol": symbol,
+            "side": "LONG",
+            "entry": 100.0,
+            "stop": 95.0,
+            "target": 110.0,
+            "atr": 2.0,
+            "rr": 2.0,
+            "strategy": strategy,
+            "strategies_triggered": [strategy],
+            "telegram_enabled": False,
+            "confluence_score": 1,
+            "reason": "isolated exit outbox acceptance",
+        }
+        trade_id = db.save_trade(trade, 2.0, "shadow")
+        assert trade_id is not None
+
+        exit_alert = {
+            "trade": {
+                "id": trade_id,
+                "symbol": symbol,
+                "side": "LONG",
+                "entry": 100.0,
+                "units": 2.0,
+                "strategy": strategy,
+                "telegram_enabled": True,
+            },
+            "exit_price": 106.0,
+            "reason": "TAKE_PROFIT",
+            "pnl": 12.0,
+            "pnl_pct": 6.0,
+            "telegram_enabled": True,
+        }
+        assert db.close_trade_and_update_stats(
+            trade_id, 106.0, "TAKE_PROFIT", 12.0, 6.0,
+            strategy, "shadow", exit_alert=exit_alert,
+        )
+
+        conn = _connection()
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(
+                "SELECT status, exit_price, net_pnl FROM rdt_trades WHERE id=%s",
+                (trade_id,),
+            )
+            closed_trade = cursor.fetchone()
+            assert closed_trade is not None
+            assert closed_trade["status"] == "CLOSED"
+            assert float(closed_trade["exit_price"]) == pytest.approx(106.0)
+            assert float(closed_trade["net_pnl"]) == pytest.approx(12.0)
+            cursor.close()
+        finally:
+            conn.close()
+
+        queued = _read_event(trade_id)
+        assert queued["event_type"] == "exit"
+        assert queued["status"] == "pending"
+        assert queued["attempts"] == 0
+        assert queued["sent_at"] is None
+
+        bot = _bot(db, Mock(return_value=True))
+        bot.tg.send_exit = Mock(return_value=True)
+        with patch("paper.retailbot2.requests.get", side_effect=AssertionError("network forbidden")), \
+             patch("paper.retailbot2.requests.post", side_effect=AssertionError("network forbidden")):
+            assert bot._dispatch_telegram_outbox(limit=1) == 1
+
+        sent = _read_event(trade_id)
+        assert sent["status"] == "sent"
+        assert sent["event_type"] == "exit"
+        assert sent["attempts"] == 1
+        assert sent["sent_at"] is not None
+        bot.tg.send_exit.assert_called_once_with(
+            exit_alert["trade"], 106.0, "TAKE_PROFIT", 12.0, 6.0
+        )
+    finally:
+        if trade_id is not None:
+            _cleanup(db, trade_id, strategy=strategy)
