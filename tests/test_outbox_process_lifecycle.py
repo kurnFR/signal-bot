@@ -28,7 +28,15 @@ from paper.outbox_worker import (
     get_live_pids_in_pgid,
     inspect_process_group,
     reap_child_bounded,
+    main as outbox_worker_main,
 )
+
+
+def test_worker_cli_rejects_unsafe_once_mode():
+    with patch("sys.argv", ["outbox_worker", "--once"]):
+        with pytest.raises(SystemExit) as exc_info:
+            outbox_worker_main()
+    assert exc_info.value.code == 2
 
 
 class ControlledSessionManager:
