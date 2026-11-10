@@ -53,9 +53,13 @@ function runPythonHelper(scriptContent, envOverrides = {}, stdinJson = null) {
   return new Promise((resolve, reject) => {
     const env = {
       ...process.env,
+      ...envOverrides,
+      // Fail closed to the local isolated MariaDB instance; never inherit or
+      // allow a helper override to redirect this harness to another database.
+      MYSQL_HOST: "127.0.0.1",
+      MYSQL_PORT: "3306",
       MYSQL_DATABASE: TARGET_DB,
       PATH: process.env.PATH || "/home/BIS/.local/bin:/usr/local/bin:/usr/bin:/bin",
-      ...envOverrides,
     };
     const pythonBin = process.env.PYTHON || "python3";
     const proc = spawn(pythonBin, ["-c", scriptContent], {
@@ -651,6 +655,9 @@ print(json.dumps({"status": "ok", "active_db": active_db, "seeded_ids": seeded_i
     console.log(`[*] Spawning staging FastAPI server on port ${STAGING_PORT} (DB: ${TARGET_DB})...`);
     const env = {
       ...process.env,
+      // Keep the child server pinned to the local isolated MariaDB instance.
+      MYSQL_HOST: "127.0.0.1",
+      MYSQL_PORT: "3306",
       MYSQL_DATABASE: TARGET_DB,
       WEB_PORT: String(STAGING_PORT),
       SIGNAL_BOT_HOST: "127.0.0.1",
