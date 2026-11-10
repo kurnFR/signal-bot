@@ -961,7 +961,6 @@ def main():
     parser.add_argument("--database", choices=["signal_bot_test", "crypto_signals"], default="signal_bot_test")
     parser.add_argument("--poll-interval", type=float, default=1.0)
     parser.add_argument("--timeout", type=float, default=10.0)
-    parser.add_argument("--once", action="store_true", help="Process at most one event and exit")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -994,14 +993,6 @@ def main():
         poll_interval_sec=args.poll_interval,
         transport_timeout_sec=args.timeout,
     )
-
-    if args.once:
-        worker.session_mgr.connect_and_acquire()
-        try:
-            worker.process_one_event()
-            sys.exit(0)
-        finally:
-            worker.session_mgr.close()
 
     worker.setup_signals()
     exit_code = worker.run()
