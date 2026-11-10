@@ -171,6 +171,83 @@ class BotConfig:
 # TELEGRAM
 # ═══════════════════════════════════════════════════════════════════
 
+OUTBOX_LOCK_NAME = "rdt_outbox_worker_lock"
+
+
+def format_entry_message(payload: Dict, trade_id: int) -> str:
+    signal = payload.get("signal") or {}
+    side_emoji = "🟢 LONG" if signal.get("side") == "LONG" else "🔴 SHORT"
+    mode = str(payload.get("mode", "shadow"))
+    mode_tag = "🔄 INVERSE" if mode == "inverse" else "👁️ SHADOW"
+    strategies = signal.get("strategies_triggered", [signal.get("strategy", "?")])
+    confluence = signal.get("confluence_score", len(strategies))
+
+    strat_lines = []
+    for s in strategies:
+        strat_lines.append(f"  ├ {escape(str(s))}")
+    strat_text = "\n".join(strat_lines) if strat_lines else "  ├ N/A"
+
+    reason = str(signal.get("reason", "N/A"))[:200]
+    units = float(payload.get("units", 0.0))
+    risk_amt = float(payload.get("risk_amt", 0.0))
+    risk_pct = float(payload.get("risk_pct", 0.0))
+    entry_val = float(signal.get("entry", 0.0))
+    stop_val = float(signal.get("stop", 0.0))
+    target_val = float(signal.get("target", 0.0))
+    candle_time = escape(str(signal.get("candle_close_time", "N/A")))
+
+    return (
+        f"{side_emoji} <b>{mode_tag} #{trade_id}</b>\n"
+        f"\n"
+        f"<b>Symbol:</b> {escape(str(signal.get('symbol', 'N/A')))}\n"
+        f"<b>Time:</b> {candle_time}\n"
+        f"\n"
+        f"<b>📊 PLAN:</b>\n"
+        f"  ├ Entry:  <code>${entry_val:.6f}</code>\n"
+        f"  ├ Stop:   <code>${stop_val:.6f}</code>\n"
+        f"  └ Target: <code>${target_val:.6f}</code>\n"
+        f"\n"
+        f"<b>💰 RISK:</b>\n"
+        f"  ├ Units: {units:.6f}\n"
+        f"  ├ Risk:  ${risk_amt:.2f} ({risk_pct:.1f}%)\n"
+        f"  └ R:R:   1:{signal.get('rr', 1.0):.1f}\n"
+        f"\n"
+        f"<b>🎯 Strategies ({confluence}/7):</b>\n"
+        f"{strat_text}\n"
+        f"\n"
+        f"<b>Reason:</b> <i>{escape(reason)}</i>"
+    )
+
+
+def format_exit_message(payload: Dict) -> str:
+    trade = payload.get("trade") or {}
+    exit_price = float(payload.get("exit_price", 0.0))
+    reason = str(payload.get("reason", "UNKNOWN"))
+    pnl = float(payload.get("pnl", 0.0))
+    pnl_pct = float(payload.get("pnl_pct", 0.0))
+    emoji_map = {
+        "TAKE_PROFIT": "🎯✅",
+        "STOP_LOSS": "🛑❌",
+    }
+    emoji = emoji_map.get(reason, "⏹️")
+    color = "🟢" if pnl >= 0 else "🔴"
+    mode = str(trade.get("mode", "shadow")).upper()
+
+    return (
+        f"{emoji} <b>EXIT [{mode}] #{trade.get('id', '?')}</b>\n"
+        f"\n"
+        f"<b>Symbol:</b> {escape(str(trade.get('symbol', '?')))} "
+        f"<b>Side:</b> {escape(str(trade.get('side', '?')))}\n"
+        f"<b>Strategy:</b> {escape(str(trade.get('strategy', '?')))}\n"
+        f"<b>Reason:</b> {escape(str(reason).replace('_', ' '))}\n"
+        f"\n"
+        f"{color} <b>P&L:</b> ${pnl:+.2f} ({pnl_pct:+.2f}%)\n"
+        f"{color} <b>Exit:</b> <code>${exit_price:.6f}</code>\n"
+        f"\n"
+        f"⏰ {datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%d %H:%M UTC')}"
+    )
+
+
 class TelegramAlert:
     """
     Fixed version with:
@@ -413,66 +490,26 @@ class TelegramAlert:
 
     def send_entry(self, signal: Dict, trade_id: int, units: float,
                    risk_amt: float, risk_pct: float, mode: str) -> bool:
-        side_emoji = "🟢 LONG" if signal['side'] == 'LONG' else "🔴 SHORT"
-        mode_tag = "🔄 INVERSE" if mode == "inverse" else "👁️ SHADOW"
-        strategies = signal.get('strategies_triggered', [signal.get('strategy', '?')])
-        confluence = signal.get('confluence_score', len(strategies))
-
-        # Build strategy list safely
-        strat_lines = []
-        for s in strategies:
-            strat_lines.append(f"  ├ {escape(str(s))}")
-        strat_text = "\n".join(strat_lines) if strat_lines else "  ├ N/A"
-
-        # Truncate reason to avoid Telegram 4096 char limit
-        reason = str(signal.get('reason', 'N/A'))[:200]
-
-        msg = (
-            f"{side_emoji} <b>{mode_tag} #{trade_id}</b>\n"
-            f"\n"
-            f"<b>Symbol:</b> {escape(str(signal['symbol']))}\n"
-            f"<b>Time:</b> {escape(str(signal.get('candle_close_time', 'N/A')))}\n"
-            f"\n"
-            f"<b>📊 PLAN:</b>\n"
-            f"  ├ Entry:  <code>${signal['entry']:.6f}</code>\n"
-            f"  ├ Stop:   <code>${signal['stop']:.6f}</code>\n"
-            f"  └ Target: <code>${signal['target']:.6f}</code>\n"
-            f"\n"
-            f"<b>💰 RISK:</b>\n"
-            f"  ├ Units: {units:.6f}\n"
-            f"  ├ Risk:  ${risk_amt:.2f} ({risk_pct:.1f}%)\n"
-            f"  └ R:R:   1:{signal.get('rr', 1.0):.1f}\n"
-            f"\n"
-            f"<b>🎯 Strategies ({confluence}/7):</b>\n"
-            f"{strat_text}\n"
-            f"\n"
-            f"<b>Reason:</b> <i>{escape(reason)}</i>"
-        )
+        payload = {
+            "signal": signal,
+            "units": units,
+            "risk_amt": risk_amt,
+            "risk_pct": risk_pct,
+            "mode": mode,
+        }
+        msg = format_entry_message(payload, trade_id)
         return self.send(msg)
 
     def send_exit(self, trade: Dict, exit_price: float,
                   reason: str, pnl: float, pnl_pct: float) -> bool:
-        emoji_map = {
-            'TAKE_PROFIT': "🎯✅",
-            'STOP_LOSS': "🛑❌",
+        payload = {
+            "trade": trade,
+            "exit_price": exit_price,
+            "reason": reason,
+            "pnl": pnl,
+            "pnl_pct": pnl_pct,
         }
-        emoji = emoji_map.get(reason, "⏹️")
-        color = "🟢" if pnl >= 0 else "🔴"
-        mode = trade.get('mode', 'shadow').upper()
-
-        msg = (
-            f"{emoji} <b>EXIT [{mode}] #{trade.get('id', '?')}</b>\n"
-            f"\n"
-            f"<b>Symbol:</b> {escape(str(trade.get('symbol', '?')))} "
-            f"<b>Side:</b> {escape(str(trade.get('side', '?')))}\n"
-            f"<b>Strategy:</b> {escape(str(trade.get('strategy', '?')))}\n"
-            f"<b>Reason:</b> {escape(str(reason).replace('_', ' '))}\n"
-            f"\n"
-            f"{color} <b>P&L:</b> ${pnl:+.2f} ({pnl_pct:+.2f}%)\n"
-            f"{color} <b>Exit:</b> <code>${exit_price:.6f}</code>\n"
-            f"\n"
-            f"⏰ {datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%d %H:%M UTC')}"
-        )
+        msg = format_exit_message(payload)
         return self.send(msg)
 
     def send_stats(self, stats: Dict,
@@ -1589,14 +1626,68 @@ class DatabaseManager:
             conn.close()
 
 
-    def claim_telegram_outbox_event(self, lease_seconds: int = 90) -> Optional[Dict]:
-        """Atomically claim one due event; expired leases are recoverable after restart."""
-        conn = self.get_conn()
+    def acquire_outbox_lock(self, conn, timeout_seconds: int = 0) -> bool:
+        """Attempt to acquire MariaDB advisory lock for outbox delivery.
+        Returns True if acquired (1), False otherwise (0 or error)."""
         if not conn:
+            return False
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT GET_LOCK(%s, %s)", (OUTBOX_LOCK_NAME, int(timeout_seconds)))
+            row = cursor.fetchone()
+            return bool(row and row[0] == 1)
+        except Exception as exc:
+            self.logger.error("Failed to acquire advisory lock %s: %s", OUTBOX_LOCK_NAME, exc)
+            return False
+        finally:
+            if cursor is not None:
+                cursor.close()
+
+    def is_outbox_lock_owned(self, conn) -> bool:
+        """Check if this connection owns the MariaDB advisory lock."""
+        if not conn:
+            return False
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT IS_USED_LOCK(%s) = CONNECTION_ID()", (OUTBOX_LOCK_NAME,))
+            row = cursor.fetchone()
+            return bool(row and row[0] == 1)
+        except Exception as exc:
+            self.logger.warning("Lock ownership check failed: %s", exc)
+            return False
+        finally:
+            if cursor is not None:
+                cursor.close()
+
+    def release_outbox_lock(self, conn) -> bool:
+        """Release the advisory lock on this connection."""
+        if not conn:
+            return False
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT RELEASE_LOCK(%s)", (OUTBOX_LOCK_NAME,))
+            row = cursor.fetchone()
+            return bool(row and row[0] == 1)
+        except Exception as exc:
+            self.logger.error("Failed to release advisory lock %s: %s", OUTBOX_LOCK_NAME, exc)
+            return False
+        finally:
+            if cursor is not None:
+                cursor.close()
+
+    def claim_telegram_outbox_event(self, lease_seconds: int = 90, conn=None) -> Optional[Dict]:
+        """Atomically claim one due event; expired leases are recoverable after restart.
+        If conn is provided (e.g. dedicated S_lock), it is kept open and committed before return."""
+        own_conn = conn is None
+        active_conn = self.get_conn() if own_conn else conn
+        if not active_conn:
             return None
         cursor = None
         try:
-            cursor = conn.cursor(dictionary=True)
+            cursor = active_conn.cursor(dictionary=True)
             cursor.execute("START TRANSACTION")
             # An expired final-attempt lease must not be sent again after a crash.
             cursor.execute(
@@ -1617,7 +1708,7 @@ class DatabaseManager:
             )
             event = cursor.fetchone()
             if not event:
-                conn.commit()
+                active_conn.commit()
                 return None
             try:
                 payload = json.loads(event.get('payload_json') or '{}')
@@ -1628,7 +1719,7 @@ class DatabaseManager:
                        WHERE id=%s""",
                     (f"invalid payload JSON: {exc}"[:1000], event['id']),
                 )
-                conn.commit()
+                active_conn.commit()
                 return None
             claim_token = uuid.uuid4().hex
             cursor.execute(
@@ -1640,7 +1731,7 @@ class DatabaseManager:
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("outbox claim lost before update")
-            conn.commit()
+            active_conn.commit()
             event['attempts'] = int(event.get('attempts') or 0) + 1
             event['claim_token'] = claim_token
             event.pop('payload_json', None)
@@ -1648,7 +1739,7 @@ class DatabaseManager:
             return event
         except Exception as exc:
             try:
-                conn.rollback()
+                active_conn.rollback()
             except Exception:
                 pass
             self.logger.error("Telegram outbox claim failed: %s", exc)
@@ -1656,9 +1747,10 @@ class DatabaseManager:
         finally:
             if cursor is not None:
                 cursor.close()
-            conn.close()
+            if own_conn and active_conn is not None:
+                active_conn.close()
 
-    def mark_telegram_outbox_sent(self, event_id: int, claim_token: str) -> bool:
+    def mark_telegram_outbox_sent(self, event_id: int, claim_token: str, conn=None) -> bool:
         """Acknowledge only the still-current, unexpired claim owner."""
         return self._update_telegram_outbox(
             """UPDATE rdt_telegram_outbox
@@ -1667,15 +1759,21 @@ class DatabaseManager:
                WHERE id=%s AND status='processing' AND claim_token=%s
                  AND locked_until > UTC_TIMESTAMP()""",
             (event_id, claim_token),
+            conn=conn,
         )
 
     def retry_telegram_outbox_event(self, event_id: int, claim_token: str,
                                     attempts: int, error: str,
-                                    max_attempts: int = 8) -> bool:
+                                    max_attempts: int = 8,
+                                    conn=None,
+                                    delay: Optional[int] = None) -> bool:
         """Release/retry only if this worker still owns an unexpired claim."""
         attempts = max(1, int(attempts))
         dead = attempts >= max_attempts
-        delay = min(3600, 15 * (2 ** min(attempts - 1, 8)))
+        if delay is None:
+            delay = min(3600, 15 * (2 ** min(attempts - 1, 8)))
+        else:
+            delay = max(1, int(delay))
         return self._update_telegram_outbox(
             """UPDATE rdt_telegram_outbox
                SET status=%s, next_attempt_at=DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s SECOND),
@@ -1683,24 +1781,39 @@ class DatabaseManager:
                WHERE id=%s AND status='processing' AND claim_token=%s
                  AND locked_until > UTC_TIMESTAMP()""",
             ('dead' if dead else 'pending', delay, str(error)[:1000], event_id, claim_token),
+            conn=conn,
         )
 
-    def _update_telegram_outbox(self, sql: str, params: tuple) -> bool:
-        conn = self.get_conn()
-        if not conn:
+    def dead_letter_telegram_outbox_event(self, event_id: int, claim_token: str,
+                                          error: str, conn=None) -> bool:
+        """Permanently transition to dead state if this worker owns unexpired claim."""
+        return self._update_telegram_outbox(
+            """UPDATE rdt_telegram_outbox
+               SET status='dead', next_attempt_at=NULL, locked_until=NULL,
+                   claim_token=NULL, last_error=%s
+               WHERE id=%s AND status='processing' AND claim_token=%s
+                 AND locked_until > UTC_TIMESTAMP()""",
+            (str(error)[:1000], event_id, claim_token),
+            conn=conn,
+        )
+
+    def _update_telegram_outbox(self, sql: str, params: tuple, conn=None) -> bool:
+        own_conn = conn is None
+        active_conn = self.get_conn() if own_conn else conn
+        if not active_conn:
             return False
         cursor = None
         try:
-            cursor = conn.cursor()
+            cursor = active_conn.cursor()
             cursor.execute(sql, params)
             if cursor.rowcount != 1:
-                conn.rollback()
+                active_conn.rollback()
                 return False
-            conn.commit()
+            active_conn.commit()
             return True
         except Exception as exc:
             try:
-                conn.rollback()
+                active_conn.rollback()
             except Exception:
                 pass
             self.logger.error("Telegram outbox update failed: %s", exc)
@@ -1708,7 +1821,8 @@ class DatabaseManager:
         finally:
             if cursor is not None:
                 cursor.close()
-            conn.close()
+            if own_conn and active_conn is not None:
+                active_conn.close()
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -2359,43 +2473,75 @@ class RetailDeathTrapBot:
         """Deliver persisted events; delivery is at-least-once, not exactly-once."""
         if not getattr(self.tg, "enabled", False):
             return 0
-        delivered = 0
-        for _ in range(max(0, int(limit))):
-            event = self.db.claim_telegram_outbox_event()
-            if not event:
-                break
+
+        # Attempt to acquire advisory lock on an independent connection for mutual exclusion
+        lock_conn = None
+        if hasattr(self.db, "get_conn") and hasattr(self.db, "acquire_outbox_lock"):
             try:
-                payload = event.get("payload") or {}
-                if event.get("event_type") == "entry":
-                    signal = payload.get("signal") or {}
-                    signal.setdefault("candle_close_time", "N/A")
-                    ok = self.tg.send_entry(
-                        signal, int(event["trade_id"]), float(payload["units"]),
-                        float(payload["risk_amt"]), float(payload["risk_pct"]),
-                        str(payload["mode"]),
-                    )
-                elif event.get("event_type") == "exit":
-                    ok = self.tg.send_exit(
-                        payload.get("trade") or {}, float(payload["exit_price"]),
-                        str(payload["reason"]), float(payload["pnl"]),
-                        float(payload["pnl_pct"]),
-                    )
-                else:
-                    raise ValueError("unsupported RetailBot2 Telegram event type")
-                if ok:
-                    if self.db.mark_telegram_outbox_sent(int(event["id"]), str(event["claim_token"])):
-                        delivered += 1
-                else:
-                    self.db.retry_telegram_outbox_event(
-                        int(event["id"]), str(event["claim_token"]), int(event.get("attempts") or 1),
-                        "Telegram API did not confirm message delivery",
-                    )
+                candidate = self.db.get_conn()
+                if candidate:
+                    if self.db.acquire_outbox_lock(candidate, timeout_seconds=0):
+                        lock_conn = candidate
+                    else:
+                        try:
+                            candidate.close()
+                        except Exception:
+                            pass
+                        self.logger.debug(
+                            "RetailBot2 outbox lock is held by standalone worker or another session; skipping dispatch"
+                        )
+                        return 0
             except Exception as exc:
-                self.db.retry_telegram_outbox_event(
-                    int(event["id"]), str(event["claim_token"]), int(event.get("attempts") or 1), str(exc),
-                )
-                self.logger.exception("RetailBot2 Telegram outbox dispatch failed")
-        return delivered
+                self.logger.warning("Failed outbox lock preflight check: %s", exc)
+
+        delivered = 0
+        try:
+            for _ in range(max(0, int(limit))):
+                event = self.db.claim_telegram_outbox_event()
+                if not event:
+                    break
+                try:
+                    payload = event.get("payload") or {}
+                    if event.get("event_type") == "entry":
+                        signal = payload.get("signal") or {}
+                        signal.setdefault("candle_close_time", "N/A")
+                        ok = self.tg.send_entry(
+                            signal, int(event["trade_id"]), float(payload["units"]),
+                            float(payload["risk_amt"]), float(payload["risk_pct"]),
+                            str(payload["mode"]),
+                        )
+                    elif event.get("event_type") == "exit":
+                        ok = self.tg.send_exit(
+                            payload.get("trade") or {}, float(payload["exit_price"]),
+                            str(payload["reason"]), float(payload["pnl"]),
+                            float(payload["pnl_pct"]),
+                        )
+                    else:
+                        raise ValueError("unsupported RetailBot2 Telegram event type")
+                    if ok:
+                        if self.db.mark_telegram_outbox_sent(int(event["id"]), str(event["claim_token"])):
+                            delivered += 1
+                    else:
+                        self.db.retry_telegram_outbox_event(
+                            int(event["id"]), str(event["claim_token"]), int(event.get("attempts") or 1),
+                            "Telegram API did not confirm message delivery",
+                        )
+                except Exception as exc:
+                    self.db.retry_telegram_outbox_event(
+                        int(event["id"]), str(event["claim_token"]), int(event.get("attempts") or 1), str(exc),
+                    )
+                    self.logger.exception("RetailBot2 Telegram outbox dispatch failed")
+            return delivered
+        finally:
+            if lock_conn:
+                try:
+                    self.db.release_outbox_lock(lock_conn)
+                except Exception:
+                    pass
+                try:
+                    lock_conn.close()
+                except Exception:
+                    pass
 
     def run(self):
         self.logger.info("🚀 Bot running — CTRL+C to stop")
