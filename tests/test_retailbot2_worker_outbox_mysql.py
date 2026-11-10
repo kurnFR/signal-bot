@@ -75,14 +75,16 @@ def test_worker_persists_entry_outbox_only_for_promoted_strategy():
         )
 
     suffix = uuid.uuid4().hex[:10].upper()
-    promoted_strategy = f"ITBB_{suffix}"
-    unpromoted_strategy = f"ITDP_{suffix}"
+    # The worker rejects unregistered strategy IDs before touching the DB.
+    # Use registered strategies and restore any existing lifecycle settings.
+    promoted_strategy = "BB_REV"
+    unpromoted_strategy = "DBL_PAT"
     promoted_symbol = f"TB{suffix}AUSDT"
     unpromoted_symbol = f"TB{suffix}BUSDT"
     symbols = (promoted_symbol, unpromoted_symbol)
     strategies = (promoted_strategy, unpromoted_strategy)
 
-    lifecycle_inserted = False
+    original_lifecycle = {}
     seed_conn = _test_connection()
     try:
         cursor = seed_conn.cursor()
@@ -99,11 +101,17 @@ def test_worker_persists_entry_outbox_only_for_promoted_strategy():
         )
         assert cursor.fetchone()[0] == 0, "unexpected pre-existing test symbols"
         cursor.execute(
-            "SELECT COUNT(*) FROM rdt_strategy_lifecycle "
-            "WHERE strategy_id IN (%s, %s)",
+            """
+            SELECT strategy_id, mode, evaluation_enabled, paper_enabled,
+                   telegram_enabled, report_enabled, auto_promote_enabled
+            FROM rdt_strategy_lifecycle
+            WHERE strategy_id IN (%s, %s) AND mode='shadow'
+            """,
             strategies,
         )
-        assert cursor.fetchone()[0] == 0, "unexpected pre-existing lifecycle fixture"
+        original_lifecycle = {
+            row["strategy_id"]: row for row in cursor.fetchall()
+        }
 
         cursor.executemany(
             """
@@ -111,6 +119,12 @@ def test_worker_persists_entry_outbox_only_for_promoted_strategy():
                 (strategy_id, mode, evaluation_enabled, paper_enabled,
                  telegram_enabled, report_enabled, auto_promote_enabled)
             VALUES (%s, 'shadow', 1, 1, %s, 1, 0)
+            ON DUPLICATE KEY UPDATE
+                evaluation_enabled=VALUES(evaluation_enabled),
+                paper_enabled=VALUES(paper_enabled),
+                telegram_enabled=VALUES(telegram_enabled),
+                report_enabled=VALUES(report_enabled),
+                auto_promote_enabled=VALUES(auto_promote_enabled)
             """,
             [
                 (promoted_strategy, 1),
@@ -118,7 +132,6 @@ def test_worker_persists_entry_outbox_only_for_promoted_strategy():
             ],
         )
         seed_conn.commit()
-        lifecycle_inserted = True
         cursor.close()
     finally:
         seed_conn.close()
@@ -228,12 +241,35 @@ def test_worker_persists_entry_outbox_only_for_promoted_strategy():
                 "DELETE FROM rdt_trades WHERE symbol IN (%s, %s)",
                 symbols,
             )
-            if lifecycle_inserted:
-                cursor.execute(
-                    "DELETE FROM rdt_strategy_lifecycle "
-                    "WHERE strategy_id IN (%s, %s) AND mode='shadow'",
-                    strategies,
-                )
+            # Restore pre-existing operator rows; remove only rows introduced
+            # by this test. This keeps the fixture safe on a populated test DB.
+            for strategy_id in strategies:
+                original = original_lifecycle.get(strategy_id)
+                if original is None:
+                    cursor.execute(
+                        "DELETE FROM rdt_strategy_lifecycle "
+                        "WHERE strategy_id=%s AND mode='shadow'",
+                        (strategy_id,),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        UPDATE rdt_strategy_lifecycle
+                        SET evaluation_enabled=%s, paper_enabled=%s,
+                            telegram_enabled=%s, report_enabled=%s,
+                            auto_promote_enabled=%s
+                        WHERE strategy_id=%s AND mode=%s
+                        """,
+                        (
+                            original["evaluation_enabled"],
+                            original["paper_enabled"],
+                            original["telegram_enabled"],
+                            original["report_enabled"],
+                            original["auto_promote_enabled"],
+                            original["strategy_id"],
+                            original["mode"],
+                        ),
+                    )
             cleanup_conn.commit()
             cursor.close()
         finally:
