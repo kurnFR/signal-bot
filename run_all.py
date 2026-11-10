@@ -97,10 +97,15 @@ def _run_and_restart(name, cmd):
     time it exits, until shutdown is requested. A crash-looping process
     (e.g. permanently missing required config) shows up as a repeating log
     line here rather than silently going dark -- that's intentional."""
-    while not _shutdown.is_set():
-        logger.info(f"[{name}] starting: {' '.join(cmd)}")
-        proc = subprocess.Popen(cmd)
+    while True:
+        # Serialize the shutdown check, process creation, and registration with
+        # _shutdown_all()'s child snapshot. Otherwise shutdown can miss a child
+        # spawned between its snapshot and this thread's registration.
         with _children_lock:
+            if _shutdown.is_set():
+                return
+            logger.info(f"[{name}] starting: {' '.join(cmd)}")
+            proc = subprocess.Popen(cmd)
             _children[name] = proc
 
         exit_code = proc.wait()
