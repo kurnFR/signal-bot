@@ -76,36 +76,32 @@ def classify_telegram_response(
     except (ValueError, TypeError):
         body_json = None
 
-    if http_status == 200:
-        if body_json is None:
+    if http_status == 200 and body_json is not None:
+        if body_json.get("ok") is True:
+            return {
+                "status": STATUS_DELIVERED,
+                "http_status": 200,
+                "result": body_json.get("result"),
+            }
+        if body_json.get("ok") is not False:
+            # A syntactically valid JSON response without an explicit API rejection
+            # does not prove whether Telegram accepted the request.
             return {
                 "status": STATUS_DELIVERY_UNKNOWN,
                 "http_status": 200,
-                "error": "HTTP 200 response had invalid or non-JSON body",
+                "error": "HTTP 200 response missing explicit Telegram ok field",
                 "raw_body": (body_str or "")[:500],
             }
-        if "ok" not in body_json or body_json["ok"] is not True:
-            # Missing ok or ok is not explicitly True
-            return {
-                "status": STATUS_DELIVERY_UNKNOWN,
-                "http_status": 200,
-                "error": "HTTP 200 response missing ok=true",
-                "raw_body": (body_str or "")[:500],
-            }
-        return {
-            "status": STATUS_DELIVERED,
-            "http_status": 200,
-            "result": body_json.get("result"),
-        }
 
-    # HTTP non-200 with valid Telegram API error JSON
+    # A valid Telegram API ok=false response is a confirmed rejection, including
+    # HTTP 200 responses. Classify retryability from Telegram's error_code.
     if body_json is not None and body_json.get("ok") is False:
         err_code = body_json.get("error_code", http_status)
         desc = str(body_json.get("description", "Telegram API rejection"))
         params = body_json.get("parameters") or {}
 
-        # 429 Rate Limit or 420 Flood
-        if http_status == 429 or err_code == 429 or err_code == 420 or "FLOOD" in desc.upper():
+        # Rate limits / flood control are confirmed transient rejections.
+        if http_status == 429 or err_code in (429, 420) or "FLOOD" in desc.upper():
             retry_after = params.get("retry_after", 30)
             try:
                 retry_after = int(retry_after)
@@ -120,8 +116,8 @@ def classify_telegram_response(
                 "permanent": False,
             }
 
-        # Known permanent client/bot errors (never succeed upon retry)
-        if http_status in (400, 401, 403, 404) or err_code in (400, 401, 403, 404):
+        # Dead-letter only recognized permanent Telegram API error codes.
+        if err_code in (400, 401, 403, 404):
             return {
                 "status": STATUS_FAILED_CONFIRMED,
                 "http_status": http_status,
@@ -130,12 +126,20 @@ def classify_telegram_response(
                 "permanent": True,
             }
 
-        # Other 4xx or recognized API rejections
         return {
             "status": STATUS_FAILED_CONFIRMED,
             "http_status": http_status,
             "error_code": err_code,
             "description": desc,
+            "permanent": False,
+        }
+
+    if http_status == 200:
+        return {
+            "status": STATUS_DELIVERY_UNKNOWN,
+            "http_status": 200,
+            "error": "HTTP 200 response did not explicitly confirm delivery",
+            "raw_body": (body_str or "")[:500],
             "permanent": False,
         }
 
