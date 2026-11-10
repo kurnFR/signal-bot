@@ -193,6 +193,27 @@ def _expire_lease(event_id):
         conn.close()
 
 
+def _force_final_attempt_expired(event_id):
+    conn = _connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE rdt_telegram_outbox
+            SET status='processing', attempts=8,
+                locked_until=DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 SECOND),
+                last_error='simulated final-attempt worker interruption'
+            WHERE id=%s
+            """,
+            (event_id,),
+        )
+        assert cursor.rowcount == 1
+        conn.commit()
+        cursor.close()
+    finally:
+        conn.close()
+
+
 def _cleanup(db, trade_id, strategy=None):
     conn = _connection()
     try:
@@ -378,3 +399,29 @@ def test_closed_trade_persists_exit_event_and_dispatches_confirmed_delivery():
     finally:
         if trade_id is not None:
             _cleanup(db, trade_id, strategy=strategy)
+
+
+def test_expired_final_attempt_is_dead_lettered_not_reclaimed():
+    if os.getenv("SIGNAL_BOT_RUN_RETAILBOT2_DB_INTEGRATION") != "1":
+        pytest.skip("opt-in isolated signal_bot_test integration test")
+
+    db = _db()
+    trade_id = None
+    try:
+        trade_id, _symbol = _seed_entry(db, uuid.uuid4().hex[:10].upper())
+        event = _read_event(trade_id)
+        _force_final_attempt_expired(event["id"])
+
+        # A crashed worker on attempt 8 must not trigger a ninth send.
+        assert db.claim_telegram_outbox_event(lease_seconds=90) is None
+        final = _read_event(trade_id)
+        assert final["status"] == "dead"
+        assert final["attempts"] == 8
+        assert final["locked_until"] is None
+        assert final["sent_at"] is None
+        assert final["last_error"] == (
+            "simulated final-attempt worker interruption"
+        )
+    finally:
+        if trade_id is not None:
+            _cleanup(db, trade_id)
