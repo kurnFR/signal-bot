@@ -50,8 +50,10 @@ class TestRetailBot2MigrationManagedStartup(unittest.TestCase):
         self.assertTrue(all(statement.startswith("SELECT") for statement in statements))
         self.assertFalse(any(statement.startswith(("CREATE", "ALTER", "INSERT", "UPDATE", "DELETE")) for statement in statements))
         self.assertIn("INFORMATION_SCHEMA.COLUMNS", statements[2])
-        self.assertIn("RDT_TELEGRAM_OUTBOX", str(cursor.execute.call_args_list[2].args[1]))
-        self.assertIn("CLAIM_TOKEN", str(cursor.execute.call_args_list[2].args[1]))
+        self.assertEqual(
+            cursor.execute.call_args_list[2].args[1],
+            ("rdt_telegram_outbox", "claim_token"),
+        )
         conn.close.assert_called_once()
         cursor.close.assert_called_once()
 
