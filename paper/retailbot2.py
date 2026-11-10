@@ -2471,7 +2471,7 @@ class RetailDeathTrapBot:
 
     def _dispatch_telegram_outbox(self, limit: int = 2):
         """Deprecated compatibility stub; delivery belongs exclusively to outbox_worker."""
-        self.logger.warning(
+        logging.getLogger(__name__).warning(
             "In-process Telegram outbox delivery is disabled; run paper.outbox_worker instead"
         )
         return 0
