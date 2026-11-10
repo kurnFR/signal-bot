@@ -2,7 +2,7 @@
 
 Pinned to 127.0.0.1:3306/signal_bot_test. All Telegram transport is mocked;
 this test never creates TelegramAlert or contacts Telegram.
-Requires migrations 018 and 026 in the isolated test schema.
+Requires migrations 018, 026, and 027 in the isolated test schema.
 
 Run:
     SIGNAL_BOT_RUN_RETAILBOT2_DB_INTEGRATION=1 \
