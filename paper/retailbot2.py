@@ -1172,6 +1172,16 @@ class DatabaseManager:
                     "RetailBot2 schema is missing rdt_trades.telegram_enabled; "
                     "run 'python -m db.migrate' before starting the worker."
                 )
+            cur.execute(
+                "SELECT COLUMN_NAME FROM information_schema.columns "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+                ("rdt_telegram_outbox", "claim_token"),
+            )
+            if not cur.fetchone():
+                raise RuntimeError(
+                    "RetailBot2 schema is missing rdt_telegram_outbox.claim_token; "
+                    "run python -m db.migrate before starting the worker."
+                )
             cur.close()
         finally:
             conn.close()
