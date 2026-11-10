@@ -20,6 +20,25 @@ class TestMigrationManagedStartupDocs(unittest.TestCase):
         text = Path("db/migrate_wallet_tracker_runtime_schema.sql").read_text(encoding="utf-8")
         self.assertIn("read-only", text)
 
+    def test_retailbot2_outbox_runbook_documents_authoritative_advisory_lock(self):
+        from paper.retailbot2 import OUTBOX_LOCK_NAME
+        self.assertEqual(OUTBOX_LOCK_NAME, "rdt_outbox_worker_lock")
+
+        release_gates = Path("docs/RETAILBOT2_AND_MODERN_UI_RELEASE_GATES.md").read_text(encoding="utf-8")
+        self.assertIn("OUTBOX_LOCK_NAME = \"rdt_outbox_worker_lock\"", release_gates)
+        self.assertIn("SELECT IS_USED_LOCK('rdt_outbox_worker_lock');", release_gates)
+        self.assertIn("WHERE ID = IS_USED_LOCK('rdt_outbox_worker_lock');", release_gates)
+
+        arch_doc = Path("docs/ARCHITECTURE.md").read_text(encoding="utf-8")
+        self.assertIn("`rdt_outbox_worker_lock`", arch_doc)
+
+        # Confirm no lock query in docs mistakenly refers to retailbot2_telegram_outbox
+        for doc_path in Path("docs").glob("*.md"):
+            doc_text = doc_path.read_text(encoding="utf-8")
+            self.assertNotIn("IS_USED_LOCK('retailbot2_telegram_outbox')", doc_text)
+            self.assertNotIn("GET_LOCK('retailbot2_telegram_outbox'", doc_text)
+
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -114,6 +114,25 @@ Before production migration, the database owner must separately authorize the pr
 
 After approval, the production operator must apply the reviewed migration before deploying/restarting code that requires the outbox table, then verify schema, worker startup, queue processing, retry behavior, and monitoring. External Telegram delivery remains a separate opt-in validation.
 
+### 4.1 Standalone worker advisory lock verification runbook
+
+The standalone outbox worker synchronizes global delivery across multiple instances using the MariaDB advisory lock constant `OUTBOX_LOCK_NAME = "rdt_outbox_worker_lock"`.
+
+To verify advisory-lock ownership after an authorized worker activation, execute these read-only inspection queries against the target database:
+
+```sql
+SELECT IS_USED_LOCK('rdt_outbox_worker_lock');
+
+SELECT
+    ID, USER, HOST, DB, COMMAND, TIME, STATE
+FROM information_schema.PROCESSLIST
+WHERE ID = IS_USED_LOCK('rdt_outbox_worker_lock');
+```
+
+- If `IS_USED_LOCK('rdt_outbox_worker_lock')` returns `NULL`, no worker session currently holds the advisory lock.
+- If it returns a connection ID, verify in `information_schema.PROCESSLIST` that the connection corresponds to the authorized worker process connected to the target database.
+
+
 ## 5. Modern UI migration and cutover
 
 The modern React UI remains available at `/modern`; legacy `/` remains the default. Keep `SIGNAL_BOT_USE_MODERN_UI=0`.

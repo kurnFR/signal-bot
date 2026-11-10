@@ -133,6 +133,9 @@ class TestDatabaseAuthorization:
 
 
 class TestAdvisoryLockOwnership:
+    def test_outbox_lock_name_constant_is_authoritative_rdt_outbox_worker_lock(self):
+        assert OUTBOX_LOCK_NAME == "rdt_outbox_worker_lock"
+
     def test_single_session_lock_and_rejection_on_contention(self):
         conn1 = _test_connection()
         conn2 = _test_connection()

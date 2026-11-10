@@ -11,7 +11,7 @@ The RetailBot2 Telegram outbox consumer is separate from the trading process. It
 `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1` are explicitly set. Without both flags,
 trade alerts remain persisted in `rdt_telegram_outbox` and are not sent. The supervisor
 sends SIGTERM during shutdown but will not SIGKILL this worker after its normal grace
-period: the worker may be retaining its MariaDB advisory lock while a transport process
+period: the worker may be retaining its MariaDB advisory lock (`rdt_outbox_worker_lock`) while a transport process
 group is still alive or unverified. This can intentionally delay full shutdown until
 transport cleanup is confirmed.
 
