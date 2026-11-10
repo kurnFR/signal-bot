@@ -11,7 +11,7 @@ Run explicitly with:
     PYTHONPATH=$PWD python3 -m pytest -q -s \
       tests/test_retailbot2_worker_outbox_mysql.py
 
-The test user needs SELECT/INSERT/DELETE on the isolated signal_bot_test schema.
+The test user needs SELECT/INSERT/UPDATE/DELETE on the isolated signal_bot_test schema.
 The schema must already have migrations 018 and 026 applied.
 """
 
