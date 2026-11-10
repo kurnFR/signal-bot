@@ -448,6 +448,7 @@ class OutboxWorker:
         self.mock_transport_response = mock_transport_response
         self.state = OutboxWorkerState.INITIALIZING
         self._shutdown_requested = False
+        self._fatal_pgid: Optional[int] = None
 
     def setup_signals(self):
         """Register graceful shutdown handlers for SIGINT and SIGTERM."""
@@ -515,10 +516,12 @@ class OutboxWorker:
         # 1. Cleanup failure: Enter fatal lockout, retain lock, do not release or claim
         if status == STATUS_CLEANUP_FAILED:
             self.state = OutboxWorkerState.FATAL_LOCKOUT
+            self._fatal_pgid = int(outcome.get("pgid") or 0) or None
             logger.critical(
-                "FATAL: Transport cleanup failed for event %d; entering STATE_FATAL_LOCKOUT. "
-                "Retaining advisory lock on S_lock to fence replacements. Operator intervention required.",
-                event_id
+                "FATAL: Transport cleanup failed for event %d (PGID=%s); entering STATE_FATAL_LOCKOUT. "
+                "Retaining advisory lock on S_lock. Shutdown requests will not release ownership while "
+                "live transport processes remain. Operator intervention required.",
+                event_id, self._fatal_pgid
             )
             return True
 
@@ -576,23 +579,35 @@ class OutboxWorker:
         logger.info("Outbox worker running in state %s", self.state.value)
 
         try:
-            while not self._shutdown_requested:
+            while True:
                 if self.state == OutboxWorkerState.FATAL_LOCKOUT:
-                    # Halt processing, keep advisory lock alive via heartbeats
-                    logger.critical("Worker locked out due to unverified process group cleanup. Sleeping...")
-                    time.sleep(5.0)
+                    # Never release S_lock while an unverified live transport process remains.
+                    logger.critical(
+                        "Worker is in FATAL_LOCKOUT (PGID=%s); claims are disabled and lock heartbeats continue.",
+                        self._fatal_pgid
+                    )
                     if not self.session_mgr.heartbeat():
-                        logger.error("Lost S_lock connection while in FATAL_LOCKOUT; exiting")
+                        # The DB session has already been lost; advisory-lock retention is no longer possible.
+                        logger.critical("S_lock connection lost during FATAL_LOCKOUT; transport exclusion is no longer guaranteed")
                         return 75
-                    continue
+                    if self._fatal_pgid and not get_live_pids_in_pgid(self._fatal_pgid):
+                        logger.warning("No live transport processes remain in PGID %s; fatal lockout can be cleared", self._fatal_pgid)
+                        self._fatal_pgid = None
+                        self.state = OutboxWorkerState.STOPPING if self._shutdown_requested else OutboxWorkerState.RUNNING
+                    else:
+                        # Even SIGTERM/SIGINT must not release the lock while transport survival is unresolved.
+                        time.sleep(5.0)
+                        continue
+
+                if self._shutdown_requested:
+                    logger.info("Graceful shutdown finished; releasing advisory lock")
+                    return 0
 
                 processed = self.process_one_event()
                 if not processed:
                     time.sleep(self.poll_interval_sec)
-                    self.session_mgr.heartbeat()
-
-            logger.info("Graceful shutdown finished; releasing advisory lock")
-            return 0
+                    if not self.session_mgr.heartbeat():
+                        raise LockLostError("S_lock heartbeat failed; advisory-lock ownership is no longer reliable")
         finally:
             self.state = OutboxWorkerState.STOPPING
             self.session_mgr.close()
@@ -615,11 +630,17 @@ def main():
             logger.error("Production outbox requires RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1")
             sys.exit(1)
 
+    if args.database == "signal_bot_test":
+        db_user = os.getenv("SIGNAL_BOT_TEST_DB_USER", os.getenv("MYSQL_USER", "cms"))
+        db_password = os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", os.getenv("MYSQL_PASSWORD", ""))
+    else:
+        db_user = os.getenv("MYSQL_USER", "cms")
+        db_password = os.getenv("MYSQL_PASSWORD", "")
     db_cfg = {
         "host": os.getenv("MYSQL_HOST", "127.0.0.1"),
         "port": int(os.getenv("MYSQL_PORT", 3306)),
-        "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", "cms"),
-        "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""),
+        "user": db_user,
+        "password": db_password,
         "database": args.database,
     }
 
