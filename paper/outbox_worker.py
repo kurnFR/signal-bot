@@ -908,6 +908,49 @@ class OutboxWorker:
                     if not self.session_mgr.heartbeat():
                         raise LockLostError("S_lock heartbeat failed; advisory-lock ownership is no longer reliable")
         finally:
+            # A cleanup failure is a hard process-lifetime constraint. Even an
+            # unexpected exception elsewhere in run() must not close S_lock
+            # while a transport process group remains live or unverified.
+            while self._fatal_pgid is not None:
+                self.state = OutboxWorkerState.FATAL_LOCKOUT
+                try:
+                    inspection = inspect_process_group(
+                        self._fatal_pgid, proc_root=self.proc_root
+                    )
+                except Exception as exc:
+                    inspection = ProcessInspectionResult(
+                        status=ProcessInspectionStatus.STATE_UNVERIFIED,
+                        error=f"Unexpected finalizer inspection error: {exc}",
+                    )
+
+                if inspection.status == ProcessInspectionStatus.CONFIRMED_EMPTY:
+                    logger.info(
+                        "Finalizer confirmed no live transport processes remain in PGID %s",
+                        self._fatal_pgid,
+                    )
+                    self._fatal_pgid = None
+                    break
+
+                # Keep the lock-owning session alive where possible. A lost
+                # database session cannot preserve the server-side advisory
+                # lock, but the parent must still not exit while descendants
+                # remain unverified.
+                try:
+                    if self.session_mgr.connection_alive():
+                        self.session_mgr.heartbeat()
+                except Exception:
+                    logger.exception(
+                        "Finalizer could not heartbeat S_lock during transport lockout"
+                    )
+
+                logger.critical(
+                    "Finalizer retaining worker process and advisory-lock session: "
+                    "transport PGID %s is not confirmed empty (%s)",
+                    self._fatal_pgid,
+                    inspection.error or inspection.status.value,
+                )
+                time.sleep(min(max(self.poll_interval_sec, 0.1), 5.0))
+
             self.state = OutboxWorkerState.STOPPING
             self.session_mgr.close()
             self.state = OutboxWorkerState.STOPPED
