@@ -349,7 +349,7 @@ class TestAdvisoryLockOwnership:
     def test_legacy_dispatcher_never_attempts_lock_acquisition(self):
         db_mgr = object.__new__(DatabaseManager)
         db_mgr.logger = logging.getLogger("test_dispatch_fail_closed")
-        db_mgr.get_conn = _test_connection
+        db_mgr.get_conn = Mock(side_effect=AssertionError("legacy dispatcher must not open a DB connection"))
         db_mgr.acquire_outbox_lock = Mock(side_effect=RuntimeError("Simulated lock acquisition error"))
 
         bot = object.__new__(RetailDeathTrapBot)
