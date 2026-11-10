@@ -284,17 +284,27 @@ def get_live_pids_in_pgid(pgid: int, proc_root: str = "/proc") -> List[int]:
 
 
 def _child_preexec_pdeathsig(expected_parent_pid: int):
-    """Set parent death signal to SIGKILL and verify parent did not exit beforehand."""
+    """Set parent death signal to SIGKILL and fail closed if prctl cannot be installed."""
     try:
         PR_SET_PDEATHSIG = 1
         SIGKILL = 9
-        libc = ctypes.CDLL("libc.so.6")
-        libc.prctl(PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0)
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        if libc.prctl(PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0) != 0:
+            os._exit(1)
         # Race-condition check: if parent died before prctl, exit immediately
         if os.getppid() != expected_parent_pid:
             os._exit(1)
     except Exception:
         os._exit(1)
+
+
+def _transport_child_environment() -> Dict[str, str]:
+    """Build a minimal child environment that cannot inherit application secrets."""
+    allowed = {
+        "PATH", "PYTHONPATH", "PYTHONHOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
+        "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+    }
+    return {key: value for key, value in os.environ.items() if key in allowed}
 
 
 def reap_child_bounded(child_pid: int, timeout_sec: float) -> Optional[int]:
@@ -377,6 +387,7 @@ def dispatch_event_via_subprocess(
             stderr=subprocess.PIPE,
             start_new_session=True,  # PGID == child_proc.pid
             preexec_fn=lambda: _child_preexec_pdeathsig(parent_pid),
+            env=_transport_child_environment(),
         )
     except Exception as exc:
         return {
@@ -587,6 +598,10 @@ class OutboxSessionManager:
         if not self.s_lock or not self.s_lock.is_connected():
             return False
         return self.db_manager.is_outbox_lock_owned(self.s_lock)
+
+    def connection_alive(self) -> bool:
+        """Return the connector's local socket state without issuing another query."""
+        return bool(self.s_lock and self.s_lock.is_connected())
 
     def heartbeat(self) -> bool:
         """Execute SELECT 1 keep-alive ping on S_lock."""
@@ -826,8 +841,23 @@ class OutboxWorker:
                         self._fatal_pgid
                     )
                     if not self.session_mgr.heartbeat():
-                        # The DB session has already been lost; advisory-lock retention is no longer possible.
-                        logger.critical("S_lock connection lost during FATAL_LOCKOUT; transport exclusion is no longer guaranteed")
+                        # A failed query is not proof that the underlying socket/session is gone.
+                        # If the connector still considers it connected, retain S_lock and retry;
+                        # never voluntarily release a potentially-held advisory lock while a
+                        # transport process may still be alive.
+                        if self.session_mgr.connection_alive():
+                            logger.critical(
+                                "S_lock heartbeat query failed but the connection remains open; "
+                                "retaining FATAL_LOCKOUT and retrying without releasing the lock"
+                            )
+                            time.sleep(min(self.poll_interval_sec, 5.0))
+                            continue
+                        # The local connection is gone; MariaDB will release its advisory lock
+                        # when it detects session loss. No local action can preserve ownership.
+                        logger.critical(
+                            "S_lock connection is no longer open during FATAL_LOCKOUT; "
+                            "transport exclusion cannot be guaranteed"
+                        )
                         return 75
 
                     if self._fatal_pgid:
