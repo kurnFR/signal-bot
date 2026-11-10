@@ -186,43 +186,18 @@ def test_mark_sent_requires_processing_state_and_commits():
     assert conn.commits == 1
 
 
-def test_dispatcher_marks_success_and_retries_failed_delivery():
+def test_legacy_dispatcher_never_sends_or_claims_outbox_events():
     bot = object.__new__(RetailDeathTrapBot)
     bot.tg = Mock()
     bot.tg.enabled = True
-    bot.tg.send_entry.return_value = True
     bot.db = Mock()
-    bot.db.claim_telegram_outbox_event.side_effect = [
-        {
-            "id": 1, "trade_id": 10, "event_type": "entry", "attempts": 1, "claim_token": "claim-entry-1",
-            "payload": {
-                "signal": {
-                    "side": "LONG", "symbol": "BTC/USDT", "entry": 100.0,
-                    "stop": 95.0, "target": 110.0,
-                },
-                "units": 2, "risk_amt": 10, "risk_pct": 1, "mode": "shadow",
-            },
-        },
-        {
-            "id": 2, "trade_id": 11, "event_type": "exit", "attempts": 2, "claim_token": "claim-exit-2",
-            "payload": {
-                "trade": {"id": 11}, "exit_price": 90,
-                "reason": "STOP_LOSS", "pnl": -20, "pnl_pct": -10,
-            },
-        },
-        None,
-    ]
-    bot.tg.send_exit.return_value = False
     bot.logger = Mock()
 
-    assert bot._dispatch_telegram_outbox(limit=3) == 1
-    expected_conn = bot.db.get_conn.return_value
-    bot.db.mark_telegram_outbox_sent.assert_called_once_with(
-        1, "claim-entry-1", conn=expected_conn
-    )
-    bot.db.retry_telegram_outbox_event.assert_called_once_with(
-        2, "claim-exit-2", 2, "Telegram API did not confirm message delivery", conn=expected_conn
-    )
+    assert bot._dispatch_telegram_outbox(limit=3) == 0
+    bot.db.get_conn.assert_not_called()
+    bot.db.claim_telegram_outbox_event.assert_not_called()
+    bot.tg.send_entry.assert_not_called()
+    bot.tg.send_exit.assert_not_called()
 
 
 def test_dispatcher_leaves_events_queued_when_telegram_disabled():
