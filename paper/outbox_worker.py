@@ -267,7 +267,37 @@ def dispatch_event_via_subprocess(
     if child_exit is None:
         reap_child_bounded(child_proc.pid, 0.2)
 
-    # Process-group verification: ensure NO live descendants remain in PGID
+    # A direct child may exit while a descendant in the same process group survives.
+    # Do not merely lock out in that case: explicitly terminate the remaining group.
+    live_descendants = get_live_pids_in_pgid(pgid)
+    if live_descendants:
+        logger.warning(
+            "Direct transport child exited but live descendants %r remain in PGID %d; terminating group",
+            live_descendants, pgid
+        )
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+        group_deadline = time.monotonic() + max(0.0, cleanup_grace_sec)
+        while time.monotonic() < group_deadline:
+            live_descendants = get_live_pids_in_pgid(pgid)
+            if not live_descendants:
+                break
+            time.sleep(0.02)
+        if live_descendants:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            group_deadline = time.monotonic() + max(0.0, cleanup_grace_sec)
+            while time.monotonic() < group_deadline:
+                live_descendants = get_live_pids_in_pgid(pgid)
+                if not live_descendants:
+                    break
+                time.sleep(0.02)
+
+    # Process-group verification: ensure NO live descendants remain in PGID.
     live_descendants = get_live_pids_in_pgid(pgid)
     if live_descendants:
         logger.critical(
