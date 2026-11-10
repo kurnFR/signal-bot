@@ -425,3 +425,38 @@ def test_expired_final_attempt_is_dead_lettered_not_reclaimed():
     finally:
         if trade_id is not None:
             _cleanup(db, trade_id)
+
+
+def test_active_lease_prevents_second_worker_from_claiming_same_event():
+    if os.getenv("SIGNAL_BOT_RUN_RETAILBOT2_DB_INTEGRATION") != "1":
+        pytest.skip("opt-in isolated signal_bot_test integration test")
+
+    first_worker_db = _db()
+    second_worker_db = _db()
+    trade_id = None
+    try:
+        trade_id, _symbol = _seed_entry(
+            first_worker_db, uuid.uuid4().hex[:10].upper()
+        )
+        event = _read_event(trade_id)
+
+        first_claim = first_worker_db.claim_telegram_outbox_event(
+            lease_seconds=90
+        )
+        assert first_claim is not None
+        assert first_claim["id"] == event["id"]
+        assert first_claim["attempts"] == 1
+
+        # A separate DatabaseManager/connection represents another worker.
+        second_claim = second_worker_db.claim_telegram_outbox_event(
+            lease_seconds=90
+        )
+        assert second_claim is None
+
+        persisted = _read_event(trade_id)
+        assert persisted["status"] == "processing"
+        assert persisted["attempts"] == 1
+        assert persisted["locked_until"] is not None
+    finally:
+        if trade_id is not None:
+            _cleanup(first_worker_db, trade_id)
