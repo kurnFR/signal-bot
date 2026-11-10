@@ -149,6 +149,7 @@ def test_claim_event_uses_transaction_and_reclaims_expired_lease():
     assert claimed["id"] == 5
     assert claimed["attempts"] == 3
     assert claimed["payload"] == {"mode": "shadow"}
+    assert len(claimed["claim_token"]) == 32
     assert "UPDATE rdt_telegram_outbox" in cursor.calls[1][0]
     assert "attempts >= 8" in cursor.calls[1][0]
     assert "FOR UPDATE" in cursor.calls[2][0]
@@ -162,10 +163,14 @@ def test_retry_uses_exponential_backoff_then_dead_letters():
     conn = Connection(cursor)
     db = db_for(conn)
 
-    assert db.retry_telegram_outbox_event(5, 1, "temporary failure")
-    assert cursor.calls[0][1] == ("pending", 15, "temporary failure", 5)
-    assert db.retry_telegram_outbox_event(5, 8, "permanent failure")
+    token = "a" * 32
+    assert db.retry_telegram_outbox_event(5, token, 1, "temporary failure")
+    assert cursor.calls[0][1] == ("pending", 15, "temporary failure", 5, token)
+    assert db.retry_telegram_outbox_event(5, token, 8, "permanent failure")
     assert cursor.calls[1][1][0] == "dead"
+    assert "claim_token=NULL" in cursor.calls[1][0]
+    assert "claim_token=%s" in cursor.calls[1][0]
+    assert "locked_until > UTC_TIMESTAMP()" in cursor.calls[1][0]
 
 
 def test_mark_sent_requires_processing_state_and_commits():
@@ -173,9 +178,11 @@ def test_mark_sent_requires_processing_state_and_commits():
     conn = Connection(cursor)
     db = db_for(conn)
 
-    assert db.mark_telegram_outbox_sent(5)
+    assert db.mark_telegram_outbox_sent(5, "b" * 32)
     assert "status='sent'" in cursor.calls[0][0]
     assert "status='processing'" in cursor.calls[0][0]
+    assert "claim_token=%s" in cursor.calls[0][0]
+    assert "locked_until > UTC_TIMESTAMP()" in cursor.calls[0][0]
     assert conn.commits == 1
 
 
@@ -187,7 +194,7 @@ def test_dispatcher_marks_success_and_retries_failed_delivery():
     bot.db = Mock()
     bot.db.claim_telegram_outbox_event.side_effect = [
         {
-            "id": 1, "trade_id": 10, "event_type": "entry", "attempts": 1,
+            "id": 1, "trade_id": 10, "event_type": "entry", "attempts": 1, "claim_token": "claim-entry-1",
             "payload": {
                 "signal": {
                     "side": "LONG", "symbol": "BTC/USDT", "entry": 100.0,
@@ -197,7 +204,7 @@ def test_dispatcher_marks_success_and_retries_failed_delivery():
             },
         },
         {
-            "id": 2, "trade_id": 11, "event_type": "exit", "attempts": 2,
+            "id": 2, "trade_id": 11, "event_type": "exit", "attempts": 2, "claim_token": "claim-exit-2",
             "payload": {
                 "trade": {"id": 11}, "exit_price": 90,
                 "reason": "STOP_LOSS", "pnl": -20, "pnl_pct": -10,
@@ -209,9 +216,9 @@ def test_dispatcher_marks_success_and_retries_failed_delivery():
     bot.logger = Mock()
 
     assert bot._dispatch_telegram_outbox(limit=3) == 1
-    bot.db.mark_telegram_outbox_sent.assert_called_once_with(1)
+    bot.db.mark_telegram_outbox_sent.assert_called_once_with(1, "claim-entry-1")
     bot.db.retry_telegram_outbox_event.assert_called_once_with(
-        2, 2, "Telegram API did not confirm message delivery"
+        2, "claim-exit-2", 2, "Telegram API did not confirm message delivery"
     )
 
 

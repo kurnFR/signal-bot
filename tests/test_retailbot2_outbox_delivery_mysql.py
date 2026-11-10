@@ -2,7 +2,7 @@
 
 Pinned to 127.0.0.1:3306/signal_bot_test. All Telegram transport is mocked;
 this test never creates TelegramAlert or contacts Telegram.
-Requires migrations 018 and 026 in the isolated test schema.
+Requires migrations 018, 026, and 027 in the isolated test schema.
 
 Run:
     SIGNAL_BOT_RUN_RETAILBOT2_DB_INTEGRATION=1 \
@@ -143,7 +143,7 @@ def _read_event(trade_id):
         cursor.execute(
             """
             SELECT id, event_key, trade_id, event_type, status, attempts,
-                   next_attempt_at, locked_until, last_error, sent_at
+                   next_attempt_at, locked_until, claim_token, last_error, sent_at
             FROM rdt_telegram_outbox WHERE trade_id=%s
             """,
             (trade_id,),
@@ -457,6 +457,54 @@ def test_active_lease_prevents_second_worker_from_claiming_same_event():
         assert persisted["status"] == "processing"
         assert persisted["attempts"] == 1
         assert persisted["locked_until"] is not None
+    finally:
+        if trade_id is not None:
+            _cleanup(first_worker_db, trade_id)
+
+
+def test_stale_worker_cannot_ack_or_retry_after_event_is_reclaimed():
+    if os.getenv("SIGNAL_BOT_RUN_RETAILBOT2_DB_INTEGRATION") != "1":
+        pytest.skip("opt-in isolated signal_bot_test integration test")
+
+    first_worker_db = _db()
+    second_worker_db = _db()
+    trade_id = None
+    try:
+        trade_id, _symbol = _seed_entry(
+            first_worker_db, uuid.uuid4().hex[:10].upper()
+        )
+        first_claim = first_worker_db.claim_telegram_outbox_event(lease_seconds=90)
+        assert first_claim is not None
+        first_token = first_claim["claim_token"]
+
+        # Worker one stalls past its lease; worker two recovers the event.
+        _expire_lease(first_claim["id"])
+        second_claim = second_worker_db.claim_telegram_outbox_event(lease_seconds=90)
+        assert second_claim is not None
+        assert second_claim["id"] == first_claim["id"]
+        second_token = second_claim["claim_token"]
+        assert second_token != first_token
+
+        # Stale worker one must not acknowledge or release worker two's claim.
+        assert not first_worker_db.mark_telegram_outbox_sent(
+            first_claim["id"], first_token
+        )
+        assert not first_worker_db.retry_telegram_outbox_event(
+            first_claim["id"], first_token, first_claim["attempts"],
+            "stale worker failure",
+        )
+        current = _read_event(trade_id)
+        assert current["status"] == "processing"
+        assert current["claim_token"] == second_token
+        assert current["attempts"] == 2
+
+        # Current owner can still complete its own claim.
+        assert second_worker_db.mark_telegram_outbox_sent(
+            second_claim["id"], second_token
+        )
+        completed = _read_event(trade_id)
+        assert completed["status"] == "sent"
+        assert completed["claim_token"] is None
     finally:
         if trade_id is not None:
             _cleanup(first_worker_db, trade_id)

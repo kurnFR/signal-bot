@@ -16,6 +16,7 @@ class TestRetailBot2MigrationManagedStartup(unittest.TestCase):
         versions = [migration.version for migration in MIGRATIONS]
         self.assertIn("022_retailbot2_runtime_schema", versions)
         self.assertIn("026_retailbot2_telegram_outbox", versions)
+        self.assertIn("027_retailbot2_outbox_claim_token", versions)
 
     def test_web_lifespan_does_not_construct_schema_manager_or_run_ddl_helper(self):
         source = inspect.getsource(lifespan)
@@ -45,9 +46,14 @@ class TestRetailBot2MigrationManagedStartup(unittest.TestCase):
         manager._verify_schema()
 
         statements = [call.args[0].lstrip().upper() for call in cursor.execute.call_args_list]
-        self.assertEqual(len(statements), 2)
+        self.assertEqual(len(statements), 3)
         self.assertTrue(all(statement.startswith("SELECT") for statement in statements))
         self.assertFalse(any(statement.startswith(("CREATE", "ALTER", "INSERT", "UPDATE", "DELETE")) for statement in statements))
+        self.assertIn("INFORMATION_SCHEMA.COLUMNS", statements[2])
+        self.assertEqual(
+            cursor.execute.call_args_list[2].args[1],
+            ("rdt_telegram_outbox", "claim_token"),
+        )
         conn.close.assert_called_once()
         cursor.close.assert_called_once()
 
