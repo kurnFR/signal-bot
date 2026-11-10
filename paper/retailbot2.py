@@ -1789,7 +1789,7 @@ class DatabaseManager:
         """Permanently transition to dead state if this worker owns unexpired claim."""
         return self._update_telegram_outbox(
             """UPDATE rdt_telegram_outbox
-               SET status='dead', next_attempt_at=NULL, locked_until=NULL,
+               SET status='dead', locked_until=NULL,
                    claim_token=NULL, last_error=%s
                WHERE id=%s AND status='processing' AND claim_token=%s
                  AND locked_until > UTC_TIMESTAMP()""",

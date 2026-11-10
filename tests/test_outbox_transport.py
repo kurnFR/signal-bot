@@ -30,13 +30,13 @@ class TestTelegramResponseClassification:
         res = classify_telegram_response(200, body)
         assert res["status"] == STATUS_DELIVERY_UNKNOWN
         assert res["http_status"] == 200
-        assert "invalid or non-JSON" in res["error"]
+        assert "did not explicitly confirm delivery" in res["error"]
 
     def test_http_200_missing_ok(self):
         body = json.dumps({"result": {"message_id": 12345}})
         res = classify_telegram_response(200, body)
         assert res["status"] == STATUS_DELIVERY_UNKNOWN
-        assert "missing ok=true" in res["error"]
+        assert "missing explicit Telegram ok field" in res["error"]
 
     def test_http_200_ok_false_is_confirmed_rejection(self):
         body = json.dumps({"ok": False, "description": "Unexpected false ok on 200"})
@@ -53,6 +53,18 @@ class TestTelegramResponseClassification:
         res = classify_telegram_response(200, body)
         assert res["status"] == STATUS_FAILED_CONFIRMED
         assert res["permanent"] is True
+
+    def test_http_200_ok_false_with_transient_error_code(self):
+        body = json.dumps({
+            "ok": False,
+            "error_code": 429,
+            "description": "Too Many Requests: retry after 15",
+            "parameters": {"retry_after": 15}
+        })
+        res = classify_telegram_response(200, body)
+        assert res["status"] == STATUS_FAILED_CONFIRMED
+        assert res["retry_after"] == 15
+        assert res["permanent"] is False
 
     def test_valid_api_ok_false_general(self):
         body = json.dumps({"ok": False, "error_code": 409, "description": "Conflict"})
@@ -172,3 +184,78 @@ class TestTransportCLIExecution:
         assert res["status"] == STATUS_FAILED_CONFIRMED
         assert res["retry_after"] == 20
         assert res["permanent"] is False
+
+
+class TestWorkerOutcomeHandling:
+    def test_permanent_rejection_marks_dead_not_retried(self):
+        from paper.outbox_worker import OutboxWorker, OutboxWorkerState
+        worker = OutboxWorker(
+            db_config={},
+            telegram_token="token",
+            telegram_chat_id="chat",
+            allowed_databases=("signal_bot_test",),
+        )
+        worker.session_mgr = Mock()
+        worker.session_mgr.check_lock_owned.return_value = True
+        worker.session_mgr.claim_event.return_value = {
+            "id": 100,
+            "claim_token": "token100",
+            "event_type": "entry",
+            "payload": {
+                "signal": {"symbol": "BTC/USDT", "side": "LONG"},
+                "units": 1.0,
+                "risk_amt": 50.0,
+                "risk_pct": 1.0,
+                "mode": "shadow",
+            },
+            "attempts": 1,
+        }
+
+        with patch("paper.outbox_worker.dispatch_event_via_subprocess", return_value={
+            "status": STATUS_FAILED_CONFIRMED,
+            "permanent": True,
+            "error_code": 403,
+            "description": "Forbidden: bot was blocked by the user",
+        }):
+            processed = worker.process_one_event()
+            assert processed is True
+
+        worker.session_mgr.mark_dead.assert_called_once_with(100, "token100", "Forbidden: bot was blocked by the user")
+        worker.session_mgr.mark_retry.assert_not_called()
+        worker.session_mgr.mark_sent.assert_not_called()
+
+    def test_ambiguous_delivery_never_marked_sent(self):
+        from paper.outbox_worker import OutboxWorker
+        worker = OutboxWorker(
+            db_config={},
+            telegram_token="token",
+            telegram_chat_id="chat",
+            allowed_databases=("signal_bot_test",),
+        )
+        worker.session_mgr = Mock()
+        worker.session_mgr.check_lock_owned.return_value = True
+        worker.session_mgr.claim_event.return_value = {
+            "id": 101,
+            "claim_token": "token101",
+            "event_type": "entry",
+            "payload": {
+                "signal": {"symbol": "BTC/USDT", "side": "LONG"},
+                "units": 1.0,
+                "risk_amt": 50.0,
+                "risk_pct": 1.0,
+                "mode": "shadow",
+            },
+            "attempts": 1,
+        }
+
+        with patch("paper.outbox_worker.dispatch_event_via_subprocess", return_value={
+            "status": STATUS_DELIVERY_UNKNOWN,
+            "error": "ReadTimeout after transmit",
+        }):
+            processed = worker.process_one_event()
+            assert processed is True
+
+        # Must never mark sent or dead on ambiguous delivery; must mark retry
+        worker.session_mgr.mark_sent.assert_not_called()
+        worker.session_mgr.mark_dead.assert_not_called()
+        worker.session_mgr.mark_retry.assert_called_once_with(101, "token101", 1, "ReadTimeout after transmit")

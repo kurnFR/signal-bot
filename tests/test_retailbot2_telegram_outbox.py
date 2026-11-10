@@ -216,9 +216,12 @@ def test_dispatcher_marks_success_and_retries_failed_delivery():
     bot.logger = Mock()
 
     assert bot._dispatch_telegram_outbox(limit=3) == 1
-    bot.db.mark_telegram_outbox_sent.assert_called_once_with(1, "claim-entry-1")
+    expected_conn = bot.db.get_conn.return_value
+    bot.db.mark_telegram_outbox_sent.assert_called_once_with(
+        1, "claim-entry-1", conn=expected_conn
+    )
     bot.db.retry_telegram_outbox_event.assert_called_once_with(
-        2, "claim-exit-2", 2, "Telegram API did not confirm message delivery"
+        2, "claim-exit-2", 2, "Telegram API did not confirm message delivery", conn=expected_conn
     )
 
 

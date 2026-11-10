@@ -254,6 +254,18 @@ def _is_pre_connect_error(exc: Exception) -> bool:
 
 def _execute_mock(mock: Dict[str, Any]) -> Dict[str, Any]:
     """Simulate transport behavior for isolated testing."""
+    if "fork_descendant" in mock:
+        desc = mock["fork_descendant"]
+        sleep_sec = float(desc.get("sleep", 10.0))
+        ignore_term = bool(desc.get("ignore_sigterm", False))
+        code = (
+            f"import signal, time; "
+            f"{'signal.signal(signal.SIGTERM, signal.SIG_IGN); ' if ignore_term else ''}"
+            f"time.sleep({sleep_sec})"
+        )
+        subprocess.Popen([sys.executable, "-c", code])
+        sys.exit(0)
+
     if "sleep" in mock:
         import time
         time.sleep(float(mock["sleep"]))

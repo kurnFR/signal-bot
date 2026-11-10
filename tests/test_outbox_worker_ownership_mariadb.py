@@ -261,7 +261,98 @@ class TestAdvisoryLockOwnership:
             mgr.mark_sent(1, "fake_token")
 
 
-class TestFencingPredicates:
+    def test_every_claim_and_transition_uses_exact_same_connection_id(self):
+        conn = _test_connection()
+        e1 = _insert_test_event(conn)
+        e2 = _insert_test_event(conn)
+        e3 = _insert_test_event(conn)
+        conn.close()
+
+        db_cfg = {
+            "host": TEST_DB_HOST,
+            "port": TEST_DB_PORT,
+            "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", "cms"),
+            "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""),
+            "database": TEST_DB_NAME,
+        }
+        mgr = OutboxSessionManager(db_cfg, ALLOWED_TEST_DATABASES)
+        assert mgr.connect_and_acquire() is True
+
+        try:
+            # Query the connection ID of S_lock
+            cur = mgr.s_lock.cursor()
+            cur.execute("SELECT CONNECTION_ID()")
+            expected_cid = cur.fetchone()[0]
+            cur.close()
+
+            # Verify advisory lock is held by this exact connection ID
+            cur = mgr.s_lock.cursor()
+            cur.execute("SELECT IS_USED_LOCK(%s)", (OUTBOX_LOCK_NAME,))
+            assert cur.fetchone()[0] == expected_cid
+            cur.close()
+
+            # Claim e1, acknowledge e1
+            event1 = mgr.claim_event(lease_seconds=60)
+            assert event1 is not None
+            cur = mgr.s_lock.cursor()
+            cur.execute("SELECT CONNECTION_ID()")
+            assert cur.fetchone()[0] == expected_cid
+            cur.close()
+
+            assert mgr.mark_sent(event1["id"], event1["claim_token"]) is True
+            cur = mgr.s_lock.cursor()
+            cur.execute("SELECT CONNECTION_ID()")
+            assert cur.fetchone()[0] == expected_cid
+            cur.close()
+
+            # Claim e2, retry e2
+            event2 = mgr.claim_event(lease_seconds=60)
+            assert event2 is not None
+            assert mgr.mark_retry(event2["id"], event2["claim_token"], 1, "retry test") is True
+            cur = mgr.s_lock.cursor()
+            cur.execute("SELECT CONNECTION_ID()")
+            assert cur.fetchone()[0] == expected_cid
+            cur.close()
+
+            # Claim e3, mark dead e3
+            event3 = mgr.claim_event(lease_seconds=60)
+            assert event3 is not None
+            assert mgr.mark_dead(event3["id"], event3["claim_token"], "dead test") is True
+            cur = mgr.s_lock.cursor()
+            cur.execute("SELECT CONNECTION_ID()")
+            assert cur.fetchone()[0] == expected_cid
+            cur.close()
+        finally:
+            mgr.close()
+
+    def test_full_retailbot2_fails_closed_when_lock_setup_unavailable(self):
+        # Database manager lacks acquire_outbox_lock or get_conn
+        db_mgr = object.__new__(DatabaseManager)
+        db_mgr.logger = logging.getLogger("test_dispatch_fail_closed")
+        # Do not provide acquire_outbox_lock
+        bot = object.__new__(RetailDeathTrapBot)
+        bot.db = db_mgr
+        bot.tg = object.__new__(TelegramAlert)
+        bot.tg.enabled = True
+        bot.logger = logging.getLogger("test_bot")
+
+        # Must fail closed and return 0 without touching outbox
+        assert bot._dispatch_telegram_outbox(limit=1) == 0
+
+    def test_full_retailbot2_fails_closed_when_lock_acquisition_raises(self):
+        db_mgr = object.__new__(DatabaseManager)
+        db_mgr.logger = logging.getLogger("test_dispatch_fail_closed")
+        db_mgr.get_conn = _test_connection
+        db_mgr.acquire_outbox_lock = Mock(side_effect=RuntimeError("Simulated lock acquisition error"))
+
+        bot = object.__new__(RetailDeathTrapBot)
+        bot.db = db_mgr
+        bot.tg = object.__new__(TelegramAlert)
+        bot.tg.enabled = True
+        bot.logger = logging.getLogger("test_bot")
+
+        # Must catch error, fail closed, and return 0
+        assert bot._dispatch_telegram_outbox(limit=1) == 0
     @pytest.fixture(autouse=True)
     def clean_db(self):
         conn = _test_connection()

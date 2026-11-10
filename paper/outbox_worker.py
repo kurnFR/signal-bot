@@ -626,7 +626,7 @@ class OutboxWorker:
                         self.state = OutboxWorkerState.STOPPING if self._shutdown_requested else OutboxWorkerState.RUNNING
                     else:
                         # Even SIGTERM/SIGINT must not release the lock while transport survival is unresolved.
-                        time.sleep(5.0)
+                        time.sleep(min(self.poll_interval_sec, 5.0))
                         continue
 
                 if self._shutdown_requested:
