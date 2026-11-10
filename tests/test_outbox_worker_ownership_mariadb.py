@@ -200,7 +200,7 @@ class TestAdvisoryLockOwnership:
             worker1.close()
             worker2.close()
 
-    def test_standalone_vs_full_retailbot2_contention(self):
+    def test_legacy_retailbot2_dispatcher_cannot_bypass_standalone_worker(self):
         db_cfg = {
             "host": TEST_DB_HOST,
             "port": TEST_DB_PORT,
@@ -218,10 +218,10 @@ class TestAdvisoryLockOwnership:
         assert standalone.connect_and_acquire() is True
 
         try:
-            # Full RetailBot2 dispatcher should detect lock held by standalone worker and return 0
+            # Legacy in-process delivery must remain disabled while standalone worker owns the lock.
             db_mgr = object.__new__(DatabaseManager)
             db_mgr.logger = logging.getLogger("test_dispatch")
-            db_mgr.get_conn = _test_connection
+            db_mgr.get_conn = Mock(side_effect=AssertionError('legacy dispatcher must not open a DB connection'))
 
             bot = object.__new__(RetailDeathTrapBot)
             bot.db = db_mgr
@@ -229,9 +229,10 @@ class TestAdvisoryLockOwnership:
             bot.tg.enabled = True
             bot.logger = logging.getLogger("test_bot")
 
-            # RetailDeathTrapBot dispatcher skips when lock is held
+            # Compatibility method must not touch the DB or send directly.
             delivered = bot._dispatch_telegram_outbox(limit=1)
             assert delivered == 0
+            db_mgr.get_conn.assert_not_called()
 
             # Event should remain pending in outbox
             chk_conn = _test_connection()
@@ -331,7 +332,7 @@ class TestAdvisoryLockOwnership:
         finally:
             mgr.close()
 
-    def test_full_retailbot2_fails_closed_when_lock_setup_unavailable(self):
+    def test_legacy_dispatcher_is_disabled_without_lock_api(self):
         # Database manager lacks acquire_outbox_lock or get_conn
         db_mgr = object.__new__(DatabaseManager)
         db_mgr.logger = logging.getLogger("test_dispatch_fail_closed")
@@ -342,10 +343,10 @@ class TestAdvisoryLockOwnership:
         bot.tg.enabled = True
         bot.logger = logging.getLogger("test_bot")
 
-        # Must fail closed and return 0 without touching outbox
+        # Must return without attempting to open a connection or touch the outbox.
         assert bot._dispatch_telegram_outbox(limit=1) == 0
 
-    def test_full_retailbot2_fails_closed_when_lock_acquisition_raises(self):
+    def test_legacy_dispatcher_never_attempts_lock_acquisition(self):
         db_mgr = object.__new__(DatabaseManager)
         db_mgr.logger = logging.getLogger("test_dispatch_fail_closed")
         db_mgr.get_conn = _test_connection
@@ -357,8 +358,10 @@ class TestAdvisoryLockOwnership:
         bot.tg.enabled = True
         bot.logger = logging.getLogger("test_bot")
 
-        # Must catch error, fail closed, and return 0
+        # Compatibility path must not attempt advisory-lock acquisition.
         assert bot._dispatch_telegram_outbox(limit=1) == 0
+        db_mgr.get_conn.assert_not_called()
+        db_mgr.acquire_outbox_lock.assert_not_called()
 
     def test_real_mariadb_advisory_lock_retention_during_fatal_lockout(self):
         db_cfg = {
