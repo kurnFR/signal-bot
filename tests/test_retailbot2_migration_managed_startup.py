@@ -46,9 +46,12 @@ class TestRetailBot2MigrationManagedStartup(unittest.TestCase):
         manager._verify_schema()
 
         statements = [call.args[0].lstrip().upper() for call in cursor.execute.call_args_list]
-        self.assertEqual(len(statements), 2)
+        self.assertEqual(len(statements), 3)
         self.assertTrue(all(statement.startswith("SELECT") for statement in statements))
         self.assertFalse(any(statement.startswith(("CREATE", "ALTER", "INSERT", "UPDATE", "DELETE")) for statement in statements))
+        self.assertIn("INFORMATION_SCHEMA.COLUMNS", statements[2])
+        self.assertIn("RDT_TELEGRAM_OUTBOX", str(cursor.execute.call_args_list[2].args[1]))
+        self.assertIn("CLAIM_TOKEN", str(cursor.execute.call_args_list[2].args[1]))
         conn.close.assert_called_once()
         cursor.close.assert_called_once()
 
