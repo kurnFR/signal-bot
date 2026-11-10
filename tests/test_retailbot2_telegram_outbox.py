@@ -168,6 +168,9 @@ def test_retry_uses_exponential_backoff_then_dead_letters():
     assert cursor.calls[0][1] == ("pending", 15, "temporary failure", 5, token)
     assert db.retry_telegram_outbox_event(5, token, 8, "permanent failure")
     assert cursor.calls[1][1][0] == "dead"
+    assert "claim_token=NULL" in cursor.calls[1][0]
+    assert "claim_token=%s" in cursor.calls[1][0]
+    assert "locked_until > UTC_TIMESTAMP()" in cursor.calls[1][0]
 
 
 def test_mark_sent_requires_processing_state_and_commits():
