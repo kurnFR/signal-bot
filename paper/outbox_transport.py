@@ -213,10 +213,17 @@ def execute_transport(payload: Dict[str, Any]) -> Dict[str, Any]:
         )
     except requests.exceptions.ConnectionError as exc:
         is_pre = _is_pre_connect_error(exc)
+        # requests exception strings may include the full /bot<TOKEN>/ URL.
+        # Persist only a safe classification, never the raw exception message.
+        safe_error = (
+            "ConnectionError before transmission"
+            if is_pre else
+            "ConnectionError after request may have been transmitted"
+        )
         return classify_telegram_response(
             http_status=None,
             body_str="",
-            exception_name=f"ConnectionError: {exc}",
+            exception_name=safe_error,
             pre_connect=is_pre,
         )
     except requests.exceptions.ReadTimeout:
@@ -230,7 +237,7 @@ def execute_transport(payload: Dict[str, Any]) -> Dict[str, Any]:
         return classify_telegram_response(
             http_status=None,
             body_str="",
-            exception_name=f"UnexpectedTransportError: {exc}",
+            exception_name=f"UnexpectedTransportError: {type(exc).__name__}",
             pre_connect=False,
         )
 
