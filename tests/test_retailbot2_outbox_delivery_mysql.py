@@ -63,7 +63,29 @@ def _db():
     return db
 
 
+def _assert_outbox_idle():
+    """The production dispatcher claims globally; refuse unrelated queued work."""
+    conn = _connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM rdt_telegram_outbox
+            WHERE status IN ('pending', 'processing')
+            """
+        )
+        active = cursor.fetchone()[0]
+        assert active == 0, (
+            "Refusing dispatcher integration test: isolated test DB contains "
+            f"{active} unrelated pending/processing outbox event(s)"
+        )
+        cursor.close()
+    finally:
+        conn.close()
+
+
 def _seed_entry(db, suffix):
+    _assert_outbox_idle()
     symbol = f"OTR{suffix}USDT"
     signal = {
         "symbol": symbol,
