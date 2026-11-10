@@ -6,6 +6,15 @@ How the system is put together and the rules that keep it correct. For setup see
 
 `run_all.py` starts and supervises these (restart after 5 s if one crashes). Each can also be run alone.
 
+The RetailBot2 Telegram outbox consumer is separate from the trading process. It is added to
+`run_all.py` only when both `RETAILBOT2_OUTBOX_WORKER_ENABLED=1` and
+`RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1` are explicitly set. Without both flags,
+trade alerts remain persisted in `rdt_telegram_outbox` and are not sent. The supervisor
+sends SIGTERM during shutdown but will not SIGKILL this worker after its normal grace
+period: the worker may be retaining its MariaDB advisory lock while a transport process
+group is still alive or unverified. This can intentionally delay full shutdown until
+transport cleanup is confirmed.
+
 | Process | Entry point | Role |
 |---|---|---|
 | `web_server` | `run_web.py` (port 8050) | FastAPI app and static dashboard |
@@ -13,6 +22,7 @@ How the system is put together and the rules that keep it correct. For setup see
 | `paper_engine` | `run_paper_engine.py` | Evaluates deployed strategies on new closed candles and manages paper positions |
 | `news_ai` | `run_news_ai.py` | News + macro-calendar pollers, LLM reasoning, guarded paper execution |
 | `retailbot2` | `paper/retailbot2.py` | Experimental research bot (own tables) |
+| `retailbot2_outbox` | `python -m paper.outbox_worker` | Isolated Telegram outbox consumer (explicitly opt-in) |
 | `screener` | `Screen/screening.py` | Smart-money volume detector (own tables) |
 | `wallet_tracker` | `run_wallet_tracker.py` | On-chain swap scanner, wallet candidates, Telegram alerts |
 

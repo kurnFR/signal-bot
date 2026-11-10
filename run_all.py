@@ -17,8 +17,10 @@ threads is fragile (one process's crash or a stuck C extension can affect
 shared interpreter state); separate OS processes give clean crash isolation
 and match how you'd run these manually, just supervised from one place.
 
-If Ctrl+C'd, every child is asked to terminate (SIGTERM) and given a few
-seconds before being killed outright, so nothing is left orphaned.
+If Ctrl+C'd, every child is asked to terminate (SIGTERM). Most children
+are killed after the shared grace period; the RetailBot2 outbox worker is
+never force-killed by the supervisor because it may be retaining its MariaDB
+advisory lock while a Telegram transport descendant is still alive or unverified.
 
 Each process is independently optional at the config level already (the
 News AI workers and retailbot2/screener all exit cleanly or run in a
@@ -48,24 +50,42 @@ logger = logging.getLogger("run_all")
 
 RESTART_BACKOFF_SECONDS = 5
 
-# name -> command. Order doesn't matter functionally (each is independent),
-# but this is roughly "most people want this" -> "opt-in extras".
-PROCESSES = {
-    "web_server":   [
-        sys.executable,
-        "run_web.py",
-        "--port",
-        os.getenv("WEB_PORT", "8050"),
-        "--host",
-        os.getenv("SIGNAL_BOT_HOST", "0.0.0.0"),
-    ],
-    "collectors":   [sys.executable, "run_collectors.py"],
-    "paper_engine": [sys.executable, "run_paper_engine.py"],
-    "news_ai":      [sys.executable, "run_news_ai.py"],
-    "retailbot2":   [sys.executable, "paper/retailbot2.py"],
-    "screener":     [sys.executable, "Screen/screening.py"],
-    "wallet_tracker": [sys.executable, "run_wallet_tracker.py"],
-}
+def build_processes(environ=None):
+    """Build supervised process commands with Telegram delivery explicitly opt-in."""
+    env = os.environ if environ is None else environ
+    processes = {
+        "web_server": [
+            sys.executable, "run_web.py", "--port",
+            env.get("WEB_PORT", "8050"), "--host",
+            env.get("SIGNAL_BOT_HOST", "0.0.0.0"),
+        ],
+        "collectors": [sys.executable, "run_collectors.py"],
+        "paper_engine": [sys.executable, "run_paper_engine.py"],
+        "news_ai": [sys.executable, "run_news_ai.py"],
+        "retailbot2": [sys.executable, "paper/retailbot2.py"],
+        "screener": [sys.executable, "Screen/screening.py"],
+        "wallet_tracker": [sys.executable, "run_wallet_tracker.py"],
+    }
+
+    # Keep delivery disabled by default. Both flags are required so enabling
+    # the process supervisor alone cannot accidentally enable production sends.
+    if env.get("RETAILBOT2_OUTBOX_WORKER_ENABLED", "").strip() == "1":
+        if env.get("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1":
+            processes["retailbot2_outbox"] = [
+                sys.executable, "-m", "paper.outbox_worker",
+                "--database", "crypto_signals",
+            ]
+        else:
+            logger.error(
+                "RetailBot2 outbox worker requested but RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 "
+                "is missing; worker will remain disabled"
+            )
+    return processes
+
+
+# name -> command. The outbox worker is explicitly opt-in; all other processes
+# preserve the existing default startup behavior.
+PROCESSES = build_processes()
 
 _shutdown = threading.Event()
 _children = {}  # name -> current subprocess.Popen, for shutdown to reach
@@ -77,10 +97,15 @@ def _run_and_restart(name, cmd):
     time it exits, until shutdown is requested. A crash-looping process
     (e.g. permanently missing required config) shows up as a repeating log
     line here rather than silently going dark -- that's intentional."""
-    while not _shutdown.is_set():
-        logger.info(f"[{name}] starting: {' '.join(cmd)}")
-        proc = subprocess.Popen(cmd)
+    while True:
+        # Serialize the shutdown check, process creation, and registration with
+        # _shutdown_all()'s child snapshot. Otherwise shutdown can miss a child
+        # spawned between its snapshot and this thread's registration.
         with _children_lock:
+            if _shutdown.is_set():
+                return
+            logger.info(f"[{name}] starting: {' '.join(cmd)}")
+            proc = subprocess.Popen(cmd)
             _children[name] = proc
 
         exit_code = proc.wait()
@@ -112,8 +137,20 @@ def _shutdown_all():
         try:
             proc.wait(timeout=remaining)
         except subprocess.TimeoutExpired:
-            logger.warning(f"[{name}] did not stop in time, killing (pid {proc.pid})")
-            proc.kill()
+            if name == "retailbot2_outbox":
+                logger.critical(
+                    "[%s] has not released its safety lock after SIGTERM; refusing SIGKILL "
+                    "and waiting until the worker confirms transport cleanup (pid %s)",
+                    name, proc.pid,
+                )
+                # This may wait indefinitely if a transport process is stuck in
+                # an uninterruptible state. That is intentional: killing the
+                # lock owner could allow a replacement worker to send while an
+                # old transport descendant is still alive.
+                proc.wait()
+            else:
+                logger.warning(f"[{name}] did not stop in time, killing (pid {proc.pid})")
+                proc.kill()
     logger.info("All processes stopped.")
 
 

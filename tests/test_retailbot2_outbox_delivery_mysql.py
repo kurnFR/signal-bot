@@ -17,13 +17,12 @@ The test account needs SELECT, INSERT, UPDATE, DELETE on signal_bot_test.
 import logging
 import os
 import uuid
-from types import SimpleNamespace
-from unittest.mock import Mock, patch
 
 import mysql.connector
 import pytest
 
-from paper.retailbot2 import DatabaseManager, RetailDeathTrapBot
+from paper.outbox_worker import ALLOWED_TEST_DATABASES, OutboxWorker
+from paper.retailbot2 import DatabaseManager
 
 
 TEST_DB_HOST = "127.0.0.1"
@@ -124,16 +123,21 @@ def _seed_entry(db, suffix):
     return trade_id, symbol
 
 
-def _bot(db, send_entry):
-    bot = object.__new__(RetailDeathTrapBot)
-    bot.db = db
-    bot.tg = SimpleNamespace(
-        enabled=True,
-        send_entry=send_entry,
-        send_exit=Mock(return_value=True),
+def _worker(mock_response):
+    return OutboxWorker(
+        db_config={
+            "host": TEST_DB_HOST,
+            "port": TEST_DB_PORT,
+            "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", "").strip(),
+            "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""),
+            "database": TEST_DB_NAME,
+        },
+        telegram_token="mock-token",
+        telegram_chat_id="mock-chat",
+        allowed_databases=ALLOWED_TEST_DATABASES,
+        mock_transport_response=mock_response,
+        poll_interval_sec=0.01,
     )
-    bot.logger = logging.getLogger("test.retailbot2.outbox.delivery.mysql")
-    return bot
 
 
 def _read_event(trade_id):
@@ -240,27 +244,31 @@ def test_dispatcher_retries_failed_send_then_marks_confirmed_send_sent():
 
     db = _db()
     trade_id = None
+    worker = None
     try:
         trade_id, _symbol = _seed_entry(db, uuid.uuid4().hex[:10].upper())
-        send_entry = Mock(side_effect=[False, True])
-        bot = _bot(db, send_entry)
+        worker = _worker({
+            "status_code": 200,
+            "body": {"ok": False, "error_code": 500, "description": "temporary server failure"},
+        })
+        assert worker.session_mgr.connect_and_acquire() is True
 
-        # Failed transport response must return the claimed event to pending.
-        with patch("paper.retailbot2.requests.get", side_effect=AssertionError("network forbidden")), \
-             patch("paper.retailbot2.requests.post", side_effect=AssertionError("network forbidden")):
-            assert bot._dispatch_telegram_outbox(limit=1) == 0
+        # Confirmed transient rejection returns the claimed event to pending.
+        assert worker.process_one_event() is True
         failed = _read_event(trade_id)
         assert failed["status"] == "pending"
         assert failed["attempts"] == 1
         assert failed["locked_until"] is None
-        assert failed["last_error"] == "Telegram API did not confirm message delivery"
+        assert failed["last_error"] == "temporary server failure"
         assert failed["sent_at"] is None
 
         # Backoff is tested above; make it due immediately to avoid sleeping.
         _set_event_due(failed["id"])
-        with patch("paper.retailbot2.requests.get", side_effect=AssertionError("network forbidden")), \
-             patch("paper.retailbot2.requests.post", side_effect=AssertionError("network forbidden")):
-            assert bot._dispatch_telegram_outbox(limit=1) == 1
+        worker.mock_transport_response = {
+            "status_code": 200,
+            "body": {"ok": True, "result": {"message_id": 777}},
+        }
+        assert worker.process_one_event() is True
 
         sent = _read_event(trade_id)
         assert sent["status"] == "sent"
@@ -268,8 +276,9 @@ def test_dispatcher_retries_failed_send_then_marks_confirmed_send_sent():
         assert sent["locked_until"] is None
         assert sent["last_error"] is None
         assert sent["sent_at"] is not None
-        assert send_entry.call_count == 2
     finally:
+        if worker is not None:
+            worker.session_mgr.close()
         if trade_id is not None:
             _cleanup(db, trade_id)
 
@@ -280,6 +289,7 @@ def test_dispatcher_recovers_expired_claim_after_worker_interruption():
 
     db = _db()
     trade_id = None
+    worker = None
     try:
         trade_id, _symbol = _seed_entry(db, uuid.uuid4().hex[:10].upper())
 
@@ -293,21 +303,23 @@ def test_dispatcher_recovers_expired_claim_after_worker_interruption():
         assert processing["locked_until"] is not None
         assert processing["sent_at"] is None
 
-        # Simulate lease expiry, then let the real dispatcher reclaim and send.
+        # Simulate lease expiry, then let the standalone worker reclaim and send.
         _expire_lease(processing["id"])
-        send_entry = Mock(return_value=True)
-        bot = _bot(db, send_entry)
-        with patch("paper.retailbot2.requests.get", side_effect=AssertionError("network forbidden")), \
-             patch("paper.retailbot2.requests.post", side_effect=AssertionError("network forbidden")):
-            assert bot._dispatch_telegram_outbox(limit=1) == 1
+        worker = _worker({
+            "status_code": 200,
+            "body": {"ok": True, "result": {"message_id": 778}},
+        })
+        assert worker.session_mgr.connect_and_acquire() is True
+        assert worker.process_one_event() is True
 
         recovered = _read_event(trade_id)
         assert recovered["status"] == "sent"
         assert recovered["attempts"] == 2
         assert recovered["locked_until"] is None
         assert recovered["sent_at"] is not None
-        send_entry.assert_called_once()
     finally:
+        if worker is not None:
+            worker.session_mgr.close()
         if trade_id is not None:
             _cleanup(db, trade_id)
 
@@ -319,6 +331,7 @@ def test_closed_trade_persists_exit_event_and_dispatches_confirmed_delivery():
     db = _db()
     trade_id = None
     strategy = f"OUTBOX_EXIT_{uuid.uuid4().hex[:12].upper()}"
+    worker = None
     try:
         _assert_outbox_idle()
         symbol = f"OTX{uuid.uuid4().hex[:10].upper()}USDT"
@@ -382,21 +395,21 @@ def test_closed_trade_persists_exit_event_and_dispatches_confirmed_delivery():
         assert queued["attempts"] == 0
         assert queued["sent_at"] is None
 
-        bot = _bot(db, Mock(return_value=True))
-        bot.tg.send_exit = Mock(return_value=True)
-        with patch("paper.retailbot2.requests.get", side_effect=AssertionError("network forbidden")), \
-             patch("paper.retailbot2.requests.post", side_effect=AssertionError("network forbidden")):
-            assert bot._dispatch_telegram_outbox(limit=1) == 1
+        worker = _worker({
+            "status_code": 200,
+            "body": {"ok": True, "result": {"message_id": 779}},
+        })
+        assert worker.session_mgr.connect_and_acquire() is True
+        assert worker.process_one_event() is True
 
         sent = _read_event(trade_id)
         assert sent["status"] == "sent"
         assert sent["event_type"] == "exit"
         assert sent["attempts"] == 1
         assert sent["sent_at"] is not None
-        bot.tg.send_exit.assert_called_once_with(
-            exit_alert["trade"], 106.0, "TAKE_PROFIT", 12.0, 6.0
-        )
     finally:
+        if worker is not None:
+            worker.session_mgr.close()
         if trade_id is not None:
             _cleanup(db, trade_id, strategy=strategy)
 
