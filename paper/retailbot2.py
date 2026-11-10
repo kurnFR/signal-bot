@@ -39,6 +39,7 @@ import traceback
 import random
 import json
 import os
+import uuid
 from html import escape
 from dotenv import load_dotenv
 
@@ -1619,17 +1620,19 @@ class DatabaseManager:
                 )
                 conn.commit()
                 return None
+            claim_token = uuid.uuid4().hex
             cursor.execute(
                 """UPDATE rdt_telegram_outbox
                    SET status='processing', attempts=attempts+1,
                        locked_until=DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s SECOND),
-                       last_error=NULL WHERE id=%s""",
-                (max(1, int(lease_seconds)), event['id']),
+                       claim_token=%s, last_error=NULL WHERE id=%s""",
+                (max(1, int(lease_seconds)), claim_token, event['id']),
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("outbox claim lost before update")
             conn.commit()
             event['attempts'] = int(event.get('attempts') or 0) + 1
+            event['claim_token'] = claim_token
             event.pop('payload_json', None)
             event['payload'] = payload
             return event
@@ -1645,25 +1648,31 @@ class DatabaseManager:
                 cursor.close()
             conn.close()
 
-    def mark_telegram_outbox_sent(self, event_id: int) -> bool:
+    def mark_telegram_outbox_sent(self, event_id: int, claim_token: str) -> bool:
+        """Acknowledge only the still-current, unexpired claim owner."""
         return self._update_telegram_outbox(
             """UPDATE rdt_telegram_outbox
                SET status='sent', sent_at=UTC_TIMESTAMP(), locked_until=NULL,
-                   last_error=NULL WHERE id=%s AND status='processing'""",
-            (event_id,),
+                   claim_token=NULL, last_error=NULL
+               WHERE id=%s AND status='processing' AND claim_token=%s
+                 AND locked_until > UTC_TIMESTAMP()""",
+            (event_id, claim_token),
         )
 
-    def retry_telegram_outbox_event(self, event_id: int, attempts: int, error: str,
+    def retry_telegram_outbox_event(self, event_id: int, claim_token: str,
+                                    attempts: int, error: str,
                                     max_attempts: int = 8) -> bool:
+        """Release/retry only if this worker still owns an unexpired claim."""
         attempts = max(1, int(attempts))
         dead = attempts >= max_attempts
         delay = min(3600, 15 * (2 ** min(attempts - 1, 8)))
         return self._update_telegram_outbox(
             """UPDATE rdt_telegram_outbox
                SET status=%s, next_attempt_at=DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s SECOND),
-                   locked_until=NULL, last_error=%s
-               WHERE id=%s AND status='processing'""",
-            ('dead' if dead else 'pending', delay, str(error)[:1000], event_id),
+                   locked_until=NULL, claim_token=NULL, last_error=%s
+               WHERE id=%s AND status='processing' AND claim_token=%s
+                 AND locked_until > UTC_TIMESTAMP()""",
+            ('dead' if dead else 'pending', delay, str(error)[:1000], event_id, claim_token),
         )
 
     def _update_telegram_outbox(self, sql: str, params: tuple) -> bool:
@@ -2364,16 +2373,16 @@ class RetailDeathTrapBot:
                 else:
                     raise ValueError("unsupported RetailBot2 Telegram event type")
                 if ok:
-                    if self.db.mark_telegram_outbox_sent(int(event["id"])):
+                    if self.db.mark_telegram_outbox_sent(int(event["id"]), str(event["claim_token"])):
                         delivered += 1
                 else:
                     self.db.retry_telegram_outbox_event(
-                        int(event["id"]), int(event.get("attempts") or 1),
+                        int(event["id"]), str(event["claim_token"]), int(event.get("attempts") or 1),
                         "Telegram API did not confirm message delivery",
                     )
             except Exception as exc:
                 self.db.retry_telegram_outbox_event(
-                    int(event["id"]), int(event.get("attempts") or 1), str(exc),
+                    int(event["id"]), str(event["claim_token"]), int(event.get("attempts") or 1), str(exc),
                 )
                 self.logger.exception("RetailBot2 Telegram outbox dispatch failed")
         return delivered
