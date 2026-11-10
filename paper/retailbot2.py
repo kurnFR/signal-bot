@@ -1601,7 +1601,7 @@ class DatabaseManager:
             # An expired final-attempt lease must not be sent again after a crash.
             cursor.execute(
                 """UPDATE rdt_telegram_outbox
-                   SET status='dead', locked_until=NULL,
+                   SET status='dead', locked_until=NULL, claim_token=NULL,
                        last_error=COALESCE(last_error, 'delivery lease expired at max attempts')
                    WHERE status='processing' AND locked_until <= UTC_TIMESTAMP()
                      AND attempts >= 8"""
@@ -1624,7 +1624,7 @@ class DatabaseManager:
             except (TypeError, ValueError) as exc:
                 cursor.execute(
                     """UPDATE rdt_telegram_outbox
-                       SET status='dead', locked_until=NULL, last_error=%s
+                       SET status='dead', locked_until=NULL, claim_token=NULL, last_error=%s
                        WHERE id=%s""",
                     (f"invalid payload JSON: {exc}"[:1000], event['id']),
                 )
