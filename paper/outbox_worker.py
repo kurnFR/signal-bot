@@ -136,7 +136,7 @@ def inspect_process_group(pgid: int, proc_root: str = "/proc") -> ProcessInspect
 
     try:
         entries = os.listdir(proc_root)
-    except (PermissionError, OSError) as exc:
+    except Exception as exc:
         return ProcessInspectionResult(
             status=ProcessInspectionStatus.STATE_UNVERIFIED,
             error=f"Cannot list process filesystem {proc_root!r}: {exc}",
@@ -151,8 +151,8 @@ def inspect_process_group(pgid: int, proc_root: str = "/proc") -> ProcessInspect
         pid = int(entry)
         stat_path = os.path.join(proc_root, str(pid), "stat")
         try:
-            with open(stat_path, "r") as f:
-                stat_content = f.read()
+            with open(stat_path, "rb") as f:
+                stat_bytes = f.read()
         except (FileNotFoundError, ProcessLookupError):
             # Process exited during directory traversal; safe and expected
             continue
@@ -180,8 +180,13 @@ def inspect_process_group(pgid: int, proc_root: str = "/proc") -> ProcessInspect
                 f"OS error reading stat for PID {pid}: {exc}"
             )
             continue
+        except Exception as exc:
+            unverified_reasons.append(
+                f"Unexpected error reading stat for PID {pid}: {exc}"
+            )
+            continue
 
-        rparen_idx = stat_content.rfind(")")
+        rparen_idx = stat_bytes.rfind(b")")
         if rparen_idx == -1:
             if proc_root == "/proc":
                 try:
@@ -197,7 +202,7 @@ def inspect_process_group(pgid: int, proc_root: str = "/proc") -> ProcessInspect
             )
             continue
 
-        fields = stat_content[rparen_idx + 2:].split()
+        fields = stat_bytes[rparen_idx + 2:].split()
         if len(fields) < 3:
             if proc_root == "/proc":
                 try:
@@ -213,10 +218,23 @@ def inspect_process_group(pgid: int, proc_root: str = "/proc") -> ProcessInspect
             )
             continue
 
-        state = fields[0]      # Field 3: process state
+        try:
+            state_str = fields[0].decode("ascii")
+            if len(state_str) != 1 or state_str not in "RSDZTtWXxKPI":
+                unverified_reasons.append(
+                    f"Malformed stat data for PID {pid}: invalid state field {fields[0]!r}"
+                )
+                continue
+            state = state_str
+        except Exception:
+            unverified_reasons.append(
+                f"Malformed stat data for PID {pid}: non-ASCII state field {fields[0]!r}"
+            )
+            continue
+
         try:
             pgrp = int(fields[2])  # Field 5: process group ID
-        except ValueError:
+        except (ValueError, UnicodeDecodeError):
             if proc_root == "/proc":
                 try:
                     actual_pgid = os.getpgid(pid)
@@ -506,6 +524,13 @@ class OutboxSessionManager:
         self.db_manager.logger = logger
         self.connected_database = ""
 
+    @property
+    def conn_id(self) -> Optional[int]:
+        """Return the underlying MariaDB connection ID of S_lock, or None if disconnected."""
+        if self.s_lock and self.s_lock.is_connected():
+            return getattr(self.s_lock, "connection_id", None)
+        return None
+
     def connect_and_acquire(self) -> bool:
         """Connect unpooled S_lock, verify database authorization, and acquire advisory lock."""
         try:
@@ -792,7 +817,17 @@ class OutboxWorker:
                         return 75
 
                     if self._fatal_pgid:
-                        inspection = inspect_process_group(self._fatal_pgid, proc_root=self.proc_root)
+                        try:
+                            inspection = inspect_process_group(self._fatal_pgid, proc_root=self.proc_root)
+                        except Exception as exc:
+                            logger.critical(
+                                "Unexpected exception during inspect_process_group for PGID %s: %s; failing closed",
+                                self._fatal_pgid, exc
+                            )
+                            inspection = ProcessInspectionResult(
+                                status=ProcessInspectionStatus.STATE_UNVERIFIED,
+                                error=f"Unexpected inspection error: {exc}",
+                            )
                         if inspection.status == ProcessInspectionStatus.CONFIRMED_EMPTY:
                             logger.info(
                                 "Confirmed no live transport processes remain in PGID %s; fatal lockout cleared",

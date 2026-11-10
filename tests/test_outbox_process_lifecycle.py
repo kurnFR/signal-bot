@@ -521,3 +521,45 @@ _child_preexec_pdeathsig(os.getppid() + 9999)
                 worker._shutdown_requested = True
                 worker._fatal_pgid = None
                 worker_thread.join(timeout=2.0)
+
+    def test_process_inspection_handles_invalid_utf8_in_comm_field(self, tmp_path):
+        test_pgid = 44444
+        proc_dir = tmp_path / "proc_utf8"
+        proc_dir.mkdir()
+
+        # 1. Process in target PGID with non-UTF-8 bytes in comm field
+        pid_dir = proc_dir / "401"
+        pid_dir.mkdir()
+        # Invalid UTF-8 sequence \xff\xfe\x80 in (comm)
+        stat_bytes = b"401 (\xff\xfe\x80proc_name\xaa) S 1 44444 100 0 0 0\n"
+        (pid_dir / "stat").write_bytes(stat_bytes)
+
+        # Inspect should safely parse bytes without raising UnicodeDecodeError
+        res = inspect_process_group(test_pgid, proc_root=str(proc_dir))
+        assert res.status == ProcessInspectionStatus.LIVE_PROCESSES_PRESENT
+        assert 401 in res.live_pids
+        assert 401 in get_live_pids_in_pgid(test_pgid, proc_root=str(proc_dir))
+
+        # 2. Zombie process with non-UTF-8 bytes in comm field (should be filtered out)
+        pid_zombie = proc_dir / "402"
+        pid_zombie.mkdir()
+        stat_zombie = b"402 (\xff\xfe_zombie) Z 1 44444 100 0 0 0\n"
+        (pid_zombie / "stat").write_bytes(stat_zombie)
+
+        res2 = inspect_process_group(test_pgid, proc_root=str(proc_dir))
+        assert 401 in res2.live_pids
+        assert 402 not in res2.live_pids  # Zombie filtered out
+
+        # 3. If trailing numeric fields are corrupted with invalid bytes, must result in STATE_UNVERIFIED,
+        # NEVER CONFIRMED_EMPTY
+        pid_corrupt = proc_dir / "403"
+        pid_corrupt.mkdir()
+        # Corrupted trailing fields after closing parenthesis
+        stat_corrupt = b"403 (comm) \xff\xfe 1 44444 100\n"
+        (pid_corrupt / "stat").write_bytes(stat_corrupt)
+
+        res_corrupt = inspect_process_group(test_pgid, proc_root=str(proc_dir))
+        assert res_corrupt.status == ProcessInspectionStatus.STATE_UNVERIFIED
+        assert res_corrupt.status != ProcessInspectionStatus.CONFIRMED_EMPTY
+        with pytest.raises(ProcessInspectionError):
+            get_live_pids_in_pgid(test_pgid, proc_root=str(proc_dir))

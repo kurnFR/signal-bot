@@ -7,6 +7,11 @@ Refuses to execute if connected to any other database.
 import json
 import logging
 import os
+import signal
+import subprocess
+import sys
+import threading
+import time
 import uuid
 from unittest.mock import MagicMock, Mock, patch
 
@@ -19,6 +24,7 @@ from paper.outbox_worker import (
     LockLostError,
     OutboxSessionManager,
     OutboxWorker,
+    OutboxWorkerState,
     verify_database_identity,
 )
 from paper.retailbot2 import (
@@ -353,6 +359,230 @@ class TestAdvisoryLockOwnership:
 
         # Must catch error, fail closed, and return 0
         assert bot._dispatch_telegram_outbox(limit=1) == 0
+
+    def test_real_mariadb_advisory_lock_retention_during_fatal_lockout(self):
+        db_cfg = {
+            "host": TEST_DB_HOST,
+            "port": TEST_DB_PORT,
+            "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", "cms"),
+            "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""),
+            "database": TEST_DB_NAME,
+        }
+        # 1. Start worker using real OutboxSessionManager connected to signal_bot_test
+        worker = OutboxWorker(
+            db_config=db_cfg,
+            telegram_token="token",
+            telegram_chat_id="chat",
+            allowed_databases=(TEST_DB_NAME,),
+            poll_interval_sec=0.05,
+        )
+
+        # 3. Enter FATAL_LOCKOUT with real surviving test process group
+        bg_proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            start_new_session=True,
+        )
+        pgid = bg_proc.pid
+
+        competing_conn = None
+        worker_thread = None
+        try:
+            # 2. Acquire actual MariaDB advisory lock on persistent S_lock connection
+            assert worker.session_mgr.connect_and_acquire() is True
+            worker_conn_id = worker.session_mgr.conn_id
+            assert worker_conn_id is not None
+
+            worker.state = OutboxWorkerState.FATAL_LOCKOUT
+            worker._fatal_pgid = pgid
+
+            worker_thread = threading.Thread(target=worker.run)
+            worker_thread.start()
+
+            # Wait for worker loop to cycle
+            time.sleep(0.15)
+            assert worker_thread.is_alive() is True
+
+            # 4. Use separate MariaDB connection to verify:
+            competing_conn = _test_connection()
+            cur = competing_conn.cursor()
+
+            # IS_USED_LOCK identifies the worker's connection ID
+            cur.execute("SELECT IS_USED_LOCK(%s)", (OUTBOX_LOCK_NAME,))
+            lock_owner = cur.fetchone()[0]
+            assert lock_owner == worker_conn_id
+
+            # Competing connection cannot acquire the lock
+            cur.execute("SELECT GET_LOCK(%s, 0)", (OUTBOX_LOCK_NAME,))
+            assert cur.fetchone()[0] == 0
+
+            # Worker's connection remains alive
+            assert worker.session_mgr.s_lock.is_connected() is True
+
+            # 5. Request shutdown while descendant remains alive
+            worker._handle_signal(signal.SIGTERM, None)
+            assert worker._shutdown_requested is True
+
+            # 6. Verify worker retains real MariaDB lock and does not exit
+            time.sleep(0.2)
+            assert worker_thread.is_alive() is True
+            assert worker.state == OutboxWorkerState.FATAL_LOCKOUT
+
+            cur.execute("SELECT IS_USED_LOCK(%s)", (OUTBOX_LOCK_NAME,))
+            assert cur.fetchone()[0] == worker_conn_id
+
+            cur.execute("SELECT GET_LOCK(%s, 0)", (OUTBOX_LOCK_NAME,))
+            assert cur.fetchone()[0] == 0
+
+            # 7. Terminate the descendant
+            os.killpg(pgid, signal.SIGKILL)
+            bg_proc.wait(timeout=3.0)
+
+            # 8. Verify worker releases lock only after process inspection returns CONFIRMED_EMPTY
+            worker_thread.join(timeout=3.0)
+            assert worker_thread.is_alive() is False
+            assert worker.state == OutboxWorkerState.STOPPED
+
+            # 9. Verify competing connection can acquire the lock after clean shutdown
+            cur.execute("SELECT GET_LOCK(%s, 0)", (OUTBOX_LOCK_NAME,))
+            assert cur.fetchone()[0] == 1
+
+            # Clean up competing lock
+            cur.execute("SELECT RELEASE_LOCK(%s)", (OUTBOX_LOCK_NAME,))
+            cur.fetchall()
+            cur.close()
+        finally:
+            # 10. Clean up every process and database connection in finally blocks
+            if competing_conn:
+                try:
+                    competing_conn.close()
+                except Exception:
+                    pass
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except OSError:
+                pass
+            bg_proc.wait()
+            if worker_thread and worker_thread.is_alive():
+                worker._shutdown_requested = True
+                worker._fatal_pgid = None
+                worker_thread.join(timeout=2.0)
+            worker.session_mgr.close()
+
+    def test_real_mariadb_advisory_lock_retained_on_actual_os_sigterm(self):
+        # Start background surviving descendant in its own PGID
+        bg_proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            start_new_session=True,
+        )
+        pgid = bg_proc.pid
+
+        # Child worker script running in independent OS process with registered signal handlers
+        worker_script = f"""
+import os, signal, sys, time
+from paper.outbox_worker import OutboxWorker, OutboxWorkerState
+
+db_cfg = {{
+    "host": "{TEST_DB_HOST}",
+    "port": {TEST_DB_PORT},
+    "user": "{os.getenv("SIGNAL_BOT_TEST_DB_USER", "cms")}",
+    "password": "{os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", "")}",
+    "database": "{TEST_DB_NAME}",
+}}
+
+fatal_pgid = int(sys.argv[1])
+worker = OutboxWorker(
+    db_config=db_cfg,
+    telegram_token="test_token",
+    telegram_chat_id="test_chat",
+    allowed_databases=("{TEST_DB_NAME}",),
+    poll_interval_sec=0.05,
+)
+worker.setup_signals()
+assert worker.session_mgr.connect_and_acquire() is True
+worker.state = OutboxWorkerState.FATAL_LOCKOUT
+worker._fatal_pgid = fatal_pgid
+
+sys.stdout.write(f"READY {{os.getpid()}} {{worker.session_mgr.conn_id}}\\n")
+sys.stdout.flush()
+
+exit_code = worker.run()
+sys.stdout.write(f"EXIT {{exit_code}}\\n")
+sys.stdout.flush()
+sys.exit(exit_code)
+"""
+
+        worker_proc = None
+        competing_conn = None
+        try:
+            worker_proc = subprocess.Popen(
+                [sys.executable, "-c", worker_script, str(pgid)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            # 1. Wait for READY line from worker process
+            ready_line = worker_proc.stdout.readline().strip()
+            assert ready_line.startswith("READY"), f"Unexpected worker output: {ready_line}"
+            _, worker_pid_str, worker_conn_id_str = ready_line.split()
+            worker_pid = int(worker_pid_str)
+            worker_conn_id = int(worker_conn_id_str)
+            assert worker_pid == worker_proc.pid
+
+            # 2. Check lock ownership from competing connection
+            competing_conn = _test_connection()
+            cur = competing_conn.cursor()
+
+            cur.execute("SELECT IS_USED_LOCK(%s)", (OUTBOX_LOCK_NAME,))
+            assert cur.fetchone()[0] == worker_conn_id
+
+            cur.execute("SELECT GET_LOCK(%s, 0)", (OUTBOX_LOCK_NAME,))
+            assert cur.fetchone()[0] == 0
+
+            # 3. Send ACTUAL OS SIGTERM using os.kill(worker_pid, signal.SIGTERM)
+            os.kill(worker_pid, signal.SIGTERM)
+
+            # 4. Verify worker remains alive and retains real MariaDB advisory lock
+            time.sleep(0.3)
+            assert worker_proc.poll() is None, "Worker process exited prematurely on SIGTERM during fatal lockout"
+
+            cur.execute("SELECT IS_USED_LOCK(%s)", (OUTBOX_LOCK_NAME,))
+            assert cur.fetchone()[0] == worker_conn_id
+
+            cur.execute("SELECT GET_LOCK(%s, 0)", (OUTBOX_LOCK_NAME,))
+            assert cur.fetchone()[0] == 0
+
+            # 5. Terminate descendant process
+            os.killpg(pgid, signal.SIGKILL)
+            bg_proc.wait(timeout=3.0)
+
+            # 6. Verify clean worker exit and lock release
+            retcode = worker_proc.wait(timeout=4.0)
+            assert retcode == 0
+
+            cur.execute("SELECT GET_LOCK(%s, 0)", (OUTBOX_LOCK_NAME,))
+            assert cur.fetchone()[0] == 1
+
+            cur.execute("SELECT RELEASE_LOCK(%s)", (OUTBOX_LOCK_NAME,))
+            cur.fetchall()
+            cur.close()
+        finally:
+            if competing_conn:
+                try:
+                    competing_conn.close()
+                except Exception:
+                    pass
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except OSError:
+                pass
+            bg_proc.wait()
+            if worker_proc and worker_proc.poll() is None:
+                try:
+                    os.kill(worker_proc.pid, signal.SIGKILL)
+                    worker_proc.wait(timeout=2.0)
+                except OSError:
+                    pass
     @pytest.fixture(autouse=True)
     def clean_db(self):
         conn = _test_connection()
