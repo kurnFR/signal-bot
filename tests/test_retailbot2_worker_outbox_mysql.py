@@ -109,8 +109,13 @@ def test_worker_persists_entry_outbox_only_for_promoted_strategy():
             """,
             strategies,
         )
+        lifecycle_columns = (
+            "strategy_id", "mode", "evaluation_enabled", "paper_enabled",
+            "telegram_enabled", "report_enabled", "auto_promote_enabled",
+        )
         original_lifecycle = {
-            row["strategy_id"]: row for row in cursor.fetchall()
+            row[0]: dict(zip(lifecycle_columns, row))
+            for row in cursor.fetchall()
         }
 
         cursor.executemany(
