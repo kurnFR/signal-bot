@@ -136,6 +136,20 @@ class TestTelegramResponseClassification:
         assert res["pre_connect"] is True
         assert res["permanent"] is False
 
+    def test_connection_error_does_not_leak_bot_token(self):
+        secret = "123456:VERY_SECRET_TOKEN"
+        exc = requests.exceptions.ConnectionError(
+            f"HTTPSConnectionPool failed for /bot{secret}/sendMessage"
+        )
+        with patch("paper.outbox_transport.requests.post", side_effect=exc):
+            result = execute_transport({
+                "token": secret,
+                "chat_id": "-1001",
+                "text": "safe test",
+            })
+        assert result["status"] == STATUS_DELIVERY_UNKNOWN
+        assert secret not in json.dumps(result)
+
 
 class TestTransportCLIExecution:
     def test_transport_cli_delivered_mock(self):
