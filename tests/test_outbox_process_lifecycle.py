@@ -295,7 +295,15 @@ _child_preexec_pdeathsig(os.getppid() + 9999)
         worker.session_mgr = session_mgr
         worker.state = OutboxWorkerState.FATAL_LOCKOUT
         worker._fatal_pgid = pgid
-        worker_thread = threading.Thread(target=worker.run)
+        worker_errors = []
+
+        def run_worker_and_capture_exception():
+            try:
+                worker.run()
+            except RuntimeError as exc:
+                worker_errors.append(exc)
+
+        worker_thread = threading.Thread(target=run_worker_and_capture_exception)
         try:
             worker_thread.start()
             deadline = time.monotonic() + 2.0
@@ -315,6 +323,8 @@ _child_preexec_pdeathsig(os.getppid() + 9999)
             assert not worker_thread.is_alive()
             assert worker.state == OutboxWorkerState.STOPPED
             assert session_mgr.close_count == 1
+            assert len(worker_errors) == 1
+            assert str(worker_errors[0]) == "simulated cursor close failure"
         finally:
             try:
                 os.killpg(pgid, signal.SIGKILL)
