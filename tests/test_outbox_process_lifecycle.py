@@ -39,6 +39,7 @@ class ControlledSessionManager:
         self.lock_held = True
         self.heartbeat_count = 0
         self.heartbeat_fail = False
+        self.heartbeat_raise = False
         self.close_count = 0
         self.claim_count = 0
         self._lock = threading.Lock()
@@ -61,6 +62,8 @@ class ControlledSessionManager:
             if not self.lock_held:
                 return False
             self.heartbeat_count += 1
+            if self.heartbeat_raise:
+                raise RuntimeError("simulated cursor close failure")
             return not self.heartbeat_fail
 
     def claim_event(self, lease_seconds: int = 90):
@@ -273,6 +276,54 @@ _child_preexec_pdeathsig(os.getppid() + 9999)
             assert False, f"Grandchild PID {grandchild_pid} is still alive after SIGKILL cleanup"
         except ProcessLookupError:
             pass
+
+    def test_unexpected_fatal_lockout_exception_does_not_release_lock_before_descendant_exit(self):
+        bg_proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            start_new_session=True,
+        )
+        pgid = bg_proc.pid
+        session_mgr = ControlledSessionManager()
+        session_mgr.heartbeat_raise = True
+        worker = OutboxWorker(
+            db_config={},
+            telegram_token="token",
+            telegram_chat_id="chat",
+            allowed_databases=("signal_bot_test",),
+            poll_interval_sec=0.02,
+        )
+        worker.session_mgr = session_mgr
+        worker.state = OutboxWorkerState.FATAL_LOCKOUT
+        worker._fatal_pgid = pgid
+        worker_thread = threading.Thread(target=worker.run)
+        try:
+            worker_thread.start()
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline and session_mgr.heartbeat_count < 2:
+                time.sleep(0.02)
+
+            assert session_mgr.heartbeat_count >= 2
+            assert worker_thread.is_alive()
+            assert worker.state == OutboxWorkerState.FATAL_LOCKOUT
+            assert session_mgr.lock_held is True
+            assert session_mgr.close_count == 0
+
+            os.killpg(pgid, signal.SIGKILL)
+            bg_proc.wait(timeout=3.0)
+            worker_thread.join(timeout=3.0)
+
+            assert not worker_thread.is_alive()
+            assert worker.state == OutboxWorkerState.STOPPED
+            assert session_mgr.close_count == 1
+        finally:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except OSError:
+                pass
+            bg_proc.wait()
+            if worker_thread.is_alive():
+                worker._fatal_pgid = None
+                worker_thread.join(timeout=2.0)
 
     def test_failed_heartbeat_with_open_connection_retains_fatal_lockout(self):
         bg_proc = subprocess.Popen(
