@@ -38,10 +38,21 @@ class TestTelegramResponseClassification:
         assert res["status"] == STATUS_DELIVERY_UNKNOWN
         assert "missing ok=true" in res["error"]
 
-    def test_http_200_ok_false(self):
+    def test_http_200_ok_false_is_confirmed_rejection(self):
         body = json.dumps({"ok": False, "description": "Unexpected false ok on 200"})
         res = classify_telegram_response(200, body)
-        assert res["status"] == STATUS_DELIVERY_UNKNOWN
+        assert res["status"] == STATUS_FAILED_CONFIRMED
+        assert res["permanent"] is False
+
+    def test_http_200_ok_false_with_permanent_api_error_code(self):
+        body = json.dumps({
+            "ok": False,
+            "error_code": 400,
+            "description": "Bad Request: chat not found"
+        })
+        res = classify_telegram_response(200, body)
+        assert res["status"] == STATUS_FAILED_CONFIRMED
+        assert res["permanent"] is True
 
     def test_valid_api_ok_false_general(self):
         body = json.dumps({"ok": False, "error_code": 409, "description": "Conflict"})
