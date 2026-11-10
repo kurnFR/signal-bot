@@ -2470,81 +2470,11 @@ class RetailDeathTrapBot:
     # ──────────────────────────────────────────────────────────────
 
     def _dispatch_telegram_outbox(self, limit: int = 2):
-        """Deliver persisted events while holding the shared outbox lock on the same DB session."""
-        if not getattr(self.tg, "enabled", False):
-            return 0
-
-        # Fail closed: dispatch must never proceed without the shared advisory lock.
-        if not (hasattr(self.db, "get_conn") and hasattr(self.db, "acquire_outbox_lock")):
-            self.logger.error("Outbox dispatch disabled: database manager cannot provide advisory-lock ownership")
-            return 0
-
-        lock_conn = None
-        try:
-            lock_conn = self.db.get_conn()
-            if not lock_conn or not self.db.acquire_outbox_lock(lock_conn, timeout_seconds=0):
-                if lock_conn:
-                    try:
-                        lock_conn.close()
-                    except Exception:
-                        pass
-                self.logger.debug("RetailBot2 outbox lock is held by another worker; skipping dispatch")
-                return 0
-
-            delivered = 0
-            for _ in range(max(0, int(limit))):
-                # Claim, acknowledge and retry must all use the exact connection owning GET_LOCK().
-                event = self.db.claim_telegram_outbox_event(conn=lock_conn)
-                if not event:
-                    break
-                try:
-                    payload = event.get("payload") or {}
-                    if event.get("event_type") == "entry":
-                        signal = payload.get("signal") or {}
-                        signal.setdefault("candle_close_time", "N/A")
-                        ok = self.tg.send_entry(
-                            signal, int(event["trade_id"]), float(payload["units"]),
-                            float(payload["risk_amt"]), float(payload["risk_pct"]),
-                            str(payload["mode"]),
-                        )
-                    elif event.get("event_type") == "exit":
-                        ok = self.tg.send_exit(
-                            payload.get("trade") or {}, float(payload["exit_price"]),
-                            str(payload["reason"]), float(payload["pnl"]),
-                            float(payload["pnl_pct"]),
-                        )
-                    else:
-                        raise ValueError("unsupported RetailBot2 Telegram event type")
-                    if ok:
-                        if self.db.mark_telegram_outbox_sent(
-                            int(event["id"]), str(event["claim_token"]), conn=lock_conn
-                        ):
-                            delivered += 1
-                    else:
-                        self.db.retry_telegram_outbox_event(
-                            int(event["id"]), str(event["claim_token"]), int(event.get("attempts") or 1),
-                            "Telegram API did not confirm message delivery", conn=lock_conn,
-                        )
-                except Exception as exc:
-                    self.db.retry_telegram_outbox_event(
-                        int(event["id"]), str(event["claim_token"]), int(event.get("attempts") or 1),
-                        str(exc), conn=lock_conn,
-                    )
-                    self.logger.exception("RetailBot2 Telegram outbox dispatch failed")
-            return delivered
-        except Exception as exc:
-            self.logger.error("RetailBot2 outbox dispatch failed closed: %s", exc)
-            return 0
-        finally:
-            if lock_conn:
-                try:
-                    self.db.release_outbox_lock(lock_conn)
-                except Exception:
-                    pass
-                try:
-                    lock_conn.close()
-                except Exception:
-                    pass
+        """Deprecated compatibility stub; delivery belongs exclusively to outbox_worker."""
+        self.logger.warning(
+            "In-process Telegram outbox delivery is disabled; run paper.outbox_worker instead"
+        )
+        return 0
 
     def run(self):
         self.logger.info("🚀 Bot running — CTRL+C to stop")
@@ -2559,7 +2489,6 @@ class RetailDeathTrapBot:
                 self.check_exits()
                 if self.trading_enabled:
                     self.scan()
-                self._dispatch_telegram_outbox()
 
                 # Heartbeat every 60s
                 hb_loops = self.config.heartbeat_interval // self.config.exit_check_interval
