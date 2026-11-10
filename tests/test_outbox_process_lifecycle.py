@@ -38,6 +38,7 @@ class ControlledSessionManager:
         self.conn_id = conn_id
         self.lock_held = True
         self.heartbeat_count = 0
+        self.heartbeat_fail = False
         self.close_count = 0
         self.claim_count = 0
         self._lock = threading.Lock()
@@ -51,12 +52,16 @@ class ControlledSessionManager:
         with self._lock:
             return self.lock_held
 
+    def connection_alive(self) -> bool:
+        with self._lock:
+            return self.lock_held
+
     def heartbeat(self) -> bool:
         with self._lock:
             if not self.lock_held:
                 return False
             self.heartbeat_count += 1
-            return True
+            return not self.heartbeat_fail
 
     def claim_event(self, lease_seconds: int = 90):
         with self._lock:
@@ -179,6 +184,38 @@ _child_preexec_pdeathsig(os.getppid() + 9999)
         res = subprocess.run([sys.executable, "-c", script])
         assert res.returncode == 1
 
+    def test_pdeathsig_prctl_failure_exits_child(self):
+        from paper import outbox_worker
+
+        fake_libc = MagicMock()
+        fake_libc.prctl.return_value = -1
+        with patch.object(outbox_worker.ctypes, "CDLL", return_value=fake_libc):
+            with patch.object(outbox_worker.os, "_exit", side_effect=SystemExit) as exit_mock:
+                with pytest.raises(SystemExit):
+                    _child_preexec_pdeathsig(os.getpid())
+        fake_libc.prctl.assert_called_once()
+        exit_mock.assert_called_once_with(1)
+
+    def test_transport_child_environment_excludes_application_secrets(self):
+        from paper.outbox_worker import _transport_child_environment
+
+        with patch.dict(os.environ, {
+            "PATH": "/usr/bin",
+            "PYTHONPATH": "/srv/signal-bot",
+            "MYSQL_PASSWORD": "db-secret",
+            "SIGNAL_BOT_TEST_DB_PASSWORD": "test-secret",
+            "BINANCE_API_SECRET": "exchange-secret",
+            "TELEGRAM_BOT_TOKEN": "telegram-secret",
+            "TELEGRAM_CHAT_ID": "chat-secret",
+            "HTTP_PROXY": "http://user:password@proxy",
+        }, clear=True):
+            child_env = _transport_child_environment()
+
+        assert child_env == {
+            "PATH": "/usr/bin",
+            "PYTHONPATH": "/srv/signal-bot",
+        }
+
     def test_direct_child_exits_while_grandchild_survives_and_is_terminated_by_sigterm(self, tmp_path):
         # Direct child exits immediately while grandchild stays alive in same PGID
         pid_file = tmp_path / "grandchild_sigterm.pid"
@@ -236,6 +273,57 @@ _child_preexec_pdeathsig(os.getppid() + 9999)
             assert False, f"Grandchild PID {grandchild_pid} is still alive after SIGKILL cleanup"
         except ProcessLookupError:
             pass
+
+    def test_failed_heartbeat_with_open_connection_retains_fatal_lockout(self):
+        bg_proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            start_new_session=True,
+        )
+        pgid = bg_proc.pid
+        session_mgr = ControlledSessionManager()
+        session_mgr.heartbeat_fail = True
+        worker = OutboxWorker(
+            db_config={},
+            telegram_token="token",
+            telegram_chat_id="chat",
+            allowed_databases=("signal_bot_test",),
+            poll_interval_sec=0.02,
+        )
+        worker.session_mgr = session_mgr
+        worker.state = OutboxWorkerState.FATAL_LOCKOUT
+        worker._fatal_pgid = pgid
+        worker_thread = threading.Thread(target=worker.run)
+        try:
+            worker_thread.start()
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline and session_mgr.heartbeat_count < 2:
+                time.sleep(0.02)
+            assert session_mgr.heartbeat_count >= 2
+            assert worker_thread.is_alive()
+            assert worker.state == OutboxWorkerState.FATAL_LOCKOUT
+            assert session_mgr.lock_held is True
+            assert session_mgr.close_count == 0
+
+            os.killpg(pgid, signal.SIGKILL)
+            bg_proc.wait(timeout=3.0)
+            session_mgr.heartbeat_fail = False
+            worker._handle_signal(signal.SIGTERM, None)
+            worker_thread.join(timeout=3.0)
+
+            assert not worker_thread.is_alive()
+            assert worker.state == OutboxWorkerState.STOPPED
+            assert session_mgr.close_count == 1
+        finally:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except OSError:
+                pass
+            bg_proc.wait()
+            if worker_thread.is_alive():
+                session_mgr.heartbeat_fail = False
+                worker._shutdown_requested = True
+                worker._fatal_pgid = None
+                worker_thread.join(timeout=2.0)
 
     def test_sigterm_during_fatal_lockout_retains_lock_until_descendant_terminated(self):
         # A. Start a real descendant process in its own session/process group
