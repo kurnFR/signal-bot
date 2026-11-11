@@ -543,12 +543,11 @@ def test_shutdown_during_strategy_processing_prevents_trade_open():
         return [{"strategy": "RSI_CTR", "side": "LONG", "symbol": "BTC/USDT"}]
     bot.engine.run_all.side_effect = run_all_and_request_shutdown
     bot._get_strategy_lifecycle = Mock(return_value={"evaluation_enabled": True, "paper_enabled": True, "telegram_enabled": False})
+    bot._open_trade = Mock()
 
     bot.scan()
 
     bot.engine.run_all.assert_called_once()
-    bot._open_trade = Mock()
-    # The scan above must have returned before attempting any trade creation.
     bot._open_trade.assert_not_called()
 
 
@@ -572,3 +571,52 @@ def test_normal_exit_processing_still_closes_triggered_trade():
     bot._close_trade = Mock()
     bot.check_exits()
     bot._close_trade.assert_called_once_with(1, 95.0, "STOP_LOSS", "shadow")
+
+
+
+def test_sigint_stops_bot_cleanly(monkeypatch, caplog):
+    monkeypatch.delenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", raising=False)
+    monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
+    monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+    bot = object.__new__(RetailDeathTrapBot)
+    bot.logger = logging.getLogger("test.retailbot2.sigint")
+    bot.config = BotConfig(observation_only=False, exit_check_interval=1, heartbeat_interval=60)
+    bot.observation_only = False
+    bot.trading_enabled = True
+    bot._shutdown_requested = False
+    bot.active_shadow = {}
+    bot.active_inverse = {}
+    bot.equity_shadow = 10000.0
+    bot.equity_inverse = 10000.0
+    bot.tg = Mock()
+    bot.tg.direct_authorized = False
+    bot.tg.enabled = False
+    bot.db = make_test_db(conn=MockConnection(MockCursor()), config=bot.config)
+    bot._reload_control = Mock()
+    bot.scan = Mock()
+
+    def signal_sigint():
+        os.kill(os.getpid(), sys_signal.SIGINT)
+
+    bot.check_exits = Mock(side_effect=signal_sigint)
+    with caplog.at_level(logging.INFO):
+        bot.run()
+
+    assert bot._shutdown_requested is True
+    bot.scan.assert_not_called()
+    assert any("Received SIGINT" in rec.message for rec in caplog.records)
+
+
+def test_shutdown_during_save_trade_does_not_mutate_in_memory_state():
+    bot = _make_shutdown_test_bot(symbols=["BTC/USDT"])
+    bot._get_strategy_lifecycle = Mock(return_value={"paper_enabled": True, "telegram_enabled": False})
+    bot._can_open = Mock(return_value=(True, "OK"))
+    bot.db.save_trade = Mock(side_effect=lambda *args, **kwargs: (setattr(bot, "_shutdown_requested", True) or 77))
+    result = bot._open_trade(
+        {"strategy": "RSI_CTR", "symbol": "BTC/USDT", "side": "LONG", "entry": 100.0, "stop": 95.0, "target": 110.0, "rr": 2.0},
+        "shadow",
+    )
+    assert result == 77
+    assert bot.active_shadow == {}
+    assert bot.active_inverse == {}
+    assert bot.last_trade_time == {}
