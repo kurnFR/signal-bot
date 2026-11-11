@@ -99,6 +99,10 @@ def send_telegram_message(text: str, parse_mode: str = "HTML", max_retries: int 
             # Keep diagnostics useful without returning or logging credential material.
             last_error = f"{type(e).__name__} while contacting Telegram API"
             logger.warning("Telegram send attempt %d/%d failed (%s)", attempt, max_retries, type(e).__name__)
+            # The request may have reached Telegram even if the response was
+            # lost or malformed. Do not retry an ambiguous outcome: duplicates
+            # are safer to avoid than to assume the message was not accepted.
+            break
 
         if attempt < max_retries:
             time.sleep(1.0 * attempt)
