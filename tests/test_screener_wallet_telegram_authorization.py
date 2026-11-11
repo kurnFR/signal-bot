@@ -541,6 +541,33 @@ class TestLegacySmartMoneyEngineAuthorization(unittest.TestCase):
             self.assertIn("error_type=HTTPError", output)
             self.assertIn("http_status=502", output)
 
+    def test_legacy_safe_http_status_validation_and_fallback(self):
+        mock_resp = MagicMock()
+        exc = requests.HTTPError(response=mock_resp)
+
+        mock_resp.status_code = 200
+        self.assertEqual(LegacyTelegram._safe_http_status(exc), "200")
+
+        mock_resp.status_code = 500
+        self.assertEqual(LegacyTelegram._safe_http_status(exc), "500")
+
+        mock_resp.status_code = 99
+        self.assertEqual(LegacyTelegram._safe_http_status(exc), "unknown")
+
+        mock_resp.status_code = 600
+        self.assertEqual(LegacyTelegram._safe_http_status(exc), "unknown")
+
+        mock_resp.status_code = "500"
+        self.assertEqual(LegacyTelegram._safe_http_status(exc), "unknown")
+
+        mock_resp.status_code = None
+        self.assertEqual(LegacyTelegram._safe_http_status(exc), "unknown")
+
+        mock_resp.status_code = True
+        self.assertEqual(LegacyTelegram._safe_http_status(exc), "unknown")
+
+        self.assertEqual(LegacyTelegram._safe_http_status(requests.ConnectionError()), "unknown")
+
 
 class TestSharedTelegramNotifierAuthorization(unittest.TestCase):
     def test_send_telegram_message_unauthorized_by_default_makes_zero_http_calls(self):
@@ -647,6 +674,7 @@ class TestTelegramConnectionTestEndpointAuthorization(unittest.TestCase):
 
     def test_direct_connection_check_authorized_calls_getme_and_send(self):
         mock_get_resp = MagicMock()
+        mock_get_resp.status_code = 200
         mock_get_resp.json.return_value = {"ok": True, "result": {"username": "bot_user", "first_name": "TestBot"}}
 
         mock_post_resp = MagicMock()
@@ -692,6 +720,7 @@ class TestTelegramConnectionTestEndpointAuthorization(unittest.TestCase):
 
     def test_api_test_endpoint_admin_authorized_dispatches_mock_only(self):
         mock_get_resp = MagicMock()
+        mock_get_resp.status_code = 200
         mock_get_resp.json.return_value = {"ok": True, "result": {"username": "admin_bot", "first_name": "AdminBot"}}
 
         mock_post_resp = MagicMock()

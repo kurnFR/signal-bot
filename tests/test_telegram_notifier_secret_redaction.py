@@ -64,6 +64,88 @@ class TestTelegramTokenRedaction(unittest.TestCase):
         mock_get.assert_not_called()
         mock_post.assert_not_called()
 
+    def test_send_unsuccessful_response_redacts_description_and_token(self):
+        token = "123456:secret-bot-token"
+        mock_res = requests.Response()
+        mock_res.status_code = 400
+        raw_desc = f"Bad Request: invalid token {token} in url https://api.telegram.org/bot{token}/sendMessage"
+        mock_res._content = f'{{"ok": false, "error_code": 400, "description": "{raw_desc}"}}'.encode("utf-8")
+
+        with patch.dict("os.environ", {
+            "TELEGRAM_BOT_TOKEN": token,
+            "TELEGRAM_CHAT_ID": "chat-123",
+            "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1",
+        }, clear=True), \
+             patch.object(telegram_notifier.requests, "post", return_value=mock_res), \
+             self.assertLogs("notifications.telegram", level="WARNING") as captured:
+            result = telegram_notifier.send_telegram_message("test message", max_retries=1)
+
+        self.assertFalse(result["success"])
+        self.assertNotIn(token, str(result))
+        self.assertNotIn(token, "\n".join(captured.output))
+        self.assertNotIn("/bot", "\n".join(captured.output))
+        self.assertNotIn("/bot", str(result))
+        self.assertNotIn("Bad Request: invalid token", str(result))
+        self.assertNotIn("Bad Request: invalid token", "\n".join(captured.output))
+        self.assertEqual(result["error"], "Telegram API error (HTTP 400)")
+        self.assertIn("HTTP 400", "\n".join(captured.output))
+
+    def test_connection_check_unsuccessful_response_redacts_description_and_token(self):
+        token = "123456:secret-bot-token"
+        mock_res = requests.Response()
+        mock_res.status_code = 401
+        raw_desc = f"Unauthorized: invalid bot token {token} in https://api.telegram.org/bot{token}/getMe"
+        mock_res._content = f'{{"ok": false, "error_code": 401, "description": "{raw_desc}"}}'.encode("utf-8")
+
+        with patch.dict("os.environ", {
+            "TELEGRAM_BOT_TOKEN": token,
+            "TELEGRAM_CHAT_ID": "chat-123",
+            "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1",
+        }, clear=True), \
+             patch.object(telegram_notifier.requests, "get", return_value=mock_res), \
+             self.assertLogs("notifications.telegram", level="WARNING") as captured:
+            result = telegram_notifier.test_telegram_connection()
+
+        self.assertFalse(result["success"])
+        self.assertNotIn(token, str(result))
+        self.assertNotIn(token, "\n".join(captured.output))
+        self.assertNotIn("/bot", "\n".join(captured.output))
+        self.assertNotIn("/bot", str(result))
+        self.assertNotIn("Unauthorized: invalid bot token", str(result))
+        self.assertNotIn("Unauthorized: invalid bot token", "\n".join(captured.output))
+        self.assertEqual(result["error"], "Telegram API error (HTTP 401)")
+        self.assertIn("HTTP 401", "\n".join(captured.output))
+
+    def test_notifier_invalid_status_representation_falls_back_to_unknown(self):
+        token = "123456:secret-bot-token"
+        mock_res = requests.Response()
+        mock_res.status_code = 999  # Out-of-range HTTP status
+        mock_res._content = b'{"ok": false, "description": "unsupported"}'
+
+        with patch.dict("os.environ", {
+            "TELEGRAM_BOT_TOKEN": token,
+            "TELEGRAM_CHAT_ID": "chat-123",
+            "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1",
+        }, clear=True), \
+             patch.object(telegram_notifier.requests, "post", return_value=mock_res), \
+             self.assertLogs("notifications.telegram", level="WARNING") as captured_send:
+            res_send = telegram_notifier.send_telegram_message("test", max_retries=1)
+
+        self.assertEqual(res_send["error"], "Telegram API error (HTTP unknown)")
+        self.assertIn("HTTP unknown", "\n".join(captured_send.output))
+
+        with patch.dict("os.environ", {
+            "TELEGRAM_BOT_TOKEN": token,
+            "TELEGRAM_CHAT_ID": "chat-123",
+            "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1",
+        }, clear=True), \
+             patch.object(telegram_notifier.requests, "get", return_value=mock_res), \
+             self.assertLogs("notifications.telegram", level="WARNING") as captured_conn:
+            res_conn = telegram_notifier.test_telegram_connection()
+
+        self.assertEqual(res_conn["error"], "Telegram API error (HTTP unknown)")
+        self.assertIn("HTTP unknown", "\n".join(captured_conn.output))
+
 
 class TestLegacyTelegramTokenRedaction(unittest.TestCase):
     def test_legacy_sender_redacts_token_from_logs_on_connection_error(self):
@@ -102,6 +184,70 @@ class TestLegacyTelegramTokenRedaction(unittest.TestCase):
             self.assertNotIn(token, output)
             self.assertNotIn("/bot" + token, output)
             self.assertIn("error_type=ConnectionError", output)
+            self.assertIn("http_status=unknown", output)
+
+    def test_legacy_sender_rejects_unsafe_status_representations(self):
+        from unittest.mock import MagicMock
+        from Screen.smart_money_engine import SmartMoneyTelegram, SmartMoneySignal
+
+        token = "987654:secret-legacy-token"
+        signal = SmartMoneySignal(
+            priority_score=-90.0,
+            symbol="BTCUSDT",
+            signal_type="STRONG_BUYING",
+            rvol=3.5,
+            buy_ratio=0.8,
+            velocity=2.0,
+            price=65000.0,
+            price_change_pct=1.5,
+            quote_volume=100000000.0,
+            timestamp=1700000000.0,
+            candle_time="2026-11-11 12:00:00",
+        )
+
+        # Test helper directly
+        mock_resp = MagicMock()
+        exc = requests.HTTPError(response=mock_resp)
+
+        mock_resp.status_code = 502
+        self.assertEqual(SmartMoneyTelegram._safe_http_status(exc), "502")
+
+        mock_resp.status_code = 999
+        self.assertEqual(SmartMoneyTelegram._safe_http_status(exc), "unknown")
+
+        mock_resp.status_code = "502"
+        self.assertEqual(SmartMoneyTelegram._safe_http_status(exc), "unknown")
+
+        mock_resp.status_code = True
+        self.assertEqual(SmartMoneyTelegram._safe_http_status(exc), "unknown")
+
+        mock_resp.status_code = None
+        self.assertEqual(SmartMoneyTelegram._safe_http_status(exc), "unknown")
+
+        self.assertEqual(SmartMoneyTelegram._safe_http_status(requests.ConnectionError()), "unknown")
+
+        # Test within send_alert logging
+        mock_resp.status_code = 999
+        error = requests.HTTPError(
+            f"999 Custom Error for url: https://api.telegram.org/bot{token}/sendMessage",
+            response=mock_resp,
+        )
+        session = MagicMock()
+        session.post.return_value = mock_resp
+        mock_resp.raise_for_status.side_effect = error
+
+        with patch.dict("os.environ", {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True):
+            tg = SmartMoneyTelegram(token=token, chat_id="chat-123")
+            tg.session = session
+            with patch("time.sleep"), \
+                 self.assertLogs("SmartMoneyDetector", level="ERROR") as captured:
+                success = tg.send_alert(signal)
+
+            self.assertFalse(success)
+            output = "\n".join(captured.output)
+            self.assertNotIn(token, output)
+            self.assertNotIn("999", output)
+            self.assertIn("error_type=HTTPError", output)
             self.assertIn("http_status=unknown", output)
 
 

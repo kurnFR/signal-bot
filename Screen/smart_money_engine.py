@@ -352,6 +352,15 @@ class SmartMoneyTelegram:
     def delivery_authorized(self) -> bool:
         return os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
 
+    @staticmethod
+    def _safe_http_status(exc: Exception) -> str:
+        resp = getattr(exc, "response", None)
+        if resp is not None:
+            status = getattr(resp, "status_code", None)
+            if type(status) is int and 100 <= status <= 599:
+                return str(status)
+        return "unknown"
+
     def send_alert(self, signal: SmartMoneySignal):
         emoji_map = {
             "STRONG_BUYING": "🔥",
@@ -414,8 +423,7 @@ class SmartMoneyTelegram:
                 logger.info(f"✅ ALERT SENT → {signal.symbol} | {signal.signal_type} | RVOL {signal.rvol:.2f}x | BuyRatio {signal.buy_ratio:.1%}")
                 return True
             except Exception as exc:
-                resp = getattr(exc, "response", None)
-                status = getattr(resp, "status_code", "unknown") if resp is not None else "unknown"
+                status = self._safe_http_status(exc)
                 logger.error(
                     "Telegram alert delivery failed (error_type=%s, http_status=%s)",
                     type(exc).__name__,

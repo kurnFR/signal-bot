@@ -19,6 +19,13 @@ logger = logging.getLogger("notifications.telegram")
 TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/{method}"
 
 
+def _safe_http_status(status: Any) -> str:
+    """Validates that status is an exact integer in the range 100-599, or returns 'unknown'."""
+    if type(status) is int and 100 <= status <= 599:
+        return str(status)
+    return "unknown"
+
+
 def is_telegram_delivery_authorized() -> bool:
     """Returns True if global Telegram delivery is explicitly enabled."""
     return os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
@@ -69,17 +76,23 @@ def send_telegram_message(text: str, parse_mode: str = "HTML", max_retries: int 
     for attempt in range(1, max_retries + 1):
         try:
             res = requests.post(url, json=payload, timeout=8)
-            data = res.json()
-            if res.status_code == 200 and data.get("ok"):
+            status_code = getattr(res, "status_code", None)
+            safe_status = _safe_http_status(status_code)
+            try:
+                data = res.json()
+            except Exception:
+                data = {}
+
+            if status_code == 200 and isinstance(data, dict) and data.get("ok"):
                 logger.info("Telegram message dispatched successfully (attempt %d/%d)", attempt, max_retries)
                 return {"success": True, "message_id": data.get("result", {}).get("message_id")}
             else:
-                last_error = data.get("description", f"HTTP {res.status_code}")
+                last_error = f"Telegram API error (HTTP {safe_status})"
                 logger.warning("Telegram API response attempt %d/%d: %s", attempt, max_retries, last_error)
                 # Retry rate limits and server-side failures; permanent client
                 # errors (invalid token/chat ID, malformed request, etc.) will
                 # not succeed by repeating the same request.
-                if res.status_code < 500 and res.status_code != 429:
+                if type(status_code) is int and status_code < 500 and status_code != 429:
                     break
         except (requests.RequestException, ValueError) as e:
             # Requests exceptions can embed the token-bearing Bot API URL.
@@ -114,9 +127,17 @@ def test_telegram_connection() -> Dict[str, Any]:
     # Test getMe
     try:
         me_url = TELEGRAM_API_URL.format(token=cfg["token"], method="getMe")
-        me_res = requests.get(me_url, timeout=5).json()
-        if not me_res.get("ok"):
-            return {"success": False, "error": me_res.get("description", "Invalid bot token")}
+        res = requests.get(me_url, timeout=5)
+        status_code = getattr(res, "status_code", None)
+        safe_status = _safe_http_status(status_code)
+        try:
+            me_res = res.json()
+        except Exception:
+            me_res = {}
+
+        if (type(status_code) is int and status_code != 200) or not (isinstance(me_res, dict) and me_res.get("ok")):
+            logger.warning("Telegram getMe check failed (HTTP %s)", safe_status)
+            return {"success": False, "error": f"Telegram API error (HTTP {safe_status})"}
         bot_info = me_res.get("result", {})
     except Exception as e:
         # Network exceptions may include the token-bearing request URL.
