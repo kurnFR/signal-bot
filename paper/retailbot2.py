@@ -40,6 +40,8 @@ import random
 import json
 import os
 import uuid
+import signal as sys_signal
+import argparse
 from html import escape
 from dotenv import load_dotenv
 
@@ -65,6 +67,25 @@ def _lifecycle_flag(value: object) -> bool:
         if normalized in {"0", "false"}:
             return False
     return False
+
+
+def is_observation_only(config: Optional[Any] = None) -> bool:
+    """Return True if RetailBot2 is explicitly configured in read-only observation mode."""
+    if config is not None and getattr(config, "observation_only", False):
+        return True
+    return os.getenv("RETAILBOT2_OBSERVATION_ONLY", "").strip() == "1"
+
+
+def is_outbox_enqueue_authorized(config: Optional[Any] = None) -> bool:
+    """Outbox enqueuing requires RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1 AND
+    global RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1. Observation-only mode always suppresses enqueue."""
+    if is_observation_only(config):
+        return False
+    if os.getenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "").strip() != "1":
+        return False
+    if os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() != "1":
+        return False
+    return True
 
 
 class SignalMode(Enum):
@@ -165,6 +186,7 @@ class BotConfig:
     api_retries: int = 3
     api_retry_delay: float = 1.0
     heartbeat_interval: int = 60
+    observation_only: bool = False
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1284,22 +1306,38 @@ class DatabaseManager:
         """Web-dashboard-controlled enable flag + BotConfig field overrides.
         Polled periodically by the run loop (see RetailDeathTrapBot._reload_control)
         rather than only read once at startup, so changes made from the
-        dashboard take effect on a running process without a restart."""
+        dashboard take effect on a running process without a restart.
+        Fails closed (enabled=False, available=False) on connection error, query failure,
+        missing control record, or malformed overrides payload."""
         conn = self.get_conn()
         if not conn:
-            return {'enabled': True, 'overrides': {}}
+            self.logger.error("❌ get_bot_control: database connection unavailable; failing closed with trading disabled")
+            return {'enabled': False, 'overrides': {}, 'available': False}
         try:
             c = conn.cursor(dictionary=True)
             c.execute("SELECT enabled, overrides_json FROM bot_control WHERE id=1")
             row = c.fetchone()
             c.close()
             if not row:
-                return {'enabled': True, 'overrides': {}}
-            overrides = json.loads(row['overrides_json']) if row['overrides_json'] else {}
-            return {'enabled': bool(row['enabled']), 'overrides': overrides}
+                self.logger.error("❌ get_bot_control: bot_control record (id=1) missing; failing closed with trading disabled")
+                return {'enabled': False, 'overrides': {}, 'available': False}
+            raw_overrides = row.get('overrides_json')
+            overrides = {}
+            if raw_overrides:
+                try:
+                    parsed = json.loads(raw_overrides)
+                    if isinstance(parsed, dict):
+                        overrides = parsed
+                    else:
+                        self.logger.error("❌ get_bot_control: overrides_json is not a JSON object; failing closed with trading disabled")
+                        return {'enabled': False, 'overrides': {}, 'available': False}
+                except (json.JSONDecodeError, TypeError) as exc:
+                    self.logger.error("❌ get_bot_control: malformed overrides_json (%s); failing closed with trading disabled", exc)
+                    return {'enabled': False, 'overrides': {}, 'available': False}
+            return {'enabled': bool(row.get('enabled')), 'overrides': overrides, 'available': True}
         except Exception as e:
-            self.logger.error(f"❌ get_bot_control: {e}")
-            return {'enabled': True, 'overrides': {}}
+            self.logger.error(f"❌ get_bot_control failed: {e}; failing closed with trading disabled")
+            return {'enabled': False, 'overrides': {}, 'available': False}
         finally:
             conn.close()
 
@@ -1346,6 +1384,9 @@ class DatabaseManager:
             return None
 
     def save_trade(self, signal: Dict, units: float, mode: str, entry_alert: Optional[Dict] = None) -> Optional[int]:
+        if is_observation_only(getattr(self, "config", None)):
+            self.logger.error("❌ DatabaseManager.save_trade blocked in observation-only mode; failing closed")
+            return None
         conn = self.get_conn()
         if not conn:
             return None
@@ -1369,7 +1410,7 @@ class DatabaseManager:
                 signal.get('candle_close_time', datetime.now(timezone.utc).replace(tzinfo=None)),
             ))
             tid = c.lastrowid
-            if bool(signal.get('telegram_enabled', False)) and entry_alert:
+            if bool(signal.get('telegram_enabled', False)) and entry_alert and is_outbox_enqueue_authorized(getattr(self, "config", None)):
                 c.execute(
                     """INSERT INTO rdt_telegram_outbox
                        (event_key, trade_id, event_type, payload_json, status, attempts, next_attempt_at)
@@ -1398,6 +1439,9 @@ class DatabaseManager:
         should use close_trade_and_update_stats() so the trade row and strategy
         statistics commit atomically.
         """
+        if is_observation_only(getattr(self, "config", None)):
+            self.logger.error("❌ DatabaseManager.close_trade blocked in observation-only mode; failing closed")
+            return False
         conn = self.get_conn()
         if not conn:
             return False
@@ -1431,6 +1475,9 @@ class DatabaseManager:
         state must be mutated until this method returns True. If either write
         fails, the transaction is rolled back and the trade remains OPEN.
         """
+        if is_observation_only(getattr(self, "config", None)):
+            self.logger.error("❌ DatabaseManager.close_trade_and_update_stats blocked in observation-only mode; failing closed")
+            return False
         conn = self.get_conn()
         if not conn:
             return False
@@ -1465,7 +1512,11 @@ class DatabaseManager:
                 1 if pnl > 0 else 0, 0 if pnl > 0 else 1, pnl,
             ))
 
-            if exit_alert and bool(exit_alert.get('telegram_enabled', False)):
+            if (
+                exit_alert
+                and bool(exit_alert.get('telegram_enabled', False))
+                and is_outbox_enqueue_authorized(getattr(self, "config", None))
+            ):
                 payload = dict(exit_alert)
                 payload.pop('telegram_enabled', None)
                 cursor.execute(
@@ -1494,6 +1545,9 @@ class DatabaseManager:
 
     def update_stats(self, strategy: str, mode: str,
                      won: bool, pnl: float):
+        if is_observation_only(getattr(self, "config", None)):
+            self.logger.error("❌ DatabaseManager.update_stats blocked in observation-only mode; failing closed")
+            return
         conn = self.get_conn()
         if not conn:
             return
@@ -1870,7 +1924,12 @@ class DatabaseManager:
         trade_id: int = 0,
         conn=None,
     ) -> bool:
-        """Enqueue an event into rdt_telegram_outbox for asynchronous delivery by outbox_worker."""
+        """Enqueue an event into rdt_telegram_outbox for asynchronous delivery by outbox_worker.
+        Blocked fail-closed if observation-only mode is active or outbox enqueuing is unauthorized."""
+        if is_observation_only(getattr(self, "config", None)):
+            return False
+        if not is_outbox_enqueue_authorized(getattr(self, "config", None)):
+            return False
         own_conn = conn is None
         active_conn = self.get_conn() if own_conn else conn
         if not active_conn:
@@ -1995,6 +2054,8 @@ class RetailDeathTrapBot:
         self.logger = logging.getLogger("RDT_Bot")
         self.config = config
         self.mode = SignalMode(config.signal_mode)
+        self.observation_only = bool(getattr(config, "observation_only", False) or is_observation_only(config))
+        self._shutdown_requested = False
 
         # Components
         self.fetcher = DataFetcher(config)
@@ -2033,7 +2094,7 @@ class RetailDeathTrapBot:
         # _reload_control()), not just read once at startup, so a toggle
         # from the web dashboard takes effect on this running process
         # without needing a restart.
-        self.trading_enabled = True
+        self.trading_enabled = False
         self._control_reload_interval = 30  # seconds
         self._last_control_reload = 0.0
         # Explicit safe-list, NOT "every dataclass field" -- BotConfig also
@@ -2062,9 +2123,20 @@ class RetailDeathTrapBot:
             return
         self._last_control_reload = now
 
+        was_enabled = getattr(self, "trading_enabled", False)
+        if getattr(self, "observation_only", False) or is_observation_only(getattr(self, "config", None)):
+            self.trading_enabled = False
+            return
+
         control = self.db.get_bot_control()
-        was_enabled = getattr(self, "trading_enabled", True)
-        self.trading_enabled = control['enabled']
+        if not control.get('available', True):
+            self.trading_enabled = False
+            if was_enabled:
+                self.logger.warning("⚠️  bot_control state unavailable; failing closed with trading PAUSED")
+                self.notify_operational("⚠️ <b>Trading PAUSED</b> (bot_control state unavailable)", event_key=f"control_err:{int(time.time()*1000)}")
+            return
+
+        self.trading_enabled = bool(control.get('enabled', False))
         if was_enabled != self.trading_enabled:
             state_str = "ENABLED" if self.trading_enabled else "PAUSED (existing positions still managed)"
             self.logger.info(f"🎛️  Trading {state_str} via dashboard control")
@@ -2154,29 +2226,41 @@ class RetailDeathTrapBot:
     def notify_operational(self, message: str, event_key: Optional[str] = None) -> bool:
         """Deliver or queue an operational notification respecting delivery authorization policy.
 
-        1. Prefers routing through durable outbox queue (rdt_telegram_outbox).
-        2. Falls back to direct delivery ONLY if direct delivery is explicitly authorized.
-        3. Fails closed (logs locally without network send) if delivery is not authorized.
+        1. Suppressed fail-closed in observation mode.
+        2. Routes through durable outbox queue (rdt_telegram_outbox) only if outbox enqueue is authorized.
+        3. Falls back to direct delivery ONLY if direct delivery is explicitly authorized.
+        4. Fails closed (logs locally without network send or DB row insertion) if delivery is not authorized.
         """
         if not message:
+            return False
+
+        if getattr(self, "observation_only", False) or is_observation_only(getattr(self, "config", None)):
+            clean = (
+                message.replace('<b>', '').replace('</b>', '')
+                .replace('<i>', '').replace('</i>', '')
+                .replace('<code>', '').replace('</code>', '')
+                .replace('\n', ' | ')
+            )
+            self.logger.info("Operational notification suppressed (observation mode): %s", clean[:160])
             return False
 
         if event_key is None:
             event_key = f"op:{uuid.uuid4().hex}"
 
-        # 1. Prefer routing through existing outbox architecture
+        # 1. Prefer routing through existing outbox architecture if enqueue is authorized
         queued = False
-        try:
-            if hasattr(self, "db") and self.db:
-                queued = self.db.enqueue_telegram_outbox_event(
-                    event_key=event_key,
-                    event_type="operational",
-                    payload={"text": message},
-                    trade_id=0,
-                )
-        except Exception as exc:
-            self.logger.warning("Could not enqueue operational notification to outbox: %s", exc)
-            queued = False
+        if is_outbox_enqueue_authorized(getattr(self, "config", None)):
+            try:
+                if hasattr(self, "db") and self.db:
+                    queued = self.db.enqueue_telegram_outbox_event(
+                        event_key=event_key,
+                        event_type="operational",
+                        payload={"text": message},
+                        trade_id=0,
+                    )
+            except Exception as exc:
+                self.logger.warning("Could not enqueue operational notification to outbox: %s", exc)
+                queued = False
 
         if queued:
             self.logger.info("Queued operational notification to outbox [%s]", event_key)
@@ -2197,8 +2281,10 @@ class RetailDeathTrapBot:
         return False
 
     def _startup_msg(self):
+        is_obs = getattr(self, "observation_only", False) or is_observation_only(getattr(self, "config", None))
+        obs_badge = "\n👀 <b>OBSERVATION-ONLY MODE</b> (no trades, no outbox enqueues)" if is_obs else ""
         msg = (
-            f"🤖 <b>RETAIL DEATH TRAP BOT v2.1</b>\n"
+            f"🤖 <b>RETAIL DEATH TRAP BOT v2.1</b>{obs_badge}\n"
             f"✅ All 7 Strategies Fixed\n"
             f"✅ Mixed Long/Short Signals\n"
             f"✅ Separate Shadow/Inverse Slots\n\n"
@@ -2210,7 +2296,8 @@ class RetailDeathTrapBot:
         )
         self.notify_operational(msg, event_key=f"startup:{int(time.time())}")
         self.logger.info("=" * 60)
-        self.logger.info("RETAIL DEATH TRAP BOT v2.1 — STARTED")
+        mode_label = "OBSERVATION-ONLY" if is_obs else "STARTED"
+        self.logger.info(f"RETAIL DEATH TRAP BOT v2.1 — {mode_label}")
         self.logger.info(f"Symbols: {self.symbols}")
         self.logger.info("=" * 60)
 
@@ -2329,6 +2416,9 @@ class RetailDeathTrapBot:
         return True, "OK"
 
     def _open_trade(self, signal: Dict, mode: str) -> Optional[int]:
+        if getattr(self, "observation_only", False) or is_observation_only(getattr(self, "config", None)):
+            self.logger.error("❌ RetailDeathTrapBot._open_trade called in observation-only mode; failing closed")
+            return None
         strategy_id = signal.get('strategy', 'combined')
         lifecycle = self._get_strategy_lifecycle(strategy_id, mode)
         if not lifecycle['paper_enabled']:
@@ -2399,6 +2489,9 @@ class RetailDeathTrapBot:
 
     def _close_trade(self, tid: int, exit_price: float,
                      reason: str, mode: str):
+        if getattr(self, "observation_only", False) or is_observation_only(getattr(self, "config", None)):
+            self.logger.error(f"❌ RetailDeathTrapBot._close_trade called in observation-only mode for trade #{tid}; failing closed")
+            return
         active = self.active_inverse if mode == 'inverse' else self.active_shadow
         trade = active.get(tid)
         if not trade:
@@ -2464,6 +2557,8 @@ class RetailDeathTrapBot:
                 prices[sym] = p
             time.sleep(0.08)
 
+        is_obs = getattr(self, "observation_only", False) or is_observation_only(getattr(self, "config", None))
+
         # Check shadow trades
         for tid, trade in list(self.active_shadow.items()):
             price = prices.get(trade['symbol'])
@@ -2471,7 +2566,13 @@ class RetailDeathTrapBot:
                 continue
             exit_p, reason = self._check_exit_condition(trade, price)
             if reason:
-                self._close_trade(tid, exit_p, reason, 'shadow')
+                if is_obs:
+                    self.logger.info(
+                        f"🔍 [OBSERVE] Trade #{tid} {trade['symbol']} [SHADOW] reached {reason} "
+                        f"at {exit_p:.4f} (simulated, no action taken)"
+                    )
+                else:
+                    self._close_trade(tid, exit_p, reason, 'shadow')
 
         # Check inverse trades
         for tid, trade in list(self.active_inverse.items()):
@@ -2480,7 +2581,13 @@ class RetailDeathTrapBot:
                 continue
             exit_p, reason = self._check_exit_condition(trade, price)
             if reason:
-                self._close_trade(tid, exit_p, reason, 'inverse')
+                if is_obs:
+                    self.logger.info(
+                        f"🔍 [OBSERVE] Trade #{tid} {trade['symbol']} [INVERSE] reached {reason} "
+                        f"at {exit_p:.4f} (simulated, no action taken)"
+                    )
+                else:
+                    self._close_trade(tid, exit_p, reason, 'inverse')
 
     def _check_exit_condition(self, trade: Dict,
                                price: float) -> Tuple[float, str]:
@@ -2599,47 +2706,85 @@ class RetailDeathTrapBot:
         return 0
 
     def run(self):
-        self.logger.info("🚀 Bot running — CTRL+C to stop")
+        self.logger.info("🚀 Bot running — CTRL+C or SIGTERM to stop")
         loop_count = 0
         stats_every = 720  # Every hour at 5s interval
 
-        while True:
+        def _handle_signal(signum, frame):
+            sig_name = "SIGTERM" if signum == sys_signal.SIGTERM else "SIGINT"
+            self.logger.info(f"🛑 Received {sig_name}; initiating graceful shutdown")
+            self._shutdown_requested = True
+
+        old_term = None
+        old_int = None
+        try:
+            old_term = sys_signal.signal(sys_signal.SIGTERM, _handle_signal)
+            old_int = sys_signal.signal(sys_signal.SIGINT, _handle_signal)
+        except (ValueError, AttributeError):
+            pass
+
+        try:
+            while not self._shutdown_requested:
+                try:
+                    loop_count += 1
+
+                    self._reload_control()
+                    if self._shutdown_requested:
+                        break
+
+                    self.check_exits()
+                    if self._shutdown_requested:
+                        break
+
+                    if self.trading_enabled and not (getattr(self, "observation_only", False) or is_observation_only(self.config)):
+                        self.scan()
+                    if self._shutdown_requested:
+                        break
+
+                    # Heartbeat every 60s
+                    hb_loops = self.config.heartbeat_interval // self.config.exit_check_interval
+                    if loop_count % max(hb_loops, 1) == 0:
+                        s_open = len(self.active_shadow)
+                        i_open = len(self.active_inverse)
+                        self.logger.info(
+                            f"💓 Shadow: {s_open} open ${self.equity_shadow:,.2f} | "
+                            f"Inverse: {i_open} open ${self.equity_inverse:,.2f}"
+                        )
+
+                    # Stats report every hour
+                    if loop_count % stats_every == 0:
+                        stats = self.db.get_stats()
+                        stats_msg = self.tg.format_stats(
+                            stats, self.equity_shadow, self.equity_inverse
+                        )
+                        self.notify_operational(stats_msg, event_key=f"stats:{int(time.time())}")
+
+                    # Sliced sleep to respond promptly to shutdown signals
+                    sleep_remaining = float(self.config.exit_check_interval)
+                    while sleep_remaining > 0 and not self._shutdown_requested:
+                        step = min(sleep_remaining, 0.5)
+                        time.sleep(step)
+                        sleep_remaining -= step
+
+                except KeyboardInterrupt:
+                    self.logger.info("🛑 Stopped by user")
+                    self._shutdown_requested = True
+                    break
+                except Exception as e:
+                    self.logger.error(f"🚨 Loop error: {e}\n{traceback.format_exc()}")
+                    self.notify_operational(f"🚨 Error: {str(e)[:150]}", event_key=f"error:{int(time.time()*1000)}")
+                    time.sleep(min(30, self.config.exit_check_interval))
+        finally:
             try:
-                loop_count += 1
+                if old_term is not None:
+                    sys_signal.signal(sys_signal.SIGTERM, old_term)
+                if old_int is not None:
+                    sys_signal.signal(sys_signal.SIGINT, old_int)
+            except (ValueError, AttributeError):
+                pass
 
-                self._reload_control()
-                self.check_exits()
-                if self.trading_enabled:
-                    self.scan()
-
-                # Heartbeat every 60s
-                hb_loops = self.config.heartbeat_interval // self.config.exit_check_interval
-                if loop_count % max(hb_loops, 1) == 0:
-                    s_open = len(self.active_shadow)
-                    i_open = len(self.active_inverse)
-                    self.logger.info(
-                        f"💓 Shadow: {s_open} open ${self.equity_shadow:,.2f} | "
-                        f"Inverse: {i_open} open ${self.equity_inverse:,.2f}"
-                    )
-
-                # Stats report every hour
-                if loop_count % stats_every == 0:
-                    stats = self.db.get_stats()
-                    stats_msg = self.tg.format_stats(
-                        stats, self.equity_shadow, self.equity_inverse
-                    )
-                    self.notify_operational(stats_msg, event_key=f"stats:{int(time.time())}")
-
-                time.sleep(self.config.exit_check_interval)
-
-            except KeyboardInterrupt:
-                self.logger.info("🛑 Stopped by user")
-                self.notify_operational("🛑 <b>Bot stopped by user</b>", event_key=f"shutdown:{int(time.time())}")
-                break
-            except Exception as e:
-                self.logger.error(f"🚨 Loop error: {e}\n{traceback.format_exc()}")
-                self.notify_operational(f"🚨 Error: {str(e)[:150]}", event_key=f"error:{int(time.time()*1000)}")
-                time.sleep(30)
+        self.logger.info("🛑 Bot shutdown complete")
+        self.notify_operational("🛑 <b>Bot stopped</b>", event_key=f"shutdown:{int(time.time())}")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -2652,6 +2797,16 @@ def main():
     print("Fixes: Mixed signals | All 7 strategies | Inverse slots")
     print("=" * 60)
 
+    parser = argparse.ArgumentParser(description="Retail Death Trap Bot v2.1")
+    parser.add_argument(
+        "--observation-only",
+        action="store_true",
+        default=False,
+        help="Run in read-only observation mode (no trades, no outbox enqueues, memory-only exit monitoring)"
+    )
+    args, _ = parser.parse_known_args()
+    obs_mode = args.observation_only or os.getenv("RETAILBOT2_OBSERVATION_ONLY", "").strip() == "1"
+
     config = BotConfig(
         symbols=[
             "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT",
@@ -2659,6 +2814,7 @@ def main():
         ],
         signal_mode="both",
         primary_timeframe="15m",
+        observation_only=obs_mode,
         # RSI wider zones = more triggers
         rsi_oversold=35,
         rsi_overbought=65,
