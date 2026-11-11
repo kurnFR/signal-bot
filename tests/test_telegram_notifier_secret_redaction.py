@@ -463,6 +463,30 @@ class TestTelegramSendStrictValidation(unittest.TestCase):
             with self.subTest(payload=payload):
                 self.assertFalse(self._send(200, payload)["success"])
 
+    def test_ambiguous_request_exception_is_not_retried(self):
+        from unittest.mock import MagicMock
+        with patch.dict("os.environ", self.env, clear=True), \
+             patch.object(
+                 telegram_notifier.requests,
+                 "post",
+                 side_effect=telegram_notifier.requests.exceptions.ReadTimeout("read timed out"),
+             ) as post, patch("time.sleep"):
+            result = telegram_notifier.send_telegram_message("test", max_retries=3)
+        self.assertFalse(result["success"])
+        self.assertEqual(post.call_count, 1)
+
+    def test_malformed_response_json_is_not_retried(self):
+        from unittest.mock import MagicMock
+        response = MagicMock()
+        response.status_code = 200
+        response.json.side_effect = ValueError("invalid JSON")
+        with patch.dict("os.environ", self.env, clear=True), \
+             patch.object(telegram_notifier.requests, "post", return_value=response) as post, \
+             patch("time.sleep"):
+            result = telegram_notifier.send_telegram_message("test", max_retries=3)
+        self.assertFalse(result["success"])
+        self.assertEqual(post.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
