@@ -281,7 +281,7 @@ class TestMLDeployTelegramOptInRoute(unittest.TestCase):
 
 
 class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
-    """Proves single-attempt delivery for deployments while preserving ordinary retry behavior."""
+    """Proves single-attempt delivery for deployments and ambiguous transport failures."""
 
     @classmethod
     def setUpClass(cls):
@@ -354,18 +354,18 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
         self.assertTrue(res["success"])
         self.assertEqual(res["message_id"], 9999)
 
-    def test_ordinary_telegram_message_retains_three_retries_on_transport_failure(self):
+    def test_ordinary_telegram_message_does_not_retry_ambiguous_transport_failure(self):
         token = "123456:secret_bot_token"
         with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_123", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", side_effect=requests.ConnectionError(f"connection error {token}")) as post_mock, \
              patch("time.sleep") as sleep_mock:
             res = send_telegram_message("ordinary signal notification")
-        self.assertEqual(post_mock.call_count, 3)
-        self.assertEqual(sleep_mock.call_count, 2)
+        self.assertEqual(post_mock.call_count, 1)
+        sleep_mock.assert_not_called()
         self.assertFalse(res["success"])
         self.assertNotIn(token, str(res))
 
-    def test_ordinary_signal_and_close_alerts_retain_default_retries(self):
+    def test_ordinary_signal_alert_does_not_retry_ambiguous_transport_failure(self):
         with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "token123", "TELEGRAM_CHAT_ID": "chat123", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", side_effect=requests.ConnectionError("network error")) as post_mock, \
              patch("time.sleep") as sleep_mock:
@@ -379,8 +379,8 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
                 stop_loss=49000.0,
                 take_profit=52000.0,
             )
-        self.assertEqual(post_mock.call_count, 3)
-        self.assertEqual(sleep_mock.call_count, 2)
+        self.assertEqual(post_mock.call_count, 1)
+        sleep_mock.assert_not_called()
         self.assertFalse(res_signal["success"])
 
     def test_paper_deploy_route_makes_only_one_http_attempt_on_telegram_failure(self):
@@ -481,7 +481,7 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
         self.assertTrue(data["telegram"]["success"])
         self.assertEqual(data["telegram"]["message_id"], 4444)
 
-    def test_trade_close_alert_retains_three_retries_on_transport_failure(self):
+    def test_trade_close_alert_does_not_retry_ambiguous_transport_failure(self):
         token = "secret_close_token_999"
         with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_close", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", side_effect=requests.ConnectionError(f"connection error {token}")) as post_mock, \
@@ -497,8 +497,8 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
                 r_multiple=2.0,
                 holding_bars=10,
             )
-        self.assertEqual(post_mock.call_count, 3)
-        self.assertEqual(sleep_mock.call_count, 2)
+        self.assertEqual(post_mock.call_count, 1)
+        sleep_mock.assert_not_called()
         self.assertFalse(res_close["success"])
         self.assertNotIn(token, str(res_close))
 
