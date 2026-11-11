@@ -137,9 +137,12 @@ class WalletTelegramNotifier:
                     )
                     return False
 
-                status = getattr(response, "status_code", 200)
-                if not isinstance(status, int):
-                    status = 200
+                status = getattr(response, "status_code", None)
+                if type(status) is not int or not 100 <= status <= 599:
+                    logger.warning(
+                        "Telegram wallet alert delivery failed (error_type=InvalidResponse, http_status=unknown)"
+                    )
+                    return False
                 if status == 429 and attempt < 2:
                     retry_after = 1
                     try:
@@ -160,7 +163,7 @@ class WalletTelegramNotifier:
                         type(exc).__name__, status,
                     )
                     return False
-                if payload.get("ok") is not True:
+                if status != 200 or not isinstance(payload, dict) or payload.get("ok") is not True:
                     logger.warning("Telegram wallet alert delivery rejected (http_status=%s)", status)
                     return False
                 self._last_send = time.monotonic()
