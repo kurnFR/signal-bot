@@ -415,10 +415,6 @@ class TestTelegramGetMeStrictValidation(unittest.TestCase):
         self.assertNotIn(malicious_desc, "\n".join(captured.output))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestTelegramSendStrictValidation(unittest.TestCase):
     def setUp(self):
         self.env = {
@@ -466,3 +462,7 @@ class TestTelegramSendStrictValidation(unittest.TestCase):
         for payload in (None, [], "ok", 1):
             with self.subTest(payload=payload):
                 self.assertFalse(self._send(200, payload)["success"])
+
+
+if __name__ == "__main__":
+    unittest.main()
