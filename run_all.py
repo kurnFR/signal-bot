@@ -51,7 +51,7 @@ logger = logging.getLogger("run_all")
 RESTART_BACKOFF_SECONDS = 5
 
 def build_processes(environ=None):
-    """Build supervised process commands with Telegram delivery explicitly opt-in."""
+    """Build supervised commands; RetailBot2 and Telegram delivery are explicit opt-ins."""
     env = os.environ if environ is None else environ
     processes = {
         "web_server": [
@@ -62,10 +62,14 @@ def build_processes(environ=None):
         "collectors": [sys.executable, "run_collectors.py"],
         "paper_engine": [sys.executable, "run_paper_engine.py"],
         "news_ai": [sys.executable, "run_news_ai.py"],
-        "retailbot2": [sys.executable, "paper/retailbot2.py"],
         "screener": [sys.executable, "Screen/screening.py"],
         "wallet_tracker": [sys.executable, "run_wallet_tracker.py"],
     }
+
+    # RetailBot2 can create/update paper trades, so never include it in the
+    # default supervisor set. It requires an explicit, independent opt-in.
+    if env.get("RETAILBOT2_ENABLED", "").strip() == "1":
+        processes["retailbot2"] = [sys.executable, "paper/retailbot2.py"]
 
     # Keep delivery disabled by default. Both flags are required so enabling
     # the process supervisor alone cannot accidentally enable production sends.
@@ -83,8 +87,8 @@ def build_processes(environ=None):
     return processes
 
 
-# name -> command. The outbox worker is explicitly opt-in; all other processes
-# preserve the existing default startup behavior.
+# name -> command. RetailBot2 and the outbox worker are explicitly opt-in;
+# other processes preserve the existing default startup behavior.
 PROCESSES = build_processes()
 
 _shutdown = threading.Event()
