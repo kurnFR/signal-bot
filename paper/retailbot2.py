@@ -2416,6 +2416,9 @@ class RetailDeathTrapBot:
         return True, "OK"
 
     def _open_trade(self, signal: Dict, mode: str) -> Optional[int]:
+        if getattr(self, "_shutdown_requested", False):
+            self.logger.info("Trade open suppressed because shutdown was requested")
+            return None
         if getattr(self, "observation_only", False) or is_observation_only(getattr(self, "config", None)):
             self.logger.error("❌ RetailDeathTrapBot._open_trade called in observation-only mode; failing closed")
             return None
@@ -2450,6 +2453,11 @@ class RetailDeathTrapBot:
             },
             "units": units, "risk_amt": risk_amt, "risk_pct": risk_pct, "mode": mode,
         } if lifecycle['telegram_enabled'] else None
+        # Last boundary check: never begin a new persistence operation after
+        # SIGTERM/SIGINT has been observed.
+        if getattr(self, "_shutdown_requested", False):
+            self.logger.info("Trade persistence suppressed because shutdown was requested")
+            return None
         tid = self.db.save_trade(signal, units, mode, entry_alert=entry_alert)
         if tid is None:
             return None
@@ -2544,6 +2552,8 @@ class RetailDeathTrapBot:
     # ──────────────────────────────────────────────────────────────
 
     def check_exits(self):
+        if getattr(self, "_shutdown_requested", False):
+            return
         all_active = {**self.active_shadow, **self.active_inverse}
         if not all_active:
             return
@@ -2552,7 +2562,11 @@ class RetailDeathTrapBot:
         symbols_needed = list(set(t['symbol'] for t in all_active.values()))
         prices: Dict[str, float] = {}
         for sym in symbols_needed:
+            if getattr(self, "_shutdown_requested", False):
+                return
             p = self.fetcher.get_price(sym)
+            if getattr(self, "_shutdown_requested", False):
+                return
             if p:
                 prices[sym] = p
             time.sleep(0.08)
@@ -2561,6 +2575,8 @@ class RetailDeathTrapBot:
 
         # Check shadow trades
         for tid, trade in list(self.active_shadow.items()):
+            if getattr(self, "_shutdown_requested", False):
+                return
             price = prices.get(trade['symbol'])
             if not price:
                 continue
@@ -2572,10 +2588,14 @@ class RetailDeathTrapBot:
                         f"at {exit_p:.4f} (simulated, no action taken)"
                     )
                 else:
+                    if getattr(self, "_shutdown_requested", False):
+                        return
                     self._close_trade(tid, exit_p, reason, 'shadow')
 
         # Check inverse trades
         for tid, trade in list(self.active_inverse.items()):
+            if getattr(self, "_shutdown_requested", False):
+                return
             price = prices.get(trade['symbol'])
             if not price:
                 continue
@@ -2587,6 +2607,8 @@ class RetailDeathTrapBot:
                         f"at {exit_p:.4f} (simulated, no action taken)"
                     )
                 else:
+                    if getattr(self, "_shutdown_requested", False):
+                        return
                     self._close_trade(tid, exit_p, reason, 'inverse')
 
     def _check_exit_condition(self, trade: Dict,
@@ -2609,9 +2631,13 @@ class RetailDeathTrapBot:
 
     def scan(self):
         for symbol in self.symbols:
+            if getattr(self, "_shutdown_requested", False):
+                return
             try:
                 # Quick candle check
                 df_check = self.fetcher.fetch(symbol, limit=15)
+                if getattr(self, "_shutdown_requested", False):
+                    return
                 if df_check is None or len(df_check) < 3:
                     continue
 
@@ -2627,10 +2653,14 @@ class RetailDeathTrapBot:
 
                 # Full fetch + indicators
                 df = self.fetcher.fetch(symbol, limit=500)
+                if getattr(self, "_shutdown_requested", False):
+                    return
                 if df is None or len(df) < 100:
                     continue
 
                 df = self.engine.calculate_indicators(df)
+                if getattr(self, "_shutdown_requested", False):
+                    return
 
                 # Only evaluate a strategy function when at least one of
                 # its mode-specific lifecycle settings allows evaluation.
@@ -2643,7 +2673,11 @@ class RetailDeathTrapBot:
 
                 # Track each enabled strategy independently. Composite signals
                 # are intentionally not booked as a contributor's trade.
+                if getattr(self, "_shutdown_requested", False):
+                    return
                 raw = self.engine.run_all(df, symbol, enabled_strategies=enabled_strategies)
+                if getattr(self, "_shutdown_requested", False):
+                    return
                 if not raw:
                     continue
 
@@ -2655,15 +2689,23 @@ class RetailDeathTrapBot:
                 )
 
                 for signal in raw:
+                    if getattr(self, "_shutdown_requested", False):
+                        return
                     if self.mode in (SignalMode.SHADOW, SignalMode.BOTH):
                         settings = self._get_strategy_lifecycle(signal.get('strategy', ''), 'shadow')
                         if settings['evaluation_enabled']:
+                            if getattr(self, "_shutdown_requested", False):
+                                return
                             self._open_trade(signal, 'shadow')
 
+                    if getattr(self, "_shutdown_requested", False):
+                        return
                     if self.mode in (SignalMode.INVERSE, SignalMode.BOTH):
                         inverse_signal = self._invert(signal)
                         settings = self._get_strategy_lifecycle(inverse_signal.get('strategy', ''), 'inverse')
                         if settings['evaluation_enabled']:
+                            if getattr(self, "_shutdown_requested", False):
+                                return
                             self._open_trade(inverse_signal, 'inverse')
 
                 time.sleep(0.3)
