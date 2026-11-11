@@ -65,5 +65,45 @@ class TestTelegramTokenRedaction(unittest.TestCase):
         mock_post.assert_not_called()
 
 
+class TestLegacyTelegramTokenRedaction(unittest.TestCase):
+    def test_legacy_sender_redacts_token_from_logs_on_connection_error(self):
+        from unittest.mock import MagicMock
+        from Screen.smart_money_engine import SmartMoneyTelegram, SmartMoneySignal
+
+        token = "987654:secret-legacy-token"
+        error = requests.ConnectionError(
+            f"failed to connect to https://api.telegram.org/bot{token}/sendMessage"
+        )
+        signal = SmartMoneySignal(
+            priority_score=-90.0,
+            symbol="BTCUSDT",
+            signal_type="STRONG_BUYING",
+            rvol=3.5,
+            buy_ratio=0.8,
+            velocity=2.0,
+            price=65000.0,
+            price_change_pct=1.5,
+            quote_volume=100000000.0,
+            timestamp=1700000000.0,
+            candle_time="2026-11-11 12:00:00",
+        )
+        session = MagicMock()
+        session.post.side_effect = error
+
+        with patch.dict("os.environ", {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True):
+            tg = SmartMoneyTelegram(token=token, chat_id="chat-123")
+            tg.session = session
+            with patch("time.sleep"), \
+                 self.assertLogs("SmartMoneyDetector", level="ERROR") as captured:
+                success = tg.send_alert(signal)
+
+            self.assertFalse(success)
+            output = "\n".join(captured.output)
+            self.assertNotIn(token, output)
+            self.assertNotIn("/bot" + token, output)
+            self.assertIn("error_type=ConnectionError", output)
+            self.assertIn("http_status=unknown", output)
+
+
 if __name__ == "__main__":
     unittest.main()

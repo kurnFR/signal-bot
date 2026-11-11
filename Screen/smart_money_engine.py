@@ -413,8 +413,14 @@ class SmartMoneyTelegram:
                 self.last_send = time.time()
                 logger.info(f"✅ ALERT SENT → {signal.symbol} | {signal.signal_type} | RVOL {signal.rvol:.2f}x | BuyRatio {signal.buy_ratio:.1%}")
                 return True
-            except Exception as e:
-                logger.error(f"Telegram error: {e}")
+            except Exception as exc:
+                resp = getattr(exc, "response", None)
+                status = getattr(resp, "status_code", "unknown") if resp is not None else "unknown"
+                logger.error(
+                    "Telegram alert delivery failed (error_type=%s, http_status=%s)",
+                    type(exc).__name__,
+                    status,
+                )
                 return False
 
 

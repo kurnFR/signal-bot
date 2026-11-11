@@ -16,6 +16,7 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
+import requests
 from fastapi.testclient import TestClient
 
 from notifications import telegram_notifier
@@ -359,6 +360,54 @@ class TestLegacySmartMoneyEngineAuthorization(unittest.TestCase):
             mock_spost.assert_not_called()
             mock_rget.assert_not_called()
             mock_rpost.assert_not_called()
+
+    def test_send_failure_redacts_token_and_raw_exception_from_logs(self):
+        token = "987654:secret-legacy-token"
+        error = requests.ConnectionError(
+            f"HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries exceeded with url: /bot{token}/sendMessage"
+        )
+        session = MagicMock()
+        session.post.side_effect = error
+
+        with patch.dict(os.environ, {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True):
+            tg = LegacyTelegram(token=token, chat_id="chat-3")
+            tg.session = session
+            with patch("time.sleep"), \
+                 self.assertLogs("SmartMoneyDetector", level="ERROR") as captured:
+                result = tg.send_alert(self.signal)
+
+            self.assertFalse(result)
+            output = "\n".join(captured.output)
+            self.assertNotIn(token, output)
+            self.assertNotIn("/bot", output)
+            self.assertIn("error_type=ConnectionError", output)
+            self.assertIn("http_status=unknown", output)
+
+    def test_http_error_logs_safe_status_code_without_token_or_raw_url(self):
+        token = "987654:secret-legacy-token"
+        mock_response = MagicMock()
+        mock_response.status_code = 502
+        error = requests.HTTPError(
+            f"502 Server Error: Bad Gateway for url: https://api.telegram.org/bot{token}/sendMessage",
+            response=mock_response,
+        )
+        session = MagicMock()
+        session.post.return_value = mock_response
+        mock_response.raise_for_status.side_effect = error
+
+        with patch.dict(os.environ, {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True):
+            tg = LegacyTelegram(token=token, chat_id="chat-3")
+            tg.session = session
+            with patch("time.sleep"), \
+                 self.assertLogs("SmartMoneyDetector", level="ERROR") as captured:
+                result = tg.send_alert(self.signal)
+
+            self.assertFalse(result)
+            output = "\n".join(captured.output)
+            self.assertNotIn(token, output)
+            self.assertNotIn("/bot", output)
+            self.assertIn("error_type=HTTPError", output)
+            self.assertIn("http_status=502", output)
 
 
 class TestSharedTelegramNotifierAuthorization(unittest.TestCase):
