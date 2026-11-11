@@ -286,6 +286,26 @@ class TestWorkerActivationSupervisorContract:
         processes = run_all.build_processes({})
         assert "retailbot2_outbox" not in processes
 
+    def test_retailbot2_disabled_by_default(self):
+        """RetailBot2 is excluded from the default supervisor process set."""
+        processes = run_all.build_processes({})
+        assert "retailbot2" not in processes
+
+    def test_retailbot2_requires_explicit_independent_opt_in(self):
+        """RETAILBOT2_ENABLED=1 opts in without implicitly authorizing Telegram."""
+        processes = run_all.build_processes({"RETAILBOT2_ENABLED": "1"})
+        assert processes["retailbot2"] == [run_all.sys.executable, "paper/retailbot2.py"]
+        assert "retailbot2_outbox" not in processes
+
+    def test_telegram_flags_do_not_implicitly_enable_retailbot2(self):
+        """Telegram authorization flags alone must not start RetailBot2."""
+        processes = run_all.build_processes({
+            "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1",
+            "RETAILBOT2_ALLOW_DIRECT_TELEGRAM": "1",
+            "RETAILBOT2_OUTBOX_ENQUEUE_ENABLED": "1",
+        })
+        assert "retailbot2" not in processes
+
     def test_worker_requires_both_flags(self):
         """Supervisor requires BOTH RETAILBOT2_OUTBOX_WORKER_ENABLED and RETAILBOT2_ALLOW_TELEGRAM_DELIVERY."""
         assert "retailbot2_outbox" not in run_all.build_processes({
