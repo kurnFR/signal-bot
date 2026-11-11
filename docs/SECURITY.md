@@ -38,7 +38,7 @@ Rules live in the role-prefix policies and the `AUTHENTICATED_READ_PATHS` route-
 ## 4. Secrets and data
 
 - Keep keys only in `.env` (gitignored): database credentials, `TELEGRAM_BOT_TOKEN`, LLM and news API keys.
-- Database credentials should belong to a dedicated MySQL user restricted to the `crypto_signals` database. `run_all.py` applies pending versioned migrations before starting processes, so the migration step needs DDL privileges. The web API and service workers now verify the RetailBot2, Screener and Wallet Tracker schemas read-only; those runtime paths do not need ALTER privilege for these schemas. If a DBA owns schema changes, apply `python -m db.migrate` separately and set `SKIP_DB_MIGRATE=1` for `run_all.py`.
+- Database credentials should belong to a dedicated MySQL user restricted to the `crypto_signals` database. `run_all.py` does not apply migrations automatically by default. Apply `python -m db.migrate` as a separately authorized deployment step using an account with the required DDL privileges. Startup migration execution requires the explicit `SIGNAL_BOT_AUTO_MIGRATE=1` opt-in; `SKIP_DB_MIGRATE=1` remains an override that suppresses startup migrations. The web API and service workers verify the RetailBot2, Screener and Wallet Tracker schemas read-only; those runtime paths do not need ALTER privilege for these schemas.
 - Telegram failures are logged without the bot token (error type and HTTP status only).
 - Never commit `.env`, `.app_secret` or `.initial_admin_credential`. If a token or key is pasted into a chat, ticket or log, revoke and replace it.
 

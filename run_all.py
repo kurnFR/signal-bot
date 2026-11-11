@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """
 Single entry point for supervising the configured Signal Bot processes.
-It starts the default process set and restarts children if they crash.
+The safe default set is the Phase 2A stack; paper/news engines and RetailBot2
+require separate opt-ins.
 
     python3 run_all.py
-    python3 run_all.py --skip screener
-    python3 run_all.py --only web_server --only paper_engine
+    python3 run_all.py --only web_server --only collectors --only screener --only wallet_tracker
+
+Enable the paper engine or News AI explicitly when intended:
+
+    PAPER_ENGINE_ENABLED=1 python3 run_all.py --only paper_engine
+    NEWS_AI_ENABLED=1 python3 run_all.py --only news_ai
 
 RetailBot2 is excluded from the default process set because it can create or
 update paper trades. To include it, explicitly set RETAILBOT2_ENABLED=1 before
@@ -17,6 +22,10 @@ The outbox worker is a separate opt-in and additionally requires
 RETAILBOT2_OUTBOX_WORKER_ENABLED=1 and
 RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1. Enabling RetailBot2 does not enable
 Telegram delivery or the outbox worker.
+
+Automatic migrations are disabled by default. Run python3 -m db.migrate
+as a separately authorized deployment step, or explicitly opt in to automatic
+startup migrations with SIGNAL_BOT_AUTO_MIGRATE=1.
 
 Each process runs as its own OS subprocess (not a thread) for crash isolation.
 If Ctrl+C'd, children receive SIGTERM. The outbox worker is never force-killed
@@ -56,11 +65,15 @@ def build_processes(environ=None):
             env.get("SIGNAL_BOT_HOST", "0.0.0.0"),
         ],
         "collectors": [sys.executable, "run_collectors.py"],
-        "paper_engine": [sys.executable, "run_paper_engine.py"],
-        "news_ai": [sys.executable, "run_news_ai.py"],
         "screener": [sys.executable, "Screen/screening.py"],
         "wallet_tracker": [sys.executable, "run_wallet_tracker.py"],
     }
+
+    # Paper and news engines are held back in the safe Phase 2A default set.
+    if env.get("PAPER_ENGINE_ENABLED", "").strip() == "1":
+        processes["paper_engine"] = [sys.executable, "run_paper_engine.py"]
+    if env.get("NEWS_AI_ENABLED", "").strip() == "1":
+        processes["news_ai"] = [sys.executable, "run_news_ai.py"]
 
     # RetailBot2 can create/update paper trades, so never include it in the
     # default supervisor set. It requires an explicit, independent opt-in.
@@ -83,8 +96,8 @@ def build_processes(environ=None):
     return processes
 
 
-# name -> command. RetailBot2 and the outbox worker are explicitly opt-in;
-# other processes preserve the existing default startup behavior.
+# name -> command. Phase 2A services are enabled by default; paper_engine,
+# news_ai, RetailBot2, and the outbox worker each require explicit opt-in.
 PROCESSES = build_processes()
 
 _shutdown = threading.Event()
@@ -206,14 +219,32 @@ def ensure_database_running():
 
 
 def apply_migrations(runner=subprocess.run) -> bool:
-    """Bring the database schema up to date before any process starts.
+    """Apply migrations only when explicitly authorized.
 
-    Returns False when migration fails (callers must not start the stack on a
-    half-migrated schema). Set SKIP_DB_MIGRATE=1 to skip, e.g. when a DBA owns the schema.
+    The safe default is to leave schema changes to a separate deployment step.
+    Set SIGNAL_BOT_AUTO_MIGRATE=1 to opt in to startup migrations. The legacy
+    SKIP_DB_MIGRATE flag remains supported as an explicit override.
     """
-    if os.getenv("SKIP_DB_MIGRATE", "").strip().lower() in ("1", "true", "yes"):
+    skip_value = os.getenv("SKIP_DB_MIGRATE", "").strip().lower()
+    auto_value = os.getenv("SIGNAL_BOT_AUTO_MIGRATE", "").strip().lower()
+
+    if skip_value in ("1", "true", "yes"):
         logger.info("SKIP_DB_MIGRATE set: not running database migrations")
         return True
+    if skip_value not in ("", "0", "false", "no"):
+        logger.error("Invalid SKIP_DB_MIGRATE value; refusing startup migration")
+        return False
+
+    if auto_value in ("", "0", "false", "no"):
+        logger.info(
+            "Automatic database migrations are disabled; run python -m db.migrate "
+            "as a separate deployment step or set SIGNAL_BOT_AUTO_MIGRATE=1"
+        )
+        return True
+    if auto_value != "1":
+        logger.error("Invalid SIGNAL_BOT_AUTO_MIGRATE value; refusing startup")
+        return False
+
     logger.info("Applying database migrations (python -m db.migrate)...")
     result = runner([sys.executable, "-m", "db.migrate"])
     if result.returncode != 0:
@@ -244,6 +275,7 @@ def main():
     ensure_database_running()
 
     if not apply_migrations():
+        _shutdown_all()
         sys.exit(1)
 
     logger.info("==================================================================")
