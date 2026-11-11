@@ -281,7 +281,7 @@ class TestMLDeployTelegramOptInRoute(unittest.TestCase):
 
 
 class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
-    """Proves single-attempt delivery for deployments while preserving ordinary retry behavior."""
+    """Proves single-attempt delivery for deployments and ambiguous transport failures."""
 
     @classmethod
     def setUpClass(cls):
@@ -315,7 +315,7 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
 
     def test_send_deployment_alert_defaults_to_single_attempt_on_transport_failure(self):
         token = "123456:secret_bot_token"
-        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_123"}, clear=True), \
+        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_123", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", side_effect=requests.ConnectionError(f"connection error {token}")) as post_mock, \
              patch("time.sleep") as sleep_mock, \
              self.assertLogs("notifications.telegram", level="WARNING") as captured:
@@ -338,7 +338,7 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"ok": True, "result": {"message_id": 9999}}
-        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "token123", "TELEGRAM_CHAT_ID": "chat123"}, clear=True), \
+        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "token123", "TELEGRAM_CHAT_ID": "chat123", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", return_value=mock_resp) as post_mock, \
              patch("time.sleep") as sleep_mock:
             res = send_deployment_alert(
@@ -354,19 +354,19 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
         self.assertTrue(res["success"])
         self.assertEqual(res["message_id"], 9999)
 
-    def test_ordinary_telegram_message_retains_three_retries_on_transport_failure(self):
+    def test_ordinary_telegram_message_does_not_retry_ambiguous_transport_failure(self):
         token = "123456:secret_bot_token"
-        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_123"}, clear=True), \
+        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_123", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", side_effect=requests.ConnectionError(f"connection error {token}")) as post_mock, \
              patch("time.sleep") as sleep_mock:
             res = send_telegram_message("ordinary signal notification")
-        self.assertEqual(post_mock.call_count, 3)
-        self.assertEqual(sleep_mock.call_count, 2)
+        self.assertEqual(post_mock.call_count, 1)
+        sleep_mock.assert_not_called()
         self.assertFalse(res["success"])
         self.assertNotIn(token, str(res))
 
-    def test_ordinary_signal_and_close_alerts_retain_default_retries(self):
-        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "token123", "TELEGRAM_CHAT_ID": "chat123"}, clear=True), \
+    def test_ordinary_signal_alert_does_not_retry_ambiguous_transport_failure(self):
+        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "token123", "TELEGRAM_CHAT_ID": "chat123", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", side_effect=requests.ConnectionError("network error")) as post_mock, \
              patch("time.sleep") as sleep_mock:
             res_signal = send_signal_alert(
@@ -379,8 +379,8 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
                 stop_loss=49000.0,
                 take_profit=52000.0,
             )
-        self.assertEqual(post_mock.call_count, 3)
-        self.assertEqual(sleep_mock.call_count, 2)
+        self.assertEqual(post_mock.call_count, 1)
+        sleep_mock.assert_not_called()
         self.assertFalse(res_signal["success"])
 
     def test_paper_deploy_route_makes_only_one_http_attempt_on_telegram_failure(self):
@@ -388,7 +388,7 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
         with patch("web.app.authenticate_request", return_value=_user("trader")), \
              patch("web.routes.paper_routes.set_paper_config", return_value={"id": 1, "status": "ok"}), \
              patch("web.routes.paper_routes.sync_and_evaluate_paper_trading", return_value={"evaluated": True}), \
-             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_paper"}, clear=True), \
+             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_paper", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", side_effect=requests.ConnectionError(f"failed to connect to https://api.telegram.org/bot{token}/sendMessage")) as post_mock, \
              patch("time.sleep") as sleep_mock:
             response = self.client.post("/api/paper/deploy", json={
@@ -415,7 +415,7 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
         with patch("web.app.authenticate_request", return_value=_user("trader")), \
              patch("web.routes.paper_routes.set_paper_config", return_value={"id": 1, "status": "ok"}), \
              patch("web.routes.paper_routes.sync_and_evaluate_paper_trading", return_value={"evaluated": True}), \
-             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "token_paper", "TELEGRAM_CHAT_ID": "chat_paper"}, clear=True), \
+             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "token_paper", "TELEGRAM_CHAT_ID": "chat_paper", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", return_value=mock_resp) as post_mock, \
              patch("time.sleep") as sleep_mock:
             response = self.client.post("/api/paper/deploy", json={
@@ -440,7 +440,7 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
              patch("web.routes.ml_routes.ML_MODELS_DIR", self.models_dir), \
              patch("web.routes.ml_routes.set_paper_config", return_value={"id": 1, "status": "ok"}), \
              patch("web.routes.ml_routes.sync_and_evaluate_paper_trading", return_value={"evaluated": True}), \
-             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_ml"}, clear=True), \
+             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_ml", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", side_effect=requests.ConnectionError(f"failed to connect to https://api.telegram.org/bot{token}/sendMessage")) as post_mock, \
              patch("time.sleep") as sleep_mock:
             response = self.client.post("/api/ml/deploy-to-paper", json={
@@ -465,7 +465,7 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
              patch("web.routes.ml_routes.ML_MODELS_DIR", self.models_dir), \
              patch("web.routes.ml_routes.set_paper_config", return_value={"id": 1, "status": "ok"}), \
              patch("web.routes.ml_routes.sync_and_evaluate_paper_trading", return_value={"evaluated": True}), \
-             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "token_ml", "TELEGRAM_CHAT_ID": "chat_ml"}, clear=True), \
+             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "token_ml", "TELEGRAM_CHAT_ID": "chat_ml", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", return_value=mock_resp) as post_mock, \
              patch("time.sleep") as sleep_mock:
             response = self.client.post("/api/ml/deploy-to-paper", json={
@@ -481,9 +481,9 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
         self.assertTrue(data["telegram"]["success"])
         self.assertEqual(data["telegram"]["message_id"], 4444)
 
-    def test_trade_close_alert_retains_three_retries_on_transport_failure(self):
+    def test_trade_close_alert_does_not_retry_ambiguous_transport_failure(self):
         token = "secret_close_token_999"
-        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_close"}, clear=True), \
+        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_close", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", side_effect=requests.ConnectionError(f"connection error {token}")) as post_mock, \
              patch("time.sleep") as sleep_mock:
             res_close = send_trade_close_alert(
@@ -497,8 +497,8 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
                 r_multiple=2.0,
                 holding_bars=10,
             )
-        self.assertEqual(post_mock.call_count, 3)
-        self.assertEqual(sleep_mock.call_count, 2)
+        self.assertEqual(post_mock.call_count, 1)
+        sleep_mock.assert_not_called()
         self.assertFalse(res_close["success"])
         self.assertNotIn(token, str(res_close))
 
@@ -510,7 +510,7 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
         with patch("web.app.authenticate_request", return_value=_user("trader")), \
              patch("web.routes.paper_routes.set_paper_config", return_value={"id": 1, "status": "ok"}), \
              patch("web.routes.paper_routes.sync_and_evaluate_paper_trading", return_value={"evaluated": True}), \
-             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_paper"}, clear=True), \
+             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_paper", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", return_value=mock_resp) as post_mock, \
              patch("time.sleep") as sleep_mock, \
              self.assertLogs("notifications.telegram", level="WARNING") as captured:
@@ -541,7 +541,7 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
         with patch("web.app.authenticate_request", return_value=_user("trader")), \
              patch("web.routes.paper_routes.set_paper_config", return_value={"id": 1, "status": "ok"}), \
              patch("web.routes.paper_routes.sync_and_evaluate_paper_trading", return_value={"error": "evaluation timed out"}), \
-             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_paper"}, clear=True), \
+             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_paper", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", return_value=mock_resp) as post_mock, \
              patch("time.sleep") as sleep_mock, \
              self.assertLogs("notifications.telegram", level="WARNING") as captured:
@@ -573,7 +573,7 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
              patch("web.routes.ml_routes.ML_MODELS_DIR", self.models_dir), \
              patch("web.routes.ml_routes.set_paper_config", return_value={"id": 1, "status": "ok"}), \
              patch("web.routes.ml_routes.sync_and_evaluate_paper_trading", return_value={"evaluated": True}), \
-             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_ml"}, clear=True), \
+             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_ml", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", return_value=mock_resp) as post_mock, \
              patch("time.sleep") as sleep_mock, \
              self.assertLogs("notifications.telegram", level="WARNING") as captured:
@@ -602,7 +602,7 @@ class TestDeploymentTelegramSingleAttempt(unittest.TestCase):
              patch("web.routes.ml_routes.ML_MODELS_DIR", self.models_dir), \
              patch("web.routes.ml_routes.set_paper_config", return_value={"id": 1, "status": "ok"}), \
              patch("web.routes.ml_routes.sync_and_evaluate_paper_trading", return_value={"evaluated": True}), \
-             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_ml"}, clear=True), \
+             patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": token, "TELEGRAM_CHAT_ID": "chat_ml", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True), \
              patch("requests.post", return_value=mock_resp) as post_mock, \
              patch("time.sleep") as sleep_mock, \
              self.assertLogs("notifications.telegram", level="WARNING") as captured:

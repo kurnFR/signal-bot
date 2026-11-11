@@ -50,12 +50,14 @@ class TestWalletTelegramNotifier(unittest.TestCase):
         self.assertIn("&lt;candidate&gt;", message)
         self.assertIn("https://bscscan.com/tx/", message)
 
+    @patch.dict("os.environ", {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"})
     def test_send_uses_existing_telegram_settings_and_api(self):
         session = MagicMock()
         response = MagicMock()
+        response.status_code = 200
         response.json.return_value = {"ok": True, "result": {"message_id": 123}}
         session.post.return_value = response
-        notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session, allow_delivery=True)
+        notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session)
         with patch("wallet_tracker.telegram.time.sleep"):
             self.assertTrue(notifier.send(self.alert))
         session.post.assert_called_once()
@@ -64,6 +66,7 @@ class TestWalletTelegramNotifier(unittest.TestCase):
         self.assertEqual(kwargs["json"]["chat_id"], "chat")
         self.assertEqual(kwargs["json"]["parse_mode"], "HTML")
 
+    @patch.dict("os.environ", {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"})
     def test_send_failure_never_logs_token_bearing_request_url(self):
         import logging
         import requests
@@ -73,13 +76,14 @@ class TestWalletTelegramNotifier(unittest.TestCase):
         session.post.side_effect = requests.ConnectionError(
             f"failed to connect to https://api.telegram.org/bot{token}/sendMessage"
         )
-        notifier = WalletTelegramNotifier(token=token, chat_id="chat", session=session, allow_delivery=True)
+        notifier = WalletTelegramNotifier(token=token, chat_id="chat", session=session)
         with self.assertLogs("wallet_tracker.telegram", level="WARNING") as captured:
             with patch("wallet_tracker.telegram.time.sleep"):
                 self.assertFalse(notifier.send(self.alert))
         self.assertNotIn(token, "\n".join(captured.output))
         self.assertNotIn("/bot" + token, "\n".join(captured.output))
 
+    @patch.dict("os.environ", {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"})
     def test_send_retries_429_using_retry_after_then_succeeds(self):
         session = MagicMock()
         limited = MagicMock()
@@ -89,18 +93,19 @@ class TestWalletTelegramNotifier(unittest.TestCase):
         success.status_code = 200
         success.json.return_value = {"ok": True, "result": {"message_id": 123}}
         session.post.side_effect = [limited, success]
-        notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session, allow_delivery=True)
+        notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session)
         with patch("wallet_tracker.telegram.time.sleep") as sleep:
             self.assertTrue(notifier.send(self.alert))
         self.assertEqual(session.post.call_count, 2)
         sleep.assert_any_call(4)
 
+    @patch.dict("os.environ", {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"})
     def test_send_rejects_unsuccessful_telegram_payload(self):
         session = MagicMock()
         response = MagicMock()
         response.json.return_value = {"ok": False, "description": "bad chat"}
         session.post.return_value = response
-        notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session, allow_delivery=True)
+        notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session)
         with patch("wallet_tracker.telegram.time.sleep"):
             self.assertFalse(notifier.send(self.alert))
 
@@ -109,6 +114,41 @@ class TestWalletTelegramNotifier(unittest.TestCase):
         notifier = WalletTelegramNotifier()
         self.assertEqual(notifier.token, "retail-token")
         self.assertEqual(notifier.chat_id, "chat")
+
+
+    @patch.dict("os.environ", {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"})
+    def test_send_requires_exact_integer_200_and_boolean_ok_true(self):
+        for status in (True, 200.0, "200", None, 401, 500):
+            with self.subTest(status=status):
+                session = MagicMock()
+                response = MagicMock()
+                response.status_code = status
+                response.json.return_value = {"ok": True}
+                session.post.return_value = response
+                notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session)
+                with patch("wallet_tracker.telegram.time.sleep"):
+                    self.assertFalse(notifier.send(self.alert))
+
+    @patch.dict("os.environ", {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"})
+    def test_send_rejects_missing_status_and_non_dictionary_json(self):
+        session = MagicMock()
+        response = MagicMock(spec=["json", "raise_for_status"])
+        response.json.return_value = {"ok": True}
+        session.post.return_value = response
+        notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session)
+        with patch("wallet_tracker.telegram.time.sleep"):
+            self.assertFalse(notifier.send(self.alert))
+
+        for payload in (None, [], "ok", 1, {"ok": 1}, {"ok": "true"}):
+            with self.subTest(payload=payload):
+                session = MagicMock()
+                response = MagicMock()
+                response.status_code = 200
+                response.json.return_value = payload
+                session.post.return_value = response
+                notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session)
+                with patch("wallet_tracker.telegram.time.sleep"):
+                    self.assertFalse(notifier.send(self.alert))
 
 
 class TestWalletAlertQueueControls(unittest.TestCase):

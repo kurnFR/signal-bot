@@ -16,7 +16,7 @@ logger = logging.getLogger("wallet_tracker.telegram")
 
 
 class WalletTelegramNotifier:
-    def __init__(self, token=None, chat_id=None, session=None, allow_delivery=None):
+    def __init__(self, token=None, chat_id=None, session=None):
         self.token = token if token is not None else (
             os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN", "")
         )
@@ -28,7 +28,6 @@ class WalletTelegramNotifier:
         self.session.mount("https://", HTTPAdapter(max_retries=0))
         self._last_send = 0.0
         self._lock = threading.Lock()
-        self._allow_delivery = allow_delivery
         if not self.delivery_authorized:
             logger.info(
                 "ℹ️ Wallet Telegram delivery is disabled (authorization missing; "
@@ -37,17 +36,7 @@ class WalletTelegramNotifier:
 
     @property
     def delivery_authorized(self) -> bool:
-        if self._allow_delivery is not None:
-            return bool(self._allow_delivery)
         return os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
-
-    @delivery_authorized.setter
-    def delivery_authorized(self, value):
-        self._allow_delivery = value
-
-    @delivery_authorized.deleter
-    def delivery_authorized(self):
-        self._allow_delivery = None
 
     @property
     def configured(self):
@@ -148,9 +137,12 @@ class WalletTelegramNotifier:
                     )
                     return False
 
-                status = getattr(response, "status_code", 200)
-                if not isinstance(status, int):
-                    status = 200
+                status = getattr(response, "status_code", None)
+                if type(status) is not int or not 100 <= status <= 599:
+                    logger.warning(
+                        "Telegram wallet alert delivery failed (error_type=InvalidResponse, http_status=unknown)"
+                    )
+                    return False
                 if status == 429 and attempt < 2:
                     retry_after = 1
                     try:
@@ -171,7 +163,7 @@ class WalletTelegramNotifier:
                         type(exc).__name__, status,
                     )
                     return False
-                if payload.get("ok") is not True:
+                if status != 200 or not isinstance(payload, dict) or payload.get("ok") is not True:
                     logger.warning("Telegram wallet alert delivery rejected (http_status=%s)", status)
                     return False
                 self._last_send = time.monotonic()

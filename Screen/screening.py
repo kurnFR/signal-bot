@@ -562,7 +562,7 @@ def bootstrap_ema_history(symbols):
 
 
 class SmartMoneyTelegram:
-    def __init__(self, token, chat_id, allow_delivery=None):
+    def __init__(self, token, chat_id):
         self.token = token
         self.chat_id = chat_id
         self.url = f"https://api.telegram.org/bot{token}/sendMessage" if token else ""
@@ -573,7 +573,6 @@ class SmartMoneyTelegram:
             "https://",
             HTTPAdapter(max_retries=Retry(total=3, backoff_factor=0.3, status_forcelist=[429, 500, 502, 503, 504])),
         )
-        self._allow_delivery = allow_delivery
         if not self.delivery_authorized:
             logger.info(
                 "ℹ️ Screener Telegram delivery is disabled (authorization missing; "
@@ -582,17 +581,16 @@ class SmartMoneyTelegram:
 
     @property
     def delivery_authorized(self) -> bool:
-        if self._allow_delivery is not None:
-            return bool(self._allow_delivery)
         return os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
 
-    @delivery_authorized.setter
-    def delivery_authorized(self, value):
-        self._allow_delivery = value
-
-    @delivery_authorized.deleter
-    def delivery_authorized(self):
-        self._allow_delivery = None
+    @staticmethod
+    def _safe_http_status(exc: Exception) -> str:
+        resp = getattr(exc, "response", None)
+        if resp is not None:
+            status = getattr(resp, "status_code", None)
+            if type(status) is int and 100 <= status <= 599:
+                return str(status)
+        return "unknown"
 
     def send_early_alert(self, signal):
         emoji = {"RVOL_SPIKE": "⚡", "DIVERGENCE_ACCUMULATION": "🤫", "DIVERGENCE_DISTRIBUTION": "🚨", "VELOCITY_SURGE": "🚀"}.get(signal.signal_type, "🔍")
@@ -649,12 +647,13 @@ class SmartMoneyTelegram:
                 self._last_send = time.time()
                 logger.info("✅ Early alert: %s | %s | Quality %.0f | RVOL %.2fx", signal.symbol, signal.signal_type, signal.quality_score, signal.rvol)
                 return True
-            except requests.HTTPError as e:
-                body = getattr(e.response, "text", "")[:500] if getattr(e, "response", None) is not None else ""
-                logger.error("❌ Telegram API error: status=%s body=%s", getattr(e.response, "status_code", None), body)
+            except requests.HTTPError as exc:
+                status = self._safe_http_status(exc)
+                logger.error("❌ Telegram API error: error_type=%s http_status=%s", type(exc).__name__, status)
                 return False
-            except Exception as e:
-                logger.error("❌ Telegram request error: %s", e)
+            except Exception as exc:
+                status = self._safe_http_status(exc)
+                logger.error("❌ Telegram request error: error_type=%s http_status=%s", type(exc).__name__, status)
                 return False
 
     def send(self, text):
@@ -677,8 +676,9 @@ class SmartMoneyTelegram:
                 resp.raise_for_status()
                 self._last_send = time.time()
                 return True
-            except Exception as e:
-                logger.error("❌ Telegram error: %s", e)
+            except Exception as exc:
+                status = self._safe_http_status(exc)
+                logger.error("❌ Telegram error: error_type=%s http_status=%s", type(exc).__name__, status)
                 return False
 
 telegram = SmartMoneyTelegram(CONFIG["telegram_bot_token"], CONFIG["telegram_chat_id"])
