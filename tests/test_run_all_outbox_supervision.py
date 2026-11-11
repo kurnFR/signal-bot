@@ -178,6 +178,7 @@ def test_optional_process_opt_ins_are_mutually_independent():
 def test_cli_rejects_held_back_processes_without_opt_in(monkeypatch, capsys):
     import sys
 
+    monkeypatch.setattr(run_all, "PROCESSES", run_all.build_processes({}))
     for process in ("paper_engine", "news_ai", "retailbot2"):
         monkeypatch.setattr(sys, "argv", ["run_all.py", "--only", process])
         try:
