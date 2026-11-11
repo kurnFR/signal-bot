@@ -417,3 +417,52 @@ class TestTelegramGetMeStrictValidation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTelegramSendStrictValidation(unittest.TestCase):
+    def setUp(self):
+        self.env = {
+            "TELEGRAM_BOT_TOKEN": "123456:secret-bot-token",
+            "TELEGRAM_CHAT_ID": "chat-123",
+            "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1",
+        }
+
+    def _send(self, status_code, payload):
+        from unittest.mock import MagicMock
+        response = MagicMock()
+        if status_code is not ...:
+            response.status_code = status_code
+        response.json.return_value = payload
+        with patch.dict("os.environ", self.env, clear=True), \
+             patch.object(telegram_notifier.requests, "post", return_value=response), \
+             patch("time.sleep"):
+            return telegram_notifier.send_telegram_message("test", max_retries=1)
+
+    def test_exact_integer_200_and_boolean_true_is_success(self):
+        self.assertTrue(self._send(200, {"ok": True})["success"])
+
+    def test_integer_200_and_non_boolean_truthy_ok_is_rejected(self):
+        for ok_value in (1, "true", ["yes"]):
+            with self.subTest(ok=ok_value):
+                self.assertFalse(self._send(200, {"ok": ok_value})["success"])
+
+    def test_non_200_status_with_ok_true_is_rejected(self):
+        for status in (401, 500):
+            with self.subTest(status=status):
+                self.assertFalse(self._send(status, {"ok": True})["success"])
+
+    def test_boolean_float_string_and_none_status_are_rejected(self):
+        for status in (True, 200.0, "200", None):
+            with self.subTest(status=status):
+                result = self._send(status, {"ok": True})
+                self.assertFalse(result["success"])
+                self.assertIn("HTTP", result["error"])
+
+    def test_missing_status_is_rejected(self):
+        result = self._send(..., {"ok": True})
+        self.assertFalse(result["success"])
+
+    def test_non_dictionary_json_is_rejected(self):
+        for payload in (None, [], "ok", 1):
+            with self.subTest(payload=payload):
+                self.assertFalse(self._send(200, payload)["success"])
