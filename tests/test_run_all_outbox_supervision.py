@@ -159,3 +159,31 @@ def test_telegram_flags_do_not_enable_held_back_services():
     })
     assert "paper_engine" not in processes
     assert "news_ai" not in processes
+
+
+def test_optional_process_opt_ins_are_mutually_independent():
+    paper_only = run_all.build_processes({"PAPER_ENGINE_ENABLED": "1"})
+    assert "paper_engine" in paper_only
+    assert "news_ai" not in paper_only
+    assert "retailbot2" not in paper_only
+    assert "retailbot2_outbox" not in paper_only
+
+    news_only = run_all.build_processes({"NEWS_AI_ENABLED": "1"})
+    assert "news_ai" in news_only
+    assert "paper_engine" not in news_only
+    assert "retailbot2" not in news_only
+    assert "retailbot2_outbox" not in news_only
+
+
+def test_cli_rejects_held_back_processes_without_opt_in(monkeypatch, capsys):
+    import sys
+
+    for process in ("paper_engine", "news_ai", "retailbot2"):
+        monkeypatch.setattr(sys, "argv", ["run_all.py", "--only", process])
+        try:
+            run_all.main()
+        except SystemExit as exc:
+            assert exc.code == 2
+        else:
+            raise AssertionError(f"--only {process} should be rejected without opt-in")
+        assert "invalid choice" in capsys.readouterr().err
