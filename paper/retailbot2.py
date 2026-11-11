@@ -22,7 +22,7 @@ FIXES IN v2.1:
 
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -258,20 +258,30 @@ class TelegramAlert:
     - Rate limit handling (30 msg/sec Telegram limit)
     """
 
-    def __init__(self, token: str, chat_id: str, logger: logging.Logger = None):
+    def __init__(self, token: str, chat_id: str, logger: logging.Logger = None, allow_direct: Optional[bool] = None):
         self.token = str(token).strip()
         self.chat_id = str(chat_id).strip()
         self.base_url = f"https://api.telegram.org/bot{self.token}"
         self.logger = logger or logging.getLogger("Telegram")
         self._last_send_time = 0.0
         self._min_interval = 0.05  # Max 20 msg/sec (safe under 30 limit)
+        if allow_direct is not None:
+            self.direct_authorized = bool(allow_direct)
+        else:
+            self.direct_authorized = os.getenv("RETAILBOT2_ALLOW_DIRECT_TELEGRAM", "").strip() == "1"
 
         # Validate on init — tell user exactly what's wrong
         self.enabled = self._validate()
 
     def _validate(self) -> bool:
         """Strict validation with clear error messages."""
-        
+        if not self.direct_authorized:
+            self.logger.info(
+                "ℹ️ Direct Telegram delivery is disabled (authorization required; "
+                "set RETAILBOT2_ALLOW_DIRECT_TELEGRAM=1 to enable direct delivery)."
+            )
+            return False
+
         if not self.token or self.token in ("", "YOUR_TOKEN", "YOUR_BOT_TOKEN_HERE"):
             self.logger.warning("⚠️  Telegram DISABLED: token is empty/placeholder")
             return False
@@ -355,7 +365,7 @@ class TelegramAlert:
     def send(self, message: str, parse_mode: str = "HTML",
              retries: int = 2) -> bool:
         """Send with retry, rate limiting, and full error reporting."""
-        if not self.enabled:
+        if not self.enabled or not getattr(self, "direct_authorized", True):
             # Console fallback — clean up HTML tags
             clean = (message
                      .replace('<b>', '').replace('</b>', '')
@@ -512,8 +522,8 @@ class TelegramAlert:
         msg = format_exit_message(payload)
         return self.send(msg)
 
-    def send_stats(self, stats: Dict,
-                   equity_shadow: float, equity_inverse: float) -> bool:
+    @staticmethod
+    def format_stats(stats: Dict, equity_shadow: float, equity_inverse: float) -> str:
         lines = [
             "📊 <b>PERFORMANCE REPORT</b>",
             "─" * 30,
@@ -535,8 +545,11 @@ class TelegramAlert:
                 f"T={total} W={wins} L={losses} "
                 f"WR={wr:.0f}% Net=${net:+.0f}"
             )
+        return "\n".join(lines)
 
-        return self.send("\n".join(lines))
+    def send_stats(self, stats: Dict,
+                   equity_shadow: float, equity_inverse: float) -> bool:
+        return self.send(self.format_stats(stats, equity_shadow, equity_inverse))
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1824,6 +1837,45 @@ class DatabaseManager:
             if own_conn and active_conn is not None:
                 active_conn.close()
 
+    def enqueue_telegram_outbox_event(
+        self,
+        event_key: str,
+        event_type: str,
+        payload: Dict[str, Any],
+        trade_id: int = 0,
+        conn=None,
+    ) -> bool:
+        """Enqueue an event into rdt_telegram_outbox for asynchronous delivery by outbox_worker."""
+        own_conn = conn is None
+        active_conn = self.get_conn() if own_conn else conn
+        if not active_conn:
+            return False
+        cursor = None
+        try:
+            cursor = active_conn.cursor()
+            cursor.execute(
+                """INSERT INTO rdt_telegram_outbox
+                   (trade_id, event_key, event_type, payload_json, status, next_attempt_at)
+                   VALUES (%s, %s, %s, %s, 'pending', UTC_TIMESTAMP())""",
+                (int(trade_id), str(event_key)[:128], str(event_type)[:16], json.dumps(payload)),
+            )
+            if own_conn:
+                active_conn.commit()
+            return True
+        except Exception as exc:
+            if own_conn and active_conn:
+                try:
+                    active_conn.rollback()
+                except Exception:
+                    pass
+            self.logger.warning("Failed to enqueue outbox event %s: %s", event_key, exc)
+            return False
+        finally:
+            if cursor is not None:
+                cursor.close()
+            if own_conn and active_conn is not None:
+                active_conn.close()
+
 
 # ═══════════════════════════════════════════════════════════════════
 # DATA FETCHER
@@ -1991,7 +2043,7 @@ class RetailDeathTrapBot:
         if was_enabled != self.trading_enabled:
             state_str = "ENABLED" if self.trading_enabled else "PAUSED (existing positions still managed)"
             self.logger.info(f"🎛️  Trading {state_str} via dashboard control")
-            self.tg.send(f"🎛️ <b>Trading {state_str}</b> (via web dashboard)")
+            self.notify_operational(f"🎛️ <b>Trading {state_str}</b> (via web dashboard)", event_key=f"control:{int(time.time()*1000)}")
 
         applied = []
         for key, value in (control.get('overrides') or {}).items():
@@ -2074,6 +2126,51 @@ class RetailDeathTrapBot:
         if restored:
             self.logger.info(f"⏱️  Restored cooldown state for {restored} symbol/mode pairs")
 
+    def notify_operational(self, message: str, event_key: Optional[str] = None) -> bool:
+        """Deliver or queue an operational notification respecting delivery authorization policy.
+
+        1. Prefers routing through durable outbox queue (rdt_telegram_outbox).
+        2. Falls back to direct delivery ONLY if direct delivery is explicitly authorized.
+        3. Fails closed (logs locally without network send) if delivery is not authorized.
+        """
+        if not message:
+            return False
+
+        if event_key is None:
+            event_key = f"op:{uuid.uuid4().hex}"
+
+        # 1. Prefer routing through existing outbox architecture
+        queued = False
+        try:
+            if hasattr(self, "db") and self.db:
+                queued = self.db.enqueue_telegram_outbox_event(
+                    event_key=event_key,
+                    event_type="operational",
+                    payload={"text": message},
+                    trade_id=0,
+                )
+        except Exception as exc:
+            self.logger.warning("Could not enqueue operational notification to outbox: %s", exc)
+            queued = False
+
+        if queued:
+            self.logger.info("Queued operational notification to outbox [%s]", event_key)
+            return True
+
+        # 2. Direct delivery ONLY if explicitly authorized
+        if getattr(self.tg, "direct_authorized", False) and getattr(self.tg, "enabled", False):
+            return self.tg.send(message)
+
+        # 3. Fail closed: log locally
+        clean = (
+            message.replace('<b>', '').replace('</b>', '')
+            .replace('<i>', '').replace('</i>', '')
+            .replace('<code>', '').replace('</code>', '')
+            .replace('\n', ' | ')
+        )
+        self.logger.info("Operational notification not sent (delivery unauthorized): %s", clean[:160])
+        return False
+
     def _startup_msg(self):
         msg = (
             f"🤖 <b>RETAIL DEATH TRAP BOT v2.1</b>\n"
@@ -2086,7 +2183,7 @@ class RetailDeathTrapBot:
             f"💰 Inverse Capital: ${self.config.initial_capital:,.2f}\n"
             f"🎯 Max trades/mode: {self.config.max_open_trades_per_mode}"
         )
-        self.tg.send(msg)
+        self.notify_operational(msg, event_key=f"startup:{int(time.time())}")
         self.logger.info("=" * 60)
         self.logger.info("RETAIL DEATH TRAP BOT v2.1 — STARTED")
         self.logger.info(f"Symbols: {self.symbols}")
@@ -2503,19 +2600,20 @@ class RetailDeathTrapBot:
                 # Stats report every hour
                 if loop_count % stats_every == 0:
                     stats = self.db.get_stats()
-                    self.tg.send_stats(
+                    stats_msg = self.tg.format_stats(
                         stats, self.equity_shadow, self.equity_inverse
                     )
+                    self.notify_operational(stats_msg, event_key=f"stats:{int(time.time())}")
 
                 time.sleep(self.config.exit_check_interval)
 
             except KeyboardInterrupt:
                 self.logger.info("🛑 Stopped by user")
-                self.tg.send("🛑 <b>Bot stopped by user</b>")
+                self.notify_operational("🛑 <b>Bot stopped by user</b>", event_key=f"shutdown:{int(time.time())}")
                 break
             except Exception as e:
                 self.logger.error(f"🚨 Loop error: {e}\n{traceback.format_exc()}")
-                self.tg.send(f"🚨 Error: {str(e)[:150]}")
+                self.notify_operational(f"🚨 Error: {str(e)[:150]}", event_key=f"error:{int(time.time()*1000)}")
                 time.sleep(30)
 
 

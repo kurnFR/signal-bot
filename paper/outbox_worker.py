@@ -119,6 +119,66 @@ def verify_database_identity(conn, allowed_databases: Tuple[str, ...]) -> str:
     return actual_db
 
 
+REQUIRED_OUTBOX_COLUMNS = (
+    "id",
+    "event_key",
+    "trade_id",
+    "event_type",
+    "payload_json",
+    "status",
+    "attempts",
+    "next_attempt_at",
+    "locked_until",
+    "claim_token",
+    "last_error",
+    "created_at",
+    "sent_at",
+)
+
+
+class SchemaVerificationError(RuntimeError):
+    """Raised when required outbox schema tables or columns are missing."""
+    pass
+
+
+def verify_outbox_schema(conn) -> None:
+    """Preflight validation of required outbox table and columns before lock acquisition.
+
+    Queries information_schema to verify rdt_telegram_outbox and all required columns exist.
+    Fails closed without modifying any database state.
+    """
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """SELECT TABLE_NAME
+               FROM information_schema.tables
+               WHERE TABLE_SCHEMA = DATABASE()
+                 AND TABLE_NAME = 'rdt_telegram_outbox'"""
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise SchemaVerificationError(
+                "Required outbox table 'rdt_telegram_outbox' does not exist in database; "
+                "run 'python -m db.migrate' before starting the worker."
+            )
+
+        cursor.execute(
+            """SELECT COLUMN_NAME
+               FROM information_schema.columns
+               WHERE TABLE_SCHEMA = DATABASE()
+                 AND TABLE_NAME = 'rdt_telegram_outbox'"""
+        )
+        existing = {r[0] for r in cursor.fetchall()}
+        missing = sorted(set(REQUIRED_OUTBOX_COLUMNS) - existing)
+        if missing:
+            raise SchemaVerificationError(
+                f"Required outbox column(s) missing from 'rdt_telegram_outbox': {', '.join(missing)}; "
+                "run 'python -m db.migrate' before starting the worker."
+            )
+    finally:
+        cursor.close()
+
+
 def inspect_process_group(pgid: int, proc_root: str = "/proc") -> ProcessInspectionResult:
     """Inspect process group `pgid` via procfs.
 
@@ -571,6 +631,10 @@ class OutboxSessionManager:
             self.connected_database = verify_database_identity(self.s_lock, self.allowed_databases)
             logger.info("S_lock connected to authorized database: %r", self.connected_database)
 
+            # Preflight: Validate required outbox schema BEFORE attempting lock acquisition
+            verify_outbox_schema(self.s_lock)
+            logger.info("Schema preflight verified for 'rdt_telegram_outbox'")
+
             # Acquire MariaDB advisory lock
             acquired = self.db_manager.acquire_outbox_lock(self.s_lock, timeout_seconds=0)
             if not acquired:
@@ -588,6 +652,10 @@ class OutboxSessionManager:
 
             logger.info("Advisory lock %r successfully acquired and verified on S_lock", OUTBOX_LOCK_NAME)
             return True
+        except SchemaVerificationError as exc:
+            logger.critical("Schema preflight validation failed: %s", exc)
+            self.close()
+            raise
         except Exception as exc:
             logger.error("Failed to connect or acquire advisory lock: %s", exc)
             self.close()
@@ -705,7 +773,7 @@ class OutboxWorker:
         signal.signal(signal.SIGTERM, self._handle_signal)
 
     def format_event_text(self, event: Dict[str, Any]) -> str:
-        """Format entry or exit payload into Telegram HTML text."""
+        """Format entry, exit, or operational payload into Telegram HTML text."""
         event_type = event.get("event_type")
         payload = event.get("payload") or {}
         trade_id = int(event.get("trade_id") or 0)
@@ -714,6 +782,11 @@ class OutboxWorker:
             return format_entry_message(payload, trade_id)
         if event_type == "exit":
             return format_exit_message(payload)
+        if event_type == "operational":
+            text = payload.get("text") or payload.get("message")
+            if text:
+                return str(text)
+            raise ValueError(f"Operational outbox event {event.get('id')} missing 'text' payload")
         raise ValueError(f"Unsupported outbox event_type: {event_type!r}")
 
     def process_one_event(self) -> bool:
@@ -820,7 +893,12 @@ class OutboxWorker:
         """Main worker execution loop."""
         if not self.session_mgr.check_lock_owned():
             self.state = OutboxWorkerState.ACQUIRING_LOCK
-            acquired = self.session_mgr.connect_and_acquire()
+            try:
+                acquired = self.session_mgr.connect_and_acquire()
+            except SchemaVerificationError as exc:
+                self.state = OutboxWorkerState.STOPPED
+                logger.critical("Outbox worker startup aborted by schema preflight: %s", exc)
+                return 1
             if not acquired:
                 self.state = OutboxWorkerState.STOPPED
                 logger.error("Could not acquire advisory lock; exiting worker")
