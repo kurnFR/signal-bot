@@ -1,32 +1,28 @@
 #!/usr/bin/env python3
 """
-Single entry point: starts every process the web dashboard depends on, and
-restarts any of them if they crash. Run this instead of starting each
-run_*.py / paper/retailbot2.py / Screen/screening.py by hand in separate
-tmux sessions.
+Single entry point for supervising the configured Signal Bot processes.
+It starts the default process set and restarts children if they crash.
 
     python3 run_all.py
-    python3 run_all.py --skip retailbot2 --skip screener   # only the core stack
+    python3 run_all.py --skip screener
     python3 run_all.py --only web_server --only paper_engine
 
-Each process runs as its own OS subprocess (not a thread) -- deliberately.
-Some of these are asyncio-based (collectors), some are blocking sync loops
-(paper_engine, retailbot2, screening), and uvicorn wants to manage its own
-event loop for the web server. Mixing all of that into one interpreter via
-threads is fragile (one process's crash or a stuck C extension can affect
-shared interpreter state); separate OS processes give clean crash isolation
-and match how you'd run these manually, just supervised from one place.
+RetailBot2 is excluded from the default process set because it can create or
+update paper trades. To include it, explicitly set RETAILBOT2_ENABLED=1 before
+invoking the supervisor; only then is it available to --only/--skip:
 
-If Ctrl+C'd, every child is asked to terminate (SIGTERM). Most children
-are killed after the shared grace period; the RetailBot2 outbox worker is
-never force-killed by the supervisor because it may be retaining its MariaDB
-advisory lock while a Telegram transport descendant is still alive or unverified.
+    RETAILBOT2_ENABLED=1 python3 run_all.py --only retailbot2
 
-Each process is independently optional at the config level already (the
-News AI workers and retailbot2/screener all exit cleanly or run in a
-reduced/no-alert mode if their API keys aren't set -- see their own
-files). This script's job is only to keep whatever you DO want running,
-running.
+The outbox worker is a separate opt-in and additionally requires
+RETAILBOT2_OUTBOX_WORKER_ENABLED=1 and
+RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1. Enabling RetailBot2 does not enable
+Telegram delivery or the outbox worker.
+
+Each process runs as its own OS subprocess (not a thread) for crash isolation.
+If Ctrl+C'd, children receive SIGTERM. The outbox worker is never force-killed
+by the supervisor after its shutdown grace period because it may still own
+its MariaDB advisory lock while a Telegram transport descendant is alive or
+its termination state is unverified.
 """
 import sys
 import os
