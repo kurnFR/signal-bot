@@ -487,6 +487,36 @@ class TestTelegramSendStrictValidation(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertEqual(post.call_count, 1)
 
+    def test_malformed_server_error_response_is_not_retried(self):
+        from unittest.mock import MagicMock
+        response = MagicMock()
+        response.status_code = 500
+        response.json.side_effect = ValueError("invalid JSON")
+        with patch.dict("os.environ", self.env, clear=True), \
+             patch.object(telegram_notifier.requests, "post", return_value=response) as post, \
+             patch("time.sleep") as sleep:
+            result = telegram_notifier.send_telegram_message("test", max_retries=3)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"], "Invalid Telegram API response")
+        self.assertEqual(post.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_invalid_http_status_metadata_is_not_retried(self):
+        from unittest.mock import MagicMock
+        for status in (True, 200.0, "200", None, 99, 600):
+            with self.subTest(status=status):
+                response = MagicMock()
+                response.status_code = status
+                response.json.return_value = {"ok": True}
+                with patch.dict("os.environ", self.env, clear=True), \
+                     patch.object(telegram_notifier.requests, "post", return_value=response) as post, \
+                     patch("time.sleep") as sleep:
+                    result = telegram_notifier.send_telegram_message("test", max_retries=3)
+                self.assertFalse(result["success"])
+                self.assertEqual(result["error"], "Telegram API error (HTTP unknown)")
+                self.assertEqual(post.call_count, 1)
+                sleep.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
