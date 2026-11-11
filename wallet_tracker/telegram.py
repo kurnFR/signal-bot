@@ -16,7 +16,7 @@ logger = logging.getLogger("wallet_tracker.telegram")
 
 
 class WalletTelegramNotifier:
-    def __init__(self, token=None, chat_id=None, session=None):
+    def __init__(self, token=None, chat_id=None, session=None, allow_delivery=None):
         self.token = token if token is not None else (
             os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN", "")
         )
@@ -28,6 +28,26 @@ class WalletTelegramNotifier:
         self.session.mount("https://", HTTPAdapter(max_retries=0))
         self._last_send = 0.0
         self._lock = threading.Lock()
+        self._allow_delivery = allow_delivery
+        if not self.delivery_authorized:
+            logger.info(
+                "ℹ️ Wallet Telegram delivery is disabled (authorization missing; "
+                "set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 to enable delivery)."
+            )
+
+    @property
+    def delivery_authorized(self) -> bool:
+        if self._allow_delivery is not None:
+            return bool(self._allow_delivery)
+        return os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
+
+    @delivery_authorized.setter
+    def delivery_authorized(self, value):
+        self._allow_delivery = value
+
+    @delivery_authorized.deleter
+    def delivery_authorized(self):
+        self._allow_delivery = None
 
     @property
     def configured(self):
@@ -95,6 +115,14 @@ class WalletTelegramNotifier:
         return "\n".join(lines)
 
     def send(self, alert):
+        formatted = self.format_message(alert)
+        if not self.delivery_authorized:
+            logger.info(
+                "ℹ️ Wallet Telegram alert suppressed (delivery unauthorized): %s",
+                formatted.replace("\n", " | "),
+            )
+            return False
+
         if not self.configured:
             logger.warning("Telegram alert skipped: bot token or chat ID is missing")
             return False
@@ -104,7 +132,7 @@ class WalletTelegramNotifier:
                 time.sleep(0.8 - elapsed)
             body = {
                 "chat_id": self.chat_id,
-                "text": self.format_message(alert),
+                "text": formatted,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             }

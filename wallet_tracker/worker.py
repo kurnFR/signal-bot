@@ -102,6 +102,12 @@ def dispatch_telegram_alerts(notifier=None):
     )
     if queued:
         logger.info("queued %d followed-wallet swap(s) for digest delivery", queued)
+    if not notifier.delivery_authorized:
+        logger.info(
+            "Wallet Telegram alerts paused: global delivery authorization missing "
+            "(set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1); alerts remain queued"
+        )
+        return 0
     sent = 0
     for alert in store.get_pending_wallet_alerts(limit=50, cooldown_minutes=cooldown_minutes):
         try:

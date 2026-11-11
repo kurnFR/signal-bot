@@ -42,10 +42,19 @@ Rules live in the role-prefix policies and the `AUTHENTICATED_READ_PATHS` route-
 - Telegram failures are logged without the bot token (error type and HTTP status only).
 - Never commit `.env`, `.app_secret` or `.initial_admin_credential`. If a token or key is pasted into a chat, ticket or log, revoke and replace it.
 
-## 5. Safety limits on trading
+## 5. Telegram Delivery Authorization Boundary
+
+All outbound Telegram delivery is strictly opt-in and fail-closed:
+- **Global Delivery Authorization:** External Telegram delivery is disabled across the application unless `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1` is explicitly set in the environment. Any absent, empty, `0`, or unrecognized value suppresses outbound HTTP calls.
+- **RetailBot2 Dual Authorization:** RetailBot2 direct delivery additionally requires `RETAILBOT2_ALLOW_DIRECT_TELEGRAM=1` alongside the global flag; production trade alerts are routed asynchronously through `rdt_telegram_outbox` consumed by `paper.outbox_worker`.
+- **Smart Money Screener (`Screen/screening.py`):** Fails closed when global delivery authorization is missing. Generated alerts and operational messages are formatted and logged locally (`SmartMoneyDetector` log stream) to preserve operator visibility without making Telegram API requests. Candidate signals remain durably queued in `smart_money_signals` without burning retry attempts.
+- **Wallet Tracker (`wallet_tracker/telegram.py`):** Fails closed when global delivery authorization is missing. Swap digest alerts are formatted and logged locally (`wallet_tracker.telegram` log stream). The worker pauses delivery while preserving pending rows in `wallet_telegram_alerts` without exhausting attempts.
+- **Zero Startup Network Validation:** Notifiers and clients perform no network calls (such as `/getMe`) during startup or instantiation. Missing tokens or chat IDs fail safely with local warning logs.
+
+## 6. Safety limits on trading
 
 This is paper trading only, so there is no exchange API key or order endpoint in the codebase. The paper engine additionally blocks new entries when risk cannot be verified (see `paper/circuit_breaker.py`: max concurrent positions, max daily loss, portfolio notional exposure, and a shared emergency stop persisted in `system_flags`). If the shared stop state cannot be read, new entries fail closed.
 
-## 6. Tests
+## 7. Tests
 
 `tests/test_auth_security.py` covers login rate limiting and the token revocation lifecycle, and the wallet route tests assert that a viewer cannot mutate. `tests/test_route_authorization_sweep.py` sweeps every `/api` route from the live route table: anonymous requests get 401, a viewer cannot reach any mutating route, only admins reach admin prefixes, and a flagged account is blocked everywhere except the password-change endpoints. Login attempts are stored in the `login_attempts` table (shared across workers, survives restarts); if shared storage is unavailable, login fails closed with HTTP 503 rather than falling back to process-local counters.
