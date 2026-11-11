@@ -1313,11 +1313,11 @@ class DatabaseManager:
         if not conn:
             self.logger.error("❌ get_bot_control: database connection unavailable; failing closed with trading disabled")
             return {'enabled': False, 'overrides': {}, 'available': False}
+        c = None
         try:
             c = conn.cursor(dictionary=True)
             c.execute("SELECT enabled, overrides_json FROM bot_control WHERE id=1")
             row = c.fetchone()
-            c.close()
             if not row:
                 self.logger.error("❌ get_bot_control: bot_control record (id=1) missing; failing closed with trading disabled")
                 return {'enabled': False, 'overrides': {}, 'available': False}
@@ -1339,6 +1339,11 @@ class DatabaseManager:
             self.logger.error(f"❌ get_bot_control failed: {e}; failing closed with trading disabled")
             return {'enabled': False, 'overrides': {}, 'available': False}
         finally:
+            if c is not None:
+                try:
+                    c.close()
+                except Exception as close_error:
+                    self.logger.warning("get_bot_control: cursor close failed: %s", close_error)
             conn.close()
 
     def set_bot_control(self, enabled: Optional[bool] = None, overrides: Optional[Dict] = None):
