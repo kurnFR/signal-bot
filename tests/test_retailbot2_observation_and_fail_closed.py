@@ -20,15 +20,18 @@ from paper.retailbot2 import (
 
 
 class MockCursor:
-    def __init__(self, row=None, rows=None, lastrowid=1):
+    def __init__(self, row=None, rows=None, lastrowid=1, execute_error=None):
         self.row = row
         self.rows = rows or []
         self.lastrowid = lastrowid
+        self.execute_error = execute_error
         self.calls = []
         self.closed = False
 
     def execute(self, sql, params=None):
         self.calls.append((sql, params))
+        if self.execute_error is not None:
+            raise self.execute_error
 
     def fetchone(self):
         return self.row
@@ -434,3 +437,137 @@ def test_sigterm_stops_bot_cleanly_without_unauthorized_outbox(monkeypatch, capl
     # Logger captures SIGTERM and clean shutdown
     assert any("Received SIGTERM" in rec.message for rec in caplog.records)
     assert any("Bot shutdown complete" in rec.message for rec in caplog.records)
+
+
+
+def test_bot_control_fail_closed_on_query_exception():
+    """get_bot_control fails closed and releases DB resources when SELECT raises."""
+    cursor = MockCursor(execute_error=RuntimeError("simulated query failure"))
+    conn = MockConnection(cursor)
+    db = make_test_db(conn=conn)
+
+    result = db.get_bot_control()
+
+    assert result == {"enabled": False, "overrides": {}, "available": False}
+    assert cursor.closed is False  # execute failed before the cursor's normal close
+    assert conn.closed is True
+
+
+def _make_shutdown_test_bot(symbols=None):
+    bot = object.__new__(RetailDeathTrapBot)
+    bot.logger = logging.getLogger("test.retailbot2.shutdown_fence")
+    bot.config = BotConfig(
+        observation_only=False,
+        exit_check_interval=1,
+        heartbeat_interval=60,
+        max_open_trades_per_mode=8,
+        max_trades_per_symbol=1,
+        min_trade_interval_hours=2,
+        risk_per_trade=0.01,
+    )
+    bot.observation_only = False
+    bot._shutdown_requested = False
+    bot.symbols = symbols or ["BTC/USDT", "ETH/USDT"]
+    bot.active_shadow = {}
+    bot.active_inverse = {}
+    bot.equity_shadow = 10000.0
+    bot.equity_inverse = 10000.0
+    bot.fetcher = Mock()
+    bot.engine = Mock()
+    bot.db = Mock()
+    bot.last_trade_time = {}
+    bot.strategy_lifecycle = {}
+    bot._strategy_lifecycle_initialized = True
+    bot._strategy_lifecycle_unavailable = False
+    bot.mode = SignalMode.BOTH
+    bot.last_scan = {}
+    bot._tunable_fields = set()
+    return bot
+
+
+def test_sigterm_during_price_fetch_prevents_all_subsequent_exit_closes():
+    bot = _make_shutdown_test_bot()
+    bot.active_shadow = {
+        1: {"id": 1, "symbol": "BTC/USDT", "side": "LONG", "entry": 100.0, "stop": 95.0, "target": 110.0, "units": 1.0, "strategy": "RSI"},
+        2: {"id": 2, "symbol": "ETH/USDT", "side": "LONG", "entry": 100.0, "stop": 95.0, "target": 110.0, "units": 1.0, "strategy": "RSI"},
+    }
+    bot._close_trade = Mock()
+    def signal_during_fetch(_symbol):
+        bot._shutdown_requested = True
+        return 90.0
+    bot.fetcher.get_price.side_effect = signal_during_fetch
+
+    bot.check_exits()
+
+    bot.fetcher.get_price.assert_called_once()
+    bot._close_trade.assert_not_called()
+
+
+def test_shutdown_during_exit_processing_stops_remaining_positions():
+    bot = _make_shutdown_test_bot()
+    bot.active_shadow = {
+        1: {"id": 1, "symbol": "BTC/USDT", "side": "LONG", "entry": 100.0, "stop": 95.0, "target": 110.0, "units": 1.0, "strategy": "RSI"},
+        2: {"id": 2, "symbol": "BTC/USDT", "side": "LONG", "entry": 100.0, "stop": 95.0, "target": 110.0, "units": 1.0, "strategy": "RSI"},
+    }
+    bot.fetcher.get_price.return_value = 90.0
+    def close_and_request_shutdown(*_args):
+        bot._shutdown_requested = True
+    bot._close_trade = Mock(side_effect=close_and_request_shutdown)
+
+    bot.check_exits()
+
+    bot._close_trade.assert_called_once()
+
+
+def test_shutdown_during_scan_fetch_stops_remaining_symbols():
+    bot = _make_shutdown_test_bot()
+    def fetch_and_request_shutdown(*_args, **_kwargs):
+        bot._shutdown_requested = True
+        return None
+    bot.fetcher.fetch.side_effect = fetch_and_request_shutdown
+
+    bot.scan()
+
+    bot.fetcher.fetch.assert_called_once()
+
+
+def test_shutdown_during_strategy_processing_prevents_trade_open():
+    bot = _make_shutdown_test_bot(symbols=["BTC/USDT"])
+    import pandas as pd
+    frame = pd.DataFrame({"close": [1.0, 2.0, 3.0]}, index=pd.date_range("2026-01-01", periods=3, freq="h"))
+    bot.fetcher.fetch.side_effect = [frame, frame]
+    bot.engine.calculate_indicators.return_value = frame
+    def run_all_and_request_shutdown(*_args, **_kwargs):
+        bot._shutdown_requested = True
+        return [{"strategy": "RSI_CTR", "side": "LONG", "symbol": "BTC/USDT"}]
+    bot.engine.run_all.side_effect = run_all_and_request_shutdown
+    bot._get_strategy_lifecycle = Mock(return_value={"evaluation_enabled": True, "paper_enabled": True, "telegram_enabled": False})
+
+    bot.scan()
+
+    bot.engine.run_all.assert_called_once()
+    bot._open_trade = Mock()
+    # The scan above must have returned before attempting any trade creation.
+    bot._open_trade.assert_not_called()
+
+
+def test_open_trade_after_shutdown_never_persists():
+    bot = _make_shutdown_test_bot(symbols=["BTC/USDT"])
+    bot._shutdown_requested = True
+    bot.db.save_trade = Mock()
+    result = bot._open_trade(
+        {"strategy": "RSI_CTR", "symbol": "BTC/USDT", "side": "LONG", "entry": 100.0, "stop": 95.0, "target": 110.0, "rr": 2.0},
+        "shadow",
+    )
+    assert result is None
+    bot.db.save_trade.assert_not_called()
+
+
+def test_normal_exit_processing_still_closes_triggered_trade():
+    bot = _make_shutdown_test_bot(symbols=["BTC/USDT"])
+    trade = {"id": 1, "symbol": "BTC/USDT", "side": "LONG", "entry": 100.0, "stop": 95.0, "target": 110.0, "units": 1.0, "strategy": "RSI", "telegram_enabled": False}
+    bot.active_shadow = {1: trade}
+    bot.fetcher.get_price.return_value = 90.0
+    bot._close_trade = Mock()
+    bot.check_exits()
+    bot._close_trade.assert_called_once_with(1, 95.0, "STOP_LOSS", "shadow")
