@@ -103,7 +103,7 @@ The existing Playwright suite that mocks `/api/**` is useful for frontend render
 
 ## 4. Production database readiness — separate authorization required
 
-### 4.1 Schema observation and activation boundary
+### 4.1 Schema observation, production database access boundary, and activation
 
 On 2026-11-10, an operator-provided read-only preflight inspection (WO71688) reported the following production status:
 - Database: `crypto_signals`.
@@ -113,16 +113,19 @@ On 2026-11-10, an operator-provided read-only preflight inspection (WO71688) rep
 
 This dated observation supersedes earlier historical reports where production lacked `rdt_telegram_outbox` or where migration 026 was only applied to `signal_bot_test`. However, the following release boundaries remain strictly enforced:
 
-1. **Dated observation, not a present guarantee:** The WO71688 preflight reflects an operator report at a specific point in time (2026-11-10). It is not an independently verified guarantee of the database's present state or continuity.
-2. **Schema presence is not activation authorization:** Having migrations 025–027 applied in `crypto_signals` satisfies the schema precondition, but does not authorize activating the standalone worker or modifying production configuration.
-3. **Worker remains inactive by default:** In the reported production configuration, both worker flags remained unset. Enabling them requires a separate approved change window.
-4. **External Telegram delivery is not validated:** Production Telegram message transmission has not been authorized or validated. No real Telegram delivery has occurred. External delivery remains an independent validation gate.
+1. **Dated observation, not a present guarantee or standing authorization:** The WO71688 preflight reflects an operator report at a specific point in time (2026-11-10). It is not an independently verified guarantee of the database's present state or continuity. Do not interpret the WO71688 report as standing authorization for future database access. Documentation changes and previously reported preflight evidence do not grant production access authorization.
+2. **Production database access requires separate authorization:** Any access to or inspection of the production database `crypto_signals` requires separate, explicit authorization. This restriction applies to all interactions: read-only SQL queries, schema inspection, migration-status checks, dry-run commands, process or session inspection through database connections, and all writes or migrations.
+3. **Schema presence is not activation authorization:** Having migrations 025–027 applied in `crypto_signals` satisfies the schema precondition, but does not authorize activating the standalone worker or modifying production configuration.
+4. **Worker remains inactive by default:** In the reported production configuration, both worker flags remained unset. Enabling them requires a separate approved change window.
+5. **External Telegram delivery remains unauthorized and unvalidated:** WO71688 provides no evidence of production Telegram delivery. External Telegram delivery remains unauthorized and unvalidated. The dated observation confirms the worker was not launched under the observed configuration, but the preflight report is not a comprehensive historical audit of every possible Telegram delivery path. External Telegram message transmission remains a separate, independent authorization and validation gate.
 
 Therefore:
+- Any access to or inspection of the production database `crypto_signals` requires separate, explicit authorization.
+- Do not execute read-only SQL queries, schema inspection, `python -m db.migrate`, migration status checks, dry-run commands, process/session inspection through database connections, or any writes/migrations against `crypto_signals` without explicit authorization.
+- Do not interpret the WO71688 report or documentation updates as standing authorization for future production database access.
 - Do not start or restart the standalone outbox worker without explicit administrative authorization.
 - Do not enable `RETAILBOT2_OUTBOX_WORKER_ENABLED` or `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY` in production without an approved change window.
 - Do not manually create or alter `rdt_telegram_outbox`.
-- Do not execute unreviewed migrations or ad-hoc SQL mutations against `crypto_signals`.
 
 Before any authorized activation, the database owner and operations team must confirm current database integrity, verify backup readiness, and coordinate an approved change window. Following activation, operators must verify advisory lock ownership, queue processing, and error monitoring before enabling external delivery.
 
