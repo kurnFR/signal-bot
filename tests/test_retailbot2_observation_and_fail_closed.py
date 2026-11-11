@@ -14,6 +14,7 @@ from paper.retailbot2 import (
     BotConfig,
     DatabaseManager,
     RetailDeathTrapBot,
+    SignalMode,
     is_observation_only,
     is_outbox_enqueue_authorized,
 )
@@ -449,7 +450,7 @@ def test_bot_control_fail_closed_on_query_exception():
     result = db.get_bot_control()
 
     assert result == {"enabled": False, "overrides": {}, "available": False}
-    assert cursor.closed is False  # execute failed before the cursor's normal close
+    assert cursor.closed is True
     assert conn.closed is True
 
 
@@ -534,7 +535,7 @@ def test_shutdown_during_scan_fetch_stops_remaining_symbols():
 def test_shutdown_during_strategy_processing_prevents_trade_open():
     bot = _make_shutdown_test_bot(symbols=["BTC/USDT"])
     import pandas as pd
-    frame = pd.DataFrame({"close": [1.0, 2.0, 3.0]}, index=pd.date_range("2026-01-01", periods=3, freq="h"))
+    frame = pd.DataFrame({"close": [float(i) for i in range(120)]}, index=pd.date_range("2026-01-01", periods=120, freq="h"))
     bot.fetcher.fetch.side_effect = [frame, frame]
     bot.engine.calculate_indicators.return_value = frame
     def run_all_and_request_shutdown(*_args, **_kwargs):
