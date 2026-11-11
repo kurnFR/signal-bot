@@ -1357,10 +1357,26 @@ def get_retailbot2_control():
         row = cur.fetchone()
         cur.close()
         if not row:
-            return {"enabled": True, "overrides": {}, "updated_at": None}
+            return {"enabled": False, "overrides": {}, "updated_at": None}
+        raw_overrides = row.get("overrides_json")
+        raw_enabled = bool(row["enabled"])
+        if raw_enabled and raw_overrides is None:
+            raw_enabled = False
+        overrides = {}
+        if raw_overrides:
+            try:
+                parsed = json.loads(raw_overrides)
+                if isinstance(parsed, dict):
+                    overrides = parsed
+                else:
+                    raw_enabled = False
+                    overrides = {}
+            except (json.JSONDecodeError, TypeError):
+                raw_enabled = False
+                overrides = {}
         return {
-            "enabled": bool(row["enabled"]),
-            "overrides": json.loads(row["overrides_json"]) if row["overrides_json"] else {},
+            "enabled": raw_enabled,
+            "overrides": overrides,
             "updated_at": str(row["updated_at"]) if row.get("updated_at") else None,
         }
     finally:

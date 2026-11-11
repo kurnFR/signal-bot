@@ -10,6 +10,7 @@ from paper.retailbot2 import DatabaseManager, RetailDeathTrapBot, TelegramAlert
 def _authorize_outbox_enqueue(monkeypatch):
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
     monkeypatch.setenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "1")
+    monkeypatch.setenv("RETAILBOT2_ALLOW_TRADING", "1")
 
 
 class Cursor:

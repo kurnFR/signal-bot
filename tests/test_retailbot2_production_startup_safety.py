@@ -306,6 +306,21 @@ class TestWorkerActivationSupervisorContract:
         })
         assert "retailbot2" not in processes
 
+    def test_trading_authorization_flag_alone_does_not_enable_retailbot2_in_supervisor(self):
+        """RETAILBOT2_ALLOW_TRADING=1 alone must not start RetailBot2 in supervisor."""
+        processes = run_all.build_processes({
+            "RETAILBOT2_ALLOW_TRADING": "1",
+        })
+        assert "retailbot2" not in processes
+
+    def test_retailbot2_enabled_does_not_implicitly_authorize_trading_or_outbox(self):
+        """RETAILBOT2_ENABLED=1 alone does not start outbox worker or imply other gates."""
+        processes = run_all.build_processes({
+            "RETAILBOT2_ENABLED": "1",
+        })
+        assert "retailbot2" in processes
+        assert "retailbot2_outbox" not in processes
+
     def test_worker_requires_both_flags(self):
         """Supervisor requires BOTH RETAILBOT2_OUTBOX_WORKER_ENABLED and RETAILBOT2_ALLOW_TELEGRAM_DELIVERY."""
         assert "retailbot2_outbox" not in run_all.build_processes({

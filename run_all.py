@@ -18,10 +18,15 @@ invoking the supervisor; only then is it available to --only/--skip:
 
     RETAILBOT2_ENABLED=1 python3 run_all.py --only retailbot2
 
+Enabling RetailBot2 starts the worker with trade execution disabled by default.
+Trade execution requires separate, explicit authorization:
+
+    RETAILBOT2_ALLOW_TRADING=1
+
 The outbox worker is a separate opt-in and additionally requires
 RETAILBOT2_OUTBOX_WORKER_ENABLED=1 and
 RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1. Enabling RetailBot2 does not enable
-Telegram delivery or the outbox worker.
+trading, Telegram delivery, or the outbox worker.
 
 Automatic migrations are disabled by default. Run python3 -m db.migrate
 as a separately authorized deployment step, or explicitly opt in to automatic

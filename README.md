@@ -81,7 +81,13 @@ RetailBot2 is also excluded by default because it can create or update paper tra
 RETAILBOT2_ENABLED=1 python3 run_all.py --only retailbot2
 ```
 
-The outbox worker is a separate opt-in. It requires both `RETAILBOT2_OUTBOX_WORKER_ENABLED=1` and `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`; enabling RetailBot2 alone does not enable Telegram delivery or the worker. The Telegram delivery flag is a shared authorization gate for multiple Telegram sender components, not an outbox-only switch. Do not set it until delivery from the relevant components has been separately reviewed and authorized.
+Enabling RetailBot2 starts the process with trading disabled by default. Trade execution requires independent, explicit authorization:
+
+```bash
+RETAILBOT2_ALLOW_TRADING=1
+```
+
+The outbox worker is a separate opt-in. It requires both `RETAILBOT2_OUTBOX_WORKER_ENABLED=1` and `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`; enabling RetailBot2 alone does not enable trading, Telegram delivery, or the worker. The Telegram delivery flag is a shared authorization gate for multiple Telegram sender components, not an outbox-only switch. Do not set it until delivery from the relevant components has been separately reviewed and authorized.
 
 Open `http://localhost:8050`. `run_all.py --help` lists the currently available `--skip` / `--only` choices. Paper Engine, News AI, and RetailBot2 are available as supervisor choices only when their respective `PAPER_ENGINE_ENABLED=1`, `NEWS_AI_ENABLED=1`, and `RETAILBOT2_ENABLED=1` flags are set. To run one piece by hand: `run_web.py`, `run_collectors.py`, `run_paper_engine.py`, `run_news_ai.py`, `run_wallet_tracker.py`.
 

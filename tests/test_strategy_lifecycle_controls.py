@@ -324,7 +324,11 @@ def _bot_for_open_trade(settings):
         max_open_trades_per_mode=8,
         max_trades_per_symbol=1,
         min_trade_interval_hours=0,
+        observation_only=False,
+        allow_trading=True,
     )
+    bot.observation_only = False
+    bot.trading_enabled = True
     bot.db = Mock()
     bot.db.save_trade.return_value = 42
     bot.db.count_open.return_value = 0

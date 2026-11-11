@@ -267,12 +267,9 @@ def _execute_mock(mock: Dict[str, Any]) -> Dict[str, Any]:
         sleep_sec = float(desc.get("sleep", 10.0))
         ignore_term = bool(desc.get("ignore_sigterm", False))
         pid_file = desc.get("pid_file")
-        code = (
-            f"import os, signal, time; "
-            f"{f'open({pid_file!r}, \"w\").write(str(os.getpid())); ' if pid_file else ''}"
-            f"{'signal.signal(signal.SIGTERM, signal.SIG_IGN); ' if ignore_term else ''}"
-            f"time.sleep({sleep_sec})"
-        )
+        pid_write = f"open({pid_file!r}, 'w').write(str(os.getpid())); " if pid_file else ""
+        ign_term = "signal.signal(signal.SIGTERM, signal.SIG_IGN); " if ignore_term else ""
+        code = f"import os, signal, time; {pid_write}{ign_term}time.sleep({sleep_sec})"
         p = subprocess.Popen([sys.executable, "-c", code])
         if pid_file:
             try:

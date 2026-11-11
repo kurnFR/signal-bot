@@ -88,6 +88,18 @@ def is_outbox_enqueue_authorized(config: Optional[Any] = None) -> bool:
     return True
 
 
+def is_trading_authorized(config: Optional[Any] = None) -> bool:
+    """Return True if RetailBot2 trading is explicitly authorized.
+    Trading requires independent, explicit authorization via RETAILBOT2_ALLOW_TRADING=1,
+    the --allow-trading CLI flag, or BotConfig(allow_trading=True).
+    Observation-only mode always suppresses trading."""
+    if is_observation_only(config):
+        return False
+    if config is not None and getattr(config, "allow_trading", None) is not None:
+        return bool(config.allow_trading)
+    return os.getenv("RETAILBOT2_ALLOW_TRADING", "").strip() == "1"
+
+
 class SignalMode(Enum):
     SHADOW = "shadow"
     INVERSE = "inverse"
@@ -187,6 +199,9 @@ class BotConfig:
     api_retry_delay: float = 1.0
     heartbeat_interval: int = 60
     observation_only: bool = False
+    allow_trading: bool = field(
+        default_factory=lambda: os.getenv("RETAILBOT2_ALLOW_TRADING", "").strip() == "1"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1334,7 +1349,18 @@ class DatabaseManager:
                 except (json.JSONDecodeError, TypeError) as exc:
                     self.logger.error("❌ get_bot_control: malformed overrides_json (%s); failing closed with trading disabled", exc)
                     return {'enabled': False, 'overrides': {}, 'available': False}
-            return {'enabled': bool(row.get('enabled')), 'overrides': overrides, 'available': True}
+            raw_enabled = bool(row.get('enabled'))
+            # Legacy safety transition: if overrides_json is NULL, this row was seeded
+            # by legacy migration 022 without explicit operator configuration.
+            # Never treat legacy unconfigured rows as trading enabled.
+            if raw_enabled and raw_overrides is None:
+                self.logger.warning(
+                    "⚠️ get_bot_control: legacy unconfigured bot_control row (overrides_json IS NULL) "
+                    "detected; failing closed with trading disabled until explicitly saved"
+                )
+                return {'enabled': False, 'overrides': {}, 'available': True, 'legacy_unconfigured': True}
+
+            return {'enabled': raw_enabled, 'overrides': overrides, 'available': True}
         except Exception as e:
             self.logger.error(f"❌ get_bot_control failed: {e}; failing closed with trading disabled")
             return {'enabled': False, 'overrides': {}, 'available': False}
@@ -1391,6 +1417,9 @@ class DatabaseManager:
     def save_trade(self, signal: Dict, units: float, mode: str, entry_alert: Optional[Dict] = None) -> Optional[int]:
         if is_observation_only(getattr(self, "config", None)):
             self.logger.error("❌ DatabaseManager.save_trade blocked in observation-only mode; failing closed")
+            return None
+        if not is_trading_authorized(getattr(self, "config", None)):
+            self.logger.error("❌ DatabaseManager.save_trade blocked: trading is not authorized; failing closed")
             return None
         conn = self.get_conn()
         if not conn:
@@ -2133,6 +2162,10 @@ class RetailDeathTrapBot:
             self.trading_enabled = False
             return
 
+        trading_authorized = is_trading_authorized(getattr(self, "config", None))
+        if not trading_authorized:
+            self.trading_enabled = False
+
         control = self.db.get_bot_control()
         if not control.get('available', True):
             self.trading_enabled = False
@@ -2141,7 +2174,20 @@ class RetailDeathTrapBot:
                 self.notify_operational("⚠️ <b>Trading PAUSED</b> (bot_control state unavailable)", event_key=f"control_err:{int(time.time()*1000)}")
             return
 
-        self.trading_enabled = bool(control.get('enabled', False))
+        db_enabled = bool(control.get('enabled', False))
+        if not trading_authorized:
+            self.trading_enabled = False
+            if db_enabled:
+                self.logger.warning(
+                    "⚠️ RetailBot2 trading is disabled (bot_control has enabled=True in database, "
+                    "but independent explicit authorization RETAILBOT2_ALLOW_TRADING=1 is missing)"
+                )
+            if was_enabled:
+                self.logger.warning("⚠️ Trading PAUSED: independent trading authorization was revoked")
+                self.notify_operational("⚠️ <b>Trading PAUSED</b> (trading authorization missing)", event_key=f"control_auth:{int(time.time()*1000)}")
+            return
+
+        self.trading_enabled = db_enabled
         if was_enabled != self.trading_enabled:
             state_str = "ENABLED" if self.trading_enabled else "PAUSED (existing positions still managed)"
             self.logger.info(f"🎛️  Trading {state_str} via dashboard control")
@@ -2426,6 +2472,9 @@ class RetailDeathTrapBot:
             return None
         if getattr(self, "observation_only", False) or is_observation_only(getattr(self, "config", None)):
             self.logger.error("❌ RetailDeathTrapBot._open_trade called in observation-only mode; failing closed")
+            return None
+        if not getattr(self, "trading_enabled", False) or not is_trading_authorized(getattr(self, "config", None)):
+            self.logger.error("❌ RetailDeathTrapBot._open_trade called while trading is disabled or unauthorized; failing closed")
             return None
         strategy_id = signal.get('strategy', 'combined')
         lifecycle = self._get_strategy_lifecycle(strategy_id, mode)
@@ -2871,8 +2920,15 @@ def main():
         default=False,
         help="Run in read-only observation mode (no trades, no outbox enqueues, memory-only exit monitoring)"
     )
+    parser.add_argument(
+        "--allow-trading",
+        action="store_true",
+        default=False,
+        help="Explicitly authorize RetailBot2 trade execution (requires bot_control.enabled=1 in DB)"
+    )
     args, _ = parser.parse_known_args()
     obs_mode = args.observation_only or os.getenv("RETAILBOT2_OBSERVATION_ONLY", "").strip() == "1"
+    allow_trading = args.allow_trading or os.getenv("RETAILBOT2_ALLOW_TRADING", "").strip() == "1"
 
     config = BotConfig(
         symbols=[
@@ -2882,6 +2938,7 @@ def main():
         signal_mode="both",
         primary_timeframe="15m",
         observation_only=obs_mode,
+        allow_trading=allow_trading,
         # RSI wider zones = more triggers
         rsi_oversold=35,
         rsi_overbought=65,

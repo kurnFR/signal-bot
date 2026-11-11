@@ -58,6 +58,13 @@ All outbound Telegram delivery across the repository is strictly opt-in and fail
 
 This is paper trading only, so there is no exchange API key or order endpoint in the codebase. The paper engine additionally blocks new entries when risk cannot be verified (see `paper/circuit_breaker.py`: max concurrent positions, max daily loss, portfolio notional exposure, and a shared emergency stop persisted in `system_flags`). If the shared stop state cannot be read, new entries fail closed.
 
+### RetailBot2 Trading Authorization Boundary
+- **Default Disabled:** All new installations seed `bot_control.enabled=FALSE` via migration 022. Missing control rows and legacy unconfigured control rows (`overrides_json IS NULL`) fail closed with trading disabled.
+- **Independent Explicit Authorization:** RetailBot2 trade execution is disabled application-wide unless `RETAILBOT2_ALLOW_TRADING=1` is explicitly set in the environment (or `--allow-trading` CLI flag / `BotConfig(allow_trading=True)`).
+- **Dual Gate Requirement:** Trade creation requires BOTH runtime dashboard enablement (`bot_control.enabled=TRUE`) AND independent explicit authorization (`RETAILBOT2_ALLOW_TRADING=1`). If either is missing, trading remains paused/disabled.
+- **Legacy Persisted Control Protection:** Existing database rows previously seeded with `enabled=TRUE` by migration 022 cannot activate trading without explicit `RETAILBOT2_ALLOW_TRADING=1` authorization, and unconfigured legacy rows (`overrides_json IS NULL`) are safely treated as disabled. Migration 028 modifies the table default to `FALSE` and resets legacy rows to `enabled=FALSE`.
+- **Observation-Only Dominance:** Observation-only mode (`RETAILBOT2_OBSERVATION_ONLY=1`, `--observation-only`, `BotConfig(observation_only=True)`) strictly overrides and suppresses trading, mutations, and outbox enqueueing regardless of any other flag.
+
 ## 7. Tests
 
 `tests/test_auth_security.py` covers login rate limiting and the token revocation lifecycle, and the wallet route tests assert that a viewer cannot mutate. `tests/test_route_authorization_sweep.py` sweeps every `/api` route from the live route table: anonymous requests get 401, a viewer cannot reach any mutating route, only admins reach admin prefixes, and a flagged account is blocked everywhere except the password-change endpoints. Login attempts are stored in the `login_attempts` table (shared across workers, survives restarts); if shared storage is unavailable, login fails closed with HTTP 503 rather than falling back to process-local counters.

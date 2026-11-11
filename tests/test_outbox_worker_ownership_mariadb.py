@@ -40,25 +40,46 @@ TEST_DB_PORT = 3306
 TEST_DB_NAME = "signal_bot_test"
 
 
+def _test_db_config():
+    return {
+        "host": TEST_DB_HOST,
+        "port": TEST_DB_PORT,
+        "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", os.getenv("MYSQL_USER", "cms")).strip(),
+        "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", os.getenv("MYSQL_PASSWORD", "")),
+        "database": TEST_DB_NAME,
+    }
+
+
 def _test_connection():
-    user = os.getenv("SIGNAL_BOT_TEST_DB_USER", "cms").strip()
-    conn = mysql.connector.connect(
-        host=TEST_DB_HOST,
-        port=TEST_DB_PORT,
-        database=TEST_DB_NAME,
-        user=user,
-        password=os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""),
-        connection_timeout=5,
-        autocommit=False,
-    )
-    cursor = conn.cursor()
-    cursor.execute("SELECT DATABASE()")
-    actual = cursor.fetchone()[0]
-    cursor.close()
-    if actual != TEST_DB_NAME:
+    cfg = _test_db_config()
+    try:
+        conn = mysql.connector.connect(
+            host=cfg["host"],
+            port=cfg["port"],
+            database=cfg["database"],
+            user=cfg["user"],
+            password=cfg["password"],
+            connection_timeout=2,
+            autocommit=False,
+        )
+    except (mysql.connector.Error, Exception) as exc:
+        pytest.skip(
+            f"Isolated MariaDB test database {TEST_DB_HOST}:{TEST_DB_PORT}/{TEST_DB_NAME} is not reachable: {exc}"
+        )
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT DATABASE()")
+        actual = cursor.fetchone()[0]
+        cursor.close()
+        if actual != TEST_DB_NAME:
+            conn.close()
+            raise AssertionError(f"Refusing unexpected database {actual!r}, must be {TEST_DB_NAME!r}")
+        return conn
+    except mysql.connector.Error as exc:
         conn.close()
-        raise AssertionError(f"Refusing unexpected database {actual!r}, must be {TEST_DB_NAME!r}")
-    return conn
+        pytest.skip(
+            f"Isolated MariaDB test database {TEST_DB_HOST}:{TEST_DB_PORT}/{TEST_DB_NAME} query failed: {exc}"
+        )
 
 
 def _clean_outbox(conn):
@@ -183,13 +204,7 @@ class TestAdvisoryLockOwnership:
             conn2.close()
 
     def test_standalone_vs_standalone_contention(self):
-        db_cfg = {
-            "host": TEST_DB_HOST,
-            "port": TEST_DB_PORT,
-            "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", "cms"),
-            "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""),
-            "database": TEST_DB_NAME,
-        }
+        db_cfg = _test_db_config()
         worker1 = OutboxSessionManager(db_cfg, ALLOWED_TEST_DATABASES)
         worker2 = OutboxSessionManager(db_cfg, ALLOWED_TEST_DATABASES)
 
@@ -204,13 +219,7 @@ class TestAdvisoryLockOwnership:
             worker2.close()
 
     def test_legacy_retailbot2_dispatcher_cannot_bypass_standalone_worker(self):
-        db_cfg = {
-            "host": TEST_DB_HOST,
-            "port": TEST_DB_PORT,
-            "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", "cms"),
-            "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""),
-            "database": TEST_DB_NAME,
-        }
+        db_cfg = _test_db_config()
         standalone = OutboxSessionManager(db_cfg, ALLOWED_TEST_DATABASES)
 
         clean_conn = _test_connection()
@@ -251,13 +260,7 @@ class TestAdvisoryLockOwnership:
             standalone.close()
 
     def test_lock_loss_prevents_further_claims(self):
-        db_cfg = {
-            "host": TEST_DB_HOST,
-            "port": TEST_DB_PORT,
-            "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", "cms"),
-            "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""),
-            "database": TEST_DB_NAME,
-        }
+        db_cfg = _test_db_config()
         mgr = OutboxSessionManager(db_cfg, ALLOWED_TEST_DATABASES)
         assert mgr.connect_and_acquire() is True
 
@@ -278,13 +281,7 @@ class TestAdvisoryLockOwnership:
         e3 = _insert_test_event(conn)
         conn.close()
 
-        db_cfg = {
-            "host": TEST_DB_HOST,
-            "port": TEST_DB_PORT,
-            "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", "cms"),
-            "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""),
-            "database": TEST_DB_NAME,
-        }
+        db_cfg = _test_db_config()
         mgr = OutboxSessionManager(db_cfg, ALLOWED_TEST_DATABASES)
         assert mgr.connect_and_acquire() is True
 
@@ -367,13 +364,7 @@ class TestAdvisoryLockOwnership:
         db_mgr.acquire_outbox_lock.assert_not_called()
 
     def test_real_mariadb_advisory_lock_retention_during_fatal_lockout(self):
-        db_cfg = {
-            "host": TEST_DB_HOST,
-            "port": TEST_DB_PORT,
-            "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", "cms"),
-            "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""),
-            "database": TEST_DB_NAME,
-        }
+        db_cfg = _test_db_config()
         # 1. Start worker using real OutboxSessionManager connected to signal_bot_test
         worker = OutboxWorker(
             db_config=db_cfg,
@@ -487,13 +478,7 @@ class TestAdvisoryLockOwnership:
 import os, signal, sys, time
 from paper.outbox_worker import OutboxWorker, OutboxWorkerState
 
-db_cfg = {{
-    "host": "{TEST_DB_HOST}",
-    "port": {TEST_DB_PORT},
-    "user": "{os.getenv("SIGNAL_BOT_TEST_DB_USER", "cms")}",
-    "password": "{os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", "")}",
-    "database": "{TEST_DB_NAME}",
-}}
+db_cfg = {_test_db_config()!r}
 
 fatal_pgid = int(sys.argv[1])
 worker = OutboxWorker(
@@ -590,7 +575,13 @@ sys.exit(exit_code)
                 except OSError:
                     pass
     @pytest.fixture(autouse=True)
-    def clean_db(self):
+    def clean_db(self, request):
+        if request.node.name in (
+            "test_outbox_lock_name_constant_is_authoritative_rdt_outbox_worker_lock",
+            "test_legacy_dispatcher_is_disabled_without_lock_api",
+            "test_legacy_dispatcher_never_attempts_lock_acquisition",
+        ):
+            return
         conn = _test_connection()
         _clean_outbox(conn)
         conn.close()
@@ -600,13 +591,7 @@ sys.exit(exit_code)
         event_id = _insert_test_event(conn)
         conn.close()
 
-        db_cfg = {
-            "host": TEST_DB_HOST,
-            "port": TEST_DB_PORT,
-            "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", "cms"),
-            "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""),
-            "database": TEST_DB_NAME,
-        }
+        db_cfg = _test_db_config()
         mgr = OutboxSessionManager(db_cfg, ALLOWED_TEST_DATABASES)
         assert mgr.connect_and_acquire() is True
 
@@ -637,13 +622,7 @@ sys.exit(exit_code)
         event_id = _insert_test_event(conn)
         conn.close()
 
-        db_cfg = {
-            "host": TEST_DB_HOST,
-            "port": TEST_DB_PORT,
-            "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", "cms"),
-            "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""),
-            "database": TEST_DB_NAME,
-        }
+        db_cfg = _test_db_config()
         mgr = OutboxSessionManager(db_cfg, ALLOWED_TEST_DATABASES)
         assert mgr.connect_and_acquire() is True
 
@@ -666,13 +645,7 @@ sys.exit(exit_code)
         event_id = _insert_test_event(conn)
         conn.close()
 
-        db_cfg = {
-            "host": TEST_DB_HOST,
-            "port": TEST_DB_PORT,
-            "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", "cms"),
-            "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""),
-            "database": TEST_DB_NAME,
-        }
+        db_cfg = _test_db_config()
         mgr = OutboxSessionManager(db_cfg, ALLOWED_TEST_DATABASES)
         assert mgr.connect_and_acquire() is True
 
@@ -701,13 +674,7 @@ sys.exit(exit_code)
         event_id = _insert_test_event(conn)
         conn.close()
 
-        db_cfg = {
-            "host": TEST_DB_HOST,
-            "port": TEST_DB_PORT,
-            "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", "cms"),
-            "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""),
-            "database": TEST_DB_NAME,
-        }
+        db_cfg = _test_db_config()
         mgr = OutboxSessionManager(db_cfg, ALLOWED_TEST_DATABASES)
         assert mgr.connect_and_acquire() is True
 

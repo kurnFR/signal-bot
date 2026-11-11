@@ -17,6 +17,7 @@ from paper.retailbot2 import (
     SignalMode,
     is_observation_only,
     is_outbox_enqueue_authorized,
+    is_trading_authorized,
 )
 
 
@@ -135,10 +136,10 @@ def test_bot_control_refresh_failure_disables_trading():
 
 
 def test_bot_control_recovers_when_db_restored():
-    """5. trading_enabled turns back True when database read succeeds again with enabled=1."""
+    """5. trading_enabled turns back True when database read succeeds again with enabled=1 and trading is authorized."""
     bot = object.__new__(RetailDeathTrapBot)
     bot.logger = logging.getLogger("test.retailbot2.recover")
-    bot.config = BotConfig()
+    bot.config = BotConfig(allow_trading=True)
     bot.observation_only = False
     bot.trading_enabled = False
     bot._last_control_reload = 0.0
@@ -459,6 +460,7 @@ def _make_shutdown_test_bot(symbols=None):
     bot.logger = logging.getLogger("test.retailbot2.shutdown_fence")
     bot.config = BotConfig(
         observation_only=False,
+        allow_trading=True,
         exit_check_interval=1,
         heartbeat_interval=60,
         max_open_trades_per_mode=8,
@@ -467,6 +469,7 @@ def _make_shutdown_test_bot(symbols=None):
         risk_per_trade=0.01,
     )
     bot.observation_only = False
+    bot.trading_enabled = True
     bot._shutdown_requested = False
     bot.symbols = symbols or ["BTC/USDT", "ETH/USDT"]
     bot.active_shadow = {}
@@ -620,3 +623,205 @@ def test_shutdown_during_save_trade_does_not_mutate_in_memory_state():
     assert bot.active_shadow == {}
     assert bot.active_inverse == {}
     assert bot.last_trade_time == {}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# PHASE 1: TRADING AUTHORIZATION & LEGACY CONTROL HARDENING
+# ═══════════════════════════════════════════════════════════════════
+
+@pytest.mark.parametrize(
+    "env_val,config_val,obs_val,expected",
+    [
+        (None, None, False, False),       # Unset defaults to unauthorized
+        ("0", None, False, False),        # Explicit 0 is unauthorized
+        ("false", None, False, False),    # Non-1 is unauthorized
+        ("1", None, False, True),         # Env 1 is authorized
+        (None, False, False, False),      # Config False is unauthorized
+        (None, True, False, True),        # Config True is authorized
+        ("1", False, False, False),       # Config False overrides env 1
+        ("0", True, False, True),         # Config True overrides env 0
+        ("1", True, True, False),         # Observation mode overrides authorization
+        ("1", None, True, False),         # Observation mode overrides env 1
+    ]
+)
+def test_is_trading_authorized_matrix(monkeypatch, env_val, config_val, obs_val, expected):
+    """Trading authorization strictly gates execution and observation mode always dominates."""
+    if env_val is None:
+        monkeypatch.delenv("RETAILBOT2_ALLOW_TRADING", raising=False)
+    else:
+        monkeypatch.setenv("RETAILBOT2_ALLOW_TRADING", env_val)
+
+    if obs_val:
+        monkeypatch.setenv("RETAILBOT2_OBSERVATION_ONLY", "1")
+    else:
+        monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+
+    cfg = BotConfig(observation_only=obs_val)
+    if config_val is not None:
+        cfg.allow_trading = config_val
+    assert is_trading_authorized(cfg) is expected
+
+
+def test_bot_control_fresh_db_defaults_to_disabled():
+    """Fresh database row (enabled=0, overrides_json=None) returns enabled=False, available=True."""
+    cursor = MockCursor(row={"enabled": 0, "overrides_json": None})
+    conn = MockConnection(cursor)
+    db = make_test_db(conn=conn)
+    result = db.get_bot_control()
+    assert result == {"enabled": False, "overrides": {}, "available": True}
+
+
+def test_bot_control_legacy_seeded_row_defaults_to_disabled(caplog):
+    """Legacy row seeded by migration 022 (enabled=1, overrides_json=None) returns enabled=False."""
+    cursor = MockCursor(row={"enabled": 1, "overrides_json": None})
+    conn = MockConnection(cursor)
+    db = make_test_db(conn=conn)
+    with caplog.at_level(logging.WARNING):
+        result = db.get_bot_control()
+    assert result == {"enabled": False, "overrides": {}, "available": True, "legacy_unconfigured": True}
+    assert any("legacy unconfigured bot_control row" in rec.message for rec in caplog.records)
+
+
+def test_bot_control_explicitly_configured_row_honors_enabled():
+    """Explicitly saved row with overrides_json preserves enabled=True."""
+    cursor = MockCursor(row={"enabled": 1, "overrides_json": "{}"})
+    conn = MockConnection(cursor)
+    db = make_test_db(conn=conn)
+    result = db.get_bot_control()
+    assert result == {"enabled": True, "overrides": {}, "available": True}
+
+
+def test_bot_control_does_not_enable_trading_without_independent_authorization(monkeypatch, caplog):
+    """Trading remains disabled even when DB row has enabled=1 if independent authorization is missing."""
+    monkeypatch.delenv("RETAILBOT2_ALLOW_TRADING", raising=False)
+    monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+
+    bot = object.__new__(RetailDeathTrapBot)
+    bot.logger = logging.getLogger("test.retailbot2.no_auth")
+    bot.config = BotConfig(allow_trading=False, observation_only=False)
+    bot.observation_only = False
+    bot.trading_enabled = False
+    bot._last_control_reload = 0.0
+    bot._control_reload_interval = 10.0
+    bot._tunable_fields = set()
+    bot.notify_operational = Mock(return_value=True)
+
+    bot.db = Mock()
+    bot.db.get_bot_control.return_value = {"enabled": True, "overrides": {}, "available": True}
+
+    with caplog.at_level(logging.WARNING):
+        bot._reload_control(force=True)
+
+    assert bot.trading_enabled is False
+    assert any("RETAILBOT2_ALLOW_TRADING=1 is missing" in rec.message for rec in caplog.records)
+
+
+def test_legacy_persisted_row_cannot_activate_trading_even_with_allow_trading(monkeypatch):
+    """Even if RETAILBOT2_ALLOW_TRADING=1 is set, a legacy unconfigured row does not activate trading."""
+    monkeypatch.setenv("RETAILBOT2_ALLOW_TRADING", "1")
+    monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+
+    cursor = MockCursor(row={"enabled": 1, "overrides_json": None})
+    conn = MockConnection(cursor)
+    db = make_test_db(conn=conn, config=BotConfig(allow_trading=True))
+
+    bot = object.__new__(RetailDeathTrapBot)
+    bot.logger = logging.getLogger("test.retailbot2.legacy_persisted")
+    bot.config = BotConfig(allow_trading=True, observation_only=False)
+    bot.observation_only = False
+    bot.trading_enabled = False
+    bot._last_control_reload = 0.0
+    bot._control_reload_interval = 10.0
+    bot._tunable_fields = set()
+    bot.notify_operational = Mock(return_value=True)
+    bot.db = db
+
+    bot._reload_control(force=True)
+
+    assert bot.trading_enabled is False
+
+
+def test_dual_gates_required_for_trading(monkeypatch):
+    """Trading requires BOTH RETAILBOT2_ALLOW_TRADING=1 AND explicit DB enabled=True."""
+    monkeypatch.setenv("RETAILBOT2_ALLOW_TRADING", "1")
+    monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+
+    cursor = MockCursor(row={"enabled": 1, "overrides_json": "{}"})
+    conn = MockConnection(cursor)
+    db = make_test_db(conn=conn, config=BotConfig(allow_trading=True))
+
+    bot = object.__new__(RetailDeathTrapBot)
+    bot.logger = logging.getLogger("test.retailbot2.dual_gates")
+    bot.config = BotConfig(allow_trading=True, observation_only=False)
+    bot.observation_only = False
+    bot.trading_enabled = False
+    bot._last_control_reload = 0.0
+    bot._control_reload_interval = 10.0
+    bot._tunable_fields = set()
+    bot.notify_operational = Mock(return_value=True)
+    bot.db = db
+
+    bot._reload_control(force=True)
+
+    assert bot.trading_enabled is True
+
+
+def test_trading_authorization_revocation_pauses_trading(caplog):
+    """Revoking trading authorization dynamically transitions trading to PAUSED."""
+    bot = object.__new__(RetailDeathTrapBot)
+    bot.logger = logging.getLogger("test.retailbot2.revocation")
+    bot.config = BotConfig(allow_trading=False, observation_only=False)
+    bot.observation_only = False
+    bot.trading_enabled = True  # Was previously enabled
+    bot._last_control_reload = 0.0
+    bot._control_reload_interval = 10.0
+    bot._tunable_fields = set()
+    bot.notify_operational = Mock(return_value=True)
+    bot.db = Mock()
+    bot.db.get_bot_control.return_value = {"enabled": True, "overrides": {}, "available": True}
+
+    with caplog.at_level(logging.WARNING):
+        bot._reload_control(force=True)
+
+    assert bot.trading_enabled is False
+    bot.notify_operational.assert_called_once()
+    assert "Trading PAUSED" in bot.notify_operational.call_args[0][0]
+    assert any("trading authorization was revoked" in rec.message for rec in caplog.records)
+
+
+def test_save_trade_fails_closed_when_trading_unauthorized(monkeypatch):
+    """DatabaseManager.save_trade returns None without mutating DB when unauthorized."""
+    monkeypatch.delenv("RETAILBOT2_ALLOW_TRADING", raising=False)
+    cursor = MockCursor()
+    conn = MockConnection(cursor)
+    db = make_test_db(conn=conn, config=BotConfig(allow_trading=False))
+
+    signal = {
+        "symbol": "BTC/USDT", "side": "LONG", "entry": 50000.0,
+        "stop": 49000.0, "target": 52000.0, "atr": 500.0, "rr": 2.0,
+    }
+    tid = db.save_trade(signal, units=0.1, mode="shadow")
+    assert tid is None
+    assert len(cursor.calls) == 0
+    assert conn.commits == 0
+
+
+def test_open_trade_fails_closed_when_trading_unauthorized(monkeypatch):
+    """RetailDeathTrapBot._open_trade returns None when trading is unauthorized or disabled."""
+    monkeypatch.delenv("RETAILBOT2_ALLOW_TRADING", raising=False)
+    bot = object.__new__(RetailDeathTrapBot)
+    bot.logger = logging.getLogger("test.retailbot2.open_unauth")
+    bot.config = BotConfig(allow_trading=False, observation_only=False)
+    bot.observation_only = False
+    bot.trading_enabled = False
+    bot._shutdown_requested = False
+    bot.db = Mock()
+
+    signal = {
+        "symbol": "BTC/USDT", "side": "LONG", "entry": 50000.0,
+        "stop": 49000.0, "target": 52000.0, "atr": 500.0, "rr": 2.0,
+    }
+    result = bot._open_trade(signal, "shadow")
+    assert result is None
+    bot.db.save_trade.assert_not_called()
+

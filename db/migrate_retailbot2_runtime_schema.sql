@@ -44,14 +44,14 @@ CREATE TABLE IF NOT EXISTS rdt_strategy_stats (
 
 CREATE TABLE IF NOT EXISTS bot_control (
     id INT PRIMARY KEY DEFAULT 1,
-    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
     overrides_json TEXT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT chk_bot_control_singleton CHECK (id = 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT IGNORE INTO bot_control (id, enabled, overrides_json)
-VALUES (1, TRUE, NULL);
+VALUES (1, FALSE, NULL);
 
 CREATE TABLE IF NOT EXISTS rdt_strategy_lifecycle (
     strategy_id VARCHAR(64) NOT NULL,
