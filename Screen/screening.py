@@ -562,26 +562,93 @@ def bootstrap_ema_history(symbols):
 
 
 class SmartMoneyTelegram:
-    def __init__(self, token, chat_id):
-        self.token=token; self.chat_id=chat_id; self.url=f"https://api.telegram.org/bot{token}/sendMessage" if token else ""; self._last_send=0; self._lock=threading.Lock(); self.session=requests.Session()
-        self.session.mount("https://",HTTPAdapter(max_retries=Retry(total=3,backoff_factor=0.3,status_forcelist=[429,500,502,503,504])))
+    def __init__(self, token, chat_id, allow_delivery=None):
+        self.token = token
+        self.chat_id = chat_id
+        self.url = f"https://api.telegram.org/bot{token}/sendMessage" if token else ""
+        self._last_send = 0
+        self._lock = threading.Lock()
+        self.session = requests.Session()
+        self.session.mount(
+            "https://",
+            HTTPAdapter(max_retries=Retry(total=3, backoff_factor=0.3, status_forcelist=[429, 500, 502, 503, 504])),
+        )
+        self._allow_delivery = allow_delivery
+        if not self.delivery_authorized:
+            logger.info(
+                "ℹ️ Screener Telegram delivery is disabled (authorization missing; "
+                "set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 to enable delivery)."
+            )
+
+    @property
+    def delivery_authorized(self) -> bool:
+        if self._allow_delivery is not None:
+            return bool(self._allow_delivery)
+        return os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
+
+    @delivery_authorized.setter
+    def delivery_authorized(self, value):
+        self._allow_delivery = value
+
+    @delivery_authorized.deleter
+    def delivery_authorized(self):
+        self._allow_delivery = None
+
     def send_early_alert(self, signal):
+        emoji = {"RVOL_SPIKE": "⚡", "DIVERGENCE_ACCUMULATION": "🤫", "DIVERGENCE_DISTRIBUTION": "🚨", "VELOCITY_SURGE": "🚀"}.get(signal.signal_type, "🔍")
+        if "ACCUMULATION" in signal.signal_type:
+            interpretation, action_hint = "🟢 Possible accumulation (high volume, limited price movement)", "Watch for upside breakout"
+        elif "DISTRIBUTION" in signal.signal_type:
+            interpretation, action_hint = "🔴 Possible distribution (high volume, limited price movement)", "Watch for downside breakdown"
+        elif signal.price_change_pct > 0.5:
+            interpretation, action_hint = "🟢 Strong buying pressure", "Momentum building"
+        elif signal.price_change_pct < -0.5:
+            interpretation, action_hint = "🔴 Strong selling pressure", "Momentum breaking down"
+        else:
+            interpretation, action_hint = "🟡 Unusual volume - watch direction", "Wait for price confirmation"
+        orderflow = f"{signal.taker_buy_ratio:.1%}" if getattr(signal, "taker_buy_ratio", None) is not None else "n/a"
+        message = (
+            f"{emoji} <b>SMART MONEY EARLY SIGNAL</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Pair: <b>{escape(str(signal.symbol))}</b>\n"
+            f"Signal: <code>{escape(str(signal.signal_type))}</code>\n"
+            f"Quality: <b>{signal.quality_score:.0f}/100</b>\n"
+            f"Bias: <b>{signal.direction}</b>\n"
+            f"RVOL: <b>{signal.rvol:.2f}x</b> (vs {CONFIG['ema_length']}-EMA)\n"
+            f"Velocity: <b>{signal.volume_velocity:.2f}x</b> acceleration\n"
+            f"Taker Buy: <b>{orderflow}</b>\n"
+            f"HTF: <b>{escape(signal.htf_context or '')}</b>\n"
+            f"Price: <code>${signal.price:.6f}</code> ({signal.price_change_pct:+.3f}%)\n"
+            f"Volume: <code>{signal.volume:,.0f}</code> | Quote: <code>${signal.quote_volume:,.0f}</code>\n"
+            f"Time: <code>{escape(str(signal.candle_time))}</code> UTC\n━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"<b>Interpretation:</b> {interpretation}\n"
+            f"<i>Action: {action_hint}</i>\n"
+            f"<i>⚠️ Early signal - confirm with your strategy before entry</i>"
+        )
+        if not self.delivery_authorized:
+            logger.info(
+                "ℹ️ Screener early alert suppressed (delivery unauthorized): %s | %s | Quality %.0f",
+                signal.symbol, signal.signal_type, signal.quality_score,
+            )
+            return False
+
         if not self.token or not self.chat_id:
             logger.error("❌ Telegram alert skipped: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing")
             return False
+
         with self._lock:
-            elapsed=time.time()-self._last_send
-            if elapsed<0.8: time.sleep(0.8-elapsed)
-            emoji={"RVOL_SPIKE":"⚡","DIVERGENCE_ACCUMULATION":"🤫","DIVERGENCE_DISTRIBUTION":"🚨","VELOCITY_SURGE":"🚀"}.get(signal.signal_type,"🔍")
-            if "ACCUMULATION" in signal.signal_type: interpretation,action_hint="🟢 Possible accumulation (high volume, limited price movement)","Watch for upside breakout"
-            elif "DISTRIBUTION" in signal.signal_type: interpretation,action_hint="🔴 Possible distribution (high volume, limited price movement)","Watch for downside breakdown"
-            elif signal.price_change_pct>0.5: interpretation,action_hint="🟢 Strong buying pressure","Momentum building"
-            elif signal.price_change_pct<-0.5: interpretation,action_hint="🔴 Strong selling pressure","Momentum breaking down"
-            else: interpretation,action_hint="🟡 Unusual volume - watch direction","Wait for price confirmation"
-            orderflow = f"{signal.taker_buy_ratio:.1%}" if signal.taker_buy_ratio is not None else "n/a"
-            message=(f"{emoji} <b>SMART MONEY EARLY SIGNAL</b>\n━━━━━━━━━━━━━━━━━━━━━━\nPair: <b>{escape(str(signal.symbol))}</b>\nSignal: <code>{escape(str(signal.signal_type))}</code>\nQuality: <b>{signal.quality_score:.0f}/100</b>\nBias: <b>{signal.direction}</b>\nRVOL: <b>{signal.rvol:.2f}x</b> (vs {CONFIG['ema_length']}-EMA)\nVelocity: <b>{signal.volume_velocity:.2f}x</b> acceleration\nTaker Buy: <b>{orderflow}</b>\nHTF: <b>{escape(signal.htf_context)}</b>\nPrice: <code>${signal.price:.6f}</code> ({signal.price_change_pct:+.3f}%)\nVolume: <code>{signal.volume:,.0f}</code> | Quote: <code>${signal.quote_volume:,.0f}</code>\nTime: <code>{escape(str(signal.candle_time))}</code> UTC\n━━━━━━━━━━━━━━━━━━━━━━\n<b>Interpretation:</b> {interpretation}\n<i>Action: {action_hint}</i>\n<i>⚠️ Early signal - confirm with your strategy before entry</i>")
+            elapsed = time.time() - self._last_send
+            if elapsed < 0.8:
+                time.sleep(0.8 - elapsed)
             try:
-                resp=self.session.post(self.url,json={"chat_id":self.chat_id,"text":message,"parse_mode":"HTML","disable_web_page_preview":True},timeout=8); resp.raise_for_status(); self._last_send=time.time(); logger.info("✅ Early alert: %s | %s | Quality %.0f | RVOL %.2fx",signal.symbol,signal.signal_type,signal.quality_score,signal.rvol); return True
+                resp = self.session.post(
+                    self.url,
+                    json={"chat_id": self.chat_id, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True},
+                    timeout=8,
+                )
+                resp.raise_for_status()
+                self._last_send = time.time()
+                logger.info("✅ Early alert: %s | %s | Quality %.0f | RVOL %.2fx", signal.symbol, signal.signal_type, signal.quality_score, signal.rvol)
+                return True
             except requests.HTTPError as e:
                 body = getattr(e.response, "text", "")[:500] if getattr(e, "response", None) is not None else ""
                 logger.error("❌ Telegram API error: status=%s body=%s", getattr(e.response, "status_code", None), body)
@@ -589,22 +656,39 @@ class SmartMoneyTelegram:
             except Exception as e:
                 logger.error("❌ Telegram request error: %s", e)
                 return False
-    def send(self,text):
+
+    def send(self, text):
+        if not self.delivery_authorized:
+            logger.info("ℹ️ Screener message suppressed (delivery unauthorized): %s", text)
+            return False
         if not self.token or not self.chat_id:
             logger.error("❌ Telegram message skipped: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing")
             return False
         with self._lock:
-            elapsed=time.time()-self._last_send
-            if elapsed<0.8: time.sleep(0.8-elapsed)
+            elapsed = time.time() - self._last_send
+            if elapsed < 0.8:
+                time.sleep(0.8 - elapsed)
             try:
-                resp=self.session.post(self.url,json={"chat_id":self.chat_id,"text":text,"parse_mode":"HTML","disable_web_page_preview":True},timeout=8); resp.raise_for_status(); self._last_send=time.time(); return True
-            except Exception as e: logger.error("❌ Telegram error: %s",e); return False
+                resp = self.session.post(
+                    self.url,
+                    json={"chat_id": self.chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
+                    timeout=8,
+                )
+                resp.raise_for_status()
+                self._last_send = time.time()
+                return True
+            except Exception as e:
+                logger.error("❌ Telegram error: %s", e)
+                return False
 
-telegram=SmartMoneyTelegram(CONFIG["telegram_bot_token"],CONFIG["telegram_chat_id"])
-if CONFIG["telegram_bot_token"] and CONFIG["telegram_chat_id"]:
-    logger.info("📨 Telegram alert transport configured")
+telegram = SmartMoneyTelegram(CONFIG["telegram_bot_token"], CONFIG["telegram_chat_id"])
+if telegram.delivery_authorized:
+    if CONFIG["telegram_bot_token"] and CONFIG["telegram_chat_id"]:
+        logger.info("📨 Telegram alert transport configured and authorized")
+    else:
+        logger.warning("⚠️ Telegram alerts are NOT configured: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing")
 else:
-    logger.warning("⚠️ Telegram alerts are NOT configured: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing")
+    logger.info("ℹ️ Screener Telegram delivery disabled: RETAILBOT2_ALLOW_TELEGRAM_DELIVERY is not set to 1")
 
 
 def verify_signal_schema():
@@ -1069,6 +1153,11 @@ def dispatch_alerts():
     while not state.shutdown_flag:
         if not CONFIG.get("enabled", True):
             time.sleep(max(0.25, CONFIG.get("delivery_poll_interval_sec", 1.0)))
+            continue
+        if not telegram.delivery_authorized:
+            # Preserve pending signals in MySQL rather than claiming and burning retry attempts
+            # while delivery is unauthorized.
+            time.sleep(max(0.5, CONFIG.get("delivery_poll_interval_sec", 1.0)))
             continue
         candidate = claim_next_pending_signal()
         if candidate is None:

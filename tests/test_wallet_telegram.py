@@ -55,7 +55,7 @@ class TestWalletTelegramNotifier(unittest.TestCase):
         response = MagicMock()
         response.json.return_value = {"ok": True, "result": {"message_id": 123}}
         session.post.return_value = response
-        notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session)
+        notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session, allow_delivery=True)
         with patch("wallet_tracker.telegram.time.sleep"):
             self.assertTrue(notifier.send(self.alert))
         session.post.assert_called_once()
@@ -73,7 +73,7 @@ class TestWalletTelegramNotifier(unittest.TestCase):
         session.post.side_effect = requests.ConnectionError(
             f"failed to connect to https://api.telegram.org/bot{token}/sendMessage"
         )
-        notifier = WalletTelegramNotifier(token=token, chat_id="chat", session=session)
+        notifier = WalletTelegramNotifier(token=token, chat_id="chat", session=session, allow_delivery=True)
         with self.assertLogs("wallet_tracker.telegram", level="WARNING") as captured:
             with patch("wallet_tracker.telegram.time.sleep"):
                 self.assertFalse(notifier.send(self.alert))
@@ -89,7 +89,7 @@ class TestWalletTelegramNotifier(unittest.TestCase):
         success.status_code = 200
         success.json.return_value = {"ok": True, "result": {"message_id": 123}}
         session.post.side_effect = [limited, success]
-        notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session)
+        notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session, allow_delivery=True)
         with patch("wallet_tracker.telegram.time.sleep") as sleep:
             self.assertTrue(notifier.send(self.alert))
         self.assertEqual(session.post.call_count, 2)
@@ -100,7 +100,7 @@ class TestWalletTelegramNotifier(unittest.TestCase):
         response = MagicMock()
         response.json.return_value = {"ok": False, "description": "bad chat"}
         session.post.return_value = response
-        notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session)
+        notifier = WalletTelegramNotifier(token="token", chat_id="chat", session=session, allow_delivery=True)
         with patch("wallet_tracker.telegram.time.sleep"):
             self.assertFalse(notifier.send(self.alert))
 
