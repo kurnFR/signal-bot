@@ -335,6 +335,15 @@ def test_dispatcher_survives_telegram_exception_and_schedules_retry(monkeypatch)
     monkeypatch.setattr(module, "claim_next_pending_signal", claim_once)
     monkeypatch.setattr(module.telegram, "send_early_alert", raise_telegram_error)
 
+    # Exercise the dispatcher's send/error path without changing the process
+    # environment or enabling real Telegram delivery. The sender itself is
+    # replaced above, so no HTTP request can be made by this test.
+    monkeypatch.setattr(
+        type(module.telegram),
+        "delivery_authorized",
+        property(lambda self: True),
+    )
+
     module.dispatch_alerts()
 
     assert released == ["BTCUSDT"]
