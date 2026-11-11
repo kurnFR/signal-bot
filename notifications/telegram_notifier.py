@@ -83,7 +83,7 @@ def send_telegram_message(text: str, parse_mode: str = "HTML", max_retries: int 
             except Exception:
                 data = {}
 
-            if status_code == 200 and isinstance(data, dict) and data.get("ok"):
+            if type(status_code) is int and status_code == 200 and isinstance(data, dict) and data.get("ok") is True:
                 logger.info("Telegram message dispatched successfully (attempt %d/%d)", attempt, max_retries)
                 return {"success": True, "message_id": data.get("result", {}).get("message_id")}
             else:
