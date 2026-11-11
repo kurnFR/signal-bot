@@ -258,17 +258,36 @@ class TelegramAlert:
     - Rate limit handling (30 msg/sec Telegram limit)
     """
 
-    def __init__(self, token: str, chat_id: str, logger: logging.Logger = None, allow_direct: Optional[bool] = None):
+    def __init__(
+        self,
+        token: str,
+        chat_id: str,
+        logger: logging.Logger = None,
+        allow_direct: Optional[bool] = None,
+        allow_global: Optional[bool] = None,
+    ):
         self.token = str(token).strip()
         self.chat_id = str(chat_id).strip()
         self.base_url = f"https://api.telegram.org/bot{self.token}"
         self.logger = logger or logging.getLogger("Telegram")
         self._last_send_time = 0.0
         self._min_interval = 0.05  # Max 20 msg/sec (safe under 30 limit)
-        if allow_direct is not None:
-            self.direct_authorized = bool(allow_direct)
+
+        # Global delivery authorization (required by outbox worker and direct delivery)
+        if allow_global is not None:
+            self.global_authorized = bool(allow_global)
         else:
-            self.direct_authorized = os.getenv("RETAILBOT2_ALLOW_DIRECT_TELEGRAM", "").strip() == "1"
+            self.global_authorized = (
+                os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
+            )
+
+        # Direct delivery authorization (prohibited by default; requires BOTH flags)
+        direct_flag = (
+            bool(allow_direct)
+            if allow_direct is not None
+            else (os.getenv("RETAILBOT2_ALLOW_DIRECT_TELEGRAM", "").strip() == "1")
+        )
+        self.direct_authorized = self.global_authorized and direct_flag
 
         # Validate on init — tell user exactly what's wrong
         self.enabled = self._validate()
@@ -276,10 +295,16 @@ class TelegramAlert:
     def _validate(self) -> bool:
         """Strict validation with clear error messages."""
         if not self.direct_authorized:
-            self.logger.info(
-                "ℹ️ Direct Telegram delivery is disabled (authorization required; "
-                "set RETAILBOT2_ALLOW_DIRECT_TELEGRAM=1 to enable direct delivery)."
-            )
+            if not self.global_authorized:
+                self.logger.info(
+                    "ℹ️ Direct Telegram delivery is disabled (global delivery authorization missing; "
+                    "set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 and RETAILBOT2_ALLOW_DIRECT_TELEGRAM=1 to enable direct delivery)."
+                )
+            else:
+                self.logger.info(
+                    "ℹ️ Direct Telegram delivery is disabled (direct delivery authorization missing; "
+                    "set RETAILBOT2_ALLOW_DIRECT_TELEGRAM=1 to enable direct delivery)."
+                )
             return False
 
         if not self.token or self.token in ("", "YOUR_TOKEN", "YOUR_BOT_TOKEN_HERE"):

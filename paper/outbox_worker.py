@@ -158,8 +158,10 @@ def verify_outbox_schema(conn) -> None:
         row = cursor.fetchone()
         if not row:
             raise SchemaVerificationError(
-                "Required outbox table 'rdt_telegram_outbox' does not exist in database; "
-                "run 'python -m db.migrate' before starting the worker."
+                "Required outbox table 'rdt_telegram_outbox' does not exist in database. "
+                "Worker startup halted fail-closed. Operator investigation required against "
+                "approved migration history (migrations 025-027 must not be blindly re-run); "
+                "do not automatically modify production schema."
             )
 
         cursor.execute(
@@ -172,8 +174,10 @@ def verify_outbox_schema(conn) -> None:
         missing = sorted(set(REQUIRED_OUTBOX_COLUMNS) - existing)
         if missing:
             raise SchemaVerificationError(
-                f"Required outbox column(s) missing from 'rdt_telegram_outbox': {', '.join(missing)}; "
-                "run 'python -m db.migrate' before starting the worker."
+                f"Required outbox column(s) missing from 'rdt_telegram_outbox': {', '.join(missing)}. "
+                "Worker startup halted fail-closed. Operator investigation required against "
+                "approved migration history (migrations 025-027 must not be blindly re-run); "
+                "do not automatically modify production schema."
             )
     finally:
         cursor.close()
