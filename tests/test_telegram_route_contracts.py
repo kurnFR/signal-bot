@@ -96,7 +96,8 @@ class TestTelegramRouteContracts(unittest.TestCase):
 
     def test_notifier_uses_mocked_outbound_helper_for_ping_and_does_not_include_token_in_message(self):
         config = {"is_configured": True, "chat_id": "-100123456789", "token": "secret-test-token"}
-        with patch.object(telegram_notifier, "get_telegram_config", return_value=config), \
+        with patch.dict("os.environ", {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}), \
+             patch.object(telegram_notifier, "get_telegram_config", return_value=config), \
              patch.object(telegram_notifier.requests, "get", return_value=_TelegramResponse()) as get_me, \
              patch.object(telegram_notifier, "send_telegram_message", return_value={"success": True}) as send_message:
             result = telegram_notifier.test_telegram_connection()
@@ -109,7 +110,8 @@ class TestTelegramRouteContracts(unittest.TestCase):
 
     def test_notifier_without_chat_id_verifies_token_without_sending_ping(self):
         config = {"is_configured": False, "chat_id": None, "token": "secret-test-token"}
-        with patch.object(telegram_notifier, "get_telegram_config", return_value=config), \
+        with patch.dict("os.environ", {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}), \
+             patch.object(telegram_notifier, "get_telegram_config", return_value=config), \
              patch.object(telegram_notifier.requests, "get", return_value=_TelegramResponse()), \
              patch.object(telegram_notifier, "send_telegram_message") as send_message:
             result = telegram_notifier.test_telegram_connection()
@@ -117,6 +119,28 @@ class TestTelegramRouteContracts(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertIn("chat_id is missing", result["note"].lower())
         send_message.assert_not_called()
+
+    def test_admin_test_endpoint_fails_closed_when_unauthorized_with_zero_http_calls(self):
+        with patch.dict("os.environ", {}, clear=True), \
+             patch.object(telegram_notifier.requests, "get") as mock_get, \
+             patch.object(telegram_notifier.requests, "post") as mock_post:
+            response = self._post("/api/telegram/test", "admin", json={})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Telegram delivery is disabled", response.json()["detail"])
+        mock_get.assert_not_called()
+        mock_post.assert_not_called()
+
+    def test_notifier_test_connection_fails_closed_when_unauthorized(self):
+        with patch.dict("os.environ", {}, clear=True), \
+             patch.object(telegram_notifier.requests, "get") as mock_get, \
+             patch.object(telegram_notifier.requests, "post") as mock_post:
+            result = telegram_notifier.test_telegram_connection()
+
+        self.assertFalse(result["success"])
+        self.assertIn("Telegram delivery is disabled", result["error"])
+        mock_get.assert_not_called()
+        mock_post.assert_not_called()
 
 
 if __name__ == "__main__":

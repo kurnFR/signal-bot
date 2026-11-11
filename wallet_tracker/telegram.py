@@ -16,7 +16,7 @@ logger = logging.getLogger("wallet_tracker.telegram")
 
 
 class WalletTelegramNotifier:
-    def __init__(self, token=None, chat_id=None, session=None, allow_delivery=None):
+    def __init__(self, token=None, chat_id=None, session=None):
         self.token = token if token is not None else (
             os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN", "")
         )
@@ -28,7 +28,6 @@ class WalletTelegramNotifier:
         self.session.mount("https://", HTTPAdapter(max_retries=0))
         self._last_send = 0.0
         self._lock = threading.Lock()
-        self._allow_delivery = allow_delivery
         if not self.delivery_authorized:
             logger.info(
                 "ℹ️ Wallet Telegram delivery is disabled (authorization missing; "
@@ -37,17 +36,7 @@ class WalletTelegramNotifier:
 
     @property
     def delivery_authorized(self) -> bool:
-        if self._allow_delivery is not None:
-            return bool(self._allow_delivery)
         return os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
-
-    @delivery_authorized.setter
-    def delivery_authorized(self, value):
-        self._allow_delivery = value
-
-    @delivery_authorized.deleter
-    def delivery_authorized(self):
-        self._allow_delivery = None
 
     @property
     def configured(self):

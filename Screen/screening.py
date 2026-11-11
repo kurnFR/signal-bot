@@ -562,7 +562,7 @@ def bootstrap_ema_history(symbols):
 
 
 class SmartMoneyTelegram:
-    def __init__(self, token, chat_id, allow_delivery=None):
+    def __init__(self, token, chat_id):
         self.token = token
         self.chat_id = chat_id
         self.url = f"https://api.telegram.org/bot{token}/sendMessage" if token else ""
@@ -573,7 +573,6 @@ class SmartMoneyTelegram:
             "https://",
             HTTPAdapter(max_retries=Retry(total=3, backoff_factor=0.3, status_forcelist=[429, 500, 502, 503, 504])),
         )
-        self._allow_delivery = allow_delivery
         if not self.delivery_authorized:
             logger.info(
                 "ℹ️ Screener Telegram delivery is disabled (authorization missing; "
@@ -582,17 +581,7 @@ class SmartMoneyTelegram:
 
     @property
     def delivery_authorized(self) -> bool:
-        if self._allow_delivery is not None:
-            return bool(self._allow_delivery)
         return os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
-
-    @delivery_authorized.setter
-    def delivery_authorized(self, value):
-        self._allow_delivery = value
-
-    @delivery_authorized.deleter
-    def delivery_authorized(self):
-        self._allow_delivery = None
 
     def send_early_alert(self, signal):
         emoji = {"RVOL_SPIKE": "⚡", "DIVERGENCE_ACCUMULATION": "🤫", "DIVERGENCE_DISTRIBUTION": "🚨", "VELOCITY_SURGE": "🚀"}.get(signal.signal_type, "🔍")

@@ -16,6 +16,7 @@ class TestTelegramTokenRedaction(unittest.TestCase):
         with patch.dict("os.environ", {
             "TELEGRAM_BOT_TOKEN": token,
             "TELEGRAM_CHAT_ID": "chat-123",
+            "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1",
         }, clear=True), \
              patch.object(telegram_notifier.requests, "post", side_effect=error), \
              patch("time.sleep"), \
@@ -35,6 +36,7 @@ class TestTelegramTokenRedaction(unittest.TestCase):
         with patch.dict("os.environ", {
             "TELEGRAM_BOT_TOKEN": token,
             "TELEGRAM_CHAT_ID": "chat-123",
+            "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1",
         }, clear=True), \
              patch.object(telegram_notifier.requests, "get", side_effect=error), \
              self.assertLogs("notifications.telegram", level="WARNING") as captured:
@@ -44,6 +46,23 @@ class TestTelegramTokenRedaction(unittest.TestCase):
         self.assertNotIn(token, str(result))
         self.assertNotIn(token, "\n".join(captured.output))
         self.assertNotIn("/bot" + token, "\n".join(captured.output))
+
+    def test_unauthorized_send_and_connection_suppresses_requests(self):
+        token = "123456:secret-bot-token"
+        with patch.dict("os.environ", {
+            "TELEGRAM_BOT_TOKEN": token,
+            "TELEGRAM_CHAT_ID": "chat-123",
+        }, clear=True), \
+             patch.object(telegram_notifier.requests, "get") as mock_get, \
+             patch.object(telegram_notifier.requests, "post") as mock_post:
+            res_send = telegram_notifier.send_telegram_message("test msg")
+            res_conn = telegram_notifier.test_telegram_connection()
+
+        self.assertFalse(res_send["success"])
+        self.assertTrue(res_send.get("suppressed"))
+        self.assertFalse(res_conn["success"])
+        mock_get.assert_not_called()
+        mock_post.assert_not_called()
 
 
 if __name__ == "__main__":

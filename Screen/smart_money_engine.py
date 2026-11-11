@@ -336,55 +336,71 @@ class SmartMoneyTelegram:
     def __init__(self, token: str, chat_id: str):
         self.token = token
         self.chat_id = chat_id
-        self.url = f"https://api.telegram.org/bot{token}/sendMessage"
+        self.url = f"https://api.telegram.org/bot{token}/sendMessage" if token else ""
         self.last_send = 0
         self.lock = threading.Lock()
         self.session = requests.Session()
         retry = Retry(total=3, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504])
         self.session.mount("https://", HTTPAdapter(max_retries=retry))
-
-    def send_alert(self, signal: SmartMoneySignal):
-        if not self.token or not self.chat_id:
-            return
-        with self.lock:
-
-            if time.time() - self.last_send < 0.7:
-                time.sleep(0.7)
-
-            emoji_map = {
-                "STRONG_BUYING": "🔥",
-                "ACCUMULATION": "🤫",
-                "MOMENTUM_BUY": "🚀",
-                "MOMENTUM_SELL": "📉",
-                "DISTRIBUTION": "⚠️"
-            }
-
-            title = {
-                "STRONG_BUYING": "STRONG BUYING PRESSURE",
-                "ACCUMULATION": "SMART ACCUMULATION",
-                "MOMENTUM_BUY": "MOMENTUM BUY SURGE",
-                "MOMENTUM_SELL": "MOMENTUM SELL OFF",
-                "DISTRIBUTION": "SMART DISTRIBUTION"
-            }.get(signal.signal_type, "VOLUME ALERT")
-
-            color = "🟢" if "BUY" in signal.signal_type or signal.signal_type == "ACCUMULATION" else "🔴"
-
-            message = (
-                f"{emoji_map.get(signal.signal_type, '📊')} <b>{color} {title}</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"Pair: <b>{signal.symbol}</b>\n"
-                f"Type: <code>{signal.signal_type}</code>\n"
-                f"RVOL: <b>{signal.rvol:.2f}x</b>\n"
-                f"Buy Ratio: <b>{signal.buy_ratio:.1%}</b>\n"
-                f"Velocity: <b>{signal.velocity:.2f}x</b>\n"
-                f"Price: <code>${signal.price:.6f}</code> ({signal.price_change_pct:+.2f}%)\n"
-                f"Quote Volume: <code>${signal.quote_volume:,.0f}</code>\n"
-                f"Time: <code>{signal.candle_time}</code> UTC\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"<b>Conviction:</b> {color} <i>{'HIGH' if signal.priority_score < -80 else 'MEDIUM'}</i>\n"
-                f"<i>⚠️ Early detection • Confirm with orderflow before entry</i>"
+        if not self.delivery_authorized:
+            logger.info(
+                "ℹ️ Legacy Screener Telegram delivery is disabled (authorization missing; "
+                "set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 to enable delivery)."
             )
 
+    @property
+    def delivery_authorized(self) -> bool:
+        return os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
+
+    def send_alert(self, signal: SmartMoneySignal):
+        emoji_map = {
+            "STRONG_BUYING": "🔥",
+            "ACCUMULATION": "🤫",
+            "MOMENTUM_BUY": "🚀",
+            "MOMENTUM_SELL": "📉",
+            "DISTRIBUTION": "⚠️"
+        }
+
+        title = {
+            "STRONG_BUYING": "STRONG BUYING PRESSURE",
+            "ACCUMULATION": "SMART ACCUMULATION",
+            "MOMENTUM_BUY": "MOMENTUM BUY SURGE",
+            "MOMENTUM_SELL": "MOMENTUM SELL OFF",
+            "DISTRIBUTION": "SMART DISTRIBUTION"
+        }.get(signal.signal_type, "VOLUME ALERT")
+
+        color = "🟢" if "BUY" in signal.signal_type or signal.signal_type == "ACCUMULATION" else "🔴"
+
+        message = (
+            f"{emoji_map.get(signal.signal_type, '📊')} <b>{color} {title}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Pair: <b>{signal.symbol}</b>\n"
+            f"Type: <code>{signal.signal_type}</code>\n"
+            f"RVOL: <b>{signal.rvol:.2f}x</b>\n"
+            f"Buy Ratio: <b>{signal.buy_ratio:.1%}</b>\n"
+            f"Velocity: <b>{signal.velocity:.2f}x</b>\n"
+            f"Price: <code>${signal.price:.6f}</code> ({signal.price_change_pct:+.2f}%)\n"
+            f"Quote Volume: <code>${signal.quote_volume:,.0f}</code>\n"
+            f"Time: <code>{signal.candle_time}</code> UTC\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"<b>Conviction:</b> {color} <i>{'HIGH' if signal.priority_score < -80 else 'MEDIUM'}</i>\n"
+            f"<i>⚠️ Early detection • Confirm with orderflow before entry</i>"
+        )
+
+        if not self.delivery_authorized:
+            logger.info(
+                "ℹ️ Legacy Screener alert suppressed (delivery unauthorized): %s | %s | RVOL %.2fx",
+                signal.symbol, signal.signal_type, signal.rvol,
+            )
+            return False
+
+        if not self.token or not self.chat_id:
+            logger.warning("Telegram alert skipped: bot token or chat ID is missing")
+            return False
+
+        with self.lock:
+            if time.time() - self.last_send < 0.7:
+                time.sleep(0.7)
             try:
                 payload = {
                     "chat_id": self.chat_id,
@@ -396,11 +412,20 @@ class SmartMoneyTelegram:
                 resp.raise_for_status()
                 self.last_send = time.time()
                 logger.info(f"✅ ALERT SENT → {signal.symbol} | {signal.signal_type} | RVOL {signal.rvol:.2f}x | BuyRatio {signal.buy_ratio:.1%}")
+                return True
             except Exception as e:
                 logger.error(f"Telegram error: {e}")
+                return False
 
 
 telegram = SmartMoneyTelegram(CONFIG["telegram_bot_token"], CONFIG["telegram_chat_id"])
+if telegram.delivery_authorized:
+    if CONFIG["telegram_bot_token"] and CONFIG["telegram_chat_id"]:
+        logger.info("📨 Legacy Smart Money Telegram alert transport configured and authorized")
+    else:
+        logger.warning("⚠️ Legacy Telegram alerts are NOT configured: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing")
+else:
+    logger.info("ℹ️ Legacy Smart Money Telegram delivery disabled: RETAILBOT2_ALLOW_TELEGRAM_DELIVERY is not set to 1")
 
 # =========================
 # BINANCE SYMBOL FILTERING

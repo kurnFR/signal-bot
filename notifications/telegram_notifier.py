@@ -19,6 +19,11 @@ logger = logging.getLogger("notifications.telegram")
 TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/{method}"
 
 
+def is_telegram_delivery_authorized() -> bool:
+    """Returns True if global Telegram delivery is explicitly enabled."""
+    return os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
+
+
 def get_telegram_config() -> Dict[str, Any]:
     """Retrieves current telegram credentials from environment."""
     # Prefer canonical names, but remain compatible with the legacy retailbot name.
@@ -33,6 +38,19 @@ def get_telegram_config() -> Dict[str, Any]:
 
 def send_telegram_message(text: str, parse_mode: str = "HTML", max_retries: int = 3) -> Dict[str, Any]:
     """Sends a raw formatted message to the configured Telegram chat with retry logic and exponential backoff."""
+    if not is_telegram_delivery_authorized():
+        clean_preview = text.replace("\n", " | ")
+        logger.info(
+            "ℹ️ Telegram message suppressed (delivery unauthorized; "
+            "set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1): %s",
+            clean_preview[:300],
+        )
+        return {
+            "success": False,
+            "error": "Telegram delivery is disabled: global authorization missing (set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1)",
+            "suppressed": True,
+        }
+
     cfg = get_telegram_config()
     if not cfg["is_configured"]:
         logger.warning("Telegram not configured (missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID)")
@@ -78,6 +96,17 @@ def send_telegram_message(text: str, parse_mode: str = "HTML", max_retries: int 
 
 def test_telegram_connection() -> Dict[str, Any]:
     """Verifies bot connectivity and sends a test ping message."""
+    if not is_telegram_delivery_authorized():
+        logger.info(
+            "Telegram connectivity test suppressed: global delivery authorization missing "
+            "(set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1)"
+        )
+        return {
+            "success": False,
+            "error": "Telegram delivery is disabled (authorization missing; set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 to enable)",
+            "delivery_authorized": False,
+        }
+
     cfg = get_telegram_config()
     if not cfg["token"]:
         return {"success": False, "error": "TELEGRAM_BOT_TOKEN missing in .env"}
