@@ -137,3 +137,25 @@ def test_shutdown_cannot_miss_child_spawned_during_startup(monkeypatch):
             shutdown.join(timeout=3)
         run_all._shutdown.clear()
         run_all._children.clear()
+
+
+def test_phase2a_is_the_safe_default_process_set():
+    processes = run_all.build_processes({})
+    assert set(processes) == {"web_server", "collectors", "screener", "wallet_tracker"}
+
+
+def test_paper_engine_and_news_ai_require_independent_opt_in():
+    assert "paper_engine" not in run_all.build_processes({})
+    assert "news_ai" not in run_all.build_processes({})
+    assert "paper_engine" in run_all.build_processes({"PAPER_ENGINE_ENABLED": "1"})
+    assert "news_ai" in run_all.build_processes({"NEWS_AI_ENABLED": "1"})
+
+
+def test_telegram_flags_do_not_enable_held_back_services():
+    processes = run_all.build_processes({
+        "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1",
+        "RETAILBOT2_ALLOW_DIRECT_TELEGRAM": "1",
+        "RETAILBOT2_OUTBOX_ENQUEUE_ENABLED": "1",
+    })
+    assert "paper_engine" not in processes
+    assert "news_ai" not in processes
