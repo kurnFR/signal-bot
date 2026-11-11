@@ -105,5 +105,78 @@ class TestLegacyTelegramTokenRedaction(unittest.TestCase):
             self.assertIn("http_status=unknown", output)
 
 
+class TestScreenerTelegramTokenRedaction(unittest.TestCase):
+    def test_screener_early_alert_redacts_token_and_body_on_http_error(self):
+        from unittest.mock import MagicMock
+        from Screen.screening import SmartMoneyTelegram, SmartMoneySignal
+
+        token = "987654:secret-screening-token"
+        mock_response = MagicMock()
+        mock_response.status_code = 403
+        mock_response.text = f'{{"ok": false, "error_code": 403, "description": "Forbidden: bot was blocked by the user {token}"}}'
+        error = requests.HTTPError(
+            f"403 Client Error: Forbidden for url: https://api.telegram.org/bot{token}/sendMessage",
+            response=mock_response,
+        )
+        signal = SmartMoneySignal(
+            priority_score=90.0,
+            symbol="BTCUSDT",
+            signal_type="RVOL_SPIKE",
+            rvol=3.0,
+            volume=150.0,
+            quote_volume=10200000.0,
+            price=68000.0,
+            price_change_pct=1.2,
+            volume_velocity=2.0,
+            timestamp=1700000000.0,
+            candle_time="2026-11-11 12:00:00",
+            quality_score=90.0,
+            direction="LONG",
+        )
+        session = MagicMock()
+        session.post.return_value = mock_response
+        mock_response.raise_for_status.side_effect = error
+
+        with patch.dict("os.environ", {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True):
+            tg = SmartMoneyTelegram(token=token, chat_id="chat-123")
+            tg.session = session
+            with patch("Screen.screening.time.sleep"), \
+                 self.assertLogs("SmartMoneyDetector", level="ERROR") as captured:
+                success = tg.send_early_alert(signal)
+
+            self.assertFalse(success)
+            output = "\n".join(captured.output)
+            self.assertNotIn(token, output)
+            self.assertNotIn("/bot", output)
+            self.assertNotIn("Forbidden: bot was blocked", output)
+            self.assertIn("error_type=HTTPError", output)
+            self.assertIn("http_status=403", output)
+
+    def test_screener_send_redacts_token_on_connection_error(self):
+        from unittest.mock import MagicMock
+        from Screen.screening import SmartMoneyTelegram
+
+        token = "987654:secret-screening-token"
+        error = requests.ConnectionError(
+            f"failed to connect to https://api.telegram.org/bot{token}/sendMessage"
+        )
+        session = MagicMock()
+        session.post.side_effect = error
+
+        with patch.dict("os.environ", {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True):
+            tg = SmartMoneyTelegram(token=token, chat_id="chat-123")
+            tg.session = session
+            with patch("Screen.screening.time.sleep"), \
+                 self.assertLogs("SmartMoneyDetector", level="ERROR") as captured:
+                success = tg.send("🎛️ Screener payload")
+
+            self.assertFalse(success)
+            output = "\n".join(captured.output)
+            self.assertNotIn(token, output)
+            self.assertNotIn("/bot", output)
+            self.assertIn("error_type=ConnectionError", output)
+            self.assertIn("http_status=unknown", output)
+
+
 if __name__ == "__main__":
     unittest.main()

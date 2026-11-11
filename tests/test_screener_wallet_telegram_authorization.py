@@ -265,6 +265,138 @@ class TestScreenerTelegramAuthorization(unittest.TestCase):
             mock_rget.assert_not_called()
             mock_rpost.assert_not_called()
 
+    def test_send_early_alert_redacts_token_and_raw_url_on_generic_exception(self):
+        token = "987654:secret-screening-token"
+        error = requests.ConnectionError(
+            f"HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries exceeded with url: /bot{token}/sendMessage"
+        )
+        session = MagicMock()
+        session.post.side_effect = error
+
+        with patch.dict(os.environ, {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True):
+            tg = SmartMoneyTelegram(token=token, chat_id="chat-2")
+            tg.session = session
+            with patch("Screen.screening.time.sleep"), \
+                 self.assertLogs("SmartMoneyDetector", level="ERROR") as captured:
+                result = tg.send_early_alert(self.signal)
+
+            self.assertFalse(result)
+            output = "\n".join(captured.output)
+            self.assertNotIn(token, output)
+            self.assertNotIn("/bot", output)
+            self.assertNotIn("api.telegram.org", output)
+            self.assertIn("error_type=ConnectionError", output)
+            self.assertIn("http_status=unknown", output)
+
+    def test_send_early_alert_redacts_token_and_response_body_on_http_error(self):
+        token = "987654:secret-screening-token"
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_response.text = f'{{"ok": false, "error_code": 401, "description": "Unauthorized: invalid token {token}"}}'
+        error = requests.HTTPError(
+            f"401 Client Error: Unauthorized for url: https://api.telegram.org/bot{token}/sendMessage",
+            response=mock_response,
+        )
+        session = MagicMock()
+        session.post.return_value = mock_response
+        mock_response.raise_for_status.side_effect = error
+
+        with patch.dict(os.environ, {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True):
+            tg = SmartMoneyTelegram(token=token, chat_id="chat-2")
+            tg.session = session
+            with patch("Screen.screening.time.sleep"), \
+                 self.assertLogs("SmartMoneyDetector", level="ERROR") as captured:
+                result = tg.send_early_alert(self.signal)
+
+            self.assertFalse(result)
+            output = "\n".join(captured.output)
+            self.assertNotIn(token, output)
+            self.assertNotIn("/bot", output)
+            self.assertNotIn("Unauthorized: invalid token", output)
+            self.assertIn("error_type=HTTPError", output)
+            self.assertIn("http_status=401", output)
+
+    def test_send_redacts_token_and_raw_url_on_generic_exception(self):
+        token = "987654:secret-screening-token"
+        error = requests.ConnectionError(
+            f"HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries exceeded with url: /bot{token}/sendMessage"
+        )
+        session = MagicMock()
+        session.post.side_effect = error
+
+        with patch.dict(os.environ, {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True):
+            tg = SmartMoneyTelegram(token=token, chat_id="chat-2")
+            tg.session = session
+            with patch("Screen.screening.time.sleep"), \
+                 self.assertLogs("SmartMoneyDetector", level="ERROR") as captured:
+                result = tg.send("🎛️ Screener alert payload")
+
+            self.assertFalse(result)
+            output = "\n".join(captured.output)
+            self.assertNotIn(token, output)
+            self.assertNotIn("/bot", output)
+            self.assertNotIn("api.telegram.org", output)
+            self.assertIn("error_type=ConnectionError", output)
+            self.assertIn("http_status=unknown", output)
+
+    def test_send_redacts_token_and_response_body_on_http_error(self):
+        token = "987654:secret-screening-token"
+        mock_response = MagicMock()
+        mock_response.status_code = 502
+        mock_response.text = f'<html><body>Bad gateway to bot {token}</body></html>'
+        error = requests.HTTPError(
+            f"502 Server Error: Bad Gateway for url: https://api.telegram.org/bot{token}/sendMessage",
+            response=mock_response,
+        )
+        session = MagicMock()
+        session.post.return_value = mock_response
+        mock_response.raise_for_status.side_effect = error
+
+        with patch.dict(os.environ, {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1"}, clear=True):
+            tg = SmartMoneyTelegram(token=token, chat_id="chat-2")
+            tg.session = session
+            with patch("Screen.screening.time.sleep"), \
+                 self.assertLogs("SmartMoneyDetector", level="ERROR") as captured:
+                result = tg.send("🎛️ Screener alert payload")
+
+            self.assertFalse(result)
+            output = "\n".join(captured.output)
+            self.assertNotIn(token, output)
+            self.assertNotIn("/bot", output)
+            self.assertNotIn("Bad gateway to bot", output)
+            self.assertIn("error_type=HTTPError", output)
+            self.assertIn("http_status=502", output)
+
+    def test_safe_http_status_validation_and_fallback(self):
+        # Valid status codes
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        exc = requests.HTTPError(response=mock_resp)
+        self.assertEqual(SmartMoneyTelegram._safe_http_status(exc), "200")
+
+        mock_resp.status_code = 599
+        self.assertEqual(SmartMoneyTelegram._safe_http_status(exc), "599")
+
+        # Out-of-range integer status codes
+        mock_resp.status_code = 99
+        self.assertEqual(SmartMoneyTelegram._safe_http_status(exc), "unknown")
+
+        mock_resp.status_code = 600
+        self.assertEqual(SmartMoneyTelegram._safe_http_status(exc), "unknown")
+
+        # Non-integer status codes
+        mock_resp.status_code = "200"
+        self.assertEqual(SmartMoneyTelegram._safe_http_status(exc), "unknown")
+
+        mock_resp.status_code = None
+        self.assertEqual(SmartMoneyTelegram._safe_http_status(exc), "unknown")
+
+        mock_resp.status_code = True
+        self.assertEqual(SmartMoneyTelegram._safe_http_status(exc), "unknown")
+
+        # Missing response attribute
+        self.assertEqual(SmartMoneyTelegram._safe_http_status(requests.ConnectionError()), "unknown")
+
 
 class TestLegacySmartMoneyEngineAuthorization(unittest.TestCase):
     def setUp(self):
