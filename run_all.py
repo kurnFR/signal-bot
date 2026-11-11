@@ -96,8 +96,8 @@ def build_processes(environ=None):
     return processes
 
 
-# name -> command. RetailBot2 and the outbox worker are explicitly opt-in;
-# other processes preserve the existing default startup behavior.
+# name -> command. Phase 2A services are enabled by default; paper_engine,
+# news_ai, RetailBot2, and the outbox worker each require explicit opt-in.
 PROCESSES = build_processes()
 
 _shutdown = threading.Event()
