@@ -135,7 +135,13 @@ def test_telegram_connection() -> Dict[str, Any]:
         except Exception:
             me_res = {}
 
-        if (type(status_code) is int and status_code != 200) or not (isinstance(me_res, dict) and me_res.get("ok")):
+        is_success = (
+            type(status_code) is int
+            and status_code == 200
+            and isinstance(me_res, dict)
+            and me_res.get("ok") is True
+        )
+        if not is_success:
             logger.warning("Telegram getMe check failed (HTTP %s)", safe_status)
             return {"success": False, "error": f"Telegram API error (HTTP {safe_status})"}
         bot_info = me_res.get("result", {})

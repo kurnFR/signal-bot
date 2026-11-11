@@ -16,6 +16,8 @@ def _user(role, must_change_password=False):
 
 
 class _TelegramResponse:
+    status_code = 200
+
     def json(self):
         return {"ok": True, "result": {"username": "signal_test_bot", "first_name": "Signal Test"}}
 

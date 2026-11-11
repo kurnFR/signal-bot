@@ -324,5 +324,96 @@ class TestScreenerTelegramTokenRedaction(unittest.TestCase):
             self.assertIn("http_status=unknown", output)
 
 
+class TestTelegramGetMeStrictValidation(unittest.TestCase):
+    def setUp(self):
+        self.token = "123456:secret-bot-token"
+        self.env = {
+            "TELEGRAM_BOT_TOKEN": self.token,
+            "TELEGRAM_CHAT_ID": "",  # Empty chat ID to isolate /getMe check without ping message
+            "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "1",
+        }
+
+    def _call_test_connection(self, status_code, ok_val, desc=None):
+        import json
+        mock_res = requests.Response()
+        mock_res.status_code = status_code
+        payload = {"ok": ok_val, "result": {"username": "test_bot"}}
+        if desc is not None:
+            payload["description"] = desc
+        mock_res._content = json.dumps(payload).encode("utf-8")
+
+        with patch.dict("os.environ", self.env, clear=True), \
+             patch.object(telegram_notifier.requests, "get", return_value=mock_res):
+            return telegram_notifier.test_telegram_connection()
+
+    def test_valid_integer_200_with_ok_true_accepted(self):
+        result = self._call_test_connection(200, True)
+        self.assertTrue(result["success"])
+        self.assertEqual(result["bot"]["username"], "test_bot")
+
+    def test_integer_401_with_ok_true_rejected(self):
+        with patch.dict("os.environ", self.env, clear=True), \
+             self.assertLogs("notifications.telegram", level="WARNING") as captured:
+            result = self._call_test_connection(401, True)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"], "Telegram API error (HTTP 401)")
+        self.assertIn("HTTP 401", "\n".join(captured.output))
+
+    def test_integer_500_with_ok_true_rejected(self):
+        with patch.dict("os.environ", self.env, clear=True), \
+             self.assertLogs("notifications.telegram", level="WARNING") as captured:
+            result = self._call_test_connection(500, True)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"], "Telegram API error (HTTP 500)")
+        self.assertIn("HTTP 500", "\n".join(captured.output))
+
+    def test_none_status_with_ok_true_rejected_with_http_unknown(self):
+        with patch.dict("os.environ", self.env, clear=True), \
+             self.assertLogs("notifications.telegram", level="WARNING") as captured:
+            result = self._call_test_connection(None, True)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"], "Telegram API error (HTTP unknown)")
+        self.assertIn("HTTP unknown", "\n".join(captured.output))
+
+    def test_string_200_status_with_ok_true_rejected_with_http_unknown(self):
+        with patch.dict("os.environ", self.env, clear=True), \
+             self.assertLogs("notifications.telegram", level="WARNING") as captured:
+            result = self._call_test_connection("200", True)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"], "Telegram API error (HTTP unknown)")
+        self.assertIn("HTTP unknown", "\n".join(captured.output))
+
+    def test_boolean_true_status_with_ok_true_rejected_with_http_unknown(self):
+        with patch.dict("os.environ", self.env, clear=True), \
+             self.assertLogs("notifications.telegram", level="WARNING") as captured:
+            result = self._call_test_connection(True, True)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"], "Telegram API error (HTTP unknown)")
+        self.assertIn("HTTP unknown", "\n".join(captured.output))
+
+    def test_integer_200_with_ok_false_rejected(self):
+        with patch.dict("os.environ", self.env, clear=True), \
+             self.assertLogs("notifications.telegram", level="WARNING") as captured:
+            result = self._call_test_connection(200, False)
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"], "Telegram API error (HTTP 200)")
+        self.assertIn("HTTP 200", "\n".join(captured.output))
+
+    def test_invalid_status_with_malicious_description_redacts_token_and_desc(self):
+        malicious_desc = f"Fake error containing token {self.token} and url https://api.telegram.org/bot{self.token}/getMe"
+        with patch.dict("os.environ", self.env, clear=True), \
+             self.assertLogs("notifications.telegram", level="WARNING") as captured:
+            result = self._call_test_connection(999, False, desc=malicious_desc)
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"], "Telegram API error (HTTP unknown)")
+        self.assertNotIn(self.token, str(result))
+        self.assertNotIn(self.token, "\n".join(captured.output))
+        self.assertNotIn("/bot", str(result))
+        self.assertNotIn("/bot", "\n".join(captured.output))
+        self.assertNotIn(malicious_desc, str(result))
+        self.assertNotIn(malicious_desc, "\n".join(captured.output))
+
+
 if __name__ == "__main__":
     unittest.main()
