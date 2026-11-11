@@ -31,11 +31,11 @@ These are local/owner-reported results. GitHub Actions were not used and no CI p
 | Staging mixed-strategy worker path | **Not yet verified** | Real staging worker creates a queued event only for the strategy whose persisted Telegram flag is enabled |
 | Staging UI readback | **Not yet reverified on this baseline** | Save lifecycle settings, reload page, verify values remain correct |
 | Telegram external delivery | **Not authorized / not tested** | Separate explicit approval for a controlled test message |
-| Production schema | **Blocked** | Production table `rdt_telegram_outbox` is currently reported missing; migration 026 has only been applied to `signal_bot_test` |
+| Production schema | **Observed in read-only preflight (2026-11-10)** | WO71688 reported migrations 025–027 and `rdt_telegram_outbox` present in `crypto_signals`; dated observation does not authorize worker activation |
 | Populated-schema migration rehearsal | **Not run** | Authorized, isolated, representative database snapshot; before/after integrity evidence |
 | Modern UI cutover | **Not authorized** | Current-candidate staging acceptance, accessibility review, rollback readiness, and explicit owner approval |
 
-An empty outbox table on the isolated test database is expected when no eligible entry/exit event has been created. It is not proof of a broken queue. The production error `crypto_signals.rdt_telegram_outbox doesn't exist` is consistent with migration 026 not having been applied there. Do not manually create the table.
+An empty outbox table on the isolated test database is expected when no eligible entry/exit event has been created. It is not proof of a broken queue. Historically, runtime startup errors such as `crypto_signals.rdt_telegram_outbox doesn't exist` occurred because migration 026 had not yet been applied to production; that historical error was superseded on 2026-11-10 when read-only preflight (WO71688) observed migrations 025–027 and `rdt_telegram_outbox` present in `crypto_signals`. Schema observation does not authorize worker startup. Do not manually create or alter tables.
 
 ## 3. Isolated staging verification — no external Telegram messages
 
@@ -103,18 +103,30 @@ The existing Playwright suite that mocks `/api/**` is useful for frontend render
 
 ## 4. Production database readiness — separate authorization required
 
-Production currently lacks `rdt_telegram_outbox`. The worker's startup schema verification requires that table and fails closed if it is missing. Therefore:
+### 4.1 Schema observation and activation boundary
 
-- Do not start or restart the outbox-dependent production worker against the current production schema.
-- Do not manually create `rdt_telegram_outbox`.
-- Do not run `python -m db.migrate`, migration status, dry-run, SQL queries, or other database commands against production under the current authorization boundary.
-- Do not infer that the successful `signal_bot_test` migration proves production is ready.
+On 2026-11-10, an operator-provided read-only preflight inspection (WO71688) reported the following production status:
+- Database: `crypto_signals`.
+- Migrations observed: `025_users_role_active_index`, `026_retailbot2_telegram_outbox`, and `027_retailbot2_outbox_claim_token`.
+- Table `rdt_telegram_outbox` was observed present, including columns `claim_token`, `locked_until`, `status`, `sent_at`, and the payload/event columns.
+- Both activation environment flags (`RETAILBOT2_OUTBOX_WORKER_ENABLED` and `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY`) were observed unset, and the supervisor did not launch the outbox worker.
 
-Before production migration, the database owner must separately authorize the production operation and approve a maintenance/change window. The required preparation is a verified backup with a tested restore path, an isolated populated-schema rehearsal based on an approved representative snapshot, migration checksum review, and a written rollback/abort plan. Follow `docs/POPULATED_DATABASE_MIGRATION_REHEARSAL.md`. Migration 026 is additive, but that does not remove the need for the full migration and recovery review.
+This dated observation supersedes earlier historical reports where production lacked `rdt_telegram_outbox` or where migration 026 was only applied to `signal_bot_test`. However, the following release boundaries remain strictly enforced:
 
-After approval, the production operator must apply the reviewed migration before deploying/restarting code that requires the outbox table, then verify schema, worker startup, queue processing, retry behavior, and monitoring. External Telegram delivery remains a separate opt-in validation.
+1. **Dated observation, not a present guarantee:** The WO71688 preflight reflects an operator report at a specific point in time (2026-11-10). It is not an independently verified guarantee of the database's present state or continuity.
+2. **Schema presence is not activation authorization:** Having migrations 025–027 applied in `crypto_signals` satisfies the schema precondition, but does not authorize activating the standalone worker or modifying production configuration.
+3. **Worker remains inactive by default:** In the reported production configuration, both worker flags remained unset. Enabling them requires a separate approved change window.
+4. **External Telegram delivery is not validated:** Production Telegram message transmission has not been authorized or validated. No real Telegram delivery has occurred. External delivery remains an independent validation gate.
 
-### 4.1 Standalone worker advisory lock verification runbook
+Therefore:
+- Do not start or restart the standalone outbox worker without explicit administrative authorization.
+- Do not enable `RETAILBOT2_OUTBOX_WORKER_ENABLED` or `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY` in production without an approved change window.
+- Do not manually create or alter `rdt_telegram_outbox`.
+- Do not execute unreviewed migrations or ad-hoc SQL mutations against `crypto_signals`.
+
+Before any authorized activation, the database owner and operations team must confirm current database integrity, verify backup readiness, and coordinate an approved change window. Following activation, operators must verify advisory lock ownership, queue processing, and error monitoring before enabling external delivery.
+
+### 4.2 Standalone worker advisory lock verification runbook
 
 The standalone outbox worker synchronizes global delivery across multiple instances using the MariaDB advisory lock constant `OUTBOX_LOCK_NAME = "rdt_outbox_worker_lock"`.
 

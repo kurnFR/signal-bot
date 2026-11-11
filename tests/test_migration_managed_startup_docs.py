@@ -38,6 +38,30 @@ class TestMigrationManagedStartupDocs(unittest.TestCase):
             self.assertNotIn("IS_USED_LOCK('retailbot2_telegram_outbox')", doc_text)
             self.assertNotIn("GET_LOCK('retailbot2_telegram_outbox'", doc_text)
 
+    def test_retailbot2_release_gates_reconciles_production_schema_evidence(self):
+        release_gates = Path("docs/RETAILBOT2_AND_MODERN_UI_RELEASE_GATES.md").read_text(encoding="utf-8")
+
+        # 1. Records the WO71688 observation and its date
+        self.assertIn("WO71688", release_gates)
+        self.assertIn("2026-11-10", release_gates)
+
+        # 2. Distinguishes schema presence from worker activation
+        self.assertIn("Schema observation does not authorize worker startup", release_gates)
+        self.assertIn("Schema presence is not activation authorization", release_gates)
+        self.assertIn("RETAILBOT2_OUTBOX_WORKER_ENABLED", release_gates)
+        self.assertIn("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", release_gates)
+
+        # 3. Does not state that production currently lacks the outbox table
+        self.assertNotIn("Production currently lacks `rdt_telegram_outbox`", release_gates)
+        self.assertNotIn("Production table `rdt_telegram_outbox` is currently reported missing", release_gates)
+        self.assertNotIn("migration 026 has only been applied to `signal_bot_test`", release_gates)
+
+        # 4. Does not claim production Telegram delivery has been validated
+        self.assertIn("Telegram external delivery | **Not authorized / not tested**", release_gates)
+        self.assertIn("External Telegram delivery is not validated", release_gates)
+        self.assertNotIn("Telegram delivery has been validated", release_gates)
+
+
 
 
 if __name__ == "__main__":
