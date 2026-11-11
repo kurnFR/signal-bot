@@ -144,8 +144,10 @@ class TestTelegramDualFlagAuthorization:
 class TestOperationalNotificationRouting:
     """Verifies operational notifications prefer outbox queue and fail closed when unauthorized."""
 
-    def test_notify_operational_prefers_outbox_queue(self):
+    def test_notify_operational_prefers_outbox_queue(self, monkeypatch):
         """Operational notifications are enqueued to rdt_telegram_outbox as durable events."""
+        monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
+        monkeypatch.setenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "1")
         bot = object.__new__(RetailDeathTrapBot)
         bot.logger = logging.getLogger("test.retailbot2")
         bot.db = Mock()

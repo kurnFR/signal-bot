@@ -1,8 +1,15 @@
 import json
 import logging
 from unittest.mock import Mock, patch
+import pytest
 
 from paper.retailbot2 import DatabaseManager, RetailDeathTrapBot, TelegramAlert
+
+
+@pytest.fixture(autouse=True)
+def _authorize_outbox_enqueue(monkeypatch):
+    monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
+    monkeypatch.setenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "1")
 
 
 class Cursor:
