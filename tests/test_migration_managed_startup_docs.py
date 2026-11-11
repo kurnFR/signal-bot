@@ -56,10 +56,26 @@ class TestMigrationManagedStartupDocs(unittest.TestCase):
         self.assertNotIn("Production table `rdt_telegram_outbox` is currently reported missing", release_gates)
         self.assertNotIn("migration 026 has only been applied to `signal_bot_test`", release_gates)
 
-        # 4. Does not claim production Telegram delivery has been validated
+        # 4. Production access boundary: requires separate authorization for all access, including read-only
+        self.assertIn(
+            "Any access to or inspection of the production database `crypto_signals` requires separate, explicit authorization",
+            release_gates,
+        )
+        self.assertIn("read-only SQL queries", release_gates)
+        self.assertIn("schema inspection", release_gates)
+        self.assertIn("migration-status checks", release_gates)
+        self.assertIn("dry-run commands", release_gates)
+        self.assertIn("process or session inspection through database connections", release_gates)
+        self.assertIn("standing authorization", release_gates)
+        # Boundary must not be weakened to only unreviewed migrations or ad-hoc SQL mutations
+        self.assertNotIn("Do not execute unreviewed migrations or ad-hoc SQL mutations against `crypto_signals`.", release_gates)
+
+        # 5. Delivery evidence boundary: evidence-bounded wording and absence of unsupported absolute claim
+        self.assertNotIn("No real Telegram delivery has occurred", release_gates)
+        self.assertIn("WO71688 provides no evidence of production Telegram delivery", release_gates)
+        self.assertIn("External Telegram delivery remains unauthorized and unvalidated", release_gates)
         self.assertIn("Telegram external delivery | **Not authorized / not tested**", release_gates)
-        self.assertIn("External Telegram delivery is not validated", release_gates)
-        self.assertNotIn("Telegram delivery has been validated", release_gates)
+        self.assertIn("not a comprehensive historical audit", release_gates)
 
 
 
