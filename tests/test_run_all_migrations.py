@@ -23,11 +23,6 @@ class TestApplyMigrations(unittest.TestCase):
             ok = run_all.apply_migrations(runner=lambda cmd: self.fail("must not run"))
         self.assertTrue(ok)
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
     def test_automatic_migrations_are_disabled_by_default(self):
         with patch.dict(os.environ, {"SKIP_DB_MIGRATE": "", "SIGNAL_BOT_AUTO_MIGRATE": ""}):
             ok = run_all.apply_migrations(runner=lambda cmd: self.fail("must not run"))
@@ -54,3 +49,7 @@ if __name__ == "__main__":
         self.assertEqual(raised.exception.code, 1)
         ensure_db.assert_called_once()
         shutdown.assert_called_once()
+
+
+if __name__ == "__main__":
+    unittest.main()
