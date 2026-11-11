@@ -2466,6 +2466,13 @@ class RetailDeathTrapBot:
         tid = self.db.save_trade(signal, units, mode, entry_alert=entry_alert)
         if tid is None:
             return None
+        if getattr(self, "_shutdown_requested", False):
+            self.logger.warning(
+                "Trade #%s persisted before shutdown was observed; skipping in-memory "
+                "activation so the committed row can be reloaded on next startup",
+                tid,
+            )
+            return tid
 
         record = {
             'id': tid,
@@ -2502,6 +2509,9 @@ class RetailDeathTrapBot:
 
     def _close_trade(self, tid: int, exit_price: float,
                      reason: str, mode: str):
+        if getattr(self, "_shutdown_requested", False):
+            self.logger.info("Trade close suppressed because shutdown was requested")
+            return
         if getattr(self, "observation_only", False) or is_observation_only(getattr(self, "config", None)):
             self.logger.error(f"❌ RetailDeathTrapBot._close_trade called in observation-only mode for trade #{tid}; failing closed")
             return
@@ -2526,6 +2536,9 @@ class RetailDeathTrapBot:
             "pnl": pnl, "pnl_pct": pnl_pct,
             "telegram_enabled": bool(trade.get('telegram_enabled', False)),
         } if trade.get('telegram_enabled', False) else None
+        if getattr(self, "_shutdown_requested", False):
+            self.logger.info("Trade close persistence suppressed because shutdown was requested")
+            return
         persisted = self.db.close_trade_and_update_stats(
             tid, exit_price, reason, pnl, pnl_pct,
             trade['strategy'], mode, exit_alert=exit_alert
@@ -2534,6 +2547,13 @@ class RetailDeathTrapBot:
             self.logger.error(
                 f"❌ [{mode.upper()}] #{tid} close persistence failed; "
                 "keeping active trade and equity unchanged"
+            )
+            return
+        if getattr(self, "_shutdown_requested", False):
+            self.logger.warning(
+                "Trade #%s close committed before shutdown was observed; leaving in-memory "
+                "state untouched because the process is terminating",
+                tid,
             )
             return
 
