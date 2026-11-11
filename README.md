@@ -61,14 +61,22 @@ python -m collectors.backfill_klines                 # add --symbol/--timeframe/
 python -m features.build_features                    # indicators used by backtest and paper
 ```
 
-**3. Start everything:**
+**3. Start the default process set:**
 
 ```bash
-python3 run_all.py                                   # web + all workers, restarts crashed ones
-python3 run_all.py --skip retailbot2 --skip screener # skip the experimental bots
+python3 run_all.py                 # starts web_server, collectors, paper_engine, news_ai, screener, wallet_tracker
+python3 run_all.py --skip screener # omit the screener
 ```
 
-Open `http://localhost:8050`. `run_all.py --help` lists `--skip` / `--only`. To run one piece by hand: `run_web.py`, `run_collectors.py`, `run_paper_engine.py` (required for paper trading to act on signals), `run_news_ai.py`, `run_wallet_tracker.py`.
+RetailBot2 is excluded by default because it can create or update paper trades. Enable it only when explicitly intended:
+
+```bash
+RETAILBOT2_ENABLED=1 python3 run_all.py --only retailbot2
+```
+
+The outbox worker is a separate opt-in. It requires both `RETAILBOT2_OUTBOX_WORKER_ENABLED=1` and `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`; enabling RetailBot2 alone does not enable Telegram delivery or the worker. The Telegram delivery flag is a shared authorization gate for multiple Telegram sender components, not an outbox-only switch. Do not set it until delivery from the relevant components has been separately reviewed and authorized.
+
+Open `http://localhost:8050`. `run_all.py --help` lists the currently available `--skip` / `--only` choices. RetailBot2 is available as a choice only when `RETAILBOT2_ENABLED=1` is set. To run one piece by hand: `run_web.py`, `run_collectors.py`, `run_paper_engine.py` (required for paper trading to act on signals), `run_news_ai.py`, `run_wallet_tracker.py`.
 
 **4. Log in.** On first start an admin account is created. Use `ADMIN_DEFAULT_PASSWORD` if you set it; otherwise a random one-time password is written to `.initial_admin_credential` (mode 0600). Accounts flagged `must_change_password` are blocked from other API actions until the password is changed, and the dashboard shows a blocking dialog. See [docs/SECURITY.md](docs/SECURITY.md).
 
