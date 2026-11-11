@@ -62,10 +62,12 @@ class TestApplyMigrations(unittest.TestCase):
 
         child = FakeMariaDB()
         from argparse import Namespace
-        with patch.object(run_all.argparse.ArgumentParser, "parse_args", return_value=Namespace(skip=[], only=[])), \\
-             patch.object(run_all, "ensure_database_running"), \\
-             patch.object(run_all, "apply_migrations", return_value=False), \\
-             patch.object(run_all, "_children", {"mariadb": child}):
+        with (
+            patch.object(run_all.argparse.ArgumentParser, "parse_args", return_value=Namespace(skip=[], only=[])),
+            patch.object(run_all, "ensure_database_running"),
+            patch.object(run_all, "apply_migrations", return_value=False),
+            patch.object(run_all, "_children", {"mariadb": child}),
+        ):
             run_all._shutdown.clear()
             try:
                 with self.assertRaises(SystemExit) as raised:
