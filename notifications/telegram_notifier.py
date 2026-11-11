@@ -78,10 +78,19 @@ def send_telegram_message(text: str, parse_mode: str = "HTML", max_retries: int 
             res = requests.post(url, json=payload, timeout=8)
             status_code = getattr(res, "status_code", None)
             safe_status = _safe_http_status(status_code)
+            if type(status_code) is not int or not 100 <= status_code <= 599:
+                last_error = f"Telegram API error (HTTP {safe_status})"
+                logger.warning("Telegram API response attempt %d/%d: %s", attempt, max_retries, last_error)
+                # An invalid status is not a trustworthy retry signal. The
+                # request may have been accepted, so fail closed immediately.
+                break
             try:
                 data = res.json()
-            except Exception:
-                data = {}
+            except Exception as e:
+                last_error = "Invalid Telegram API response"
+                logger.warning("Telegram response attempt %d/%d was malformed (%s)", attempt, max_retries, type(e).__name__)
+                # A malformed response leaves delivery outcome ambiguous.
+                break
 
             if type(status_code) is int and status_code == 200 and isinstance(data, dict) and data.get("ok") is True:
                 logger.info("Telegram message dispatched successfully (attempt %d/%d)", attempt, max_retries)
