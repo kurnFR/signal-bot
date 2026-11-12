@@ -36,7 +36,11 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         self._middleware_auth_patcher = patch(
             "web.app.authenticate_request", side_effect=self._authenticate_test_request
         )
+        self._auth_dep_patcher = patch(
+            "web.auth.authenticate_request", side_effect=self._authenticate_test_request
+        )
         self._middleware_auth_patcher.start()
+        self._auth_dep_patcher.start()
         self.client = TestClient(app, raise_server_exceptions=False)
 
     def _authenticate_test_request(self, request):
@@ -58,6 +62,8 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
     def tearDown(self):
         _revoked_tokens_cache.clear()
         _login_attempts.clear()
+        if self._auth_dep_patcher is not None:
+            self._auth_dep_patcher.stop()
         if self._middleware_auth_patcher is not None:
             self._middleware_auth_patcher.stop()
         if self._revocation_patcher is not None:
