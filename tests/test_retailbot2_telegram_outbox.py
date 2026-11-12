@@ -280,3 +280,45 @@ def test_claim_dead_letters_invalid_payload_instead_of_retrying_forever():
     assert "SET status='dead'" in cursor.calls[3][0]
     assert conn.commits == 1
     assert conn.rollbacks == 0
+
+
+
+def test_exit_outbox_failure_keeps_active_trade_and_equity_unchanged(monkeypatch):
+    """An exit outbox insert failure must roll back persistence and preserve bot state."""
+    monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+
+    cursor = Cursor(fail_on=3)
+    conn = Connection(cursor)
+    db = db_for(conn)
+
+    bot = object.__new__(RetailDeathTrapBot)
+    bot.logger = Mock()
+    bot.observation_only = False
+    bot._shutdown_requested = False
+    bot.db = db
+    bot.equity_shadow = 1000.0
+    bot.equity_inverse = 1000.0
+    trade = {
+        "id": 77,
+        "symbol": "BTC/USDT",
+        "side": "LONG",
+        "entry": 100.0,
+        "units": 2.0,
+        "strategy": "BB_REV",
+        "mode": "shadow",
+        "telegram_enabled": True,
+    }
+    bot.active_shadow = {77: trade}
+    bot.active_inverse = {}
+
+    bot._close_trade(77, 110.0, "TAKE_PROFIT", "shadow")
+
+    assert len(cursor.calls) == 3
+    assert "INSERT INTO rdt_telegram_outbox" in cursor.calls[2][0]
+    assert conn.commits == 0
+    assert conn.rollbacks == 1
+    assert bot.active_shadow == {77: trade}
+    assert bot.equity_shadow == 1000.0
+    assert bot.equity_inverse == 1000.0
+    bot.logger.error.assert_called_once()
+    assert "close persistence failed" in bot.logger.error.call_args[0][0]
