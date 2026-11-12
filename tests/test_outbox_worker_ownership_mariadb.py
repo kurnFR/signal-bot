@@ -62,10 +62,15 @@ def _test_connection():
             connection_timeout=2,
             autocommit=False,
         )
-    except (mysql.connector.Error, Exception) as exc:
-        pytest.skip(
-            f"Isolated MariaDB test database {TEST_DB_HOST}:{TEST_DB_PORT}/{TEST_DB_NAME} is not reachable: {exc}"
-        )
+    except mysql.connector.Error as exc:
+        # Skip only when the isolated test database is genuinely unreachable.
+        # Authentication, schema, and configuration errors must fail loudly.
+        if getattr(exc, "errno", None) in {2002, 2003, 2005, 2006, 2013}:
+            pytest.skip(
+                f"Isolated MariaDB test database {TEST_DB_HOST}:{TEST_DB_PORT}/{TEST_DB_NAME} "
+                f"is not reachable: {exc}"
+            )
+        raise
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT DATABASE()")
@@ -75,16 +80,28 @@ def _test_connection():
             conn.close()
             raise AssertionError(f"Refusing unexpected database {actual!r}, must be {TEST_DB_NAME!r}")
         return conn
-    except mysql.connector.Error as exc:
+    except mysql.connector.Error:
         conn.close()
-        pytest.skip(
-            f"Isolated MariaDB test database {TEST_DB_HOST}:{TEST_DB_PORT}/{TEST_DB_NAME} query failed: {exc}"
-        )
+        raise
 
 
-def _clean_outbox(conn):
+TEST_EVENT_KEY_PREFIX = "test:retailbot2_outbox_worker_ownership:"
+
+
+def _clean_test_outbox_events(conn):
+    """Delete only rows created by this integration suite, never the shared outbox."""
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM rdt_telegram_outbox")
+    cursor.execute(
+        """
+        DELETE FROM rdt_telegram_outbox
+        WHERE event_key LIKE %s
+           OR (
+               event_key LIKE 'test:%'
+               AND trade_id BETWEEN -999999 AND -999000
+           )
+        """,
+        (f"{TEST_EVENT_KEY_PREFIX}%",),
+    )
     conn.commit()
     cursor.close()
 
@@ -92,7 +109,7 @@ def _clean_outbox(conn):
 def _insert_test_event(conn, event_type="entry", trade_id=None):
     if trade_id is None:
         trade_id = -999000 - int(uuid.uuid4().int % 1000)
-    event_key = f"test:{trade_id}:{uuid.uuid4().hex[:12]}"
+    event_key = f"{TEST_EVENT_KEY_PREFIX}{trade_id}:{uuid.uuid4().hex[:12]}"
     payload = {
         "signal": {
             "symbol": "BTC/USDT",
@@ -223,7 +240,7 @@ class TestAdvisoryLockOwnership:
         standalone = OutboxSessionManager(db_cfg, ALLOWED_TEST_DATABASES)
 
         clean_conn = _test_connection()
-        _clean_outbox(clean_conn)
+        _clean_test_outbox_events(clean_conn)
         event_id = _insert_test_event(clean_conn)
         clean_conn.close()
 
@@ -575,16 +592,62 @@ sys.exit(exit_code)
                 except OSError:
                     pass
     @pytest.fixture(autouse=True)
-    def clean_db(self, request):
-        if request.node.name in (
-            "test_outbox_lock_name_constant_is_authoritative_rdt_outbox_worker_lock",
-            "test_legacy_dispatcher_is_disabled_without_lock_api",
-            "test_legacy_dispatcher_never_attempts_lock_acquisition",
-        ):
-            return
+    def isolate_test_outbox_rows(self):
+        # Clean only this suite's reserved event-key namespace and legacy
+        # sentinel IDs. Preserve every unrelated outbox row in signal_bot_test.
         conn = _test_connection()
-        _clean_outbox(conn)
-        conn.close()
+        try:
+            _clean_test_outbox_events(conn)
+        finally:
+            conn.close()
+        yield
+        conn = _test_connection()
+        try:
+            _clean_test_outbox_events(conn)
+        finally:
+            conn.close()
+
+    def test_cleanup_preserves_unrelated_outbox_rows(self):
+        conn = _test_connection()
+        owned_id = None
+        unrelated_id = None
+        try:
+            owned_id = _insert_test_event(conn)
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO rdt_telegram_outbox
+                (event_key, trade_id, event_type, payload_json, status, attempts, next_attempt_at)
+                VALUES (%s, %s, 'entry', %s, 'pending', 0, UTC_TIMESTAMP())
+                """,
+                (
+                    f"cleanup-guard:{uuid.uuid4().hex}",
+                    987654321,
+                    json.dumps({"test": "must be preserved"}),
+                ),
+            )
+            unrelated_id = cursor.lastrowid
+            conn.commit()
+            cursor.close()
+
+            _clean_test_outbox_events(conn)
+
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM rdt_telegram_outbox WHERE id IN (%s, %s)",
+                (owned_id, unrelated_id),
+            )
+            remaining = {row[0] for row in cursor.fetchall()}
+            cursor.close()
+            assert owned_id not in remaining
+            assert unrelated_id in remaining
+        finally:
+            if unrelated_id is not None:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM rdt_telegram_outbox WHERE id=%s", (unrelated_id,))
+                conn.commit()
+                cursor.close()
+            conn.close()
 
     def test_correct_token_acknowledges(self):
         conn = _test_connection()

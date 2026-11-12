@@ -15,13 +15,13 @@
 
 This report documents the completed implementation, security hardening, bugfixes, test results, and QA audit sign-offs for **Phase 1** and **Phase 2** of the `signal-bot` production readiness roadmap.
 
-All changes have been developed, remediated against QA review findings, verified through the regression test suite (1,395 tests passing), and committed to `master`.
+Phase 1 and Phase 2 implementation commits are on `master`. The previously reported regression run predates the corrective review patch described below; Phase 1 is not considered accepted until scoped DB-test cleanup and strict connection-error handling are independently reviewed and rerun.
 
 ### High-Level Status Summary
 
 | Phase | Core Objective | Primary Commits | Test Suite Status | QA Verdict |
 | :--- | :--- | :--- | :---: | :---: |
-| **Phase 1** | Close critical production safety gaps in RetailBot2, trading controls, and outbox transports | `b89d3f1` | 100% Passed (46 new tests) | **APPROVED (PASS)** |
+| **Phase 1** | Close critical production safety gaps in RetailBot2, trading controls, and outbox transports | `b89d3f1` + corrective review PR | Prior run reported passing; corrective rerun pending | **RE-REVIEW REQUIRED** |
 | **Phase 2** | Enforce safe Phase 2A supervisor startup defaults, fail-closed migrations, and resilient operations | `5b24ed3` | 100% Passed (17 new tests) | **APPROVED (PASS)** |
 
 ---
@@ -63,14 +63,15 @@ Prior to Phase 1, several critical safety gaps existed in the experimental tradi
   1. Operator explicit authorization: `RETAILBOT2_ALLOW_TRADING=1` or CLI `--allow-trading` or `BotConfig(allow_trading=True)`.
   2. Runtime database control: `bot_control.enabled == 1`.
 - **Observation Dominance:** `observation_only` (`RETAILBOT2_OBSERVATION_ONLY=1` or `--observation-only`) strictly dominates and forces `allow_trading = False`.
-- **Fail-Closed Mutation Fences:** Added direct authorization guards to `RetailDeathTrapBot._open_trade()` and `DatabaseManager.save_trade()`. Attempting to save a trade when unauthorized raises an exception and writes zero order rows.
-- **Dynamic Revocation:** `_reload_control()` immediately cancels pending orders, pauses trading, and emits a critical alert if authorization is revoked while the process is running.
+- **Fail-Closed Mutation Fences:** Added direct authorization guards to `RetailDeathTrapBot._open_trade()` and `DatabaseManager.save_trade()`. When unauthorized, both return without inserting a trade; `DatabaseManager.save_trade()` returns `None` and performs no SQL mutation.
+- **Dynamic Revocation:** `_reload_control()` disables new trading and emits an operational alert when authorization is revoked or the control state becomes unavailable. Existing open positions continue to be managed; this implementation does not claim to cancel a separate pending-order queue.
 - **Supervisor Isolation:** In `run_all.py`, `RETAILBOT2_ENABLED=1` starts the worker with trading disabled by default. Setting `RETAILBOT2_ALLOW_TRADING=1` alone never launches the worker.
 
 ### 2.3 Phase 1 QA Audit & Remediation Log
-- **Initial QA Review:** Antigravity Reviewer audited commit `b89d3f1` and flagged subtle test isolation issues in `tests/test_outbox_worker_ownership_mariadb.py`.
-- **Engineer Remediation:** Test isolation was strengthened with dedicated mocks and transaction rollbacks.
-- **Final Verdict:** **APPROVED (PASS)** by Antigravity Reviewer.
+- **Review Finding:** The MariaDB integration test helper previously deleted every row from `rdt_telegram_outbox` before each test. Its connection helper also converted every connection exception into a skip, which could hide authentication or configuration failures.
+- **Corrective Patch:** The test now uses a reserved event-key namespace plus the exact legacy sentinel trade-ID range created by this suite. Cleanup is restricted to those test-owned rows, runs before and after each test, and has a regression check proving unrelated outbox rows survive. Only known network-unreachable connector error codes are skipped; authentication, schema, and query errors fail the test.
+- **Documentation Correction:** Mutation-fence and dynamic-revocation descriptions now match the actual return behavior and lifecycle implementation.
+- **Final Verdict:** **INDEPENDENT RE-REVIEW REQUIRED.** The earlier PASS is superseded until the corrective patch is reviewed and its DB integration tests are rerun.
 
 ---
 
@@ -137,6 +138,9 @@ Following PR #729, the supervisor (`run_all.py`) required hardening against real
 ## 4. Test Suite and Verification Evidence
 
 ### 4.1 Test Execution Results
+
+> **Evidence boundary:** The test results below are historical execution evidence from the Phase 1/2 implementation before the corrective review patch. They do not validate that patch; rerun the affected integration module and the full required regression groups against the final corrective commit before acceptance.
+
 
 ```bash
 # 1. Supervisor Startup, Shutdown, and Recovery Tests
