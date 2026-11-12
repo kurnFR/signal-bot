@@ -504,3 +504,37 @@ def test_claim_commit_failure_returns_none_and_preserves_connection_ownership(sh
     assert conn.commits == 1
     assert conn.rollbacks == 1
     assert cursor.closed is True
+
+
+@pytest.mark.parametrize("shared_connection", [False, True])
+def test_dead_letter_outbox_event_uses_fenced_terminal_transition(shared_connection):
+    """Dead-lettering must use the live claim fence and preserve connection ownership."""
+    cursor = Cursor()
+    conn = Connection(cursor)
+    db = db_for(conn)
+    token = "d" * 32
+
+    if shared_connection:
+        result = db.dead_letter_telegram_outbox_event(
+            5, token, "permanent delivery failure", conn=conn
+        )
+        db.get_conn.assert_not_called()
+        assert conn.closed is False
+    else:
+        result = db.dead_letter_telegram_outbox_event(
+            5, token, "permanent delivery failure"
+        )
+        db.get_conn.assert_called_once_with()
+        assert conn.closed is True
+
+    assert result is True
+    assert len(cursor.calls) == 1
+    sql, params = cursor.calls[0]
+    assert "SET status='dead'" in sql
+    assert "status='processing'" in sql
+    assert "claim_token=%s" in sql
+    assert "locked_until > UTC_TIMESTAMP()" in sql
+    assert params == ("permanent delivery failure", 5, token)
+    assert conn.commits == 1
+    assert conn.rollbacks == 0
+    assert cursor.closed is True
