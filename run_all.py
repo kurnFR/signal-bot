@@ -63,11 +63,22 @@ RESTART_BACKOFF_SECONDS = 5
 def build_processes(environ=None):
     """Build supervised commands; RetailBot2 and Telegram delivery are explicit opt-ins."""
     env = os.environ if environ is None else environ
+    raw_port = (env.get("WEB_PORT") or "").strip()
+    try:
+        port_num = int(raw_port) if raw_port else 8050
+        web_port = str(port_num) if (1 <= port_num <= 65535) else "8050"
+    except ValueError:
+        logger.warning("Malformed WEB_PORT %r; falling back to 8050", raw_port)
+        web_port = "8050"
+
+    raw_host = (env.get("SIGNAL_BOT_HOST") or "").strip()
+    web_host = raw_host or "0.0.0.0"
+
     processes = {
         "web_server": [
             sys.executable, "run_web.py", "--port",
-            env.get("WEB_PORT", "8050"), "--host",
-            env.get("SIGNAL_BOT_HOST", "0.0.0.0"),
+            web_port, "--host",
+            web_host,
         ],
         "collectors": [sys.executable, "run_collectors.py"],
         "screener": [sys.executable, "Screen/screening.py"],
@@ -75,20 +86,20 @@ def build_processes(environ=None):
     }
 
     # Paper and news engines are held back in the safe Phase 2A default set.
-    if env.get("PAPER_ENGINE_ENABLED", "").strip() == "1":
+    if (env.get("PAPER_ENGINE_ENABLED") or "").strip() == "1":
         processes["paper_engine"] = [sys.executable, "run_paper_engine.py"]
-    if env.get("NEWS_AI_ENABLED", "").strip() == "1":
+    if (env.get("NEWS_AI_ENABLED") or "").strip() == "1":
         processes["news_ai"] = [sys.executable, "run_news_ai.py"]
 
     # RetailBot2 can create/update paper trades, so never include it in the
     # default supervisor set. It requires an explicit, independent opt-in.
-    if env.get("RETAILBOT2_ENABLED", "").strip() == "1":
+    if (env.get("RETAILBOT2_ENABLED") or "").strip() == "1":
         processes["retailbot2"] = [sys.executable, "paper/retailbot2.py"]
 
     # Keep delivery disabled by default. Both flags are required so enabling
     # the process supervisor alone cannot accidentally enable production sends.
-    if env.get("RETAILBOT2_OUTBOX_WORKER_ENABLED", "").strip() == "1":
-        if env.get("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1":
+    if (env.get("RETAILBOT2_OUTBOX_WORKER_ENABLED") or "").strip() == "1":
+        if (env.get("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY") or "").strip() == "1":
             processes["retailbot2_outbox"] = [
                 sys.executable, "-m", "paper.outbox_worker",
                 "--database", "crypto_signals",
@@ -177,8 +188,17 @@ def ensure_database_running():
     import socket
     from pathlib import Path
 
-    host = os.getenv("MYSQL_HOST", "127.0.0.1")
-    port = int(os.getenv("MYSQL_PORT", 3306))
+    raw_host = (os.getenv("MYSQL_HOST") or "").strip()
+    host = raw_host or "127.0.0.1"
+    raw_port = (os.getenv("MYSQL_PORT") or "").strip()
+    try:
+        port = int(raw_port) if raw_port else 3306
+        if not (1 <= port <= 65535):
+            logger.warning("MYSQL_PORT %r out of range (1-65535); falling back to 3306", raw_port)
+            port = 3306
+    except ValueError:
+        logger.warning("Malformed MYSQL_PORT %r; falling back to 3306", raw_port)
+        port = 3306
 
     def is_port_open():
         try:
@@ -223,15 +243,16 @@ def ensure_database_running():
     return None
 
 
-def apply_migrations(runner=subprocess.run) -> bool:
+def apply_migrations(runner=subprocess.run, environ=None) -> bool:
     """Apply migrations only when explicitly authorized.
 
     The safe default is to leave schema changes to a separate deployment step.
     Set SIGNAL_BOT_AUTO_MIGRATE=1 to opt in to startup migrations. The legacy
     SKIP_DB_MIGRATE flag remains supported as an explicit override.
     """
-    skip_value = os.getenv("SKIP_DB_MIGRATE", "").strip().lower()
-    auto_value = os.getenv("SIGNAL_BOT_AUTO_MIGRATE", "").strip().lower()
+    env = os.environ if environ is None else environ
+    skip_value = (env.get("SKIP_DB_MIGRATE") or "").strip().lower()
+    auto_value = (env.get("SIGNAL_BOT_AUTO_MIGRATE") or "").strip().lower()
 
     if skip_value in ("1", "true", "yes"):
         logger.info("SKIP_DB_MIGRATE set: not running database migrations")
