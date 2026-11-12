@@ -20,9 +20,14 @@ class TestUserManagementSecurity(unittest.TestCase):
         self._middleware_auth_patcher = patch(
             "web.app.authenticate_request", side_effect=self._authenticate_test_request
         )
+        self._auth_dep_patcher = patch(
+            "web.auth.authenticate_request", side_effect=self._authenticate_test_request
+        )
         self._middleware_auth_patcher.start()
+        self._auth_dep_patcher.start()
         self.client = TestClient(app, raise_server_exceptions=False)
         self.addCleanup(self._middleware_auth_patcher.stop)
+        self.addCleanup(self._auth_dep_patcher.stop)
         self.addCleanup(self._revocation_patcher.stop)
         self.admin_token = create_access_token(user_id=1, username="admin", role="admin")
         self.trader_token = create_access_token(user_id=2, username="trader_joe", role="trader")
