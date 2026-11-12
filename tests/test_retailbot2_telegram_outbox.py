@@ -688,3 +688,34 @@ def test_retry_outbox_event_rejects_stale_claim_without_commit(shared_connection
     assert conn.commits == 0
     assert conn.rollbacks == 1
     assert cursor.closed is True
+
+
+@pytest.mark.parametrize("shared_connection", [False, True])
+def test_mark_sent_rejects_stale_claim_without_commit(shared_connection):
+    """A stale/lost claim must not acknowledge an outbox event as sent."""
+    cursor = Cursor(rowcount=0)
+    conn = Connection(cursor)
+    db = db_for(conn)
+    token = "i" * 32
+
+    if shared_connection:
+        result = db.mark_telegram_outbox_sent(5, token, conn=conn)
+        db.get_conn.assert_not_called()
+        assert conn.closed is False
+    else:
+        result = db.mark_telegram_outbox_sent(5, token)
+        db.get_conn.assert_called_once_with()
+        assert conn.closed is True
+
+    assert result is False
+    assert len(cursor.calls) == 1
+    sql, params = cursor.calls[0]
+    assert "SET status='sent'" in sql
+    assert "sent_at=UTC_TIMESTAMP()" in sql
+    assert "status='processing'" in sql
+    assert "claim_token=%s" in sql
+    assert "locked_until > UTC_TIMESTAMP()" in sql
+    assert params == (5, token)
+    assert conn.commits == 0
+    assert conn.rollbacks == 1
+    assert cursor.closed is True
