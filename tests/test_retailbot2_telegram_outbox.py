@@ -280,3 +280,64 @@ def test_claim_dead_letters_invalid_payload_instead_of_retrying_forever():
     assert "SET status='dead'" in cursor.calls[3][0]
     assert conn.commits == 1
     assert conn.rollbacks == 0
+
+
+def test_mixed_strategy_exit_lifecycle_enqueues_only_promoted_trade():
+    """Close both trades through production paths; only the promoted one enters the outbox."""
+    promoted_cursor = Cursor()
+    promoted_conn = Connection(promoted_cursor)
+    unpromoted_cursor = Cursor()
+    unpromoted_conn = Connection(unpromoted_cursor)
+
+    db = db_for(promoted_conn)
+    db.get_conn.side_effect = [promoted_conn, unpromoted_conn]
+
+    bot = object.__new__(RetailDeathTrapBot)
+    bot.active_shadow = {
+        7: {
+            "id": 7, "symbol": "BTC/USDT", "side": "LONG",
+            "mode": "shadow", "entry": 100.0, "units": 2.0,
+            "strategy": "BB_REV", "telegram_enabled": True,
+        },
+        8: {
+            "id": 8, "symbol": "ETH/USDT", "side": "LONG",
+            "mode": "shadow", "entry": 100.0, "units": 2.0,
+            "strategy": "DBL_PAT", "telegram_enabled": False,
+        },
+    }
+    bot.active_inverse = {}
+    bot.db = db
+    bot.equity_shadow = 1000.0
+    bot.equity_inverse = 1000.0
+    bot.logger = Mock()
+    bot.tg = Mock()
+
+    # These calls exercise the real _close_trade() and
+    # DatabaseManager.close_trade_and_update_stats() implementations.
+    bot._close_trade(7, 110.0, "TAKE_PROFIT", "shadow")
+    bot._close_trade(8, 110.0, "TAKE_PROFIT", "shadow")
+
+    promoted_outbox = [
+        call for call in promoted_cursor.calls
+        if "INSERT INTO rdt_telegram_outbox" in call[0]
+    ]
+    unpromoted_outbox = [
+        call for call in unpromoted_cursor.calls
+        if "INSERT INTO rdt_telegram_outbox" in call[0]
+    ]
+
+    assert len(promoted_cursor.calls) == 3
+    assert len(promoted_outbox) == 1
+    assert promoted_outbox[0][1][0] == "retailbot2:exit:7"
+    assert json.loads(promoted_outbox[0][1][2])["trade"]["strategy"] == "BB_REV"
+
+    assert len(unpromoted_cursor.calls) == 2
+    assert unpromoted_outbox == []
+
+    assert promoted_conn.commits == 1
+    assert unpromoted_conn.commits == 1
+    assert promoted_conn.rollbacks == 0
+    assert unpromoted_conn.rollbacks == 0
+    assert bot.active_shadow == {}
+    assert bot.equity_shadow == 1040.0
+    bot.tg.send_exit.assert_not_called()
