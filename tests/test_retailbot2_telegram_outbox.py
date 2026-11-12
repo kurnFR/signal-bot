@@ -607,3 +607,48 @@ def test_dead_letter_outbox_event_commit_failure_rolls_back_and_preserves_connec
     assert conn.commits == 1
     assert conn.rollbacks == 1
     assert cursor.closed is True
+
+
+
+@pytest.mark.parametrize(
+    ("attempts", "max_attempts", "delay", "expected_status", "expected_delay"),
+    [
+        (1, 8, None, "pending", 15),
+        (8, 8, None, "dead", 1920),
+        (9, 8, None, "dead", 3600),
+        (1, 8, 0, "pending", 1),
+        (1, 8, 5000, "pending", 5000),
+        (3, 3, 30, "dead", 30),
+    ],
+)
+def test_retry_outbox_event_backoff_boundaries_and_dead_letter_threshold(
+    attempts, max_attempts, delay, expected_status, expected_delay
+):
+    """Retry scheduling respects exponential caps, explicit-delay floor, and dead threshold."""
+    cursor = Cursor()
+    conn = Connection(cursor)
+    db = db_for(conn)
+    token = "g" * 32
+
+    result = db.retry_telegram_outbox_event(
+        5,
+        token,
+        attempts,
+        "temporary failure",
+        max_attempts=max_attempts,
+        delay=delay,
+    )
+
+    assert result is True
+    assert len(cursor.calls) == 1
+    sql, params = cursor.calls[0]
+    assert "SET status=%s" in sql
+    assert "next_attempt_at=DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s SECOND)" in sql
+    assert "status='processing'" in sql
+    assert "claim_token=%s" in sql
+    assert "locked_until > UTC_TIMESTAMP()" in sql
+    assert params == (expected_status, expected_delay, "temporary failure", 5, token)
+    assert conn.commits == 1
+    assert conn.rollbacks == 0
+    assert cursor.closed is True
+    assert conn.closed is True
