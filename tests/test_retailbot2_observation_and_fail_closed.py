@@ -825,6 +825,7 @@ def test_open_trade_fails_closed_when_trading_unauthorized(monkeypatch):
     assert result is None
     bot.db.save_trade.assert_not_called()
 
+
 def test_mixed_strategy_lifecycle_queues_only_selected_telegram_alert(monkeypatch):
     """The real worker entry path must queue an alert only for the strategy whose saved lifecycle flag is on."""
     monkeypatch.setenv("RETAILBOT2_ALLOW_TRADING", "1")
