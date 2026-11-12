@@ -6,21 +6,43 @@ roles, prevent self-lockout/self-deletion, and write atomic audit entries.
 import unittest
 from unittest.mock import MagicMock, patch
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from web.app import app
-from web.auth import create_access_token
+from web.auth import create_access_token, verify_access_token
 
 
 class TestUserManagementSecurity(unittest.TestCase):
     def setUp(self):
         self._revocation_patcher = patch("web.auth.is_token_revoked", return_value=False)
         self._revocation_patcher.start()
+        self._middleware_auth_patcher = patch(
+            "web.app.authenticate_request", side_effect=self._authenticate_test_request
+        )
+        self._middleware_auth_patcher.start()
         self.client = TestClient(app, raise_server_exceptions=False)
+        self.addCleanup(self._middleware_auth_patcher.stop)
         self.addCleanup(self._revocation_patcher.stop)
         self.admin_token = create_access_token(user_id=1, username="admin", role="admin")
         self.trader_token = create_access_token(user_id=2, username="trader_joe", role="trader")
         self.viewer_token = create_access_token(user_id=3, username="viewer_bob", role="viewer")
+
+    def _authenticate_test_request(self, request):
+        """Verify signed test tokens without querying the live user-profile store."""
+        auth_header = request.headers.get("Authorization", "")
+        token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+        payload = verify_access_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="Session expired or invalid token")
+        return {
+            "id": payload["sub"],
+            "username": payload["username"],
+            "role": payload["role"],
+            "is_active": 1,
+            "must_change_password": 0,
+            "session_version": payload.get("session_version", 0),
+        }
 
     def _headers(self, token):
         return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
