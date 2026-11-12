@@ -159,6 +159,7 @@ def test_worker_persists_entry_outbox_only_for_promoted_strategy():
         risk_per_trade=0.01,
         allow_trading=True,
         observation_only=False,
+        db_name=TEST_DB_NAME,
     )
     db.config = bot.config
     bot.trading_enabled = True

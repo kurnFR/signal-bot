@@ -330,16 +330,16 @@ def test_observation_mode_mutation_boundary_defense(monkeypatch):
     [
         ("", "", False),
         ("0", "0", False),
-        ("1", "", False),
+        ("1", "", True),
         ("", "1", False),
-        ("1", "0", False),
+        ("1", "0", True),
         ("0", "1", False),
         ("true", "true", False),  # Strictly requires "1"
         ("1", "1", True),
     ],
 )
 def test_outbox_enqueue_requires_both_authorization_flags(monkeypatch, enqueue_flag, delivery_flag, expected):
-    """12. Enqueuing succeeds only when BOTH RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1 and RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1."""
+    """12. Enqueuing requires RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1 and valid database allowlist, independent of RETAILBOT2_ALLOW_TELEGRAM_DELIVERY."""
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", enqueue_flag)
     monkeypatch.setenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", delivery_flag)

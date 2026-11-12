@@ -16,6 +16,7 @@ The test account needs SELECT, INSERT, UPDATE, DELETE on signal_bot_test.
 
 import logging
 import os
+from types import SimpleNamespace
 import uuid
 
 import mysql.connector
@@ -59,6 +60,11 @@ def _db():
     db = object.__new__(DatabaseManager)
     db.logger = logging.getLogger("test.retailbot2.outbox.delivery.mysql")
     db.get_conn = _connection
+    db.config = SimpleNamespace(
+        db_name=TEST_DB_NAME,
+        allow_trading=True,
+        observation_only=False,
+    )
     return db
 
 
