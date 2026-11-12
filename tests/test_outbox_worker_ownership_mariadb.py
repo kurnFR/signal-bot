@@ -136,6 +136,32 @@ def _clean_test_outbox_events(conn):
     cursor.close()
 
 
+def _assert_no_unrelated_outbox_rows(conn):
+    """Refuse worker tests if any non-suite outbox rows could be claimed or mutated."""
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM rdt_telegram_outbox
+        WHERE NOT (
+            event_key LIKE %s
+            OR (
+                event_key LIKE 'test:%'
+                AND trade_id BETWEEN -999999 AND -999000
+            )
+        )
+        """,
+        (f"{TEST_EVENT_KEY_PREFIX}%",),
+    )
+    unrelated_count = int(cursor.fetchone()[0] or 0)
+    cursor.close()
+    if unrelated_count:
+        raise RuntimeError(
+            "Refusing outbox worker integration tests: signal_bot_test contains "
+            f"{unrelated_count} unrelated outbox row(s); preserve them and use a clean isolated test database."
+        )
+
+
 def _insert_test_event(conn, event_type="entry", trade_id=None):
     if trade_id is None:
         trade_id = -999000 - int(uuid.uuid4().int % 1000)
@@ -628,6 +654,7 @@ sys.exit(exit_code)
         conn = _test_connection()
         try:
             _clean_test_outbox_events(conn)
+            _assert_no_unrelated_outbox_rows(conn)
         finally:
             conn.close()
         yield
@@ -659,6 +686,9 @@ sys.exit(exit_code)
             unrelated_id = cursor.lastrowid
             conn.commit()
             cursor.close()
+
+            with pytest.raises(RuntimeError, match="unrelated outbox row"):
+                _assert_no_unrelated_outbox_rows(conn)
 
             _clean_test_outbox_events(conn)
 
