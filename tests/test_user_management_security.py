@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from web.app import app
+from web.auth import authenticate_request as real_authenticate_request
 from web.auth import create_access_token, verify_access_token
 
 
@@ -416,7 +417,6 @@ class TestUserManagementSecurity(unittest.TestCase):
         old_token = create_access_token(user_id=2, username="trader_joe", role="trader", session_version=0)
         from starlette.datastructures import Headers
         from fastapi import Request, HTTPException
-        from web.auth import authenticate_request
 
         req = MagicMock(spec=Request)
         req.headers = Headers({"Authorization": f"Bearer {old_token}"})
@@ -432,7 +432,7 @@ class TestUserManagementSecurity(unittest.TestCase):
         with patch("web.auth.get_pool") as mock_pool, \
              patch("web.auth.is_token_revoked", return_value=False):
             mock_pool.return_value.get_connection.return_value = mock_conn
-            user_before = authenticate_request(req)
+            user_before = real_authenticate_request(req)
             self.assertEqual(user_before["username"], "trader_joe")
 
         # 3. When database increments session_version to 1 (e.g. after password reset),
@@ -445,7 +445,7 @@ class TestUserManagementSecurity(unittest.TestCase):
              patch("web.auth.is_token_revoked", return_value=False):
             mock_pool.return_value.get_connection.return_value = mock_conn
             with self.assertRaises(HTTPException) as ctx:
-                authenticate_request(req)
+                real_authenticate_request(req)
             self.assertEqual(ctx.exception.status_code, 401)
             self.assertIn("Session expired or invalid token", ctx.exception.detail)
 
