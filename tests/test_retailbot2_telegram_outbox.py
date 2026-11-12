@@ -474,3 +474,33 @@ def test_outbox_state_update_commit_failure_rolls_back_and_returns_false(operati
     assert conn.rollbacks == 1
     assert cursor.closed is True
     assert conn.closed is True
+
+@pytest.mark.parametrize("shared_connection", [False, True])
+def test_claim_commit_failure_returns_none_and_preserves_connection_ownership(shared_connection):
+    """A failed claim commit must not leak an unreturned claim token or close S_lock."""
+    event = {
+        "id": 5, "trade_id": 12, "event_type": "entry",
+        "payload_json": '{"mode":"shadow"}', "attempts": 2,
+    }
+    cursor = Cursor(event=event)
+    conn = Connection(cursor, fail_commit=True)
+    db = db_for(conn)
+
+    if shared_connection:
+        claimed = db.claim_telegram_outbox_event(lease_seconds=90, conn=conn)
+        db.get_conn.assert_not_called()
+        assert conn.closed is False
+    else:
+        claimed = db.claim_telegram_outbox_event(lease_seconds=90)
+        db.get_conn.assert_called_once_with()
+        assert conn.closed is True
+
+    assert claimed is None
+    assert len(cursor.calls) == 4
+    assert cursor.calls[0][0] == "START TRANSACTION"
+    assert "attempts >= 8" in cursor.calls[1][0]
+    assert "FOR UPDATE" in cursor.calls[2][0]
+    assert "SET status='processing'" in cursor.calls[3][0]
+    assert conn.commits == 1
+    assert conn.rollbacks == 1
+    assert cursor.closed is True
