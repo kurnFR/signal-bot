@@ -31,16 +31,24 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
     def setUp(self):
         _revoked_tokens_cache.clear()
         _login_attempts.clear()
+        self._revocation_patcher = patch("web.auth.is_token_revoked", return_value=False)
+        self._revocation_patcher.start()
         self.client = TestClient(app, raise_server_exceptions=False)
 
     def tearDown(self):
         _revoked_tokens_cache.clear()
         _login_attempts.clear()
+        if self._revocation_patcher is not None:
+            self._revocation_patcher.stop()
 
     # ------------------------------------------------------------------------
     # 1. Token Revocation Fails Closed on Database Errors
     # ------------------------------------------------------------------------
     def test_token_revocation_fails_closed_when_storage_fails(self):
+        # This test exercises the real fail-closed revocation path; disable the
+        # default API-test bypass installed by setUp.
+        self._revocation_patcher.stop()
+        self._revocation_patcher = None
         token = create_access_token(user_id=10, username="trader_alice", role="trader")
         self.assertIsNotNone(verify_access_token(token))
 
@@ -680,7 +688,8 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
             [unittest.mock.call.identity_connection_close(), unittest.mock.call.rate_limit_admission("testclient:unknown:admin")],
         )
 
-    def test_database_collation_equivalent_usernames_share_account_rate_limit(self):
+    @patch("web.auth.log_audit", return_value=True)
+    def test_database_collation_equivalent_usernames_share_account_rate_limit(self, _mock_log_audit):
         account = {
             "id": 42, "username": "cafe", "email": None,
             "password_hash": "hash", "role": "trader", "is_active": 1,
@@ -755,7 +764,8 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         mock_conn.close.assert_called_once()
 
-    def test_failed_password_finalizes_its_durable_reservation(self):
+    @patch("web.auth.log_audit", return_value=True)
+    def test_failed_password_finalizes_its_durable_reservation(self, _mock_log_audit):
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_cur.fetchone.return_value = {
