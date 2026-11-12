@@ -648,7 +648,14 @@ sys.exit(exit_code)
                 except OSError:
                     pass
     @pytest.fixture(autouse=True)
-    def isolate_test_outbox_rows(self):
+    def isolate_test_outbox_rows(self, request):
+        if request.node.name in (
+            "test_outbox_lock_name_constant_is_authoritative_rdt_outbox_worker_lock",
+            "test_legacy_dispatcher_is_disabled_without_lock_api",
+            "test_legacy_dispatcher_never_attempts_lock_acquisition",
+        ):
+            yield
+            return
         # Clean only this suite's reserved event-key namespace and legacy
         # sentinel IDs. Preserve every unrelated outbox row in signal_bot_test.
         conn = _test_connection()
