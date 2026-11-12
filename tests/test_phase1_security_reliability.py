@@ -31,18 +31,61 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
     def setUp(self):
         _revoked_tokens_cache.clear()
         _login_attempts.clear()
+        self._revocation_patcher = patch("web.auth.is_token_revoked", return_value=False)
+        self._revocation_patcher.start()
+        self._middleware_auth_patcher = patch(
+            "web.app.authenticate_request", side_effect=self._authenticate_test_request
+        )
+        self._auth_dep_patcher = patch(
+            "web.auth.authenticate_request", side_effect=self._authenticate_test_request
+        )
+        self._middleware_auth_patcher.start()
+        self._auth_dep_patcher.start()
         self.client = TestClient(app, raise_server_exceptions=False)
+
+    def _authenticate_test_request(self, request):
+        """Verify the signed test token while isolating middleware from user-profile DB I/O."""
+        auth_header = request.headers.get("Authorization", "")
+        token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+        payload = verify_access_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="Session expired or invalid token")
+        return {
+            "id": payload["sub"],
+            "username": payload["username"],
+            "role": payload["role"],
+            "is_active": 1,
+            "must_change_password": 0,
+            "session_version": payload.get("session_version", 0),
+        }
 
     def tearDown(self):
         _revoked_tokens_cache.clear()
         _login_attempts.clear()
+        if self._auth_dep_patcher is not None:
+            self._auth_dep_patcher.stop()
+        if self._middleware_auth_patcher is not None:
+            self._middleware_auth_patcher.stop()
+        if self._revocation_patcher is not None:
+            self._revocation_patcher.stop()
 
     # ------------------------------------------------------------------------
     # 1. Token Revocation Fails Closed on Database Errors
     # ------------------------------------------------------------------------
     def test_token_revocation_fails_closed_when_storage_fails(self):
+        # This test exercises the real fail-closed revocation path; disable the
+        # default API-test bypass installed by setUp.
+        self._revocation_patcher.stop()
+        self._revocation_patcher = None
         token = create_access_token(user_id=10, username="trader_alice", role="trader")
-        self.assertIsNotNone(verify_access_token(token))
+        # Establish a valid, non-revoked baseline without requiring a live DB.
+        baseline_conn, baseline_cur = MagicMock(), MagicMock()
+        baseline_conn.cursor.return_value = baseline_cur
+        baseline_cur.fetchone.return_value = None
+        with patch("web.auth.get_pool") as baseline_pool:
+            baseline_pool.return_value.get_connection.return_value = baseline_conn
+            self.assertIsNotNone(verify_access_token(token))
+        baseline_conn.close.assert_called_once()
 
         # When database fails during lookup:
         with patch("web.auth.get_pool", side_effect=RuntimeError("MariaDB connection refused")):
@@ -680,7 +723,8 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
             [unittest.mock.call.identity_connection_close(), unittest.mock.call.rate_limit_admission("testclient:unknown:admin")],
         )
 
-    def test_database_collation_equivalent_usernames_share_account_rate_limit(self):
+    @patch("web.routes.auth_routes.log_audit", return_value=True)
+    def test_database_collation_equivalent_usernames_share_account_rate_limit(self, _mock_log_audit):
         account = {
             "id": 42, "username": "cafe", "email": None,
             "password_hash": "hash", "role": "trader", "is_active": 1,
@@ -755,7 +799,8 @@ class TestPhase1SecurityAndReliability(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         mock_conn.close.assert_called_once()
 
-    def test_failed_password_finalizes_its_durable_reservation(self):
+    @patch("web.routes.auth_routes.log_audit", return_value=True)
+    def test_failed_password_finalizes_its_durable_reservation(self, _mock_log_audit):
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_cur.fetchone.return_value = {

@@ -35,8 +35,6 @@ from paper.retailbot2 import (
 )
 
 
-pytestmark = pytest.mark.db_integration
-
 TEST_DB_HOST = "127.0.0.1"
 TEST_DB_PORT = 3306
 TEST_DB_NAME = "signal_bot_test"
@@ -104,7 +102,8 @@ def _test_connection():
 def test_test_connection_skips_only_network_unreachable_errors(errno, should_skip):
     error = mysql.connector.Error("simulated connector failure")
     error.errno = errno
-    with patch("mysql.connector.connect", side_effect=error):
+    with patch.dict(os.environ, {"SIGNAL_BOT_TEST_DB_USER": "mock-user", "SIGNAL_BOT_TEST_DB_PASSWORD": "mock-password"}), \
+         patch("mysql.connector.connect", side_effect=error):
         if should_skip:
             with pytest.raises(pytest.skip.Exception):
                 _test_connection()
@@ -118,7 +117,8 @@ def test_test_connection_query_failure_is_not_skipped():
     cursor = Mock()
     conn.cursor.return_value = cursor
     cursor.execute.side_effect = mysql.connector.Error("simulated SELECT DATABASE failure")
-    with patch("mysql.connector.connect", return_value=conn):
+    with patch.dict(os.environ, {"SIGNAL_BOT_TEST_DB_USER": "mock-user", "SIGNAL_BOT_TEST_DB_PASSWORD": "mock-password"}), \
+         patch("mysql.connector.connect", return_value=conn):
         with pytest.raises(mysql.connector.Error):
             _test_connection()
     conn.close.assert_called_once()
@@ -206,6 +206,7 @@ def _insert_test_event(conn, event_type="entry", trade_id=None):
 
 
 class TestDatabaseAuthorization:
+    @pytest.mark.db_integration
     def test_database_authorization_signal_bot_test_accepted(self):
         conn = _test_connection()
         try:
@@ -239,6 +240,7 @@ class TestAdvisoryLockOwnership:
     def test_outbox_lock_name_constant_is_authoritative_rdt_outbox_worker_lock(self):
         assert OUTBOX_LOCK_NAME == "rdt_outbox_worker_lock"
 
+    @pytest.mark.db_integration
     def test_single_session_lock_and_rejection_on_contention(self):
         conn1 = _test_connection()
         conn2 = _test_connection()
@@ -261,6 +263,7 @@ class TestAdvisoryLockOwnership:
             conn1.close()
             conn2.close()
 
+    @pytest.mark.db_integration
     def test_advisory_lock_released_when_session_closes(self):
         conn1 = _test_connection()
         conn2 = _test_connection()
@@ -285,6 +288,7 @@ class TestAdvisoryLockOwnership:
             cur_rel.close()
             conn2.close()
 
+    @pytest.mark.db_integration
     def test_standalone_vs_standalone_contention(self):
         db_cfg = _test_db_config()
         worker1 = OutboxSessionManager(db_cfg, ALLOWED_TEST_DATABASES)
@@ -300,6 +304,7 @@ class TestAdvisoryLockOwnership:
             worker1.close()
             worker2.close()
 
+    @pytest.mark.db_integration
     def test_legacy_retailbot2_dispatcher_cannot_bypass_standalone_worker(self):
         db_cfg = _test_db_config()
         standalone = OutboxSessionManager(db_cfg, ALLOWED_TEST_DATABASES)
@@ -341,6 +346,7 @@ class TestAdvisoryLockOwnership:
         finally:
             standalone.close()
 
+    @pytest.mark.db_integration
     def test_lock_loss_prevents_further_claims(self):
         db_cfg = _test_db_config()
         mgr = OutboxSessionManager(db_cfg, ALLOWED_TEST_DATABASES)
@@ -356,6 +362,7 @@ class TestAdvisoryLockOwnership:
             mgr.mark_sent(1, "fake_token")
 
 
+    @pytest.mark.db_integration
     def test_every_claim_and_transition_uses_exact_same_connection_id(self):
         conn = _test_connection()
         e1 = _insert_test_event(conn)
@@ -445,6 +452,7 @@ class TestAdvisoryLockOwnership:
         db_mgr.get_conn.assert_not_called()
         db_mgr.acquire_outbox_lock.assert_not_called()
 
+    @pytest.mark.db_integration
     def test_real_mariadb_advisory_lock_retention_during_fatal_lockout(self):
         db_cfg = _test_db_config()
         # 1. Start worker using real OutboxSessionManager connected to signal_bot_test
@@ -547,6 +555,7 @@ class TestAdvisoryLockOwnership:
                 worker_thread.join(timeout=2.0)
             worker.session_mgr.close()
 
+    @pytest.mark.db_integration
     def test_real_mariadb_advisory_lock_retained_on_actual_os_sigterm(self):
         # Start background surviving descendant in its own PGID
         bg_proc = subprocess.Popen(
@@ -680,6 +689,7 @@ sys.exit(exit_code)
         finally:
             conn.close()
 
+    @pytest.mark.db_integration
     def test_cleanup_preserves_unrelated_outbox_rows(self):
         conn = _test_connection()
         owned_id = None
@@ -725,6 +735,7 @@ sys.exit(exit_code)
                 cursor.close()
             conn.close()
 
+    @pytest.mark.db_integration
     def test_correct_token_acknowledges(self):
         conn = _test_connection()
         event_id = _insert_test_event(conn)
@@ -756,6 +767,7 @@ sys.exit(exit_code)
         finally:
             mgr.close()
 
+    @pytest.mark.db_integration
     def test_stale_token_cannot_acknowledge_retry_or_dead(self):
         conn = _test_connection()
         event_id = _insert_test_event(conn)
@@ -779,6 +791,7 @@ sys.exit(exit_code)
         finally:
             mgr.close()
 
+    @pytest.mark.db_integration
     def test_expired_lease_cannot_be_acknowledged(self):
         conn = _test_connection()
         event_id = _insert_test_event(conn)
@@ -808,6 +821,7 @@ sys.exit(exit_code)
         finally:
             mgr.close()
 
+    @pytest.mark.db_integration
     def test_new_claim_token_invalidates_previous_owner(self):
         conn = _test_connection()
         event_id = _insert_test_event(conn)
