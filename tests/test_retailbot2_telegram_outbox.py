@@ -652,3 +652,39 @@ def test_retry_outbox_event_backoff_boundaries_and_dead_letter_threshold(
     assert conn.rollbacks == 0
     assert cursor.closed is True
     assert conn.closed is True
+
+
+
+@pytest.mark.parametrize("shared_connection", [False, True])
+def test_retry_outbox_event_rejects_stale_claim_without_commit(shared_connection):
+    """A stale/lost claim must not schedule a retry or commit a state transition."""
+    cursor = Cursor(rowcount=0)
+    conn = Connection(cursor)
+    db = db_for(conn)
+    token = "h" * 32
+
+    if shared_connection:
+        result = db.retry_telegram_outbox_event(
+            5, token, 2, "temporary failure", delay=45, conn=conn
+        )
+        db.get_conn.assert_not_called()
+        assert conn.closed is False
+    else:
+        result = db.retry_telegram_outbox_event(
+            5, token, 2, "temporary failure", delay=45
+        )
+        db.get_conn.assert_called_once_with()
+        assert conn.closed is True
+
+    assert result is False
+    assert len(cursor.calls) == 1
+    sql, params = cursor.calls[0]
+    assert "SET status=%s" in sql
+    assert "next_attempt_at=DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s SECOND)" in sql
+    assert "status='processing'" in sql
+    assert "claim_token=%s" in sql
+    assert "locked_until > UTC_TIMESTAMP()" in sql
+    assert params == ("pending", 45, "temporary failure", 5, token)
+    assert conn.commits == 0
+    assert conn.rollbacks == 1
+    assert cursor.closed is True
