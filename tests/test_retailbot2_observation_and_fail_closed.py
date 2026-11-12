@@ -912,3 +912,71 @@ def test_mixed_strategy_lifecycle_queues_only_selected_telegram_alert(monkeypatc
     assert selected_outbox_inserts[0][1][1] == selected_trade_id
     assert unselected_outbox_inserts == []
 
+
+
+def test_mixed_strategy_exit_lifecycle_queues_only_selected_telegram_alert(monkeypatch):
+    """The real close path must enqueue an exit alert only for trades persisted as Telegram-selected."""
+    monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
+    monkeypatch.setenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "1")
+    monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+
+    config = BotConfig(observation_only=False)
+    selected_cursor = MockCursor()
+    selected_cursor.rowcount = 1
+    unselected_cursor = MockCursor()
+    unselected_cursor.rowcount = 1
+    selected_conn = MockConnection(selected_cursor)
+    unselected_conn = MockConnection(unselected_cursor)
+    db = make_test_db(conn=selected_conn, config=config)
+    db.get_conn = Mock(side_effect=[selected_conn, unselected_conn])
+
+    bot = object.__new__(RetailDeathTrapBot)
+    bot.logger = logging.getLogger("test.retailbot2.mixed_strategy_exit_outbox")
+    bot.config = config
+    bot.observation_only = False
+    bot._shutdown_requested = False
+    bot.db = db
+    bot.equity_shadow = 1000.0
+    bot.equity_inverse = 1000.0
+    bot.active_shadow = {
+        201: {
+            "id": 201, "symbol": "BTC/USDT", "side": "LONG",
+            "entry": 100.0, "units": 2.0, "strategy": "BB_REV",
+            "mode": "shadow", "telegram_enabled": True,
+        },
+        202: {
+            "id": 202, "symbol": "ETH/USDT", "side": "LONG",
+            "entry": 100.0, "units": 1.0, "strategy": "DBL_PAT",
+            "mode": "shadow", "telegram_enabled": False,
+        },
+    }
+    bot.active_inverse = {}
+
+    bot._close_trade(201, 110.0, "TAKE_PROFIT", "shadow")
+    bot._close_trade(202, 90.0, "STOP_LOSS", "shadow")
+
+    selected_exit_inserts = [
+        (sql, params) for sql, params in selected_cursor.calls
+        if "insert into rdt_telegram_outbox" in sql.lower()
+    ]
+    unselected_exit_inserts = [
+        (sql, params) for sql, params in unselected_cursor.calls
+        if "insert into rdt_telegram_outbox" in sql.lower()
+    ]
+
+    assert len(selected_exit_inserts) == 1
+    selected_sql, selected_params = selected_exit_inserts[0]
+    assert "values (%s, %s, 'exit'" in selected_sql.lower()
+    assert selected_params[0] == "retailbot2:exit:201"
+    assert selected_params[1] == 201
+    selected_payload = json.loads(selected_params[2])
+    assert selected_payload["reason"] == "TAKE_PROFIT"
+    assert selected_payload["exit_price"] == 110.0
+    assert unselected_exit_inserts == []
+
+    assert selected_conn.commits == 1
+    assert unselected_conn.commits == 1
+    assert 201 not in bot.active_shadow
+    assert 202 not in bot.active_shadow
+    assert bot.equity_shadow == 1010.0
+    assert bot.equity_inverse == 1000.0
