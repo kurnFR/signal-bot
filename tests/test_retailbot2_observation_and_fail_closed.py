@@ -825,3 +825,89 @@ def test_open_trade_fails_closed_when_trading_unauthorized(monkeypatch):
     assert result is None
     bot.db.save_trade.assert_not_called()
 
+def test_mixed_strategy_lifecycle_queues_only_selected_telegram_alert(monkeypatch):
+    """The real worker entry path must queue an alert only for the strategy whose saved lifecycle flag is on."""
+    monkeypatch.setenv("RETAILBOT2_ALLOW_TRADING", "1")
+    monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
+    monkeypatch.setenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "1")
+    monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+
+    config = BotConfig(allow_trading=True, observation_only=False)
+    selected_cursor = MockCursor(lastrowid=101)
+    unselected_cursor = MockCursor(lastrowid=102)
+    selected_conn = MockConnection(selected_cursor)
+    unselected_conn = MockConnection(unselected_cursor)
+    db = make_test_db(conn=selected_conn, config=config)
+    db.get_conn = Mock(side_effect=[selected_conn, unselected_conn])
+    db.get_strategy_lifecycle_settings = Mock(return_value=[
+        {
+            "strategy_id": "BB_REV", "mode": "shadow",
+            "evaluation_enabled": 1, "paper_enabled": 1,
+            "telegram_enabled": 1, "report_enabled": 1,
+            "auto_promote_enabled": 0,
+        },
+        {
+            "strategy_id": "DBL_PAT", "mode": "shadow",
+            "evaluation_enabled": 1, "paper_enabled": 1,
+            "telegram_enabled": 0, "report_enabled": 1,
+            "auto_promote_enabled": 0,
+        },
+    ])
+
+    bot = object.__new__(RetailDeathTrapBot)
+    bot.logger = logging.getLogger("test.retailbot2.mixed_strategy_outbox")
+    bot.config = config
+    bot.observation_only = False
+    bot.trading_enabled = True
+    bot._shutdown_requested = False
+    bot.db = db
+    bot.equity_shadow = config.initial_capital
+    bot.equity_inverse = config.initial_capital
+    bot.active_shadow = {}
+    bot.active_inverse = {}
+    bot.last_trade_time = {}
+    bot.strategy_lifecycle = {}
+    bot._strategy_lifecycle_initialized = False
+    bot._strategy_lifecycle_reload_at = 0.0
+    bot._strategy_lifecycle_unavailable = False
+    bot._can_open = Mock(return_value=(True, "OK"))
+
+    def signal(strategy_id, symbol):
+        return {
+            "symbol": symbol, "side": "LONG", "entry": 100.0,
+            "stop": 95.0, "target": 110.0, "atr": 2.0, "rr": 2.0,
+            "strategy": strategy_id, "strategies_triggered": [strategy_id],
+            "confluence_score": 1, "reason": "mixed-strategy lifecycle test",
+        }
+
+    selected_trade_id = bot._open_trade(signal("BB_REV", "BTC/USDT"), "shadow")
+    unselected_trade_id = bot._open_trade(signal("DBL_PAT", "ETH/USDT"), "shadow")
+
+    assert selected_trade_id == 101
+    assert unselected_trade_id == 102
+    db.get_strategy_lifecycle_settings.assert_called_once()
+
+    selected_trade_insert = next(
+        params for sql, params in selected_cursor.calls
+        if "INSERT INTO rdt_trades" in sql.lower()
+    )
+    unselected_trade_insert = next(
+        params for sql, params in unselected_cursor.calls
+        if "INSERT INTO rdt_trades" in sql.lower()
+    )
+    assert selected_trade_insert[11] is True
+    assert unselected_trade_insert[11] is False
+
+    selected_outbox_inserts = [
+        (sql, params) for sql, params in selected_cursor.calls
+        if "INSERT INTO rdt_telegram_outbox" in sql.lower()
+    ]
+    unselected_outbox_inserts = [
+        (sql, params) for sql, params in unselected_cursor.calls
+        if "INSERT INTO rdt_telegram_outbox" in sql.lower()
+    ]
+    assert len(selected_outbox_inserts) == 1
+    assert selected_outbox_inserts[0][1][0] == "retailbot2:entry:101"
+    assert selected_outbox_inserts[0][1][1] == selected_trade_id
+    assert unselected_outbox_inserts == []
+
