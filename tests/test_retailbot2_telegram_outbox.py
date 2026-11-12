@@ -450,3 +450,27 @@ def test_exit_commit_failure_keeps_active_trade_and_equity_unchanged():
     assert bot.equity_inverse == 1000.0
     bot.logger.error.assert_called_once()
     assert "close persistence failed" in bot.logger.error.call_args[0][0]
+
+@pytest.mark.parametrize("operation", ["acknowledge", "retry"])
+def test_outbox_state_update_commit_failure_rolls_back_and_returns_false(operation):
+    """A failed outbox state commit is reported, with rollback attempted."""
+    cursor = Cursor()
+    conn = Connection(cursor, fail_commit=True)
+    db = db_for(conn)
+
+    if operation == "acknowledge":
+        result = db.mark_telegram_outbox_sent(5, "a" * 32)
+        assert "SET status='sent'" in cursor.calls[0][0]
+    else:
+        result = db.retry_telegram_outbox_event(
+            5, "a" * 32, 1, "temporary failure"
+        )
+        assert "SET status=%s" in cursor.calls[0][0]
+        assert cursor.calls[0][1][0] == "pending"
+
+    assert result is False
+    assert len(cursor.calls) == 1
+    assert conn.commits == 1
+    assert conn.rollbacks == 1
+    assert cursor.closed is True
+    assert conn.closed is True
