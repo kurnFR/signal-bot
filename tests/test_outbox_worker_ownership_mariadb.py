@@ -85,6 +85,36 @@ def _test_connection():
         raise
 
 
+@pytest.mark.parametrize(
+    ("errno", "should_skip"),
+    [
+        (2003, True),   # Connection refused / isolated DB unavailable
+        (1045, False),  # Access denied must fail, not silently skip
+    ],
+)
+def test_test_connection_skips_only_network_unreachable_errors(errno, should_skip):
+    error = mysql.connector.Error("simulated connector failure")
+    error.errno = errno
+    with patch("mysql.connector.connect", side_effect=error):
+        if should_skip:
+            with pytest.raises(pytest.skip.Exception):
+                _test_connection()
+        else:
+            with pytest.raises(mysql.connector.Error):
+                _test_connection()
+
+
+def test_test_connection_query_failure_is_not_skipped():
+    conn = Mock()
+    cursor = Mock()
+    conn.cursor.return_value = cursor
+    cursor.execute.side_effect = mysql.connector.Error("simulated SELECT DATABASE failure")
+    with patch("mysql.connector.connect", return_value=conn):
+        with pytest.raises(mysql.connector.Error):
+            _test_connection()
+    conn.close.assert_called_once()
+
+
 TEST_EVENT_KEY_PREFIX = "test:retailbot2_outbox_worker_ownership:"
 
 
