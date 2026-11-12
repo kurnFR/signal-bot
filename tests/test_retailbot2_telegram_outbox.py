@@ -407,3 +407,46 @@ def test_entry_commit_failure_returns_none_and_attempts_rollback():
     assert conn.commits == 1
     assert conn.rollbacks == 1
     assert conn.closed is True
+
+def test_exit_commit_failure_keeps_active_trade_and_equity_unchanged():
+    """A failed exit commit must not mutate in-memory trade or equity state."""
+    cursor = Cursor()
+    conn = Connection(cursor, fail_commit=True)
+    db = db_for(conn)
+
+    bot = object.__new__(RetailDeathTrapBot)
+    bot.logger = Mock()
+    bot.observation_only = False
+    bot._shutdown_requested = False
+    bot.db = db
+    bot.equity_shadow = 1000.0
+    bot.equity_inverse = 1000.0
+    trade = {
+        "id": 78,
+        "symbol": "BTC/USDT",
+        "side": "LONG",
+        "entry": 100.0,
+        "units": 2.0,
+        "strategy": "BB_REV",
+        "mode": "shadow",
+        "telegram_enabled": True,
+    }
+    bot.active_shadow = {78: trade}
+    bot.active_inverse = {}
+
+    bot._close_trade(78, 110.0, "TAKE_PROFIT", "shadow")
+
+    assert len(cursor.calls) == 3
+    assert "UPDATE rdt_trades" in cursor.calls[0][0]
+    assert "INSERT INTO rdt_strategy_stats" in cursor.calls[1][0]
+    assert "INSERT INTO rdt_telegram_outbox" in cursor.calls[2][0]
+    assert cursor.calls[2][1][0] == "retailbot2:exit:78"
+    assert conn.commits == 1
+    assert conn.rollbacks == 1
+    assert conn.closed is True
+    assert cursor.closed is True
+    assert bot.active_shadow == {78: trade}
+    assert bot.equity_shadow == 1000.0
+    assert bot.equity_inverse == 1000.0
+    bot.logger.error.assert_called_once()
+    assert "close persistence failed" in bot.logger.error.call_args[0][0]
