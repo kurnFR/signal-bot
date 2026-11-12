@@ -16,6 +16,7 @@ import threading
 import time
 import unittest
 import uuid
+import pytest
 from unittest.mock import patch, Mock
 from fastapi.testclient import TestClient
 
@@ -35,13 +36,30 @@ from web.auth import create_access_token, hash_password
 import web.routes.auth_routes as auth_routes
 
 
+pytestmark = pytest.mark.db_integration
+
+
 class TestMariaDBUserManagementConcurrency(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # Require explicit test-only credentials; never inherit generic/production credentials.
+        test_db_user = os.getenv("SIGNAL_BOT_TEST_DB_USER", "").strip()
+        test_db_password = os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", "")
+        if not test_db_user or not test_db_password:
+            raise unittest.SkipTest(
+                "Live MariaDB concurrency tests require explicit SIGNAL_BOT_TEST_DB_USER and "
+                "SIGNAL_BOT_TEST_DB_PASSWORD; no fallback credentials are permitted."
+            )
+        os.environ["MYSQL_USER"] = test_db_user
+        os.environ["MYSQL_PASSWORD"] = test_db_password
         # Mandatory database isolation guard: enforce signal_bot_test authorization
         os.environ["MYSQL_DATABASE"] = "signal_bot_test"
         config.MYSQL_CONFIG["database"] = "signal_bot_test"
+        config.MYSQL_CONFIG["user"] = test_db_user
+        config.MYSQL_CONFIG["password"] = test_db_password
         config.RETAILBOT2_DB_CONFIG["database"] = "signal_bot_test"
+        config.RETAILBOT2_DB_CONFIG["user"] = test_db_user
+        config.RETAILBOT2_DB_CONFIG["password"] = test_db_password
         db_module._pool = None
         db_module._retailbot2_pool = None
 

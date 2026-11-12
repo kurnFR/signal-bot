@@ -4,6 +4,7 @@ import pytest
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_flag_io: exercise the emergency-stop flag's real database I/O")
+    config.addinivalue_line("markers", "db_integration: requires an isolated MariaDB test database")
 
 
 @pytest.fixture(autouse=True)
