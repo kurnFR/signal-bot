@@ -914,7 +914,6 @@ def test_mixed_strategy_lifecycle_queues_only_selected_telegram_alert(monkeypatc
 
 
 
-
 def test_mixed_strategy_exit_lifecycle_queues_only_selected_telegram_alert(monkeypatch):
     """The real close path must enqueue an exit alert only for trades persisted as Telegram-selected."""
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
