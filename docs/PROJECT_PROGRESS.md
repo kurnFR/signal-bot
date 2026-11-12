@@ -12,7 +12,7 @@
 - **Dual-Gate Authorization:** Enforced independent explicit authorization (`RETAILBOT2_ALLOW_TRADING=1`) AND database control (`bot_control.enabled=1`).
 - **Observation Dominance & Fences:** `RETAILBOT2_OBSERVATION_ONLY` strictly dominates trading settings. Mutation fences added to `_open_trade()` and `save_trade()`.
 - **Dynamic Revocation:** `_reload_control()` immediately halts and revokes trading on unauthorized status change.
-- **Status:** **APPROVED (PASS)** by Antigravity Reviewer. 46 new/updated tests passing.
+- **Status:** **RE-REVIEW REQUIRED** after an independent review found unsafe table-wide cleanup and over-broad DB connection skips in the MariaDB integration tests. Corrective PR narrows cleanup to suite-owned test rows and makes auth/schema/configuration failures fail rather than skip; approval remains pending exact-commit re-review and DB rerun.
 
 #### 2. Phase 2 — Startup and Deployment Safety (`5b24ed3`)
 - **Safe Supervisor Baseline:** `run_all.py` strictly restricts default process set to Phase 2A (`web_server`, `collectors`, `screener`, `wallet_tracker`).
