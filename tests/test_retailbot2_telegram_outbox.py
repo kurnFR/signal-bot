@@ -322,3 +322,44 @@ def test_exit_outbox_failure_keeps_active_trade_and_equity_unchanged(monkeypatch
     assert bot.equity_inverse == 1000.0
     bot.logger.error.assert_called_once()
     assert "close persistence failed" in bot.logger.error.call_args[0][0]
+
+def test_exit_trade_update_requires_exactly_one_open_row():
+    cursor = Cursor(rowcount=0)
+    conn = Connection(cursor)
+    db = db_for(conn)
+    alert = {
+        "telegram_enabled": True, "trade": {"id": 7},
+        "exit_price": 110.0, "reason": "TAKE_PROFIT",
+        "pnl": 20.0, "pnl_pct": 10.0,
+    }
+
+    assert not db.close_trade_and_update_stats(
+        7, 110.0, "TAKE_PROFIT", 20.0, 10.0, "BB_REV", "shadow",
+        exit_alert=alert,
+    )
+    assert len(cursor.calls) == 1
+    assert "UPDATE rdt_trades" in cursor.calls[0][0]
+    assert conn.commits == 0
+    assert conn.rollbacks == 1
+
+
+def test_exit_stats_failure_rolls_back_before_outbox_enqueue():
+    cursor = Cursor(fail_on=2)
+    conn = Connection(cursor)
+    db = db_for(conn)
+    alert = {
+        "telegram_enabled": True, "trade": {"id": 7},
+        "exit_price": 110.0, "reason": "TAKE_PROFIT",
+        "pnl": 20.0, "pnl_pct": 10.0,
+    }
+
+    assert not db.close_trade_and_update_stats(
+        7, 110.0, "TAKE_PROFIT", 20.0, 10.0, "BB_REV", "shadow",
+        exit_alert=alert,
+    )
+    assert len(cursor.calls) == 2
+    assert "UPDATE rdt_trades" in cursor.calls[0][0]
+    assert "INSERT INTO rdt_strategy_stats" in cursor.calls[1][0]
+    assert all("INSERT INTO rdt_telegram_outbox" not in sql for sql, _ in cursor.calls)
+    assert conn.commits == 0
+    assert conn.rollbacks == 1
