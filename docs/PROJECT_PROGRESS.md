@@ -1,5 +1,29 @@
 # Project Progress, Completion Status, and Roadmap
 
+### Production Roadmap Phase 1 & Phase 2 Verification — 2026-11-12
+
+**Master Commits:** `b89d3f1` (Phase 1), `5b24ed3` (Phase 2)  
+**Full Report:** [docs/PHASE_1_AND_PHASE_2_EXECUTION_AND_REVIEW_REPORT.md](PHASE_1_AND_PHASE_2_EXECUTION_AND_REVIEW_REPORT.md)  
+**Runbook:** [docs/DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md](DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md)
+
+#### 1. Phase 1 — Closed Critical Production Safety Gaps (`b89d3f1`)
+- **RetailBot2 Control Defaults:** Fixed migration 022 schema default and seed to `enabled = FALSE`. Added migration `028_retailbot2_safe_control_defaults` altering table defaults and resetting legacy `bot_control` row 1.
+- **Runtime Transition Defense:** Handled legacy seed signature (`enabled=1` and `overrides_json IS NULL`) fail-safe in `db/db.py` and `paper/retailbot2.py`.
+- **Dual-Gate Authorization:** Enforced independent explicit authorization (`RETAILBOT2_ALLOW_TRADING=1`) AND database control (`bot_control.enabled=1`).
+- **Observation Dominance & Fences:** `RETAILBOT2_OBSERVATION_ONLY` strictly dominates trading settings. Mutation fences added to `_open_trade()` and `save_trade()`.
+- **Dynamic Revocation:** `_reload_control()` immediately halts and revokes trading on unauthorized status change.
+- **Status:** **APPROVED (PASS)** by Antigravity Reviewer. 46 new/updated tests passing.
+
+#### 2. Phase 2 — Startup and Deployment Safety (`5b24ed3`)
+- **Safe Supervisor Baseline:** `run_all.py` strictly restricts default process set to Phase 2A (`web_server`, `collectors`, `screener`, `wallet_tracker`).
+- **Independent Subsystem Opt-Ins:** Added strict opt-ins for `paper_engine`, `news_ai`, `retailbot2`, and `retailbot2_outbox` with defensive `(env.get(...) or "").strip() == "1"` parsing protecting against `None` values.
+- **Fail-Closed Migrations:** Automatic migrations disabled by default (`SIGNAL_BOT_AUTO_MIGRATE=1` required). Supervisor executes `_shutdown_all()` and exits 1 on migration failure.
+- **Shutdown Resilience:** Signals `SIGTERM`/`SIGINT` trapped and escalated to `SIGKILL` after 10s grace, refusing `SIGKILL` for outbox worker to preserve MariaDB advisory locks.
+- **Operational Runbook:** Authored `docs/DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md` with pre-flight checklists, health endpoints, failure recovery, and rollback procedures.
+- **Status:** **APPROVED (PASS)** by Antigravity Reviewer. 17 new recovery tests passing, 1,395 full-suite non-DB tests passing.
+
+---
+
 ### Latest UIX migration verification — 2026-10-27
 
 **Master reviewed:** `bb6dd13abb4657aff58095ea6ff13c91ac2e3122`

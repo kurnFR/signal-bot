@@ -129,6 +129,8 @@ See [docs/STRATEGIES.md](docs/STRATEGIES.md) for the validation workflow (the ho
 | [docs/SECURITY.md](docs/SECURITY.md) | Authentication, roles, hardening notes |
 | [docs/STATUS.md](docs/STATUS.md) | What is implemented, and the verified open gaps |
 | [docs/PROJECT_PROGRESS.md](docs/PROJECT_PROGRESS.md) | Progress summary, completion status, and prioritized roadmap |
+| [docs/DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md](docs/DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md) | Production operations, startup, verification, and rollback runbook |
+| [docs/PHASE_1_AND_PHASE_2_EXECUTION_AND_REVIEW_REPORT.md](docs/PHASE_1_AND_PHASE_2_EXECUTION_AND_REVIEW_REPORT.md) | Production readiness roadmap: Phase 1 & 2 execution, hardening, and QA review report |
 
 ## Tests
 
