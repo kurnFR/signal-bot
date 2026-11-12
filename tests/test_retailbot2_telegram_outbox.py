@@ -35,8 +35,9 @@ class Cursor:
 
 
 class Connection:
-    def __init__(self, cursor):
+    def __init__(self, cursor, *, fail_commit=False):
         self.cur = cursor
+        self.fail_commit = fail_commit
         self.commits = 0
         self.rollbacks = 0
         self.closed = False
@@ -46,6 +47,8 @@ class Connection:
 
     def commit(self):
         self.commits += 1
+        if self.fail_commit:
+            raise RuntimeError("simulated commit failure")
 
     def rollback(self):
         self.rollbacks += 1
@@ -382,3 +385,25 @@ def test_entry_trade_insert_failure_stops_before_outbox_enqueue():
     assert all("INSERT INTO rdt_telegram_outbox" not in sql for sql, _ in cursor.calls)
     assert conn.commits == 0
     assert conn.rollbacks == 1
+
+
+def test_entry_commit_failure_returns_none_and_attempts_rollback():
+    cursor = Cursor(lastrowid=456)
+    conn = Connection(cursor, fail_commit=True)
+    db = db_for(conn)
+    signal = {
+        "symbol": "BTC/USDT", "side": "LONG", "entry": 100.0,
+        "stop": 95.0, "target": 110.0, "atr": 2.0, "rr": 2.0,
+        "telegram_enabled": True,
+    }
+
+    assert db.save_trade(
+        signal, 2.0, "shadow", entry_alert={"signal": {"symbol": "BTC/USDT"}}
+    ) is None
+    assert len(cursor.calls) == 2
+    assert "INSERT INTO rdt_trades" in cursor.calls[0][0]
+    assert "INSERT INTO rdt_telegram_outbox" in cursor.calls[1][0]
+    assert cursor.calls[1][1][0] == "retailbot2:entry:456"
+    assert conn.commits == 1
+    assert conn.rollbacks == 1
+    assert conn.closed is True
