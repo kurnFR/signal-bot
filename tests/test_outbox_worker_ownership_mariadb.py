@@ -35,6 +35,8 @@ from paper.retailbot2 import (
 )
 
 
+pytestmark = pytest.mark.db_integration
+
 TEST_DB_HOST = "127.0.0.1"
 TEST_DB_PORT = 3306
 TEST_DB_NAME = "signal_bot_test"
@@ -44,13 +46,20 @@ def _test_db_config():
     return {
         "host": TEST_DB_HOST,
         "port": TEST_DB_PORT,
-        "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", os.getenv("MYSQL_USER", "cms")).strip(),
-        "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", os.getenv("MYSQL_PASSWORD", "")),
+        "user": os.getenv("SIGNAL_BOT_TEST_DB_USER", "").strip(),
+        "password": os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""),
         "database": TEST_DB_NAME,
     }
 
 
 def _test_connection():
+    # Never fall back to generic/production credentials. Missing explicit test
+    # credentials mean the live integration test is not runnable in this shell.
+    if not os.getenv("SIGNAL_BOT_TEST_DB_USER", "").strip() or not os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", ""):
+        pytest.skip(
+            "Live MariaDB integration requires explicit SIGNAL_BOT_TEST_DB_USER and "
+            "SIGNAL_BOT_TEST_DB_PASSWORD; no fallback credentials are permitted."
+        )
     cfg = _test_db_config()
     try:
         conn = mysql.connector.connect(
