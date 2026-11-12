@@ -14,7 +14,10 @@ from web.auth import create_access_token
 
 class TestUserManagementSecurity(unittest.TestCase):
     def setUp(self):
+        self._revocation_patcher = patch("web.auth.is_token_revoked", return_value=False)
+        self._revocation_patcher.start()
         self.client = TestClient(app, raise_server_exceptions=False)
+        self.addCleanup(self._revocation_patcher.stop)
         self.admin_token = create_access_token(user_id=1, username="admin", role="admin")
         self.trader_token = create_access_token(user_id=2, username="trader_joe", role="trader")
         self.viewer_token = create_access_token(user_id=3, username="viewer_bob", role="viewer")
