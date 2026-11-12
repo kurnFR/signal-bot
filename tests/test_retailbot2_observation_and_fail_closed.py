@@ -889,22 +889,22 @@ def test_mixed_strategy_lifecycle_queues_only_selected_telegram_alert(monkeypatc
 
     selected_trade_insert = next(
         params for sql, params in selected_cursor.calls
-        if "INSERT INTO rdt_trades" in sql.lower()
+        if "insert into rdt_trades" in sql.lower()
     )
     unselected_trade_insert = next(
         params for sql, params in unselected_cursor.calls
-        if "INSERT INTO rdt_trades" in sql.lower()
+        if "insert into rdt_trades" in sql.lower()
     )
     assert selected_trade_insert[11] is True
     assert unselected_trade_insert[11] is False
 
     selected_outbox_inserts = [
         (sql, params) for sql, params in selected_cursor.calls
-        if "INSERT INTO rdt_telegram_outbox" in sql.lower()
+        if "insert into rdt_telegram_outbox" in sql.lower()
     ]
     unselected_outbox_inserts = [
         (sql, params) for sql, params in unselected_cursor.calls
-        if "INSERT INTO rdt_telegram_outbox" in sql.lower()
+        if "insert into rdt_telegram_outbox" in sql.lower()
     ]
     assert len(selected_outbox_inserts) == 1
     assert selected_outbox_inserts[0][1][0] == "retailbot2:entry:101"
