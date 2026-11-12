@@ -363,3 +363,22 @@ def test_exit_stats_failure_rolls_back_before_outbox_enqueue():
     assert all("INSERT INTO rdt_telegram_outbox" not in sql for sql, _ in cursor.calls)
     assert conn.commits == 0
     assert conn.rollbacks == 1
+
+def test_entry_trade_insert_failure_stops_before_outbox_enqueue():
+    cursor = Cursor(lastrowid=123, fail_on=1)
+    conn = Connection(cursor)
+    db = db_for(conn)
+    signal = {
+        "symbol": "BTC/USDT", "side": "LONG", "entry": 100.0,
+        "stop": 95.0, "target": 110.0, "atr": 2.0, "rr": 2.0,
+        "telegram_enabled": True,
+    }
+
+    assert db.save_trade(
+        signal, 2.0, "shadow", entry_alert={"signal": {"symbol": "BTC/USDT"}}
+    ) is None
+    assert len(cursor.calls) == 1
+    assert "INSERT INTO rdt_trades" in cursor.calls[0][0]
+    assert all("INSERT INTO rdt_telegram_outbox" not in sql for sql, _ in cursor.calls)
+    assert conn.commits == 0
+    assert conn.rollbacks == 1
