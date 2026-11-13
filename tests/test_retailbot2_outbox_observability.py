@@ -16,6 +16,7 @@ import os
 import sys
 import unittest
 import uuid
+from unittest.mock import patch
 
 import mysql.connector
 
@@ -28,16 +29,20 @@ TEST_DB_HOST = "127.0.0.1"
 TEST_DB_PORT = 3306
 TEST_DB_NAME = "signal_bot_test"
 TEST_DB_USER = os.getenv("SIGNAL_BOT_TEST_DB_USER", "signal_bot_test")
-TEST_DB_PASSWORD = os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", "3XWMDvCqj9hWb1kc65LU321RG28mSSB3l9_Li7CLRxw")
+TEST_DB_PASSWORD = os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", "")
 
 
 def _get_test_conn():
+    user = os.getenv("SIGNAL_BOT_TEST_DB_USER", "signal_bot_test").strip()
+    pwd = os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", "").strip()
+    if not pwd:
+        raise RuntimeError("SIGNAL_BOT_TEST_DB_PASSWORD is required for integration tests; no fallback permitted")
     conn = mysql.connector.connect(
         host=TEST_DB_HOST,
         port=TEST_DB_PORT,
         database=TEST_DB_NAME,
-        user=TEST_DB_USER,
-        password=TEST_DB_PASSWORD,
+        user=user,
+        password=pwd,
         autocommit=False,
     )
     cur = conn.cursor()
@@ -201,6 +206,34 @@ class TestOutboxObservability(unittest.TestCase):
 
         self.assertEqual(outbox_before, outbox_after, "Outbox table mutated by health inspection!")
         self.assertEqual(trades_before, trades_after, "Trades table mutated by health inspection!")
+
+
+class TestTestDBCredentialSecurity(unittest.TestCase):
+    """Verify that test database credentials fail closed when missing or empty."""
+
+    def test_missing_password_fails_closed(self):
+        """Missing SIGNAL_BOT_TEST_DB_PASSWORD raises RuntimeError without falling back to any secret."""
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(RuntimeError) as ctx:
+                _get_test_conn()
+            self.assertIn("SIGNAL_BOT_TEST_DB_PASSWORD is required", str(ctx.exception))
+
+    def test_empty_password_fails_closed(self):
+        """Empty SIGNAL_BOT_TEST_DB_PASSWORD raises RuntimeError without selecting another credential."""
+        with patch.dict(os.environ, {"SIGNAL_BOT_TEST_DB_PASSWORD": ""}):
+            with self.assertRaises(RuntimeError) as ctx:
+                _get_test_conn()
+            self.assertIn("SIGNAL_BOT_TEST_DB_PASSWORD is required", str(ctx.exception))
+
+    def test_production_credentials_never_used_as_fallback(self):
+        """Even if production MYSQL_PASSWORD or MYSQL_DATABASE is set, _get_test_conn never connects to production."""
+        with patch.dict(os.environ, {
+            "SIGNAL_BOT_TEST_DB_PASSWORD": "",
+            "MYSQL_DATABASE": "crypto_signals",
+            "MYSQL_PASSWORD": "some_production_password",
+        }):
+            with self.assertRaises(RuntimeError):
+                _get_test_conn()
 
 
 if __name__ == "__main__":
