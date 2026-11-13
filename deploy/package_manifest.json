@@ -2,14 +2,14 @@
   "version": "1.0.0",
   "stage": "F",
   "files": {
-    "deploy/systemd/retailbot2-outbox-worker.service": "789d49c038515d35e786314ba75be4085d957597a47ef1a92791fdf17387805c",
-    "deploy/env/outbox-worker.env.example": "2a60f7701136a5adbeb48e66aa70b9a152873dda07c4bcce843cd791752c39d5",
+    "deploy/systemd/retailbot2-outbox-worker.service": "35b76b4c545f36ba70229472abbf1dc2567c0c9f9cf0092fa238edce85bd7f29",
+    "deploy/env/outbox-worker.env.example": "d157da69214647835b540fb56b2238b2290d1215a63ff52aaadd16bc06038051",
     "deploy/requirements-worker.txt": "597580c344905b902d0d7ca7f9e17041561e655ec97029288f2d516370f844fa",
-    "paper/outbox_worker.py": "6e58d6645f505aded8273079e3ee5e2d679e312325ed978db598bee712a7d833",
+    "paper/outbox_worker.py": "9c6c70e59ce4127263be5f8ff3fa258cd88b120c8ce2e4f6b43bcfee6035b53f",
     "paper/outbox_transport.py": "3b8f8c729970190bb0ceb745f5caa8f4b303cd4aaad75f697467a76e7259649b",
     "paper/outbox_health.py": "496f13f777eb1029d94b9232321da6e0061691c9923bd807a3c59df92e024091",
     "paper/outbox_retention.py": "724819ab3242589937b620335eddcd9e570676377239ee459bf279c32a644f61",
-    "docs/RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md": "e01d694f186c4d526ba75b35be21d6af2b4cd3a8cf34e7f74ff21d9432df2b3e",
+    "docs/RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md": "a8376cf29c0ce83f298bdfabe9761738e2fae702b2d02c51c688e1c0280fb259",
     "docs/RETAILBOT2_AND_MODERN_UI_RELEASE_GATES.md": "4bca873d896aacc0ffab88b364cdb34f23984b01c761d32d99d15e65b7edced4"
   }
 }

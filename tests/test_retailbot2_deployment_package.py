@@ -235,3 +235,36 @@ def test_verify_deployment_package_detects_tampered_artifact(tmp_path):
     assert len(report["checks"]["manifest_verification"]["mismatches"]) > 0
     assert target_key in report["checks"]["manifest_verification"]["mismatches"][0]
 
+
+def test_observation_disabled_startup_fails_closed():
+    """Verify that when observation flag is 0, credential resolution raises ValueError."""
+    from unittest.mock import patch
+    from paper.outbox_worker import resolve_worker_db_credentials
+    with patch.dict(os.environ, {"RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED": "0"}, clear=False):
+        with pytest.raises(ValueError) as excinfo:
+            resolve_worker_db_credentials("crypto_signals", observation=True)
+        assert "RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1 is required" in str(excinfo.value)
+
+
+def test_service_observation_and_env_fail_closed_contract():
+    """Verify service unit specifies --observation and env template leaves all authorizations disabled."""
+    service_file = REPO_ROOT / "deploy/systemd/retailbot2-outbox-worker.service"
+    service_text = service_file.read_text(encoding="utf-8")
+    assert "--observation" in service_text
+
+    env_file = REPO_ROOT / "deploy/env/outbox-worker.env.example"
+    env_text = env_file.read_text(encoding="utf-8")
+    lines = [l.strip() for l in env_text.splitlines() if l.strip() and not l.startswith("#")]
+    vars_dict = dict(l.split("=", 1) for l in lines if "=" in l)
+    assert vars_dict.get("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED") == "0"
+    assert vars_dict.get("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY") == "0"
+
+
+def test_runbook_observation_contract_documentation():
+    """Verify runbook explicitly documents the fail-closed observation deployment contract."""
+    runbook_file = REPO_ROOT / "docs/RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md"
+    runbook_text = runbook_file.read_text(encoding="utf-8")
+    assert "RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=0" in runbook_text
+    assert "merely to make health checks or observation work" in runbook_text
+
+

@@ -226,6 +226,105 @@ class TestWorkerLifecycleSimulation(unittest.TestCase):
                 resolve_worker_db_credentials("crypto_signals", observation=True)
             self.assertIn("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1 is required", str(ctx.exception))
 
+    def test_production_health_without_observation_fails_closed(self):
+        """Production --health without --observation fails closed without requesting delivery authorization."""
+        from paper.outbox_worker import main
+        with patch.dict(os.environ, {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "0"}, clear=False):
+            with patch("sys.argv", ["outbox_worker", "--database", "crypto_signals", "--health"]):
+                with self.assertLogs("outbox_worker", level="ERROR") as log_ctx:
+                    with self.assertRaises(SystemExit) as ctx:
+                        main()
+                self.assertEqual(ctx.exception.code, 1)
+                log_text = "\n".join(log_ctx.output)
+                self.assertIn("Production health inspection is read-only and requires --observation mode", log_text)
+                self.assertNotIn("requires RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1", log_text)
+
+    def test_production_health_with_observation_uses_dedicated_obs_credentials(self):
+        """Production --health --observation resolves only dedicated observation credentials."""
+        from paper.outbox_worker import main
+        fake_conn = MagicMock()
+        with patch.dict(os.environ, {
+            "RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED": "1",
+            "RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER": "obs_usr_mock",
+            "RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD": "obs_pwd_mock",
+            "MYSQL_USER": "delivery_user_forbidden",
+            "MYSQL_PASSWORD": "delivery_password_forbidden",
+        }, clear=False):
+            with patch("sys.argv", ["outbox_worker", "--database", "crypto_signals", "--health", "--observation"]):
+                with patch("mysql.connector.connect", return_value=fake_conn) as mock_connect:
+                    with patch("paper.outbox_health.inspect_outbox_health", return_value={"health_status": "HEALTHY"}):
+                        with patch("builtins.print"):
+                            with self.assertRaises(SystemExit) as ctx:
+                                main()
+                        self.assertEqual(ctx.exception.code, 0)
+                        mock_connect.assert_called_once()
+                        conn_kwargs = mock_connect.call_args[1]
+                        self.assertEqual(conn_kwargs["user"], "obs_usr_mock")
+                        self.assertEqual(conn_kwargs["password"], "obs_pwd_mock")
+                        self.assertNotEqual(conn_kwargs["user"], "delivery_user_forbidden")
+
+    def test_production_health_never_consults_delivery_credentials(self):
+        """Production health inspection fails closed if observation credentials missing, ignoring delivery credentials."""
+        from paper.outbox_worker import main
+        with patch.dict(os.environ, {
+            "RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED": "0",
+            "MYSQL_USER": "delivery_user_forbidden",
+            "MYSQL_PASSWORD": "delivery_password_forbidden",
+        }, clear=False):
+            with patch("sys.argv", ["outbox_worker", "--database", "crypto_signals", "--health", "--observation"]):
+                with self.assertRaises(SystemExit) as ctx:
+                    main()
+                self.assertEqual(ctx.exception.code, 1)
+
+    def test_test_db_health_uses_dedicated_test_credentials(self):
+        """Test database health inspection uses SIGNAL_BOT_TEST_DB_USER and SIGNAL_BOT_TEST_DB_PASSWORD."""
+        from paper.outbox_worker import main
+        fake_conn = MagicMock()
+        with patch.dict(os.environ, {
+            "SIGNAL_BOT_TEST_DB_USER": "test_db_user_mock",
+            "SIGNAL_BOT_TEST_DB_PASSWORD": "test_db_pwd_mock",
+            "MYSQL_USER": "cms_fallback_forbidden",
+            "MYSQL_PASSWORD": "cms_fallback_forbidden",
+        }, clear=False):
+            with patch("sys.argv", ["outbox_worker", "--database", "signal_bot_test", "--health"]):
+                with patch("mysql.connector.connect", return_value=fake_conn) as mock_connect:
+                    with patch("paper.outbox_health.inspect_outbox_health", return_value={"health_status": "HEALTHY"}):
+                        with patch("builtins.print"):
+                            with self.assertRaises(SystemExit) as ctx:
+                                main()
+                        self.assertEqual(ctx.exception.code, 0)
+                        conn_kwargs = mock_connect.call_args[1]
+                        self.assertEqual(conn_kwargs["user"], "test_db_user_mock")
+                        self.assertEqual(conn_kwargs["password"], "test_db_pwd_mock")
+
+    def test_health_mode_does_not_instantiate_worker(self):
+        """Health mode exits before OutboxWorker is instantiated or run."""
+        from paper.outbox_worker import main
+        fake_conn = MagicMock()
+        with patch.dict(os.environ, {
+            "SIGNAL_BOT_TEST_DB_USER": "test_user",
+            "SIGNAL_BOT_TEST_DB_PASSWORD": "test_pwd",
+        }, clear=False):
+            with patch("sys.argv", ["outbox_worker", "--database", "signal_bot_test", "--health"]):
+                with patch("mysql.connector.connect", return_value=fake_conn):
+                    with patch("paper.outbox_health.inspect_outbox_health", return_value={"health_status": "HEALTHY"}):
+                        with patch("builtins.print"):
+                            with patch("paper.outbox_worker.OutboxWorker") as mock_worker_cls:
+                                with self.assertRaises(SystemExit) as ctx:
+                                    main()
+                                self.assertEqual(ctx.exception.code, 0)
+                                mock_worker_cls.assert_not_called()
+
+    def test_normal_delivery_requires_explicit_delivery_authorization(self):
+        """Production worker without --observation and without --health requires RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1."""
+        from paper.outbox_worker import main
+        with patch.dict(os.environ, {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "0"}, clear=False):
+            with patch("sys.argv", ["outbox_worker", "--database", "crypto_signals"]):
+                with self.assertLogs("outbox_worker", level="ERROR") as log_ctx:
+                    with self.assertRaises(SystemExit) as ctx:
+                        main()
+                self.assertEqual(ctx.exception.code, 1)
+                self.assertIn("Production outbox requires RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1", "\n".join(log_ctx.output))
 
 
 if __name__ == "__main__":

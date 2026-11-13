@@ -311,16 +311,23 @@ When authorized for production deployment, operators must execute the rollout in
    - Install minimal runtime venv: `python3 -m venv /opt/signal-bot/venv && /opt/signal-bot/venv/bin/pip install -r deploy/requirements-worker.txt`.
 3. **Step 3: Configuration & Credential Provisioning**
    - Deploy `/etc/retailbot2/outbox-worker.env` with permissions `0600` owned by `retailbot:retailbot`.
-   - Set initial switches: `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1`, `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0`.
+   - **Fail-Closed Default Contract (WO71795):** When copied from `deploy/env/outbox-worker.env.example`, observation authorization is disabled by default (`RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=0`). The service strictly refuses database access and exits with code 1 until the system owner explicitly enables observation mode and configures dedicated observation credentials (`retailbot2_obs`).
+   - **Enabling Observation Mode:** To authorize read-only queue observation, configure:
+     - `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1`
+     - `RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER=retailbot2_obs`
+     - `RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD=<dedicated_observation_password>`
+     - `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0` (must remain 0; observation never authorizes delivery)
+   - **Delivery Authorization Separation:** Never set `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1` merely to make health checks or observation work. Telegram delivery is an independent stage requiring separate owner authorization, delivery credentials (`retailbot2_dispatcher`), and removal of `--observation` from the systemd unit.
 4. **Step 4: Systemd Service Installation & Timeout Verification**
    - Copy `deploy/systemd/retailbot2-outbox-worker.service` to `/etc/systemd/system/`.
    - Run `sudo systemctl daemon-reload`.
    - Run `systemd-analyze verify /etc/systemd/system/retailbot2-outbox-worker.service`.
    - **Shutdown Timeout:** The deployment unit template establishes `TimeoutStopSec=30s` (revised from 15s in WO71785), providing a safe operating margin over the worst-case 15.0s cleanup duration (10.0s transport HTTP deadline + 1.5s SIGTERM grace + 1.5s SIGKILL grace + 1.0s group verification + 1.0s DB lock release). This ensures clean MariaDB advisory lock release and prevents premature SIGKILL escalation under heavy system load.
 5. **Step 5: Controlled Observation Trial (Stage C Verification)**
-   - Start worker in observation mode with `--observation` flag: `sudo systemctl start retailbot2-outbox-worker.service`.
+   - Verify fail-closed behavior: If `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED` is left at `0`, starting the service immediately fails closed with `Database credential resolution failed: Production outbox observation authorization rejected`.
+   - Once observation is explicitly enabled and credentials provisioned in `/etc/retailbot2/outbox-worker.env`, start worker: `sudo systemctl start retailbot2-outbox-worker.service`.
    - Confirm advisory lock acquired: `SELECT IS_USED_LOCK('rdt_outbox_worker_lock');`.
-   - Run health snapshot: `python3 -m paper.outbox_health --database crypto_signals --observation`.
+   - Run health snapshot: `python3 -m paper.outbox_worker --database crypto_signals --health --observation`. (Note: health-only inspection on `crypto_signals` requires `--observation` with dedicated observation credentials and never consults delivery credentials or delivery authorization flags).
    - Verify zero outbox row updates and zero outbound HTTP requests for 60 seconds.
 6. **Step 6: Delivery Authorization Cutover (Upon Explicit Owner Approval)**
    - Update `/etc/retailbot2/outbox-worker.env`: `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`.

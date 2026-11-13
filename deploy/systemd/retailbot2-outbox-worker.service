@@ -40,15 +40,20 @@ WorkingDirectory=/opt/signal-bot
 EnvironmentFile=-/etc/retailbot2/outbox-worker.env
 
 # Worker daemon invocation (unambiguously observation-only by default)
-# SAFETY REQUIREMENT (WO71786):
-# The packaged unit explicitly specifies --observation to guarantee that the default
-# service startup cannot claim, transition, acknowledge, retry, or deliver events.
-# In observation mode, the worker performs read-only SELECT queue inspection on S_lock.
-#
-# Any future transition from observation mode to active delivery mode requires:
-# 1. Deliberate written authorization from system owners.
-# 2. Operator configuration change (e.g. systemd drop-in override removing --observation).
-# 3. Setting RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 in /etc/retailbot2/outbox-worker.env.
+# SAFETY & DEPLOYMENT CONTRACT (WO71786 / WO71795):
+# 1. OBSERVATION DEFAULT: The packaged unit explicitly specifies --observation to guarantee
+#    that default service startup cannot claim, transition, acknowledge, retry, or deliver events.
+#    In observation mode, the worker performs read-only SELECT queue inspection on S_lock.
+# 2. FAIL-CLOSED ENVIRONMENT CONTRACT: Copying outbox-worker.env.example leaves observation
+#    authorization disabled (RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=0). The service
+#    will strictly refuse database access and fail closed upon startup until the owner explicitly
+#    enables observation mode and supplies dedicated observation credentials.
+# 3. DELIVERY SEPARATION: Enabling observation is SELECT-only and NEVER authorizes delivery.
+#    Any future transition from observation mode to active delivery mode requires:
+#    a. Deliberate written authorization from system owners.
+#    b. Setting RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 and delivery credentials in the env file.
+#    c. Operator configuration change (e.g. systemd drop-in override removing --observation).
+#    Never enable delivery authorization merely to satisfy health checks or observation.
 ExecStart=/opt/signal-bot/venv/bin/python3 -m paper.outbox_worker --database crypto_signals --poll-interval 1.0 --timeout 10.0 --observation
 
 # Process lifecycle and graceful shutdown:

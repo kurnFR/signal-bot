@@ -1178,6 +1178,52 @@ def main():
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
+    # 1. Health-only operational inspection branch (Finding A - WO71795)
+    if getattr(args, "health", False):
+        if args.database == "crypto_signals" and not args.observation:
+            logger.error(
+                "Production health inspection is read-only and requires --observation mode "
+                "with dedicated observation credentials"
+            )
+            sys.exit(1)
+
+        try:
+            creds = resolve_worker_db_credentials(
+                args.database,
+                observation=True if args.database == "crypto_signals" else args.observation,
+            )
+        except ValueError as exc:
+            logger.critical("Database credential resolution failed: %s", exc)
+            sys.exit(1)
+
+        db_cfg = {
+            "host": os.getenv("MYSQL_HOST", "127.0.0.1"),
+            "port": int(os.getenv("MYSQL_PORT", 3306)),
+            "user": creds["user"],
+            "password": creds["password"],
+            "database": args.database,
+        }
+
+        import mysql.connector
+        from paper.outbox_health import inspect_outbox_health
+        health_conn = mysql.connector.connect(
+            host=db_cfg["host"],
+            port=db_cfg["port"],
+            user=db_cfg["user"],
+            password=db_cfg["password"],
+            database=db_cfg["database"],
+            autocommit=False,
+        )
+        try:
+            snapshot = inspect_outbox_health(
+                health_conn, args.database, observation_mode=args.observation
+            )
+            print(json.dumps(snapshot, indent=2))
+            sys.exit(0 if snapshot["health_status"] != "CRITICAL" else 2)
+        finally:
+            health_conn.close()
+
+    # 2. Worker daemon execution branch
     allowed = ALLOWED_PROD_DATABASES if args.database == "crypto_signals" else ALLOWED_TEST_DATABASES
     if args.database == "crypto_signals" and not args.observation:
         if os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY") != "1":
@@ -1197,26 +1243,6 @@ def main():
         "password": creds["password"],
         "database": args.database,
     }
-
-    if getattr(args, "health", False):
-        import mysql.connector
-        from paper.outbox_health import inspect_outbox_health
-        health_conn = mysql.connector.connect(
-            host=db_cfg["host"],
-            port=db_cfg["port"],
-            user=db_cfg["user"],
-            password=db_cfg["password"],
-            database=db_cfg["database"],
-            autocommit=False,
-        )
-        try:
-            snapshot = inspect_outbox_health(
-                health_conn, args.database, observation_mode=args.observation
-            )
-            print(json.dumps(snapshot, indent=2))
-            sys.exit(0 if snapshot["health_status"] != "CRITICAL" else 2)
-        finally:
-            health_conn.close()
 
     telegram_token = "" if args.observation else os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id = "" if args.observation else os.getenv("TELEGRAM_CHAT_ID", "")
