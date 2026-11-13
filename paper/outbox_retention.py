@@ -34,11 +34,12 @@ DEFAULT_SENT_RETENTION_DAYS = 14
 DEFAULT_DEAD_RETENTION_DAYS = 90
 TEST_CLEANUP_CONFIRMATION_TOKEN = "AUTHORIZE_TEST_DATABASE_PURGE_ONLY"
 
-# Explicit criteria for uncertain/ambiguous delivery outcomes (WO71797).
+# Explicit criteria for uncertain/ambiguous delivery outcomes (WO71797, WO71798).
 # Covers both newly tagged outcomes (with DELIVERY_UNKNOWN marker) and historical/legacy error strings.
 UNCERTAIN_DELIVERY_CONDITIONS = (
     "last_error LIKE '%DELIVERY_UNKNOWN%'",
     "last_error LIKE '%Delivery state unknown%'",
+    "LOWER(last_error) LIKE '%transport child exception%'",
     "last_error LIKE '%ReadTimeout%'",
     "last_error LIKE '%HTTP 5%'",
     "last_error LIKE '%Server error HTTP 5%'",
@@ -47,6 +48,7 @@ UNCERTAIN_DELIVERY_CONDITIONS = (
     "last_error LIKE '%delivery lease expired%'",
     "last_error LIKE '%did not explicitly confirm delivery%'",
     "last_error LIKE '%missing explicit Telegram ok field%'",
+    "last_error LIKE '%HTTP 200 response%'",
     "last_error LIKE '%UnexpectedTransportError%'",
     "last_error LIKE '%No HTTP status received%'",
     "last_error LIKE '%unparseable body%'",

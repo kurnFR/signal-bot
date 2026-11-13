@@ -334,7 +334,7 @@ def main():
     except Exception as exc:
         result = {
             "status": STATUS_DELIVERY_UNKNOWN,
-            "error": f"Transport child exception: {exc}",
+            "error": format_delivery_unknown_error(f"Transport child exception: {exc}"),
         }
 
     sys.stdout.write(json.dumps(result))

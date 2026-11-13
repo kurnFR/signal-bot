@@ -378,15 +378,109 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         self.assertEqual(cur.fetchone()[0], 1)
         cur.close()
 
+    def test_legacy_transport_child_exception_protected(self):
+        """Historical records with 'Transport child exception' are excluded from candidates and DELETE (WO71798)."""
+        cur = self.conn.cursor()
+        key_child_exc = f"retailbot2:test:child_exc_{uuid.uuid4().hex[:8]}"
+        key_child_exc_lower = f"retailbot2:test:child_exc_lower_{uuid.uuid4().hex[:8]}"
+        key_perm_rejection = f"retailbot2:test:perm_rej_{uuid.uuid4().hex[:8]}"
+        key_new_ambig = f"retailbot2:test:new_ambig_{uuid.uuid4().hex[:8]}"
+        self.tracked_keys.extend([key_child_exc, key_child_exc_lower, key_perm_rejection, key_new_ambig])
+
+        # 1. Historical dead row with Transport child exception (100 days old)
+        cur.execute(
+            """INSERT INTO rdt_telegram_outbox
+               (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
+               VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY),
+                       'Transport child exception: unexpected child failure')""",
+            (key_child_exc,)
+        )
+        # 2. Historical dead row with lowercase transport child exception (100 days old)
+        cur.execute(
+            """INSERT INTO rdt_telegram_outbox
+               (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
+               VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY),
+                       'transport child exception: process terminated unexpectedly')""",
+            (key_child_exc_lower,)
+        )
+        # 3. Known confirmed permanent rejection without ambiguity marker (100 days old)
+        cur.execute(
+            """INSERT INTO rdt_telegram_outbox
+               (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
+               VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY),
+                       'Bad Request: chat not found')""",
+            (key_perm_rejection,)
+        )
+        # 4. New ambiguous outcome with DELIVERY_UNKNOWN marker (100 days old)
+        cur.execute(
+            """INSERT INTO rdt_telegram_outbox
+               (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
+               VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY),
+                       'DELIVERY_UNKNOWN: Transport child exception: subprocess broken pipe')""",
+            (key_new_ambig,)
+        )
+        self.conn.commit()
+        cur.close()
+
+        planner = OutboxRetentionPlanner(self.conn, expected_database="signal_bot_test", sent_retention_days=14, dead_retention_days=90)
+        plan = planner.plan()
+
+        # Evidence: key_child_exc and key_child_exc_lower must be excluded from dead_candidates
+        cur = self.conn.cursor()
+        cur.execute(
+            f"""SELECT COUNT(*) FROM rdt_telegram_outbox
+               WHERE event_key IN (%s, %s, %s) AND status = 'dead'
+                 AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
+            (key_child_exc, key_child_exc_lower, key_new_ambig)
+        )
+        self.assertEqual(cur.fetchone()[0], 0, "Uncertain events must be excluded from candidate predicate")
+
+        # Evidence: confirmed permanent rejection IS an eligible candidate
+        cur.execute(
+            f"""SELECT COUNT(*) FROM rdt_telegram_outbox
+               WHERE event_key = %s AND status = 'dead'
+                 AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
+            (key_perm_rejection,)
+        )
+        self.assertEqual(cur.fetchone()[0], 1, "Confirmed rejection must remain an eligible candidate")
+        cur.close()
+
+        # Evidence: uncertain summary counts legacy and new uncertain outcomes for manual review
+        self.assertGreaterEqual(plan["uncertain_summary"]["uncertain_dead_count"], 3)
+        self.assertGreaterEqual(plan["protected_summary"]["uncertain_delivery_requiring_review_count"], 3)
+
+        # Execute actual test cleanup DELETE
+        res = planner.execute_test_cleanup(TEST_CLEANUP_CONFIRMATION_TOKEN)
+
+        cur = self.conn.cursor()
+        # The confirmed rejection was deleted
+        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_perm_rejection,))
+        self.assertEqual(cur.fetchone()[0], 0, "Confirmed rejection must be purged")
+
+        # The historical Transport child exception rows remain untouched
+        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_child_exc,))
+        self.assertEqual(cur.fetchone()[0], 1, "Legacy Transport child exception row must NOT be deleted")
+        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_child_exc_lower,))
+        self.assertEqual(cur.fetchone()[0], 1, "Legacy lowercase transport child exception row must NOT be deleted")
+
+        # The new DELIVERY_UNKNOWN row remains untouched
+        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_new_ambig,))
+        self.assertEqual(cur.fetchone()[0], 1, "New DELIVERY_UNKNOWN row must NOT be deleted")
+        cur.close()
+
     def test_legacy_ambiguous_error_strings_protected(self):
         """Legacy ambiguous error strings without the new marker remain protected."""
         cur = self.conn.cursor()
         legacy_errors = [
             "Delivery state unknown: request timeout",
+            "Transport child exception: child process failed",
+            "transport child exception: lowercase error",
             "ConnectionError after request may have been transmitted",
             "Transport exceeded deadline 10.0s",
             "delivery lease expired at max attempts",
             "HTTP 200 response missing explicit Telegram ok field",
+            "HTTP 200 response missing ok=true",
+            "HTTP 200 response had invalid or non-JSON body",
             "HTTP 200 response did not explicitly confirm delivery",
             "UnexpectedTransportError: SocketError",
             "No HTTP status received",
