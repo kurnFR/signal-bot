@@ -459,6 +459,26 @@ ORDER BY locked_until ASC, id ASC;
 ```
 
 
+### 4.6 Stage E Operational Hardening and Worker Supervision (WO71782)
+
+Stage E hardens the outbox worker for reliable supervised operation, provides queue and dead-letter observability, and establishes a safe, dry-run retention planning engine:
+
+1. **Supervised Service Unit Template (`deploy/systemd/retailbot2-outbox-worker.service`):**
+   - Implements `KillMode=mixed` and `TimeoutStopSec=15s` to ensure graceful `SIGTERM` shutdown, child transport process group reaping, and clean MariaDB advisory lock release.
+   - Restricts privileges via `NoNewPrivileges=true`, `ProtectSystem=strict`, `ProtectHome=read-only`, and drops capabilities.
+   - Pinned to environment configuration file `/etc/retailbot2/outbox-worker.env` (mode 0600) with zero hardcoded credentials.
+   - Restarts on failure with backoff (`Restart=on-failure`, `RestartSec=5s`, `StartLimitIntervalSec=60s`, `StartLimitBurst=5`).
+2. **Queue and Dead-Letter Observability (`paper/outbox_health.py`):**
+   - Provides read-only health snapshots reporting pending backlog, due items, processing leases, expired leases, retry distributions, dead-letter details, and advisory lock ownership.
+   - Evaluates operational health states (`HEALTHY`, `WARN`, `CRITICAL`).
+   - Integrated into CLI via `python3 -m paper.outbox_health` and `python3 -m paper.outbox_worker --health`.
+3. **Retention Policy Proposals & Dry-Run Planner (`paper/outbox_retention.py`):**
+   - Establishes defensible retention proposals (14 days for sent events, 90 days for dead letters, indefinite protection for pending/processing/uncertain events).
+   - Read-only dry-run planner computes candidate counts and age ranges without modifying rows.
+   - Automated purge execution is strictly locked to `signal_bot_test` and blocked on production.
+4. **Comprehensive Operational Runbook:**
+   - Full operational procedures and troubleshooting guidelines documented in [RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md](file:///home/BIS/signal-bot-wo71767-prod-validation/docs/RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md).
+
 ## 5. Modern UI migration and cutover
 
 The modern React UI remains available at `/modern`; legacy `/` remains the default. Keep `SIGNAL_BOT_USE_MODERN_UI=0`.

@@ -1169,6 +1169,11 @@ def main():
         action="store_true",
         help="Run in read-only observation mode (inspect queue without claiming or delivering)",
     )
+    parser.add_argument(
+        "--health",
+        action="store_true",
+        help="Perform read-only operational health snapshot and exit",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -1192,6 +1197,26 @@ def main():
         "password": creds["password"],
         "database": args.database,
     }
+
+    if getattr(args, "health", False):
+        import mysql.connector
+        from paper.outbox_health import inspect_outbox_health
+        health_conn = mysql.connector.connect(
+            host=db_cfg["host"],
+            port=db_cfg["port"],
+            user=db_cfg["user"],
+            password=db_cfg["password"],
+            database=db_cfg["database"],
+            autocommit=False,
+        )
+        try:
+            snapshot = inspect_outbox_health(
+                health_conn, args.database, observation_mode=args.observation
+            )
+            print(json.dumps(snapshot, indent=2))
+            sys.exit(0 if snapshot["health_status"] != "CRITICAL" else 2)
+        finally:
+            health_conn.close()
 
     telegram_token = "" if args.observation else os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id = "" if args.observation else os.getenv("TELEGRAM_CHAT_ID", "")

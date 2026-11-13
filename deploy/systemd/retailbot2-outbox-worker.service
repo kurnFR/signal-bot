@@ -1,0 +1,92 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# RetailBot2 Telegram Outbox Dispatcher Service Template
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Production systemd unit template for the standalone outbox worker daemon.
+#
+# IMPORTANT SAFETY & AUTHORIZATION NOTICE:
+# - Installing or enabling this service does NOT authorize live trading or
+#   Telegram delivery.
+# - Telegram delivery remains fail-closed unless RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1
+#   is explicitly configured in the environment file.
+# - In read-only observation mode, configure --observation in ExecStart and
+#   set RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1 with dedicated
+#   observation credentials (retailbot2_obs@127.0.0.1).
+# - This worker daemon NEVER executes trades, connects to exchange APIs, or
+#   accesses live order execution endpoints.
+#
+# PREREQUISITES:
+# 1. Database schema migrations 026 and 027 applied to the target database.
+# 2. Environment file /etc/retailbot2/outbox-worker.env created with mode 0600,
+#    owned by retailbot:retailbot.
+# 3. Dedicated MariaDB account provisioned with least-privilege table grants.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+[Unit]
+Description=RetailBot2 Telegram Outbox Dispatcher Worker
+Documentation=https://github.com/kurnFR/signal-bot/blob/master/docs/RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md
+After=network-online.target mariadb.service
+Wants=network-online.target
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=retailbot
+Group=retailbot
+WorkingDirectory=/opt/signal-bot
+
+# Load dedicated environment configuration (must be mode 0600)
+EnvironmentFile=-/etc/retailbot2/outbox-worker.env
+
+# Worker daemon invocation
+# NOTE: To run in read-only observation mode, append: --observation
+ExecStart=/opt/signal-bot/venv/bin/python3 -m paper.outbox_worker --database crypto_signals --poll-interval 1.0 --timeout 10.0
+
+# Process lifecycle and graceful shutdown:
+# KillMode=mixed sends SIGTERM to the main worker process, allowing its signal
+# handler to stop claiming, wait for in-flight transport subprocesses to terminate,
+# and cleanly release MariaDB advisory lock 'rdt_outbox_worker_lock'.
+# If descendants or parent linger beyond TimeoutStopSec, systemd sends SIGKILL to all.
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=15s
+TimeoutStartSec=30s
+
+# Controlled restart behavior on unexpected worker termination:
+# Restart on failure or unhandled signals; do not restart on clean SIGTERM exit (0).
+Restart=on-failure
+RestartSec=5s
+
+# Logging to systemd journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=retailbot2-outbox-worker
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Process & Filesystem Security Hardening
+# ─────────────────────────────────────────────────────────────────────────────
+# Deny privilege escalation
+NoNewPrivileges=true
+
+# Read-only OS filesystem; allow write only to designated runtime/logging dirs
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+# Kernel and hardware isolation
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+# Restrict networking to IPv4/IPv6 and local Unix domain sockets
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Drop all kernel capabilities
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

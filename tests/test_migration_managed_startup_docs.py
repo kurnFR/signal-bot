@@ -187,6 +187,37 @@ class TestMigrationManagedStartupDocs(unittest.TestCase):
         self.assertIn("Rollback is strictly prohibited unless **all six** provenance conditions are satisfied", release_gates)
         self.assertIn("If creation provenance is uncertain or any condition cannot be proven: **STOP IMMEDIATELY.**", release_gates)
 
+    def test_retailbot2_stage_e_operational_runbook_and_supervision_docs(self):
+        """Verify Stage E operational runbook, supervision unit, observability, and retention docs."""
+        release_gates = _doc("docs/RETAILBOT2_AND_MODERN_UI_RELEASE_GATES.md").read_text(encoding="utf-8")
+        runbook = _doc("docs/RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md").read_text(encoding="utf-8")
+
+        # 1. Release gates section 4.6
+        self.assertIn("### 4.6 Stage E Operational Hardening and Worker Supervision", release_gates)
+        self.assertIn("deploy/systemd/retailbot2-outbox-worker.service", release_gates)
+        self.assertIn("paper/outbox_health.py", release_gates)
+        self.assertIn("paper/outbox_retention.py", release_gates)
+        self.assertIn("RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md", release_gates)
+
+        # 2. Operational runbook key sections
+        self.assertIn("## 1. Operating Modes & Authorization Boundaries", runbook)
+        self.assertIn("## 2. Worker Prerequisites", runbook)
+        self.assertIn("## 3. Environment Variables Reference", runbook)
+        self.assertIn("## 4. Service Installation Procedure", runbook)
+        self.assertIn("## 5. Startup, Shutdown, and Process Management Commands", runbook)
+        self.assertIn("## 6. Health & Queue Inspection", runbook)
+        self.assertIn("## 7. Backlog & Latency Diagnosis", runbook)
+        self.assertIn("## 8. Dead-Letter Diagnosis & Forensic Triage", runbook)
+        self.assertIn("## 9. Advisory Lock Contention & Worker Conflict", runbook)
+        self.assertIn("## 10. Worker Crash Recovery & Stale Lease Fencing", runbook)
+        self.assertIn("## 11. Uncertain Delivery Recovery (Safe Procedure)", runbook)
+        self.assertIn("## 12. Retention Policy Proposals & Dry-Run Planner", runbook)
+        self.assertIn("## 13. Explicit Prohibitions for Operators", runbook)
+
+        # 3. Explicit safety notice
+        self.assertIn("Installing, enabling, or starting the systemd service does NOT authorize outbox event enqueueing, Telegram delivery, or live trading", runbook)
+
+
 
 
 
