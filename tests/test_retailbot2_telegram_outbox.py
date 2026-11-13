@@ -1,5 +1,6 @@
 import json
 import logging
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import pytest
 
@@ -14,20 +15,28 @@ def _authorize_outbox_enqueue(monkeypatch):
 
 
 class Cursor:
-    def __init__(self, *, rowcount=1, lastrowid=91, event=None, fail_on=None):
+    def __init__(self, *, rowcount=1, lastrowid=91, event=None, fail_on=None, db_name="crypto_signals"):
         self.rowcount = rowcount
         self.lastrowid = lastrowid
         self.event = event
         self.fail_on = fail_on
+        self.db_name = db_name
         self.calls = []
         self.closed = False
+        self._last_query_was_db = False
 
     def execute(self, sql, params=None):
+        if "SELECT DATABASE()" in sql.upper():
+            self._last_query_was_db = True
+            return
+        self._last_query_was_db = False
         self.calls.append((sql, params))
         if self.fail_on == len(self.calls):
             raise RuntimeError("simulated SQL failure")
 
     def fetchone(self):
+        if self._last_query_was_db:
+            return (self.db_name,)
         return self.event
 
     def close(self):
@@ -57,9 +66,14 @@ class Connection:
         self.closed = True
 
 
-def db_for(conn):
+def db_for(conn, db_name="crypto_signals"):
     db = object.__new__(DatabaseManager)
     db.logger = logging.getLogger("test.retailbot2.outbox")
+    db.config = SimpleNamespace(
+        db_name=db_name,
+        observation_only=False,
+        allow_trading=True,
+    )
     db.get_conn = Mock(return_value=conn)
     return db
 

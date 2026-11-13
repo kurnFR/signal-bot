@@ -79,10 +79,54 @@ def is_observation_only(config: Optional[Any] = None) -> bool:
 ALLOWED_OUTBOX_ENQUEUE_DATABASES: Tuple[str, ...] = ("signal_bot_test", "crypto_signals")
 
 
-def _resolve_database_name(config: Optional[Any] = None, database: Optional[str] = None) -> Optional[str]:
-    """Resolve target database name from explicit parameter or config object."""
-    if database is not None and isinstance(database, str) and database.strip():
-        return database.strip()
+def get_connection_database(conn: Any) -> Optional[str]:
+    """Execute SELECT DATABASE() on the active MariaDB/MySQL connection.
+
+    Returns the normalized database name string if successfully retrieved.
+    Fails closed (returns None) on missing connection, NULL result, query error,
+    or unexpected return structure.
+    """
+    if conn is None:
+        return None
+    cursor = None
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT DATABASE()")
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        if isinstance(row, (tuple, list)):
+            db = row[0] if len(row) > 0 else None
+        elif isinstance(row, dict):
+            db = next(iter(row.values()), None)
+        else:
+            db = str(row)
+        if db is None:
+            return None
+        db_str = str(db).strip()
+        if not db_str or db_str.upper() in ("NULL", "NONE"):
+            return None
+        return db_str
+    except Exception as exc:
+        logging.getLogger("retailbot2.auth").warning(
+            "Failed to determine active database identity via SELECT DATABASE(): %s", exc
+        )
+        return None
+    finally:
+        if cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+
+
+def _resolve_configured_database(config: Optional[Any] = None) -> Optional[str]:
+    """Resolve expected target database name strictly from configuration object.
+
+    Fails closed (returns None) if configuration is absent or does not specify
+    a non-empty database string. Never substitutes BotConfig() defaults or
+    unrelated environment defaults.
+    """
     if config is None:
         return None
     if isinstance(config, str) and config.strip():
@@ -104,18 +148,59 @@ def _resolve_database_name(config: Optional[Any] = None, database: Optional[str]
     return None
 
 
-def is_outbox_enqueue_authorized(config: Optional[Any] = None, database: Optional[str] = None) -> bool:
-    """Outbox enqueuing requires RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1 and a validated
-    allowlisted database identity ('signal_bot_test' or 'crypto_signals').
-    Observation-only mode always suppresses enqueue.
-    Independent of Telegram delivery authorization (RETAILBOT2_ALLOW_TELEGRAM_DELIVERY).
-    Fails closed if database identity or configuration cannot be established."""
+def _resolve_database_name(config: Optional[Any] = None, database: Optional[str] = None) -> Optional[str]:
+    """Legacy helper preserved for backward compatibility.
+    Resolves database name from config or explicit database parameter."""
+    if database is not None and isinstance(database, str) and database.strip():
+        return database.strip()
+    return _resolve_configured_database(config)
+
+
+def is_outbox_enqueue_authorized(
+    config: Optional[Any] = None,
+    conn: Optional[Any] = None,
+    database: Optional[str] = None,
+) -> bool:
+    """Validate outbox enqueue authorization against actual connection identity and configuration.
+
+    Production Enqueue Policy (Work Order 71760):
+    1. RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1 authorizes enqueue only when the actual MariaDB
+       connection identity is allowlisted and all other checks pass.
+    2. This flag authorizes outbox enqueue ONLY; it MUST NEVER authorize Telegram delivery.
+    3. Production enqueue is not being activated or tested by this work order.
+    4. Actual delivery remains subject to independent delivery authorization
+       (RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1) and worker startup restrictions.
+
+    Fail-Closed Rules:
+    - Enqueue flag missing or not '1': reject.
+    - Observation-only mode active (via config or RETAILBOT2_OBSERVATION_ONLY): reject.
+    - Missing configuration (config is None or missing db_name): reject.
+    - Missing connection (conn is None): reject.
+    - SELECT DATABASE() returns NULL, empty, or fails: reject.
+    - Actual database not in ALLOWED_OUTBOX_ENQUEUE_DATABASES: reject.
+    - Configured expected database does not agree with actual connection database: reject.
+    - Caller-supplied database parameter is never used as proof of connection identity;
+      if provided, it must also agree with the expected database.
+    - Never substitutes BotConfig() when configuration is absent in an authorization path.
+    """
     if is_observation_only(config):
         return False
     if os.getenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "").strip() != "1":
         return False
-    resolved_db = _resolve_database_name(config, database=database)
-    if not resolved_db or resolved_db not in ALLOWED_OUTBOX_ENQUEUE_DATABASES:
+    if config is None:
+        return False
+    expected_db = _resolve_configured_database(config)
+    if not expected_db or expected_db not in ALLOWED_OUTBOX_ENQUEUE_DATABASES:
+        return False
+    if database is not None and isinstance(database, str) and database.strip():
+        if database.strip() != expected_db:
+            return False
+    if conn is None:
+        return False
+    actual_db = get_connection_database(conn)
+    if not actual_db or actual_db not in ALLOWED_OUTBOX_ENQUEUE_DATABASES:
+        return False
+    if expected_db != actual_db:
         return False
     return True
 
@@ -1476,11 +1561,11 @@ class DatabaseManager:
                 signal.get('candle_close_time', datetime.now(timezone.utc).replace(tzinfo=None)),
             ))
             tid = c.lastrowid
-            enqueue_cfg = getattr(self, "config", None) or BotConfig()
+            enqueue_cfg = getattr(self, "config", None)
             if (
                 bool(signal.get('telegram_enabled', False))
                 and entry_alert
-                and is_outbox_enqueue_authorized(enqueue_cfg, database=getattr(self, "db_name", None))
+                and is_outbox_enqueue_authorized(enqueue_cfg, conn=conn)
             ):
                 c.execute(
                     """INSERT INTO rdt_telegram_outbox
@@ -1583,11 +1668,11 @@ class DatabaseManager:
                 1 if pnl > 0 else 0, 0 if pnl > 0 else 1, pnl,
             ))
 
-            enqueue_cfg = getattr(self, "config", None) or BotConfig()
+            enqueue_cfg = getattr(self, "config", None)
             if (
                 exit_alert
                 and bool(exit_alert.get('telegram_enabled', False))
-                and is_outbox_enqueue_authorized(enqueue_cfg, database=getattr(self, "db_name", None))
+                and is_outbox_enqueue_authorized(enqueue_cfg, conn=conn)
             ):
                 payload = dict(exit_alert)
                 payload.pop('telegram_enabled', None)
@@ -1997,15 +2082,18 @@ class DatabaseManager:
         conn=None,
     ) -> bool:
         """Enqueue an event into rdt_telegram_outbox for asynchronous delivery by outbox_worker.
-        Blocked fail-closed if observation-only mode is active or outbox enqueuing is unauthorized."""
-        enqueue_cfg = getattr(self, "config", None) or BotConfig()
-        if is_observation_only(enqueue_cfg):
-            return False
-        if not is_outbox_enqueue_authorized(enqueue_cfg, database=getattr(self, "db_name", None)):
+        Blocked fail-closed if observation-only mode is active, configuration is missing,
+        or outbox enqueuing is unauthorized on the active database connection."""
+        enqueue_cfg = getattr(self, "config", None)
+        if enqueue_cfg is None or is_observation_only(enqueue_cfg):
             return False
         own_conn = conn is None
         active_conn = self.get_conn() if own_conn else conn
         if not active_conn:
+            return False
+        if not is_outbox_enqueue_authorized(enqueue_cfg, conn=active_conn):
+            if own_conn:
+                active_conn.close()
             return False
         cursor = None
         try:
@@ -2339,19 +2427,17 @@ class RetailDeathTrapBot:
 
         # 1. Prefer routing through existing outbox architecture if enqueue is authorized
         queued = False
-        bot_cfg = getattr(self, "config", None) or BotConfig()
-        if is_outbox_enqueue_authorized(bot_cfg):
-            try:
-                if hasattr(self, "db") and self.db:
-                    queued = self.db.enqueue_telegram_outbox_event(
-                        event_key=event_key,
-                        event_type="operational",
-                        payload={"text": message},
-                        trade_id=0,
-                    )
-            except Exception as exc:
-                self.logger.warning("Could not enqueue operational notification to outbox: %s", exc)
-                queued = False
+        try:
+            if hasattr(self, "db") and self.db:
+                queued = self.db.enqueue_telegram_outbox_event(
+                    event_key=event_key,
+                    event_type="operational",
+                    payload={"text": message},
+                    trade_id=0,
+                )
+        except Exception as exc:
+            self.logger.warning("Could not enqueue operational notification to outbox: %s", exc)
+            queued = False
 
         if queued:
             self.logger.info("Queued operational notification to outbox [%s]", event_key)
