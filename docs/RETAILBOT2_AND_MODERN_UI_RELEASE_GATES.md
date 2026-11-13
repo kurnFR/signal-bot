@@ -251,10 +251,10 @@ ORDER BY id DESC
 LIMIT 10;
 ```
 
-#### Manual Recovery Preconditions, Incident Policy, and Read-Only Inspection
+#### Manual Recovery Preconditions, Delivery Outcome Classification, and Incident Policy
 
 > [!CAUTION]
-> **No Automated or Unconditional Requeue**: Lease expiry alone is **NOT** proof that an old transport process has terminated. If an old transport subprocess was spawned and encountered a network stall or high latency, its HTTP request to Telegram might still be in-flight or succeed after the database lease expires. Blindly resetting `status = 'processing'` to `'pending'` can result in **duplicate Telegram deliveries**.
+> **No Automated or Unconditional Requeue**: Lease expiry alone is **NOT** proof that an old transport process has terminated, nor is process termination or advisory-lock release proof that an external Telegram message was not delivered. If an HTTP request was transmitted or in-flight, it may have succeeded on Telegram's servers before a process died or before a database state acknowledgement failed. Blindly resetting `status = 'processing'` to `'pending'` can result in **duplicate Telegram deliveries**.
 
 Automated recovery jobs and ad-hoc UPDATE queries are strictly prohibited. Before any manually authorized recovery operation on stuck or expired events, all of the following six preconditions must be satisfied:
 
@@ -262,8 +262,42 @@ Automated recovery jobs and ad-hoc UPDATE queries are strictly prohibited. Befor
 2. **Verify process elimination**: Verify via `ps aux | grep -E "outbox_worker|outbox_transport"` and `/proc` inspection that no worker process and no transport subprocess group remains alive.
 3. **Verify advisory lock release**: Execute read-only lock inspection to confirm `IS_USED_LOCK('rdt_outbox_worker_lock')` returns `NULL`.
 4. **Read-only event inspection**: Inspect affected event IDs, their exact claim token, attempts, and lease expiry timestamps using read-only inspection SQL (see query 4 below).
-5. **Obtain explicit authorization**: Obtain explicit operator and database owner sign-off for the specific event IDs to be recovered after confirming no external delivery occurred.
-6. **Preserve audit record**: Record an immutable audit log detailing the affected IDs, original states, claim tokens, and the authorized operator before making any state adjustments.
+5. **Obtain explicit authorization**: Obtain explicit operator and database owner sign-off for the specific event IDs to be recovered after evaluating the external delivery classification below.
+6. **Preserve audit record**: Record an immutable audit log detailing the affected IDs, original states, claim tokens, delivery classification, and the authorized operator before making any state adjustments.
+
+> [!IMPORTANT]
+> **Satisfying process and advisory-lock checks does NOT resolve external delivery status**: Terminating processes and confirming advisory lock release guarantees only that local concurrency conflicts are eliminated; it provides **zero evidence** regarding whether an external HTTP request was received, processed, or acknowledged by the Telegram Bot API.
+
+#### Delivery Outcome Classification and Handling Policy
+
+Every in-flight or expired outbox event subject to incident review must be classified into exactly one of three delivery outcomes based on verifiable evidence:
+
+1. **`CONFIRMED_NOT_DELIVERED`**:
+   - **Definition**: Reliable, verifiable evidence establishes that Telegram did not accept the request (e.g. DNS failure before connection establishment, socket connect timeout before TCP handshake, or pre-connect error prior to HTTP transmission).
+   - **Handling**: Eligible for manual requeueing only after all six preconditions above are met and explicit operator and database owner sign-off is obtained.
+2. **`CONFIRMED_DELIVERED`**:
+   - **Definition**: Reliable evidence establishes that Telegram accepted the request (e.g. Telegram API returned HTTP 200 with `{"ok": true}`, message ID observed in target channel/chat, or verified upstream log).
+   - **Handling**: The event must **never** be requeued. If stuck in `status = 'processing'`, manual remediation must transition the row directly to `sent` (setting `sent_at = UTC_TIMESTAMP()`), never back to `pending`.
+3. **`DELIVERY_UNKNOWN`**:
+   - **Definition**: The request may have succeeded, but its outcome cannot be established from available evidence (e.g. post-send timeout, connection reset after HTTP request bytes written, worker crash during payload transit, or database connection drop before writing `sent` status).
+   - **Explicit Non-Proof Guarantees**:
+     - **Process termination** does NOT prove that a previous HTTP request was unsuccessful.
+     - **Advisory-lock release** does NOT prove that a previous HTTP request was unsuccessful.
+     - **Lease expiry** does NOT prove that a previous HTTP request was unsuccessful.
+     - **Database acknowledgement failure** after successful Telegram delivery can leave the event in an apparently recoverable state (`status = 'processing'` with expired lease) despite the message having already been delivered.
+     - **Duplicate delivery risk**: Requeueing an event with `DELIVERY_UNKNOWN` can produce duplicate Telegram messages.
+   - **Mandatory Policy for `DELIVERY_UNKNOWN`**:
+     - **Do NOT describe the event as safe to requeue.**
+     - **Leave the event untouched** unless an authorized operator and database owner explicitly accept the duplicate-delivery risk for the exact event IDs.
+     - **Do NOT claim that duplicate delivery can be prevented or ruled out.**
+     - **Mandatory Audit Logging**: Operators must record in the incident audit record:
+       - The unknown outcome (`DELIVERY_UNKNOWN`);
+       - All available evidence and inspection logs;
+       - The exact event IDs and `event_key` values;
+       - Prior claim tokens, attempt counts, and states;
+       - The explicit authorization decision and duplicate-risk acceptance;
+       - The named responsible operators and database owner;
+       - The resulting database action.
 
 ```sql
 -- 4. Read-only inspection of processing events with expired leases (do not mutate)
