@@ -39,9 +39,12 @@ from paper.retailbot2 import (
     format_exit_message,
 )
 from paper.outbox_transport import (
+    DELIVERY_UNKNOWN_MARKER,
+    DELIVERY_UNKNOWN_PREFIX,
     STATUS_DELIVERED,
     STATUS_DELIVERY_UNKNOWN,
     STATUS_FAILED_CONFIRMED,
+    format_delivery_unknown_error,
 )
 
 
@@ -457,7 +460,7 @@ def dispatch_event_via_subprocess(
     except Exception as exc:
         return {
             "status": STATUS_DELIVERY_UNKNOWN,
-            "error": f"Failed to spawn transport child: {exc}",
+            "error": format_delivery_unknown_error(f"Failed to spawn transport child: {exc}"),
         }
 
     pgid = child_proc.pid
@@ -569,7 +572,7 @@ def dispatch_event_via_subprocess(
     if timed_out:
         out = {
             "status": STATUS_DELIVERY_UNKNOWN,
-            "error": f"Transport exceeded deadline {timeout_sec:.1f}s",
+            "error": format_delivery_unknown_error(f"Transport exceeded deadline {timeout_sec:.1f}s"),
             "stderr": stderr_bytes.decode("utf-8", errors="replace")[:500],
         }
         if captured_descendants:
@@ -582,7 +585,7 @@ def dispatch_event_via_subprocess(
         if not stdout_text:
             out = {
                 "status": STATUS_DELIVERY_UNKNOWN,
-                "error": "Empty stdout from transport child",
+                "error": format_delivery_unknown_error("Empty stdout from transport child"),
                 "stderr": stderr_bytes.decode("utf-8", errors="replace")[:500],
             }
             if captured_descendants:
@@ -595,7 +598,7 @@ def dispatch_event_via_subprocess(
     except Exception as exc:
         out = {
             "status": STATUS_DELIVERY_UNKNOWN,
-            "error": f"Failed to parse transport child JSON: {exc}",
+            "error": format_delivery_unknown_error(f"Failed to parse transport child JSON: {exc}"),
             "raw_stdout": stdout_bytes.decode("utf-8", errors="replace")[:500],
         }
         if captured_descendants:
@@ -934,7 +937,8 @@ class OutboxWorker:
             return True
 
         # 4. Unknown delivery state: Never mark sent; schedule retry with backoff
-        err_desc = outcome.get("error") or "Delivery state unknown"
+        raw_error = outcome.get("error") or "Delivery state unknown"
+        err_desc = format_delivery_unknown_error(raw_error)
         logger.warning(
             "Ambiguous delivery status for outbox event %d (attempts=%d): %s; scheduling backoff retry",
             event_id, attempts, err_desc

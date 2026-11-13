@@ -22,11 +22,46 @@ import os
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
+from paper.outbox_transport import (
+    DELIVERY_UNKNOWN_MARKER,
+    DELIVERY_UNKNOWN_PREFIX,
+    format_delivery_unknown_error,
+)
+
 logger = logging.getLogger("retailbot2.retention")
 
 DEFAULT_SENT_RETENTION_DAYS = 14
 DEFAULT_DEAD_RETENTION_DAYS = 90
 TEST_CLEANUP_CONFIRMATION_TOKEN = "AUTHORIZE_TEST_DATABASE_PURGE_ONLY"
+
+# Explicit criteria for uncertain/ambiguous delivery outcomes (WO71797).
+# Covers both newly tagged outcomes (with DELIVERY_UNKNOWN marker) and historical/legacy error strings.
+UNCERTAIN_DELIVERY_CONDITIONS = (
+    "last_error LIKE '%DELIVERY_UNKNOWN%'",
+    "last_error LIKE '%Delivery state unknown%'",
+    "last_error LIKE '%ReadTimeout%'",
+    "last_error LIKE '%HTTP 5%'",
+    "last_error LIKE '%Server error HTTP 5%'",
+    "last_error LIKE '%ConnectionError after request%'",
+    "last_error LIKE '%Transport exceeded deadline%'",
+    "last_error LIKE '%delivery lease expired%'",
+    "last_error LIKE '%did not explicitly confirm delivery%'",
+    "last_error LIKE '%missing explicit Telegram ok field%'",
+    "last_error LIKE '%UnexpectedTransportError%'",
+    "last_error LIKE '%No HTTP status received%'",
+    "last_error LIKE '%unparseable body%'",
+    "last_error LIKE '%Failed to spawn transport child%'",
+    "last_error LIKE '%Empty stdout from transport child%'",
+    "last_error LIKE '%Failed to parse transport child JSON%'",
+)
+
+UNCERTAIN_DELIVERY_SQL_PREDICATE = (
+    "(last_error IS NOT NULL AND (" + " OR ".join(UNCERTAIN_DELIVERY_CONDITIONS) + "))"
+)
+
+NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE = (
+    "(last_error IS NULL OR NOT (" + " OR ".join(UNCERTAIN_DELIVERY_CONDITIONS) + "))"
+)
 
 
 class SecurityError(Exception):
@@ -36,6 +71,9 @@ class SecurityError(Exception):
 
 class OutboxRetentionPlanner:
     """Read-only retention analysis and policy planning engine."""
+
+    UNCERTAIN_PREDICATE = UNCERTAIN_DELIVERY_SQL_PREDICATE
+    EXCLUDE_UNCERTAIN_PREDICATE = NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE
 
     def __init__(
         self,
@@ -97,16 +135,17 @@ class OutboxRetentionPlanner:
             sent_cutoff = cutoffs["sent_cutoff"]
             dead_cutoff = cutoffs["dead_cutoff"]
 
-            # 1. Eligible Candidates: Sent events older than sent_cutoff
+            # 1. Eligible Candidates: Sent events older than sent_cutoff (strictly excluding uncertain records)
             # Uses sent_at if present; falls back to created_at if sent_at is NULL
             cur.execute(
-                """SELECT
+                f"""SELECT
                        COUNT(*) AS count,
                        MIN(COALESCE(sent_at, created_at)) AS oldest_timestamp,
                        MAX(COALESCE(sent_at, created_at)) AS newest_timestamp
                    FROM rdt_telegram_outbox
                    WHERE status = 'sent'
-                     AND COALESCE(sent_at, created_at) < %s""",
+                     AND COALESCE(sent_at, created_at) < %s
+                     AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
                 (sent_cutoff,)
             )
             sent_cand_row = cur.fetchone()
@@ -114,15 +153,16 @@ class OutboxRetentionPlanner:
             oldest_sent_cand = sent_cand_row.get("oldest_timestamp")
             newest_sent_cand = sent_cand_row.get("newest_timestamp")
 
-            # 2. Eligible Candidates: Dead-letter events older than dead_cutoff
+            # 2. Eligible Candidates: Dead-letter events older than dead_cutoff (strictly excluding uncertain records)
             cur.execute(
-                """SELECT
+                f"""SELECT
                        COUNT(*) AS count,
                        MIN(created_at) AS oldest_timestamp,
                        MAX(created_at) AS newest_timestamp
                    FROM rdt_telegram_outbox
                    WHERE status = 'dead'
-                     AND created_at < %s""",
+                     AND created_at < %s
+                     AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
                 (dead_cutoff,)
             )
             dead_cand_row = cur.fetchone()
@@ -137,30 +177,56 @@ class OutboxRetentionPlanner:
             cur.execute("SELECT COUNT(*) AS count FROM rdt_telegram_outbox WHERE status = 'processing'")
             processing_count = int(cur.fetchone()["count"])
 
-            # 4. Protected Categories: Retained within retention window
+            # 4. Protected Categories: Retained within retention window (and not uncertain)
             cur.execute(
-                """SELECT COUNT(*) AS count FROM rdt_telegram_outbox
-                   WHERE status = 'sent' AND COALESCE(sent_at, created_at) >= %s""",
+                f"""SELECT COUNT(*) AS count FROM rdt_telegram_outbox
+                   WHERE status = 'sent' AND COALESCE(sent_at, created_at) >= %s
+                     AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
                 (sent_cutoff,)
             )
             sent_retained = int(cur.fetchone()["count"])
 
             cur.execute(
-                """SELECT COUNT(*) AS count FROM rdt_telegram_outbox
-                   WHERE status = 'dead' AND created_at >= %s""",
+                f"""SELECT COUNT(*) AS count FROM rdt_telegram_outbox
+                   WHERE status = 'dead' AND created_at >= %s
+                     AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
                 (dead_cutoff,)
             )
             dead_retained = int(cur.fetchone()["count"])
 
-            # 5. Uncertain delivery events (events with non-zero attempts and delivery state unknown)
+            # 5. Uncertain delivery events (matching the comprehensive uncertain delivery predicate)
             cur.execute(
-                """SELECT COUNT(*) AS count FROM rdt_telegram_outbox
-                   WHERE last_error LIKE '%Delivery state unknown%'"""
+                f"""SELECT
+                       COUNT(*) AS count,
+                       MIN(created_at) AS oldest_timestamp,
+                       MAX(created_at) AS newest_timestamp
+                   FROM rdt_telegram_outbox
+                   WHERE {UNCERTAIN_DELIVERY_SQL_PREDICATE}"""
             )
-            uncertain_delivery_count = int(cur.fetchone()["count"])
+            uncertain_row = cur.fetchone()
+            uncertain_delivery_count = int(uncertain_row["count"])
+            oldest_uncertain = uncertain_row.get("oldest_timestamp")
+            newest_uncertain = uncertain_row.get("newest_timestamp")
+
+            # Breakdown of uncertain records by status
+            cur.execute(
+                f"""SELECT
+                       SUM(CASE WHEN status = 'dead' THEN 1 ELSE 0 END) AS dead_count,
+                       SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) AS sent_count,
+                       SUM(CASE WHEN status IN ('pending', 'processing') THEN 1 ELSE 0 END) AS active_count
+                   FROM rdt_telegram_outbox
+                   WHERE {UNCERTAIN_DELIVERY_SQL_PREDICATE}"""
+            )
+            breakdown_row = cur.fetchone()
+            uncertain_dead_count = int(breakdown_row.get("dead_count") or 0)
+            uncertain_sent_count = int(breakdown_row.get("sent_count") or 0)
+            uncertain_active_count = int(breakdown_row.get("active_count") or 0)
 
             total_candidates = sent_candidates + dead_candidates
-            total_protected = pending_count + processing_count + sent_retained + dead_retained
+            total_protected = (
+                pending_count + processing_count + sent_retained + dead_retained +
+                uncertain_dead_count + uncertain_sent_count
+            )
 
             return {
                 "dry_run": True,
@@ -192,7 +258,18 @@ class OutboxRetentionPlanner:
                     "processing_protected_count": processing_count,
                     "sent_retained_in_window_count": sent_retained,
                     "dead_retained_in_window_count": dead_retained,
+                    "uncertain_dead_protected_count": uncertain_dead_count,
+                    "uncertain_sent_protected_count": uncertain_sent_count,
                     "uncertain_delivery_requiring_review_count": uncertain_delivery_count,
+                },
+                "uncertain_summary": {
+                    "total_uncertain_records": uncertain_delivery_count,
+                    "uncertain_dead_count": uncertain_dead_count,
+                    "uncertain_sent_count": uncertain_sent_count,
+                    "uncertain_active_count": uncertain_active_count,
+                    "oldest_uncertain_timestamp": oldest_uncertain.isoformat() if oldest_uncertain and hasattr(oldest_uncertain, "isoformat") else str(oldest_uncertain) if oldest_uncertain else None,
+                    "newest_uncertain_timestamp": newest_uncertain.isoformat() if newest_uncertain and hasattr(newest_uncertain, "isoformat") else str(newest_uncertain) if newest_uncertain else None,
+                    "policy": "EXCLUDED_FROM_PURGE_MANUAL_REVIEW_REQUIRED",
                 },
                 "action": "DRY_RUN_ONLY_NO_RECORDS_MODIFIED",
             }
@@ -230,20 +307,22 @@ class OutboxRetentionPlanner:
             sent_cutoff = cutoffs[0]
             dead_cutoff = cutoffs[1]
 
-            # 1. Delete sent candidates older than sent_cutoff
+            # 1. Delete sent candidates older than sent_cutoff (strictly excluding uncertain)
             cur.execute(
-                """DELETE FROM rdt_telegram_outbox
+                f"""DELETE FROM rdt_telegram_outbox
                    WHERE status = 'sent'
-                     AND COALESCE(sent_at, created_at) < %s""",
+                     AND COALESCE(sent_at, created_at) < %s
+                     AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
                 (sent_cutoff,)
             )
             deleted_sent = cur.rowcount
 
-            # 2. Delete dead candidates older than dead_cutoff
+            # 2. Delete dead candidates older than dead_cutoff (strictly excluding uncertain)
             cur.execute(
-                """DELETE FROM rdt_telegram_outbox
+                f"""DELETE FROM rdt_telegram_outbox
                    WHERE status = 'dead'
-                     AND created_at < %s""",
+                     AND created_at < %s
+                     AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
                 (dead_cutoff,)
             )
             deleted_dead = cur.rowcount

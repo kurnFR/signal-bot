@@ -5,10 +5,10 @@
     "deploy/systemd/retailbot2-outbox-worker.service": "35b76b4c545f36ba70229472abbf1dc2567c0c9f9cf0092fa238edce85bd7f29",
     "deploy/env/outbox-worker.env.example": "d157da69214647835b540fb56b2238b2290d1215a63ff52aaadd16bc06038051",
     "deploy/requirements-worker.txt": "597580c344905b902d0d7ca7f9e17041561e655ec97029288f2d516370f844fa",
-    "paper/outbox_worker.py": "9c6c70e59ce4127263be5f8ff3fa258cd88b120c8ce2e4f6b43bcfee6035b53f",
-    "paper/outbox_transport.py": "3b8f8c729970190bb0ceb745f5caa8f4b303cd4aaad75f697467a76e7259649b",
+    "paper/outbox_worker.py": "6a3d1eda9b300e163ae05e0a429820263cf62c6f302806d97a30f9b3e30e5e13",
+    "paper/outbox_transport.py": "4b1d1b485b43c03c6c9098785ed2660dd175e3d4c4d83d7292183c3ba8f327e0",
     "paper/outbox_health.py": "496f13f777eb1029d94b9232321da6e0061691c9923bd807a3c59df92e024091",
-    "paper/outbox_retention.py": "724819ab3242589937b620335eddcd9e570676377239ee459bf279c32a644f61",
+    "paper/outbox_retention.py": "f62502b21c5d4f782d54451ac284ca4245d2965153cd54cbf3f9e9e1bf77ea9c",
     "docs/RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md": "a8376cf29c0ce83f298bdfabe9761738e2fae702b2d02c51c688e1c0280fb259",
     "docs/RETAILBOT2_AND_MODERN_UI_RELEASE_GATES.md": "4bca873d896aacc0ffab88b364cdb34f23984b01c761d32d99d15e65b7edced4"
   }

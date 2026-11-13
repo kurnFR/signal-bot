@@ -2173,7 +2173,7 @@ class DatabaseManager:
             cursor.execute(
                 """UPDATE rdt_telegram_outbox
                    SET status='dead', locked_until=NULL, claim_token=NULL,
-                       last_error=COALESCE(last_error, 'delivery lease expired at max attempts')
+                       last_error=COALESCE(last_error, 'DELIVERY_UNKNOWN: delivery lease expired at max attempts')
                    WHERE status='processing' AND locked_until <= UTC_TIMESTAMP()
                      AND attempts >= 8"""
             )
