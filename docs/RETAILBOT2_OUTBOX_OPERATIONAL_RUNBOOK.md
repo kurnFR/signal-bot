@@ -284,10 +284,16 @@ The following 10 alerts constitute the production monitoring specification for t
 | **`OutboxDeadLetterCritical`** | `dead_count > 20` | Critical | Immediate | Systemic failure (invalid Telegram token, blocked chat, unrecoverable bug). Halt queue claiming if necessary. |
 | **`OutboxLockContention`** | `IS_USED_LOCK('rdt_outbox_worker_lock')` holds foreign connection ID | Critical | Immediate | Duplicate worker or orphaned zombie connection. Terminate conflicting process before restarting worker. |
 | **`OutboxWorkerCrashLoop`** | Service restarts >= 5 times within 60s | Critical | Immediate | Configuration error, invalid credentials, or missing database connection. Check `journalctl -u retailbot2-outbox-worker.service`. |
-| **`OutboxExpiredLeaseAccumulation`** | `expired_processing_count > 5` | Warning | 10 min | Transport subprocess crashes or HTTP timeouts exceeding lease duration (300s). Check network connectivity. |
+| **`OutboxExpiredLeaseAccumulation`** | `expired_processing_count > 5` | Warning | 10 min | Transport subprocess crashes, worker termination, or network timeouts exceeding the 90-second lease duration (with 10.0s transport HTTP deadline + 2.0s ack budget). An expired lease (`status='processing' AND locked_until <= UTC_TIMESTAMP()`) means claim ownership has lapsed; it is NOT proof that delivery failed. Do not blindly reset rows; inspect individual event forensic evidence. |
 | **`OutboxSlowTransport`** | Delivery loop duration > 15s per batch | Warning | 15 min | Telegram API rate limits (HTTP 429), proxy latency, or DB lock contention. Inspect Telegram response latency. |
 | **`OutboxRetentionStagnation`** | `sent_events > 10000` with age > 30 days | Info / Warn | 24 hours | Automated retention schedule absent or failing dry-run checks. Run `outbox_retention.py` dry-run. |
 | **`OutboxSchemaDivergence`** | Worker preflight column count != 13 | Critical | Immediate | Unapplied or rolled-back migrations on target database. Verify migrations 026 and 027. |
+
+> [!IMPORTANT]
+> **Expired Lease Semantics & Investigation Guidelines:**
+> 1. **Expired Lease vs. Old Processing Row:** A row is only an expired lease when `status = 'processing' AND locked_until <= UTC_TIMESTAMP()`. A processing row whose `created_at` is old but whose `locked_until` is in the future is still actively leased.
+> 2. **Uncertain Delivery Outcome:** If a worker transmitted a payload to Telegram but crashed or experienced network partition before recording `status = 'sent'`, its 90-second lease will expire even though Telegram successfully delivered the alert. Blindly resetting expired leases to `pending` risks duplicate broadcasts.
+> 3. **No Automatic Blanket Resets:** Never execute automated or blanket reset queries against processing events. If the worker is running, it naturally re-claims expired events under fenced tokens. If the worker is stopped, follow the per-event forensic recovery procedure in Section 17.
 
 ---
 
@@ -306,10 +312,11 @@ When authorized for production deployment, operators must execute the rollout in
 3. **Step 3: Configuration & Credential Provisioning**
    - Deploy `/etc/retailbot2/outbox-worker.env` with permissions `0600` owned by `retailbot:retailbot`.
    - Set initial switches: `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1`, `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0`.
-4. **Step 4: Systemd Service Installation**
+4. **Step 4: Systemd Service Installation & Timeout Reconciliation**
    - Copy `deploy/systemd/retailbot2-outbox-worker.service` to `/etc/systemd/system/`.
    - Run `sudo systemctl daemon-reload`.
    - Run `systemd-analyze verify /etc/systemd/system/retailbot2-outbox-worker.service`.
+   - **Timeout Recommendation:** The unit template specifies `TimeoutStopSec=15s`. The worst-case shutdown path comprises: 10.0s transport HTTP deadline + 1.5s SIGTERM grace + 1.5s SIGKILL grace + 1.0s group verification + 1.0s DB lock release = 15.0s. For production hosts, configuring `TimeoutStopSec=25s` or `TimeoutStopSec=30s` is strongly recommended to guarantee clean MariaDB advisory lock release under heavy system load.
 5. **Step 5: Controlled Observation Trial (Stage C Verification)**
    - Start worker in observation mode with `--observation` flag: `sudo systemctl start retailbot2-outbox-worker.service`.
    - Confirm advisory lock acquired: `SELECT IS_USED_LOCK('rdt_outbox_worker_lock');`.
@@ -328,27 +335,63 @@ When authorized for production deployment, operators must execute the rollout in
 
 ---
 
-## 17. Emergency Stop and Rollback Procedures
+## 17. Emergency Stop and Conservative Recovery Procedures
 
 If anomalous behavior, unexpected delivery loops, or operational failures occur, operators must execute the applicable rollback scenario:
 
-### Scenario A: Rapid Emergency Stop (Immediate Delivery Halt)
-1. **Stop the Service Immediately:**
+### Scenario A: Rapid Emergency Stop & Conservative Per-Event Recovery
+1. **Stop Worker Activity (Authorized Environment Only):**
    ```bash
    sudo systemctl stop retailbot2-outbox-worker.service
    ```
-   *Action:* `SIGTERM` terminates dispatcher; worker exits claim loop, terminates in-flight subprocesses, and releases advisory lock within 15 seconds.
-2. **Disable Delivery Authorization Switch:**
+   *Action:* `SIGTERM` requests graceful stop. Worker stops claiming new events, allows active transport to complete or terminates subprocess group within bounded grace, and releases MariaDB advisory lock.
+2. **Confirm Process & Descendant Termination:**
+   Verify zero remaining dispatcher or transport processes in `/proc`:
+   ```bash
+   pgrep -a -f "paper.outbox_worker|paper.outbox_transport"
+   ```
+   Confirm no live PID/PGID remains.
+3. **Verify Advisory Lock & Session Release:**
+   Query MariaDB to verify lock is released and socket dropped:
+   ```sql
+   SELECT IS_USED_LOCK('rdt_outbox_worker_lock');
+   ```
+   Must return `NULL`.
+4. **Disable Delivery Authorization Switch:**
    In `/etc/retailbot2/outbox-worker.env`, set:
    ```bash
    RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0
    ```
-3. **Reset In-Flight Leases (Safe State Recovery):**
+5. **Inspect Affected Processing Events Individually:**
+   Query all in-flight or expired processing events:
    ```sql
-   UPDATE rdt_telegram_outbox
-   SET status = 'pending', claim_token = NULL, locked_until = NULL
-   WHERE status = 'processing';
+   SELECT id, event_key, trade_id, event_type, attempts, locked_until, created_at,
+          TIMESTAMPDIFF(SECOND, locked_until, UTC_TIMESTAMP()) AS expired_seconds_ago
+   FROM rdt_telegram_outbox
+   WHERE status = 'processing'
+   ORDER BY id ASC;
    ```
+6. **Classify Each Event Individually Using Forensic Evidence:**
+   - **Confirmed NOT Sent:** Verify that the message is absent from the target Telegram chat and the transport subprocess did not reach Telegram API. With explicit operator authorization, reset only that specific event:
+     ```sql
+     UPDATE rdt_telegram_outbox
+     SET status = 'pending', claim_token = NULL, locked_until = NULL, attempts = attempts + 1
+     WHERE id = <event_id> AND status = 'processing';
+     ```
+   - **Confirmed Sent:** If the message is present in the Telegram chat, reconcile database state:
+     ```sql
+     UPDATE rdt_telegram_outbox
+     SET status = 'sent', sent_at = UTC_TIMESTAMP(), claim_token = NULL, locked_until = NULL
+     WHERE id = <event_id> AND status = 'processing';
+     ```
+   - **Delivery Outcome Uncertain:** If delivery cannot be definitively verified (e.g., chat logs inconclusive, network partition during HTTP POST):
+     **PRESERVE UNCERTAIN EVENTS FOR MANUAL OWNER REVIEW.** Do NOT reset to pending; doing so risks duplicate delivery.
+7. **Maintain Immutable Audit Record:**
+   Document every recovered event ID, evidence examined, operator name, timestamp, and approved action.
+8. **Explicit Prohibition:**
+   > [!CAUTION]
+   > **Never execute blanket resets such as `UPDATE rdt_telegram_outbox SET status='pending' WHERE status='processing';`!**
+   > Blanket resets bypass forensic classification and risk re-sending messages that were already delivered to Telegram.
 
 ### Scenario B: Service Downgrade / Code Rollback
 1. Stop running worker: `sudo systemctl stop retailbot2-outbox-worker.service`.

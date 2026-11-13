@@ -502,7 +502,47 @@ Stage F establishes the comprehensive release gate matrix, packaging specificati
 | **G-13** | **Production Enqueue & Delivery Authorization** | **NOT_AUTHORIZED** | Production enqueue switch `RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED` and delivery switch `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY` remain `0` (fail-closed). | Explicit owner approval required to enable delivery mode. |
 | **G-14** | **Final Owner Deployment Approval** | **OWNER_ACTION_REQUIRED** | Formal owner authorization to install systemd service on production host and initiate staged rollout. | Owner review and sign-off on Stage F report. |
 
-#### 2. Technical Readiness vs. Deployment Authorization
+#### 2. Git Lineage & Commit Lineage Clarification (WO71784 Audit)
+
+- **Master Base Lineage:** Commit `a2c850aa8f97f081e22008d1efc0d3654c379dbe` (`origin/master`).
+- **Stage D Head:** Commit `bcc9f7439dc9d8c927da23208bf1fdb8858656ae`.
+- **Stage E Genuine Git Commit:** `861a0a96caba5d367064abdd577e826a5dae63db` (abbreviated `861a0a9`).
+- **Lineage Verification:** The SHA `861a0a911767ee427494f6c4c0b4cb9da143b8c4` reported in WO71783 prompt metadata does not exist in local or remote Git repositories (`fatal: bad object`). It represents an erroneous string transcription where the valid 7-character prefix `861a0a9` was matched with a non-existent suffix. The authentic Git parent object is `861a0a96caba5d367064abdd577e826a5dae63db`, and the merge-base with master is strictly `a2c850aa8f97f081e22008d1efc0d3654c379dbe`.
+
+#### 3. Test Suite Count Reconciliation (151 Baseline Tests; 154 Post-Audit Tests Across 9 Suites)
+
+An empirical test collection and execution across all 9 suites reconciles the previous 150-vs-151 count discrepancy and records the newly added corrective test coverage:
+
+| Suite | WO71783 Baseline | WO71784 Post-Audit | Notes & Scope |
+| :--- | :---: | :---: | :--- |
+| `tests/test_retailbot2_shadow_enqueue.py` | 24 | 24 | Pure payload builders & decoupled shadow enqueue |
+| `tests/test_retailbot2_outbox_enqueue_auth.py` | 46 | 46 | Parameterized flag & connection validation cases |
+| `tests/test_retailbot2_telegram_outbox.py` | 39 | 39 | Unit tests for dispatcher loop and token fencing |
+| `tests/test_retailbot2_outbox_delivery_mysql.py` | 6 | 6 | Concurrency, lease fencing, and retry integration tests |
+| `tests/test_migration_managed_startup_docs.py` | 8 | 8 | Runbook, migration, and documentation assertions |
+| `tests/test_retailbot2_outbox_supervision.py` | 9 | 10 | Added active-transport subprocess shutdown test (+1) |
+| `tests/test_retailbot2_outbox_observability.py` | 7 | 7 | Health snapshots, dead-letter inspection, and lock inspection |
+| `tests/test_retailbot2_outbox_retention.py` | 5 | 5 | Dry-run retention planner & active row protection |
+| `tests/test_retailbot2_deployment_package.py` | 7 | 9 | Added lease consistency & recovery assertion tests (+2) |
+| **Total Test Count** | **151** | **154** | **154 Passed, 0 Failed, 0 Skipped, 0 Deselected** |
+
+**Root Cause of WO71783 Discrepancy:** The 150-count breakdown cited in WO71783 metadata originated from an outdated manual transcription where `delivery_mysql` was listed with 4 tests (instead of 6) and unparameterized estimates were cited. In reality, the codebase collected and passed exactly 151 tests in WO71783, and now passes 154 tests with WO71784 corrective additions.
+
+#### 4. Lease Duration, HTTP Deadlines & Expired Lease Semantics
+
+- **Worker Claim Lease:** `lease_seconds = 90` (normal-path recovery margin).
+- **Transport Subprocess Deadline:** `transport_timeout_sec = 10.0` (read deadline for HTTP POST).
+- **Connect Timeout:** `5.0s`.
+- **Acknowledgement Budget:** `cleanup_grace_sec = 1.5s` to 2.0s.
+- **Expired Lease vs. Old Processing Row:** A row is only an expired lease when `status = 'processing' AND locked_until <= UTC_TIMESTAMP()`. Total row age (`created_at`) does not define lease expiration.
+- **Uncertainty & No-Reset Rule:** An expired lease does NOT prove delivery failed; the message may have been delivered prior to worker termination. Automated or blanket status resets (`UPDATE ... WHERE status='processing'`) are strictly prohibited.
+
+#### 5. Systemd Shutdown Timing Reconciliation
+
+- **Worst-case Shutdown Duration:** Transport HTTP deadline (10.0s) + child SIGTERM wait (1.5s) + child SIGKILL escalation (1.5s) + process group verification (1.0s) + MariaDB advisory lock release (1.0s) = **15.0s**.
+- **Operational Recommendation:** While the unit template specifies `TimeoutStopSec=15s`, under heavy system load 15s can trigger premature systemd cgroup SIGKILL before `session_mgr.close()` finishes. Setting `TimeoutStopSec=25s` or `TimeoutStopSec=30s` in production `/etc/systemd/system/retailbot2-outbox-worker.service` is strongly recommended.
+
+#### 6. Technical Readiness vs. Deployment Authorization Verdict
 
 - **Technical Readiness Verdict:** **`PASS`**  
   All 10 technical release gates (G-01 through G-10, plus observation credential G-12) have achieved full implementation, rigorous multi-suite test coverage (151 tests passing), and independent verification.

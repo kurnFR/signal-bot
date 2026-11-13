@@ -158,3 +158,37 @@ def test_cli_invalid_database_fails():
     # argparse error code 2
     assert res.returncode == 2
     assert "invalid choice" in res.stderr.lower()
+
+
+def test_lease_and_timeout_parameters():
+    """Verify lease, deadline, and monitoring consistency between code and documentation."""
+    import inspect
+    from paper.outbox_worker import OutboxWorker
+
+    sig = inspect.signature(OutboxWorker.__init__)
+    # Verify established code defaults
+    assert sig.parameters["lease_seconds"].default == 90, "Worker lease_seconds must default to 90"
+    assert sig.parameters["transport_timeout_sec"].default == 10.0, "transport_timeout_sec must default to 10.0"
+
+    # Verify runbook references 90-second lease and does not refer to 300s
+    runbook_path = REPO_ROOT / "docs/RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md"
+    runbook_text = runbook_path.read_text(encoding="utf-8")
+    assert "90-second lease" in runbook_text
+    assert "lease duration (300s)" not in runbook_text
+
+
+def test_runbook_conservative_recovery_assertions():
+    """Verify runbook prohibits blanket resets and enforces conservative recovery."""
+    runbook_path = REPO_ROOT / "docs/RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md"
+    runbook_text = runbook_path.read_text(encoding="utf-8")
+
+    # Blanket UPDATE on all processing rows must NOT be present
+    blanket_sql = "UPDATE rdt_telegram_outbox SET status = 'pending', claim_token = NULL, locked_until = NULL WHERE status = 'processing';"
+    assert blanket_sql not in runbook_text
+
+    # Must prescribe per-event inspection and classification
+    assert "Scenario A: Rapid Emergency Stop & Conservative Per-Event Recovery" in runbook_text
+    assert "Inspect Affected Processing Events Individually" in runbook_text
+    assert "PRESERVE UNCERTAIN EVENTS FOR MANUAL OWNER REVIEW" in runbook_text
+    assert "Never execute blanket resets" in runbook_text
+

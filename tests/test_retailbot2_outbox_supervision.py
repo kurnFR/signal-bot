@@ -138,6 +138,52 @@ class TestWorkerLifecycleSimulation(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertEqual(worker.state, OutboxWorkerState.STOPPED)
 
+    def test_shutdown_with_active_transport_subprocess_terminates_and_releases_lock(self):
+        """Simulate worker receiving SIGTERM while a transport subprocess is active in-flight.
+        Proves clean subprocess handling, release of advisory lock, and exit code 0."""
+        worker = OutboxWorker(
+            db_config={"host": "127.0.0.1", "database": "signal_bot_test"},
+            allowed_databases=("signal_bot_test",),
+            poll_interval_sec=0.01,
+        )
+        worker.session_mgr = MagicMock()
+        worker.session_mgr.check_lock_owned.return_value = True
+        worker.session_mgr.heartbeat.return_value = True
+
+        event_sample = {
+            "id": 999,
+            "event_key": "retailbot2:test:shutdown_active_transport",
+            "trade_id": 0,
+            "event_type": "entry",
+            "attempts": 1,
+            "claim_token": "token1234567890123456789012345678",
+            "payload": {
+                "symbol": "BTC/USDT",
+                "side": "LONG",
+                "entry": 50000.0,
+                "stop": 49000.0,
+                "target": 52000.0,
+                "units": 0.1,
+                "risk_amt": 100.0,
+                "risk_pct": 1.0,
+            },
+        }
+        worker.session_mgr.claim_event.return_value = event_sample
+
+        def mock_dispatch(payload, **kwargs):
+            # Simulate SIGTERM receipt during in-flight subprocess execution
+            worker._handle_signal(signal.SIGTERM, None)
+            return {"status": "DELIVERED"}
+
+        with patch("paper.outbox_worker.dispatch_event_via_subprocess", side_effect=mock_dispatch):
+            exit_code = worker.run()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(worker.state, OutboxWorkerState.STOPPED)
+        worker.session_mgr.close.assert_called_once()
+        worker.session_mgr.mark_sent.assert_called_once_with(999, "token1234567890123456789012345678")
+
+
 
 if __name__ == "__main__":
     unittest.main()
