@@ -2,44 +2,50 @@
 from pathlib import Path
 import unittest
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _doc(rel_path: str) -> Path:
+    return REPO_ROOT / rel_path
+
 
 class TestMigrationManagedStartupDocs(unittest.TestCase):
     def test_security_guide_separates_migration_privileges_from_runtime(self):
-        text = Path("docs/SECURITY.md").read_text(encoding="utf-8")
+        text = _doc("docs/SECURITY.md").read_text(encoding="utf-8")
         self.assertIn("run_all.py", text)
         self.assertIn("read-only", text)
         self.assertNotIn("wallet tracker startup runs an ALTER TABLE", text)
 
     def test_wallet_tracker_guide_requires_migrations_before_standalone_worker(self):
-        text = Path("docs/WALLET_TRACKER.md").read_text(encoding="utf-8")
+        text = _doc("docs/WALLET_TRACKER.md").read_text(encoding="utf-8")
         self.assertIn("versioned migrations", text)
         self.assertIn("standalone worker requires migrations", text)
         self.assertNotIn("Tables are created automatically at startup.", text)
 
     def test_wallet_runtime_schema_migration_documents_read_only_verification(self):
-        text = Path("db/migrate_wallet_tracker_runtime_schema.sql").read_text(encoding="utf-8")
+        text = _doc("db/migrate_wallet_tracker_runtime_schema.sql").read_text(encoding="utf-8")
         self.assertIn("read-only", text)
 
     def test_retailbot2_outbox_runbook_documents_authoritative_advisory_lock(self):
         from paper.retailbot2 import OUTBOX_LOCK_NAME
         self.assertEqual(OUTBOX_LOCK_NAME, "rdt_outbox_worker_lock")
 
-        release_gates = Path("docs/RETAILBOT2_AND_MODERN_UI_RELEASE_GATES.md").read_text(encoding="utf-8")
+        release_gates = _doc("docs/RETAILBOT2_AND_MODERN_UI_RELEASE_GATES.md").read_text(encoding="utf-8")
         self.assertIn("OUTBOX_LOCK_NAME = \"rdt_outbox_worker_lock\"", release_gates)
         self.assertIn("SELECT IS_USED_LOCK('rdt_outbox_worker_lock');", release_gates)
         self.assertIn("WHERE ID = IS_USED_LOCK('rdt_outbox_worker_lock');", release_gates)
 
-        arch_doc = Path("docs/ARCHITECTURE.md").read_text(encoding="utf-8")
+        arch_doc = _doc("docs/ARCHITECTURE.md").read_text(encoding="utf-8")
         self.assertIn("`rdt_outbox_worker_lock`", arch_doc)
 
         # Confirm no lock query in docs mistakenly refers to retailbot2_telegram_outbox
-        for doc_path in Path("docs").glob("*.md"):
+        for doc_path in (REPO_ROOT / "docs").glob("*.md"):
             doc_text = doc_path.read_text(encoding="utf-8")
             self.assertNotIn("IS_USED_LOCK('retailbot2_telegram_outbox')", doc_text)
             self.assertNotIn("GET_LOCK('retailbot2_telegram_outbox'", doc_text)
 
     def test_retailbot2_release_gates_reconciles_production_schema_evidence(self):
-        release_gates = Path("docs/RETAILBOT2_AND_MODERN_UI_RELEASE_GATES.md").read_text(encoding="utf-8")
+        release_gates = _doc("docs/RETAILBOT2_AND_MODERN_UI_RELEASE_GATES.md").read_text(encoding="utf-8")
 
         # 1. Records the WO71688 observation and its date
         self.assertIn("WO71688", release_gates)
@@ -76,6 +82,65 @@ class TestMigrationManagedStartupDocs(unittest.TestCase):
         self.assertIn("External Telegram delivery remains unauthorized and unvalidated", release_gates)
         self.assertIn("Telegram external delivery | **Not authorized / not tested**", release_gates)
         self.assertIn("not a comprehensive historical audit", release_gates)
+
+    def test_retailbot2_outbox_recovery_policy_unknown_delivery_and_preconditions(self):
+        """Verify Section 4.5 recovery policy distinguishes 3 delivery outcomes and guards DELIVERY_UNKNOWN."""
+        release_gates = _doc("docs/RETAILBOT2_AND_MODERN_UI_RELEASE_GATES.md").read_text(encoding="utf-8")
+
+        # 1. Three distinct delivery outcomes documented
+        self.assertIn("`CONFIRMED_NOT_DELIVERED`", release_gates)
+        self.assertIn("`CONFIRMED_DELIVERED`", release_gates)
+        self.assertIn("`DELIVERY_UNKNOWN`", release_gates)
+
+        # 2. DELIVERY_UNKNOWN explicitly carries duplicate-delivery risk
+        self.assertIn(
+            "Requeueing an event with `DELIVERY_UNKNOWN` can produce duplicate Telegram messages",
+            release_gates,
+        )
+        self.assertIn("**Do NOT describe the event as safe to requeue.**", release_gates)
+        self.assertIn("**Do NOT claim that duplicate delivery can be prevented or ruled out.**", release_gates)
+
+        # 3. Process termination, lock release, and lease expiry do not prove non-delivery
+        self.assertIn(
+            "**Process termination** does NOT prove that a previous HTTP request was unsuccessful",
+            release_gates,
+        )
+        self.assertIn(
+            "**Advisory-lock release** does NOT prove that a previous HTTP request was unsuccessful",
+            release_gates,
+        )
+        self.assertIn(
+            "**Lease expiry** does NOT prove that a previous HTTP request was unsuccessful",
+            release_gates,
+        )
+        self.assertIn(
+            "**Database acknowledgement failure** after successful Telegram delivery",
+            release_gates,
+        )
+        self.assertIn(
+            "Satisfying process and advisory-lock checks does NOT resolve external delivery status",
+            release_gates,
+        )
+
+        # 4. Unknown events are not automatically requeued
+        self.assertIn(
+            "**Leave the event untouched** unless an authorized operator and database owner explicitly accept the duplicate-delivery risk",
+            release_gates,
+        )
+        self.assertIn("Automated recovery jobs and ad-hoc UPDATE queries are strictly prohibited", release_gates)
+
+        # 5. Manual recovery requires 6 strict preconditions, explicit authorization, and audit record
+        self.assertIn("Obtain explicit operator and database owner sign-off", release_gates)
+        self.assertIn("Preserve audit record", release_gates)
+        self.assertIn("Mandatory Audit Logging", release_gates)
+        self.assertIn("Stop the worker gracefully", release_gates)
+        self.assertIn("Verify process elimination", release_gates)
+        self.assertIn("Verify advisory lock release", release_gates)
+        self.assertIn("Read-only event inspection", release_gates)
+
+        # 6. No unconditional recovery UPDATE query is present in documentation
+        self.assertNotIn("UPDATE rdt_telegram_outbox", release_gates)
+        self.assertNotIn("SET status = 'pending'", release_gates)
 
 
 

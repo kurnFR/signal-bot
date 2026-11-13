@@ -56,6 +56,7 @@ class OutboxWorkerState(Enum):
     INITIALIZING = "INITIALIZING"
     ACQUIRING_LOCK = "ACQUIRING_LOCK"
     RUNNING = "RUNNING"
+    OBSERVING = "OBSERVING"
     STOPPING = "STOPPING"
     STOPPED = "STOPPED"
     FATAL_LOCKOUT = "FATAL_LOCKOUT"
@@ -721,6 +722,43 @@ class OutboxSessionManager:
             event_id, claim_token, error, conn=self.s_lock
         )
 
+    def inspect_queue(self) -> Dict[str, Any]:
+        """Perform read-only inspection of outbox queue on S_lock without claiming or mutating.
+
+        Queries table status counts and due items using only verified schema columns.
+        Does not initiate transactions, acquire row locks, or modify any database state.
+        """
+        if not self.check_lock_owned():
+            raise LockLostError("Cannot inspect outbox queue: advisory lock ownership lost")
+        cursor = self.s_lock.cursor(dictionary=True)
+        try:
+            cursor.execute(
+                """SELECT
+                       status,
+                       COUNT(*) AS count,
+                       MIN(created_at) AS oldest_created_at
+                   FROM rdt_telegram_outbox
+                   GROUP BY status"""
+            )
+            rows = cursor.fetchall()
+            cursor.execute(
+                """SELECT COUNT(*) AS due_count
+                   FROM rdt_telegram_outbox
+                   WHERE attempts < 8 AND (
+                       (status='pending' AND next_attempt_at <= UTC_TIMESTAMP())
+                       OR (status='processing' AND locked_until <= UTC_TIMESTAMP())
+                   )"""
+            )
+            due_row = cursor.fetchone()
+            due_count = due_row["due_count"] if due_row else 0
+            return {
+                "status_counts": {r["status"]: int(r["count"]) for r in rows},
+                "oldest_by_status": {r["status"]: r["oldest_created_at"] for r in rows if r.get("oldest_created_at")},
+                "due_count": int(due_count),
+            }
+        finally:
+            cursor.close()
+
     def close(self):
         """Release advisory lock and cleanly close S_lock."""
         if self.s_lock:
@@ -742,8 +780,8 @@ class OutboxWorker:
     def __init__(
         self,
         db_config: Dict[str, Any],
-        telegram_token: str,
-        telegram_chat_id: str,
+        telegram_token: str = "",
+        telegram_chat_id: str = "",
         allowed_databases: Tuple[str, ...] = ALLOWED_TEST_DATABASES,
         poll_interval_sec: float = 1.0,
         transport_timeout_sec: float = 10.0,
@@ -752,6 +790,7 @@ class OutboxWorker:
         max_attempts: int = 8,
         mock_transport_response: Optional[Dict[str, Any]] = None,
         proc_root: str = "/proc",
+        observation_mode: bool = False,
     ):
         self.session_mgr = OutboxSessionManager(db_config, allowed_databases)
         self.telegram_token = telegram_token
@@ -763,6 +802,7 @@ class OutboxWorker:
         self.max_attempts = max_attempts
         self.mock_transport_response = mock_transport_response
         self.proc_root = proc_root
+        self.observation_mode = observation_mode
         self.state = OutboxWorkerState.INITIALIZING
         self._shutdown_requested = False
         self._fatal_pgid: Optional[int] = None
@@ -803,6 +843,15 @@ class OutboxWorker:
             logger.error("Advisory lock ownership lost during event loop; stopping worker")
             self.state = OutboxWorkerState.STOPPED
             raise LockLostError("Advisory lock lost")
+
+        if self.observation_mode:
+            summary = self.session_mgr.inspect_queue()
+            logger.info(
+                "Observation mode active: read-only queue summary (due=%d, counts=%s)",
+                summary.get("due_count", 0),
+                summary.get("status_counts", {}),
+            )
+            return False
 
         event = self.session_mgr.claim_event(lease_seconds=self.lease_seconds)
         if not event:
@@ -910,6 +959,8 @@ class OutboxWorker:
 
         if self._fatal_pgid or self.state == OutboxWorkerState.FATAL_LOCKOUT:
             self.state = OutboxWorkerState.FATAL_LOCKOUT
+        elif self.observation_mode:
+            self.state = OutboxWorkerState.OBSERVING
         else:
             self.state = OutboxWorkerState.RUNNING
         logger.info("Outbox worker running in state %s", self.state.value)
@@ -960,7 +1011,15 @@ class OutboxWorker:
                                 self._fatal_pgid
                             )
                             self._fatal_pgid = None
-                            self.state = OutboxWorkerState.STOPPING if self._shutdown_requested else OutboxWorkerState.RUNNING
+                            self.state = (
+                                OutboxWorkerState.STOPPING
+                                if self._shutdown_requested
+                                else (
+                                    OutboxWorkerState.OBSERVING
+                                    if self.observation_mode
+                                    else OutboxWorkerState.RUNNING
+                                )
+                            )
                         elif inspection.status == ProcessInspectionStatus.LIVE_PROCESSES_PRESENT:
                             logger.warning(
                                 "Live transport processes %r still present in PGID %s; retaining FATAL_LOCKOUT and S_lock",
@@ -1038,42 +1097,113 @@ class OutboxWorker:
             self.state = OutboxWorkerState.STOPPED
 
 
+def is_production_outbox_observation_authorized() -> bool:
+    """Check if production outbox observation mode is authorized.
+
+    Requires explicit RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1.
+    Missing, empty, or any value other than '1' fails closed.
+    This flag authorizes read-only outbox queue inspection ONLY;
+    it never authorizes outbox enqueue, live trading, worker delivery, or Telegram transmission.
+    """
+    return os.getenv("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED", "").strip() == "1"
+
+
+def resolve_worker_db_credentials(database: str, observation: bool = False) -> Dict[str, str]:
+    """Resolve database credentials with strict fail-closed requirements.
+
+    Credential Isolation Rules (Work Order 71765):
+    1. For 'signal_bot_test':
+       Requires explicit SIGNAL_BOT_TEST_DB_USER and SIGNAL_BOT_TEST_DB_PASSWORD.
+       Generic or default ('cms') fallbacks are strictly prohibited.
+    2. For 'crypto_signals' in observation mode (observation=True):
+       Requires independent explicit RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1.
+       Requires explicit RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER and
+       RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD.
+       Generic or default ('cms') fallbacks are strictly prohibited.
+       The production observation account must be provisioned separately by DB administrators
+       with SELECT-only privileges for table inspection and advisory locks.
+    3. For 'crypto_signals' in delivery mode (observation=False):
+       Resolves standard MYSQL_USER / MYSQL_PASSWORD.
+    """
+    if database == "signal_bot_test":
+        user = os.getenv("SIGNAL_BOT_TEST_DB_USER", "").strip()
+        password = os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", "").strip()
+        if not user or not password:
+            raise ValueError(
+                f"Missing dedicated test credentials for {database!r}: "
+                "SIGNAL_BOT_TEST_DB_USER and SIGNAL_BOT_TEST_DB_PASSWORD are both required; "
+                "generic or default credential fallbacks are strictly prohibited"
+            )
+        return {"user": user, "password": password}
+
+    if database == "crypto_signals" and observation:
+        if not is_production_outbox_observation_authorized():
+            raise ValueError(
+                "Production outbox observation authorization rejected: "
+                "RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1 is required for database 'crypto_signals'"
+            )
+        user = os.getenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER", "").strip()
+        password = os.getenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD", "").strip()
+        if not user or not password:
+            raise ValueError(
+                f"Missing dedicated production observation credentials for {database!r}: "
+                "RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER and "
+                "RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD are both required; "
+                "generic or default credential fallbacks are strictly prohibited"
+            )
+        return {"user": user, "password": password}
+
+    return {
+        "user": os.getenv("MYSQL_USER", "cms"),
+        "password": os.getenv("MYSQL_PASSWORD", ""),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="Standalone RetailBot2 Telegram Outbox Worker")
     parser.add_argument("--database", choices=["signal_bot_test", "crypto_signals"], default="signal_bot_test")
     parser.add_argument("--poll-interval", type=float, default=1.0)
     parser.add_argument("--timeout", type=float, default=10.0)
+    parser.add_argument(
+        "--observation",
+        action="store_true",
+        help="Run in read-only observation mode (inspect queue without claiming or delivering)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
     allowed = ALLOWED_PROD_DATABASES if args.database == "crypto_signals" else ALLOWED_TEST_DATABASES
-    if args.database == "crypto_signals":
+    if args.database == "crypto_signals" and not args.observation:
         if os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY") != "1":
             logger.error("Production outbox requires RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1")
             sys.exit(1)
 
-    if args.database == "signal_bot_test":
-        db_user = os.getenv("SIGNAL_BOT_TEST_DB_USER", os.getenv("MYSQL_USER", "cms"))
-        db_password = os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", os.getenv("MYSQL_PASSWORD", ""))
-    else:
-        db_user = os.getenv("MYSQL_USER", "cms")
-        db_password = os.getenv("MYSQL_PASSWORD", "")
+    try:
+        creds = resolve_worker_db_credentials(args.database, observation=args.observation)
+    except ValueError as exc:
+        logger.critical("Database credential resolution failed: %s", exc)
+        sys.exit(1)
+
     db_cfg = {
         "host": os.getenv("MYSQL_HOST", "127.0.0.1"),
         "port": int(os.getenv("MYSQL_PORT", 3306)),
-        "user": db_user,
-        "password": db_password,
+        "user": creds["user"],
+        "password": creds["password"],
         "database": args.database,
     }
 
+    telegram_token = "" if args.observation else os.getenv("TELEGRAM_BOT_TOKEN", "")
+    telegram_chat_id = "" if args.observation else os.getenv("TELEGRAM_CHAT_ID", "")
+
     worker = OutboxWorker(
         db_config=db_cfg,
-        telegram_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
-        telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
+        telegram_token=telegram_token,
+        telegram_chat_id=telegram_chat_id,
         allowed_databases=allowed,
         poll_interval_sec=args.poll_interval,
         transport_timeout_sec=args.timeout,
+        observation_mode=args.observation,
     )
 
     worker.setup_signals()

@@ -163,45 +163,71 @@ def is_outbox_enqueue_authorized(
 ) -> bool:
     """Validate outbox enqueue authorization against actual connection identity and configuration.
 
-    Production Enqueue Policy (Work Order 71760):
-    1. RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1 authorizes enqueue only when the actual MariaDB
-       connection identity is allowlisted and all other checks pass.
-    2. This flag authorizes outbox enqueue ONLY; it MUST NEVER authorize Telegram delivery.
-    3. Production enqueue is not being activated or tested by this work order.
-    4. Actual delivery remains subject to independent delivery authorization
-       (RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1) and worker startup restrictions.
-
-    Fail-Closed Rules:
-    - Enqueue flag missing or not '1': reject.
-    - Observation-only mode active (via config or RETAILBOT2_OBSERVATION_ONLY): reject.
-    - Missing configuration (config is None or missing db_name): reject.
-    - Missing connection (conn is None): reject.
-    - SELECT DATABASE() returns NULL, empty, or fails: reject.
-    - Actual database not in ALLOWED_OUTBOX_ENQUEUE_DATABASES: reject.
-    - Configured expected database does not agree with actual connection database: reject.
-    - Caller-supplied database parameter is never used as proof of connection identity;
-      if provided, it must also agree with the expected database.
-    - Never substitutes BotConfig() when configuration is absent in an authorization path.
+    Production Enqueue Policy (Work Orders 71760 & 71764):
+    1. For 'signal_bot_test': requires RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1.
+    2. For 'crypto_signals': requires BOTH:
+       - RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1
+       - RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED=1
+       Missing, malformed, or unset production flag fails closed.
+    3. Active connection identity is verified on the active MariaDB connection via SELECT DATABASE().
+    4. Configured expected database and actual connection database must strictly match.
+    5. Observation-only mode always suppresses enqueue.
+    6. Independent of Telegram delivery authorization (RETAILBOT2_ALLOW_TELEGRAM_DELIVERY).
+    7. Independent of trading authorization (RETAILBOT2_ALLOW_TRADING).
+    8. Independent of worker startup (RETAILBOT2_OUTBOX_WORKER_ENABLED).
+    9. Fails closed without BotConfig() fallback if configuration or connection is absent.
     """
     if is_observation_only(config):
         return False
     if os.getenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "").strip() != "1":
         return False
     if config is None:
+        logging.getLogger("retailbot2.auth").warning(
+            "Outbox enqueue rejected: missing configuration (fails closed)"
+        )
         return False
     expected_db = _resolve_configured_database(config)
     if not expected_db or expected_db not in ALLOWED_OUTBOX_ENQUEUE_DATABASES:
+        logging.getLogger("retailbot2.auth").warning(
+            "Outbox enqueue rejected: configured database %r is not in allowlist %r",
+            expected_db,
+            ALLOWED_OUTBOX_ENQUEUE_DATABASES,
+        )
         return False
     if database is not None and isinstance(database, str) and database.strip():
         if database.strip() != expected_db:
+            logging.getLogger("retailbot2.auth").warning(
+                "Outbox enqueue rejected: caller-supplied database %r does not match configured database %r",
+                database.strip(),
+                expected_db,
+            )
             return False
     if conn is None:
+        logging.getLogger("retailbot2.auth").warning(
+            "Outbox enqueue rejected: missing active database connection (fails closed)"
+        )
         return False
     actual_db = get_connection_database(conn)
     if not actual_db or actual_db not in ALLOWED_OUTBOX_ENQUEUE_DATABASES:
+        logging.getLogger("retailbot2.auth").warning(
+            "Outbox enqueue rejected: active connection database %r is not in allowlist %r",
+            actual_db,
+            ALLOWED_OUTBOX_ENQUEUE_DATABASES,
+        )
         return False
     if expected_db != actual_db:
+        logging.getLogger("retailbot2.auth").warning(
+            "Outbox enqueue rejected: configured database %r does not match active connection database %r",
+            expected_db,
+            actual_db,
+        )
         return False
+    if actual_db == "crypto_signals" or expected_db == "crypto_signals":
+        if os.getenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", "").strip() != "1":
+            logging.getLogger("retailbot2.auth").warning(
+                "Production outbox enqueue rejected: RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED=1 is required for database 'crypto_signals'"
+            )
+            return False
     return True
 
 
