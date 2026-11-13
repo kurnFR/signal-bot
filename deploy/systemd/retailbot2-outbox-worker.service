@@ -50,7 +50,7 @@ ExecStart=/opt/signal-bot/venv/bin/python3 -m paper.outbox_worker --database cry
 # If descendants or parent linger beyond TimeoutStopSec, systemd sends SIGKILL to all.
 KillMode=mixed
 KillSignal=SIGTERM
-TimeoutStopSec=15s
+TimeoutStopSec=30s
 TimeoutStartSec=30s
 
 # Controlled restart behavior on unexpected worker termination:

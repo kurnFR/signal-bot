@@ -312,11 +312,11 @@ When authorized for production deployment, operators must execute the rollout in
 3. **Step 3: Configuration & Credential Provisioning**
    - Deploy `/etc/retailbot2/outbox-worker.env` with permissions `0600` owned by `retailbot:retailbot`.
    - Set initial switches: `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1`, `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0`.
-4. **Step 4: Systemd Service Installation & Timeout Reconciliation**
+4. **Step 4: Systemd Service Installation & Timeout Verification**
    - Copy `deploy/systemd/retailbot2-outbox-worker.service` to `/etc/systemd/system/`.
    - Run `sudo systemctl daemon-reload`.
    - Run `systemd-analyze verify /etc/systemd/system/retailbot2-outbox-worker.service`.
-   - **Timeout Recommendation:** The unit template specifies `TimeoutStopSec=15s`. The worst-case shutdown path comprises: 10.0s transport HTTP deadline + 1.5s SIGTERM grace + 1.5s SIGKILL grace + 1.0s group verification + 1.0s DB lock release = 15.0s. For production hosts, configuring `TimeoutStopSec=25s` or `TimeoutStopSec=30s` is strongly recommended to guarantee clean MariaDB advisory lock release under heavy system load.
+   - **Shutdown Timeout:** The deployment unit template establishes `TimeoutStopSec=30s` (revised from 15s in WO71785), providing a safe operating margin over the worst-case 15.0s cleanup duration (10.0s transport HTTP deadline + 1.5s SIGTERM grace + 1.5s SIGKILL grace + 1.0s group verification + 1.0s DB lock release). This ensures clean MariaDB advisory lock release and prevents premature SIGKILL escalation under heavy system load.
 5. **Step 5: Controlled Observation Trial (Stage C Verification)**
    - Start worker in observation mode with `--observation` flag: `sudo systemctl start retailbot2-outbox-worker.service`.
    - Confirm advisory lock acquired: `SELECT IS_USED_LOCK('rdt_outbox_worker_lock');`.
@@ -372,25 +372,44 @@ If anomalous behavior, unexpected delivery loops, or operational failures occur,
    ORDER BY id ASC;
    ```
 6. **Classify Each Event Individually Using Forensic Evidence:**
-   - **Confirmed NOT Sent:** Verify that the message is absent from the target Telegram chat and the transport subprocess did not reach Telegram API. With explicit operator authorization, reset only that specific event:
-     ```sql
-     UPDATE rdt_telegram_outbox
-     SET status = 'pending', claim_token = NULL, locked_until = NULL, attempts = attempts + 1
-     WHERE id = <event_id> AND status = 'processing';
-     ```
-   - **Confirmed Sent:** If the message is present in the Telegram chat, reconcile database state:
-     ```sql
-     UPDATE rdt_telegram_outbox
-     SET status = 'sent', sent_at = UTC_TIMESTAMP(), claim_token = NULL, locked_until = NULL
-     WHERE id = <event_id> AND status = 'processing';
-     ```
-   - **Delivery Outcome Uncertain:** If delivery cannot be definitively verified (e.g., chat logs inconclusive, network partition during HTTP POST):
-     **PRESERVE UNCERTAIN EVENTS FOR MANUAL OWNER REVIEW.** Do NOT reset to pending; doing so risks duplicate delivery.
+   Every event must be evaluated under strict evidentiary standards:
+   
+   - **Confirmed NOT Sent:**
+     - *Evidentiary Requirement:* Requires **positive evidence** proving the transport request was never transmitted or could not have been accepted by Telegram. Examples include verified failure before request dispatch supported by process/journald logs (e.g., DNS resolution failure, network interface down prior to socket open, missing token exception, payload serialization error).
+     - *Negative Rule:* **Absence of a Telegram message in a chat is NOT sufficient proof that delivery did not occur.** (Chat UI latency, wrong chat inspection, message deletion, Telegram internal pipeline delays, or client sync lag can make a delivered message appear missing).
+     - *Recovery Action:* Only when positive evidence confirms zero transmission and written operator approval is obtained:
+       ```sql
+       UPDATE rdt_telegram_outbox
+       SET status = 'pending', claim_token = NULL, locked_until = NULL, attempts = attempts + 1
+       WHERE id = <event_id> AND status = 'processing';
+       ```
+   
+   - **Confirmed Sent:**
+     - *Evidentiary Requirement:* Requires **positive evidence** identifying the exact delivered Telegram message or affirmative API response.
+     - *Correlation Criteria:* Operators must affirmatively correlate:
+       1. The `event_key` (e.g., `retailbot2:shadow:entry:BTC/USDT_...`) or trade ID.
+       2. Exact timestamp of the event against message timestamp in the Telegram channel.
+       3. Payload parameters (symbol, side LONG/SHORT, entry price, stop-loss, target, units).
+       4. Transport logs recording HTTP 200 with Telegram `message_id`.
+     - *Recovery Action:* With written approval, reconcile database state:
+       ```sql
+       UPDATE rdt_telegram_outbox
+       SET status = 'sent', sent_at = UTC_TIMESTAMP(), claim_token = NULL, locked_until = NULL
+       WHERE id = <event_id> AND status = 'processing';
+       ```
+   
+   - **Delivery Outcome Uncertain:**
+     - *Definition:* Any event where evidence is ambiguous, partial, or missing (e.g., worker killed during HTTP POST, socket timeout during response read, network partition without receipt confirmation).
+     - *Strict Handling Rule:* **PRESERVE UNCERTAIN EVENTS FOR MANUAL OWNER REVIEW.**
+     - *Duplicate-Delivery Risk:* **Do NOT reset uncertain events to pending.** Re-queuing an uncertain event creates a severe risk of transmitting duplicate signal notifications to live traders. Uncertain events remain in `status = 'processing'` or are moved to an owner triage queue only with written authorization.
+
 7. **Maintain Immutable Audit Record:**
    Document every recovered event ID, evidence examined, operator name, timestamp, and approved action.
-8. **Explicit Prohibition:**
+8. **Explicit Prohibitions for Operators:**
    > [!CAUTION]
-   > **Never execute blanket resets such as `UPDATE rdt_telegram_outbox SET status='pending' WHERE status='processing';`!**
+   > 1. **Never execute blanket resets such as `UPDATE rdt_telegram_outbox SET status='pending' WHERE status='processing';`!**
+   > 2. **Never create or run automated blanket reset scripts.**
+   > 3. **Never treat chat message absence as proof of non-delivery.**
    > Blanket resets bypass forensic classification and risk re-sending messages that were already delivered to Telegram.
 
 ### Scenario B: Service Downgrade / Code Rollback

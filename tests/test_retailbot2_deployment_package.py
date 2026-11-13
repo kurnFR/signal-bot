@@ -4,7 +4,7 @@ Validates:
 1. Deployment package files presence and integrity (SHA-256 manifest).
 2. Standalone verification script (`deploy/verify_deployment_package.py`).
 3. Environment example security defaults (fail-closed, no leaked secrets).
-4. Systemd unit specification (KillMode=mixed, TimeoutStopSec=15s, sandboxing).
+4. Systemd unit specification (KillMode=mixed, TimeoutStopSec=30s, sandboxing).
 5. Minimal runtime dependencies (deploy/requirements-worker.txt).
 6. CLI entrypoint argument handling.
 7. Staging operational lifecycle rehearsal.
@@ -114,7 +114,7 @@ def test_systemd_unit_lifecycle_and_sandboxing():
 
     # Graceful shutdown configuration
     assert "KillMode=mixed" in content
-    assert "TimeoutStopSec=15s" in content
+    assert "TimeoutStopSec=30s" in content
 
     # Supervision and backoff
     assert "Restart=on-failure" in content
@@ -191,4 +191,7 @@ def test_runbook_conservative_recovery_assertions():
     assert "Inspect Affected Processing Events Individually" in runbook_text
     assert "PRESERVE UNCERTAIN EVENTS FOR MANUAL OWNER REVIEW" in runbook_text
     assert "Never execute blanket resets" in runbook_text
+    assert "Absence of a Telegram message in a chat is NOT sufficient proof" in runbook_text
+    assert "Do NOT reset uncertain events to pending" in runbook_text
+    assert "TimeoutStopSec=30s" in runbook_text
 

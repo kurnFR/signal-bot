@@ -56,7 +56,7 @@ class TestOutboxSystemdUnitTemplate(unittest.TestCase):
         service = self.config["Service"]
         self.assertEqual(service.get("KillMode"), "mixed")
         self.assertEqual(service.get("KillSignal"), "SIGTERM")
-        self.assertEqual(service.get("TimeoutStopSec"), "15s")
+        self.assertEqual(service.get("TimeoutStopSec"), "30s")
         self.assertEqual(service.get("TimeoutStartSec"), "30s")
         self.assertEqual(service.get("Restart"), "on-failure")
         self.assertEqual(service.get("RestartSec"), "5s")

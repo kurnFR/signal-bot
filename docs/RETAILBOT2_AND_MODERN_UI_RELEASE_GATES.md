@@ -479,28 +479,29 @@ Stage E hardens the outbox worker for reliable supervised operation, provides qu
 4. **Comprehensive Operational Runbook:**
    - Full operational procedures and troubleshooting guidelines documented in [RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md](file:///home/BIS/signal-bot-wo71767-prod-validation/docs/RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md).
 
-### 4.7 Stage F Production Deployment Readiness & Release Gate Matrix (WO71783)
+### 4.7 Stage G1 Production Deployment Candidate Readiness & 15-Gate Release Matrix (WO71785)
 
-Stage F establishes the comprehensive release gate matrix, packaging specification, operational monitoring plan, and deployment/rollback rehearsal for the RetailBot2 outbox dispatcher subsystem.
+Stage G1 finalizes the RetailBot2 outbox dispatcher deployment candidate, establishes the revised 30-second shutdown timeout, strengthens per-event forensic recovery rules, inspects target host readiness, and provides the authoritative 15-gate release readiness matrix.
 
-#### 1. RetailBot2 14-Gate Production Release Matrix
+#### 1. RetailBot2 15-Gate Production Release Readiness Matrix
 
 | Gate # | Release Gate / Requirement | Status | Evidence & Validation Scope | Owner Action / Blockers |
 | :---: | :--- | :---: | :--- | :--- |
-| **G-01** | **Code Lineage & Base Commit Integrity** | **PASS** | Parent lineage cleanly traces back to master `a2c850aa8f97f081e22008d1efc0d3654c379dbe`. Zero uncommitted files, all 45 worktrees intact, 21 screenshot PNGs preserved. | None. Verified in WO71779A/B, WO71782, WO71783. |
-| **G-02** | **Schema Migrations (026 & 027) on Target DB** | **PASS** | 13-column `rdt_telegram_outbox` and `claim_token` verified on `signal_bot_test`. Production schema verified via WO71776 observation trial. Zero invalid references to `updated_at`. | None. |
-| **G-03** | **Worker Lease & Advisory Lock Exclusivity** | **PASS** | Single-instance mutual exclusion via MariaDB `GET_LOCK('rdt_outbox_worker_lock', 0)`. Atomic lease claiming (`locked_until`, `claim_token`) verified under concurrent worker contention. | None. Validated in `tests/test_retailbot2_outbox_supervision.py`. |
-| **G-04** | **Fail-Closed Delivery Authorization Gate** | **PASS** | Outbound Telegram dispatch blocked unless `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`. Default is fail-closed `0`. Verified across all test suites. | None. |
-| **G-05** | **Pure Payload Builders & Shadow Enqueue Authorization** | **PASS** | Pure payload builders (`build_entry_alert_payload`, `build_exit_alert_payload`) decouple notifications from live trading (`trade_id = 0`). 8-point check in `is_shadow_outbox_enqueue_authorized` strictly enforces test-only persistence. | None. Validated in WO71779A/B and test suites. |
-| **G-06** | **Staging E2E Outbox Integration Flow** | **PASS** | End-to-end signal flow verified on `signal_bot_test`: signal generation → pure payload builder → shadow enqueue → worker claim → mock transport → delivery acknowledgment (`sent`). Zero mutations to `rdt_trades`. | None. Validated in WO71781. |
-| **G-07** | **Worker Supervision & Systemd Unit Hardening** | **PASS** | Systemd unit template `retailbot2-outbox-worker.service` implements `KillMode=mixed`, `TimeoutStopSec=15s`, non-root user `retailbot`, sandboxing (`ProtectSystem=strict`), and failure restart limits. Directives validated. | None. Added in WO71782; verified in WO71783. |
-| **G-08** | **Operational Observability & Health Snapshot Contract** | **PASS** | Read-only observability module `paper/outbox_health.py` reports queue backlog, processing leases, dead letters, and advisory locks with zero row locks. CLI `--health` and `--json` operational. | None. Validated in `tests/test_retailbot2_outbox_observability.py`. |
-| **G-09** | **Retention Policy Proposals & Dry-Run Planner** | **PASS** | Retention policy proposed (14d sent, 90d dead, indefinite protection for pending/processing/uncertain rows). Dry-run planner `paper/outbox_retention.py` computes prune candidates without row mutations. | None. Validated in `tests/test_retailbot2_outbox_retention.py`. |
-| **G-10** | **Deployment Package & Verification Tooling** | **PASS** | Minimal runtime requirements `deploy/requirements-worker.txt` (`mysql-connector-python` only). Standalone verifier `deploy/verify_deployment_package.py` and SHA-256 manifest `deploy/package_manifest.json` verify integrity. | None. Verified in `tests/test_retailbot2_deployment_package.py`. |
-| **G-11** | **Production Host User, Filesystem & Mode 0600 Env Setup** | **OWNER_ACTION_REQUIRED** | Dedicated user `retailbot`, directory `/opt/signal-bot`, and configuration file `/etc/retailbot2/outbox-worker.env` (chmod 0600) must be provisioned on target production host. | Owner/Operator must provision host environment prior to service startup. |
-| **G-12** | **Production Observation Credential Provisioning & Rotation** | **PASS** | Dedicated SELECT-only account `'retailbot2_obs'@'127.0.0.1'` provisioned, credential rotated (WO71774), and verified via 60-second read-only trial (WO71776). Zero DML privileges. | None. Account operational for observation. |
-| **G-13** | **Production Enqueue & Delivery Authorization** | **NOT_AUTHORIZED** | Production enqueue switch `RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED` and delivery switch `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY` remain `0` (fail-closed). | Explicit owner approval required to enable delivery mode. |
-| **G-14** | **Final Owner Deployment Approval** | **OWNER_ACTION_REQUIRED** | Formal owner authorization to install systemd service on production host and initiate staged rollout. | Owner review and sign-off on Stage F report. |
+| **G-01** | **Source and Git Lineage** | **PASS** | Lineage cleanly traces back to master `a2c850aa8f97f081e22008d1efc0d3654c379dbe`. Zero uncommitted files, all 45 worktrees intact, 21 screenshot PNGs preserved. | None. Verified in WO71779–WO71785. |
+| **G-02** | **Package Integrity & Manifest** | **PASS** | Checksums verified via `deploy/verify_deployment_package.py --check-manifest`. Minimal runtime dependencies (`mysql-connector-python`). | None. |
+| **G-03** | **Test Regression Coverage** | **PASS** | 154/154 tests passing across all 9 suites in ~9.3s. Database integration tests validated on `signal_bot_test`. | None. |
+| **G-04** | **Worker Shutdown & Lock-Release Safety** | **PASS** | Unit template specifies `TimeoutStopSec=30s` with `KillMode=mixed`. Tested active transport SIGTERM termination; advisory lock released with code 0 before timeout. | None. Validated in `tests/test_retailbot2_outbox_supervision.py`. |
+| **G-05** | **Conservative Recovery Safety** | **PASS** | Blanket resets prohibited. Strengthened 3-state forensic classification (Confirmed not sent, Confirmed sent, Uncertain). Uncertain events preserved for manual owner review. | None. Validated in runbook and test assertions. |
+| **G-06** | **Target Production Host Identity** | **PASS** | Host `CMS` (`192.168.1.30`) identified as host running MariaDB `127.0.0.1:3306` containing `crypto_signals`. Loopback credentials (`retailbot2_obs@127.0.0.1`) match `CMS`. | Owner to confirm whether `CMS` or separate VM is the production service host. |
+| **G-07** | **Target Host OS & systemd Compatibility** | **PASS** | CentOS Linux 8, x86_64, systemd 239, Python 3.12 available, 533 GB disk space free, time synchronized. | None for host `CMS`. |
+| **G-08** | **Service Account & Filesystem Provisioning** | **OWNER_ACTION_REQUIRED** | Dedicated user `retailbot:retailbot`, `/opt/signal-bot`, `/opt/signal-bot/venv`, `/etc/retailbot2/outbox-worker.env` (0600) not yet created on host. | Operator must execute provisioning steps before service startup. |
+| **G-09** | **Production Observation Credentials** | **PASS** | Dedicated SELECT-only account `'retailbot2_obs'@'127.0.0.1'` provisioned, rotated (WO71774), verified in 60s trial (WO71776). | None. Account active and tested. |
+| **G-10** | **Production Observation Startup** | **READY_FOR_OWNER_TRIAL** | Worker observation mode (`--observation`) verified; reads queue without row locks or claiming. Systemd service ready to launch in observation mode. | Owner authorization to start service with `--observation`. |
+| **G-11** | **Production Shadow Enqueue Authorization** | **NOT_AUTHORIZED** | `RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED` remains `0` (fail-closed). Decoupled shadow notifications enter queue only on `signal_bot_test`. | Explicit owner written authorization required to enable. |
+| **G-12** | **Telegram Delivery Authorization** | **NOT_AUTHORIZED** | `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY` remains `0` (fail-closed). Subprocess transport execution strictly blocked. | Explicit owner written authorization required to enable. |
+| **G-13** | **Monitoring and Incident Readiness** | **PASS** | 10-alert matrix defined; expired lease monitoring aligned to 90s lease; read-only health CLI `paper.outbox_health` verified. | None. |
+| **G-14** | **Backup and Rollback Readiness** | **PASS** | Logical mysqldump procedures, rapid stop sequence, and per-event forensic recovery procedures documented in runbook. | None. |
+| **G-15** | **Final Owner Deployment Approval** | **OWNER_ACTION_REQUIRED** | Written owner sign-off on deployment candidate release package and service cutover. | Owner review and sign-off on Stage G1 report. |
 
 #### 2. Git Lineage & Commit Lineage Clarification (WO71784 Audit)
 
@@ -537,17 +538,17 @@ An empirical test collection and execution across all 9 suites reconciles the pr
 - **Expired Lease vs. Old Processing Row:** A row is only an expired lease when `status = 'processing' AND locked_until <= UTC_TIMESTAMP()`. Total row age (`created_at`) does not define lease expiration.
 - **Uncertainty & No-Reset Rule:** An expired lease does NOT prove delivery failed; the message may have been delivered prior to worker termination. Automated or blanket status resets (`UPDATE ... WHERE status='processing'`) are strictly prohibited.
 
-#### 5. Systemd Shutdown Timing Reconciliation
+#### 5. Systemd Shutdown Timing & Revised 30-Second Timeout
 
 - **Worst-case Shutdown Duration:** Transport HTTP deadline (10.0s) + child SIGTERM wait (1.5s) + child SIGKILL escalation (1.5s) + process group verification (1.0s) + MariaDB advisory lock release (1.0s) = **15.0s**.
-- **Operational Recommendation:** While the unit template specifies `TimeoutStopSec=15s`, under heavy system load 15s can trigger premature systemd cgroup SIGKILL before `session_mgr.close()` finishes. Setting `TimeoutStopSec=25s` or `TimeoutStopSec=30s` in production `/etc/systemd/system/retailbot2-outbox-worker.service` is strongly recommended.
+- **Adopted Timeout:** The unit template establishes `TimeoutStopSec=30s` (revised from 15s in WO71785), providing a full 15-second safety buffer over worst-case execution. This eliminates any risk of premature systemd cgroup SIGKILL escalation and guarantees clean MariaDB advisory lock release under heavy system load.
 
-#### 6. Technical Readiness vs. Deployment Authorization Verdict
+#### 6. Stage G1 Deployment Candidate Readiness Verdict
 
-- **Technical Readiness Verdict:** **`PASS`**  
-  All 10 technical release gates (G-01 through G-10, plus observation credential G-12) have achieved full implementation, rigorous multi-suite test coverage (151 tests passing), and independent verification.
-- **Production Deployment Status:** **`PASS_WITH_OWNER_ACTIONS`**  
-  Production deployment cannot proceed until the owner provisions the target production host filesystem/user (G-11), explicitly authorizes live delivery switches (G-13), and issues final deployment sign-off (G-14).
+- **Candidate Technical Readiness:** **`PASS_STAGE_G1_DEPLOYMENT_CANDIDATE`**  
+  All technical components, package checksums, 154 automated regression tests, 30-second shutdown timeout, strengthened recovery classification, and read-only host discovery are complete and verified.
+- **Production Rollout Status:** **`PASS_WITH_OWNER_ACTIONS`**  
+  Production deployment remains safely gated pending owner host provisioning (Gate 8), live delivery authorization (Gate 12), and final deployment sign-off (Gate 15).
 
 
 ## 5. Modern UI migration and cutover

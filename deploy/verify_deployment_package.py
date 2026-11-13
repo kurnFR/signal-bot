@@ -119,7 +119,7 @@ def check_systemd_unit() -> Tuple[bool, List[str]]:
         "WorkingDirectory=/opt/signal-bot",
         "EnvironmentFile=-/etc/retailbot2/outbox-worker.env",
         "KillMode=mixed",
-        "TimeoutStopSec=15s",
+        "TimeoutStopSec=30s",
         "Restart=on-failure",
         "StartLimitIntervalSec=",
         "StartLimitBurst=",
@@ -300,7 +300,7 @@ def main() -> int:
 
         print("\n3. Systemd Unit Configuration:")
         if results["checks"]["systemd_unit"]["pass"]:
-            print("  - Verified: KillMode=mixed, TimeoutStopSec=15s, User=retailbot, directives valid.")
+            print("  - Verified: KillMode=mixed, TimeoutStopSec=30s, User=retailbot, directives valid.")
         else:
             print(f"  - FAILED: {results['checks']['systemd_unit']['errors']}")
 
