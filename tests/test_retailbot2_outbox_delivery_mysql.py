@@ -31,6 +31,11 @@ TEST_DB_PORT = 3306
 TEST_DB_NAME = "signal_bot_test"
 
 
+@pytest.fixture(autouse=True)
+def _enable_outbox_enqueue(monkeypatch):
+    monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
+
+
 def _connection():
     user = os.getenv("SIGNAL_BOT_TEST_DB_USER", "").strip()
     if not user:

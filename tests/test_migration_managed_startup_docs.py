@@ -142,6 +142,51 @@ class TestMigrationManagedStartupDocs(unittest.TestCase):
         self.assertNotIn("UPDATE rdt_telegram_outbox", release_gates)
         self.assertNotIn("SET status = 'pending'", release_gates)
 
+    def test_retailbot2_outbox_provisioning_runbook_and_failure_states(self):
+        """Verify Stage B provisioning runbook, four failure states, audit, and rollback provenance."""
+        release_gates = _doc("docs/RETAILBOT2_AND_MODERN_UI_RELEASE_GATES.md").read_text(encoding="utf-8")
+
+        # 1. Four explicit provisioning states
+        self.assertIn("`ACCOUNT_NOT_CREATED`", release_gates)
+        self.assertIn("`ACCOUNT_CREATED_GRANT_PENDING`", release_gates)
+        self.assertIn("`ACCOUNT_CREATED_GRANT_VERIFIED`", release_gates)
+        self.assertIn("`PROVISIONING_STATE_UNKNOWN`", release_gates)
+
+        # 2. Invariant: only ACCOUNT_CREATED_GRANT_VERIFIED may proceed
+        self.assertIn(
+            "No state other than `ACCOUNT_CREATED_GRANT_VERIFIED` may proceed to worker credential configuration or observation worker startup",
+            release_gates,
+        )
+
+        # 3. Ten-step sequence elements
+        self.assertIn("DBA performs account-existence preflight", release_gates)
+        self.assertIn("Preflight Stop Condition", release_gates)
+        self.assertIn("DBA executes `CREATE USER` without `IF NOT EXISTS`", release_gates)
+        self.assertIn("Record creation result", release_gates)
+        self.assertIn("Handle `CREATE USER` failure", release_gates)
+        self.assertIn("Execute exact table-level grant", release_gates)
+        self.assertIn("Handle `GRANT` failure", release_gates)
+        self.assertIn("Prohibit worker startup", release_gates)
+        self.assertIn("No automatic recovery", release_gates)
+        self.assertIn("Record partial state & escalate", release_gates)
+
+        # 4. Audit record requirements (ticket ID, DBA identity, timestamps, status, password secrecy)
+        self.assertIn("Change / Incident Ticket ID", release_gates)
+        self.assertIn("DBA Identity", release_gates)
+        self.assertIn("Owner Authorization Reference", release_gates)
+        self.assertIn("Preflight Timestamp & Result", release_gates)
+        self.assertIn("Account Creation Timestamp & Result", release_gates)
+        self.assertIn("Grant Timestamp & Result", release_gates)
+        self.assertIn("Effective Grants Verification Timestamp & Result", release_gates)
+        self.assertIn("Exact Account Identity", release_gates)
+        self.assertIn("Provisioning Completion Status", release_gates)
+        self.assertIn("**Never** record the plaintext password", release_gates)
+
+        # 5. Rollback provenance conditions and exact drop statement
+        self.assertIn("DROP USER 'retailbot2_obs'@'127.0.0.1';", release_gates)
+        self.assertIn("Rollback is strictly prohibited unless **all six** provenance conditions are satisfied", release_gates)
+        self.assertIn("If creation provenance is uncertain or any condition cannot be proven: **STOP IMMEDIATELY.**", release_gates)
+
 
 
 

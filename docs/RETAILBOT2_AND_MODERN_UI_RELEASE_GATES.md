@@ -178,22 +178,160 @@ To prevent operational confusion during staging, deployment, and auditing, opera
    - Logs periodic queue status summaries.
    - **Strictly prohibited** from claiming events, mutating rows (`status`, `attempts`, `locked_until`, `claim_token`, `next_attempt_at`, `last_error`), spawning transport subprocesses, making network or HTTP calls, or requiring `TELEGRAM_BOT_TOKEN` or `TELEGRAM_CHAT_ID`.
    - Releases the advisory lock cleanly on `SIGINT` or `SIGTERM`.
+
+#### Stage B Production Observation Account Provisioning and Failure-Handling Runbook
+
+To safely prepare and operate the read-only worker observation mode against `crypto_signals`, database administrators and operators must follow this strict execution, failure-handling, and audit runbook.
+
+##### 1. Ten-Step Execution Sequence
+
+1. **DBA performs account-existence preflight**:
+   ```sql
+   SELECT User, Host FROM mysql.user WHERE User = 'retailbot2_obs';
+   ```
+2. **Preflight Stop Condition**: If any matching account exists, **STOP IMMEDIATELY**. Do not reuse, alter, or drop the account. State is evaluated under existing account policy.
+3. **DBA executes `CREATE USER` without `IF NOT EXISTS`**:
+   ```sql
+   CREATE USER 'retailbot2_obs'@'127.0.0.1' IDENTIFIED BY '<STRONG_RANDOM_PASSWORD>';
+   ```
+4. **Record creation result**: Record the exact execution result and timestamp in the provisioning change audit record.
+5. **Handle `CREATE USER` failure**: If `CREATE USER` fails (e.g. syntax error, permission error, or conflict), **STOP**. Do not execute `GRANT`. State remains `ACCOUNT_NOT_CREATED` (or `PROVISIONING_STATE_UNKNOWN` if the connection dropped or state is unverified).
+6. **Execute exact table-level grant**: If `CREATE USER` succeeds, state transitions to `ACCOUNT_CREATED_GRANT_PENDING`. Execute the exact table-level `SELECT` grant:
+   ```sql
+   GRANT SELECT ON `crypto_signals`.`rdt_telegram_outbox` TO 'retailbot2_obs'@'127.0.0.1';
+   ```
+7. **Handle `GRANT` failure**: If `GRANT` fails (e.g. `Error 1142: GRANT command denied`), **STOP IMMEDIATELY**. State remains `ACCOUNT_CREATED_GRANT_PENDING` (or `PROVISIONING_STATE_UNKNOWN` if connection was interrupted).
+8. **Prohibit worker startup**: Do **NOT** configure worker credentials or start the observation worker while in any unverified or partial state.
+9. **No automatic recovery**: Do **NOT** automatically retry, revoke, or drop the account upon failure.
+10. **Record partial state & escalate**: Record the exact partial state and error in the audit record and request database owner and DBA review.
+
+##### 2. Four Provisioning States State Machine
+
+Every provisioning attempt must be tracked and classified into exactly one of four explicit states:
+
+- **`ACCOUNT_NOT_CREATED`**: Preflight check confirmed 0 matching rows, and `CREATE USER` was either not attempted or failed closed before user creation. No user object exists in MariaDB.
+- **`ACCOUNT_CREATED_GRANT_PENDING`**: `CREATE USER` completed successfully, but `GRANT SELECT` has either not yet executed, failed, or not yet been verified. The account has only implicit `USAGE` and cannot read `rdt_telegram_outbox`.
+- **`ACCOUNT_CREATED_GRANT_VERIFIED`**: Both `CREATE USER` and `GRANT SELECT` completed successfully, and read-only verification (`SHOW GRANTS FOR 'retailbot2_obs'@'127.0.0.1'`) confirmed exact least-privilege grants (`USAGE` on `*.*` and `SELECT` on `crypto_signals.rdt_telegram_outbox`).
+- **`PROVISIONING_STATE_UNKNOWN`**: A network timeout, disconnection, or unhandled server error occurred during `CREATE USER` or `GRANT`, leaving the server-side state unconfirmed.
+
+> [!CRITICAL]
+> **Promotion Invariant:** **No state other than `ACCOUNT_CREATED_GRANT_VERIFIED` may proceed to worker credential configuration or observation worker startup.** If the state is `ACCOUNT_NOT_CREATED`, `ACCOUNT_CREATED_GRANT_PENDING`, or `PROVISIONING_STATE_UNKNOWN`, worker execution is strictly prohibited.
+
+##### 3. Provisioning Change and Audit Record Requirements
+
+A formal provisioning change/audit record must be created and maintained for the deployment. It must capture:
+
+- **Change / Incident Ticket ID**: Reference to the authorized change ticket.
+- **DBA Identity**: Name and role of the executing database administrator.
+- **Owner Authorization Reference**: Documented reference to explicit database owner sign-off.
+- **Preflight Timestamp & Result**: Exact execution timestamp and rowcount from preflight `SELECT`.
+- **Account Creation Timestamp & Result**: Exact timestamp and outcome of `CREATE USER`.
+- **Grant Timestamp & Result**: Exact timestamp and outcome of `GRANT SELECT`.
+- **Effective Grants Verification Timestamp & Result**: Timestamp and output of `SHOW GRANTS`.
+- **Exact Account Identity**: `'retailbot2_obs'@'127.0.0.1'`.
+- **Provisioning Completion Status**: Exactly one of the four provisioning states above.
+- **Password Security Guarantee**: **Never** record the plaintext password or expose it in terminal output, change records, reports, application logs, or Git.
+
+##### 4. Rollback Procedure and Provenance Conditions
+
+An exact-account `DROP USER` removes the account and its privileges:
+```sql
+DROP USER 'retailbot2_obs'@'127.0.0.1';
+```
+
+> [!CAUTION]
+> **Rollback Preconditions**: Rollback is strictly prohibited unless **all six** provenance conditions are satisfied:
+> 1. The account was confirmed absent during the DBA preflight check.
+> 2. The exact account was created by this specific authorized provisioning operation.
+> 3. The creation result, timestamp, and audit record were formally documented.
+> 4. The account identity is strictly and uniquely `'retailbot2_obs'@'127.0.0.1'`.
+> 5. The DBA explicitly confirms that the observation worker is stopped and the account is no longer required.
+> 6. The database owner authorizes rollback in writing.
+>
+> If creation provenance is uncertain or any condition cannot be proven: **STOP IMMEDIATELY.** Do not drop the account; escalate to the database owner. Never use wildcard host accounts (`'retailbot2_obs'@'%'`).
+
 4. **Mock delivery on test database (`mock_transport_response`)**:
    An isolated integration test mechanism on `signal_bot_test` where the worker claims events and transitions row states based on synthetic in-memory responses without invoking Telegram or external network endpoints.
 5. **Actual Telegram delivery authorization (`RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`)**:
    Authorizes the worker or supervisor to execute the external transport subprocess and transmit HTTP requests to the Telegram Bot API. Standalone worker startup against production fails closed without this flag unless running in `--observation` mode.
 
-### 4.4 Shadow enqueue coupling constraint and unresolved rollout blocker
+### 4.4 Shadow enqueue decoupling, payload builders, and testing architecture (WO71778)
 
-**Unresolved Rollout Blocker:** Safe production shadow enqueue cannot be operated independently of trade persistence under the current architecture.
+Work Order 71778 introduces an isolated shadow outbox enqueue mechanism that decouples signal notification generation from live trade persistence, enabling paper/shadow signal alerts to enter the outbox during testing without authorizing live trading or creating synthetic trade records.
 
-- In `paper/retailbot2.py`, outbox event generation for trade entry and trade exit is embedded directly inside trade persistence transactions:
-  - Entry events are enqueued inside `save_trade()`, which is called only when `_open_trade()` executes under `is_trading_authorized(config)`. If trading is unauthorized, `_open_trade()` returns `None` and `save_trade()` is never called.
-  - Exit events are enqueued inside `close_trade_and_update_stats()`.
-  - When running in observation-only mode (`is_observation_only(config)`), trade persistence is suppressed and `is_outbox_enqueue_authorized()` explicitly returns `False`.
-- Consequently, RetailBot2 cannot enqueue shadow trade entry or exit events in production without live trade persistence and trading authorization.
-- While operational events (e.g. engine startup, heartbeat, reconciliations) can technically be enqueued without trade persistence, entry and exit shadow testing against production cannot take place without persisting trades or refactoring the lifecycle pipeline to decouple signal generation from trade persistence.
-- Any future production rollout proposal must treat this architectural coupling as an explicit blocker until decoupled or explicitly authorized.
+#### 1. Persisted Trade Notifications vs. Shadow Signal Notifications
+
+The system strictly differentiates between two notification classes:
+
+| Attribute | Persisted Trade Notifications | Shadow Signal Notifications (Decoupled) |
+| :--- | :--- | :--- |
+| **Trigger Path** | `RetailDeathTrapBot._open_trade()` and `_close_trade()` | `RetailDeathTrapBot.enqueue_shadow_entry_signal()` |
+| **Persistence Boundary** | Embedded in MariaDB trade transaction (`DatabaseManager.save_trade()` / `close_trade_and_update_stats()`) | Standalone outbox insert (`DatabaseManager.enqueue_trade_signal_event()`) |
+| **`trade_id` Value** | `trade_id > 0` (FK-free, references row in `rdt_trades`) | `trade_id = 0` (unlinked, signals shadow signal only) |
+| **`rdt_trades` Mutation** | `INSERT` on entry, `UPDATE` on exit | **Zero mutations** (never touches `rdt_trades`) |
+| **`rdt_strategy_stats` Mutation** | `UPDATE` on trade close | **Zero mutations** (never touches `rdt_strategy_stats`) |
+| **Trading Authorization** | Requires `RETAILBOT2_ALLOW_TRADING=1` | **Prohibits / bypasses trading authorization** |
+| **Primary Use Case** | Real paper/live execution order notifications | Test & paper evaluation of strategy signals |
+
+#### 2. Pure Payload Builders
+
+Outbox payloads are constructed by pure, deterministic builder functions that perform no database queries, network requests, or input mutations:
+
+- **`build_entry_alert_payload(signal, units, risk_amt, risk_pct, mode="shadow")`**:
+  - Validates required signal keys (`symbol`, `side`, `entry`, `stop`, `target`).
+  - Enforces `side` must be either `'LONG'` or `'SHORT'`.
+  - Enforces numeric validity (`float` conversions) for prices and risk parameters.
+  - Returns a pure dictionary structured for `format_entry_message(payload)`.
+- **`build_exit_alert_payload(trade, exit_price, reason, pnl, pnl_pct)`**:
+  - Validates required trade dictionary keys (`symbol`, `side`, `entry`, `units`, `strategy`).
+  - Validates numeric exit fields (`exit_price`, `pnl`, `pnl_pct`).
+  - Returns a pure dictionary structured for `format_exit_message(payload)`.
+
+#### 3. Test-Only Shadow Enqueue Authorization Gate
+
+Shadow enqueue is guarded by a dedicated fail-closed authorization function `is_shadow_outbox_enqueue_authorized(config, conn, database)`:
+
+1. **Explicit Enablement:** Requires `RETAILBOT2_SHADOW_ENQUEUE_ENABLED=1`. Any unset, empty, or other value fails closed.
+2. **Strict Test Database Restriction:** The configured database must be strictly `'signal_bot_test'`.
+3. **Connection Identity Verification:** The active connection's `SELECT DATABASE()` must report strictly `'signal_bot_test'`.
+4. **Configuration & Connection Agreement:** Caller-supplied and configured database names must agree with the connection database.
+5. **Fail-Closed on Production:** Target database `'crypto_signals'` is **strictly prohibited** and immediately rejected.
+6. **Observation Mode Suppression:** Observation-only mode (`is_observation_only()`) suppresses shadow enqueue.
+7. **Independence from Trading:** Does **not** require `RETAILBOT2_ALLOW_TRADING=1`.
+8. **No Delivery or Production Authority:** Does **not** authorize production enqueue (`RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED=1`) or external Telegram transmission (`RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`).
+
+#### 4. Event Key Namespace and Idempotency
+
+To prevent duplicate outbox entries while supporting independent signals across symbols, strategies, and timeframes, shadow events use a dedicated deterministic key namespace:
+
+- **Shadow Entry Key Format:**
+  ```text
+  retailbot2:shadow:entry:{symbol}_{strategy}_{mode}_{side}_{candle_close}
+  ```
+- **Shadow Exit Key Format:**
+  ```text
+  retailbot2:shadow:exit:{symbol}_{strategy}_{mode}_{side}_{candle_close}
+  ```
+- **Idempotency Guarantee:**
+  Rows are enqueued using MariaDB's `INSERT ... ON DUPLICATE KEY UPDATE event_key=VALUES(event_key)`. Since `event_key` has a `UNIQUE` index on `rdt_telegram_outbox`, repeated evaluations of the same candle signal produce a harmless no-op, preventing duplicate notifications.
+
+#### 5. Trade ID = 0 Semantics and Schema Compatibility
+
+In migration 026, `rdt_telegram_outbox.trade_id` is defined as `int(11) NOT NULL` without a foreign key constraint to `rdt_trades`.
+- `trade_id = 0` is fully compliant with schema constraints.
+- `OutboxWorker.format_event_text()` and the message formatters (`format_entry_message`, `format_exit_message`) parse payloads with `trade_id = 0` seamlessly without querying `rdt_trades`.
+- Delivery status updates (`acknowledge_outbox_event`, `retry_outbox_event`, `dead_letter_outbox_event`) operate on outbox `id` and `claim_token`, remaining completely agnostic to `trade_id`.
+
+#### 6. Exit Correlation Limitations and Future Architecture
+
+While entry signals are purely decoupled from trade records, shadow exit correlation has specific operational boundaries:
+- **Decoupled Entry Signals:** Fully supported. The scan loop detects candidate entries and immediately enqueues them when `RETAILBOT2_SHADOW_ENQUEUE_ENABLED=1` without opening trades.
+- **Exit Correlation Limitation:** Because unauthorized trading skips `_open_trade()`, no active trade record exists in `rdt_trades` or in-memory trade collections. Consequently, standard stop-loss, take-profit, or trend-reversal triggers cannot look up an existing shadow position to calculate realized exit P&L or determine exit timestamps.
+- **Future Resolution Path:** To achieve fully automated shadow exit notifications without trade persistence, a future work order will introduce a dedicated in-memory shadow position ledger or virtual paper state engine that tracks simulated trade lifetimes separately from live execution tables.
+
+> [!WARNING]
+> **Production Boundary Warning:**
+> The decoupled shadow enqueue path is authorized exclusively for testing on `signal_bot_test`. It must **never** be enabled on `crypto_signals`. Production outbox notifications remain strictly blocked until approved under Stage D and E release gates.
 
 ### 4.5 Verified schema lineage and production monitoring / recovery runbook
 
