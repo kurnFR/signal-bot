@@ -22,8 +22,9 @@ from paper.retailbot2 import (
 
 
 class MockCursor:
-    def __init__(self, row=None, rows=None, lastrowid=1, execute_error=None):
-        self.row = row
+    def __init__(self, db_name="crypto_signals", row=None, rows=None, lastrowid=1, execute_error=None):
+        self.db_name = db_name
+        self.row = row if row is not None else ((db_name,) if db_name is not None else None)
         self.rows = rows or []
         self.lastrowid = lastrowid
         self.execute_error = execute_error
@@ -34,6 +35,11 @@ class MockCursor:
         self.calls.append((sql, params))
         if self.execute_error is not None:
             raise self.execute_error
+        if "SELECT DATABASE()" in sql.upper():
+            if self.db_name is not None:
+                self.row = (self.db_name,)
+            else:
+                self.row = (None,)
 
     def fetchone(self):
         return self.row
@@ -330,22 +336,24 @@ def test_observation_mode_mutation_boundary_defense(monkeypatch):
     [
         ("", "", False),
         ("0", "0", False),
-        ("1", "", False),
+        ("1", "", True),
         ("", "1", False),
-        ("1", "0", False),
+        ("1", "0", True),
         ("0", "1", False),
         ("true", "true", False),  # Strictly requires "1"
         ("1", "1", True),
     ],
 )
 def test_outbox_enqueue_requires_both_authorization_flags(monkeypatch, enqueue_flag, delivery_flag, expected):
-    """12. Enqueuing succeeds only when BOTH RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1 and RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1."""
+    """12. Enqueuing requires RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1 and valid database allowlist, independent of RETAILBOT2_ALLOW_TELEGRAM_DELIVERY."""
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", enqueue_flag)
     monkeypatch.setenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", delivery_flag)
 
     config = BotConfig(observation_only=False)
-    assert is_outbox_enqueue_authorized(config) is expected
+    cursor = MockCursor(db_name=config.db_name)
+    conn = MockConnection(cursor)
+    assert is_outbox_enqueue_authorized(config, conn=conn) is expected
 
 
 def test_outbox_enqueue_suppressed_by_default(monkeypatch):
@@ -834,8 +842,8 @@ def test_mixed_strategy_lifecycle_queues_only_selected_telegram_alert(monkeypatc
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
 
     config = BotConfig(allow_trading=True, observation_only=False)
-    selected_cursor = MockCursor(lastrowid=101)
-    unselected_cursor = MockCursor(lastrowid=102)
+    selected_cursor = MockCursor(db_name=config.db_name, lastrowid=101)
+    unselected_cursor = MockCursor(db_name=config.db_name, lastrowid=102)
     selected_conn = MockConnection(selected_cursor)
     unselected_conn = MockConnection(unselected_cursor)
     db = make_test_db(conn=selected_conn, config=config)
@@ -921,9 +929,9 @@ def test_mixed_strategy_exit_lifecycle_queues_only_selected_telegram_alert(monke
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
 
     config = BotConfig(observation_only=False)
-    selected_cursor = MockCursor()
+    selected_cursor = MockCursor(db_name=config.db_name)
     selected_cursor.rowcount = 1
-    unselected_cursor = MockCursor()
+    unselected_cursor = MockCursor(db_name=config.db_name)
     unselected_cursor.rowcount = 1
     selected_conn = MockConnection(selected_cursor)
     unselected_conn = MockConnection(unselected_cursor)

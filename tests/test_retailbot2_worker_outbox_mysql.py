@@ -157,7 +157,14 @@ def test_worker_persists_entry_outbox_only_for_promoted_strategy():
         max_trades_per_symbol=1,
         min_trade_interval_hours=0,
         risk_per_trade=0.01,
+        allow_trading=True,
+        observation_only=False,
+        db_name=TEST_DB_NAME,
     )
+    db.config = bot.config
+    bot.trading_enabled = True
+    bot.observation_only = False
+    bot._shutdown_requested = False
     bot.logger = logging.getLogger("test.retailbot2.worker_outbox.mysql")
     bot.strategy_lifecycle = {}
     bot._strategy_lifecycle_reload_at = 0.0
