@@ -31,6 +31,8 @@ These are local/owner-reported results. GitHub Actions were not used and no CI p
 | Staging mixed-strategy worker path | **Not yet verified** | Real staging worker creates a queued event only for the strategy whose persisted Telegram flag is enabled |
 | Staging UI readback | **Not yet reverified on this baseline** | Save lifecycle settings, reload page, verify values remain correct |
 | Telegram external delivery | **Not authorized / not tested** | Separate explicit approval for a controlled test message |
+| Production shadow enqueue coupling | **Unresolved architectural blocker** | Entry/exit enqueue is strictly coupled to trade persistence (`save_trade` / `close_trade_and_update_stats`); shadow enqueue cannot run in production without authorized trade persistence |
+| Production enqueue authorization gate | **Hardened (WO71764)** | Requires BOTH `RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1` AND `RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED=1` for `crypto_signals`; fail-closed DB identity verification |
 | Production schema | **Observed in read-only preflight (2026-11-10)** | WO71688 reported migrations 025–027 and `rdt_telegram_outbox` present in `crypto_signals`; dated observation does not authorize worker activation |
 | Populated-schema migration rehearsal | **Not run** | Authorized, isolated, representative database snapshot; before/after integrity evidence |
 | Modern UI cutover | **Not authorized** | Current-candidate staging acceptance, accessibility review, rollback readiness, and explicit owner approval |
@@ -146,6 +148,114 @@ WHERE ID = IS_USED_LOCK('rdt_outbox_worker_lock');
 
 - If `IS_USED_LOCK('rdt_outbox_worker_lock')` returns `NULL`, no worker session currently holds the advisory lock.
 - If it returns a connection ID, verify in `information_schema.PROCESSLIST` that the connection corresponds to the authorized worker process connected to the target database.
+
+### 4.3 Five distinct outbox operational modes and authorization boundaries
+
+To prevent operational confusion during staging, deployment, and auditing, operators and engineers must strictly distinguish between five independent operational concepts:
+
+1. **Trade persistence authorization (`RETAILBOT2_ALLOW_TRADING=1`)**:
+   Authorizes RetailBot2 to execute trades and persist trade records (`rdt_trades`, `rdt_trade_events`). When absent or set to any value other than `"1"`, or when `RETAILBOT2_OBSERVATION_ONLY=1`, trading and trade persistence are disabled.
+2. **Outbox enqueue authorization (`RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1` + dedicated database gates)**:
+   Authorizes inserting notification events into `rdt_telegram_outbox`.
+   - For `signal_bot_test`: requires `RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1`.
+   - For `crypto_signals`: requires **both** `RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1` AND `RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED=1`. Missing, empty, or malformed values fail closed.
+   - Always validates active connection identity via `SELECT DATABASE()` against the configured database.
+   - Fails closed if in observation-only mode (`is_observation_only(config)`).
+   - This gate authorizes event persistence ONLY; it never authorizes Telegram delivery, worker startup, or trading.
+3. **Worker observation mode (`--observation` CLI flag / `OutboxWorker(observation_mode=True)`)**:
+   A genuinely read-only queue monitoring mode for standalone workers.
+   - Acquires and heartbeats the MariaDB advisory lock (`rdt_outbox_worker_lock`).
+   - Verifies database identity via `SELECT DATABASE()` and verifies schema presence.
+   - Queries queue status totals and due item counts using read-only `SELECT` queries (`inspect_queue`).
+   - Logs periodic queue status summaries.
+   - **Strictly prohibited** from claiming events, mutating rows (`status`, `attempts`, `locked_until`, `claim_token`, `next_attempt_at`, `last_error`), spawning transport subprocesses, making network or HTTP calls, or requiring `TELEGRAM_BOT_TOKEN` or `TELEGRAM_CHAT_ID`.
+   - Releases the advisory lock cleanly on `SIGINT` or `SIGTERM`.
+4. **Mock delivery on test database (`mock_transport_response`)**:
+   An isolated integration test mechanism on `signal_bot_test` where the worker claims events and transitions row states based on synthetic in-memory responses without invoking Telegram or external network endpoints.
+5. **Actual Telegram delivery authorization (`RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`)**:
+   Authorizes the worker or supervisor to execute the external transport subprocess and transmit HTTP requests to the Telegram Bot API. Standalone worker startup against production fails closed without this flag unless running in `--observation` mode.
+
+### 4.4 Shadow enqueue coupling constraint and unresolved rollout blocker
+
+**Unresolved Rollout Blocker:** Safe production shadow enqueue cannot be operated independently of trade persistence under the current architecture.
+
+- In `paper/retailbot2.py`, outbox event generation for trade entry and trade exit is embedded directly inside trade persistence transactions:
+  - Entry events are enqueued inside `save_trade()`, which is called only when `_open_trade()` executes under `is_trading_authorized(config)`. If trading is unauthorized, `_open_trade()` returns `None` and `save_trade()` is never called.
+  - Exit events are enqueued inside `close_trade_and_update_stats()`.
+  - When running in observation-only mode (`is_observation_only(config)`), trade persistence is suppressed and `is_outbox_enqueue_authorized()` explicitly returns `False`.
+- Consequently, RetailBot2 cannot enqueue shadow trade entry or exit events in production without live trade persistence and trading authorization.
+- While operational events (e.g. engine startup, heartbeat, reconciliations) can technically be enqueued without trade persistence, entry and exit shadow testing against production cannot take place without persisting trades or refactoring the lifecycle pipeline to decouple signal generation from trade persistence.
+- Any future production rollout proposal must treat this architectural coupling as an explicit blocker until decoupled or explicitly authorized.
+
+### 4.5 Verified schema lineage and production monitoring / recovery runbook
+
+#### Schema Lineage
+- **Migration 026 (`db/migrate_retailbot2_telegram_outbox.sql`):** Creates table `rdt_telegram_outbox` with 12 columns: `id`, `event_key`, `trade_id`, `event_type`, `payload_json`, `status`, `attempts`, `next_attempt_at`, `locked_until`, `last_error`, `created_at`, `sent_at`.
+- **Migration 027 (`db/migrate_retailbot2_outbox_claim_token.sql`):** Fences stale worker leases by adding column 13: `claim_token CHAR(32) NULL AFTER locked_until`.
+- **No `updated_at` column:** Table `rdt_telegram_outbox` does **not** contain an `updated_at` column. Monitoring queries, administrative inspection scripts, and incident recovery scripts must NEVER reference `updated_at`. Referencing `updated_at` will fail with MariaDB error `Unknown column 'updated_at' in 'field list'`.
+
+#### Approved Read-Only Monitoring Queries
+Use only verified schema columns:
+
+```sql
+-- 1. Queue totals by status and oldest item timestamp
+SELECT
+    status,
+    COUNT(*) AS count,
+    MIN(created_at) AS oldest_created_at
+FROM rdt_telegram_outbox
+GROUP BY status;
+
+-- 2. Due items ready for processing or retry
+SELECT
+    id,
+    event_key,
+    trade_id,
+    event_type,
+    status,
+    attempts,
+    next_attempt_at,
+    locked_until,
+    claim_token,
+    created_at
+FROM rdt_telegram_outbox
+WHERE attempts < 8
+  AND (
+      (status = 'pending' AND next_attempt_at <= UTC_TIMESTAMP())
+      OR (status = 'processing' AND locked_until <= UTC_TIMESTAMP())
+  )
+ORDER BY next_attempt_at ASC, id ASC
+LIMIT 10;
+
+-- 3. Dead-letter items (exhausted retries or explicit fatal errors)
+SELECT
+    id,
+    event_key,
+    trade_id,
+    event_type,
+    status,
+    attempts,
+    last_error,
+    created_at
+FROM rdt_telegram_outbox
+WHERE status = 'dead' OR attempts >= 8
+ORDER BY id DESC
+LIMIT 10;
+```
+
+#### Approved Incident Recovery (Requeue Expired Leases)
+When a worker crashes or is terminated while holding leased events, those events remain in `status = 'processing'` until `locked_until` expires. To safely requeue them without referencing non-existent columns:
+
+```sql
+-- Requeue lease-expired processing events back to pending
+UPDATE rdt_telegram_outbox
+SET status = 'pending',
+    claim_token = NULL,
+    locked_until = NULL,
+    next_attempt_at = UTC_TIMESTAMP()
+WHERE status = 'processing'
+  AND locked_until <= UTC_TIMESTAMP();
+```
 
 
 ## 5. Modern UI migration and cutover

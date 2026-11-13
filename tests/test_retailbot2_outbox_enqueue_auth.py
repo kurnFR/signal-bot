@@ -227,9 +227,13 @@ def test_config_agrees_with_actual_connection_database_accepted(monkeypatch):
     conn_test = MockConnection(MockCursor(db_name="signal_bot_test"))
     assert is_outbox_enqueue_authorized(cfg_test, conn=conn_test) is True
 
-    # 4b. crypto_signals match
+    # 4b. crypto_signals match without RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED: rejected (WO71764)
     cfg_prod = SimpleNamespace(db_name="crypto_signals", observation_only=False)
     conn_prod = MockConnection(MockCursor(db_name="crypto_signals"))
+    assert is_outbox_enqueue_authorized(cfg_prod, conn=conn_prod) is False
+
+    # 4c. crypto_signals match with BOTH flags set to '1': accepted in unit test
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", "1")
     assert is_outbox_enqueue_authorized(cfg_prod, conn=conn_prod) is True
 
 
@@ -746,6 +750,7 @@ def test_production_startup_safety_unchanged(monkeypatch):
     """22. Clean production environment (no flags set) defaults to all gates closed."""
     for key in [
         "RETAILBOT2_OUTBOX_ENQUEUE_ENABLED",
+        "RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED",
         "RETAILBOT2_OUTBOX_WORKER_ENABLED",
         "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY",
         "RETAILBOT2_ALLOW_DIRECT_TELEGRAM",
@@ -766,3 +771,111 @@ def test_production_startup_safety_unchanged(monkeypatch):
 
     # Supervisor launches no outbox worker by default
     assert "retailbot2_outbox" not in run_all.build_processes({})
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 23. Production enqueue gate fails closed on missing, malformed, or non-'1' values (WO71764)
+# ═══════════════════════════════════════════════════════════════════
+
+@pytest.mark.parametrize("flag_value", [None, "", "0", "false", "no", "yes", "true", "2", "ENABLE", "ENABLED"])
+def test_production_enqueue_gate_fails_closed_on_invalid_flags(monkeypatch, flag_value):
+    """23. For crypto_signals, any value of RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED other than '1' fails closed."""
+    monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
+    if flag_value is None:
+        monkeypatch.delenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", flag_value)
+
+    cfg_prod = SimpleNamespace(db_name="crypto_signals", observation_only=False)
+    conn_prod = MockConnection(MockCursor(db_name="crypto_signals"))
+
+    assert is_outbox_enqueue_authorized(cfg_prod, conn=conn_prod) is False
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 24. Production enqueue flag alone does NOT authorize anything (WO71764)
+# ═══════════════════════════════════════════════════════════════════
+
+def test_production_flag_alone_does_not_authorize_any_operation(monkeypatch):
+    """24. RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED=1 alone never authorizes enqueue, trading, delivery, or worker startup."""
+    monkeypatch.delenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", raising=False)
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", "1")
+    monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
+    monkeypatch.delenv("RETAILBOT2_ALLOW_TRADING", raising=False)
+    monkeypatch.delenv("RETAILBOT2_OUTBOX_WORKER_ENABLED", raising=False)
+
+    cfg_prod = SimpleNamespace(db_name="crypto_signals", observation_only=False)
+    conn_prod = MockConnection(MockCursor(db_name="crypto_signals"))
+
+    # Outbox enqueue remains rejected (generic flag unset)
+    assert is_outbox_enqueue_authorized(cfg_prod, conn=conn_prod) is False
+
+    # Trading remains unauthorized
+    assert is_trading_authorized(cfg_prod) is False
+
+    # Delivery remains unauthorized
+    assert is_telegram_delivery_authorized() is False
+
+    # Supervisor process table contains no outbox worker
+    assert "retailbot2_outbox" not in run_all.build_processes({})
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 25. Production enqueue gate preserves connection identity verification (WO71764)
+# ═══════════════════════════════════════════════════════════════════
+
+def test_production_gate_preserves_connection_verification_and_observation_rejection(monkeypatch):
+    """25. When both enqueue flags are '1', connection identity, agreement, and observation-mode checks still apply."""
+    monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", "1")
+
+    cfg_prod = SimpleNamespace(db_name="crypto_signals", observation_only=False)
+
+    # Missing connection fails closed
+    assert is_outbox_enqueue_authorized(cfg_prod, conn=None) is False
+
+    # Connection identity query returning NULL fails closed
+    cursor_null = MockCursor(db_name=None)
+    assert is_outbox_enqueue_authorized(cfg_prod, conn=MockConnection(cursor_null)) is False
+
+    # Connection identity query error fails closed
+    cursor_err = MockCursor(execute_error=RuntimeError("Identity error"))
+    assert is_outbox_enqueue_authorized(cfg_prod, conn=MockConnection(cursor_err)) is False
+
+    # Connection reports different database (e.g. signal_bot_test) fails closed
+    cursor_mismatch = MockCursor(db_name="signal_bot_test")
+    assert is_outbox_enqueue_authorized(cfg_prod, conn=MockConnection(cursor_mismatch)) is False
+
+    # Observation-only mode active via config fails closed
+    cfg_obs = SimpleNamespace(db_name="crypto_signals", observation_only=True)
+    conn_prod = MockConnection(MockCursor(db_name="crypto_signals"))
+    assert is_outbox_enqueue_authorized(cfg_obs, conn=conn_prod) is False
+
+    # Observation-only mode active via environment fails closed
+    monkeypatch.setenv("RETAILBOT2_OBSERVATION_ONLY", "1")
+    assert is_outbox_enqueue_authorized(cfg_prod, conn=conn_prod) is False
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 26. Safe rejection logging without sensitive payloads or credentials (WO71764)
+# ═══════════════════════════════════════════════════════════════════
+
+def test_safe_rejection_logging_without_sensitive_payloads(monkeypatch, caplog):
+    """26. Rejection logs clear warning reason without credentials or sensitive payloads."""
+    monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
+    monkeypatch.delenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", raising=False)
+
+    cfg_prod = SimpleNamespace(db_name="crypto_signals", observation_only=False)
+    conn_prod = MockConnection(MockCursor(db_name="crypto_signals"))
+
+    with caplog.at_level(logging.WARNING, logger="retailbot2.auth"):
+        res = is_outbox_enqueue_authorized(cfg_prod, conn=conn_prod)
+
+    assert res is False
+    assert any("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED=1 is required" in record.message for record in caplog.records)
+    # Ensure no sensitive words appear in logged records
+    for record in caplog.records:
+        msg = record.message.lower()
+        assert "password" not in msg
+        assert "token" not in msg
+        assert "secret" not in msg

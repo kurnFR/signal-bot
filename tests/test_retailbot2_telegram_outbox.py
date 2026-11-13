@@ -15,7 +15,7 @@ def _authorize_outbox_enqueue(monkeypatch):
 
 
 class Cursor:
-    def __init__(self, *, rowcount=1, lastrowid=91, event=None, fail_on=None, db_name="crypto_signals"):
+    def __init__(self, *, rowcount=1, lastrowid=91, event=None, fail_on=None, db_name="signal_bot_test"):
         self.rowcount = rowcount
         self.lastrowid = lastrowid
         self.event = event
@@ -66,7 +66,7 @@ class Connection:
         self.closed = True
 
 
-def db_for(conn, db_name="crypto_signals"):
+def db_for(conn, db_name="signal_bot_test"):
     db = object.__new__(DatabaseManager)
     db.logger = logging.getLogger("test.retailbot2.outbox")
     db.config = SimpleNamespace(
