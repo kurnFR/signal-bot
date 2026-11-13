@@ -164,6 +164,14 @@ To prevent operational confusion during staging, deployment, and auditing, opera
    - This gate authorizes event persistence ONLY; it never authorizes Telegram delivery, worker startup, or trading.
 3. **Worker observation mode (`--observation` CLI flag / `OutboxWorker(observation_mode=True)`)**:
    A genuinely read-only queue monitoring mode for standalone workers.
+   - **Credential & Authorization Isolation (Work Order 71765):**
+     - For `signal_bot_test`: requires explicit dedicated credentials `SIGNAL_BOT_TEST_DB_USER` and `SIGNAL_BOT_TEST_DB_PASSWORD`.
+     - For `crypto_signals`: requires an independent explicit authorization flag `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1`.
+     - For `crypto_signals`: requires dedicated production observation credentials `RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER` and `RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD`.
+     - Missing, empty, or non-`"1"` authorization flag, or missing credentials, must fail closed and abort before any database connection attempt.
+     - Never falls back to generic `MYSQL_USER`, `MYSQL_PASSWORD`, or default `"cms"`.
+     - This flag authorizes read-only observation ONLY; it never authorizes outbox enqueue, live trading, worker delivery, or Telegram transmission.
+     - **Provisioning Constraint:** The production observation account must be provisioned separately by database administrators with SELECT-only privileges for the required outbox and schema inspection (`SELECT` on `rdt_telegram_outbox`, `information_schema.tables`, `information_schema.columns`) and advisory-lock operations (`GET_LOCK`, `RELEASE_LOCK`, `IS_USED_LOCK`). Do not provision accounts or modify grants automatically.
    - Acquires and heartbeats the MariaDB advisory lock (`rdt_outbox_worker_lock`).
    - Verifies database identity via `SELECT DATABASE()` and verifies schema presence.
    - Queries queue status totals and due item counts using read-only `SELECT` queries (`inspect_queue`).
@@ -243,18 +251,39 @@ ORDER BY id DESC
 LIMIT 10;
 ```
 
-#### Approved Incident Recovery (Requeue Expired Leases)
-When a worker crashes or is terminated while holding leased events, those events remain in `status = 'processing'` until `locked_until` expires. To safely requeue them without referencing non-existent columns:
+#### Manual Recovery Preconditions, Incident Policy, and Read-Only Inspection
+
+> [!CAUTION]
+> **No Automated or Unconditional Requeue**: Lease expiry alone is **NOT** proof that an old transport process has terminated. If an old transport subprocess was spawned and encountered a network stall or high latency, its HTTP request to Telegram might still be in-flight or succeed after the database lease expires. Blindly resetting `status = 'processing'` to `'pending'` can result in **duplicate Telegram deliveries**.
+
+Automated recovery jobs and ad-hoc UPDATE queries are strictly prohibited. Before any manually authorized recovery operation on stuck or expired events, all of the following six preconditions must be satisfied:
+
+1. **Stop the worker gracefully**: Terminate the running worker process using `SIGINT` or `SIGTERM` and ensure it shuts down cleanly.
+2. **Verify process elimination**: Verify via `ps aux | grep -E "outbox_worker|outbox_transport"` and `/proc` inspection that no worker process and no transport subprocess group remains alive.
+3. **Verify advisory lock release**: Execute read-only lock inspection to confirm `IS_USED_LOCK('rdt_outbox_worker_lock')` returns `NULL`.
+4. **Read-only event inspection**: Inspect affected event IDs, their exact claim token, attempts, and lease expiry timestamps using read-only inspection SQL (see query 4 below).
+5. **Obtain explicit authorization**: Obtain explicit operator and database owner sign-off for the specific event IDs to be recovered after confirming no external delivery occurred.
+6. **Preserve audit record**: Record an immutable audit log detailing the affected IDs, original states, claim tokens, and the authorized operator before making any state adjustments.
 
 ```sql
--- Requeue lease-expired processing events back to pending
-UPDATE rdt_telegram_outbox
-SET status = 'pending',
-    claim_token = NULL,
-    locked_until = NULL,
-    next_attempt_at = UTC_TIMESTAMP()
+-- 4. Read-only inspection of processing events with expired leases (do not mutate)
+SELECT
+    id,
+    event_key,
+    trade_id,
+    event_type,
+    status,
+    attempts,
+    claim_token,
+    locked_until,
+    created_at,
+    CASE
+        WHEN locked_until <= UTC_TIMESTAMP() THEN 'EXPIRED'
+        ELSE 'ACTIVE_LEASE'
+    END AS lease_state
+FROM rdt_telegram_outbox
 WHERE status = 'processing'
-  AND locked_until <= UTC_TIMESTAMP();
+ORDER BY locked_until ASC, id ASC;
 ```
 
 

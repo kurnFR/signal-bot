@@ -1097,11 +1097,33 @@ class OutboxWorker:
             self.state = OutboxWorkerState.STOPPED
 
 
-def resolve_worker_db_credentials(database: str) -> Dict[str, str]:
-    """Resolve database credentials with strict fail-closed requirements for test databases.
+def is_production_outbox_observation_authorized() -> bool:
+    """Check if production outbox observation mode is authorized.
 
-    For 'signal_bot_test', requires explicit SIGNAL_BOT_TEST_DB_USER and
-    SIGNAL_BOT_TEST_DB_PASSWORD; generic or default ('cms') fallbacks are strictly prohibited.
+    Requires explicit RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1.
+    Missing, empty, or any value other than '1' fails closed.
+    This flag authorizes read-only outbox queue inspection ONLY;
+    it never authorizes outbox enqueue, live trading, worker delivery, or Telegram transmission.
+    """
+    return os.getenv("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED", "").strip() == "1"
+
+
+def resolve_worker_db_credentials(database: str, observation: bool = False) -> Dict[str, str]:
+    """Resolve database credentials with strict fail-closed requirements.
+
+    Credential Isolation Rules (Work Order 71765):
+    1. For 'signal_bot_test':
+       Requires explicit SIGNAL_BOT_TEST_DB_USER and SIGNAL_BOT_TEST_DB_PASSWORD.
+       Generic or default ('cms') fallbacks are strictly prohibited.
+    2. For 'crypto_signals' in observation mode (observation=True):
+       Requires independent explicit RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1.
+       Requires explicit RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER and
+       RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD.
+       Generic or default ('cms') fallbacks are strictly prohibited.
+       The production observation account must be provisioned separately by DB administrators
+       with SELECT-only privileges for table inspection and advisory locks.
+    3. For 'crypto_signals' in delivery mode (observation=False):
+       Resolves standard MYSQL_USER / MYSQL_PASSWORD.
     """
     if database == "signal_bot_test":
         user = os.getenv("SIGNAL_BOT_TEST_DB_USER", "").strip()
@@ -1113,6 +1135,24 @@ def resolve_worker_db_credentials(database: str) -> Dict[str, str]:
                 "generic or default credential fallbacks are strictly prohibited"
             )
         return {"user": user, "password": password}
+
+    if database == "crypto_signals" and observation:
+        if not is_production_outbox_observation_authorized():
+            raise ValueError(
+                "Production outbox observation authorization rejected: "
+                "RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1 is required for database 'crypto_signals'"
+            )
+        user = os.getenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER", "").strip()
+        password = os.getenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD", "").strip()
+        if not user or not password:
+            raise ValueError(
+                f"Missing dedicated production observation credentials for {database!r}: "
+                "RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER and "
+                "RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD are both required; "
+                "generic or default credential fallbacks are strictly prohibited"
+            )
+        return {"user": user, "password": password}
+
     return {
         "user": os.getenv("MYSQL_USER", "cms"),
         "password": os.getenv("MYSQL_PASSWORD", ""),
@@ -1140,7 +1180,7 @@ def main():
             sys.exit(1)
 
     try:
-        creds = resolve_worker_db_credentials(args.database)
+        creds = resolve_worker_db_credentials(args.database, observation=args.observation)
     except ValueError as exc:
         logger.critical("Database credential resolution failed: %s", exc)
         sys.exit(1)

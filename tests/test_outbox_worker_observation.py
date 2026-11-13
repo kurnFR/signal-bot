@@ -27,6 +27,13 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 import pytest
 
+from notifications.telegram_notifier import is_telegram_delivery_authorized
+from paper.retailbot2 import (
+    BotConfig,
+    is_outbox_enqueue_authorized,
+    is_trading_authorized,
+)
+import run_all
 from paper.outbox_worker import (
     ALLOWED_PROD_DATABASES,
     ALLOWED_TEST_DATABASES,
@@ -36,6 +43,7 @@ from paper.outbox_worker import (
     OutboxWorker,
     OutboxWorkerState,
     SchemaVerificationError,
+    is_production_outbox_observation_authorized,
     main as worker_main,
     resolve_worker_db_credentials,
 )
@@ -98,17 +106,142 @@ def test_resolve_test_credentials_fails_closed_no_fallbacks(monkeypatch, user_va
 
 
 def test_resolve_prod_credentials_preserves_existing_behavior(monkeypatch):
-    """crypto_signals preserves standard MYSQL_USER / MYSQL_PASSWORD resolution."""
+    """crypto_signals in delivery mode (observation=False) preserves standard MYSQL_USER / MYSQL_PASSWORD resolution."""
     monkeypatch.setenv("MYSQL_USER", "prod_user")
     monkeypatch.setenv("MYSQL_PASSWORD", "prod_secret")
 
-    creds = resolve_worker_db_credentials("crypto_signals")
+    creds = resolve_worker_db_credentials("crypto_signals", observation=False)
     assert creds == {"user": "prod_user", "password": "prod_secret"}
 
     # Default fallback for prod user is 'cms' if unset
     monkeypatch.delenv("MYSQL_USER", raising=False)
-    creds_default = resolve_worker_db_credentials("crypto_signals")
+    creds_default = resolve_worker_db_credentials("crypto_signals", observation=False)
     assert creds_default["user"] == "cms"
+
+
+def test_resolve_prod_observation_credentials_success(monkeypatch):
+    """crypto_signals in observation mode resolves dedicated observation credentials when authorized."""
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED", "1")
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER", "obs_user_ok")
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD", "obs_pass_ok")
+    # Set generic env vars that must NOT be used
+    monkeypatch.setenv("MYSQL_USER", "cms")
+    monkeypatch.setenv("MYSQL_PASSWORD", "wrong_generic_pass")
+
+    assert is_production_outbox_observation_authorized() is True
+    creds = resolve_worker_db_credentials("crypto_signals", observation=True)
+    assert creds == {"user": "obs_user_ok", "password": "obs_pass_ok"}
+
+
+@pytest.mark.parametrize(
+    "auth_val",
+    [None, "", "0", "false", "no", "yes", "true", "2", "ENABLE", "ENABLED", "1 "],
+)
+def test_resolve_prod_observation_fails_closed_when_auth_flag_unset_or_invalid(monkeypatch, auth_val):
+    """Production observation fails closed if RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED is not exact '1'."""
+    if auth_val is None:
+        monkeypatch.delenv("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED", raising=False)
+    else:
+        # Note: if stripped string is '1', it passes; test non-'1' values
+        if auth_val.strip() == "1":
+            # Pass through stripped '1' is accepted; test invalid only
+            return
+        monkeypatch.setenv("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED", auth_val)
+
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER", "obs_user")
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD", "obs_pass")
+    monkeypatch.setenv("MYSQL_USER", "cms")
+    monkeypatch.setenv("MYSQL_PASSWORD", "generic_pass")
+
+    assert is_production_outbox_observation_authorized() is False
+
+    with pytest.raises(ValueError) as exc_info:
+        resolve_worker_db_credentials("crypto_signals", observation=True)
+
+    err = str(exc_info.value)
+    assert "RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1 is required" in err
+    assert "cms" not in err
+
+
+@pytest.mark.parametrize(
+    "user_val,pass_val",
+    [
+        (None, "obs_pass"),
+        ("", "obs_pass"),
+        ("   ", "obs_pass"),
+        ("obs_user", None),
+        ("obs_user", ""),
+        ("obs_user", "   "),
+        (None, None),
+        ("", ""),
+    ],
+)
+def test_resolve_prod_observation_fails_closed_when_credentials_missing_or_empty(monkeypatch, user_val, pass_val):
+    """Production observation fails closed if dedicated user or password is missing/empty."""
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED", "1")
+
+    if user_val is None:
+        monkeypatch.delenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER", raising=False)
+    else:
+        monkeypatch.setenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER", user_val)
+
+    if pass_val is None:
+        monkeypatch.delenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD", raising=False)
+    else:
+        monkeypatch.setenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD", pass_val)
+
+    # Set generic fallbacks that MUST NOT be used
+    monkeypatch.setenv("MYSQL_USER", "cms")
+    monkeypatch.setenv("MYSQL_PASSWORD", "generic_secret")
+
+    with pytest.raises(ValueError) as exc_info:
+        resolve_worker_db_credentials("crypto_signals", observation=True)
+
+    err = str(exc_info.value)
+    assert "RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER" in err
+    assert "RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD" in err
+    assert "generic or default credential fallbacks are strictly prohibited" in err
+    # Ensure no credentials leaked in error message
+    assert "generic_secret" not in err
+    assert "obs_pass" not in err
+
+
+def test_generic_mysql_credentials_cannot_satisfy_prod_observation(monkeypatch):
+    """Generic MYSQL credentials (or default 'cms') can never satisfy production observation."""
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED", "1")
+    monkeypatch.delenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER", raising=False)
+    monkeypatch.delenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD", raising=False)
+    monkeypatch.setenv("MYSQL_USER", "cms")
+    monkeypatch.setenv("MYSQL_PASSWORD", "cms_pass")
+
+    with pytest.raises(ValueError) as exc_info:
+        resolve_worker_db_credentials("crypto_signals", observation=True)
+
+    assert "RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER" in str(exc_info.value)
+
+
+def test_prod_observation_flag_does_not_authorize_enqueue_trading_or_delivery(monkeypatch):
+    """RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1 alone never authorizes enqueue, trading, or delivery."""
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED", "1")
+    monkeypatch.delenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", raising=False)
+    monkeypatch.delenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", raising=False)
+    monkeypatch.delenv("RETAILBOT2_ALLOW_TRADING", raising=False)
+    monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
+    monkeypatch.delenv("RETAILBOT2_OUTBOX_WORKER_ENABLED", raising=False)
+
+    cfg = SimpleNamespace(db_name="crypto_signals", observation_only=False)
+
+    # Outbox enqueue remains rejected
+    assert is_outbox_enqueue_authorized(cfg, conn=None) is False
+
+    # Trading remains unauthorized
+    assert is_trading_authorized(cfg) is False
+
+    # Telegram delivery remains unauthorized
+    assert is_telegram_delivery_authorized() is False
+
+    # Supervisor process table contains no outbox worker
+    assert "retailbot2_outbox" not in run_all.build_processes({})
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -413,11 +546,14 @@ def test_worker_observation_fails_closed_on_schema_verification_failure():
 # 5. CLI --observation and Credential Gate Tests
 # ═══════════════════════════════════════════════════════════════════
 
-def test_cli_observation_on_crypto_signals_bypasses_delivery_gate(monkeypatch):
-    """Running CLI with --database crypto_signals --observation does NOT require RETAILBOT2_ALLOW_TELEGRAM_DELIVERY."""
+def test_cli_observation_on_crypto_signals_with_valid_auth_and_creds(monkeypatch):
+    """Running CLI with --database crypto_signals --observation succeeds with dedicated observation creds."""
     monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
-    monkeypatch.setenv("MYSQL_USER", "prod_user")
-    monkeypatch.setenv("MYSQL_PASSWORD", "prod_pass")
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED", "1")
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER", "obs_user")
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD", "obs_pass")
+    monkeypatch.setenv("MYSQL_USER", "cms")
+    monkeypatch.setenv("MYSQL_PASSWORD", "generic_pass")
 
     with patch("sys.argv", ["outbox_worker", "--database", "crypto_signals", "--observation"]), \
          patch("paper.outbox_worker.OutboxWorker") as mock_worker_cls:
@@ -431,8 +567,51 @@ def test_cli_observation_on_crypto_signals_bypasses_delivery_gate(monkeypatch):
         mock_worker_cls.assert_called_once()
         kwargs = mock_worker_cls.call_args[1]
         assert kwargs["observation_mode"] is True
+        assert kwargs["db_config"]["user"] == "obs_user"
+        assert kwargs["db_config"]["password"] == "obs_pass"
         assert kwargs["telegram_token"] == ""
         assert kwargs["telegram_chat_id"] == ""
+
+
+@pytest.mark.parametrize(
+    "auth_flag,user_val,pass_val",
+    [
+        (None, "obs_user", "obs_pass"),
+        ("0", "obs_user", "obs_pass"),
+        ("1", None, "obs_pass"),
+        ("1", "", "obs_pass"),
+        ("1", "obs_user", None),
+        ("1", "obs_user", ""),
+        ("1", None, None),
+    ],
+)
+def test_cli_observation_on_crypto_signals_fails_closed_without_auth_or_creds(
+    monkeypatch, auth_flag, user_val, pass_val
+):
+    """Running CLI with --database crypto_signals --observation aborts with code 1 if auth flag or creds are missing."""
+    if auth_flag is None:
+        monkeypatch.delenv("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED", auth_flag)
+
+    if user_val is None:
+        monkeypatch.delenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER", raising=False)
+    else:
+        monkeypatch.setenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER", user_val)
+
+    if pass_val is None:
+        monkeypatch.delenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD", raising=False)
+    else:
+        monkeypatch.setenv("RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD", pass_val)
+
+    monkeypatch.setenv("MYSQL_USER", "cms")
+    monkeypatch.setenv("MYSQL_PASSWORD", "generic_pass")
+
+    with patch("sys.argv", ["outbox_worker", "--database", "crypto_signals", "--observation"]):
+        with pytest.raises(SystemExit) as exc_info:
+            worker_main()
+
+        assert exc_info.value.code == 1
 
 
 def test_cli_delivery_mode_on_crypto_signals_requires_delivery_gate(monkeypatch):
