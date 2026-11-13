@@ -115,6 +115,7 @@ def test_systemd_unit_lifecycle_and_sandboxing():
     # Graceful shutdown configuration
     assert "KillMode=mixed" in content
     assert "TimeoutStopSec=30s" in content
+    assert "--observation" in content, "Systemd unit ExecStart must explicitly specify --observation"
 
     # Supervision and backoff
     assert "Restart=on-failure" in content
@@ -186,12 +187,51 @@ def test_runbook_conservative_recovery_assertions():
     blanket_sql = "UPDATE rdt_telegram_outbox SET status = 'pending', claim_token = NULL, locked_until = NULL WHERE status = 'processing';"
     assert blanket_sql not in runbook_text
 
-    # Must prescribe per-event inspection and classification
+    # Un-fenced per-event recovery queries without claim_token must NOT be present
+    unfenced_pending_sql = "WHERE id = <event_id> AND status = 'processing';"
+    assert unfenced_pending_sql not in runbook_text
+
+    # Must prescribe per-event inspection with claim_token and classification
     assert "Scenario A: Rapid Emergency Stop & Conservative Per-Event Recovery" in runbook_text
     assert "Inspect Affected Processing Events Individually" in runbook_text
+    assert "SELECT id, claim_token, event_key" in runbook_text
+    assert "AND claim_token = '<observed_claim_token>'" in runbook_text
+    assert "SELECT ROW_COUNT();" in runbook_text
     assert "PRESERVE UNCERTAIN EVENTS FOR MANUAL OWNER REVIEW" in runbook_text
     assert "Never execute blanket resets" in runbook_text
+    assert "Never omit optimistic claim-token fencing" in runbook_text
     assert "Absence of a Telegram message in a chat is NOT sufficient proof" in runbook_text
     assert "Do NOT reset uncertain events to pending" in runbook_text
     assert "TimeoutStopSec=30s" in runbook_text
+
+
+def test_verify_deployment_package_detects_tampered_artifact(tmp_path):
+    """Verify that verify_deployment_package.py fails with code 1 when manifest checksum mismatches."""
+    script_path = REPO_ROOT / "deploy/verify_deployment_package.py"
+    manifest_path = REPO_ROOT / "deploy/package_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    # Tamper with one file's hash
+    tampered_manifest = dict(manifest)
+    tampered_manifest["files"] = dict(manifest["files"])
+    target_key = list(tampered_manifest["files"].keys())[0]
+    tampered_manifest["files"][target_key] = "0000000000000000000000000000000000000000000000000000000000000000"
+
+    tampered_file = tmp_path / "tampered_manifest.json"
+    tampered_file.write_text(json.dumps(tampered_manifest, indent=2), encoding="utf-8")
+
+    res = subprocess.run(
+        [sys.executable, str(script_path), "--json", "--check-manifest", "--manifest", str(tampered_file)],
+        cwd=str(REPO_ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 1, f"Expected returncode 1 on tampered manifest, got {res.returncode}"
+    report = json.loads(res.stdout)
+    assert report["status"] == "FAIL"
+    assert report["checks"]["manifest_verification"]["pass"] is False
+    assert len(report["checks"]["manifest_verification"]["mismatches"]) > 0
+    assert target_key in report["checks"]["manifest_verification"]["mismatches"][0]
 

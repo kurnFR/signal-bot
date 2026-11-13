@@ -39,9 +39,17 @@ WorkingDirectory=/opt/signal-bot
 # Load dedicated environment configuration (must be mode 0600)
 EnvironmentFile=-/etc/retailbot2/outbox-worker.env
 
-# Worker daemon invocation
-# NOTE: To run in read-only observation mode, append: --observation
-ExecStart=/opt/signal-bot/venv/bin/python3 -m paper.outbox_worker --database crypto_signals --poll-interval 1.0 --timeout 10.0
+# Worker daemon invocation (unambiguously observation-only by default)
+# SAFETY REQUIREMENT (WO71786):
+# The packaged unit explicitly specifies --observation to guarantee that the default
+# service startup cannot claim, transition, acknowledge, retry, or deliver events.
+# In observation mode, the worker performs read-only SELECT queue inspection on S_lock.
+#
+# Any future transition from observation mode to active delivery mode requires:
+# 1. Deliberate written authorization from system owners.
+# 2. Operator configuration change (e.g. systemd drop-in override removing --observation).
+# 3. Setting RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 in /etc/retailbot2/outbox-worker.env.
+ExecStart=/opt/signal-bot/venv/bin/python3 -m paper.outbox_worker --database crypto_signals --poll-interval 1.0 --timeout 10.0 --observation
 
 # Process lifecycle and graceful shutdown:
 # KillMode=mixed sends SIGTERM to the main worker process, allowing its signal

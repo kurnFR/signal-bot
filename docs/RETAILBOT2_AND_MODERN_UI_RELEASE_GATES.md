@@ -489,19 +489,19 @@ Stage G1 finalizes the RetailBot2 outbox dispatcher deployment candidate, establ
 | :---: | :--- | :---: | :--- | :--- |
 | **G-01** | **Source and Git Lineage** | **PASS** | Lineage cleanly traces back to master `a2c850aa8f97f081e22008d1efc0d3654c379dbe`. Zero uncommitted files, all 45 worktrees intact, 21 screenshot PNGs preserved. | None. Verified in WO71779–WO71785. |
 | **G-02** | **Package Integrity & Manifest** | **PASS** | Checksums verified via `deploy/verify_deployment_package.py --check-manifest`. Minimal runtime dependencies (`mysql-connector-python`). | None. |
-| **G-03** | **Test Regression Coverage** | **PASS** | 154/154 tests passing across all 9 suites in ~9.3s. Database integration tests validated on `signal_bot_test`. | None. |
+| **G-03** | **Test Regression Coverage** | **PASS** | 160/160 tests passing across all 9 suites in ~9.4s. Database integration tests validated on `signal_bot_test`. | None. |
 | **G-04** | **Worker Shutdown & Lock-Release Safety** | **PASS** | Unit template specifies `TimeoutStopSec=30s` with `KillMode=mixed`. Tested active transport SIGTERM termination; advisory lock released with code 0 before timeout. | None. Validated in `tests/test_retailbot2_outbox_supervision.py`. |
 | **G-05** | **Conservative Recovery Safety** | **PASS** | Blanket resets prohibited. Strengthened 3-state forensic classification (Confirmed not sent, Confirmed sent, Uncertain). Uncertain events preserved for manual owner review. | None. Validated in runbook and test assertions. |
-| **G-06** | **Target Production Host Identity** | **PASS** | Host `CMS` (`192.168.1.30`) identified as host running MariaDB `127.0.0.1:3306` containing `crypto_signals`. Loopback credentials (`retailbot2_obs@127.0.0.1`) match `CMS`. | Owner to confirm whether `CMS` or separate VM is the production service host. |
+| **G-06** | **Target Production Host Identity** | **OWNER_CONFIRMATION_REQUIRED** | Host `CMS` (`192.168.1.30`) identified as candidate host by technical evidence (runs MariaDB `127.0.0.1:3306` containing `crypto_signals`; loopback credentials match `CMS`). CMS is NOT owner-confirmed as the application service host. | Owner explicit written confirmation required to designate CMS or a separate dedicated VM as the production application service host. |
 | **G-07** | **Target Host OS & systemd Compatibility** | **PASS** | CentOS Linux 8, x86_64, systemd 239, Python 3.12 available, 533 GB disk space free, time synchronized. | None for host `CMS`. |
-| **G-08** | **Service Account & Filesystem Provisioning** | **OWNER_ACTION_REQUIRED** | Dedicated user `retailbot:retailbot`, `/opt/signal-bot`, `/opt/signal-bot/venv`, `/etc/retailbot2/outbox-worker.env` (0600) not yet created on host. | Operator must execute provisioning steps before service startup. |
+| **G-08** | **Service Account & Filesystem Provisioning** | **OWNER_ACTION_REQUIRED** | Dedicated user `retailbot:retailbot`, `/opt/signal-bot`, `/opt/signal-bot/venv`, `/etc/retailbot2/outbox-worker.env` (0600) not yet created on host. Blocked pending Gate 6 host confirmation. | Operator must execute provisioning steps on confirmed host after explicit owner provisioning authorization. |
 | **G-09** | **Production Observation Credentials** | **PASS** | Dedicated SELECT-only account `'retailbot2_obs'@'127.0.0.1'` provisioned, rotated (WO71774), verified in 60s trial (WO71776). | None. Account active and tested. |
-| **G-10** | **Production Observation Startup** | **READY_FOR_OWNER_TRIAL** | Worker observation mode (`--observation`) verified; reads queue without row locks or claiming. Systemd service ready to launch in observation mode. | Owner authorization to start service with `--observation`. |
+| **G-10** | **Production Observation Startup** | **READY_FOR_OWNER_TRIAL** | Packaged service template explicitly specifies `--observation` (WO71786). Worker executes read-only SELECT queue inspection on S_lock without row locks or claiming. Systemd service ready to launch in observation mode only. | Explicit owner written authorization required to install and start the service in observation mode. Startup remains unauthorized. |
 | **G-11** | **Production Shadow Enqueue Authorization** | **NOT_AUTHORIZED** | `RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED` remains `0` (fail-closed). Decoupled shadow notifications enter queue only on `signal_bot_test`. | Explicit owner written authorization required to enable. |
 | **G-12** | **Telegram Delivery Authorization** | **NOT_AUTHORIZED** | `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY` remains `0` (fail-closed). Subprocess transport execution strictly blocked. | Explicit owner written authorization required to enable. |
 | **G-13** | **Monitoring and Incident Readiness** | **PASS** | 10-alert matrix defined; expired lease monitoring aligned to 90s lease; read-only health CLI `paper.outbox_health` verified. | None. |
 | **G-14** | **Backup and Rollback Readiness** | **PASS** | Logical mysqldump procedures, rapid stop sequence, and per-event forensic recovery procedures documented in runbook. | None. |
-| **G-15** | **Final Owner Deployment Approval** | **OWNER_ACTION_REQUIRED** | Written owner sign-off on deployment candidate release package and service cutover. | Owner review and sign-off on Stage G1 report. |
+| **G-15** | **Final Owner Deployment Approval** | **OWNER_ACTION_REQUIRED** | Written owner sign-off on deployment candidate release package and service cutover. | Owner review and sign-off on Stage G1 / G1.1 report. |
 
 #### 2. Git Lineage & Commit Lineage Clarification (WO71784 Audit)
 
@@ -510,24 +510,24 @@ Stage G1 finalizes the RetailBot2 outbox dispatcher deployment candidate, establ
 - **Stage E Genuine Git Commit:** `861a0a96caba5d367064abdd577e826a5dae63db` (abbreviated `861a0a9`).
 - **Lineage Verification:** The SHA `861a0a911767ee427494f6c4c0b4cb9da143b8c4` reported in WO71783 prompt metadata does not exist in local or remote Git repositories (`fatal: bad object`). It represents an erroneous string transcription where the valid 7-character prefix `861a0a9` was matched with a non-existent suffix. The authentic Git parent object is `861a0a96caba5d367064abdd577e826a5dae63db`, and the merge-base with master is strictly `a2c850aa8f97f081e22008d1efc0d3654c379dbe`.
 
-#### 3. Test Suite Count Reconciliation (151 Baseline Tests; 154 Post-Audit Tests Across 9 Suites)
+#### 3. Test Suite Count Reconciliation (151 Baseline Tests; 154 Post-Audit Tests; 160 Stage G1.1 Tests Across 9 Suites)
 
-An empirical test collection and execution across all 9 suites reconciles the previous 150-vs-151 count discrepancy and records the newly added corrective test coverage:
+An empirical test collection and execution across all 9 suites reconciles the previous counts and records the newly added corrective test coverage:
 
-| Suite | WO71783 Baseline | WO71784 Post-Audit | Notes & Scope |
-| :--- | :---: | :---: | :--- |
-| `tests/test_retailbot2_shadow_enqueue.py` | 24 | 24 | Pure payload builders & decoupled shadow enqueue |
-| `tests/test_retailbot2_outbox_enqueue_auth.py` | 46 | 46 | Parameterized flag & connection validation cases |
-| `tests/test_retailbot2_telegram_outbox.py` | 39 | 39 | Unit tests for dispatcher loop and token fencing |
-| `tests/test_retailbot2_outbox_delivery_mysql.py` | 6 | 6 | Concurrency, lease fencing, and retry integration tests |
-| `tests/test_migration_managed_startup_docs.py` | 8 | 8 | Runbook, migration, and documentation assertions |
-| `tests/test_retailbot2_outbox_supervision.py` | 9 | 10 | Added active-transport subprocess shutdown test (+1) |
-| `tests/test_retailbot2_outbox_observability.py` | 7 | 7 | Health snapshots, dead-letter inspection, and lock inspection |
-| `tests/test_retailbot2_outbox_retention.py` | 5 | 5 | Dry-run retention planner & active row protection |
-| `tests/test_retailbot2_deployment_package.py` | 7 | 9 | Added lease consistency & recovery assertion tests (+2) |
-| **Total Test Count** | **151** | **154** | **154 Passed, 0 Failed, 0 Skipped, 0 Deselected** |
+| Suite | WO71783 Baseline | WO71784/WO71785 Post-Audit | WO71786 Stage G1.1 | Notes & Scope |
+| :--- | :---: | :---: | :---: | :--- |
+| `tests/test_retailbot2_shadow_enqueue.py` | 24 | 24 | 24 | Pure payload builders & decoupled shadow enqueue |
+| `tests/test_retailbot2_outbox_enqueue_auth.py` | 46 | 46 | 46 | Parameterized flag & connection validation cases |
+| `tests/test_retailbot2_telegram_outbox.py` | 39 | 39 | 39 | Unit tests for dispatcher loop and token fencing |
+| `tests/test_retailbot2_outbox_delivery_mysql.py` | 6 | 6 | 7 | Added recovery claim-token fencing test (+1) |
+| `tests/test_migration_managed_startup_docs.py` | 8 | 8 | 8 | Runbook, migration, and documentation assertions |
+| `tests/test_retailbot2_outbox_supervision.py` | 9 | 10 | 14 | Added observation defaults & safety fail-closed tests (+4) |
+| `tests/test_retailbot2_outbox_observability.py` | 7 | 7 | 7 | Health snapshots, dead-letter inspection, and lock inspection |
+| `tests/test_retailbot2_outbox_retention.py` | 5 | 5 | 5 | Dry-run retention planner & active row protection |
+| `tests/test_retailbot2_deployment_package.py` | 7 | 9 | 10 | Added tampered manifest verification test (+1) |
+| **Total Test Count** | **151** | **154** | **160** | **160 Passed, 0 Failed, 0 Skipped, 0 Deselected** |
 
-**Root Cause of WO71783 Discrepancy:** The 150-count breakdown cited in WO71783 metadata originated from an outdated manual transcription where `delivery_mysql` was listed with 4 tests (instead of 6) and unparameterized estimates were cited. In reality, the codebase collected and passed exactly 151 tests in WO71783, and now passes 154 tests with WO71784 corrective additions.
+**Root Cause of WO71783 Discrepancy:** The 150-count breakdown cited in WO71783 metadata originated from an outdated manual transcription where `delivery_mysql` was listed with 4 tests (instead of 6) and unparameterized estimates were cited. In reality, the codebase collected and passed exactly 151 tests in WO71783, 154 tests with WO71784 corrective additions, and now passes 160 tests with WO71786 Stage G1.1 safety additions.
 
 #### 4. Lease Duration, HTTP Deadlines & Expired Lease Semantics
 
@@ -549,6 +549,32 @@ An empirical test collection and execution across all 9 suites reconciles the pr
   All technical components, package checksums, 154 automated regression tests, 30-second shutdown timeout, strengthened recovery classification, and read-only host discovery are complete and verified.
 - **Production Rollout Status:** **`PASS_WITH_OWNER_ACTIONS`**  
   Production deployment remains safely gated pending owner host provisioning (Gate 8), live delivery authorization (Gate 12), and final deployment sign-off (Gate 15).
+
+
+### 4.8 Stage G1.1 Observation-Only Service Default & Recovery Fencing Audit (WO71786)
+
+Stage G1.1 resolves the operational and safety ambiguities identified during review of WO71785:
+
+1. **Unambiguous Observation-Only Service Default:**
+   - `deploy/systemd/retailbot2-outbox-worker.service` explicitly specifies `--observation` in `ExecStart`.
+   - The packaged service default guarantees that launching the unit cannot claim, acknowledge, retry, dead-letter, or transmit outbox events. In observation mode, the worker performs read-only queue inspection (`inspect_queue()`) on S_lock and never invokes `claim_event()`.
+   - Any transition from observation mode to active delivery mode requires deliberate written authorization, an operator configuration change (e.g. removing `--observation` via a systemd drop-in override), and explicit `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`.
+   - Verified by `deploy/verify_deployment_package.py` and automated unit tests.
+
+2. **Manual Recovery Claim-Token Fencing & Row Count Verification:**
+   - Section 17 of `docs/RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md` updated to require optimistic conditional updates fencing the exact event ID, expected status `processing`, and the claim token observed during forensic inspection (`claim_token = '<observed_claim_token>'`).
+   - Mandatory operator rule: verify `SELECT ROW_COUNT();`. Exactly 1 row affected indicates successful recovery. 0 rows affected requires stopping immediately without broadening the query.
+   - Tested and verified on `signal_bot_test`: stale tokens and non-processing statuses are rejected with 0 rows affected.
+
+3. **Host Identity & Release Gate Reclassification:**
+   - Gate 6 reclassified to `OWNER_CONFIRMATION_REQUIRED`: Host `CMS` (`192.168.1.30`) is identified by technical evidence as the candidate host running MariaDB `127.0.0.1:3306` containing `crypto_signals`, but owner explicit designation is required to confirm whether CMS or a separate dedicated VM is the application service host.
+   - Gate 8 remains `OWNER_ACTION_REQUIRED`: Blocked pending host confirmation and separate provisioning authorization.
+   - Gate 10 remains `READY_FOR_OWNER_TRIAL`: Service installation and startup remain unauthorized until explicit owner instruction.
+   - Gates 11 and 12 remain `NOT_AUTHORIZED`: Production shadow enqueue and Telegram delivery remain strictly fail-closed.
+   - Gate 15 remains `OWNER_ACTION_REQUIRED`: Final owner deployment approval outstanding.
+
+4. **Stage G1.1 Verdict:**
+   - **`PASS_STAGE_G1_1_OBSERVATION_AND_RECOVERY_SAFETY`**
 
 
 ## 5. Modern UI migration and cutover

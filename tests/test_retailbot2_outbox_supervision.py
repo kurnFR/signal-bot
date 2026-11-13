@@ -61,6 +61,13 @@ class TestOutboxSystemdUnitTemplate(unittest.TestCase):
         self.assertEqual(service.get("Restart"), "on-failure")
         self.assertEqual(service.get("RestartSec"), "5s")
 
+    def test_service_exec_start_observation_default(self):
+        service = self.config["Service"]
+        exec_start = service.get("ExecStart", "")
+        self.assertIn("--observation", exec_start, "ExecStart must explicitly default to --observation")
+        self.assertIn("--database crypto_signals", exec_start)
+        self.assertIn("paper.outbox_worker", exec_start)
+
     def test_service_security_hardening(self):
         service = self.config["Service"]
         self.assertEqual(service.get("NoNewPrivileges"), "true")
@@ -182,6 +189,42 @@ class TestWorkerLifecycleSimulation(unittest.TestCase):
         self.assertEqual(worker.state, OutboxWorkerState.STOPPED)
         worker.session_mgr.close.assert_called_once()
         worker.session_mgr.mark_sent.assert_called_once_with(999, "token1234567890123456789012345678")
+
+    def test_observation_mode_does_not_claim_or_dispatch(self):
+        """Verify that a worker running in observation mode inspects queue without claiming."""
+        worker = OutboxWorker(
+            db_config={"host": "127.0.0.1", "database": "signal_bot_test"},
+            allowed_databases=("signal_bot_test",),
+            poll_interval_sec=0.01,
+            observation_mode=True,
+        )
+        worker.session_mgr = MagicMock()
+        worker.session_mgr.check_lock_owned.return_value = True
+        worker.session_mgr.inspect_queue.return_value = {"due_count": 5, "status_counts": {"pending": 5}}
+
+        res = worker.process_one_event()
+        self.assertFalse(res)
+        worker.session_mgr.inspect_queue.assert_called_once()
+        worker.session_mgr.claim_event.assert_not_called()
+        self.assertEqual(worker.telegram_token, "")
+        self.assertEqual(worker.telegram_chat_id, "")
+
+    def test_production_startup_without_observation_fails_closed(self):
+        """Verify that launching worker on crypto_signals without --observation fails closed."""
+        with patch.dict(os.environ, {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "0"}, clear=False):
+            with patch("sys.argv", ["outbox_worker", "--database", "crypto_signals"]):
+                with self.assertRaises(SystemExit) as ctx:
+                    from paper.outbox_worker import main
+                    main()
+                self.assertEqual(ctx.exception.code, 1)
+
+    def test_production_observation_startup_without_auth_switch_fails_closed(self):
+        """Verify that observation mode on crypto_signals requires explicit authorization switch."""
+        from paper.outbox_worker import resolve_worker_db_credentials
+        with patch.dict(os.environ, {"RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED": "0"}, clear=False):
+            with self.assertRaises(ValueError) as ctx:
+                resolve_worker_db_credentials("crypto_signals", observation=True)
+            self.assertIn("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1 is required", str(ctx.exception))
 
 
 

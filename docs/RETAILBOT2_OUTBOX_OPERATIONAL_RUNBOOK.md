@@ -363,9 +363,9 @@ If anomalous behavior, unexpected delivery loops, or operational failures occur,
    RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0
    ```
 5. **Inspect Affected Processing Events Individually:**
-   Query all in-flight or expired processing events:
+   Query all in-flight or expired processing events, capturing the active `claim_token`:
    ```sql
-   SELECT id, event_key, trade_id, event_type, attempts, locked_until, created_at,
+   SELECT id, claim_token, event_key, trade_id, event_type, attempts, locked_until, created_at,
           TIMESTAMPDIFF(SECOND, locked_until, UTC_TIMESTAMP()) AS expired_seconds_ago
    FROM rdt_telegram_outbox
    WHERE status = 'processing'
@@ -377,11 +377,14 @@ If anomalous behavior, unexpected delivery loops, or operational failures occur,
    - **Confirmed NOT Sent:**
      - *Evidentiary Requirement:* Requires **positive evidence** proving the transport request was never transmitted or could not have been accepted by Telegram. Examples include verified failure before request dispatch supported by process/journald logs (e.g., DNS resolution failure, network interface down prior to socket open, missing token exception, payload serialization error).
      - *Negative Rule:* **Absence of a Telegram message in a chat is NOT sufficient proof that delivery did not occur.** (Chat UI latency, wrong chat inspection, message deletion, Telegram internal pipeline delays, or client sync lag can make a delivered message appear missing).
-     - *Recovery Action:* Only when positive evidence confirms zero transmission and written operator approval is obtained:
+     - *Recovery Action:* Only when positive evidence confirms zero transmission and written operator approval is obtained, execute optimistic conditional update fencing the exact ID, status, and observed claim token:
        ```sql
        UPDATE rdt_telegram_outbox
        SET status = 'pending', claim_token = NULL, locked_until = NULL, attempts = attempts + 1
-       WHERE id = <event_id> AND status = 'processing';
+       WHERE id = <event_id>
+         AND status = 'processing'
+         AND claim_token = '<observed_claim_token>';
+       SELECT ROW_COUNT();
        ```
    
    - **Confirmed Sent:**
@@ -391,13 +394,22 @@ If anomalous behavior, unexpected delivery loops, or operational failures occur,
        2. Exact timestamp of the event against message timestamp in the Telegram channel.
        3. Payload parameters (symbol, side LONG/SHORT, entry price, stop-loss, target, units).
        4. Transport logs recording HTTP 200 with Telegram `message_id`.
-     - *Recovery Action:* With written approval, reconcile database state:
+     - *Recovery Action:* With written approval, reconcile database state via optimistic conditional update:
        ```sql
        UPDATE rdt_telegram_outbox
        SET status = 'sent', sent_at = UTC_TIMESTAMP(), claim_token = NULL, locked_until = NULL
-       WHERE id = <event_id> AND status = 'processing';
+       WHERE id = <event_id>
+         AND status = 'processing'
+         AND claim_token = '<observed_claim_token>';
+       SELECT ROW_COUNT();
        ```
    
+   - **Mandatory Optimistic Fencing & Row Count Verification:**
+     - Operators MUST verify the affected-row count (`SELECT ROW_COUNT();`) immediately after executing the conditional update.
+     - **Exactly 1 row affected:** Success. The event was securely updated under its verified forensic ownership.
+     - **Zero rows affected (0):** **STOP IMMEDIATELY.** Do NOT broaden the WHERE clause or retry blindly. Zero affected rows indicates that the event's state mutated between forensic inspection and update execution (e.g., status changed, claim token expired and was reclaimed by a running worker with a new token, or the row was modified by another session). Modifying an event without matching the exact claim token risks corrupting an active worker's in-flight transaction or re-queuing an already resolved event.
+     - **Never omit `AND claim_token = '<observed_claim_token>'` or `AND status = 'processing'`.**
+
    - **Delivery Outcome Uncertain:**
      - *Definition:* Any event where evidence is ambiguous, partial, or missing (e.g., worker killed during HTTP POST, socket timeout during response read, network partition without receipt confirmation).
      - *Strict Handling Rule:* **PRESERVE UNCERTAIN EVENTS FOR MANUAL OWNER REVIEW.**
@@ -410,6 +422,7 @@ If anomalous behavior, unexpected delivery loops, or operational failures occur,
    > 1. **Never execute blanket resets such as `UPDATE rdt_telegram_outbox SET status='pending' WHERE status='processing';`!**
    > 2. **Never create or run automated blanket reset scripts.**
    > 3. **Never treat chat message absence as proof of non-delivery.**
+   > 4. **Never omit optimistic claim-token fencing (`AND claim_token = '<observed_claim_token>'`) or status checks from recovery queries.**
    > Blanket resets bypass forensic classification and risk re-sending messages that were already delivered to Telegram.
 
 ### Scenario B: Service Downgrade / Code Rollback

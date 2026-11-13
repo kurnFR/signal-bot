@@ -129,6 +129,15 @@ def check_systemd_unit() -> Tuple[bool, List[str]]:
         if directive not in content:
             errors.append(f"Missing directive in systemd unit: '{directive}'")
 
+    # Default startup must be explicitly observation-only (WO71786)
+    exec_start_lines = [l for l in content.splitlines() if l.strip().startswith("ExecStart=")]
+    if not exec_start_lines:
+        errors.append("Missing ExecStart directive in systemd unit")
+    else:
+        exec_start = exec_start_lines[0]
+        if "--observation" not in exec_start:
+            errors.append("ExecStart in systemd unit must include '--observation' for default observation-only startup")
+
     # Syntax check via systemd-analyze verify if installed
     try:
         proc = subprocess.run(
@@ -239,12 +248,13 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     parser.add_argument("--write-manifest", action="store_true", help="Write package manifest to deploy/package_manifest.json")
     parser.add_argument("--check-manifest", action="store_true", help="Verify checksums against deploy/package_manifest.json")
+    parser.add_argument("--manifest", type=str, default=None, help="Custom path to package manifest JSON file")
     args = parser.parse_args()
 
     results = run_all_checks()
+    manifest_path = Path(args.manifest) if args.manifest else (REPO_ROOT / "deploy/package_manifest.json")
 
     if args.write_manifest:
-        manifest_path = REPO_ROOT / "deploy/package_manifest.json"
         manifest_data = {
             "version": "1.0.0",
             "stage": "F",
@@ -259,7 +269,6 @@ def main() -> int:
             print(f"Package manifest written to {manifest_path}")
 
     if args.check_manifest:
-        manifest_path = REPO_ROOT / "deploy/package_manifest.json"
         if not manifest_path.exists():
             print(f"ERROR: Manifest file not found at {manifest_path}", file=sys.stderr)
             return 1
@@ -300,7 +309,7 @@ def main() -> int:
 
         print("\n3. Systemd Unit Configuration:")
         if results["checks"]["systemd_unit"]["pass"]:
-            print("  - Verified: KillMode=mixed, TimeoutStopSec=30s, User=retailbot, directives valid.")
+            print("  - Verified: KillMode=mixed, TimeoutStopSec=30s, User=retailbot, ExecStart has --observation, directives valid.")
         else:
             print(f"  - FAILED: {results['checks']['systemd_unit']['errors']}")
 

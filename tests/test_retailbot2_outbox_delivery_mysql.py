@@ -532,3 +532,118 @@ def test_stale_worker_cannot_ack_or_retry_after_event_is_reclaimed():
     finally:
         if trade_id is not None:
             _cleanup(first_worker_db, trade_id)
+
+
+def test_manual_recovery_claim_token_fencing():
+    """Verify optimistic claim-token fencing in manual recovery SQL (WO71786).
+
+    Proves:
+    1. Recovery update with mismatched/stale claim token affects 0 rows.
+    2. Recovery update on non-processing status affects 0 rows.
+    3. Recovery update with matching ID, status 'processing', and exact claim token affects exactly 1 row.
+    """
+    if os.getenv("SIGNAL_BOT_RUN_RETAILBOT2_DB_INTEGRATION") != "1":
+        pytest.skip("opt-in isolated signal_bot_test integration test")
+
+    db = _db()
+    trade_id = None
+    try:
+        trade_id, _symbol = _seed_entry(db, uuid.uuid4().hex[:10].upper())
+        event = _read_event(trade_id)
+        event_id = event["id"]
+
+        claim = db.claim_telegram_outbox_event(lease_seconds=90)
+        assert claim is not None
+        assert claim["id"] == event_id
+        valid_token = claim["claim_token"]
+        assert valid_token is not None
+
+        # 1. Stale / mismatched token recovery update -> 0 rows affected
+        conn = _connection()
+        try:
+            cursor = conn.cursor()
+            stale_token = "stale_token_" + uuid.uuid4().hex[:16]
+            cursor.execute(
+                """
+                UPDATE rdt_telegram_outbox
+                SET status = 'pending', claim_token = NULL, locked_until = NULL, attempts = attempts + 1
+                WHERE id = %s
+                  AND status = 'processing'
+                  AND claim_token = %s
+                """,
+                (event_id, stale_token),
+            )
+            assert cursor.rowcount == 0, f"Expected 0 rows affected on stale token, got {cursor.rowcount}"
+            conn.commit()
+
+            # Verify row unchanged in DB
+            cur_event = _read_event(trade_id)
+            assert cur_event["status"] == "processing"
+            assert cur_event["claim_token"] == valid_token
+
+            # 2. Changed status recovery update -> 0 rows affected
+            # Suppose another session or worker completed the event
+            cursor.execute(
+                """
+                UPDATE rdt_telegram_outbox
+                SET status = 'sent', sent_at = UTC_TIMESTAMP(), claim_token = NULL, locked_until = NULL
+                WHERE id = %s
+                  AND status = 'processing'
+                  AND claim_token = %s
+                """,
+                (event_id, valid_token),
+            )
+            assert cursor.rowcount == 1
+            conn.commit()
+
+            # Now status is 'sent'; an attempted recovery update expecting 'processing' must affect 0 rows
+            cursor.execute(
+                """
+                UPDATE rdt_telegram_outbox
+                SET status = 'pending', claim_token = NULL, locked_until = NULL, attempts = attempts + 1
+                WHERE id = %s
+                  AND status = 'processing'
+                  AND claim_token = %s
+                """,
+                (event_id, valid_token),
+            )
+            assert cursor.rowcount == 0, f"Expected 0 rows affected on non-processing status, got {cursor.rowcount}"
+            conn.commit()
+
+            # Reset back to processing with a new token for successful conditional recovery test
+            new_token = "token_recov_" + uuid.uuid4().hex[:16]
+            cursor.execute(
+                """
+                UPDATE rdt_telegram_outbox
+                SET status = 'processing', claim_token = %s, locked_until = DATE_ADD(UTC_TIMESTAMP(), INTERVAL 90 SECOND)
+                WHERE id = %s
+                """,
+                (new_token, event_id),
+            )
+            conn.commit()
+
+            # 3. Valid conditional recovery with matching ID, status 'processing', and exact token -> 1 row affected
+            cursor.execute(
+                """
+                UPDATE rdt_telegram_outbox
+                SET status = 'pending', claim_token = NULL, locked_until = NULL, attempts = attempts + 1
+                WHERE id = %s
+                  AND status = 'processing'
+                  AND claim_token = %s
+                """,
+                (event_id, new_token),
+            )
+            assert cursor.rowcount == 1, f"Expected 1 row affected on valid recovery, got {cursor.rowcount}"
+            conn.commit()
+
+            recovered = _read_event(trade_id)
+            assert recovered["status"] == "pending"
+            assert recovered["claim_token"] is None
+            assert recovered["locked_until"] is None
+            assert recovered["attempts"] == 2
+            cursor.close()
+        finally:
+            conn.close()
+    finally:
+        if trade_id is not None:
+            _cleanup(db, trade_id)
