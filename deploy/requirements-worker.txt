@@ -1,0 +1,7 @@
+# RetailBot2 Outbox Worker Daemon - Minimal Runtime Dependencies
+# Stage F Production Deployment Package
+#
+# Only the database connector is required at runtime by the outbox dispatcher daemon
+# (paper.outbox_worker, paper.outbox_transport, paper.outbox_health, paper.outbox_retention).
+# No heavyweight scientific, machine learning, or web framework packages are needed.
+mysql-connector-python>=8.0.30,<10.0.0

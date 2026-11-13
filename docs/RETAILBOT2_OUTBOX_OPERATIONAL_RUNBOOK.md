@@ -248,3 +248,121 @@ Operators and administrators must **NEVER**:
 - [ ] Reference `updated_at` on `rdt_telegram_outbox` (column does not exist; schema is 13 columns).
 - [ ] Bypass advisory lock acquisition (`GET_LOCK`) or force kill workers with `SIGKILL` without first attempting graceful `SIGTERM`.
 - [ ] Replay dead-lettered events without addressing the underlying error.
+
+---
+
+## 14. Deployment Package Integrity & Verification (Stage F)
+
+Prior to deploying or upgrading the RetailBot2 outbox dispatcher worker on any host, run the standalone verification tool:
+
+```bash
+# Verify integrity, SHA-256 manifest, security defaults, and systemd syntax
+python3 deploy/verify_deployment_package.py --check-manifest
+
+# Structured JSON output for CI / deployment automation
+python3 deploy/verify_deployment_package.py --json
+```
+
+### Verification Checks Performed:
+1. **File Presence & Integrity:** Validates SHA-256 checksums of all 9 core deployment artifacts against `deploy/package_manifest.json`.
+2. **Fail-Closed Security Defaults:** Confirms `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0` and `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=0` in environment templates; guarantees zero hardcoded secrets.
+3. **Systemd Unit Directives:** Confirms `KillMode=mixed`, `TimeoutStopSec=15s`, non-root execution (`User=retailbot`), restart limits, and sandboxing directives.
+4. **Python Module Imports:** Tests clean import of `paper.outbox_worker`, `paper.outbox_transport`, `paper.outbox_health`, and `paper.outbox_retention`.
+5. **CLI Entrypoints:** Validates return codes and help flag parsing.
+
+---
+
+## 15. Operational Monitoring Matrix (10 Alerts)
+
+The following 10 alerts constitute the production monitoring specification for the outbox subsystem:
+
+| Alert ID | Condition / Query | Severity | Window | Root Cause & Operator Action |
+| :--- | :--- | :--- | :--- | :--- |
+| **`OutboxBacklogHigh`** | `due_pending_count > 100` | Warning | 5 min | High signal generation frequency or slow worker loop. Check CPU/DB load and worker status. |
+| **`OutboxDeliveryStalled`** | `oldest_pending_age_sec > 900` while `due_pending_count > 0` | Critical | 15 min | Worker stopped, hung, or lost database connectivity. Check `systemctl status retailbot2-outbox-worker`. |
+| **`OutboxDeadLetterSpike`** | `dead_count` delta >= 5 | Warning | 15 min | Intermittent Telegram API errors or schema/payload format incompatibility. Query `paper.outbox_health --dead-letters`. |
+| **`OutboxDeadLetterCritical`** | `dead_count > 20` | Critical | Immediate | Systemic failure (invalid Telegram token, blocked chat, unrecoverable bug). Halt queue claiming if necessary. |
+| **`OutboxLockContention`** | `IS_USED_LOCK('rdt_outbox_worker_lock')` holds foreign connection ID | Critical | Immediate | Duplicate worker or orphaned zombie connection. Terminate conflicting process before restarting worker. |
+| **`OutboxWorkerCrashLoop`** | Service restarts >= 5 times within 60s | Critical | Immediate | Configuration error, invalid credentials, or missing database connection. Check `journalctl -u retailbot2-outbox-worker.service`. |
+| **`OutboxExpiredLeaseAccumulation`** | `expired_processing_count > 5` | Warning | 10 min | Transport subprocess crashes or HTTP timeouts exceeding lease duration (300s). Check network connectivity. |
+| **`OutboxSlowTransport`** | Delivery loop duration > 15s per batch | Warning | 15 min | Telegram API rate limits (HTTP 429), proxy latency, or DB lock contention. Inspect Telegram response latency. |
+| **`OutboxRetentionStagnation`** | `sent_events > 10000` with age > 30 days | Info / Warn | 24 hours | Automated retention schedule absent or failing dry-run checks. Run `outbox_retention.py` dry-run. |
+| **`OutboxSchemaDivergence`** | Worker preflight column count != 13 | Critical | Immediate | Unapplied or rolled-back migrations on target database. Verify migrations 026 and 027. |
+
+---
+
+## 16. Staged 7-Step Deployment & Verification Sequence
+
+When authorized for production deployment, operators must execute the rollout in seven strictly sequential steps:
+
+1. **Step 1: Pre-Deployment Package Verification**
+   - Run `python3 deploy/verify_deployment_package.py --check-manifest`.
+   - Confirm target Git commit SHA matches authorized release tag.
+   - Verify MariaDB migrations 026 and 027 applied to production database.
+2. **Step 2: Host Filesystem & System User Provisioning**
+   - Create system user: `sudo useradd -r -s /bin/false -d /opt/signal-bot retailbot`.
+   - Provision directory structure: `sudo mkdir -p /opt/signal-bot /etc/retailbot2 /var/log/retailbot2`.
+   - Install minimal runtime venv: `python3 -m venv /opt/signal-bot/venv && /opt/signal-bot/venv/bin/pip install -r deploy/requirements-worker.txt`.
+3. **Step 3: Configuration & Credential Provisioning**
+   - Deploy `/etc/retailbot2/outbox-worker.env` with permissions `0600` owned by `retailbot:retailbot`.
+   - Set initial switches: `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1`, `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0`.
+4. **Step 4: Systemd Service Installation**
+   - Copy `deploy/systemd/retailbot2-outbox-worker.service` to `/etc/systemd/system/`.
+   - Run `sudo systemctl daemon-reload`.
+   - Run `systemd-analyze verify /etc/systemd/system/retailbot2-outbox-worker.service`.
+5. **Step 5: Controlled Observation Trial (Stage C Verification)**
+   - Start worker in observation mode with `--observation` flag: `sudo systemctl start retailbot2-outbox-worker.service`.
+   - Confirm advisory lock acquired: `SELECT IS_USED_LOCK('rdt_outbox_worker_lock');`.
+   - Run health snapshot: `python3 -m paper.outbox_health --database crypto_signals --observation`.
+   - Verify zero outbox row updates and zero outbound HTTP requests for 60 seconds.
+6. **Step 6: Delivery Authorization Cutover (Upon Explicit Owner Approval)**
+   - Update `/etc/retailbot2/outbox-worker.env`: `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`.
+   - Update ExecStart in service unit to remove `--observation`.
+   - Reload and restart: `sudo systemctl daemon-reload && sudo systemctl restart retailbot2-outbox-worker.service`.
+   - Tail logs: `sudo journalctl -u retailbot2-outbox-worker.service -f`.
+   - Confirm first event claims and transitions cleanly to `sent`.
+7. **Step 7: Post-Deployment Monitoring & Health Sign-Off**
+   - Confirm `python3 -m paper.outbox_health` returns `status: HEALTHY`.
+   - Verify no dead letters, expired leases, or crash loops.
+   - Record deployment completion audit record with operator name, timestamp, and commit SHA.
+
+---
+
+## 17. Emergency Stop and Rollback Procedures
+
+If anomalous behavior, unexpected delivery loops, or operational failures occur, operators must execute the applicable rollback scenario:
+
+### Scenario A: Rapid Emergency Stop (Immediate Delivery Halt)
+1. **Stop the Service Immediately:**
+   ```bash
+   sudo systemctl stop retailbot2-outbox-worker.service
+   ```
+   *Action:* `SIGTERM` terminates dispatcher; worker exits claim loop, terminates in-flight subprocesses, and releases advisory lock within 15 seconds.
+2. **Disable Delivery Authorization Switch:**
+   In `/etc/retailbot2/outbox-worker.env`, set:
+   ```bash
+   RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0
+   ```
+3. **Reset In-Flight Leases (Safe State Recovery):**
+   ```sql
+   UPDATE rdt_telegram_outbox
+   SET status = 'pending', claim_token = NULL, locked_until = NULL
+   WHERE status = 'processing';
+   ```
+
+### Scenario B: Service Downgrade / Code Rollback
+1. Stop running worker: `sudo systemctl stop retailbot2-outbox-worker.service`.
+2. Check out previous approved commit SHA in `/opt/signal-bot`.
+3. Verify package files: `python3 deploy/verify_deployment_package.py`.
+4. Start worker in `--observation` mode first to verify database compatibility before re-authorizing delivery.
+
+### Scenario C: Emergency Database Account Isolation (DBA Cut-Off)
+If the host or service process is unresponsive or compromised:
+```sql
+-- Revoke dispatcher privileges immediately
+REVOKE ALL PRIVILEGES ON crypto_signals.* FROM 'retailbot2_dispatcher'@'127.0.0.1';
+-- Terminate active dispatcher connections holding locks
+KILL <dispatcher_connection_id>;
+```
+Worker connections drop immediately, freeing all locks and halting all queue mutations without data loss.
+
