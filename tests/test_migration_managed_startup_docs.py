@@ -142,6 +142,82 @@ class TestMigrationManagedStartupDocs(unittest.TestCase):
         self.assertNotIn("UPDATE rdt_telegram_outbox", release_gates)
         self.assertNotIn("SET status = 'pending'", release_gates)
 
+    def test_retailbot2_outbox_provisioning_runbook_and_failure_states(self):
+        """Verify Stage B provisioning runbook, four failure states, audit, and rollback provenance."""
+        release_gates = _doc("docs/RETAILBOT2_AND_MODERN_UI_RELEASE_GATES.md").read_text(encoding="utf-8")
+
+        # 1. Four explicit provisioning states
+        self.assertIn("`ACCOUNT_NOT_CREATED`", release_gates)
+        self.assertIn("`ACCOUNT_CREATED_GRANT_PENDING`", release_gates)
+        self.assertIn("`ACCOUNT_CREATED_GRANT_VERIFIED`", release_gates)
+        self.assertIn("`PROVISIONING_STATE_UNKNOWN`", release_gates)
+
+        # 2. Invariant: only ACCOUNT_CREATED_GRANT_VERIFIED may proceed
+        self.assertIn(
+            "No state other than `ACCOUNT_CREATED_GRANT_VERIFIED` may proceed to worker credential configuration or observation worker startup",
+            release_gates,
+        )
+
+        # 3. Ten-step sequence elements
+        self.assertIn("DBA performs account-existence preflight", release_gates)
+        self.assertIn("Preflight Stop Condition", release_gates)
+        self.assertIn("DBA executes `CREATE USER` without `IF NOT EXISTS`", release_gates)
+        self.assertIn("Record creation result", release_gates)
+        self.assertIn("Handle `CREATE USER` failure", release_gates)
+        self.assertIn("Execute exact table-level grant", release_gates)
+        self.assertIn("Handle `GRANT` failure", release_gates)
+        self.assertIn("Prohibit worker startup", release_gates)
+        self.assertIn("No automatic recovery", release_gates)
+        self.assertIn("Record partial state & escalate", release_gates)
+
+        # 4. Audit record requirements (ticket ID, DBA identity, timestamps, status, password secrecy)
+        self.assertIn("Change / Incident Ticket ID", release_gates)
+        self.assertIn("DBA Identity", release_gates)
+        self.assertIn("Owner Authorization Reference", release_gates)
+        self.assertIn("Preflight Timestamp & Result", release_gates)
+        self.assertIn("Account Creation Timestamp & Result", release_gates)
+        self.assertIn("Grant Timestamp & Result", release_gates)
+        self.assertIn("Effective Grants Verification Timestamp & Result", release_gates)
+        self.assertIn("Exact Account Identity", release_gates)
+        self.assertIn("Provisioning Completion Status", release_gates)
+        self.assertIn("**Never** record the plaintext password", release_gates)
+
+        # 5. Rollback provenance conditions and exact drop statement
+        self.assertIn("DROP USER 'retailbot2_obs'@'127.0.0.1';", release_gates)
+        self.assertIn("Rollback is strictly prohibited unless **all six** provenance conditions are satisfied", release_gates)
+        self.assertIn("If creation provenance is uncertain or any condition cannot be proven: **STOP IMMEDIATELY.**", release_gates)
+
+    def test_retailbot2_stage_e_operational_runbook_and_supervision_docs(self):
+        """Verify Stage E operational runbook, supervision unit, observability, and retention docs."""
+        release_gates = _doc("docs/RETAILBOT2_AND_MODERN_UI_RELEASE_GATES.md").read_text(encoding="utf-8")
+        runbook = _doc("docs/RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md").read_text(encoding="utf-8")
+
+        # 1. Release gates section 4.6
+        self.assertIn("### 4.6 Stage E Operational Hardening and Worker Supervision", release_gates)
+        self.assertIn("deploy/systemd/retailbot2-outbox-worker.service", release_gates)
+        self.assertIn("paper/outbox_health.py", release_gates)
+        self.assertIn("paper/outbox_retention.py", release_gates)
+        self.assertIn("RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md", release_gates)
+
+        # 2. Operational runbook key sections
+        self.assertIn("## 1. Operating Modes & Authorization Boundaries", runbook)
+        self.assertIn("## 2. Worker Prerequisites", runbook)
+        self.assertIn("## 3. Environment Variables Reference", runbook)
+        self.assertIn("## 4. Service Installation Procedure", runbook)
+        self.assertIn("## 5. Startup, Shutdown, and Process Management Commands", runbook)
+        self.assertIn("## 6. Health & Queue Inspection", runbook)
+        self.assertIn("## 7. Backlog & Latency Diagnosis", runbook)
+        self.assertIn("## 8. Dead-Letter Diagnosis & Forensic Triage", runbook)
+        self.assertIn("## 9. Advisory Lock Contention & Worker Conflict", runbook)
+        self.assertIn("## 10. Worker Crash Recovery & Stale Lease Fencing", runbook)
+        self.assertIn("## 11. Uncertain Delivery Recovery (Safe Procedure)", runbook)
+        self.assertIn("## 12. Retention Policy Proposals & Dry-Run Planner", runbook)
+        self.assertIn("## 13. Explicit Prohibitions for Operators", runbook)
+
+        # 3. Explicit safety notice
+        self.assertIn("Installing, enabling, or starting the systemd service does NOT authorize outbox event enqueueing, Telegram delivery, or live trading", runbook)
+
+
 
 
 

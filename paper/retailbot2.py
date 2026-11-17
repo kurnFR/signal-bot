@@ -231,6 +231,67 @@ def is_outbox_enqueue_authorized(
     return True
 
 
+def is_shadow_outbox_enqueue_authorized(
+    config: Optional[Any] = None,
+    conn: Optional[Any] = None,
+    database: Optional[str] = None,
+) -> bool:
+    """Validate shadow outbox enqueue authorization against actual connection identity and configuration.
+
+    Strict Shadow Enqueue Policy (Work Order 71778):
+    1. Independent test-only authorization via explicit RETAILBOT2_SHADOW_ENQUEUE_ENABLED=1.
+       Missing, empty, or any value other than '1' fails closed.
+    2. Configured database must be EXACTLY 'signal_bot_test'.
+       Production database 'crypto_signals' is STRICTLY PROHIBITED.
+    3. Active database connection's SELECT DATABASE() must report EXACTLY 'signal_bot_test'.
+    4. Configured expected database and actual connection database must strictly match.
+    5. Observation-only mode always suppresses enqueue.
+    6. Does NOT require RETAILBOT2_ALLOW_TRADING=1.
+    7. Does NOT authorize production enqueue (RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED).
+    8. Fails closed without BotConfig() fallback if configuration or connection is absent.
+    """
+    logger = logging.getLogger("retailbot2.auth")
+    if is_observation_only(config):
+        return False
+    if os.getenv("RETAILBOT2_SHADOW_ENQUEUE_ENABLED", "").strip() != "1":
+        return False
+    if config is None:
+        logger.warning("Shadow enqueue rejected: missing configuration (fails closed)")
+        return False
+    expected_db = _resolve_configured_database(config)
+    if expected_db != "signal_bot_test":
+        logger.warning(
+            "Shadow enqueue rejected: database %r is not permitted for shadow enqueue (strictly 'signal_bot_test' only)",
+            expected_db,
+        )
+        return False
+    if database is not None and isinstance(database, str) and database.strip():
+        if database.strip() != "signal_bot_test":
+            logger.warning(
+                "Shadow enqueue rejected: caller-supplied database %r does not match 'signal_bot_test'",
+                database.strip(),
+            )
+            return False
+    if conn is None:
+        logger.warning("Shadow enqueue rejected: missing active database connection (fails closed)")
+        return False
+    actual_db = get_connection_database(conn)
+    if actual_db != "signal_bot_test":
+        logger.warning(
+            "Shadow enqueue rejected: active connection database %r is not 'signal_bot_test'",
+            actual_db,
+        )
+        return False
+    if expected_db != actual_db:
+        logger.warning(
+            "Shadow enqueue rejected: configured database %r does not match active connection database %r",
+            expected_db,
+            actual_db,
+        )
+        return False
+    return True
+
+
 def is_trading_authorized(config: Optional[Any] = None) -> bool:
     """Return True if RetailBot2 trading is explicitly authorized.
     Trading requires independent, explicit authorization via RETAILBOT2_ALLOW_TRADING=1,
@@ -426,6 +487,150 @@ def format_exit_message(payload: Dict) -> str:
         f"\n"
         f"⏰ {datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%d %H:%M UTC')}"
     )
+
+
+def build_entry_alert_payload(
+    signal: Dict[str, Any],
+    units: float,
+    risk_amt: float,
+    risk_pct: float,
+    mode: str = "shadow",
+) -> Dict[str, Any]:
+    """Pure, deterministic payload builder for outbox entry notifications.
+
+    Validates required fields and returns a JSON-serializable dictionary.
+    Does not mutate input parameters, access databases, or make network calls.
+    """
+    if not isinstance(signal, dict):
+        raise ValueError("signal must be a dictionary")
+
+    required_signal_fields = ("symbol", "side", "entry", "stop", "target")
+    missing = [f for f in required_signal_fields if f not in signal or signal[f] is None]
+    if missing:
+        raise ValueError(f"Missing required signal fields: {', '.join(missing)}")
+
+    side = str(signal["side"]).strip().upper()
+    if side not in ("LONG", "SHORT"):
+        raise ValueError(f"Invalid signal side: {side!r}; must be 'LONG' or 'SHORT'")
+
+    try:
+        entry_val = float(signal["entry"])
+        stop_val = float(signal["stop"])
+        target_val = float(signal["target"])
+        units_val = float(units)
+        risk_amt_val = float(risk_amt)
+        risk_pct_val = float(risk_pct)
+        rr_val = float(signal.get("rr", 1.0))
+        confluence_val = int(signal.get("confluence_score", 1))
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"Numeric validation failed for entry payload: {exc}") from exc
+
+    if entry_val <= 0 or stop_val <= 0 or target_val <= 0:
+        raise ValueError(f"Prices must be positive: entry={entry_val}, stop={stop_val}, target={target_val}")
+    if units_val <= 0:
+        raise ValueError(f"Units must be positive: {units_val}")
+    if risk_amt_val < 0 or risk_pct_val < 0:
+        raise ValueError(f"Risk amounts must be non-negative: amt={risk_amt_val}, pct={risk_pct_val}")
+
+    mode_str = str(mode).strip().lower()
+    if mode_str not in ("shadow", "inverse"):
+        mode_str = "shadow"
+
+    candle_time = signal.get("candle_close_time")
+    candle_time_str = str(candle_time) if candle_time is not None else ""
+
+    strategies = signal.get("strategies_triggered")
+    if not strategies:
+        strat = signal.get("strategy", "combined")
+        strategies = [strat] if strat else ["combined"]
+    strategies_clean = [str(s) for s in strategies]
+
+    reason_clean = str(signal.get("reason", ""))[:500]
+
+    return {
+        "signal": {
+            "symbol": str(signal["symbol"]).strip().upper(),
+            "side": side,
+            "candle_close_time": candle_time_str,
+            "entry": entry_val,
+            "stop": stop_val,
+            "target": target_val,
+            "rr": rr_val,
+            "strategies_triggered": strategies_clean,
+            "strategy": str(signal.get("strategy", strategies_clean[0])),
+            "confluence_score": confluence_val,
+            "reason": reason_clean,
+        },
+        "units": units_val,
+        "risk_amt": risk_amt_val,
+        "risk_pct": risk_pct_val,
+        "mode": mode_str,
+    }
+
+
+def build_exit_alert_payload(
+    trade: Dict[str, Any],
+    exit_price: float,
+    reason: str,
+    pnl: float,
+    pnl_pct: float,
+) -> Dict[str, Any]:
+    """Pure, deterministic payload builder for outbox exit notifications.
+
+    Validates required fields and returns a JSON-serializable dictionary.
+    Does not mutate input parameters, access databases, or make network calls.
+    """
+    if not isinstance(trade, dict):
+        raise ValueError("trade must be a dictionary")
+
+    required_trade_fields = ("symbol", "side")
+    missing = [f for f in required_trade_fields if f not in trade or trade[f] is None]
+    if missing:
+        raise ValueError(f"Missing required trade fields: {', '.join(missing)}")
+
+    side = str(trade["side"]).strip().upper()
+    if side not in ("LONG", "SHORT"):
+        raise ValueError(f"Invalid trade side: {side!r}; must be 'LONG' or 'SHORT'")
+
+    try:
+        exit_val = float(exit_price)
+        pnl_val = float(pnl)
+        pnl_pct_val = float(pnl_pct)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"Numeric validation failed for exit payload: {exc}") from exc
+
+    if exit_val <= 0:
+        raise ValueError(f"Exit price must be positive: {exit_val}")
+
+    reason_str = str(reason).strip()
+    if not reason_str:
+        raise ValueError("Exit reason must be a non-empty string")
+
+    trade_id = trade.get("id", 0)
+    try:
+        trade_id_int = int(trade_id)
+    except (ValueError, TypeError):
+        trade_id_int = 0
+
+    mode_str = str(trade.get("mode", "shadow")).strip().lower()
+
+    return {
+        "trade": {
+            "id": trade_id_int,
+            "symbol": str(trade["symbol"]).strip().upper(),
+            "side": side,
+            "strategy": str(trade.get("strategy", "combined")),
+            "mode": mode_str,
+            "entry": float(trade.get("entry", 0.0)),
+            "stop": float(trade.get("stop", 0.0)),
+            "target": float(trade.get("target", 0.0)),
+            "units": float(trade.get("units", 0.0)),
+        },
+        "exit_price": exit_val,
+        "reason": reason_str,
+        "pnl": pnl_val,
+        "pnl_pct": pnl_pct_val,
+    }
 
 
 class TelegramAlert:
@@ -1968,7 +2173,7 @@ class DatabaseManager:
             cursor.execute(
                 """UPDATE rdt_telegram_outbox
                    SET status='dead', locked_until=NULL, claim_token=NULL,
-                       last_error=COALESCE(last_error, 'delivery lease expired at max attempts')
+                       last_error=COALESCE(last_error, 'DELIVERY_UNKNOWN: delivery lease expired at max attempts')
                    WHERE status='processing' AND locked_until <= UTC_TIMESTAMP()
                      AND attempts >= 8"""
             )
@@ -2140,6 +2345,81 @@ class DatabaseManager:
                 except Exception:
                     pass
             self.logger.warning("Failed to enqueue outbox event %s: %s", event_key, exc)
+            return False
+        finally:
+            if cursor is not None:
+                cursor.close()
+            if own_conn and active_conn is not None:
+                active_conn.close()
+
+    def enqueue_trade_signal_event(
+        self,
+        event_key: str,
+        event_type: str,
+        payload: Dict[str, Any],
+        conn=None,
+        trade_id: int = 0,
+    ) -> bool:
+        """Enqueue a trade signal event (e.g. shadow entry/exit) into rdt_telegram_outbox.
+
+        Strictly notification-only (Work Order 71778):
+        - Never inserts into rdt_trades.
+        - Never updates rdt_trades or rdt_strategy_stats.
+        - Never requires RETAILBOT2_ALLOW_TRADING=1.
+        - Commits only its own outbox insertion.
+        - Requires is_shadow_outbox_enqueue_authorized() on the active connection.
+        - Uses ON DUPLICATE KEY UPDATE for idempotent delivery.
+        """
+        if not event_key or not isinstance(event_key, str):
+            self.logger.warning("enqueue_trade_signal_event rejected: invalid or empty event_key")
+            return False
+        if event_type not in ("entry", "exit", "shadow_entry", "shadow_exit"):
+            self.logger.warning("enqueue_trade_signal_event rejected: unsupported event_type %r", event_type)
+            return False
+        if not isinstance(payload, dict):
+            self.logger.warning("enqueue_trade_signal_event rejected: payload must be a dict")
+            return False
+
+        enqueue_cfg = getattr(self, "config", None)
+        if enqueue_cfg is None or is_observation_only(enqueue_cfg):
+            return False
+
+        own_conn = conn is None
+        active_conn = self.get_conn() if own_conn else conn
+        if not active_conn:
+            return False
+
+        if not is_shadow_outbox_enqueue_authorized(enqueue_cfg, conn=active_conn):
+            if own_conn:
+                active_conn.close()
+            return False
+
+        cursor = None
+        try:
+            cursor = active_conn.cursor()
+            normalized_event_type = "entry" if "entry" in event_type else "exit"
+            cursor.execute(
+                """INSERT INTO rdt_telegram_outbox
+                   (trade_id, event_key, event_type, payload_json, status, attempts, next_attempt_at)
+                   VALUES (%s, %s, %s, %s, 'pending', 0, UTC_TIMESTAMP())
+                   ON DUPLICATE KEY UPDATE event_key=VALUES(event_key)""",
+                (
+                    int(trade_id),
+                    str(event_key)[:128],
+                    normalized_event_type,
+                    json.dumps(payload, default=str),
+                ),
+            )
+            if own_conn:
+                active_conn.commit()
+            return True
+        except Exception as exc:
+            if own_conn and active_conn:
+                try:
+                    active_conn.rollback()
+                except Exception:
+                    pass
+            self.logger.warning("Failed to enqueue trade signal event %s: %s", event_key, exc)
             return False
         finally:
             if cursor is not None:
@@ -2483,6 +2763,60 @@ class RetailDeathTrapBot:
         self.logger.info("Operational notification not sent (delivery unauthorized): %s", clean[:160])
         return False
 
+    def enqueue_shadow_entry_signal(self, signal: Dict[str, Any], mode: str = "shadow") -> bool:
+        """Enqueue an entry notification for an eligible paper/shadow signal without executing a trade.
+
+        Conditions (Work Order 71778):
+        - Observation-only mode is not active.
+        - Strategy lifecycle setting has telegram_enabled=True.
+        - Strategy has paper_enabled=True or evaluation_enabled=True.
+        - Stable signal identity is constructed.
+        - Active connection is signal_bot_test with shadow enqueue authorized.
+        """
+        if getattr(self, "observation_only", False) or is_observation_only(getattr(self, "config", None)):
+            return False
+
+        strategy_id = signal.get("strategy", "combined")
+        lifecycle = self._get_strategy_lifecycle(strategy_id, mode)
+        if not lifecycle.get("telegram_enabled", False):
+            return False
+        if not lifecycle.get("paper_enabled", False) and not lifecycle.get("evaluation_enabled", False):
+            return False
+
+        symbol = str(signal.get("symbol", "")).strip().upper()
+        candle_close = str(signal.get("candle_close_time", "")).replace(" ", "_").replace(":", "-")
+        side = str(signal.get("side", "")).strip().upper()
+        if not symbol or not side:
+            return False
+
+        # Stable deterministic event key in shadow namespace
+        event_key = f"retailbot2:shadow:entry:{symbol}_{strategy_id}_{mode}_{side}_{candle_close}"[:128]
+
+        equity = self.equity_inverse if mode == "inverse" else self.equity_shadow
+        risk_pct = self.config.risk_per_trade * 100
+        risk_amt = equity * self.config.risk_per_trade
+        risk_pu = abs(float(signal.get("entry", 0.0)) - float(signal.get("stop", 0.0)))
+        units = (risk_amt / risk_pu) if risk_pu > 0 else 0.0
+
+        try:
+            payload = build_entry_alert_payload(
+                signal=signal,
+                units=units,
+                risk_amt=risk_amt,
+                risk_pct=risk_pct,
+                mode=mode,
+            )
+        except Exception as exc:
+            self.logger.warning("Failed to build shadow entry alert payload: %s", exc)
+            return False
+
+        return self.db.enqueue_trade_signal_event(
+            event_key=event_key,
+            event_type="entry",
+            payload=payload,
+            trade_id=0,
+        )
+
     def _startup_msg(self):
         is_obs = getattr(self, "observation_only", False) or is_observation_only(getattr(self, "config", None))
         obs_badge = "\n👀 <b>OBSERVATION-ONLY MODE</b> (no trades, no outbox enqueues)" if is_obs else ""
@@ -2649,16 +2983,13 @@ class RetailDeathTrapBot:
             return None
 
         risk_pct = self.config.risk_per_trade * 100
-        entry_alert = {
-            "signal": {
-                key: signal.get(key) for key in (
-                    "side", "symbol", "candle_close_time", "entry", "stop",
-                    "target", "rr", "strategies_triggered", "strategy",
-                    "confluence_score", "reason"
-                )
-            },
-            "units": units, "risk_amt": risk_amt, "risk_pct": risk_pct, "mode": mode,
-        } if lifecycle['telegram_enabled'] else None
+        try:
+            entry_alert = build_entry_alert_payload(
+                signal, units, risk_amt, risk_pct, mode=mode
+            ) if lifecycle['telegram_enabled'] else None
+        except Exception as exc:
+            self.logger.warning("Failed to build entry alert payload: %s", exc)
+            entry_alert = None
         # Last boundary check: never begin a new persistence operation after
         # SIGTERM/SIGINT has been observed.
         if getattr(self, "_shutdown_requested", False):
@@ -2732,11 +3063,15 @@ class RetailDeathTrapBot:
 
         # Persistence is the commit boundary. Do not mutate in-memory
         # equity or remove the active trade until both DB writes commit.
-        exit_alert = {
-            "trade": dict(trade), "exit_price": exit_price, "reason": reason,
-            "pnl": pnl, "pnl_pct": pnl_pct,
-            "telegram_enabled": bool(trade.get('telegram_enabled', False)),
-        } if trade.get('telegram_enabled', False) else None
+        try:
+            exit_alert = build_exit_alert_payload(
+                trade, exit_price, reason, pnl, pnl_pct
+            ) if trade.get('telegram_enabled', False) else None
+            if exit_alert:
+                exit_alert['telegram_enabled'] = True
+        except Exception as exc:
+            self.logger.warning("Failed to build exit alert payload: %s", exc)
+            exit_alert = None
         if getattr(self, "_shutdown_requested", False):
             self.logger.info("Trade close persistence suppressed because shutdown was requested")
             return
@@ -2922,7 +3257,10 @@ class RetailDeathTrapBot:
                         if settings['evaluation_enabled']:
                             if getattr(self, "_shutdown_requested", False):
                                 return
-                            self._open_trade(signal, 'shadow')
+                            if getattr(self, "trading_enabled", False) and is_trading_authorized(getattr(self, "config", None)):
+                                self._open_trade(signal, 'shadow')
+                            elif os.getenv("RETAILBOT2_SHADOW_ENQUEUE_ENABLED", "").strip() == "1":
+                                self.enqueue_shadow_entry_signal(signal, 'shadow')
 
                     if getattr(self, "_shutdown_requested", False):
                         return
@@ -2932,7 +3270,10 @@ class RetailDeathTrapBot:
                         if settings['evaluation_enabled']:
                             if getattr(self, "_shutdown_requested", False):
                                 return
-                            self._open_trade(inverse_signal, 'inverse')
+                            if getattr(self, "trading_enabled", False) and is_trading_authorized(getattr(self, "config", None)):
+                                self._open_trade(inverse_signal, 'inverse')
+                            elif os.getenv("RETAILBOT2_SHADOW_ENQUEUE_ENABLED", "").strip() == "1":
+                                self.enqueue_shadow_entry_signal(inverse_signal, 'inverse')
 
                 time.sleep(0.3)
 

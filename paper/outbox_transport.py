@@ -27,6 +27,22 @@ STATUS_DELIVERED = "DELIVERED"
 STATUS_FAILED_CONFIRMED = "FAILED_CONFIRMED"
 STATUS_DELIVERY_UNKNOWN = "DELIVERY_UNKNOWN"
 
+# Explicit persistent marker for ambiguous delivery outcomes (WO71797)
+DELIVERY_UNKNOWN_MARKER = "DELIVERY_UNKNOWN"
+DELIVERY_UNKNOWN_PREFIX = "DELIVERY_UNKNOWN: "
+
+
+def format_delivery_unknown_error(raw_error: Any) -> str:
+    """Format an ambiguous delivery outcome with a reliable persistent marker.
+
+    Preserves useful diagnostic information without storing Telegram tokens or sensitive request data.
+    Ensures every DELIVERY_UNKNOWN worker outcome is persistently identifiable in last_error.
+    """
+    clean_err = str(raw_error or "Delivery state unknown").strip()
+    if clean_err.startswith("DELIVERY_UNKNOWN"):
+        return clean_err[:1000]
+    return f"{DELIVERY_UNKNOWN_PREFIX}{clean_err}"[:1000]
+
 
 def classify_telegram_response(
     http_status: Optional[int],
@@ -57,7 +73,7 @@ def classify_telegram_response(
             }
         return {
             "status": STATUS_DELIVERY_UNKNOWN,
-            "error": exception_name,
+            "error": format_delivery_unknown_error(exception_name),
             "pre_connect": False,
             "permanent": False,
         }
@@ -65,7 +81,7 @@ def classify_telegram_response(
     if http_status is None:
         return {
             "status": STATUS_DELIVERY_UNKNOWN,
-            "error": "No HTTP status received",
+            "error": format_delivery_unknown_error("No HTTP status received"),
             "permanent": False,
         }
 
@@ -90,7 +106,7 @@ def classify_telegram_response(
             return {
                 "status": STATUS_DELIVERY_UNKNOWN,
                 "http_status": 200,
-                "error": "HTTP 200 response missing explicit Telegram ok field",
+                "error": format_delivery_unknown_error("HTTP 200 response missing explicit Telegram ok field"),
                 "raw_body": (body_str or "")[:500],
             }
 
@@ -139,7 +155,7 @@ def classify_telegram_response(
         return {
             "status": STATUS_DELIVERY_UNKNOWN,
             "http_status": 200,
-            "error": "HTTP 200 response did not explicitly confirm delivery",
+            "error": format_delivery_unknown_error("HTTP 200 response did not explicitly confirm delivery"),
             "raw_body": (body_str or "")[:500],
             "permanent": False,
         }
@@ -149,7 +165,7 @@ def classify_telegram_response(
         return {
             "status": STATUS_DELIVERY_UNKNOWN,
             "http_status": http_status,
-            "error": f"Server error HTTP {http_status}",
+            "error": format_delivery_unknown_error(f"Server error HTTP {http_status}"),
             "raw_body": (body_str or "")[:500],
             "permanent": False,
         }
@@ -158,7 +174,7 @@ def classify_telegram_response(
     return {
         "status": STATUS_DELIVERY_UNKNOWN,
         "http_status": http_status,
-        "error": f"Unexpected HTTP status {http_status} with unparseable body",
+        "error": format_delivery_unknown_error(f"Unexpected HTTP status {http_status} with unparseable body"),
         "raw_body": (body_str or "")[:500],
         "permanent": False,
     }
@@ -318,7 +334,7 @@ def main():
     except Exception as exc:
         result = {
             "status": STATUS_DELIVERY_UNKNOWN,
-            "error": f"Transport child exception: {exc}",
+            "error": format_delivery_unknown_error(f"Transport child exception: {exc}"),
         }
 
     sys.stdout.write(json.dumps(result))

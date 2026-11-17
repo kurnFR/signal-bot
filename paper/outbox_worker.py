@@ -39,9 +39,12 @@ from paper.retailbot2 import (
     format_exit_message,
 )
 from paper.outbox_transport import (
+    DELIVERY_UNKNOWN_MARKER,
+    DELIVERY_UNKNOWN_PREFIX,
     STATUS_DELIVERED,
     STATUS_DELIVERY_UNKNOWN,
     STATUS_FAILED_CONFIRMED,
+    format_delivery_unknown_error,
 )
 
 
@@ -457,7 +460,7 @@ def dispatch_event_via_subprocess(
     except Exception as exc:
         return {
             "status": STATUS_DELIVERY_UNKNOWN,
-            "error": f"Failed to spawn transport child: {exc}",
+            "error": format_delivery_unknown_error(f"Failed to spawn transport child: {exc}"),
         }
 
     pgid = child_proc.pid
@@ -569,7 +572,7 @@ def dispatch_event_via_subprocess(
     if timed_out:
         out = {
             "status": STATUS_DELIVERY_UNKNOWN,
-            "error": f"Transport exceeded deadline {timeout_sec:.1f}s",
+            "error": format_delivery_unknown_error(f"Transport exceeded deadline {timeout_sec:.1f}s"),
             "stderr": stderr_bytes.decode("utf-8", errors="replace")[:500],
         }
         if captured_descendants:
@@ -582,7 +585,7 @@ def dispatch_event_via_subprocess(
         if not stdout_text:
             out = {
                 "status": STATUS_DELIVERY_UNKNOWN,
-                "error": "Empty stdout from transport child",
+                "error": format_delivery_unknown_error("Empty stdout from transport child"),
                 "stderr": stderr_bytes.decode("utf-8", errors="replace")[:500],
             }
             if captured_descendants:
@@ -595,7 +598,7 @@ def dispatch_event_via_subprocess(
     except Exception as exc:
         out = {
             "status": STATUS_DELIVERY_UNKNOWN,
-            "error": f"Failed to parse transport child JSON: {exc}",
+            "error": format_delivery_unknown_error(f"Failed to parse transport child JSON: {exc}"),
             "raw_stdout": stdout_bytes.decode("utf-8", errors="replace")[:500],
         }
         if captured_descendants:
@@ -934,7 +937,8 @@ class OutboxWorker:
             return True
 
         # 4. Unknown delivery state: Never mark sent; schedule retry with backoff
-        err_desc = outcome.get("error") or "Delivery state unknown"
+        raw_error = outcome.get("error") or "Delivery state unknown"
+        err_desc = format_delivery_unknown_error(raw_error)
         logger.warning(
             "Ambiguous delivery status for outbox event %d (attempts=%d): %s; scheduling backoff retry",
             event_id, attempts, err_desc
@@ -1169,10 +1173,61 @@ def main():
         action="store_true",
         help="Run in read-only observation mode (inspect queue without claiming or delivering)",
     )
+    parser.add_argument(
+        "--health",
+        action="store_true",
+        help="Perform read-only operational health snapshot and exit",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
+    # 1. Health-only operational inspection branch (Finding A - WO71795)
+    if getattr(args, "health", False):
+        if args.database == "crypto_signals" and not args.observation:
+            logger.error(
+                "Production health inspection is read-only and requires --observation mode "
+                "with dedicated observation credentials"
+            )
+            sys.exit(1)
+
+        try:
+            creds = resolve_worker_db_credentials(
+                args.database,
+                observation=True if args.database == "crypto_signals" else args.observation,
+            )
+        except ValueError as exc:
+            logger.critical("Database credential resolution failed: %s", exc)
+            sys.exit(1)
+
+        db_cfg = {
+            "host": os.getenv("MYSQL_HOST", "127.0.0.1"),
+            "port": int(os.getenv("MYSQL_PORT", 3306)),
+            "user": creds["user"],
+            "password": creds["password"],
+            "database": args.database,
+        }
+
+        import mysql.connector
+        from paper.outbox_health import inspect_outbox_health
+        health_conn = mysql.connector.connect(
+            host=db_cfg["host"],
+            port=db_cfg["port"],
+            user=db_cfg["user"],
+            password=db_cfg["password"],
+            database=db_cfg["database"],
+            autocommit=False,
+        )
+        try:
+            snapshot = inspect_outbox_health(
+                health_conn, args.database, observation_mode=args.observation
+            )
+            print(json.dumps(snapshot, indent=2))
+            sys.exit(0 if snapshot["health_status"] != "CRITICAL" else 2)
+        finally:
+            health_conn.close()
+
+    # 2. Worker daemon execution branch
     allowed = ALLOWED_PROD_DATABASES if args.database == "crypto_signals" else ALLOWED_TEST_DATABASES
     if args.database == "crypto_signals" and not args.observation:
         if os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY") != "1":

@@ -178,22 +178,160 @@ To prevent operational confusion during staging, deployment, and auditing, opera
    - Logs periodic queue status summaries.
    - **Strictly prohibited** from claiming events, mutating rows (`status`, `attempts`, `locked_until`, `claim_token`, `next_attempt_at`, `last_error`), spawning transport subprocesses, making network or HTTP calls, or requiring `TELEGRAM_BOT_TOKEN` or `TELEGRAM_CHAT_ID`.
    - Releases the advisory lock cleanly on `SIGINT` or `SIGTERM`.
+
+#### Stage B Production Observation Account Provisioning and Failure-Handling Runbook
+
+To safely prepare and operate the read-only worker observation mode against `crypto_signals`, database administrators and operators must follow this strict execution, failure-handling, and audit runbook.
+
+##### 1. Ten-Step Execution Sequence
+
+1. **DBA performs account-existence preflight**:
+   ```sql
+   SELECT User, Host FROM mysql.user WHERE User = 'retailbot2_obs';
+   ```
+2. **Preflight Stop Condition**: If any matching account exists, **STOP IMMEDIATELY**. Do not reuse, alter, or drop the account. State is evaluated under existing account policy.
+3. **DBA executes `CREATE USER` without `IF NOT EXISTS`**:
+   ```sql
+   CREATE USER 'retailbot2_obs'@'127.0.0.1' IDENTIFIED BY '<STRONG_RANDOM_PASSWORD>';
+   ```
+4. **Record creation result**: Record the exact execution result and timestamp in the provisioning change audit record.
+5. **Handle `CREATE USER` failure**: If `CREATE USER` fails (e.g. syntax error, permission error, or conflict), **STOP**. Do not execute `GRANT`. State remains `ACCOUNT_NOT_CREATED` (or `PROVISIONING_STATE_UNKNOWN` if the connection dropped or state is unverified).
+6. **Execute exact table-level grant**: If `CREATE USER` succeeds, state transitions to `ACCOUNT_CREATED_GRANT_PENDING`. Execute the exact table-level `SELECT` grant:
+   ```sql
+   GRANT SELECT ON `crypto_signals`.`rdt_telegram_outbox` TO 'retailbot2_obs'@'127.0.0.1';
+   ```
+7. **Handle `GRANT` failure**: If `GRANT` fails (e.g. `Error 1142: GRANT command denied`), **STOP IMMEDIATELY**. State remains `ACCOUNT_CREATED_GRANT_PENDING` (or `PROVISIONING_STATE_UNKNOWN` if connection was interrupted).
+8. **Prohibit worker startup**: Do **NOT** configure worker credentials or start the observation worker while in any unverified or partial state.
+9. **No automatic recovery**: Do **NOT** automatically retry, revoke, or drop the account upon failure.
+10. **Record partial state & escalate**: Record the exact partial state and error in the audit record and request database owner and DBA review.
+
+##### 2. Four Provisioning States State Machine
+
+Every provisioning attempt must be tracked and classified into exactly one of four explicit states:
+
+- **`ACCOUNT_NOT_CREATED`**: Preflight check confirmed 0 matching rows, and `CREATE USER` was either not attempted or failed closed before user creation. No user object exists in MariaDB.
+- **`ACCOUNT_CREATED_GRANT_PENDING`**: `CREATE USER` completed successfully, but `GRANT SELECT` has either not yet executed, failed, or not yet been verified. The account has only implicit `USAGE` and cannot read `rdt_telegram_outbox`.
+- **`ACCOUNT_CREATED_GRANT_VERIFIED`**: Both `CREATE USER` and `GRANT SELECT` completed successfully, and read-only verification (`SHOW GRANTS FOR 'retailbot2_obs'@'127.0.0.1'`) confirmed exact least-privilege grants (`USAGE` on `*.*` and `SELECT` on `crypto_signals.rdt_telegram_outbox`).
+- **`PROVISIONING_STATE_UNKNOWN`**: A network timeout, disconnection, or unhandled server error occurred during `CREATE USER` or `GRANT`, leaving the server-side state unconfirmed.
+
+> [!CRITICAL]
+> **Promotion Invariant:** **No state other than `ACCOUNT_CREATED_GRANT_VERIFIED` may proceed to worker credential configuration or observation worker startup.** If the state is `ACCOUNT_NOT_CREATED`, `ACCOUNT_CREATED_GRANT_PENDING`, or `PROVISIONING_STATE_UNKNOWN`, worker execution is strictly prohibited.
+
+##### 3. Provisioning Change and Audit Record Requirements
+
+A formal provisioning change/audit record must be created and maintained for the deployment. It must capture:
+
+- **Change / Incident Ticket ID**: Reference to the authorized change ticket.
+- **DBA Identity**: Name and role of the executing database administrator.
+- **Owner Authorization Reference**: Documented reference to explicit database owner sign-off.
+- **Preflight Timestamp & Result**: Exact execution timestamp and rowcount from preflight `SELECT`.
+- **Account Creation Timestamp & Result**: Exact timestamp and outcome of `CREATE USER`.
+- **Grant Timestamp & Result**: Exact timestamp and outcome of `GRANT SELECT`.
+- **Effective Grants Verification Timestamp & Result**: Timestamp and output of `SHOW GRANTS`.
+- **Exact Account Identity**: `'retailbot2_obs'@'127.0.0.1'`.
+- **Provisioning Completion Status**: Exactly one of the four provisioning states above.
+- **Password Security Guarantee**: **Never** record the plaintext password or expose it in terminal output, change records, reports, application logs, or Git.
+
+##### 4. Rollback Procedure and Provenance Conditions
+
+An exact-account `DROP USER` removes the account and its privileges:
+```sql
+DROP USER 'retailbot2_obs'@'127.0.0.1';
+```
+
+> [!CAUTION]
+> **Rollback Preconditions**: Rollback is strictly prohibited unless **all six** provenance conditions are satisfied:
+> 1. The account was confirmed absent during the DBA preflight check.
+> 2. The exact account was created by this specific authorized provisioning operation.
+> 3. The creation result, timestamp, and audit record were formally documented.
+> 4. The account identity is strictly and uniquely `'retailbot2_obs'@'127.0.0.1'`.
+> 5. The DBA explicitly confirms that the observation worker is stopped and the account is no longer required.
+> 6. The database owner authorizes rollback in writing.
+>
+> If creation provenance is uncertain or any condition cannot be proven: **STOP IMMEDIATELY.** Do not drop the account; escalate to the database owner. Never use wildcard host accounts (`'retailbot2_obs'@'%'`).
+
 4. **Mock delivery on test database (`mock_transport_response`)**:
    An isolated integration test mechanism on `signal_bot_test` where the worker claims events and transitions row states based on synthetic in-memory responses without invoking Telegram or external network endpoints.
 5. **Actual Telegram delivery authorization (`RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`)**:
    Authorizes the worker or supervisor to execute the external transport subprocess and transmit HTTP requests to the Telegram Bot API. Standalone worker startup against production fails closed without this flag unless running in `--observation` mode.
 
-### 4.4 Shadow enqueue coupling constraint and unresolved rollout blocker
+### 4.4 Shadow enqueue decoupling, payload builders, and testing architecture (WO71778)
 
-**Unresolved Rollout Blocker:** Safe production shadow enqueue cannot be operated independently of trade persistence under the current architecture.
+Work Order 71778 introduces an isolated shadow outbox enqueue mechanism that decouples signal notification generation from live trade persistence, enabling paper/shadow signal alerts to enter the outbox during testing without authorizing live trading or creating synthetic trade records.
 
-- In `paper/retailbot2.py`, outbox event generation for trade entry and trade exit is embedded directly inside trade persistence transactions:
-  - Entry events are enqueued inside `save_trade()`, which is called only when `_open_trade()` executes under `is_trading_authorized(config)`. If trading is unauthorized, `_open_trade()` returns `None` and `save_trade()` is never called.
-  - Exit events are enqueued inside `close_trade_and_update_stats()`.
-  - When running in observation-only mode (`is_observation_only(config)`), trade persistence is suppressed and `is_outbox_enqueue_authorized()` explicitly returns `False`.
-- Consequently, RetailBot2 cannot enqueue shadow trade entry or exit events in production without live trade persistence and trading authorization.
-- While operational events (e.g. engine startup, heartbeat, reconciliations) can technically be enqueued without trade persistence, entry and exit shadow testing against production cannot take place without persisting trades or refactoring the lifecycle pipeline to decouple signal generation from trade persistence.
-- Any future production rollout proposal must treat this architectural coupling as an explicit blocker until decoupled or explicitly authorized.
+#### 1. Persisted Trade Notifications vs. Shadow Signal Notifications
+
+The system strictly differentiates between two notification classes:
+
+| Attribute | Persisted Trade Notifications | Shadow Signal Notifications (Decoupled) |
+| :--- | :--- | :--- |
+| **Trigger Path** | `RetailDeathTrapBot._open_trade()` and `_close_trade()` | `RetailDeathTrapBot.enqueue_shadow_entry_signal()` |
+| **Persistence Boundary** | Embedded in MariaDB trade transaction (`DatabaseManager.save_trade()` / `close_trade_and_update_stats()`) | Standalone outbox insert (`DatabaseManager.enqueue_trade_signal_event()`) |
+| **`trade_id` Value** | `trade_id > 0` (FK-free, references row in `rdt_trades`) | `trade_id = 0` (unlinked, signals shadow signal only) |
+| **`rdt_trades` Mutation** | `INSERT` on entry, `UPDATE` on exit | **Zero mutations** (never touches `rdt_trades`) |
+| **`rdt_strategy_stats` Mutation** | `UPDATE` on trade close | **Zero mutations** (never touches `rdt_strategy_stats`) |
+| **Trading Authorization** | Requires `RETAILBOT2_ALLOW_TRADING=1` | **Prohibits / bypasses trading authorization** |
+| **Primary Use Case** | Real paper/live execution order notifications | Test & paper evaluation of strategy signals |
+
+#### 2. Pure Payload Builders
+
+Outbox payloads are constructed by pure, deterministic builder functions that perform no database queries, network requests, or input mutations:
+
+- **`build_entry_alert_payload(signal, units, risk_amt, risk_pct, mode="shadow")`**:
+  - Validates required signal keys (`symbol`, `side`, `entry`, `stop`, `target`).
+  - Enforces `side` must be either `'LONG'` or `'SHORT'`.
+  - Enforces numeric validity (`float` conversions) for prices and risk parameters.
+  - Returns a pure dictionary structured for `format_entry_message(payload)`.
+- **`build_exit_alert_payload(trade, exit_price, reason, pnl, pnl_pct)`**:
+  - Validates required trade dictionary keys (`symbol`, `side`, `entry`, `units`, `strategy`).
+  - Validates numeric exit fields (`exit_price`, `pnl`, `pnl_pct`).
+  - Returns a pure dictionary structured for `format_exit_message(payload)`.
+
+#### 3. Test-Only Shadow Enqueue Authorization Gate
+
+Shadow enqueue is guarded by a dedicated fail-closed authorization function `is_shadow_outbox_enqueue_authorized(config, conn, database)`:
+
+1. **Explicit Enablement:** Requires `RETAILBOT2_SHADOW_ENQUEUE_ENABLED=1`. Any unset, empty, or other value fails closed.
+2. **Strict Test Database Restriction:** The configured database must be strictly `'signal_bot_test'`.
+3. **Connection Identity Verification:** The active connection's `SELECT DATABASE()` must report strictly `'signal_bot_test'`.
+4. **Configuration & Connection Agreement:** Caller-supplied and configured database names must agree with the connection database.
+5. **Fail-Closed on Production:** Target database `'crypto_signals'` is **strictly prohibited** and immediately rejected.
+6. **Observation Mode Suppression:** Observation-only mode (`is_observation_only()`) suppresses shadow enqueue.
+7. **Independence from Trading:** Does **not** require `RETAILBOT2_ALLOW_TRADING=1`.
+8. **No Delivery or Production Authority:** Does **not** authorize production enqueue (`RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED=1`) or external Telegram transmission (`RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`).
+
+#### 4. Event Key Namespace and Idempotency
+
+To prevent duplicate outbox entries while supporting independent signals across symbols, strategies, and timeframes, shadow events use a dedicated deterministic key namespace:
+
+- **Shadow Entry Key Format:**
+  ```text
+  retailbot2:shadow:entry:{symbol}_{strategy}_{mode}_{side}_{candle_close}
+  ```
+- **Shadow Exit Key Format:**
+  ```text
+  retailbot2:shadow:exit:{symbol}_{strategy}_{mode}_{side}_{candle_close}
+  ```
+- **Idempotency Guarantee:**
+  Rows are enqueued using MariaDB's `INSERT ... ON DUPLICATE KEY UPDATE event_key=VALUES(event_key)`. Since `event_key` has a `UNIQUE` index on `rdt_telegram_outbox`, repeated evaluations of the same candle signal produce a harmless no-op, preventing duplicate notifications.
+
+#### 5. Trade ID = 0 Semantics and Schema Compatibility
+
+In migration 026, `rdt_telegram_outbox.trade_id` is defined as `int(11) NOT NULL` without a foreign key constraint to `rdt_trades`.
+- `trade_id = 0` is fully compliant with schema constraints.
+- `OutboxWorker.format_event_text()` and the message formatters (`format_entry_message`, `format_exit_message`) parse payloads with `trade_id = 0` seamlessly without querying `rdt_trades`.
+- Delivery status updates (`acknowledge_outbox_event`, `retry_outbox_event`, `dead_letter_outbox_event`) operate on outbox `id` and `claim_token`, remaining completely agnostic to `trade_id`.
+
+#### 6. Exit Correlation Limitations and Future Architecture
+
+While entry signals are purely decoupled from trade records, shadow exit correlation has specific operational boundaries:
+- **Decoupled Entry Signals:** Fully supported. The scan loop detects candidate entries and immediately enqueues them when `RETAILBOT2_SHADOW_ENQUEUE_ENABLED=1` without opening trades.
+- **Exit Correlation Limitation:** Because unauthorized trading skips `_open_trade()`, no active trade record exists in `rdt_trades` or in-memory trade collections. Consequently, standard stop-loss, take-profit, or trend-reversal triggers cannot look up an existing shadow position to calculate realized exit P&L or determine exit timestamps.
+- **Future Resolution Path:** To achieve fully automated shadow exit notifications without trade persistence, a future work order will introduce a dedicated in-memory shadow position ledger or virtual paper state engine that tracks simulated trade lifetimes separately from live execution tables.
+
+> [!WARNING]
+> **Production Boundary Warning:**
+> The decoupled shadow enqueue path is authorized exclusively for testing on `signal_bot_test`. It must **never** be enabled on `crypto_signals`. Production outbox notifications remain strictly blocked until approved under Stage D and E release gates.
 
 ### 4.5 Verified schema lineage and production monitoring / recovery runbook
 
@@ -319,6 +457,124 @@ FROM rdt_telegram_outbox
 WHERE status = 'processing'
 ORDER BY locked_until ASC, id ASC;
 ```
+
+
+### 4.6 Stage E Operational Hardening and Worker Supervision (WO71782)
+
+Stage E hardens the outbox worker for reliable supervised operation, provides queue and dead-letter observability, and establishes a safe, dry-run retention planning engine:
+
+1. **Supervised Service Unit Template (`deploy/systemd/retailbot2-outbox-worker.service`):**
+   - Implements `KillMode=mixed` and `TimeoutStopSec=15s` to ensure graceful `SIGTERM` shutdown, child transport process group reaping, and clean MariaDB advisory lock release.
+   - Restricts privileges via `NoNewPrivileges=true`, `ProtectSystem=strict`, `ProtectHome=read-only`, and drops capabilities.
+   - Pinned to environment configuration file `/etc/retailbot2/outbox-worker.env` (mode 0600) with zero hardcoded credentials.
+   - Restarts on failure with backoff (`Restart=on-failure`, `RestartSec=5s`, `StartLimitIntervalSec=60s`, `StartLimitBurst=5`).
+2. **Queue and Dead-Letter Observability (`paper/outbox_health.py`):**
+   - Provides read-only health snapshots reporting pending backlog, due items, processing leases, expired leases, retry distributions, dead-letter details, and advisory lock ownership.
+   - Evaluates operational health states (`HEALTHY`, `WARN`, `CRITICAL`).
+   - Integrated into CLI via `python3 -m paper.outbox_health` and `python3 -m paper.outbox_worker --health`.
+3. **Retention Policy Proposals & Dry-Run Planner (`paper/outbox_retention.py`):**
+   - Establishes defensible retention proposals (14 days for sent events, 90 days for dead letters, indefinite protection for pending/processing/uncertain events).
+   - Read-only dry-run planner computes candidate counts and age ranges without modifying rows.
+   - Automated purge execution is strictly locked to `signal_bot_test` and blocked on production.
+4. **Comprehensive Operational Runbook:**
+   - Full operational procedures and troubleshooting guidelines documented in [RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md](file:///home/BIS/signal-bot-wo71767-prod-validation/docs/RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md).
+
+### 4.7 Stage G1 Production Deployment Candidate Readiness & 15-Gate Release Matrix (WO71785)
+
+Stage G1 finalizes the RetailBot2 outbox dispatcher deployment candidate, establishes the revised 30-second shutdown timeout, strengthens per-event forensic recovery rules, inspects target host readiness, and provides the authoritative 15-gate release readiness matrix.
+
+#### 1. RetailBot2 15-Gate Production Release Readiness Matrix
+
+| Gate # | Release Gate / Requirement | Status | Evidence & Validation Scope | Owner Action / Blockers |
+| :---: | :--- | :---: | :--- | :--- |
+| **G-01** | **Source and Git Lineage** | **PASS** | Lineage cleanly traces back to master `a2c850aa8f97f081e22008d1efc0d3654c379dbe`. Zero uncommitted files, all 45 worktrees intact, 21 screenshot PNGs preserved. | None. Verified in WO71779–WO71785. |
+| **G-02** | **Package Integrity & Manifest** | **PASS** | Checksums verified via `deploy/verify_deployment_package.py --check-manifest`. Minimal runtime dependencies (`mysql-connector-python`). | None. |
+| **G-03** | **Test Regression Coverage** | **PASS** | 160/160 tests passing across all 9 suites in ~9.4s. Database integration tests validated on `signal_bot_test`. | None. |
+| **G-04** | **Worker Shutdown & Lock-Release Safety** | **PASS** | Unit template specifies `TimeoutStopSec=30s` with `KillMode=mixed`. Tested active transport SIGTERM termination; advisory lock released with code 0 before timeout. | None. Validated in `tests/test_retailbot2_outbox_supervision.py`. |
+| **G-05** | **Conservative Recovery Safety** | **PASS** | Blanket resets prohibited. Strengthened 3-state forensic classification (Confirmed not sent, Confirmed sent, Uncertain). Uncertain events preserved for manual owner review. | None. Validated in runbook and test assertions. |
+| **G-06** | **Target Production Host Identity** | **OWNER_CONFIRMATION_REQUIRED** | Host `CMS` (`192.168.1.30`) identified as candidate host by technical evidence (runs MariaDB `127.0.0.1:3306` containing `crypto_signals`; loopback credentials match `CMS`). CMS is NOT owner-confirmed as the application service host. | Owner explicit written confirmation required to designate CMS or a separate dedicated VM as the production application service host. |
+| **G-07** | **Target Host OS & systemd Compatibility** | **PASS** | CentOS Linux 8, x86_64, systemd 239, Python 3.12 available, 533 GB disk space free, time synchronized. | None for host `CMS`. |
+| **G-08** | **Service Account & Filesystem Provisioning** | **OWNER_ACTION_REQUIRED** | Dedicated user `retailbot:retailbot`, `/opt/signal-bot`, `/opt/signal-bot/venv`, `/etc/retailbot2/outbox-worker.env` (0600) not yet created on host. Blocked pending Gate 6 host confirmation. | Operator must execute provisioning steps on confirmed host after explicit owner provisioning authorization. |
+| **G-09** | **Production Observation Credentials** | **PASS** | Dedicated SELECT-only account `'retailbot2_obs'@'127.0.0.1'` provisioned, rotated (WO71774), verified in 60s trial (WO71776). | None. Account active and tested. |
+| **G-10** | **Production Observation Startup** | **READY_FOR_OWNER_TRIAL** | Packaged service template explicitly specifies `--observation` (WO71786). Worker executes read-only SELECT queue inspection on S_lock without row locks or claiming. Systemd service ready to launch in observation mode only. | Explicit owner written authorization required to install and start the service in observation mode. Startup remains unauthorized. |
+| **G-11** | **Production Shadow Enqueue Authorization** | **NOT_AUTHORIZED** | `RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED` remains `0` (fail-closed). Decoupled shadow notifications enter queue only on `signal_bot_test`. | Explicit owner written authorization required to enable. |
+| **G-12** | **Telegram Delivery Authorization** | **NOT_AUTHORIZED** | `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY` remains `0` (fail-closed). Subprocess transport execution strictly blocked. | Explicit owner written authorization required to enable. |
+| **G-13** | **Monitoring and Incident Readiness** | **PASS** | 10-alert matrix defined; expired lease monitoring aligned to 90s lease; read-only health CLI `paper.outbox_health` verified. | None. |
+| **G-14** | **Backup and Rollback Readiness** | **PASS** | Logical mysqldump procedures, rapid stop sequence, and per-event forensic recovery procedures documented in runbook. | None. |
+| **G-15** | **Final Owner Deployment Approval** | **OWNER_ACTION_REQUIRED** | Written owner sign-off on deployment candidate release package and service cutover. | Owner review and sign-off on Stage G1 / G1.1 report. |
+
+#### 2. Git Lineage & Commit Lineage Clarification (WO71784 Audit)
+
+- **Master Base Lineage:** Commit `a2c850aa8f97f081e22008d1efc0d3654c379dbe` (`origin/master`).
+- **Stage D Head:** Commit `bcc9f7439dc9d8c927da23208bf1fdb8858656ae`.
+- **Stage E Genuine Git Commit:** `861a0a96caba5d367064abdd577e826a5dae63db` (abbreviated `861a0a9`).
+- **Lineage Verification:** The SHA `861a0a911767ee427494f6c4c0b4cb9da143b8c4` reported in WO71783 prompt metadata does not exist in local or remote Git repositories (`fatal: bad object`). It represents an erroneous string transcription where the valid 7-character prefix `861a0a9` was matched with a non-existent suffix. The authentic Git parent object is `861a0a96caba5d367064abdd577e826a5dae63db`, and the merge-base with master is strictly `a2c850aa8f97f081e22008d1efc0d3654c379dbe`.
+
+#### 3. Test Suite Count Reconciliation (151 Baseline Tests; 154 Post-Audit Tests; 160 Stage G1.1 Tests Across 9 Suites)
+
+An empirical test collection and execution across all 9 suites reconciles the previous counts and records the newly added corrective test coverage:
+
+| Suite | WO71783 Baseline | WO71784/WO71785 Post-Audit | WO71786 Stage G1.1 | Notes & Scope |
+| :--- | :---: | :---: | :---: | :--- |
+| `tests/test_retailbot2_shadow_enqueue.py` | 24 | 24 | 24 | Pure payload builders & decoupled shadow enqueue |
+| `tests/test_retailbot2_outbox_enqueue_auth.py` | 46 | 46 | 46 | Parameterized flag & connection validation cases |
+| `tests/test_retailbot2_telegram_outbox.py` | 39 | 39 | 39 | Unit tests for dispatcher loop and token fencing |
+| `tests/test_retailbot2_outbox_delivery_mysql.py` | 6 | 6 | 7 | Added recovery claim-token fencing test (+1) |
+| `tests/test_migration_managed_startup_docs.py` | 8 | 8 | 8 | Runbook, migration, and documentation assertions |
+| `tests/test_retailbot2_outbox_supervision.py` | 9 | 10 | 14 | Added observation defaults & safety fail-closed tests (+4) |
+| `tests/test_retailbot2_outbox_observability.py` | 7 | 7 | 7 | Health snapshots, dead-letter inspection, and lock inspection |
+| `tests/test_retailbot2_outbox_retention.py` | 5 | 5 | 5 | Dry-run retention planner & active row protection |
+| `tests/test_retailbot2_deployment_package.py` | 7 | 9 | 10 | Added tampered manifest verification test (+1) |
+| **Total Test Count** | **151** | **154** | **160** | **160 Passed, 0 Failed, 0 Skipped, 0 Deselected** |
+
+**Root Cause of WO71783 Discrepancy:** The 150-count breakdown cited in WO71783 metadata originated from an outdated manual transcription where `delivery_mysql` was listed with 4 tests (instead of 6) and unparameterized estimates were cited. In reality, the codebase collected and passed exactly 151 tests in WO71783, 154 tests with WO71784 corrective additions, and now passes 160 tests with WO71786 Stage G1.1 safety additions.
+
+#### 4. Lease Duration, HTTP Deadlines & Expired Lease Semantics
+
+- **Worker Claim Lease:** `lease_seconds = 90` (normal-path recovery margin).
+- **Transport Subprocess Deadline:** `transport_timeout_sec = 10.0` (read deadline for HTTP POST).
+- **Connect Timeout:** `5.0s`.
+- **Acknowledgement Budget:** `cleanup_grace_sec = 1.5s` to 2.0s.
+- **Expired Lease vs. Old Processing Row:** A row is only an expired lease when `status = 'processing' AND locked_until <= UTC_TIMESTAMP()`. Total row age (`created_at`) does not define lease expiration.
+- **Uncertainty & No-Reset Rule:** An expired lease does NOT prove delivery failed; the message may have been delivered prior to worker termination. Automated or blanket status resets (`UPDATE ... WHERE status='processing'`) are strictly prohibited.
+
+#### 5. Systemd Shutdown Timing & Revised 30-Second Timeout
+
+- **Worst-case Shutdown Duration:** Transport HTTP deadline (10.0s) + child SIGTERM wait (1.5s) + child SIGKILL escalation (1.5s) + process group verification (1.0s) + MariaDB advisory lock release (1.0s) = **15.0s**.
+- **Adopted Timeout:** The unit template establishes `TimeoutStopSec=30s` (revised from 15s in WO71785), providing a full 15-second safety buffer over worst-case execution. This eliminates any risk of premature systemd cgroup SIGKILL escalation and guarantees clean MariaDB advisory lock release under heavy system load.
+
+#### 6. Stage G1 Deployment Candidate Readiness Verdict
+
+- **Candidate Technical Readiness:** **`PASS_STAGE_G1_DEPLOYMENT_CANDIDATE`**  
+  All technical components, package checksums, 154 automated regression tests, 30-second shutdown timeout, strengthened recovery classification, and read-only host discovery are complete and verified.
+- **Production Rollout Status:** **`PASS_WITH_OWNER_ACTIONS`**  
+  Production deployment remains safely gated pending owner host provisioning (Gate 8), live delivery authorization (Gate 12), and final deployment sign-off (Gate 15).
+
+
+### 4.8 Stage G1.1 Observation-Only Service Default & Recovery Fencing Audit (WO71786)
+
+Stage G1.1 resolves the operational and safety ambiguities identified during review of WO71785:
+
+1. **Unambiguous Observation-Only Service Default:**
+   - `deploy/systemd/retailbot2-outbox-worker.service` explicitly specifies `--observation` in `ExecStart`.
+   - The packaged service default guarantees that launching the unit cannot claim, acknowledge, retry, dead-letter, or transmit outbox events. In observation mode, the worker performs read-only queue inspection (`inspect_queue()`) on S_lock and never invokes `claim_event()`.
+   - Any transition from observation mode to active delivery mode requires deliberate written authorization, an operator configuration change (e.g. removing `--observation` via a systemd drop-in override), and explicit `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`.
+   - Verified by `deploy/verify_deployment_package.py` and automated unit tests.
+
+2. **Manual Recovery Claim-Token Fencing & Row Count Verification:**
+   - Section 17 of `docs/RETAILBOT2_OUTBOX_OPERATIONAL_RUNBOOK.md` updated to require optimistic conditional updates fencing the exact event ID, expected status `processing`, and the claim token observed during forensic inspection (`claim_token = '<observed_claim_token>'`).
+   - Mandatory operator rule: verify `SELECT ROW_COUNT();`. Exactly 1 row affected indicates successful recovery. 0 rows affected requires stopping immediately without broadening the query.
+   - Tested and verified on `signal_bot_test`: stale tokens and non-processing statuses are rejected with 0 rows affected.
+
+3. **Host Identity & Release Gate Reclassification:**
+   - Gate 6 reclassified to `OWNER_CONFIRMATION_REQUIRED`: Host `CMS` (`192.168.1.30`) is identified by technical evidence as the candidate host running MariaDB `127.0.0.1:3306` containing `crypto_signals`, but owner explicit designation is required to confirm whether CMS or a separate dedicated VM is the application service host.
+   - Gate 8 remains `OWNER_ACTION_REQUIRED`: Blocked pending host confirmation and separate provisioning authorization.
+   - Gate 10 remains `READY_FOR_OWNER_TRIAL`: Service installation and startup remain unauthorized until explicit owner instruction.
+   - Gates 11 and 12 remain `NOT_AUTHORIZED`: Production shadow enqueue and Telegram delivery remain strictly fail-closed.
+   - Gate 15 remains `OWNER_ACTION_REQUIRED`: Final owner deployment approval outstanding.
+
+4. **Stage G1.1 Verdict:**
+   - **`PASS_STAGE_G1_1_OBSERVATION_AND_RECOVERY_SAFETY`**
 
 
 ## 5. Modern UI migration and cutover

@@ -269,7 +269,9 @@ class TestWorkerOutcomeHandling:
             processed = worker.process_one_event()
             assert processed is True
 
-        # Must never mark sent or dead on ambiguous delivery; must mark retry
+        # Must never mark sent or dead on ambiguous delivery; must mark retry with persistent DELIVERY_UNKNOWN marker
         worker.session_mgr.mark_sent.assert_not_called()
         worker.session_mgr.mark_dead.assert_not_called()
-        worker.session_mgr.mark_retry.assert_called_once_with(101, "token101", 1, "ReadTimeout after transmit")
+        worker.session_mgr.mark_retry.assert_called_once_with(
+            101, "token101", 1, "DELIVERY_UNKNOWN: ReadTimeout after transmit"
+        )
