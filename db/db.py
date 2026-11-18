@@ -8,6 +8,7 @@ from mysql.connector import pooling
 import logging
 import json
 import math
+import threading
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
@@ -21,6 +22,7 @@ logger = logging.getLogger("db")
 _pool = None
 _retailbot2_pool = None
 _funding_pool = None
+_pool_lock = threading.RLock()
 
 
 def get_funding_pool(config=None, reset=False):
@@ -30,19 +32,20 @@ def get_funding_pool(config=None, reset=False):
     Never falls back to global _pool or cms.
     """
     global _funding_pool
-    if reset and _funding_pool is not None:
-        _funding_pool = None
+    with _pool_lock:
+        if reset and _funding_pool is not None:
+            _funding_pool = None
 
-    if _funding_pool is None:
-        from config import load_funding_collector_config
-        cfg = config or load_funding_collector_config()
-        _funding_pool = pooling.MySQLConnectionPool(
-            pool_name="funding_collector_pool",
-            pool_size=3,
-            init_command="SET time_zone = '+00:00'",
-            **cfg.to_dict(),
-        )
-    return _funding_pool
+        if _funding_pool is None:
+            from config import load_funding_collector_config
+            cfg = config or load_funding_collector_config()
+            _funding_pool = pooling.MySQLConnectionPool(
+                pool_name="funding_collector_pool",
+                pool_size=3,
+                init_command="SET time_zone = '+00:00'",
+                **cfg.to_dict(),
+            )
+        return _funding_pool
 
 
 def get_retailbot2_pool():
@@ -50,28 +53,30 @@ def get_retailbot2_pool():
     It uses the same centralized MYSQL_CONFIG as every other component;
     this separate pool preserves existing callers only."""
     global _retailbot2_pool
-    if _retailbot2_pool is None:
-        import config
-        _retailbot2_pool = pooling.MySQLConnectionPool(
-            pool_name="retailbot2_pool",
-            pool_size=3,
-            init_command="SET time_zone = '+00:00'",
-            **config.RETAILBOT2_DB_CONFIG,
-        )
-    return _retailbot2_pool
+    with _pool_lock:
+        if _retailbot2_pool is None:
+            import config
+            _retailbot2_pool = pooling.MySQLConnectionPool(
+                pool_name="retailbot2_pool",
+                pool_size=3,
+                init_command="SET time_zone = '+00:00'",
+                **config.RETAILBOT2_DB_CONFIG,
+            )
+        return _retailbot2_pool
 
 
 def get_pool():
     global _pool
-    if _pool is None:
-        import config
-        _pool = pooling.MySQLConnectionPool(
-            pool_name="crypto_bot_pool",
-            pool_size=10,
-            init_command="SET time_zone = '+00:00'",  # force UTC session tz -- see note in schema.sql
-            **config.MYSQL_CONFIG,
-        )
-    return _pool
+    with _pool_lock:
+        if _pool is None:
+            import config
+            _pool = pooling.MySQLConnectionPool(
+                pool_name="crypto_bot_pool",
+                pool_size=10,
+                init_command="SET time_zone = '+00:00'",  # force UTC session tz -- see note in schema.sql
+                **config.MYSQL_CONFIG,
+            )
+        return _pool
 
 
 def _strip_sql_comments(sql_text):
@@ -225,9 +230,14 @@ def upsert_funding(rows, pool=None):
     conn = p.get_connection()
     try:
         cur = conn.cursor()
-        cur.executemany(sql, rows)
-        conn.commit()
-        cur.close()
+        try:
+            cur.executemany(sql, rows)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
     finally:
         conn.close()
 
