@@ -1,7 +1,16 @@
 """Generic trade simulation engine shared by all strategies."""
+import logging
+import math
+import numpy as np
 import pandas as pd
 
-from backtest.accounting import calculate_trade_accounting, resolve_stop_target_exit
+from backtest.accounting import (
+    calculate_trade_accounting,
+    resolve_stop_target_exit,
+    calculate_funding_cost,
+)
+
+logger = logging.getLogger("backtest.simulate")
 
 
 def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, stop_target) -> list:
@@ -40,6 +49,75 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
         simulation_end = int(simulation_end)
         end_idx = int(np.searchsorted(open_times, simulation_end, side="right")) - 1
         max_allowed_idx = min(n - 1, max(-1, end_idx))
+
+    market = str(params.get("market", "spot")).lower()
+    symbol = params.get("symbol")
+    strategy_name = params.get("strategy_name", "")
+    is_pairs = (
+        strategy_name == "pairs_ratio_v1"
+        or params.get("is_pairs_ratio", False)
+        or (df is not None and "ratio" in df.columns)
+    )
+
+    funding_events_all: list = []
+    funding_data_missing: bool = False
+
+    if market == "futures":
+        if is_pairs:
+            # Pairs ratio trades a synthetic ratio without an executable two-leg sizing model.
+            # Documented as unsupported for funding accrual per WO 71937 architectural boundary.
+            pass
+        elif "funding_events" in params and params["funding_events"] is not None:
+            raw_events = params["funding_events"]
+            validated = []
+            for ev in raw_events:
+                evt_time = int(ev[0])
+                mp = float(ev[1])
+                fr = float(ev[2])
+                if not math.isfinite(mp) or not math.isfinite(fr):
+                    raise ValueError(f"Non-finite funding data: mark_price={mp}, funding_rate={fr}")
+                if mp <= 0:
+                    raise ValueError(f"Invalid non-positive mark price: mark_price={mp}")
+                validated.append((evt_time, mp, fr))
+            validated.sort(key=lambda x: x[0])
+            funding_events_all = validated
+            if not funding_events_all:
+                funding_data_missing = True
+                logger.warning(
+                    "Historical funding data unavailable for symbol %s in simulation window; "
+                    "falling back to documented zero-cost funding.",
+                    symbol,
+                )
+        elif symbol:
+            win_start = int(df["open_time"].min())
+            win_end = int(df["open_time"].max()) + int(max_hold * 86400 * 1000)
+            try:
+                from db.db import fetch_settled_funding_events
+                funding_events_all = fetch_settled_funding_events(
+                    symbol=symbol,
+                    start_time=win_start,
+                    end_time=win_end,
+                )
+                if not funding_events_all:
+                    funding_data_missing = True
+                    logger.warning(
+                        "Historical funding data unavailable for symbol %s in window [%d, %d]; "
+                        "falling back to documented zero-cost funding.",
+                        symbol, win_start, win_end,
+                    )
+            except Exception as e:
+                funding_data_missing = True
+                logger.warning(
+                    "Failed to retrieve historical funding data for symbol %s in window [%d, %d]: %s; "
+                    "falling back to documented zero-cost funding.",
+                    symbol, win_start, win_end, e,
+                )
+        else:
+            funding_data_missing = True
+            logger.warning(
+                "No symbol provided for futures backtest; historical funding data unavailable, "
+                "falling back to documented zero-cost funding."
+            )
 
     while i < n - 1:
         row = df.iloc[i]
@@ -153,29 +231,59 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
             exit_idx = last_allowed_idx
             exit_price, exit_reason = float(df.iloc[exit_idx]["close"]), "END_OF_DATA"
 
+        qty = float(params.get("quantity", 1.0))
+        entry_t = int(entry_bar["open_time"])
+        exit_t = int(df.iloc[exit_idx]["open_time"])
+
+        if market == "futures" and not is_pairs:
+            if funding_data_missing:
+                funding_cost = 0.0
+                trade_funding_status = "missing_data_zero_cost_fallback"
+            else:
+                trade_events = [
+                    (ev[1], ev[2])
+                    for ev in funding_events_all
+                    if entry_t < ev[0] <= exit_t
+                ]
+                if trade_events:
+                    long_cost = calculate_funding_cost(qty, trade_events)
+                    funding_cost = long_cost if direction == "LONG" else -long_cost
+                    trade_funding_status = "settled"
+                else:
+                    funding_cost = 0.0
+                    trade_funding_status = "no_events_in_interval"
+        elif is_pairs:
+            funding_cost = 0.0
+            trade_funding_status = "unsupported_pairs_ratio_two_leg"
+        else:
+            funding_cost = 0.0
+            trade_funding_status = "not_applicable"
+
         accounting = calculate_trade_accounting(
             direction=direction,
-            quantity=1.0,
+            quantity=qty,
             entry_price=raw_entry_price,
             exit_price=float(exit_price),
             fee_pct=fee,
             entry_slippage_pct=slip,
             exit_slippage_pct=slip,
             stop_price=float(stop_loss),
+            funding_cost=funding_cost,
         )
         trade = {
             "direction": direction,
             "signal_open_time": int(row["open_time"]),
-            "entry_time": int(entry_bar["open_time"]),
+            "entry_time": entry_t,
             "entry_price": float(accounting["entry_exec_price"]),
-            "exit_time": int(df.iloc[exit_idx]["open_time"]),
+            "exit_time": exit_t,
             "exit_price": float(exit_price),
             "exit_reason": exit_reason,
             "stop_loss": float(stop_loss),
             "take_profit": float(take_profit),
             "gross_pnl": float(accounting["gross_pnl"]),
             "fees": float(accounting["fees"]),
-            "funding_cost": 0.0,
+            "funding_cost": float(accounting["funding_cost"]),
+            "funding_status": trade_funding_status,
             "net_pnl": float(accounting["net_pnl"]),
             "net_return_pct": float(accounting["return_pct_on_entry_notional"]),
             "r_multiple": float(accounting["r_multiple"]) if accounting["r_multiple"] is not None else None,

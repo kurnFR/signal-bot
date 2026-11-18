@@ -621,29 +621,47 @@ def get_paper_metrics() -> Dict[str, Any]:
         conn.close()
 
 
+class PaperFundingRetrievalError(RuntimeError):
+    """Raised when settled funding events cannot be retrieved for a paper position."""
+    pass
+
+
 def _funding_cost_for_position(pos: Dict[str, Any], exit_time: int) -> float:
-    """Return signed funding cost for the position over its holding interval."""
-    if pos["market"] != "futures":
+    """Return signed funding cost for the position over its holding interval.
+
+    Raises:
+        PaperFundingRetrievalError: if settled funding events cannot be retrieved
+            or validated for a supported Futures position.
+    """
+    if pos.get("market") != "futures":
         return 0.0
-    conn = get_pool().get_connection()
-    try:
-        cur = conn.cursor(dictionary=True)
-        cur.execute(
-            """
-            SELECT mark_price, funding_rate
-            FROM funding_rate
-            WHERE symbol = %s
-              AND event_time > %s
-              AND event_time <= %s
-              AND mark_price IS NOT NULL
-            ORDER BY event_time ASC
-            """,
-            (pos["symbol"], int(pos["entry_time"]), int(exit_time)),
+
+    strategy_name = str(pos.get("strategy_name") or "")
+    if strategy_name == "pairs_ratio_v1" or bool(pos.get("is_pairs_ratio")):
+        logger.warning(
+            "Paper position #%s (%s/%s): pairs_ratio trades a synthetic ratio without an "
+            "executable two-leg sizing model; skipping single-leg funding accrual "
+            "(unsupported_pairs_ratio_two_leg).",
+            pos.get("id"), pos.get("symbol"), strategy_name,
         )
-        events = [(float(r["mark_price"]), float(r["funding_rate"])) for r in cur.fetchall()]
-        cur.close()
-    finally:
-        conn.close()
+        return 0.0
+
+    try:
+        from db.db import fetch_settled_funding_events
+        raw_events = fetch_settled_funding_events(
+            symbol=pos["symbol"],
+            start_time=int(pos["entry_time"]),
+            end_time=int(exit_time),
+        )
+        events = [(float(ev[1]), float(ev[2])) for ev in raw_events]
+    except Exception as exc:
+        logger.error(
+            "Failed to retrieve settled funding events for position #%s (%s): %s",
+            pos.get("id"), pos.get("symbol"), exc,
+        )
+        raise PaperFundingRetrievalError(
+            f"Failed to retrieve settled funding events for position #{pos.get('id')} ({pos.get('symbol')}): {exc}"
+        ) from exc
 
     if not events:
         return 0.0
@@ -820,8 +838,13 @@ def manual_close_position(position_id: int) -> Dict[str, Any]:
     if not pos:
         raise ValueError(f"Open position #{position_id} not found")
     now_ms = int(time.time() * 1000)
+    try:
+        closed = close_position_in_db(pos, float(pos["current_price"]), now_ms, "MANUAL")
+    except PaperFundingRetrievalError as exc:
+        logger.error("Failed to manually close position #%s due to funding retrieval error: %s", position_id, exc)
+        raise RuntimeError(f"Cannot close position #{position_id} due to funding retrieval failure: {exc}") from exc
     return {
-        "status": "success" if close_position_in_db(pos, float(pos["current_price"]), now_ms, "MANUAL") else "already_closed",
+        "status": "success" if closed else "already_closed",
         "message": f"Position #{position_id} manually closed",
     }
 
@@ -1195,6 +1218,7 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
 
         position_closed = False
         bars_evaluated = 0
+        funding_error_occurred = False
 
         for _, bar in new_bars.iterrows():
             bar_open_time = int(bar["open_time"])
@@ -1262,10 +1286,23 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
                     current_stop = min(current_stop, bar_close + trail_dist_mult * atr)
 
             if exit_reason:
-                if close_position_in_db(pos, float(exit_price), bar_open_time, exit_reason, holding_bars=holding_bars):
-                    result["positions_closed"] += 1
-                    position_closed = True
+                try:
+                    if close_position_in_db(pos, float(exit_price), bar_open_time, exit_reason, holding_bars=holding_bars):
+                        result["positions_closed"] += 1
+                        position_closed = True
+                except PaperFundingRetrievalError as exc:
+                    logger.error(
+                        "Paper position #%s (%s): funding retrieval failed during exit (%s) at candle %s: %s; "
+                        "preserving position as OPEN at last_update_time %s for retry on next cycle.",
+                        pos_id, symbol, exit_reason, bar_open_time, exc, last_update_time,
+                    )
+                    remaining_open_positions.append(pos)
+                    funding_error_occurred = True
+                    break
                 break
+
+        if funding_error_occurred:
+            continue
 
         if not position_closed and bars_evaluated > 0:
             latest_evaluated_bar = new_bars.iloc[-1]
