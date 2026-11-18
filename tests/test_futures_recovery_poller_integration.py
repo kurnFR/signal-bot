@@ -32,7 +32,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 import mysql.connector
-from dotenv import load_dotenv
 
 from db.db import upsert_ohlcv
 from collectors.recover_futures_history import (
@@ -48,7 +47,6 @@ from collectors.futures_kline_poller import (
     run_cycle as poller_run_cycle,
 )
 
-load_dotenv("/home/BIS/signal-bot/.env")
 
 TEST_HOST = os.getenv("SIGNAL_BOT_TEST_DB_HOST", "127.0.0.1")
 TEST_PORT = int(os.getenv("SIGNAL_BOT_TEST_DB_PORT", "3306"))
@@ -88,7 +86,7 @@ def db_conn():
     
     # Pre-test cleanup of synthetic symbols only
     cur = conn.cursor()
-    cur.execute("DELETE FROM ohlcv WHERE symbol LIKE 'SYNTH%'")
+    cur.execute("DELETE FROM ohlcv WHERE symbol IN (%s, %s)", (SYNTH_BTC, SYNTH_ETH))
     conn.commit()
     cur.close()
 
@@ -97,7 +95,7 @@ def db_conn():
     # Post-test cleanup of synthetic symbols only
     try:
         cur = conn.cursor()
-        cur.execute("DELETE FROM ohlcv WHERE symbol LIKE 'SYNTH%'")
+        cur.execute("DELETE FROM ohlcv WHERE symbol IN (%s, %s)", (SYNTH_BTC, SYNTH_ETH))
         conn.commit()
         cur.close()
     except Exception:
@@ -374,7 +372,7 @@ def test_poller_defers_and_cannot_corrupt_during_recovery():
         open_t, close_t,
         "100.0", "110.0", "95.0", "105.0", "1000.0", "105000.0", 100, "500.0", "52500.0", 1
     )
-    upsert_ohlcv([row], conn=conn_rec)
+    upsert_ohlcv([row], conn=conn_rec, commit=True)
 
     # 1. Recovery acquires lock
     assert acquire_advisory_lock(conn_rec, lock_name, timeout=2) is True

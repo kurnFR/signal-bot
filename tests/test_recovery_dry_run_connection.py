@@ -22,6 +22,7 @@ Coverage:
 """
 
 import os
+from pathlib import Path
 import re
 import sys
 from decimal import Decimal
@@ -30,9 +31,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 import mysql.connector
-from dotenv import load_dotenv
 
-load_dotenv("/home/BIS/signal-bot/.env")
 
 from collectors.recover_futures_history import (
     get_read_only_connection,
@@ -379,10 +378,11 @@ def test_main_cli_dry_run_full_cycle(test_db_conn):
     resp_200.json.return_value = []
     mock_session.get.return_value = resp_200
 
-    manifest_path = "/home/BIS/.gemini/antigravity-cli/brain/8676284a-04c3-4017-9d68-508794c31087/restricted_1h_recovery_manifest_v3.json"
+    manifest_path = str(Path(__file__).parent / "fixtures" / "recovery_sample.json")
     test_args = [
         "recover_futures_history.py",
         "--manifest", manifest_path,
+        "--expected-manifest-sha256", "8aa665abd35fafeaa4e4d1c6ade04d66d7d6a80dcaefa3a8b1254e9bb8cd5abe",
         "--symbol", SYNTH_SYMBOL,
         "--timeframe", SYNTH_TIMEFRAME,
         "--dry-run",

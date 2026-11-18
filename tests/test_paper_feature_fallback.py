@@ -320,7 +320,7 @@ def test_series_cache_prevents_duplicate_queries():
          patch("paper.engine.fetch_ohlcv_with_features_df", return_value=df_synth) as mock_fetch, \
          patch("paper.engine.fetch_latest_open_candle", return_value=None):
 
-        result = pe_mod.sync_and_evaluate_paper_trading()
+        result = pe_mod.sync_and_evaluate_paper_trading(bypass_lock=True)
 
         assert result["evaluated_configs"] == 2
         # mock_fetch must be called only ONCE for (BTCUSDT, futures, 1h, False)

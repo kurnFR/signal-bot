@@ -72,7 +72,7 @@ def build_processes(environ=None):
         web_port = "8050"
 
     raw_host = (env.get("SIGNAL_BOT_HOST") or "").strip()
-    web_host = raw_host or "0.0.0.0"
+    web_host = raw_host or "127.0.0.1"
 
     processes = {
         "web_server": [
@@ -134,8 +134,18 @@ def _run_and_restart(name, cmd):
             if _shutdown.is_set():
                 return
             logger.info(f"[{name}] starting: {' '.join(cmd)}")
-            proc = subprocess.Popen(cmd)
-            _children[name] = proc
+            try:
+                proc = subprocess.Popen(cmd)
+            except OSError as exc:
+                logger.warning("[%s] launch failed (%s); retrying in %ss",
+                               name, exc, RESTART_BACKOFF_SECONDS)
+                proc = None
+            else:
+                _children[name] = proc
+
+        if proc is None:
+            _shutdown.wait(RESTART_BACKOFF_SECONDS)
+            continue
 
         exit_code = proc.wait()
         with _children_lock:

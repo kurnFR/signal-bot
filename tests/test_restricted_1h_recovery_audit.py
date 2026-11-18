@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import os
+from pathlib import Path
 import stat
 import sys
 from decimal import Decimal
@@ -24,7 +25,6 @@ from unittest.mock import MagicMock, patch
 import mysql.connector
 from mysql.connector import pooling
 import pytest
-from dotenv import load_dotenv
 
 from db.db import upsert_ohlcv
 from collectors.backfill_klines import is_candle_closed
@@ -46,7 +46,6 @@ from collectors.futures_kline_poller import (
     release_advisory_lock as poller_release_lock,
 )
 
-load_dotenv("/home/BIS/signal-bot/.env")
 
 TEST_HOST = os.getenv("SIGNAL_BOT_TEST_DB_HOST", "127.0.0.1")
 TEST_PORT = int(os.getenv("SIGNAL_BOT_TEST_DB_PORT", "3306"))
@@ -54,8 +53,8 @@ TEST_DB = "signal_bot_test"
 TEST_USER = os.getenv("SIGNAL_BOT_TEST_DB_USER", "signal_bot_test").strip()
 TEST_PASS = os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", "").strip()
 
-MANIFEST_V3_PATH = "/home/BIS/.gemini/antigravity-cli/brain/8676284a-04c3-4017-9d68-508794c31087/restricted_1h_recovery_manifest_v3.json"
-EXPECTED_MANIFEST_SHA256 = APPROVED_MANIFEST_SHA256
+MANIFEST_V3_PATH = str(Path(__file__).parent / "fixtures" / "recovery_sample.json")
+EXPECTED_MANIFEST_SHA256 = "8aa665abd35fafeaa4e4d1c6ade04d66d7d6a80dcaefa3a8b1254e9bb8cd5abe"
 
 SYNTH_BTC = "SYNTH1H_BTCUSDT"
 SYNTH_ETH = "SYNTH1H_ETHUSDT"
@@ -87,14 +86,14 @@ def cleanup_synthetic_records():
     """Ensure clean table before and after each test."""
     conn = get_test_conn()
     cur = conn.cursor()
-    cur.execute("DELETE FROM ohlcv WHERE symbol LIKE 'SYNTH1H_%';")
+    cur.execute("DELETE FROM ohlcv WHERE symbol IN (%s, %s, %s)", (SYNTH_BTC, SYNTH_ETH, SYNTH_BNB))
     conn.commit()
     cur.close()
     conn.close()
     yield
     conn = get_test_conn()
     cur = conn.cursor()
-    cur.execute("DELETE FROM ohlcv WHERE symbol LIKE 'SYNTH1H_%';")
+    cur.execute("DELETE FROM ohlcv WHERE symbol IN (%s, %s, %s)", (SYNTH_BTC, SYNTH_ETH, SYNTH_BNB))
     conn.commit()
     cur.close()
     conn.close()
@@ -120,6 +119,29 @@ def test_01_manifest_checksum_and_targets_accepted():
     assert summary["total_proposed_updates"] == 3
     assert summary["total_expected_target_rows"] == 138330
     assert summary["per_target_post_recovery_rows"] == 46110
+
+
+def test_sample_is_rejected_by_production_digest():
+    with pytest.raises(ValueError, match="Manifest SHA256 mismatch"):
+        load_and_validate_manifest(MANIFEST_V3_PATH)
+
+
+def test_write_cli_rejects_sample_even_with_matching_checksum(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["recover", "--manifest", MANIFEST_V3_PATH,
+                        "--expected-manifest-sha256", EXPECTED_MANIFEST_SHA256,
+                        "--db-user", EXACT_WRITE_USER, "--db-password-file", "unused"])
+    with patch("collectors.recover_futures_history.get_write_connection") as connect:
+        with pytest.raises(SystemExit) as exc:
+            main()
+    assert exc.value.code == 1
+    connect.assert_not_called()
+
+
+def test_operator_manifest_when_supplied():
+    path = os.getenv("SIGNAL_BOT_APPROVED_RECOVERY_MANIFEST")
+    if not path:
+        pytest.skip("Operator recovery manifest was not supplied")
+    load_and_validate_manifest(path, APPROVED_MANIFEST_SHA256)
 
 
 def test_02_incorrect_checksum_rejected_before_db_connection(tmp_path):
@@ -1152,12 +1174,21 @@ def test_47_dry_run_and_tests_never_mutate_production():
     mock_cur = MagicMock()
     mock_conn.cursor.return_value = mock_cur
 
-    with patch("collectors.recover_futures_history.upsert_ohlcv") as mock_upsert:
+    def candle_page(**request):
+        ot = request["start_ms"]
+        def candle(start):
+            return [start, "100", "110", "90", "105", "10", start + STEP_MS - 1,
+                    "1000", 5, "4", "400"]
+        return [candle(ot - STEP_MS), candle(ot)]
+
+    with patch("collectors.recover_futures_history.fetch_futures_klines", side_effect=candle_page), \
+         patch("collectors.recover_futures_history.upsert_ohlcv") as mock_upsert:
         exit_code, summary = run_recovery(
             manifest=manifest_data,
             conn=mock_conn,
             dry_run=True,
         )
         assert exit_code == 0
+        assert all(item["inserted"] == 1 for item in summary.values())
         mock_upsert.assert_not_called()
 

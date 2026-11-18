@@ -32,6 +32,9 @@ jobs:
       MYSQL_USER: root
       MYSQL_PASSWORD: signal_bot_test_root
       MYSQL_DATABASE: signal_bot_test
+      SIGNAL_BOT_RUN_RETAILBOT2_DB_INTEGRATION: "1"
+      SIGNAL_BOT_TEST_DB_USER: signal_bot_test
+      SIGNAL_BOT_TEST_DB_PASSWORD: disposable_recovery_tests
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,6 +54,7 @@ jobs:
       - name: Seed isolated test admin identity
         run: |
           python - <<'PY'
+          import os
           import secrets
           from db.db import get_pool
           from web.auth import hash_password
@@ -58,6 +62,20 @@ jobs:
           conn = get_pool().get_connection()
           try:
               cur = conn.cursor()
+              cur.execute("CREATE USER 'signal_bot_test'@'%' IDENTIFIED BY %s",
+                          (os.environ["SIGNAL_BOT_TEST_DB_PASSWORD"],))
+              for table, privileges in (("ohlcv", "SELECT, INSERT, UPDATE, DELETE"),
+                                        ("funding_rate", "SELECT, INSERT, UPDATE"),
+                                        ("collector_heartbeat", "SELECT, INSERT, UPDATE"),
+                                        ("rdt_telegram_outbox", "SELECT, INSERT, UPDATE, DELETE"),
+                                        ("rdt_trades", "SELECT, INSERT, UPDATE, DELETE"),
+                                        ("rdt_strategy_lifecycle", "SELECT, INSERT, UPDATE, DELETE"),
+                                        ("rdt_strategy_stats", "SELECT, INSERT, UPDATE, DELETE"),
+                                        ("users", "SELECT, INSERT, UPDATE, DELETE"),
+                                        ("audit_logs", "SELECT, INSERT, DELETE")):
+                  cur.execute(f"GRANT {privileges} ON signal_bot_test.{table} TO 'signal_bot_test'@'%'")
+              # The concurrency regression observes the waiting transaction in this disposable service.
+              cur.execute("GRANT PROCESS ON *.* TO 'signal_bot_test'@'%'")
               cur.execute(
                   """
                   INSERT INTO users

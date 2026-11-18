@@ -1,0 +1,70 @@
+{
+  "manifest_version": "3.test",
+  "targets": [
+    {
+      "symbol": "BTCUSDT",
+      "timeframe": "1h",
+      "target_key": "BTCUSDT_1h",
+      "pre_recovery": {
+        "total_rows": 44939
+      },
+      "proposed_inserts": {
+        "first_missing_open_time_ms": 1790604000000,
+        "last_missing_open_time_ms": 1794816000000,
+        "proposed_insert_count": 1171
+      },
+      "proposed_boundary_update": {
+        "open_time_ms": 1790600400000
+      },
+      "post_recovery_expected": {
+        "mathematically_expected_rows": 46110
+      }
+    },
+    {
+      "symbol": "ETHUSDT",
+      "timeframe": "1h",
+      "target_key": "ETHUSDT_1h",
+      "pre_recovery": {
+        "total_rows": 44434
+      },
+      "proposed_inserts": {
+        "first_missing_open_time_ms": 1788786000000,
+        "last_missing_open_time_ms": 1794816000000,
+        "proposed_insert_count": 1676
+      },
+      "proposed_boundary_update": {
+        "open_time_ms": 1788782400000
+      },
+      "post_recovery_expected": {
+        "mathematically_expected_rows": 46110
+      }
+    },
+    {
+      "symbol": "BNBUSDT",
+      "timeframe": "1h",
+      "target_key": "BNBUSDT_1h",
+      "pre_recovery": {
+        "total_rows": 44434
+      },
+      "proposed_inserts": {
+        "first_missing_open_time_ms": 1788786000000,
+        "last_missing_open_time_ms": 1794816000000,
+        "proposed_insert_count": 1676
+      },
+      "proposed_boundary_update": {
+        "open_time_ms": 1788782400000
+      },
+      "post_recovery_expected": {
+        "mathematically_expected_rows": 46110
+      }
+    }
+  ],
+  "summary": {
+    "total_targets": 3,
+    "total_existing_target_rows": 133807,
+    "total_proposed_inserts": 4523,
+    "total_proposed_updates": 3,
+    "total_expected_target_rows": 138330,
+    "per_target_post_recovery_rows": 46110
+  }
+}

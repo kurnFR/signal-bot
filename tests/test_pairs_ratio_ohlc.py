@@ -43,21 +43,14 @@ class TestPairsRatioOHLC(unittest.TestCase):
             pair_symbol="BTCUSDT",
         )
 
-        # Load or generate 300-bar historical dataset
-        cls.hist_file = "/home/BIS/.gemini/antigravity-cli/brain/8e0d6895-718d-4f4a-bc5a-0cf744420e4b/scratch/historical_300_bars.json"
-        if os.path.exists(cls.hist_file):
-            with open(cls.hist_file, "r") as f:
+        # Exact historical assertions require the original snapshot.
+        cls.hist_bnb = cls.hist_btc = None
+        fixture = os.getenv("SIGNAL_BOT_PAIRS_HISTORY_FIXTURE")
+        if fixture:
+            with open(fixture) as f:
                 data = json.load(f)
             cls.hist_bnb = pd.DataFrame(data["bnb"])
             cls.hist_btc = pd.DataFrame(data["btc"])
-        else:
-            try:
-                from db.db import fetch_ohlcv_with_features_df
-                cls.hist_bnb = fetch_ohlcv_with_features_df("BNBUSDT", "futures", "1d", closed_only=True, limit=300)
-                cls.hist_btc = fetch_ohlcv_with_features_df("BTCUSDT", "futures", "1d", closed_only=True, limit=300)
-            except Exception:
-                cls.hist_bnb = None
-                cls.hist_btc = None
 
         if cls.hist_bnb is not None and cls.hist_btc is not None:
             for c in ["open", "high", "low", "close"]:
