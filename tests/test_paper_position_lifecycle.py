@@ -895,15 +895,14 @@ class TestPaperPositionLifecycle(unittest.TestCase):
 
         df = self._make_df([{"open_time": 2000, "open": 51000.0, "high": 54500.0, "low": 50900.0, "close": 54200.0}])
 
-        def run_sync():
-            with patch("paper.engine.fetch_ohlcv_with_features_df", return_value=df):
-                return pe.sync_and_evaluate_paper_trading()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            f1 = executor.submit(run_sync)
-            f2 = executor.submit(run_sync)
-            r1 = f1.result()
-            r2 = f2.result()
+        # Patch once around both threads. Overlapping patches can restore the
+        # real data fetch while the lock-owning thread is still evaluating.
+        with patch("paper.engine.fetch_ohlcv_with_features_df", return_value=df):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                f1 = executor.submit(pe.sync_and_evaluate_paper_trading)
+                f2 = executor.submit(pe.sync_and_evaluate_paper_trading)
+                r1 = f1.result()
+                r2 = f2.result()
 
         # Exactly one should process, or if serialized, only one can close the position
         total_closed = r1["positions_closed"] + r2["positions_closed"]
