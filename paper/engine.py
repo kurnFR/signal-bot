@@ -633,7 +633,7 @@ def _funding_cost_for_position(pos: Dict[str, Any], exit_time: int) -> float:
         PaperFundingRetrievalError: if settled funding events cannot be retrieved
             or validated for a supported Futures position.
     """
-    if pos.get("market") != "futures":
+    if str(pos.get("market") or "").strip().lower() != "futures":
         return 0.0
 
     strategy_name = str(pos.get("strategy_name") or "")
