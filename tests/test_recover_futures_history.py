@@ -300,8 +300,6 @@ def test_advisory_lock_drains_cursor_and_permits_subsequent_cursor_allocation_li
     without raising InternalError('Unread result found').
     """
     import mysql.connector
-    from dotenv import load_dotenv
-    load_dotenv("/home/BIS/signal-bot/.env")
     test_user = os.getenv("SIGNAL_BOT_TEST_DB_USER", "signal_bot_test").strip()
     test_pass = os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", "").strip()
 
@@ -332,8 +330,6 @@ def test_advisory_lock_drains_cursor_and_permits_subsequent_cursor_allocation_li
 def test_repeated_lock_lifecycle_live():
     """Verify repeated acquire -> release cycles across multiple iterations on a live connection."""
     import mysql.connector
-    from dotenv import load_dotenv
-    load_dotenv("/home/BIS/signal-bot/.env")
     test_user = os.getenv("SIGNAL_BOT_TEST_DB_USER", "signal_bot_test").strip()
     test_pass = os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", "").strip()
 
@@ -373,8 +369,6 @@ def test_release_advisory_lock_unheld_or_nonexistent():
 def test_strict_lockout_from_crypto_signals():
     """Verifies that recover_futures_history rejects crypto_signals without authorization."""
     from collectors.recover_futures_history import get_read_only_connection
-    from dotenv import load_dotenv
-    load_dotenv("/home/BIS/signal-bot/.env")
     test_user = os.getenv("SIGNAL_BOT_TEST_DB_USER", "signal_bot_test").strip()
     test_pass = os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", "").strip()
 

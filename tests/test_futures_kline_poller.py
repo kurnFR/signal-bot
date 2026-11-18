@@ -197,8 +197,6 @@ def test_signal_bot_test_isolation_and_lockout():
     Verifies that signal_bot_test credentials strictly connect to authorized databases
     and are denied access to unauthorized databases (e.g. mysql).
     """
-    from dotenv import load_dotenv
-    load_dotenv("/home/BIS/signal-bot/.env")
     test_user = os.getenv("SIGNAL_BOT_TEST_DB_USER", "signal_bot_test").strip()
     test_pass = os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", "").strip()
 
@@ -230,8 +228,6 @@ def test_signal_bot_test_ohlcv_access_and_create_denial():
     Verifies that signal_bot_test has SELECT access on ohlcv,
     while CREATE on arbitrary tables remains strictly denied (least privilege).
     """
-    from dotenv import load_dotenv
-    load_dotenv("/home/BIS/signal-bot/.env")
     test_user = os.getenv("SIGNAL_BOT_TEST_DB_USER", "signal_bot_test").strip()
     test_pass = os.getenv("SIGNAL_BOT_TEST_DB_PASSWORD", "").strip()
 

@@ -13,7 +13,7 @@ This runbook defines the exact operational procedure for deploying, verifying, r
 
 ### Safe Default Service Set
 The default supervisor startup is strictly limited to the Phase 2A stack:
-1. `web_server` (`run_web.py --port 8050 --host 0.0.0.0`)
+1. `web_server` (`run_web.py --port 8050 --host 127.0.0.1`)
 2. `collectors` (`run_collectors.py`)
 3. `screener` (`Screen/screening.py`)
 4. `wallet_tracker` (`run_wallet_tracker.py`)
@@ -118,11 +118,11 @@ sudo systemctl status signal-bot
    - **Zero** `run_paper_engine.py`, `run_news_ai.py`, `retailbot2.py`, or `outbox_worker` processes.
 
 2. **Verify HTTP API Endpoint:**
-   Check web server accessibility and status endpoint:
+   Check that the local listener responds and enforces authentication (adjust the port if configured):
    ```bash
    curl -s -w "\nHTTP Status: %{http_code}\n" http://127.0.0.1:8050/api/system/status
    ```
-   **Pass Criteria:** HTTP Status 200 with JSON status payload.
+   **Expected:** HTTP 401 for this credential-free probe. To check readiness, sign in to the dashboard, open the system status view, and confirm the database reports `ok` and the enabled collectors have fresh heartbeats. An HTTP response alone only confirms the listener is reachable.
 
 3. **Verify Supervisor Logs:**
    Inspect startup log output:
@@ -244,6 +244,6 @@ python3 run_all.py
 
 ### Rollback Step 6 — Post-Rollback Validation
 1. Re-run verification checks from Section 3.3.
-2. Verify HTTP status: `curl http://127.0.0.1:8050/api/system/status`.
+2. Repeat the listener, authentication, and signed-in readiness checks in Step 3.3.
 3. Confirm collectors and screener resume normal operation.
 4. Document the incident, root cause, and rollback timestamp in the incident log.

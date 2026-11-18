@@ -20,17 +20,7 @@ import pytest
 from unittest.mock import patch, Mock
 from fastapi.testclient import TestClient
 
-# 1. Enforce database isolation before importing or initializing DB pools
-os.environ["MYSQL_DATABASE"] = "signal_bot_test"
-
-import config
-config.MYSQL_CONFIG["database"] = "signal_bot_test"
-config.RETAILBOT2_DB_CONFIG["database"] = "signal_bot_test"
-
 import db.db as db_module
-db_module._pool = None
-db_module._retailbot2_pool = None
-
 from web.app import app
 from web.auth import create_access_token, hash_password
 import web.routes.auth_routes as auth_routes
@@ -50,18 +40,14 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 "Live MariaDB concurrency tests require explicit SIGNAL_BOT_TEST_DB_USER and "
                 "SIGNAL_BOT_TEST_DB_PASSWORD; no fallback credentials are permitted."
             )
-        os.environ["MYSQL_USER"] = test_db_user
-        os.environ["MYSQL_PASSWORD"] = test_db_password
-        # Mandatory database isolation guard: enforce signal_bot_test authorization
-        os.environ["MYSQL_DATABASE"] = "signal_bot_test"
-        config.MYSQL_CONFIG["database"] = "signal_bot_test"
-        config.MYSQL_CONFIG["user"] = test_db_user
-        config.MYSQL_CONFIG["password"] = test_db_password
-        config.RETAILBOT2_DB_CONFIG["database"] = "signal_bot_test"
-        config.RETAILBOT2_DB_CONFIG["user"] = test_db_user
-        config.RETAILBOT2_DB_CONFIG["password"] = test_db_password
-        db_module._pool = None
-        db_module._retailbot2_pool = None
+        overrides = dict(host="127.0.0.1", port=3306, database="signal_bot_test",
+                         user=test_db_user, password=test_db_password)
+        for patcher in (patch.dict(db_module.MYSQL_CONFIG, overrides),
+                        patch.dict(db_module.RETAILBOT2_DB_CONFIG, overrides),
+                        patch.object(db_module, "_pool", None),
+                        patch.object(db_module, "_retailbot2_pool", None)):
+            patcher.start()
+            cls.addClassCleanup(patcher.stop)
 
         cls.pool = db_module.get_pool()
         cls.retailbot2_pool = db_module.get_retailbot2_pool()
@@ -373,6 +359,15 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         finally:
             conn.close()
 
+    def _wait_for_lock_contention(self, thread_id):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if self._check_exact_thread_lock_wait(thread_id):
+                return True
+            # Leave time for MariaDB to refresh its InnoDB transaction snapshot.
+            time.sleep(0.2)
+        return False
+
     def _check_exact_thread_lock_wait(self, thread_id: int) -> bool:
         """Query MariaDB information_schema to verify whether the EXACT transaction
         associated with thread_id is in LOCK WAIT state."""
@@ -443,12 +438,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 t2_tid = t2_thread_id_holder[0]
 
                 # Verify the EXACT Thread 2 transaction enters MariaDB LOCK WAIT state
-                t2_in_lock_wait = False
-                for _ in range(50):
-                    time.sleep(0.05)
-                    if self._check_exact_thread_lock_wait(t2_tid):
-                        t2_in_lock_wait = True
-                        break
+                t2_in_lock_wait = self._wait_for_lock_contention(t2_tid)
 
                 self.assertTrue(
                     t2_in_lock_wait,
@@ -537,12 +527,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 t2_tid = t2_thread_id_holder[0]
 
                 # Verify the EXACT Thread 2 transaction enters MariaDB LOCK WAIT state
-                t2_in_lock_wait = False
-                for _ in range(50):
-                    time.sleep(0.05)
-                    if self._check_exact_thread_lock_wait(t2_tid):
-                        t2_in_lock_wait = True
-                        break
+                t2_in_lock_wait = self._wait_for_lock_contention(t2_tid)
 
                 self.assertTrue(
                     t2_in_lock_wait,
@@ -614,12 +599,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 t2_tid = t2_thread_id_holder[0]
 
                 # Verify the EXACT Thread 2 transaction enters MariaDB LOCK WAIT state
-                t2_in_lock_wait = False
-                for _ in range(50):
-                    time.sleep(0.05)
-                    if self._check_exact_thread_lock_wait(t2_tid):
-                        t2_in_lock_wait = True
-                        break
+                t2_in_lock_wait = self._wait_for_lock_contention(t2_tid)
 
                 self.assertTrue(
                     t2_in_lock_wait,
@@ -718,12 +698,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 self.assertTrue(t2_about_to_query.wait(timeout=5.0), "Thread 2 failed to reach locking query")
                 t2_tid = t2_thread_id_holder[0]
 
-                t2_in_lock_wait = False
-                for _ in range(50):
-                    time.sleep(0.05)
-                    if self._check_exact_thread_lock_wait(t2_tid):
-                        t2_in_lock_wait = True
-                        break
+                t2_in_lock_wait = self._wait_for_lock_contention(t2_tid)
 
                 self.assertTrue(
                     t2_in_lock_wait,
@@ -824,12 +799,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 self.assertTrue(t2_about_to_query.wait(timeout=5.0), "Thread 2 failed to reach locking query")
                 t2_tid = t2_thread_id_holder[0]
 
-                t2_in_lock_wait = False
-                for _ in range(50):
-                    time.sleep(0.05)
-                    if self._check_exact_thread_lock_wait(t2_tid):
-                        t2_in_lock_wait = True
-                        break
+                t2_in_lock_wait = self._wait_for_lock_contention(t2_tid)
 
                 self.assertTrue(
                     t2_in_lock_wait,
@@ -941,12 +911,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 self.assertTrue(t2_about_to_query.wait(timeout=5.0), "Thread 2 failed to reach locking query")
                 t2_tid = t2_thread_id_holder[0]
 
-                t2_in_lock_wait = False
-                for _ in range(50):
-                    time.sleep(0.05)
-                    if self._check_exact_thread_lock_wait(t2_tid):
-                        t2_in_lock_wait = True
-                        break
+                t2_in_lock_wait = self._wait_for_lock_contention(t2_tid)
 
                 self.assertTrue(
                     t2_in_lock_wait,
@@ -1147,12 +1112,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 t2_tid = t2_thread_id_holder[0]
 
                 # 3. Prove Thread 2's EXACT transaction enters MariaDB 'LOCK WAIT' state
-                t2_in_lock_wait = False
-                for _ in range(50):
-                    time.sleep(0.05)
-                    if self._check_exact_thread_lock_wait(t2_tid):
-                        t2_in_lock_wait = True
-                        break
+                t2_in_lock_wait = self._wait_for_lock_contention(t2_tid)
                 self.assertTrue(
                     t2_in_lock_wait,
                     f"Thread 2 (thread_id={t2_tid}) failed to enter MariaDB LOCK WAIT state"

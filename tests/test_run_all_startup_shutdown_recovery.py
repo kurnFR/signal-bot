@@ -41,7 +41,7 @@ class TestSupervisorProcessSet(unittest.TestCase):
         self.assertEqual(processes["wallet_tracker"], [sys.executable, "run_wallet_tracker.py"])
         self.assertEqual(
             processes["web_server"],
-            [sys.executable, "run_web.py", "--port", "8050", "--host", "0.0.0.0"],
+            [sys.executable, "run_web.py", "--port", "8050", "--host", "127.0.0.1"],
         )
 
     def test_web_server_handles_missing_empty_and_malformed_host_and_port(self):
@@ -49,22 +49,22 @@ class TestSupervisorProcessSet(unittest.TestCase):
         p1 = run_all.build_processes({})
         self.assertIn("--port", p1["web_server"])
         self.assertEqual(p1["web_server"][p1["web_server"].index("--port") + 1], "8050")
-        self.assertEqual(p1["web_server"][p1["web_server"].index("--host") + 1], "0.0.0.0")
+        self.assertEqual(p1["web_server"][p1["web_server"].index("--host") + 1], "127.0.0.1")
 
         # Explicit valid port and host
-        p2 = run_all.build_processes({"WEB_PORT": "9000", "SIGNAL_BOT_HOST": "127.0.0.1"})
+        p2 = run_all.build_processes({"WEB_PORT": "9000", "SIGNAL_BOT_HOST": "0.0.0.0"})
         self.assertEqual(p2["web_server"][p2["web_server"].index("--port") + 1], "9000")
-        self.assertEqual(p2["web_server"][p2["web_server"].index("--host") + 1], "127.0.0.1")
+        self.assertEqual(p2["web_server"][p2["web_server"].index("--host") + 1], "0.0.0.0")
 
-        # Malformed / empty / out-of-range / None port and host fall back safely to 8050 and 0.0.0.0
+        # Malformed / empty / out-of-range / None port and host fall back safely to 8050 and 127.0.0.1
         for bad_port in ("", "   ", "not_a_port", "0", "65536", "-1", "abc", None):
             p = run_all.build_processes({"WEB_PORT": bad_port, "SIGNAL_BOT_HOST": "  "})
             self.assertEqual(p["web_server"][p["web_server"].index("--port") + 1], "8050")
-            self.assertEqual(p["web_server"][p["web_server"].index("--host") + 1], "0.0.0.0")
+            self.assertEqual(p["web_server"][p["web_server"].index("--host") + 1], "127.0.0.1")
 
         p_none_host = run_all.build_processes({"WEB_PORT": None, "SIGNAL_BOT_HOST": None})
         self.assertEqual(p_none_host["web_server"][p_none_host["web_server"].index("--port") + 1], "8050")
-        self.assertEqual(p_none_host["web_server"][p_none_host["web_server"].index("--host") + 1], "0.0.0.0")
+        self.assertEqual(p_none_host["web_server"][p_none_host["web_server"].index("--host") + 1], "127.0.0.1")
 
     def test_paper_engine_opt_in_strictness(self):
         for val in ("", "0", "false", "no", "true", "yes", "2", "enabled", None):
@@ -203,6 +203,16 @@ class TestSupervisorRestartAndLifecycle(unittest.TestCase):
 
         self.assertGreaterEqual(iteration, 2)
         self.assertNotIn("test_worker", run_all._children)
+
+    def test_worker_recovers_after_launch_error(self):
+        child = MagicMock()
+        child.wait.side_effect = lambda: run_all._shutdown.set()
+        with patch.object(run_all.subprocess, "Popen", side_effect=[OSError("busy"), child]) as launch, \
+             patch.object(run_all._shutdown, "wait") as backoff:
+            run_all._run_and_restart("collectors", ["worker"])
+        self.assertEqual(launch.call_count, 2)
+        backoff.assert_called_once_with(run_all.RESTART_BACKOFF_SECONDS)
+        self.assertNotIn("collectors", run_all._children)
 
     def test_run_and_restart_exits_immediately_if_shutdown_already_set(self):
         run_all._shutdown.set()

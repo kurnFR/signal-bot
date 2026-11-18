@@ -67,13 +67,14 @@ def _signal(symbol, strategy):
     }
 
 
-def test_worker_persists_entry_outbox_only_for_promoted_strategy():
+def test_worker_persists_entry_outbox_only_for_promoted_strategy(monkeypatch):
     if os.getenv("SIGNAL_BOT_RUN_RETAILBOT2_DB_INTEGRATION") != "1":
         pytest.skip(
             "opt-in only; set SIGNAL_BOT_RUN_RETAILBOT2_DB_INTEGRATION=1 "
             "to use the isolated local signal_bot_test database"
         )
 
+    monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
     suffix = uuid.uuid4().hex[:10].upper()
     # The worker rejects unregistered strategy IDs before touching the DB.
     # Use registered strategies and restore any existing lifecycle settings.

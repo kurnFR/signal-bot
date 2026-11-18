@@ -188,7 +188,7 @@ def load_and_validate_manifest(
        - BNBUSDT 1h
     3. Exclusions: Rejects any 15m, 4h, 1d timeframe or extraneous symbol.
     4. Arithmetic check: Requires cur_rows + proposed_inserts == expected_rows.
-    5. Upper bound guard: Rejects any range exceeding MAX_FINALIZED_BOUNDARY_OT (2026-11-16 05:00:00 UTC).
+    5. Upper bound guard: Rejects any range exceeding MAX_FINALIZED_BOUNDARY_OT (2026-11-16 08:00:00 UTC).
     6. Interval continuity: Confirms (last_ot - first_ot) // 3600000 + 1 == proposed_insert_count.
     7. Fails closed before any DB connection or network request.
     """
@@ -205,7 +205,7 @@ def load_and_validate_manifest(
         raw_bytes = f.read()
 
     actual_sha = hashlib.sha256(raw_bytes).hexdigest()
-    if expected_sha and actual_sha.lower() != expected_sha.lower():
+    if not expected_sha or actual_sha.lower() != expected_sha.lower():
         raise ValueError(
             f"Manifest SHA256 mismatch: calculated {actual_sha} != expected {expected_sha}. "
             "Manifest file has been altered or is unapproved."
@@ -244,6 +244,9 @@ def load_and_validate_manifest(
         if tf != "1h":
             raise ValueError(f"Prohibited timeframe '{tf}' for {sym}. Only 1h permitted (15m, 4h, 1d are strictly excluded).")
 
+        if key != f"{sym}_{tf}":
+            raise ValueError(f"Manifest target key '{key}' does not match {sym}_{tf}.")
+
         if key in seen_target_keys:
             raise ValueError(f"Duplicate target key '{key}' detected in manifest.")
         seen_target_keys.add(key)
@@ -281,11 +284,11 @@ def load_and_validate_manifest(
                 f"manifest specifies {ins_count}."
             )
 
-        # Finalized boundary guard: 2026-11-16 05:00:00 UTC (1794805200000)
+        # Finalized boundary guard: 2026-11-16 08:00:00 UTC (1794816000000)
         if last_ot > MAX_FINALIZED_BOUNDARY_OT:
             raise ValueError(
                 f"Insert range for target '{key}' extends beyond approved finalized boundary "
-                f"({MAX_FINALIZED_BOUNDARY_OT} - 2026-11-16 05:00:00 UTC): {last_ot}."
+                f"({MAX_FINALIZED_BOUNDARY_OT} - 2026-11-16 08:00:00 UTC): {last_ot}."
             )
 
     if seen_target_keys != expected_target_keys:
@@ -716,7 +719,7 @@ def recover_range(
 
             # Closure validation: only closed candles are accepted in historical recovery
             closed_flag = is_candle_closed(close_time, now_ms=now_ms)
-            if not closed_flag or open_time > end_ms:
+            if not closed_flag or not cursor <= open_time <= end_ms:
                 # Omit forming bar
                 continue
 
@@ -969,6 +972,10 @@ def main():
     # Manifest enforcement: manifest must be supplied and validated before any connection or API call
     if not args.manifest:
         logger.error("Explicit --manifest <path> is mandatory. Recovery must execute strictly from a verified manifest.")
+        sys.exit(1)
+
+    if not args.dry_run and args.expected_manifest_sha256 != APPROVED_MANIFEST_SHA256:
+        logger.error("Write mode requires the approved manifest digest.")
         sys.exit(1)
 
     try:

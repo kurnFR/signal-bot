@@ -93,6 +93,23 @@ Open `http://localhost:8050`. `run_all.py --help` lists the currently available 
 
 **4. Log in.** On first start an admin account is created. Use `ADMIN_DEFAULT_PASSWORD` if you set it; otherwise a random one-time password is written to `.initial_admin_credential` (mode 0600). Accounts flagged `must_change_password` are blocked from other API actions until the password is changed, and the dashboard shows a blocking dialog. See [docs/SECURITY.md](docs/SECURITY.md).
 
+### Verify an existing server after a pull
+
+From the repository root with the server's virtual environment active, record the deployed revision, then update the checkout and inspect the migration plan:
+
+```bash
+git rev-parse HEAD
+git pull --ff-only
+git rev-parse HEAD
+python -m pip install -r requirements.txt
+python -m db.migrate --status
+python -m db.migrate --dry-run
+```
+
+If you serve the modern dashboard, run `(cd frontend && npm ci && npm run build)` before restarting the web service. The default listener is `127.0.0.1:8050`. Set `SIGNAL_BOT_HOST` explicitly if a reverse proxy on another host needs to reach it. Review any pending migrations against a restored copy of your database before applying them. Use the deployment runbook for restart and rollback.
+
+After restart, a credential-free request to `/api/system/status` should return 401. Sign in and verify database status, collector heartbeats, and the latest candle timestamps for the markets and timeframes you use. Run the full test suite against a disposable database because its integration tests create and remove fixture data.
+
 ### Command-line research tools
 
 ```bash

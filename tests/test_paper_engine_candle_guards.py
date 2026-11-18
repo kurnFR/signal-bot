@@ -181,7 +181,7 @@ class TestPerCandleIdempotency(unittest.TestCase):
              patch("paper.engine.get_active_positions", return_value=[position]), \
              patch("paper.engine.fetch_ohlcv_with_features_df", return_value=df), \
              patch("paper.engine.get_pool", return_value=pool):
-            result = pe.sync_and_evaluate_paper_trading()
+            result = pe.sync_and_evaluate_paper_trading(bypass_lock=True)
         return result, log
 
     def test_second_poll_on_same_candle_does_not_reapply(self):
@@ -241,7 +241,7 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
              patch("paper.engine.STRATEGIES", {"trend_ema_v1": fake_strategy}), \
              patch("paper.engine._signal_already_traded", return_value=True) as already_traded, \
              patch("paper.engine._insert_position") as insert_position:
-            pe.sync_and_evaluate_paper_trading()
+            pe.sync_and_evaluate_paper_trading(bypass_lock=True)
 
         already_traded.assert_called_once()
         insert_position.assert_not_called()
@@ -275,7 +275,7 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
              }), \
              patch("paper.engine.fill_pending_order", side_effect=lambda order_id, price, writer: {"status": "filled", "position_id": writer(object())}), \
              patch("paper.engine._insert_position", return_value=555) as insert_position:
-            result = pe.sync_and_evaluate_paper_trading()
+            result = pe.sync_and_evaluate_paper_trading(bypass_lock=True)
 
         signal_df = fake_strategy.call_args.args[0]
         self.assertEqual(int(signal_df.iloc[-1]["open_time"]), CANDLE_B)
@@ -300,7 +300,7 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
              patch("paper.engine.fetch_latest_open_candle", return_value=None), \
              patch("paper.engine.STRATEGIES", {"trend_ema_v1": fake_strategy}), \
              patch("paper.engine._insert_position") as insert_position:
-            result = pe.sync_and_evaluate_paper_trading()
+            result = pe.sync_and_evaluate_paper_trading(bypass_lock=True)
         fake_strategy.assert_not_called()
         insert_position.assert_not_called()
         self.assertEqual(result["new_positions_opened"], 0)
@@ -320,7 +320,7 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
              patch("paper.engine.time.time", return_value=(CANDLE_A + 30 * 60 * 1000) / 1000), \
              patch("paper.engine.STRATEGIES", {"trend_ema_v1": fake_strategy}), \
              patch("paper.engine._insert_position") as insert_position:
-            result = pe.sync_and_evaluate_paper_trading()
+            result = pe.sync_and_evaluate_paper_trading(bypass_lock=True)
         fake_strategy.assert_not_called()
         insert_position.assert_not_called()
         self.assertEqual(result["new_positions_opened"], 0)
@@ -340,7 +340,7 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
              patch("paper.engine.time.time", return_value=(CANDLE_B + 5 * 60 * 1000) / 1000), \
              patch("paper.engine.STRATEGIES", {"trend_ema_v1": fake_strategy}), \
              patch("paper.engine._insert_position") as insert_position:
-            result = pe.sync_and_evaluate_paper_trading()
+            result = pe.sync_and_evaluate_paper_trading(bypass_lock=True)
         fake_strategy.assert_not_called()
         insert_position.assert_not_called()
         self.assertEqual(result["new_positions_opened"], 0)
@@ -376,7 +376,7 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
              patch("paper.engine.time.time", return_value=(CANDLE_A + 3_600_000 + 60_000) / 1000), \
              patch("paper.engine.STRATEGIES", {"trend_ema_v1": fake_strategy}), \
              patch("paper.engine._insert_position") as insert_position:
-            result = pe.sync_and_evaluate_paper_trading()
+            result = pe.sync_and_evaluate_paper_trading(bypass_lock=True)
         fake_strategy.assert_not_called()
         insert_position.assert_not_called()
         self.assertEqual(result["new_positions_opened"], 0)
