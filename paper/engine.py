@@ -33,6 +33,157 @@ from paper.orders import create_pending_order, fill_pending_order, list_orders, 
 
 logger = logging.getLogger("paper.engine")
 
+PAPER_ENGINE_LOCK_NAME = "paper_engine_lock"
+PAPER_ENGINE_LOCK_TIMEOUT_SECONDS = 0
+
+
+def get_dedicated_connection(config_dict: Optional[Dict[str, Any]] = None):
+    """
+    Establish an unpooled, dedicated MariaDB connection.
+    Used strictly for advisory lock ownership to guarantee that the connection
+    is never returned to a pool or shared across threads while holding the lock.
+    """
+    import mysql.connector
+    from config import MYSQL_CONFIG
+
+    cfg = dict(config_dict or MYSQL_CONFIG)
+    for k in ("pool_name", "pool_size", "pool_reset_session"):
+        cfg.pop(k, None)
+    return mysql.connector.connect(
+        init_command="SET time_zone = '+00:00'",
+        **cfg
+    )
+
+
+class PaperEngineAdvisoryLock:
+    """
+    Dedicated database connection advisory lock manager for the paper trading engine.
+    Ensures that only one paper-engine execution runs at any time across systemd, CLI,
+    cron, or web evaluation triggers.
+    """
+    def __init__(
+        self,
+        lock_name: str = PAPER_ENGINE_LOCK_NAME,
+        timeout: int = PAPER_ENGINE_LOCK_TIMEOUT_SECONDS,
+        config_dict: Optional[Dict[str, Any]] = None,
+    ):
+        self.lock_name = lock_name
+        self.timeout = int(timeout)
+        self.config_dict = config_dict
+        self.conn = None
+        self.acquired = False
+
+    def acquire(self) -> bool:
+        """
+        Attempt to acquire the MariaDB advisory lock on a dedicated connection.
+        Returns True if acquired, False otherwise. Fully drains cursor results.
+        """
+        if self.acquired:
+            return True
+        cur = None
+        try:
+            self.conn = get_dedicated_connection(self.config_dict)
+            cur = self.conn.cursor()
+            cur.execute("SELECT GET_LOCK(%s, %s)", (self.lock_name, self.timeout))
+            rows = cur.fetchall()
+            if rows and len(rows) > 0 and rows[0][0] == 1:
+                self.acquired = True
+                logger.debug("Acquired paper engine advisory lock '%s'", self.lock_name)
+                return True
+            else:
+                self.acquired = False
+                logger.debug(
+                    "Could not acquire paper engine advisory lock '%s' (timeout=%s)",
+                    self.lock_name, self.timeout
+                )
+                if self.conn:
+                    try:
+                        self.conn.close()
+                    except Exception:
+                        pass
+                    self.conn = None
+                return False
+        except Exception as exc:
+            logger.warning("Error acquiring paper engine advisory lock '%s': %s", self.lock_name, exc)
+            self.acquired = False
+            if self.conn:
+                try:
+                    self.conn.close()
+                except Exception:
+                    pass
+                self.conn = None
+            return False
+        finally:
+            if cur is not None:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+
+    def is_owned(self) -> bool:
+        """Verify that this connection currently owns the advisory lock."""
+        if not self.conn or not self.acquired:
+            return False
+        cur = None
+        try:
+            cur = self.conn.cursor()
+            cur.execute("SELECT IS_USED_LOCK(%s) = CONNECTION_ID()", (self.lock_name,))
+            rows = cur.fetchall()
+            return bool(rows and len(rows) > 0 and rows[0][0] == 1)
+        except Exception as exc:
+            logger.warning("Error checking ownership of advisory lock '%s': %s", self.lock_name, exc)
+            return False
+        finally:
+            if cur is not None:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+
+    def release(self) -> bool:
+        """
+        Release the advisory lock and close the dedicated connection.
+        Guaranteed to clean up connection resources.
+        """
+        released = False
+        if self.conn:
+            cur = None
+            try:
+                if self.acquired:
+                    cur = self.conn.cursor()
+                    cur.execute("SELECT RELEASE_LOCK(%s)", (self.lock_name,))
+                    rows = cur.fetchall()
+                    if rows and len(rows) > 0 and rows[0][0] == 1:
+                        released = True
+                        logger.debug("Released paper engine advisory lock '%s'", self.lock_name)
+                    else:
+                        logger.warning(
+                            "Advisory lock '%s' was not held by this connection on release",
+                            self.lock_name
+                        )
+            except Exception as exc:
+                logger.warning("Error releasing advisory lock '%s': %s", self.lock_name, exc)
+            finally:
+                if cur is not None:
+                    try:
+                        cur.close()
+                    except Exception:
+                        pass
+                try:
+                    self.conn.close()
+                except Exception:
+                    pass
+                self.conn = None
+                self.acquired = False
+        return released
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+
 
 def _load_verified_ml_model(ml_model_id: str, models_dir: str = "ml_models"):
     """Load an eligible paper model only after same-descriptor hash verification."""
@@ -502,10 +653,18 @@ def _funding_cost_for_position(pos: Dict[str, Any], exit_time: int) -> float:
     return long_cost if pos["direction"] == "LONG" else -long_cost
 
 
-def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int, exit_reason: str):
+def close_position_in_db(
+    pos: Dict[str, Any],
+    exit_price: float,
+    exit_time: int,
+    exit_reason: str,
+    holding_bars: Optional[int] = None,
+) -> bool:
     """Close one position using canonical accounting and persist the ledger."""
     if pos.get("status") != "OPEN":
         return False
+
+    final_holding_bars = int(holding_bars if holding_bars is not None else pos.get("holding_bars", 0))
 
     direction = pos["direction"]
     quantity = float(pos["quantity"])
@@ -532,14 +691,32 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
             """
             UPDATE paper_positions
             SET status = 'CLOSED', current_price = %s, last_update_time = %s,
-                funding_pnl = %s
+                funding_pnl = %s, holding_bars = %s
             WHERE id = %s AND status = 'OPEN'
             """,
-            (float(exit_price), int(exit_time), -funding_cost, pos["id"]),
+            (float(exit_price), int(exit_time), -funding_cost, final_holding_bars, pos["id"]),
         )
         if cur.rowcount != 1:
             conn.rollback()
             return False
+
+        # Guard against duplicate paper_trades record for this position_id
+        cur.execute(
+            "SELECT 1 FROM paper_trades WHERE position_id = %s LIMIT 1",
+            (pos["id"],),
+        )
+        existing_trade = cur.fetchall()
+        if existing_trade and len(existing_trade) > 0:
+            logger.warning(
+                "Paper position #%s already has a trade record in paper_trades; skipping duplicate trade insert",
+                pos["id"],
+            )
+            conn.commit()
+            pos["status"] = "CLOSED"
+            pos["holding_bars"] = final_holding_bars
+            pos["last_update_time"] = int(exit_time)
+            pos["current_price"] = float(exit_price)
+            return True
 
         cur.execute(
             """
@@ -563,17 +740,27 @@ def close_position_in_db(pos: Dict[str, Any], exit_price: float, exit_time: int,
                 accounting["risk_amount"], pos["stop_distance"], quantity, pos["notional_value"],
                 accounting["gross_pnl"], pos["entry_fee"], accounting["fees"] - float(pos["entry_fee"]),
                 -funding_cost, accounting["net_pnl"], accounting["return_pct_on_entry_notional"],
-                accounting["r_multiple"], pos["holding_bars"], pos.get("ml_model_id"), pos.get("ml_probability"),
+                accounting["r_multiple"], final_holding_bars, pos.get("ml_model_id"), pos.get("ml_probability"),
                 pos.get("config_id"), pos.get("ml_generator_model_id"),
             ),
         )
         conn.commit()
         cur.close()
+        pos["status"] = "CLOSED"
+        pos["holding_bars"] = final_holding_bars
+        pos["last_update_time"] = int(exit_time)
+        pos["current_price"] = float(exit_price)
         logger.info(
             "Closed paper position #%s (%s %s) via %s: %+.2fR net_pnl=%+.4f funding=%+.4f",
             pos["id"], pos["symbol"], direction, exit_reason,
             accounting["r_multiple"] or 0.0, accounting["net_pnl"], -funding_cost,
         )
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     finally:
         conn.close()
 
@@ -945,110 +1132,118 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
             logger.exception("Unable to recover/fill pending paper order #%s", order.get("id"))
     return result
 
-def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
-    """Evaluate active configs and open positions with canonical accounting."""
+def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
+    """Internal implementation of paper evaluation cycle."""
     configs = get_paper_configs()
     order_recovery = _process_pending_paper_orders(configs)
     active_cfgs = [c for c in configs if c["is_active"]]
     positions = get_active_positions()
-    open_pos_map = {
-        (int(p["config_id"]) if p.get("config_id") is not None else
-         (p["symbol"], p["market"], p["timeframe"], p["strategy_name"])): p
-        for p in positions
-    }
+
     result = {"evaluated_configs": len(active_cfgs), "positions_updated": 0,
               "new_positions_opened": order_recovery["filled"], "positions_closed": 0,
               "orders_filled": order_recovery["filled"], "orders_expired": order_recovery["expired"],
-              "orders_rejected": order_recovery["rejected"]}
+              "orders_rejected": order_recovery["rejected"], "skipped_locked": False}
 
-    for cfg in active_cfgs:
-        symbol, market, timeframe, strategy_name = cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"]
-        key = int(cfg["id"]) if cfg.get("id") is not None else (symbol, market, timeframe, strategy_name)
-        is_generator_strategy = strategy_name == "ml_signal_generator_v1"
-        is_overlay_strategy = strategy_name in OVERLAY_STRATEGIES
-        if strategy_name not in STRATEGIES and not is_overlay_strategy:
-            continue
+    series_cache: Dict[tuple, pd.DataFrame] = {}
+
+    # =========================================================================
+    # Phase 1: Position Lifecycle & Exit Management
+    # Evaluates EVERY existing open position chronologically across all newly
+    # closed candles. Operates independently of active_cfgs so positions opened
+    # under disabled, demoted, or deleted configs are still managed safely.
+    # =========================================================================
+    remaining_open_positions: List[Dict[str, Any]] = []
+
+    for pos in positions:
+        pos_id = pos["id"]
+        symbol = pos["symbol"]
+        market = pos["market"]
+        timeframe = pos["timeframe"]
+        strategy_name = pos["strategy_name"]
+        direction = pos["direction"]
+        entry_price = float(pos["entry_price"])
+        initial_risk = float(pos["initial_risk"])
+        current_stop = float(pos["current_stop"])
+        take_profit = float(pos["take_profit"])
+        trailing_active = bool(pos["trailing_active"])
+        trail_act_r = float(pos["trail_activation_r"])
+        trail_dist_mult = float(pos["trail_distance_atr_mult"])
+        holding_bars = int(pos["holding_bars"])
+        max_hold_bars = int(pos["max_hold_bars"])
+        last_update_time = int(pos.get("last_update_time") or 0)
+
         include_funding = strategy_name in FUNDING_STRATEGIES
-        # Incremental evaluation: fetch latest 300 bars for O(1) live polling speed
-        df = fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, include_funding=include_funding, limit=300)
-        if len(df) < 50:
+        cache_key = (symbol, market, timeframe, include_funding)
+        if cache_key in series_cache:
+            df = series_cache[cache_key].copy()
+        else:
+            df = fetch_ohlcv_with_features_df(
+                symbol, market, timeframe, closed_only=True, include_funding=include_funding, limit=300
+            )
+            if not df.empty:
+                series_cache[cache_key] = df
+            df = df.copy()
+
+        if df.empty or len(df) < 1:
+            remaining_open_positions.append(pos)
             continue
 
-        latest_bar = df.iloc[-1]
-        current_close = float(latest_bar["close"])
-        candle_open_time = int(latest_bar["open_time"])
+        new_bars = df[df["open_time"] > last_update_time]
+        if new_bars.empty:
+            remaining_open_positions.append(pos)
+            continue
 
-        if key in open_pos_map:
-            pos = open_pos_map[key]
+        position_closed = False
+        bars_evaluated = 0
 
-            # Per-candle idempotency. This function is now driven by a
-            # continuous loop (run_paper_engine.py, ~60s), not just manual
-            # button clicks -- so the same latest closed candle is seen many
-            # times. Everything below (holding_bars += 1, SL/TP/trailing
-            # against this bar's range) must be applied once per candle, or
-            # a 1h strategy would count ~60 "bars" per hour and time-stop
-            # ~60x too early. last_update_time is the open_time of the last
-            # candle already applied to this position (see _insert_position).
-            if int(pos.get("last_update_time") or 0) >= candle_open_time:
-                continue
-
-            direction = pos["direction"]
-            entry_price = float(pos["entry_price"])
-            initial_risk = float(pos["initial_risk"])
-            current_stop = float(pos["current_stop"])
-            take_profit = float(pos["take_profit"])
-            trailing_active = bool(pos["trailing_active"])
-            trail_act_r = float(pos["trail_activation_r"])
-            trail_dist_mult = float(pos["trail_distance_atr_mult"])
-
-            holding_bars = int(pos["holding_bars"]) + 1
+        for _, bar in new_bars.iterrows():
+            bar_open_time = int(bar["open_time"])
+            bar_open = float(bar["open"])
+            bar_high = float(bar["high"])
+            bar_low = float(bar["low"])
+            bar_close = float(bar["close"])
+            holding_bars += 1
+            bars_evaluated += 1
 
             if direction == "LONG":
-                unrealized_pct = (current_close - entry_price) / entry_price
-                unrealized_r = (current_close - entry_price) / initial_risk if initial_risk > 0 else 0.0
+                unrealized_pct = (bar_close - entry_price) / entry_price
+                unrealized_r = (bar_close - entry_price) / initial_risk if initial_risk > 0 else 0.0
             else:
-                unrealized_pct = (entry_price - current_close) / entry_price
-                unrealized_r = (entry_price - current_close) / initial_risk if initial_risk > 0 else 0.0
+                unrealized_pct = (entry_price - bar_close) / entry_price
+                unrealized_r = (entry_price - bar_close) / initial_risk if initial_risk > 0 else 0.0
 
-            # Robust ATR validation: do not silently swallow NaN. Must run
-            # AFTER unrealized_r is computed above -- it's referenced in the
-            # warning log below (this ordering bug previously caused a
-            # NameError -> uncaught 500 on every /api/paper/sync call that
-            # touched a position with invalid/NaN ATR on its latest bar).
-            raw_atr = latest_bar.get("atr")
+            raw_atr = bar.get("atr")
             if pd.isna(raw_atr) or float(raw_atr or 0.0) <= 0:
                 atr = 0.0
                 if unrealized_r >= trail_act_r:
                     logger.warning(
                         "Paper position #%s: trailing stop threshold reached (unrealized_r=%.2f >= %.2f) "
                         "but ATR is invalid/NaN (%s); cannot trail stop on this bar",
-                        pos["id"], unrealized_r, trail_act_r, raw_atr
+                        pos_id, unrealized_r, trail_act_r, raw_atr
                     )
             else:
                 atr = float(raw_atr)
 
             exit_reason = None
             exit_price = None
+
             if trailing_active:
-                # A trailing stop has no fixed take-profit. A gap through the
-                # active stop fills at the candle open; otherwise an intrabar
-                # touch fills at the stop level.
                 if direction == "LONG":
-                    if float(latest_bar["open"]) <= current_stop:
-                        exit_reason, exit_price = "TRAIL", float(latest_bar["open"])
-                    elif float(latest_bar["low"]) <= current_stop:
+                    if bar_open <= current_stop:
+                        exit_reason, exit_price = "TRAIL", bar_open
+                    elif bar_low <= current_stop:
                         exit_reason, exit_price = "TRAIL", current_stop
                 else:
-                    if float(latest_bar["open"]) >= current_stop:
-                        exit_reason, exit_price = "TRAIL", float(latest_bar["open"])
-                    elif float(latest_bar["high"]) >= current_stop:
+                    if bar_open >= current_stop:
+                        exit_reason, exit_price = "TRAIL", bar_open
+                    elif bar_high >= current_stop:
                         exit_reason, exit_price = "TRAIL", current_stop
             else:
                 resolved_exit = resolve_stop_target_exit(
                     direction,
-                    float(latest_bar["open"]),
-                    float(latest_bar["high"]),
-                    float(latest_bar["low"]),
+                    bar_open,
+                    bar_high,
+                    bar_low,
                     current_stop,
                     take_profit,
                 )
@@ -1056,206 +1251,306 @@ def sync_and_evaluate_paper_trading() -> Dict[str, Any]:
                     exit_price, exit_code = resolved_exit
                     exit_reason = "SL" if exit_code == "SL" else "TP"
 
-            if exit_reason is None and holding_bars >= int(pos["max_hold_bars"]):
-                exit_reason, exit_price = "TIMEOUT", current_close
+            if exit_reason is None and holding_bars >= max_hold_bars:
+                exit_reason, exit_price = "TIMEOUT", bar_close
             elif exit_reason is None and unrealized_r >= trail_act_r and atr > 0:
                 if direction == "LONG":
                     trailing_active = True
-                    current_stop = max(current_stop, current_close - trail_dist_mult * atr)
+                    current_stop = max(current_stop, bar_close - trail_dist_mult * atr)
                 else:
                     trailing_active = True
-                    current_stop = min(current_stop, current_close + trail_dist_mult * atr)
+                    current_stop = min(current_stop, bar_close + trail_dist_mult * atr)
 
             if exit_reason:
-                if close_position_in_db(pos, float(exit_price), candle_open_time, exit_reason):
+                if close_position_in_db(pos, float(exit_price), bar_open_time, exit_reason, holding_bars=holding_bars):
                     result["positions_closed"] += 1
+                    position_closed = True
+                break
+
+        if not position_closed and bars_evaluated > 0:
+            latest_evaluated_bar = new_bars.iloc[-1]
+            latest_candle_time = int(latest_evaluated_bar["open_time"])
+            latest_close = float(latest_evaluated_bar["close"])
+            if direction == "LONG":
+                final_unrealized_pct = (latest_close - entry_price) / entry_price
+                final_unrealized_r = (latest_close - entry_price) / initial_risk if initial_risk > 0 else 0.0
             else:
-                conn = get_pool().get_connection()
-                try:
-                    cur = conn.cursor()
-                    cur.execute(
-                        """
-                        UPDATE paper_positions
-                        SET current_price=%s, current_stop=%s, trailing_active=%s,
-                            unrealized_pnl_pct=%s, unrealized_r=%s, holding_bars=%s,
-                            last_update_time=%s
-                        WHERE id=%s AND status='OPEN'
-                        """,
-                        (current_close, current_stop, 1 if trailing_active else 0,
-                         unrealized_pct, unrealized_r, holding_bars, candle_open_time, pos["id"]),
-                    )
-                    conn.commit()
-                    cur.close()
-                    result["positions_updated"] += 1
-                finally:
-                    conn.close()
-        else:
-            if is_overlay_strategy:
-                # Overlay strategies (e.g. news_ai_overlay) don't generate
-                # entries from price action here -- their entries are
-                # inserted directly by their own module (ai/news_execution.py
-                # for news_ai_overlay), using insert_paper_position(). This
-                # branch's only job for them is the exit-management above,
-                # which already ran. Deliberately NOT in STRATEGIES / not
-                # backtestable the normal way -- see docs/NEWS_AI.md §2.
-                continue
-            # Signal decisions use only the latest CLOSED candle. A paper
-            # entry is allowed only on the immediately following, still-open
-            # candle; never backfill an entry at the open of a candle that has
-            # already closed while this process was waiting/polling.
-            if _ML_REJECTED_CANDLE.get(key) == candle_open_time:
-                continue
-            open_candle = fetch_latest_open_candle(symbol, market, timeframe)
-            signal_df = _append_next_open_candle(df, open_candle, timeframe)
-            if signal_df is None:
-                logger.debug(
-                    "Skipping entry evaluation for %s/%s: no immediately following open candle",
-                    symbol, strategy_name,
+                final_unrealized_pct = (entry_price - latest_close) / entry_price
+                final_unrealized_r = (entry_price - latest_close) / initial_risk if initial_risk > 0 else 0.0
+
+            conn = get_pool().get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE paper_positions
+                    SET current_price=%s, current_stop=%s, trailing_active=%s,
+                        unrealized_pnl_pct=%s, unrealized_r=%s, holding_bars=%s,
+                        last_update_time=%s
+                    WHERE id=%s AND status='OPEN'
+                    """,
+                    (latest_close, current_stop, 1 if trailing_active else 0,
+                     final_unrealized_pct, final_unrealized_r, holding_bars,
+                     latest_candle_time, pos_id),
                 )
+                conn.commit()
+                cur.close()
+                result["positions_updated"] += 1
+                pos["holding_bars"] = holding_bars
+                pos["last_update_time"] = latest_candle_time
+                pos["current_price"] = latest_close
+                pos["current_stop"] = current_stop
+                pos["trailing_active"] = trailing_active
+                remaining_open_positions.append(pos)
+            finally:
+                conn.close()
+
+    # =========================================================================
+    # Phase 2: Signal Discovery & Entry Evaluation
+    # Evaluates new entry signals only for active configs without open positions.
+    # =========================================================================
+    open_config_ids = {int(p["config_id"]) for p in remaining_open_positions if p.get("config_id") is not None}
+    open_tuples = {
+        (p["symbol"], p["market"], p["timeframe"], p["strategy_name"])
+        for p in remaining_open_positions
+    }
+
+    for cfg in active_cfgs:
+        symbol, market, timeframe, strategy_name = cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"]
+        cfg_id = int(cfg["id"]) if cfg.get("id") is not None else None
+        key = cfg_id if cfg_id is not None else (symbol, market, timeframe, strategy_name)
+
+        if cfg_id is not None and cfg_id in open_config_ids:
+            continue
+        if (symbol, market, timeframe, strategy_name) in open_tuples:
+            continue
+
+        is_generator_strategy = strategy_name == "ml_signal_generator_v1"
+        is_overlay_strategy = strategy_name in OVERLAY_STRATEGIES
+        if strategy_name not in STRATEGIES and not is_overlay_strategy:
+            continue
+        if is_overlay_strategy:
+            continue
+
+        include_funding = strategy_name in FUNDING_STRATEGIES
+        cache_key = (symbol, market, timeframe, include_funding)
+        if cache_key in series_cache:
+            df = series_cache[cache_key].copy()
+        else:
+            df = fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, include_funding=include_funding, limit=300)
+            if not df.empty:
+                series_cache[cache_key] = df
+            df = df.copy()
+        if len(df) < 50:
+            continue
+
+        latest_bar = df.iloc[-1]
+        candle_open_time = int(latest_bar["open_time"])
+
+        if _ML_REJECTED_CANDLE.get(key) == candle_open_time:
+            continue
+        open_candle = fetch_latest_open_candle(symbol, market, timeframe)
+        signal_df = _append_next_open_candle(df, open_candle, timeframe)
+        if signal_df is None:
+            logger.debug(
+                "Skipping entry evaluation for %s/%s: no immediately following open candle",
+                symbol, strategy_name,
+            )
+            continue
+        entry_candle_time = int(open_candle["open_time"])
+        if _signal_already_traded(cfg, entry_candle_time):
+            continue
+
+        # Check risk circuit breakers before discovering / opening new trades
+        from paper.circuit_breaker import check_circuit_breakers
+        allowed, breaker_msg = check_circuit_breakers()
+        if not allowed:
+            logger.info("Skipping signal evaluation for %s: %s", symbol, breaker_msg)
+            continue
+
+        run_params = dict(BASE_PARAMS, symbol=symbol, market=market, timeframe=timeframe)
+        if strategy_name == "ml_signal_generator_v1":
+            generator_model_id = cfg.get("ml_generator_model_id")
+            if not generator_model_id or cfg.get("ml_model_id"):
+                logger.error("Generator paper config #%s has an invalid model association; skipping entry", cfg.get("id"))
                 continue
-            entry_candle_time = int(open_candle["open_time"])
-            if _signal_already_traded(cfg, entry_candle_time):
-                continue
+            run_params["ml_generator_model_id"] = generator_model_id
+            run_params["_require_generator_eligible"] = True
+        if strategy_name in TREND_ALIGNMENT_STRATEGIES and timeframe != HTF_TIMEFRAME:
+            htf_key = (symbol, market, HTF_TIMEFRAME, False)
+            if htf_key in series_cache:
+                run_params["htf_df"] = series_cache[htf_key].copy()
+            else:
+                htf_df = fetch_ohlcv_with_features_df(symbol, market, HTF_TIMEFRAME, closed_only=True, limit=300)
+                if not htf_df.empty:
+                    series_cache[htf_key] = htf_df
+                run_params["htf_df"] = htf_df.copy()
+        if strategy_name in PAIRS_STRATEGIES and symbol != PAIRS_BASE_SYMBOL:
+            pair_key = (PAIRS_BASE_SYMBOL, market, timeframe, False)
+            if pair_key in series_cache:
+                run_params["pair_df"] = series_cache[pair_key].copy()
+            else:
+                pair_df = fetch_ohlcv_with_features_df(PAIRS_BASE_SYMBOL, market, timeframe, closed_only=True, limit=300)
+                if not pair_df.empty:
+                    series_cache[pair_key] = pair_df
+                run_params["pair_df"] = pair_df.copy()
+            run_params["pair_symbol"] = PAIRS_BASE_SYMBOL
 
-            # Check risk circuit breakers before discovering / opening new trades
-            from paper.circuit_breaker import check_circuit_breakers
-            allowed, breaker_msg = check_circuit_breakers()
-            if not allowed:
-                logger.info("Skipping signal evaluation for %s: %s", symbol, breaker_msg)
-                continue
+        sim_trades = STRATEGIES[strategy_name](signal_df, run_params)
+        if sim_trades:
+            latest_trade = sim_trades[-1]
+            # Accept only a trade signaled on the latest closed candle
+            # and entered at the current candle's open. This prevents the
+            # previous retroactive fill at a candle open after its range
+            # was already known.
+            if (latest_trade.get("signal_open_time") == candle_open_time
+                    and latest_trade.get("entry_time") == entry_candle_time):
+                # Existing ML filter remains a separate optional gate. The
+                # standalone generator reports its own confidence metadata.
+                ml_model_id = cfg.get("ml_model_id")
+                ml_probability = (
+                    latest_trade.get("ml_probability")
+                    if strategy_name == "ml_signal_generator_v1" else None
+                )
+                ml_threshold = None
 
-            run_params = dict(BASE_PARAMS, symbol=symbol, market=market, timeframe=timeframe)
-            if strategy_name == "ml_signal_generator_v1":
-                generator_model_id = cfg.get("ml_generator_model_id")
-                if not generator_model_id or cfg.get("ml_model_id"):
-                    logger.error("Generator paper config #%s has an invalid model association; skipping entry", cfg.get("id"))
-                    continue
-                run_params["ml_generator_model_id"] = generator_model_id
-                run_params["_require_generator_eligible"] = True
-            if strategy_name in TREND_ALIGNMENT_STRATEGIES and timeframe != HTF_TIMEFRAME:
-                run_params["htf_df"] = fetch_ohlcv_with_features_df(symbol, market, HTF_TIMEFRAME, closed_only=True, limit=300)
-            if strategy_name in PAIRS_STRATEGIES and symbol != PAIRS_BASE_SYMBOL:
-                run_params["pair_df"] = fetch_ohlcv_with_features_df(PAIRS_BASE_SYMBOL, market, timeframe, closed_only=True, limit=300)
-                run_params["pair_symbol"] = PAIRS_BASE_SYMBOL
+                if ml_model_id:
+                    try:
+                        from ml.strategy import MLSignalFilter
 
-            sim_trades = STRATEGIES[strategy_name](signal_df, run_params)
-            if sim_trades:
-                latest_trade = sim_trades[-1]
-                # Accept only a trade signaled on the latest closed candle
-                # and entered at the current candle's open. This prevents the
-                # previous retroactive fill at a candle open after its range
-                # was already known.
-                if (latest_trade.get("signal_open_time") == candle_open_time
-                        and latest_trade.get("entry_time") == entry_candle_time):
-                    # Existing ML filter remains a separate optional gate. The
-                    # standalone generator reports its own confidence metadata.
-                    ml_model_id = cfg.get("ml_model_id")
-                    ml_probability = (
-                        latest_trade.get("ml_probability")
-                        if strategy_name == "ml_signal_generator_v1" else None
-                    )
-                    ml_threshold = None
+                        artifact, model = _load_verified_ml_model(ml_model_id)
+                        ml_filter = MLSignalFilter.from_artifact(
+                            artifact=artifact,
+                            model=model,
+                            base_strategy=STRATEGIES[strategy_name],
+                        )
 
-                    if ml_model_id:
-                        try:
-                            from ml.strategy import MLSignalFilter
+                        # Evaluate features on current candle
+                        feature_row = pd.DataFrame([latest_bar.to_dict()])
+                        probs = ml_filter.predict_probability(feature_row)
+                        ml_probability = float(probs[0])
+                        ml_threshold = float(ml_filter.threshold)
 
-                            artifact, model = _load_verified_ml_model(ml_model_id)
-                            ml_filter = MLSignalFilter.from_artifact(
-                                artifact=artifact,
-                                model=model,
-                                base_strategy=STRATEGIES[strategy_name],
-                            )
-
-                            # Evaluate features on current candle
-                            feature_row = pd.DataFrame([latest_bar.to_dict()])
-                            probs = ml_filter.predict_probability(feature_row)
-                            ml_probability = float(probs[0])
-                            ml_threshold = float(ml_filter.threshold)
-
-                            if ml_probability < ml_threshold:
-                                _ML_REJECTED_CANDLE[key] = candle_open_time
-                                logger.info(
-                                    "Paper trading signal %s (%s) REJECTED by ML model %s: prob=%.4f < threshold=%.4f",
-                                    symbol, latest_trade["direction"], ml_model_id, ml_probability, ml_threshold
-                                )
-                                continue
+                        if ml_probability < ml_threshold:
+                            _ML_REJECTED_CANDLE[key] = candle_open_time
                             logger.info(
-                                "Paper trading signal %s (%s) ACCEPTED by ML model %s: prob=%.4f >= threshold=%.4f",
+                                "Paper trading signal %s (%s) REJECTED by ML model %s: prob=%.4f < threshold=%.4f",
                                 symbol, latest_trade["direction"], ml_model_id, ml_probability, ml_threshold
                             )
-                        except Exception as ml_err:
-                            logger.error("Error evaluating ML signal filter %s: %s; skipping entry (fail closed)", ml_model_id, ml_err)
                             continue
-
-                    # Persist only after the ML gate succeeds. If the process stops
-                    # after persistence, the next sync recovers this pending order.
-                    try:
-                        order = create_pending_order({
-                            "config_id": cfg["id"], "symbol": symbol, "market": market,
-                            "timeframe": timeframe, "strategy_name": strategy_name,
-                            "signal_open_time": candle_open_time, "entry_time": entry_candle_time,
-                            "direction": latest_trade["direction"],
-                            "requested_entry_price": float(latest_trade["entry_price"]),
-                            "stop_loss": float(latest_trade["stop_loss"]),
-                            "take_profit": float(latest_trade["take_profit"]),
-                            "atr_at_signal": float(latest_trade.get("atr_at_signal", latest_bar.get("atr", 0)) or 0),
-                            "ml_model_id": ml_model_id,
-                            "ml_generator_model_id": cfg.get("ml_generator_model_id"),
-                            "ml_probability": ml_probability,
-                            "telegram_enabled": bool(cfg.get("telegram_enabled", False)),
-                        })
-                    except Exception:
-                        logger.exception("Unable to persist paper order for %s/%s", symbol, strategy_name)
+                        logger.info(
+                            "Paper trading signal %s (%s) ACCEPTED by ML model %s: prob=%.4f >= threshold=%.4f",
+                            symbol, latest_trade["direction"], ml_model_id, ml_probability, ml_threshold
+                        )
+                    except Exception as ml_err:
+                        logger.error("Error evaluating ML signal filter %s: %s; skipping entry (fail closed)", ml_model_id, ml_err)
                         continue
 
-                    # Recheck the shared emergency stop immediately before the
-                    # transactional fill; it may have changed after signal evaluation.
-                    from paper.circuit_breaker import check_circuit_breakers
-                    fill_allowed, fill_block_reason = check_circuit_breakers()
-                    if not fill_allowed:
-                        logger.warning("Paper order #%s remains pending: %s", order["id"], fill_block_reason)
-                        continue
-                    # Use the durable row as the source of truth if this is an
-                    # idempotent retry, rather than recalculated strategy output.
-                    if (order.get("status") != "PENDING"
-                            or int(order.get("entry_time") or 0) != entry_candle_time
-                            or order.get("symbol") != symbol
-                            or order.get("market") != market
-                            or order.get("timeframe") != timeframe
-                            or order.get("strategy_name") != strategy_name
-                            or (order.get("ml_model_id") or None) != (cfg.get("ml_model_id") or None)
-                            or (order.get("ml_generator_model_id") or None) != (cfg.get("ml_generator_model_id") or None)):
-                        continue
-                    durable_trade = {
-                        "direction": order["direction"],
-                        "entry_price": float(order["requested_entry_price"]),
-                        "stop_loss": float(order["stop_loss"]),
-                        "take_profit": float(order["take_profit"]),
-                        "atr_at_signal": float(order["atr_at_signal"]),
-                    }
-                    durable_ml_model_id = order.get("ml_model_id")
-                    durable_ml_probability = order.get("ml_probability")
-                    durable_generator_model_id = order.get("ml_generator_model_id")
-                    order_result = fill_pending_order(
-                        int(order["id"]),
-                        float(order["requested_entry_price"]),
-                        lambda conn: _insert_position(
-                            cfg, durable_trade, float(open_candle["close"]), entry_candle_time,
-                            ml_model_id=durable_ml_model_id, ml_probability=durable_ml_probability,
-                            ml_generator_model_id=durable_generator_model_id, connection=conn,
-                        ),
-                    )
-                    if order_result["status"] == "expired":
-                        result["orders_expired"] += 1
-                    if order_result["status"] == "rejected":
-                        result["orders_rejected"] += 1
-                    if order_result["status"] == "filled":
-                        result["new_positions_opened"] += 1
-                        result["orders_filled"] += 1
-                        logger.info("Filled paper order #%s for %s (%s) via %s", order["id"], symbol, latest_trade["direction"], strategy_name)
-                        if order.get("telegram_enabled", cfg.get("telegram_enabled", False)):
-                            _send_paper_entry_alert(order, ml_threshold=ml_threshold)
+                # Persist only after the ML gate succeeds. If the process stops
+                # after persistence, the next sync recovers this pending order.
+                try:
+                    order = create_pending_order({
+                        "config_id": cfg["id"], "symbol": symbol, "market": market,
+                        "timeframe": timeframe, "strategy_name": strategy_name,
+                        "signal_open_time": candle_open_time, "entry_time": entry_candle_time,
+                        "direction": latest_trade["direction"],
+                        "requested_entry_price": float(latest_trade["entry_price"]),
+                        "stop_loss": float(latest_trade["stop_loss"]),
+                        "take_profit": float(latest_trade["take_profit"]),
+                        "atr_at_signal": float(latest_trade.get("atr_at_signal", latest_bar.get("atr", 0)) or 0),
+                        "ml_model_id": ml_model_id,
+                        "ml_generator_model_id": cfg.get("ml_generator_model_id"),
+                        "ml_probability": ml_probability,
+                        "telegram_enabled": bool(cfg.get("telegram_enabled", False)),
+                    })
+                except Exception:
+                    logger.exception("Unable to persist paper order for %s/%s", symbol, strategy_name)
+                    continue
+
+                # Recheck the shared emergency stop immediately before the
+                # transactional fill; it may have changed after signal evaluation.
+                from paper.circuit_breaker import check_circuit_breakers
+                fill_allowed, fill_block_reason = check_circuit_breakers()
+                if not fill_allowed:
+                    logger.warning("Paper order #%s remains pending: %s", order["id"], fill_block_reason)
+                    continue
+                # Use the durable row as the source of truth if this is an
+                # idempotent retry, rather than recalculated strategy output.
+                if (order.get("status") != "PENDING"
+                        or int(order.get("entry_time") or 0) != entry_candle_time
+                        or order.get("symbol") != symbol
+                        or order.get("market") != market
+                        or order.get("timeframe") != timeframe
+                        or order.get("strategy_name") != strategy_name
+                        or (order.get("ml_model_id") or None) != (cfg.get("ml_model_id") or None)
+                        or (order.get("ml_generator_model_id") or None) != (cfg.get("ml_generator_model_id") or None)):
+                    continue
+                durable_trade = {
+                    "direction": order["direction"],
+                    "entry_price": float(order["requested_entry_price"]),
+                    "stop_loss": float(order["stop_loss"]),
+                    "take_profit": float(order["take_profit"]),
+                    "atr_at_signal": float(order["atr_at_signal"]),
+                }
+                durable_ml_model_id = order.get("ml_model_id")
+                durable_ml_probability = order.get("ml_probability")
+                durable_generator_model_id = order.get("ml_generator_model_id")
+                order_result = fill_pending_order(
+                    int(order["id"]),
+                    float(order["requested_entry_price"]),
+                    lambda conn: _insert_position(
+                        cfg, durable_trade, float(open_candle["close"]), entry_candle_time,
+                        ml_model_id=durable_ml_model_id, ml_probability=durable_ml_probability,
+                        ml_generator_model_id=durable_generator_model_id, connection=conn,
+                    ),
+                )
+                if order_result["status"] == "expired":
+                    result["orders_expired"] += 1
+                if order_result["status"] == "rejected":
+                    result["orders_rejected"] += 1
+                if order_result["status"] == "filled":
+                    result["new_positions_opened"] += 1
+                    result["orders_filled"] += 1
+                    logger.info("Filled paper order #%s for %s (%s) via %s", order["id"], symbol, latest_trade["direction"], strategy_name)
+                    if order.get("telegram_enabled", cfg.get("telegram_enabled", False)):
+                        _send_paper_entry_alert(order, ml_threshold=ml_threshold)
 
 
     return result
+
+
+def sync_and_evaluate_paper_trading(
+    lock_timeout: int = PAPER_ENGINE_LOCK_TIMEOUT_SECONDS,
+    bypass_lock: bool = False,
+) -> Dict[str, Any]:
+    """
+    Evaluate active configs and open positions with canonical accounting and
+    concurrency protection.
+
+    Acquires a dedicated MariaDB advisory lock (paper_engine_lock) before reading
+    or mutating positions. If another engine process/thread holds the lock,
+    exits safely without processing.
+    """
+    if not bypass_lock:
+        lock = PaperEngineAdvisoryLock(timeout=lock_timeout)
+        if not lock.acquire():
+            logger.info(
+                "Paper engine evaluation skipped: advisory lock '%s' is held by another process",
+                PAPER_ENGINE_LOCK_NAME,
+            )
+            return {
+                "evaluated_configs": 0,
+                "positions_updated": 0,
+                "new_positions_opened": 0,
+                "positions_closed": 0,
+                "orders_filled": 0,
+                "orders_expired": 0,
+                "orders_rejected": 0,
+                "skipped_locked": True,
+            }
+        try:
+            return _sync_and_evaluate_paper_trading_impl()
+        finally:
+            lock.release()
+    else:
+        return _sync_and_evaluate_paper_trading_impl()

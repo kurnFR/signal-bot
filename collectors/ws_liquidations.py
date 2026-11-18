@@ -1,7 +1,15 @@
 """
-Liquidation event collector via !forceOrder@arr (all futures symbols, one
-socket). Every liquidation order is written -- volume here is naturally
-low compared to trades/klines, no throttling needed.
+DEPRECATED: Binance Futures Liquidation WebSocket Collector.
+
+Notice:
+- Status: Deprecated / Inactive. No longer started by run_collectors.py.
+- The Binance Futures liquidation stream (!forceOrder@arr) is currently
+  unusable from the existing network origin (Indonesian IP addresses face
+  edge broadcast/aggregated stream suppression).
+- Liquidation data is unavailable until a verified replacement source is
+  implemented.
+- This module and the underlying `liquidations` database table are retained
+  for reference, architectural documentation, and possible future reactivation.
 """
 import asyncio
 import json
@@ -31,6 +39,11 @@ def event_to_row(event):
 
 
 async def run():
+    logger.warning(
+        "DEPRECATED: collectors.ws_liquidations is deprecated and no longer started by run_collectors.py. "
+        "The Binance Futures !forceOrder@arr stream is unusable from the existing network origin. "
+        "Liquidation data is unavailable until a verified replacement source is implemented."
+    )
     url = f"{FUTURES_WS_BASE}/ws/{FUTURES_LIQUIDATION_ARR_STREAM}"
     backoff = 1
     while True:

@@ -55,18 +55,66 @@ def fetch_klines(url, symbol, interval, start_ms, end_ms, retries=3):
     raise RuntimeError(f"Failed to fetch klines for {symbol} {interval} after {retries} retries")
 
 
-def klines_to_rows(symbol, market, timeframe, raw_klines):
+def is_candle_closed(close_time, now_ms=None):
+    """
+    Determines whether a Binance candle is finalized according to the exchange close timestamp.
+
+    Explicit closure rule:
+    - A candle may be marked closed (1) if and only if the current UTC time is
+      strictly later than the exchange-provided close timestamp (now_ms > close_time).
+    - If the close timestamp is equal to or later than current UTC time (now_ms <= close_time),
+      the candle is incomplete / still forming; return 0.
+    - If close_time is None, missing, non-positive, or non-numeric, fail closed; return 0.
+    """
+    if close_time is None:
+        return 0
+    try:
+        ct = int(close_time)
+        if ct <= 0:
+            return 0
+    except (ValueError, TypeError):
+        return 0
+
+    if now_ms is None:
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    else:
+        try:
+            now_ms = int(now_ms)
+        except (ValueError, TypeError):
+            return 0
+
+    return 1 if now_ms > ct else 0
+
+
+def klines_to_rows(symbol, market, timeframe, raw_klines, now_ms=None):
+    """
+    Convert raw Binance REST klines into database row tuples.
+    Evaluates candle closure using is_candle_closed() to ensure in-progress candles
+    are stored with is_closed=0 instead of prematurely marked closed.
+    """
+    if now_ms is None:
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+
     rows = []
     for k in raw_klines:
         # Binance kline array format:
-        # [open_time, open, high, low, close, volume, close_time, quote_volume,
-        #  num_trades, taker_buy_base_vol, taker_buy_quote_vol, ignore]
+        # [0: open_time, 1: open, 2: high, 3: low, 4: close, 5: volume,
+        #  6: close_time, 7: quote_volume, 8: num_trades,
+        #  9: taker_buy_base_vol, 10: taker_buy_quote_vol, 11: ignore]
+        try:
+            open_time = int(k[0])
+            close_time = int(k[6])
+        except (IndexError, TypeError, ValueError):
+            continue
+
+        closed_flag = is_candle_closed(close_time, now_ms=now_ms)
+
         rows.append((
             symbol, market, timeframe,
-            int(k[0]), int(k[6]),
+            open_time, close_time,
             k[1], k[2], k[3], k[4], k[5], k[7],
             int(k[8]), k[9], k[10],
-            1,  # is_closed -- historical candles are always closed
+            closed_flag,
         ))
     return rows
 

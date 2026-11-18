@@ -38,6 +38,11 @@ logger = logging.getLogger("run_paper_engine")
 
 def poll_once():
     result = sync_and_evaluate_paper_trading()
+    if result.get("skipped_locked"):
+        detail = "skipped (advisory lock held by another process)"
+        heartbeat("paper_engine", detail=detail)
+        logger.info(f"Cycle: {detail}")
+        return
     detail = (
         f"{result['evaluated_configs']} configs, "
         f"{result['positions_updated']} updated, "
