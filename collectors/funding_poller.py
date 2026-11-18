@@ -75,6 +75,10 @@ def parse_retry_after(header_val: Optional[str], now_epoch: Optional[float] = No
     try:
         dt = email.utils.parsedate_to_datetime(val)
         if dt is not None:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            else:
+                dt = dt.astimezone(timezone.utc)
             now_dt = datetime.fromtimestamp(now_epoch if now_epoch is not None else time.time(), tz=timezone.utc)
             delta = (dt - now_dt).total_seconds()
             return max(0.0, float(delta))
@@ -296,6 +300,8 @@ def parse_funding_item(item: Dict[str, Any]) -> Tuple[str, int, Optional[str], O
     if not symbol_raw or not isinstance(symbol_raw, str):
         raise ValueError(f"Missing or invalid symbol in funding item: {item}")
     symbol = symbol_raw.strip().upper()
+    if not symbol:
+        raise ValueError(f"Blank symbol in funding item: {item}")
 
     funding_time_raw = item.get("fundingTime")
     if funding_time_raw is None:
@@ -415,8 +421,10 @@ def fetch_funding_page(
                 logger.warning(
                     f"Server error {resp.status_code} for {symbol}. Retrying in {wait:.1f}s (attempt {attempt + 1}/{max_retries})"
                 )
-                time.sleep(wait)
-                continue
+                if attempt < max_retries - 1:
+                    time.sleep(wait)
+                    continue
+                break
 
             resp.raise_for_status()
             data = resp.json()
@@ -429,7 +437,8 @@ def fetch_funding_page(
             logger.warning(
                 f"Network error ({type(e).__name__}) for {symbol}: {e}. Retrying in {wait:.1f}s (attempt {attempt + 1}/{max_retries})"
             )
-            time.sleep(wait)
+            if attempt < max_retries - 1:
+                time.sleep(wait)
         except requests.HTTPError as e:
             # Client errors (4xx other than 418 and 429) should fail fast
             logger.error(f"HTTP client error {resp.status_code} for {symbol}: {e}")
@@ -500,7 +509,20 @@ def poll_symbol_incremental(
             total_inserted += len(rows)
 
         # Pagination advancement based on highest fundingTime in the batch
-        highest_time = max(int(item["fundingTime"]) for item in raw_items if "fundingTime" in item)
+        valid_times = []
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            try:
+                event_time = int(item.get("fundingTime"))
+                if event_time > 0:
+                    valid_times.append(event_time)
+            except (TypeError, ValueError):
+                continue
+        if not valid_times:
+            logger.warning("%s: funding page contained no valid fundingTime values; stopping pagination safely", symbol)
+            break
+        highest_time = max(valid_times)
         next_cursor = highest_time + 1
         if next_cursor <= cursor:
             # Prevent infinite loop if exchange returns static or non-advancing timestamp
