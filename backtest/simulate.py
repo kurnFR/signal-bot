@@ -235,7 +235,16 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
 
         qty = float(params.get("quantity", 1.0))
         entry_t = int(entry_bar["open_time"])
-        exit_t = int(df.iloc[exit_idx]["open_time"])
+        exit_bar = df.iloc[exit_idx]
+        # TIMEOUT and END_OF_DATA exits are valued at the candle close, so
+        # include settled funding events through close_time when available.
+        # Intrabar SL/TP timestamps are unknowable from OHLCV alone; retain
+        # the candle open as a conservative boundary rather than fabricating
+        # an intrabar execution timestamp.
+        if exit_reason in ("TIMEOUT", "END_OF_DATA") and "close_time" in df.columns:
+            exit_t = int(exit_bar["close_time"])
+        else:
+            exit_t = int(exit_bar["open_time"])
 
         if market == "futures" and not is_pairs:
             if funding_data_missing:
