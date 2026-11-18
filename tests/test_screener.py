@@ -704,3 +704,14 @@ def test_reload_control_does_not_notify_for_threshold_only_changes(monkeypatch):
     assert module.CONFIG["rvol_multiplier"] == 8.5
     assert notifications == []
 
+
+def test_schema_import_preserves_host_shutdown_handlers():
+    import subprocess
+    import sys
+
+    subprocess.run([sys.executable, "-c", """
+import signal
+before = [signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)]
+from Screen.screening import verify_signal_schema
+assert before == [signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)]
+"""], check=True)

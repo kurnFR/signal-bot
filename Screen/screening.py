@@ -1206,10 +1206,17 @@ def start_websocket(streams,thread_id,stop_event):
         if stop_event.wait(reconnect_delay): break
         reconnect_delay=min(reconnect_delay*1.5,CONFIG["reconnect_delay_max"])
 
-def signal_handler(signum,frame): logger.info("🛑 Received signal %s, initiating graceful shutdown...",signum); state.shutdown_flag=True
-signal.signal(signal.SIGINT,signal_handler); signal.signal(signal.SIGTERM,signal_handler)
+def signal_handler(signum, frame):
+    logger.info("Received signal %s, stopping the screener", signum)
+    state.shutdown_flag = True
+    shutdown_event.set()
+
+
+shutdown_event = threading.Event()
 
 def main():
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     logger.info("🚀 Smart Money Volume Detector starting (EARLY WARNING MODE)...")
     logger.info(f"Config: RVOL≥{CONFIG['rvol_multiplier']}x | Divergence: ≤{CONFIG['divergence_max_price_change']}% | Velocity: ≥{CONFIG['velocity_threshold']}x | Quality≥{CONFIG.get('min_quality_score',0):.0f} | Selection window={CONFIG.get('alert_selection_window_sec',3):.1f}s | Max {CONFIG['max_alerts_per_hour']} alerts/hour")
     verify_signal_schema(); reload_control()
@@ -1242,7 +1249,8 @@ def main():
                 logger.warning("⚠️ initial universe heartbeat update failed: %s", e)
         else: logger.error("❌ No liquid symbols found - retrying universe discovery in control loop")
         while not state.shutdown_flag:
-            time.sleep(60)
+            if shutdown_event.wait(60):
+                break
             try:
                 update_screener_heartbeat(pid=os.getpid(), timeframe=CONFIG.get("timeframe", "1m"), symbols_monitored=len(symbols), last_universe_refresh_at=datetime.utcfromtimestamp(last_universe_refresh) if last_universe_refresh else None)
             except Exception as e:
