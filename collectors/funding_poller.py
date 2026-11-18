@@ -45,6 +45,12 @@ DEFAULT_MAX_RETRIES = 3
 DEFAULT_LOOKBACK_DAYS = 30
 
 HTTP_418_MIN_DELAY_SECONDS = 120.0
+
+
+class FundingIPBanError(RuntimeError):
+    """Raised when Binance returns HTTP 418 and the cycle must stop."""
+
+
 _BAN_COOLDOWN_LOCK = threading.Lock()
 _BAN_COOLDOWN_UNTIL = 0.0
 
@@ -367,12 +373,14 @@ def fetch_funding_page(
     if end_ms is not None:
         params["endTime"] = int(end_ms)
 
+    ban_detected = False
     for attempt in range(max_retries):
         try:
             resp = session.get(url, params=params, timeout=15)
 
             # 2. IP ban handling (HTTP 418) - never enter generic non-retryable 4xx path
             if resp.status_code == 418:
+                ban_detected = True
                 ra_header = resp.headers.get("Retry-After")
                 parsed_ra = parse_retry_after(ra_header)
                 ban_duration = HTTP_418_MIN_DELAY_SECONDS
@@ -447,6 +455,8 @@ def fetch_funding_page(
             logger.error(f"Response format/JSON decoding error for {symbol}: {e}")
             raise
 
+    if ban_detected:
+        raise FundingIPBanError(f"Binance HTTP 418 IP ban for {symbol}; stop this polling cycle")
     raise RuntimeError(f"Failed to fetch funding rates for {symbol} after {max_retries} retries")
 
 
@@ -555,7 +565,6 @@ def poll_all_symbols(
     """
     target_symbols = symbols if symbols is not None else SYMBOLS
     managed_session = session is None
-    req_session = session or requests.Session()
 
     results: Dict[str, Any] = {
         "symbols_total": len(target_symbols),
@@ -588,6 +597,7 @@ def poll_all_symbols(
             results["reason"] = "advisory_lock_held"
             return results
 
+    req_session = session or requests.Session()
     try:
         for symbol in target_symbols:
             try:
@@ -601,6 +611,11 @@ def poll_all_symbols(
                 )
                 results["symbols_ok"] += 1
                 results["rows_inserted"] += inserted
+            except FundingIPBanError as e:
+                results["symbols_failed"] += 1
+                results["errors"][symbol] = str(e)
+                logger.critical("Stopping funding polling cycle after Binance IP ban: %s", e)
+                break
             except Exception as e:
                 results["symbols_failed"] += 1
                 results["errors"][symbol] = str(e)
