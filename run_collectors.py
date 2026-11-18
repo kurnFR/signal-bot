@@ -27,12 +27,31 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("run_collectors")
 
 
+async def _run_collector_supervised(name, collector, restart_delay=5):
+    """Keep one collector failure from terminating its sibling collector.
+
+    Cancellation is always propagated so systemd SIGTERM can shut the process
+    down cleanly. Unexpected return and exceptions both trigger bounded retry.
+    """
+    delay = max(1, int(restart_delay))
+    while True:
+        try:
+            await collector()
+            logger.error("Collector %s exited unexpectedly; restarting in %ss", name, delay)
+        except asyncio.CancelledError:
+            logger.info("Collector %s received cancellation", name)
+            raise
+        except Exception:
+            logger.exception("Collector %s failed; restarting in %ss", name, delay)
+        await asyncio.sleep(delay)
+
+
 async def main():
     logger.info("Starting all collectors...")
-    tasks = [ws_kline_main()]
+    collectors = [("kline", ws_kline_main)]
 
     if ENABLE_FUTURES:
-        tasks += [oi_poller_run()]
+        collectors.append(("open_interest", oi_poller_run))
     else:
         logger.info(
             "ENABLE_FUTURES is false -- skipping open-interest "
@@ -40,7 +59,17 @@ async def main():
             "once you've confirmed futures WS is reachable from your network."
         )
 
-    await asyncio.gather(*tasks)
+    tasks = [
+        asyncio.create_task(_run_collector_supervised(name, collector))
+        for name, collector in collectors
+    ]
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 if __name__ == "__main__":
