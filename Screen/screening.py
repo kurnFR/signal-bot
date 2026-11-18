@@ -1207,12 +1207,12 @@ def start_websocket(streams,thread_id,stop_event):
         reconnect_delay=min(reconnect_delay*1.5,CONFIG["reconnect_delay_max"])
 
 def signal_handler(signum, frame):
+    if state.shutdown_flag:
+        return
     logger.info("Received signal %s, stopping the screener", signum)
     state.shutdown_flag = True
-    shutdown_event.set()
-
-
-shutdown_event = threading.Event()
+    # Interrupt blocking discovery requests as well as the control-loop sleep.
+    raise KeyboardInterrupt
 
 def main():
     signal.signal(signal.SIGINT, signal_handler)
@@ -1237,7 +1237,9 @@ def main():
     def stop_connections():
         nonlocal threads
         ws_stop_event.set()
-        for t in threads: t.join(timeout=5)
+        deadline = time.monotonic() + 4
+        for t in threads:
+            t.join(timeout=max(0, deadline - time.monotonic()))
         threads=[]
     try:
         symbols=get_liquid_symbols()
@@ -1249,8 +1251,7 @@ def main():
                 logger.warning("⚠️ initial universe heartbeat update failed: %s", e)
         else: logger.error("❌ No liquid symbols found - retrying universe discovery in control loop")
         while not state.shutdown_flag:
-            if shutdown_event.wait(60):
-                break
+            time.sleep(60)
             try:
                 update_screener_heartbeat(pid=os.getpid(), timeframe=CONFIG.get("timeframe", "1m"), symbols_monitored=len(symbols), last_universe_refresh_at=datetime.utcfromtimestamp(last_universe_refresh) if last_universe_refresh else None)
             except Exception as e:
@@ -1269,4 +1270,8 @@ def main():
     finally:
         logger.info("🔄 Shutting down..."); state.shutdown_flag=True; ws_stop_event.set(); stop_connections(); dispatch_thread.join(timeout=5); logger.info("✅ Shutdown complete")
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass  # Stop requested during initial schema or heartbeat checks.
