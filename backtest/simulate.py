@@ -21,6 +21,8 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
     indicator warm-up, but no signal/entry/exit is allowed outside the window.
     """
     trades = []
+    if df is None or df.empty:
+        return trades
     n = len(df)
     i = 1
     fee = params["BACKTEST_FEE_PCT"]
