@@ -25,16 +25,66 @@ from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT
 class TestPaperPositionLifecycle(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # Reset pool to use signal_bot_test
+        # 1. Enforce database isolation before pool initialization
+        os.environ["MYSQL_DATABASE"] = "signal_bot_test"
+        config.MYSQL_CONFIG["database"] = "signal_bot_test"
+        db.MYSQL_CONFIG["database"] = "signal_bot_test"
         db._pool = None
-        cls.pool = db.get_pool()
+
+        # 2. Safely attempt database connection
+        try:
+            cls.pool = db.get_pool()
+            conn = cls.pool.get_connection()
+        except Exception as e:
+            raise unittest.SkipTest(
+                f"Isolated test database 'signal_bot_test' is unavailable or unreachable: {e}. "
+                "Please provision and configure signal_bot_test before running integration tests."
+            )
+
+        # 3. Verify database identity - FAIL immediately on mismatch, never skip
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT DATABASE(), CURRENT_USER()")
+            cls.db_name, cls.db_user = cur.fetchone()
+            cur.close()
+        finally:
+            conn.close()
+
+        if cls.db_name != "signal_bot_test":
+            raise AssertionError(
+                f"Database isolation guard failed: connected to '{cls.db_name}', "
+                "strictly expected 'signal_bot_test'. Integration tests must never run against production."
+            )
+
+        # 4. Verify required tables exist - clear setup failure if missing
         conn = cls.pool.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT DATABASE(), CURRENT_USER()")
-        cls.db_name, cls.db_user = cur.fetchone()
-        cur.close()
-        conn.close()
-        assert cls.db_name == "signal_bot_test", f"Safety assertion failed: connected to {cls.db_name}"
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'signal_bot_test'
+                """
+            )
+            existing_tables = {row[0].lower() for row in cur.fetchall()}
+            cur.close()
+        finally:
+            conn.close()
+
+        required_tables = {"paper_trades", "paper_orders", "paper_positions", "paper_configs", "funding_rate"}
+        missing_tables = required_tables - existing_tables
+        if missing_tables:
+            raise RuntimeError(
+                f"Required schema tables missing in signal_bot_test: {missing_tables}. "
+                "Run database schema migrations on signal_bot_test."
+            )
+
+    @classmethod
+    def tearDownClass(cls):
+        # Cleanly restore config and reset pool singleton
+        config.MYSQL_CONFIG["database"] = "crypto_signals"
+        db.MYSQL_CONFIG["database"] = "crypto_signals"
+        db._pool = None
 
     def setUp(self):
         # Clean test tables in signal_bot_test before each test

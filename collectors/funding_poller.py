@@ -14,9 +14,11 @@ and only broadcasts 1-second estimated rates), this REST endpoint is:
 import argparse
 import asyncio
 import decimal
+import email.utils
 import logging
 import math
 import os
+import random
 import signal
 import sys
 import threading
@@ -41,6 +43,164 @@ logger = logging.getLogger("funding_poller")
 DEFAULT_LIMIT = 1000
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_LOOKBACK_DAYS = 30
+
+HTTP_418_MIN_DELAY_SECONDS = 120.0
+_BAN_COOLDOWN_LOCK = threading.Lock()
+_BAN_COOLDOWN_UNTIL = 0.0
+
+
+def parse_retry_after(header_val: Optional[str], now_epoch: Optional[float] = None) -> Optional[float]:
+    """
+    Parse Retry-After header value into seconds.
+    Supports:
+    - Numeric seconds string (e.g. '120', '5', '86400')
+    - HTTP-date format (e.g. 'Wed, 21 Oct 2026 07:28:00 GMT')
+    Returns seconds as float >= 0.0, or None if missing/invalid.
+    """
+    if not header_val or not isinstance(header_val, str):
+        return None
+    val = header_val.strip()
+    if not val:
+        return None
+
+    # 1. Numeric seconds
+    try:
+        seconds = float(val)
+        if math.isfinite(seconds) and seconds >= 0:
+            return float(seconds)
+    except (ValueError, TypeError):
+        pass
+
+    # 2. HTTP-date format (RFC 2822 / RFC 7231)
+    try:
+        dt = email.utils.parsedate_to_datetime(val)
+        if dt is not None:
+            now_dt = datetime.fromtimestamp(now_epoch if now_epoch is not None else time.time(), tz=timezone.utc)
+            delta = (dt - now_dt).total_seconds()
+            return max(0.0, float(delta))
+    except Exception:
+        pass
+
+    return None
+
+
+def get_ban_cooldown_remaining(now_epoch: Optional[float] = None) -> float:
+    """Return remaining process-level cooldown seconds under active IP ban."""
+    now = now_epoch if now_epoch is not None else time.time()
+    with _BAN_COOLDOWN_LOCK:
+        if _BAN_COOLDOWN_UNTIL > now:
+            return _BAN_COOLDOWN_UNTIL - now
+        return 0.0
+
+
+def set_ban_cooldown(cooldown_seconds: float, now_epoch: Optional[float] = None) -> float:
+    """
+    Set process-level IP ban cooldown.
+    Ensures that retry exhaustion or subsequent calls do not clear an active ban window.
+    """
+    now = now_epoch if now_epoch is not None else time.time()
+    target = now + max(0.0, float(cooldown_seconds))
+    with _BAN_COOLDOWN_LOCK:
+        global _BAN_COOLDOWN_UNTIL
+        if target > _BAN_COOLDOWN_UNTIL:
+            _BAN_COOLDOWN_UNTIL = target
+        return max(0.0, _BAN_COOLDOWN_UNTIL - now)
+
+
+def reset_ban_cooldown_for_testing() -> None:
+    """Reset the shared process-level ban cooldown for test isolation."""
+    with _BAN_COOLDOWN_LOCK:
+        global _BAN_COOLDOWN_UNTIL
+        _BAN_COOLDOWN_UNTIL = 0.0
+
+
+class FundingPollerLock:
+    """
+    MariaDB advisory lock: 'signal_bot_funding_poller'.
+    - Non-blocking acquisition using GET_LOCK(name, 0).
+    - Dedicated unpooled database connection.
+    - Uses existing least-privilege funding collector credentials.
+    - Never holds the lock on a connection returned to a shared pool.
+    - Releases lock in guaranteed cleanup.
+    - Safely handles connection loss and lock-release errors.
+    """
+    LOCK_NAME = "signal_bot_funding_poller"
+
+    def __init__(
+        self,
+        config: Optional[Any] = None,
+        config_path: Optional[str] = None,
+        connection: Optional[Any] = None,
+    ):
+        self._config = config
+        self._config_path = config_path
+        self._conn = connection
+        self._owned_connection = connection is None
+        self._acquired = False
+
+    def acquire(self) -> bool:
+        """
+        Attempt non-blocking acquisition of signal_bot_funding_poller.
+        Returns True if acquired, False if held by another process or on error.
+        """
+        try:
+            if self._conn is None:
+                cfg = self._config or load_funding_collector_config(env_path=self._config_path)
+                import mysql.connector
+                self._conn = mysql.connector.connect(**cfg.to_dict())
+                self._owned_connection = True
+
+            cur = self._conn.cursor()
+            cur.execute("SELECT GET_LOCK(%s, 0)", (self.LOCK_NAME,))
+            res = cur.fetchone()
+            cur.close()
+
+            if res is not None and res[0] == 1:
+                self._acquired = True
+                logger.info(f"Acquired MariaDB advisory lock '{self.LOCK_NAME}'.")
+                return True
+            else:
+                self._acquired = False
+                logger.warning(
+                    f"MariaDB advisory lock '{self.LOCK_NAME}' is held by another process (result={res})."
+                )
+                self.release()
+                return False
+        except Exception as e:
+            logger.error(f"Error acquiring MariaDB advisory lock '{self.LOCK_NAME}': {e}")
+            self._acquired = False
+            self.release()
+            return False
+
+    def release(self) -> None:
+        """
+        Release advisory lock and safely close the dedicated unpooled connection.
+        """
+        if self._conn is not None:
+            if self._acquired:
+                try:
+                    cur = self._conn.cursor()
+                    cur.execute("SELECT RELEASE_LOCK(%s)", (self.LOCK_NAME,))
+                    cur.fetchall()
+                    cur.close()
+                    logger.info(f"Released MariaDB advisory lock '{self.LOCK_NAME}'.")
+                except Exception as e:
+                    logger.warning(f"Error releasing MariaDB advisory lock '{self.LOCK_NAME}': {e}")
+                finally:
+                    self._acquired = False
+
+            if self._owned_connection:
+                try:
+                    self._conn.close()
+                except Exception as e:
+                    logger.warning(f"Error closing dedicated advisory lock connection: {e}")
+                self._conn = None
+
+    def __enter__(self) -> bool:
+        return self.acquire()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
 
 
 def clean_decimal(value: Any) -> Optional[str]:
@@ -121,11 +281,21 @@ def fetch_funding_page(
     max_retries: int = DEFAULT_MAX_RETRIES,
     base_url: Optional[str] = None,
     backoff_base: float = 1.0,
+    jitter_func: Optional[Any] = None,
 ) -> List[Dict[str, Any]]:
     """
     Fetch a single page of funding rates from Binance public REST API with bounded exponential backoff.
-    Handles HTTP 429 (Retry-After), HTTP 5xx, timeouts, and network disconnects.
+    Handles HTTP 418 (IP ban), HTTP 429 (Retry-After), HTTP 5xx, timeouts, and network disconnects.
     """
+    # 1. Enforce shared process-level IP ban cooldown (cannot bypass with another symbol or cycle)
+    remaining = get_ban_cooldown_remaining()
+    if remaining > 0:
+        logger.warning(
+            f"Active IP ban/cooldown window in effect ({remaining:.1f}s remaining). "
+            f"Enforcing shared cooldown before request for {symbol}."
+        )
+        time.sleep(remaining)
+
     url = base_url or FUTURES_FUNDING_HISTORY_URL
     params: Dict[str, Any] = {
         "symbol": symbol.strip().upper(),
@@ -139,20 +309,52 @@ def fetch_funding_page(
     for attempt in range(max_retries):
         try:
             resp = session.get(url, params=params, timeout=15)
-            # Rate limit handling (HTTP 429)
+
+            # 2. IP ban handling (HTTP 418) - never enter generic non-retryable 4xx path
+            if resp.status_code == 418:
+                ra_header = resp.headers.get("Retry-After")
+                parsed_ra = parse_retry_after(ra_header)
+                ban_duration = HTTP_418_MIN_DELAY_SECONDS
+                if parsed_ra is not None and parsed_ra > HTTP_418_MIN_DELAY_SECONDS:
+                    ban_duration = parsed_ra
+
+                jitter = jitter_func() if jitter_func is not None else random.uniform(0.1, 1.0)
+                wait = ban_duration + max(0.0, jitter)
+
+                # Record cooldown at process level; retry exhaustion must not clear this
+                set_ban_cooldown(wait)
+                logger.error(
+                    f"HIGH-SEVERITY WARNING: Binance HTTP 418 IP ban detected for {symbol}! "
+                    f"Enforcing mandatory ban cooldown of {ban_duration:.1f}s (wait={wait:.2f}s, attempt {attempt + 1}/{max_retries})."
+                )
+
+                # Avoid sleeping unnecessarily after the final exhausted attempt
+                if attempt < max_retries - 1:
+                    time.sleep(wait)
+                    continue
+                else:
+                    break
+
+            # 3. Rate limit handling (HTTP 429) - retains existing Retry-After behavior
             if resp.status_code == 429:
-                retry_after_str = resp.headers.get("Retry-After", "5")
-                try:
-                    retry_after = max(1, int(retry_after_str))
-                except ValueError:
+                ra_header = resp.headers.get("Retry-After")
+                parsed_ra = parse_retry_after(ra_header)
+                if parsed_ra is not None:
+                    retry_after = int(parsed_ra) if float(parsed_ra).is_integer() else max(1.0, parsed_ra)
+                else:
                     retry_after = 5
+
                 logger.warning(
                     f"Rate limited (HTTP 429) for {symbol}. Sleeping {retry_after}s (attempt {attempt + 1}/{max_retries})"
                 )
-                time.sleep(retry_after)
-                continue
 
-            # Server error handling (HTTP 5xx)
+                if attempt < max_retries - 1:
+                    time.sleep(retry_after)
+                    continue
+                else:
+                    break
+
+            # 4. Server error handling (HTTP 5xx)
             if 500 <= resp.status_code < 600:
                 wait = min(backoff_base * (2 ** attempt), 30.0)
                 logger.warning(
@@ -174,7 +376,7 @@ def fetch_funding_page(
             )
             time.sleep(wait)
         except requests.HTTPError as e:
-            # Client errors (4xx other than 429) should fail fast
+            # Client errors (4xx other than 418 and 429) should fail fast
             logger.error(f"HTTP client error {resp.status_code} for {symbol}: {e}")
             raise
         except ValueError as e:
@@ -264,10 +466,15 @@ def poll_all_symbols(
     end_ms: Optional[int] = None,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
     base_url: Optional[str] = None,
+    acquire_lock: bool = True,
+    lock: Optional[FundingPollerLock] = None,
+    config_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Poll funding rates for all target symbols in a single cycle.
     Updates collector heartbeat.
+    Acquires MariaDB advisory lock 'signal_bot_funding_poller' using a dedicated unpooled connection.
+    If another poller owns the lock, skips the cycle cleanly.
     """
     target_symbols = symbols if symbols is not None else SYMBOLS
     managed_session = session is None
@@ -280,6 +487,18 @@ def poll_all_symbols(
         "rows_inserted": 0,
         "errors": {},
     }
+
+    lock_ctx: Optional[FundingPollerLock] = None
+    if acquire_lock:
+        lock_ctx = lock if lock is not None else FundingPollerLock(config_path=config_path)
+        if not lock_ctx.acquire():
+            logger.warning(
+                "MariaDB advisory lock 'signal_bot_funding_poller' is currently held by another process; "
+                "skipping funding poller cycle cleanly."
+            )
+            results["skipped"] = True
+            results["reason"] = "advisory_lock_held"
+            return results
 
     try:
         for symbol in target_symbols:
@@ -314,6 +533,8 @@ def poll_all_symbols(
     finally:
         if managed_session:
             req_session.close()
+        if lock_ctx is not None:
+            lock_ctx.release()
 
     return results
 
@@ -361,11 +582,19 @@ def run_standalone_loop(
         while not shutdown_flag.is_set():
             start_t = time.time()
             try:
-                results = poll_all_symbols(symbols=target_symbols, pool=active_pool, session=session)
-                logger.info(
-                    f"Poll cycle completed: {results['symbols_ok']}/{results['symbols_total']} symbols ok, "
-                    f"+{results['rows_inserted']} rows"
+                results = poll_all_symbols(
+                    symbols=target_symbols,
+                    pool=active_pool,
+                    session=session,
+                    config_path=config_path,
                 )
+                if results.get("skipped"):
+                    logger.info("Funding poll cycle skipped: MariaDB advisory lock held by another process.")
+                else:
+                    logger.info(
+                        f"Poll cycle completed: {results['symbols_ok']}/{results['symbols_total']} symbols ok, "
+                        f"+{results['rows_inserted']} rows"
+                    )
             except Exception as e:
                 logger.error(f"Unhandled error in funding poller cycle: {e}")
                 try:
@@ -427,8 +656,16 @@ def main():
         logger.info(f"Running one-shot funding poll for symbols: {symbols}")
         cfg = load_funding_collector_config(env_path=args.config)
         pool = get_funding_pool(config=cfg)
-        results = poll_all_symbols(symbols=symbols, pool=pool, lookback_days=args.lookback_days)
-        logger.info(f"Execution finished: {results}")
+        results = poll_all_symbols(
+            symbols=symbols,
+            pool=pool,
+            lookback_days=args.lookback_days,
+            config_path=args.config,
+        )
+        if results.get("skipped"):
+            logger.info(f"One-shot execution skipped cleanly: {results}")
+        else:
+            logger.info(f"Execution finished: {results}")
     elif args.async_loop:
         cfg = load_funding_collector_config(env_path=args.config)
         pool = get_funding_pool(config=cfg)

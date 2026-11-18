@@ -10,6 +10,7 @@ import json
 import math
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any, Dict, List, Optional, Tuple
 
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -50,11 +51,12 @@ def get_retailbot2_pool():
     this separate pool preserves existing callers only."""
     global _retailbot2_pool
     if _retailbot2_pool is None:
+        import config
         _retailbot2_pool = pooling.MySQLConnectionPool(
             pool_name="retailbot2_pool",
             pool_size=3,
             init_command="SET time_zone = '+00:00'",
-            **RETAILBOT2_DB_CONFIG,
+            **config.RETAILBOT2_DB_CONFIG,
         )
     return _retailbot2_pool
 
@@ -62,11 +64,12 @@ def get_retailbot2_pool():
 def get_pool():
     global _pool
     if _pool is None:
+        import config
         _pool = pooling.MySQLConnectionPool(
             pool_name="crypto_bot_pool",
             pool_size=10,
             init_command="SET time_zone = '+00:00'",  # force UTC session tz -- see note in schema.sql
-            **MYSQL_CONFIG,
+            **config.MYSQL_CONFIG,
         )
     return _pool
 
@@ -241,6 +244,74 @@ def get_latest_funding_time(symbol, pool=None):
         return row[0] if row and row[0] is not None else None
     finally:
         conn.close()
+
+
+def fetch_settled_funding_events(
+    symbol: str,
+    start_time: int,
+    end_time: int,
+    pool: Any = None,
+) -> List[Tuple[int, float, float]]:
+    """
+    Fetch authentic settled funding events for a symbol between start_time and end_time (in ms).
+    Bounded single database query for the entire simulation interval:
+      SELECT event_time, mark_price, funding_rate
+      FROM funding_rate
+      WHERE symbol = %s
+        AND event_time > %s
+        AND event_time <= %s
+        AND mark_price IS NOT NULL
+      ORDER BY event_time ASC
+
+    Validates:
+    - mark_price must be non-null, numeric, and > 0.
+    - funding_rate must be numeric and finite.
+    Rejects non-finite funding data (raises ValueError).
+    Returns list of (event_time, mark_price, funding_rate) tuples sorted by event_time asc.
+    """
+    p = pool or get_pool()
+    conn = p.get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            """
+            SELECT event_time, mark_price, funding_rate
+            FROM funding_rate
+            WHERE symbol = %s
+              AND event_time > %s
+              AND event_time <= %s
+              AND mark_price IS NOT NULL
+            ORDER BY event_time ASC
+            """,
+            (symbol.strip().upper(), int(start_time), int(end_time)),
+        )
+        rows = cur.fetchall()
+        cur.close()
+    finally:
+        conn.close()
+
+    events: List[Tuple[int, float, float]] = []
+    for r in rows:
+        evt_time = int(r["event_time"])
+        mp_raw = r["mark_price"]
+        fr_raw = r["funding_rate"]
+
+        if mp_raw is None:
+            continue
+        try:
+            mp = float(mp_raw)
+            fr = float(fr_raw)
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid non-numeric funding data for {symbol} at {evt_time}: {e}")
+
+        if not math.isfinite(mp) or not math.isfinite(fr):
+            raise ValueError(f"Non-finite funding data for {symbol} at {evt_time}: mark_price={mp}, funding_rate={fr}")
+        if mp <= 0:
+            raise ValueError(f"Invalid non-positive mark price for {symbol} at {evt_time}: mark_price={mp}")
+
+        events.append((evt_time, mp, fr))
+
+    return events
 
 
 def upsert_open_interest(rows):

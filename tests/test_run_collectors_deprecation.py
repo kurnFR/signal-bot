@@ -68,19 +68,30 @@ def test_ws_liquidations_run_logs_deprecation_warning(caplog):
     )
 
 
+def test_run_collectors_does_not_import_funding_poller():
+    """Verify run_collectors namespace does not schedule funding_poller (exclusive to systemd service)."""
+    import run_collectors
+    assert not hasattr(run_collectors, "funding_poller_run"), (
+        "Dual ownership failure: funding_poller_run is still imported/scheduled in run_collectors!"
+    )
+    source = inspect.getsource(run_collectors)
+    assert "funding_poller_run" not in source, "Source still references funding_poller_run"
+    assert "from collectors.funding_poller" not in source, (
+        "Source still imports from collectors.funding_poller"
+    )
+
+
 def test_run_collectors_main_futures_enabled_schedules_intended_tasks():
     """
     When ENABLE_FUTURES is True, run_collectors.main() must schedule:
     - ws_kline_main()
-    - funding_poller_run()
     - oi_poller_run()
-    And must NOT schedule any liquidation collector.
+    And must NOT schedule funding_poller or any liquidation collector.
     """
     import run_collectors
 
     async def execute():
         mock_kline_coro = AsyncMock(name="mock_kline")
-        mock_funding_coro = AsyncMock(name="mock_funding")
         mock_oi_coro = AsyncMock(name="mock_oi")
 
         scheduled_tasks = []
@@ -94,16 +105,16 @@ def test_run_collectors_main_futures_enabled_schedules_intended_tasks():
 
         with patch("run_collectors.ENABLE_FUTURES", True), \
              patch("run_collectors.ws_kline_main", return_value=mock_kline_coro()), \
-             patch("run_collectors.funding_poller_run", return_value=mock_funding_coro()), \
              patch("run_collectors.oi_poller_run", return_value=mock_oi_coro()), \
              patch("run_collectors.asyncio.gather", side_effect=fake_gather):
 
             await run_collectors.main()
 
-        assert len(scheduled_tasks) == 3, f"Expected 3 tasks, got {len(scheduled_tasks)}"
+        assert len(scheduled_tasks) == 2, f"Expected 2 tasks (kline + oi), got {len(scheduled_tasks)}"
         task_reprs = [repr(t) for t in scheduled_tasks]
         for r in task_reprs:
             assert "liquidation" not in r.lower(), f"Unexpected liquidation task scheduled: {r}"
+            assert "funding" not in r.lower(), f"Unexpected funding task scheduled in run_collectors: {r}"
 
     asyncio.run(execute())
 
@@ -148,7 +159,6 @@ def test_run_collectors_cancellation_behavior():
 
         with patch("run_collectors.ENABLE_FUTURES", True), \
              patch("run_collectors.ws_kline_main", side_effect=hanging_task), \
-             patch("run_collectors.funding_poller_run", side_effect=hanging_task), \
              patch("run_collectors.oi_poller_run", side_effect=hanging_task):
 
             task = asyncio.create_task(run_collectors.main())
@@ -227,3 +237,71 @@ def test_schema_sql_preserves_liquidations_table():
     assert "price" in schema_sql
     assert "event_time" in schema_sql
     assert "idx_liq_symbol_time" in schema_sql
+
+
+def test_two_simultaneous_funding_pollers_cannot_poll_concurrently():
+    """Verify MariaDB advisory lock prevents two funding poller instances from polling concurrently."""
+    from collectors.funding_poller import FundingPollerLock
+    from unittest.mock import MagicMock
+
+    mock_conn1 = MagicMock()
+    cur1 = MagicMock()
+    cur1.fetchone.return_value = (1,)  # lock acquired
+    mock_conn1.cursor.return_value = cur1
+
+    mock_conn2 = MagicMock()
+    cur2 = MagicMock()
+    cur2.fetchone.return_value = (0,)  # lock held by another
+    mock_conn2.cursor.return_value = cur2
+
+    lock1 = FundingPollerLock(connection=mock_conn1)
+    lock2 = FundingPollerLock(connection=mock_conn2)
+
+    assert lock1.acquire() is True
+    assert lock2.acquire() is False
+    lock1.release()
+
+
+def test_funding_poller_lock_release_after_success_and_exceptions():
+    """Verify FundingPollerLock releases the lock and connection in all scenarios."""
+    from collectors.funding_poller import FundingPollerLock
+    from unittest.mock import MagicMock
+
+    # 1. Normal success
+    mock_conn = MagicMock()
+    cur = MagicMock()
+    cur.fetchone.return_value = (1,)
+    mock_conn.cursor.return_value = cur
+    lock = FundingPollerLock(connection=mock_conn)
+    with lock as acquired:
+        assert acquired is True
+    cur.execute.assert_any_call("SELECT RELEASE_LOCK(%s)", ("signal_bot_funding_poller",))
+
+    # 2. Unhandled exception
+    mock_conn_exc = MagicMock()
+    cur_exc = MagicMock()
+    cur_exc.fetchone.return_value = (1,)
+    mock_conn_exc.cursor.return_value = cur_exc
+    lock_exc = FundingPollerLock(connection=mock_conn_exc)
+    with pytest.raises(ZeroDivisionError):
+        with lock_exc as acquired:
+            assert acquired is True
+            _ = 1 / 0
+    cur_exc.execute.assert_any_call("SELECT RELEASE_LOCK(%s)", ("signal_bot_funding_poller",))
+
+
+def test_competing_funding_poller_skips_without_modifying_data():
+    """Verify that when advisory lock is held, poll_all_symbols skips cleanly without fetching or inserting."""
+    from collectors.funding_poller import poll_all_symbols, FundingPollerLock
+    from unittest.mock import MagicMock, patch
+
+    mock_lock = MagicMock(spec=FundingPollerLock)
+    mock_lock.acquire.return_value = False  # Lock held by competing instance
+
+    with patch("collectors.funding_poller.poll_symbol_incremental") as mock_incremental:
+        res = poll_all_symbols(symbols=["BTCUSDT", "ETHUSDT"], acquire_lock=True, lock=mock_lock)
+
+    assert res.get("skipped") is True
+    assert res.get("reason") == "advisory_lock_held"
+    assert res.get("rows_inserted") == 0
+    assert mock_incremental.call_count == 0
