@@ -35,6 +35,10 @@ from collectors.funding_poller import (
     poll_symbol_incremental,
     poll_all_symbols,
     run_standalone_loop,
+    parse_retry_after,
+    reset_ban_cooldown_for_testing,
+    get_ban_cooldown_remaining,
+    set_ban_cooldown,
 )
 import db.db as db_module
 
@@ -1018,4 +1022,230 @@ def test_secret_redaction_in_config_and_logging():
     assert "***REDACTED***" in plain_str
     # Dict form preserves actual password for connector
     assert cfg.to_dict()["password"] == "SuperSecretPassword_MustNotBeLogged_999"
+
+
+# =============================================================================
+# 15. Unit & Regression Tests: Binance HTTP 418 & 429 Ban Protection
+# =============================================================================
+
+def test_parse_retry_after_numeric_and_http_date():
+    # Numeric seconds
+    assert parse_retry_after("120") == 120.0
+    assert parse_retry_after("5.5") == 5.5
+    assert parse_retry_after("0") == 0.0
+    assert parse_retry_after(None) is None
+    assert parse_retry_after("") is None
+    assert parse_retry_after("invalid") is None
+
+    # HTTP-date
+    import email.utils
+    date_str = "Tue, 21 Oct 2025 07:02:00 GMT"
+    parsed_sec = parse_retry_after(date_str, now_epoch=email.utils.parsedate_to_datetime("Tue, 21 Oct 2025 07:00:00 GMT").timestamp())
+    assert parsed_sec == 120.0
+
+
+def test_http_418_with_numeric_retry_after(caplog):
+    """1. HTTP 418 with numeric Retry-After: enforces delay with positive jitter."""
+    reset_ban_cooldown_for_testing()
+    session = Mock(spec=requests.Session)
+    resp_418 = Mock()
+    resp_418.status_code = 418
+    resp_418.headers = {"Retry-After": "150"}
+
+    resp_200 = Mock()
+    resp_200.status_code = 200
+    resp_200.json.return_value = [{"symbol": "BTCUSDT", "fundingTime": 1000, "fundingRate": "0.0001"}]
+
+    session.get.side_effect = [resp_418, resp_200]
+
+    with patch("time.sleep") as mock_sleep:
+        data = fetch_funding_page(session, "BTCUSDT", max_retries=3, jitter_func=lambda: 0.5)
+        assert len(data) == 1
+        # 150 + 0.5 jitter = 150.5s
+        assert mock_sleep.call_count >= 1
+        assert mock_sleep.call_args_list[0][0][0] == 150.5
+        assert any("HTTP 418" in rec.message for rec in caplog.records)
+    reset_ban_cooldown_for_testing()
+
+
+def test_http_418_with_http_date_retry_after():
+    """2. HTTP 418 with HTTP-date Retry-After: parses date and computes wait with positive jitter."""
+    from datetime import datetime, timezone
+    reset_ban_cooldown_for_testing()
+    session = Mock(spec=requests.Session)
+    resp_418 = Mock()
+    resp_418.status_code = 418
+    fixed_now = 1761030000.0
+    future_date = datetime.fromtimestamp(fixed_now + 200, tz=timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+    resp_418.headers = {"Retry-After": future_date}
+
+    resp_200 = Mock()
+    resp_200.status_code = 200
+    resp_200.json.return_value = [{"symbol": "BTCUSDT", "fundingTime": 1000, "fundingRate": "0.0001"}]
+
+    session.get.side_effect = [resp_418, resp_200]
+
+    with patch("time.time", return_value=fixed_now), patch("time.sleep") as mock_sleep:
+        data = fetch_funding_page(session, "BTCUSDT", max_retries=3, jitter_func=lambda: 0.25)
+        assert len(data) == 1
+        assert mock_sleep.call_count >= 1
+        wait_called = mock_sleep.call_args_list[0][0][0]
+        assert abs(wait_called - 200.25) < 1.0
+    reset_ban_cooldown_for_testing()
+
+
+def test_http_418_without_retry_after_uses_at_least_120_seconds():
+    """3. HTTP 418 without Retry-After: uses minimum 120 seconds delay."""
+    reset_ban_cooldown_for_testing()
+    session = Mock(spec=requests.Session)
+    resp_418 = Mock()
+    resp_418.status_code = 418
+    resp_418.headers = {}
+
+    resp_200 = Mock()
+    resp_200.status_code = 200
+    resp_200.json.return_value = [{"symbol": "BTCUSDT", "fundingTime": 1000, "fundingRate": "0.0001"}]
+
+    session.get.side_effect = [resp_418, resp_200]
+
+    with patch("time.sleep") as mock_sleep:
+        data = fetch_funding_page(session, "BTCUSDT", max_retries=3, jitter_func=lambda: 0.5)
+        assert len(data) == 1
+        assert mock_sleep.call_count >= 1
+        assert mock_sleep.call_args_list[0][0][0] == 120.5
+    reset_ban_cooldown_for_testing()
+
+
+def test_http_418_with_retry_after_greater_than_120s_preserves_longer_duration():
+    """4. HTTP 418 with Retry-After > 120s: preserves longer exchange ban duration."""
+    reset_ban_cooldown_for_testing()
+    session = Mock(spec=requests.Session)
+    resp_418 = Mock()
+    resp_418.status_code = 418
+    resp_418.headers = {"Retry-After": "86400"}  # 24 hour ban
+
+    resp_200 = Mock()
+    resp_200.status_code = 200
+    resp_200.json.return_value = [{"symbol": "BTCUSDT", "fundingTime": 1000, "fundingRate": "0.0001"}]
+
+    session.get.side_effect = [resp_418, resp_200]
+
+    with patch("time.sleep") as mock_sleep:
+        data = fetch_funding_page(session, "BTCUSDT", max_retries=3, jitter_func=lambda: 0.1)
+        assert len(data) == 1
+        assert mock_sleep.call_count >= 1
+        assert mock_sleep.call_args_list[0][0][0] == 86400.1
+    reset_ban_cooldown_for_testing()
+
+
+def test_http_429_retains_existing_retry_after_behavior():
+    """5. HTTP 429 retains existing Retry-After behavior."""
+    reset_ban_cooldown_for_testing()
+    session = Mock(spec=requests.Session)
+    resp_429 = Mock()
+    resp_429.status_code = 429
+    resp_429.headers = {"Retry-After": "10"}
+
+    resp_200 = Mock()
+    resp_200.status_code = 200
+    resp_200.json.return_value = [{"symbol": "BTCUSDT", "fundingTime": 1000, "fundingRate": "0.0001"}]
+
+    session.get.side_effect = [resp_429, resp_200]
+
+    with patch("time.sleep") as mock_sleep:
+        data = fetch_funding_page(session, "BTCUSDT", max_retries=3)
+        assert len(data) == 1
+        assert mock_sleep.call_count == 1
+        assert mock_sleep.call_args_list[0][0][0] == 10
+    reset_ban_cooldown_for_testing()
+
+
+def test_another_symbol_cannot_bypass_shared_cooldown():
+    """6. Shared cooldown: requests for another symbol cannot bypass an active IP-ban window."""
+    reset_ban_cooldown_for_testing()
+    session = Mock(spec=requests.Session)
+
+    resp_418 = Mock()
+    resp_418.status_code = 418
+    resp_418.headers = {"Retry-After": "150"}
+
+    resp_200_btc = Mock()
+    resp_200_btc.status_code = 200
+    resp_200_btc.json.return_value = [{"symbol": "BTCUSDT", "fundingTime": 1000, "fundingRate": "0.0001"}]
+
+    session.get.side_effect = [resp_418, resp_200_btc]
+
+    t0 = 10000.0
+    with patch("time.time", return_value=t0), patch("time.sleep") as mock_sleep:
+        fetch_funding_page(session, "BTCUSDT", max_retries=2, jitter_func=lambda: 0.0)
+
+    # Now attempt a request for ETHUSDT 30 seconds into the 150s ban (120s remaining)
+    resp_200_eth = Mock()
+    resp_200_eth.status_code = 200
+    resp_200_eth.json.return_value = [{"symbol": "ETHUSDT", "fundingTime": 1000, "fundingRate": "0.0002"}]
+    session.get.side_effect = [resp_200_eth]
+
+    with patch("time.time", return_value=t0 + 30.0), patch("time.sleep") as mock_sleep_eth:
+        data_eth = fetch_funding_page(session, "ETHUSDT", max_retries=2)
+        assert len(data_eth) == 1
+        assert mock_sleep_eth.call_count == 1
+        remaining_slept = mock_sleep_eth.call_args_list[0][0][0]
+        assert abs(remaining_slept - 120.0) < 1.0
+
+    reset_ban_cooldown_for_testing()
+
+
+def test_retry_exhaustion_does_not_permit_early_request_in_next_poll_cycle():
+    """7. Retry exhaustion must not clear cooldown; subsequent call must respect active ban window."""
+    reset_ban_cooldown_for_testing()
+    session = Mock(spec=requests.Session)
+
+    resp_418 = Mock()
+    resp_418.status_code = 418
+    resp_418.headers = {"Retry-After": "180"}
+
+    # All 2 attempts return 418
+    session.get.side_effect = [resp_418, resp_418]
+
+    t0 = 20000.0
+    with patch("time.time", return_value=t0), patch("time.sleep") as mock_sleep:
+        with pytest.raises(RuntimeError, match="Failed to fetch"):
+            fetch_funding_page(session, "BTCUSDT", max_retries=2, jitter_func=lambda: 0.0)
+        # Slept once (attempt 1), avoided sleeping after final attempt 2
+        assert mock_sleep.call_count == 1
+
+    # In next poll cycle (60s later, 120s of ban still remaining), verify cooldown is enforced
+    resp_200 = Mock()
+    resp_200.status_code = 200
+    resp_200.json.return_value = [{"symbol": "BTCUSDT", "fundingTime": 2000, "fundingRate": "0.0001"}]
+    session.get.side_effect = [resp_200]
+
+    with patch("time.time", return_value=t0 + 60.0), patch("time.sleep") as mock_sleep_cycle2:
+        data = fetch_funding_page(session, "BTCUSDT", max_retries=2)
+        assert len(data) == 1
+        assert mock_sleep_cycle2.call_count == 1
+        remaining_slept = mock_sleep_cycle2.call_args_list[0][0][0]
+        assert abs(remaining_slept - 120.0) < 1.0
+
+    reset_ban_cooldown_for_testing()
+
+
+def test_normal_successful_polling_remains_unchanged():
+    """8. Normal successful polling remains unchanged (no sleeps, 200 OK fast path)."""
+    reset_ban_cooldown_for_testing()
+    session = Mock(spec=requests.Session)
+    resp_200 = Mock()
+    resp_200.status_code = 200
+    resp_200.json.return_value = [
+        {"symbol": "BTCUSDT", "fundingTime": 1000, "fundingRate": "0.0001", "markPrice": "60000.0"},
+        {"symbol": "BTCUSDT", "fundingTime": 2000, "fundingRate": "0.0002", "markPrice": "60500.0"},
+    ]
+    session.get.return_value = resp_200
+
+    with patch("time.sleep") as mock_sleep:
+        data = fetch_funding_page(session, "BTCUSDT")
+        assert len(data) == 2
+        assert mock_sleep.call_count == 0
+        assert get_ban_cooldown_remaining() == 0.0
+    reset_ban_cooldown_for_testing()
 

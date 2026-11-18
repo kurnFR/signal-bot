@@ -60,24 +60,33 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         config.RETAILBOT2_DB_CONFIG["database"] = "signal_bot_test"
         config.RETAILBOT2_DB_CONFIG["user"] = test_db_user
         config.RETAILBOT2_DB_CONFIG["password"] = test_db_password
+        db_module.MYSQL_CONFIG["database"] = "signal_bot_test"
+        db_module.RETAILBOT2_DB_CONFIG["database"] = "signal_bot_test"
         db_module._pool = None
         db_module._retailbot2_pool = None
 
-        cls.pool = db_module.get_pool()
-        cls.retailbot2_pool = db_module.get_retailbot2_pool()
-        cls.client = TestClient(app, raise_server_exceptions=False)
+        # 2. Attempt connections safely
+        try:
+            cls.pool = db_module.get_pool()
+            cls.retailbot2_pool = db_module.get_retailbot2_pool()
+            conn_primary = cls.pool.get_connection()
+            conn_retail = cls.retailbot2_pool.get_connection()
+        except Exception as e:
+            raise unittest.SkipTest(
+                f"Isolated test database 'signal_bot_test' is unavailable or unreachable: {e}. "
+                "Please provision and configure signal_bot_test before running integration tests."
+            )
 
-        # Independently verify every configured database pool strictly uses signal_bot_test
+        # 3. Independently verify every configured database pool strictly uses signal_bot_test - FAIL immediately on mismatch
         cls.verified_pools = {}
-        for pool_name, pool_obj in [("primary_pool", cls.pool), ("retailbot2_pool", cls.retailbot2_pool)]:
-            conn = pool_obj.get_connection()
+        for pool_name, conn in [("primary_pool", conn_primary), ("retailbot2_pool", conn_retail)]:
             try:
                 cur = conn.cursor()
                 cur.execute("SELECT DATABASE()")
                 db_name = cur.fetchone()[0]
                 cur.close()
                 if db_name != "signal_bot_test":
-                    raise RuntimeError(
+                    raise AssertionError(
                         f"Database isolation guard failed for {pool_name}: "
                         f"connected to '{db_name}', strictly expected 'signal_bot_test'"
                     )
@@ -85,6 +94,30 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
             finally:
                 conn.close()
 
+        # 4. Verify required tables exist - clear setup failure if missing
+        conn = cls.pool.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'signal_bot_test'
+                """
+            )
+            existing_tables = {row[0].lower() for row in cur.fetchall()}
+            cur.close()
+        finally:
+            conn.close()
+
+        required_tables = {"users", "audit_logs"}
+        missing_tables = required_tables - existing_tables
+        if missing_tables:
+            raise RuntimeError(
+                f"Required schema tables missing in signal_bot_test: {missing_tables}. "
+                "Run database schema migrations on signal_bot_test."
+            )
+
+        cls.client = TestClient(app, raise_server_exceptions=False)
         cls._run_id = uuid.uuid4().hex[:8]
         cls._all_executors = []
 
@@ -139,9 +172,13 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                     f"({pool_obj._cnx_queue.qsize()} connections remaining)."
                 )
 
-        # 4. Only after all pools are verified cleanly drained and closed, reset references
+        # 4. Only after all pools are verified cleanly drained and closed, reset references and restore config
         db_module._pool = None
         db_module._retailbot2_pool = None
+        config.MYSQL_CONFIG["database"] = "crypto_signals"
+        config.RETAILBOT2_DB_CONFIG["database"] = "crypto_signals"
+        db_module.MYSQL_CONFIG["database"] = "crypto_signals"
+        db_module.RETAILBOT2_DB_CONFIG["database"] = "crypto_signals"
 
     def setUp(self):
         auth_routes._test_before_admin_lock_hook = None
