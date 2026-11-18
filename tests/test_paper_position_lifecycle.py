@@ -1118,6 +1118,284 @@ class TestPaperPositionLifecycle(unittest.TestCase):
             cost = pe._funding_cost_for_position(pos, exit_time=2000)
             self.assertAlmostEqual(cost, 2.4, places=4, msg=f"Strategy {strat} was unexpectedly excluded")
 
+    def test_33_supported_futures_valid_empty_funding_closes_with_zero_funding(self):
+        """33. Supported Futures with valid empty funding events closes with zero funding cost."""
+        cfg_id = self._create_config(symbol="SOLUSDT", market="futures", strategy_name="trend_alignment_v1")
+        pos_id = self._create_position(
+            config_id=cfg_id, symbol="SOLUSDT", market="futures", strategy_name="trend_alignment_v1",
+            quantity=2.0, entry_time=1000, last_update_time=1000
+        )
+
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM paper_positions WHERE id=%s", (pos_id,))
+        pos = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        # No funding_rate events exist in DB for SOLUSDT; query returns [] cleanly
+        closed = pe.close_position_in_db(pos, exit_price=150.0, exit_time=2000, exit_reason="TP")
+        self.assertTrue(closed)
+
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT status, funding_pnl FROM paper_positions WHERE id=%s", (pos_id,))
+        p = cur.fetchone()
+        self.assertEqual(p["status"], "CLOSED")
+        self.assertEqual(float(p["funding_pnl"]), 0.0)
+
+        cur.execute("SELECT funding_pnl FROM paper_trades WHERE position_id=%s", (pos_id,))
+        t = cur.fetchone()
+        self.assertEqual(float(t["funding_pnl"]), 0.0)
+        cur.close()
+        conn.close()
+
+    def test_34_supported_futures_funding_exception_does_not_persist_trade(self):
+        """34. Supported Futures with funding query exception raises PaperFundingRetrievalError and preserves position OPEN."""
+        cfg_id = self._create_config(symbol="BTCUSDT", market="futures", strategy_name="trend_alignment_v1")
+        pos_id = self._create_position(
+            config_id=cfg_id, symbol="BTCUSDT", market="futures", strategy_name="trend_alignment_v1",
+            quantity=0.1, entry_time=1000, last_update_time=1000
+        )
+
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM paper_positions WHERE id=%s", (pos_id,))
+        pos = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        with patch("db.db.fetch_settled_funding_events", side_effect=RuntimeError("Simulated funding query timeout")):
+            with self.assertRaises(pe.PaperFundingRetrievalError) as cm:
+                pe.close_position_in_db(pos, exit_price=54000.0, exit_time=2000, exit_reason="TP")
+            self.assertIn("Simulated funding query timeout", str(cm.exception))
+
+        # Position must remain strictly OPEN in MariaDB with NO trade record in paper_trades
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT status, funding_pnl FROM paper_positions WHERE id=%s", (pos_id,))
+        p = cur.fetchone()
+        self.assertEqual(p["status"], "OPEN")
+        self.assertEqual(float(p["funding_pnl"]), 0.0)
+
+        cur.execute("SELECT count(*) as cnt FROM paper_trades WHERE position_id=%s", (pos_id,))
+        self.assertEqual(cur.fetchone()["cnt"], 0)
+        cur.close()
+        conn.close()
+
+    def test_35_position_remains_open_and_retries_successfully(self):
+        """35. Position preserved as OPEN after funding query failure retries and closes exactly once."""
+        conn = self.pool.get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO funding_rate (symbol, event_time, funding_rate, mark_price)
+            VALUES ('ADAUSDT', 1500, 0.0010, 1.0)
+            """
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        cfg_id = self._create_config(symbol="ADAUSDT", market="futures", strategy_name="trend_alignment_v1")
+        pos_id = self._create_position(
+            config_id=cfg_id, symbol="ADAUSDT", market="futures", strategy_name="trend_alignment_v1",
+            quantity=1000.0, entry_time=1000, last_update_time=1000
+        )
+
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM paper_positions WHERE id=%s", (pos_id,))
+        pos = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        # Attempt 1: funding retrieval failure
+        with patch("db.db.fetch_settled_funding_events", side_effect=RuntimeError("Transient MariaDB connection loss")):
+            with self.assertRaises(pe.PaperFundingRetrievalError):
+                pe.close_position_in_db(pos, exit_price=1.2, exit_time=2000, exit_reason="TP")
+
+        # Verify state is still pristine OPEN
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT status FROM paper_positions WHERE id=%s", (pos_id,))
+        self.assertEqual(cur.fetchone()["status"], "OPEN")
+        cur.execute("SELECT count(*) as cnt FROM paper_trades WHERE position_id=%s", (pos_id,))
+        self.assertEqual(cur.fetchone()["cnt"], 0)
+        cur.close()
+        conn.close()
+
+        # Attempt 2: retry succeeds with authentic funding events from real DB
+        # Expected funding cost: 1000.0 * 1.0 * 0.0010 = 1.0 -> funding_pnl = -1.0
+        success = pe.close_position_in_db(pos, exit_price=1.2, exit_time=2000, exit_reason="TP")
+        self.assertTrue(success)
+
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT status, funding_pnl FROM paper_positions WHERE id=%s", (pos_id,))
+        p = cur.fetchone()
+        self.assertEqual(p["status"], "CLOSED")
+        self.assertAlmostEqual(float(p["funding_pnl"]), -1.0, places=4)
+
+        cur.execute("SELECT count(*) as cnt, funding_pnl FROM paper_trades WHERE position_id=%s", (pos_id,))
+        t = cur.fetchone()
+        self.assertEqual(t["cnt"], 1)
+        self.assertAlmostEqual(float(t["funding_pnl"]), -1.0, places=4)
+        cur.close()
+        conn.close()
+
+        # Attempt 3: duplicate closure call is strictly idempotent (CAS guard)
+        second_call = pe.close_position_in_db(pos, exit_price=1.2, exit_time=2000, exit_reason="TP")
+        self.assertFalse(second_call)
+
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT count(*) as cnt FROM paper_trades WHERE position_id=%s", (pos_id,))
+        self.assertEqual(cur.fetchone()["cnt"], 1)
+        cur.close()
+        conn.close()
+
+    def test_36_paper_engine_cycle_continues_running_on_funding_error(self):
+        """36. Engine cycle catches funding error per-position, preserves open state, and continues evaluating other positions."""
+        cfg_futures = self._create_config(symbol="BTCUSDT", market="futures", strategy_name="trend_alignment_v1")
+        pos_futures = self._create_position(
+            config_id=cfg_futures, symbol="BTCUSDT", market="futures", strategy_name="trend_alignment_v1",
+            entry_price=50000.0, stop_loss=48000.0, take_profit=54000.0, last_update_time=1000
+        )
+
+        cfg_spot = self._create_config(symbol="ETHUSDT", market="spot", strategy_name="ema_crossover")
+        pos_spot = self._create_position(
+            config_id=cfg_spot, symbol="ETHUSDT", market="spot", strategy_name="ema_crossover",
+            entry_price=3000.0, stop_loss=2800.0, take_profit=3400.0, last_update_time=1000
+        )
+
+        df_btc = self._make_df([
+            {"open_time": 2000, "open": 51000.0, "high": 54500.0, "low": 50800.0, "close": 54200.0}
+        ])
+        df_eth = self._make_df([
+            {"open_time": 2000, "open": 3100.0, "high": 3450.0, "low": 3050.0, "close": 3420.0}
+        ])
+
+        def fake_fetch_df(sym, mkt, tf, **kwargs):
+            return df_btc if sym == "BTCUSDT" else df_eth
+
+        def fake_fetch_events(symbol, start_time, end_time, **kwargs):
+            if symbol == "BTCUSDT":
+                raise RuntimeError("Simulated MariaDB funding_rate table lock error")
+            return []
+
+        with patch("paper.engine.fetch_ohlcv_with_features_df", side_effect=fake_fetch_df), \
+             patch("db.db.fetch_settled_funding_events", side_effect=fake_fetch_events):
+            res = pe.sync_and_evaluate_paper_trading()
+
+        # Engine completed the cycle without crashing! Spot position closed; Futures position kept OPEN
+        self.assertEqual(res["positions_closed"], 1)
+
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        # BTC futures position preserved as OPEN and last_update_time was NOT advanced
+        cur.execute("SELECT status, last_update_time FROM paper_positions WHERE id=%s", (pos_futures,))
+        p_btc = cur.fetchone()
+        self.assertEqual(p_btc["status"], "OPEN")
+        self.assertEqual(p_btc["last_update_time"], 1000)
+
+        # ETH spot position closed normally
+        cur.execute("SELECT status FROM paper_positions WHERE id=%s", (pos_spot,))
+        p_eth = cur.fetchone()
+        self.assertEqual(p_eth["status"], "CLOSED")
+        cur.close()
+        conn.close()
+
+    def test_37_exit_event_preserved_across_cycle_retry(self):
+        """37. Intended exit candle is preserved without inventing prices/timestamps and evaluated on cycle retry."""
+        conn = self.pool.get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO funding_rate (symbol, event_time, funding_rate, mark_price)
+            VALUES ('BTCUSDT', 1500, 0.0005, 52000.0)
+            """
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        cfg_id = self._create_config(symbol="BTCUSDT", market="futures", strategy_name="trend_alignment_v1")
+        pos_id = self._create_position(
+            config_id=cfg_id, symbol="BTCUSDT", market="futures", strategy_name="trend_alignment_v1",
+            quantity=0.1, entry_time=1000, entry_price=50000.0, stop_loss=48000.0, take_profit=54000.0, last_update_time=1000
+        )
+
+        # Two bars: bar 1 (no exit), bar 2 (hits TP at 54000)
+        df = self._make_df([
+            {"open_time": 2000, "open": 50500.0, "high": 51500.0, "low": 50200.0, "close": 51000.0},
+            {"open_time": 3000, "open": 51200.0, "high": 54500.0, "low": 51000.0, "close": 54200.0},
+        ])
+
+        # Cycle 1: funding retrieval fails
+        with patch("paper.engine.fetch_ohlcv_with_features_df", return_value=df), \
+             patch("db.db.fetch_settled_funding_events", side_effect=RuntimeError("Simulated outage")):
+            res1 = pe.sync_and_evaluate_paper_trading()
+
+        self.assertEqual(res1["positions_closed"], 0)
+
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT status, last_update_time FROM paper_positions WHERE id=%s", (pos_id,))
+        p1 = cur.fetchone()
+        self.assertEqual(p1["status"], "OPEN")
+        # last_update_time MUST NOT have advanced past the exit candle (remains 1000)
+        self.assertEqual(p1["last_update_time"], 1000)
+        cur.close()
+        conn.close()
+
+        # Cycle 2: funding retrieval restored (uses authentic event from MariaDB)
+        with patch("paper.engine.fetch_ohlcv_with_features_df", return_value=df):
+            res2 = pe.sync_and_evaluate_paper_trading()
+
+        self.assertEqual(res2["positions_closed"], 1)
+
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT status, current_price, funding_pnl FROM paper_positions WHERE id=%s", (pos_id,))
+        p2 = cur.fetchone()
+        self.assertEqual(p2["status"], "CLOSED")
+        self.assertEqual(float(p2["current_price"]), 54000.0)
+
+        cur.execute("SELECT * FROM paper_trades WHERE position_id=%s", (pos_id,))
+        trades = cur.fetchall()
+        self.assertEqual(len(trades), 1)
+        t = trades[0]
+        self.assertEqual(t["exit_reason"], "TP")
+        self.assertEqual(float(t["exit_price"]), 54000.0)
+        self.assertEqual(t["exit_time"], 3000)
+        # Expected funding cost: 0.1 * 52000.0 * 0.0005 = 2.6 -> funding_pnl = -2.6
+        self.assertAlmostEqual(float(t["funding_pnl"]), -2.6, places=4)
+        cur.close()
+        conn.close()
+
+    def test_38_manual_close_raises_on_funding_error_preserving_open_state(self):
+        """38. manual_close_position surfaces funding error and preserves position as OPEN."""
+        cfg_id = self._create_config(symbol="BTCUSDT", market="futures", strategy_name="trend_alignment_v1")
+        pos_id = self._create_position(
+            config_id=cfg_id, symbol="BTCUSDT", market="futures", strategy_name="trend_alignment_v1",
+            quantity=0.1, entry_time=1000, last_update_time=1000
+        )
+
+        with patch("db.db.fetch_settled_funding_events", side_effect=RuntimeError("Simulated dedicated DB failure")):
+            with self.assertRaises(RuntimeError) as cm:
+                pe.manual_close_position(pos_id)
+            self.assertIn("funding retrieval failure", str(cm.exception))
+
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT status FROM paper_positions WHERE id=%s", (pos_id,))
+        self.assertEqual(cur.fetchone()["status"], "OPEN")
+        cur.execute("SELECT count(*) as cnt FROM paper_trades WHERE position_id=%s", (pos_id,))
+        self.assertEqual(cur.fetchone()["cnt"], 0)
+        cur.close()
+        conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()
