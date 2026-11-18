@@ -623,27 +623,34 @@ def get_paper_metrics() -> Dict[str, Any]:
 
 def _funding_cost_for_position(pos: Dict[str, Any], exit_time: int) -> float:
     """Return signed funding cost for the position over its holding interval."""
-    if pos["market"] != "futures":
+    if pos.get("market") != "futures":
         return 0.0
-    conn = get_pool().get_connection()
-    try:
-        cur = conn.cursor(dictionary=True)
-        cur.execute(
-            """
-            SELECT mark_price, funding_rate
-            FROM funding_rate
-            WHERE symbol = %s
-              AND event_time > %s
-              AND event_time <= %s
-              AND mark_price IS NOT NULL
-            ORDER BY event_time ASC
-            """,
-            (pos["symbol"], int(pos["entry_time"]), int(exit_time)),
+
+    strategy_name = str(pos.get("strategy_name") or "")
+    if strategy_name == "pairs_ratio_v1" or bool(pos.get("is_pairs_ratio")):
+        logger.warning(
+            "Paper position #%s (%s/%s): pairs_ratio trades a synthetic ratio without an "
+            "executable two-leg sizing model; skipping single-leg funding accrual "
+            "(unsupported_pairs_ratio_two_leg).",
+            pos.get("id"), pos.get("symbol"), strategy_name,
         )
-        events = [(float(r["mark_price"]), float(r["funding_rate"])) for r in cur.fetchall()]
-        cur.close()
-    finally:
-        conn.close()
+        return 0.0
+
+    try:
+        from db.db import fetch_settled_funding_events
+        raw_events = fetch_settled_funding_events(
+            symbol=pos["symbol"],
+            start_time=int(pos["entry_time"]),
+            end_time=int(exit_time),
+        )
+        events = [(float(ev[1]), float(ev[2])) for ev in raw_events]
+    except Exception as exc:
+        logger.warning(
+            "Failed to retrieve settled funding events for position #%s (%s): %s; "
+            "falling back to zero-cost funding.",
+            pos.get("id"), pos.get("symbol"), exc,
+        )
+        return 0.0
 
     if not events:
         return 0.0

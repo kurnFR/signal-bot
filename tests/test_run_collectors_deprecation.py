@@ -305,3 +305,136 @@ def test_competing_funding_poller_skips_without_modifying_data():
     assert res.get("reason") == "advisory_lock_held"
     assert res.get("rows_inserted") == 0
     assert mock_incremental.call_count == 0
+
+
+def test_funding_poller_lock_connection_failure_distinguished():
+    """Verify database connection initialization failure raises FundingPollerLockConnectionError and cleans up."""
+    from collectors.funding_poller import FundingPollerLock, FundingPollerLockConnectionError
+    from unittest.mock import patch, MagicMock
+
+    mock_cfg = MagicMock()
+    mock_cfg.to_dict.return_value = {"host": "127.0.0.1", "port": 3306, "user": "test", "password": "x", "database": "db"}
+
+    with patch("mysql.connector.connect", side_effect=Exception("Can't connect to MySQL server on '127.0.0.1'")):
+        lock = FundingPollerLock(config=mock_cfg)
+        with pytest.raises(FundingPollerLockConnectionError) as exc_info:
+            lock.acquire()
+        assert "Connection failure" in str(exc_info.value)
+        assert lock._conn is None
+        assert lock._acquired is False
+
+
+def test_funding_poller_lock_authentication_failure_distinguished():
+    """Verify database authentication failure raises FundingPollerLockAuthenticationError."""
+    from collectors.funding_poller import FundingPollerLock, FundingPollerLockAuthenticationError
+    from unittest.mock import patch, MagicMock
+
+    # 1. Missing credentials (ValueError)
+    with patch("collectors.funding_poller.load_funding_collector_config", side_effect=ValueError("Dedicated database password (FUNDING_DB_PASSWORD) is missing.")):
+        lock = FundingPollerLock()
+        with pytest.raises(FundingPollerLockAuthenticationError) as exc_info:
+            lock.acquire()
+        assert "Authentication failure" in str(exc_info.value)
+
+    # 2. Access denied error (error code 1045)
+    access_err = Exception("1045 (28000): Access denied for user 'funding_poller'@'localhost'")
+    access_err.errno = 1045
+    mock_cfg = MagicMock()
+    mock_cfg.to_dict.return_value = {"host": "127.0.0.1", "port": 3306, "user": "bad_user", "password": "bad", "database": "db"}
+    with patch("mysql.connector.connect", side_effect=access_err):
+        lock2 = FundingPollerLock(config=mock_cfg)
+        with pytest.raises(FundingPollerLockAuthenticationError) as exc_info2:
+            lock2.acquire()
+        assert "Authentication failure" in str(exc_info2.value)
+
+
+def test_funding_poller_lock_unexpected_query_failure_distinguished():
+    """Verify unexpected database error during GET_LOCK query raises FundingPollerLockQueryError."""
+    from collectors.funding_poller import FundingPollerLock, FundingPollerLockQueryError
+    from unittest.mock import MagicMock
+
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_cur.execute.side_effect = Exception("Lost connection to MySQL server during query")
+    mock_conn.cursor.return_value = mock_cur
+
+    lock = FundingPollerLock(connection=mock_conn)
+    with pytest.raises(FundingPollerLockQueryError) as exc_info:
+        lock.acquire()
+    assert "Unexpected database error" in str(exc_info.value)
+    assert lock._acquired is False
+    # Verify cursor closed
+    mock_cur.close.assert_called_once()
+
+
+def test_poll_all_symbols_lock_error_raises_and_records_heartbeat():
+    """Verify poll_all_symbols records an error heartbeat and raises when lock acquisition fails with an error."""
+    from collectors.funding_poller import poll_all_symbols, FundingPollerLock, FundingPollerLockConnectionError
+    from unittest.mock import MagicMock, patch
+
+    mock_lock = MagicMock(spec=FundingPollerLock)
+    mock_lock.acquire.side_effect = FundingPollerLockConnectionError("Connection failure connecting to MariaDB")
+
+    with patch("collectors.funding_poller.heartbeat") as mock_hb:
+        with pytest.raises(FundingPollerLockConnectionError):
+            poll_all_symbols(symbols=["BTCUSDT"], acquire_lock=True, lock=mock_lock)
+
+        mock_hb.assert_called_once()
+        call_args = mock_hb.call_args
+        assert call_args[0][0] == "funding_poller"
+        assert call_args[1]["status"] == "error"
+        assert "Connection failure" in call_args[1]["detail"]
+
+
+def test_poll_all_symbols_forwards_config_path_to_lock():
+    """Verify poll_all_symbols passes custom config_path to FundingPollerLock."""
+    from collectors.funding_poller import poll_all_symbols
+    from unittest.mock import patch, MagicMock
+
+    with patch("collectors.funding_poller.FundingPollerLock") as MockLock:
+        mock_instance = MagicMock()
+        mock_instance.acquire.return_value = False
+        MockLock.return_value = mock_instance
+
+        custom_path = "/etc/signal-bot/custom-collector.env"
+        res = poll_all_symbols(symbols=["BTCUSDT"], config_path=custom_path)
+
+        MockLock.assert_called_once_with(config_path=custom_path)
+        assert res.get("skipped") is True
+
+
+def test_funding_poller_run_forwards_config_path():
+    """Verify async run() forwards custom config_path to poll_all_symbols and loads custom config."""
+    import asyncio
+    from collectors.funding_poller import run
+    from unittest.mock import patch, MagicMock
+
+    custom_path = "/etc/signal-bot/custom-collector.env"
+
+    class StopLoop(BaseException):
+        pass
+
+    async def execute():
+        call_params = []
+
+        def fake_poll_all_symbols(*args, **kwargs):
+            call_params.append(kwargs)
+            raise StopLoop("Stop async loop after first cycle")
+
+        with patch("collectors.funding_poller.load_funding_collector_config") as mock_load_cfg, \
+             patch("collectors.funding_poller.get_funding_pool") as mock_get_pool, \
+             patch("collectors.funding_poller.poll_all_symbols", side_effect=fake_poll_all_symbols), \
+             patch("collectors.funding_poller.heartbeat"):
+
+            mock_pool = MagicMock()
+            mock_get_pool.return_value = mock_pool
+
+            with pytest.raises(StopLoop):
+                await run(symbols=["BTCUSDT"], poll_interval=1, config_path=custom_path)
+
+            mock_load_cfg.assert_called_once_with(env_path=custom_path)
+            assert len(call_params) == 1
+            assert call_params[0].get("config_path") == custom_path
+
+    asyncio.run(execute())
+

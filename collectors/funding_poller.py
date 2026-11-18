@@ -114,6 +114,26 @@ def reset_ban_cooldown_for_testing() -> None:
         _BAN_COOLDOWN_UNTIL = 0.0
 
 
+class FundingPollerLockError(Exception):
+    """Base exception for funding poller advisory lock errors."""
+    pass
+
+
+class FundingPollerLockConnectionError(FundingPollerLockError):
+    """Raised when dedicated database connection initialization fails for advisory lock."""
+    pass
+
+
+class FundingPollerLockAuthenticationError(FundingPollerLockConnectionError):
+    """Raised when dedicated database authentication fails for advisory lock."""
+    pass
+
+
+class FundingPollerLockQueryError(FundingPollerLockError):
+    """Raised when advisory lock query encounters an unexpected database error."""
+    pass
+
+
 class FundingPollerLock:
     """
     MariaDB advisory lock: 'signal_bot_funding_poller'.
@@ -141,34 +161,69 @@ class FundingPollerLock:
     def acquire(self) -> bool:
         """
         Attempt non-blocking acquisition of signal_bot_funding_poller.
-        Returns True if acquired, False if held by another process or on error.
+        Returns:
+            True if acquired.
+            False if held by another process (genuine lock contention).
+        Raises:
+            FundingPollerLockAuthenticationError: on credential or access-denied failures.
+            FundingPollerLockConnectionError: on database connection initialization failures.
+            FundingPollerLockQueryError: on unexpected database query failures.
         """
-        try:
-            if self._conn is None:
+        if self._conn is None:
+            try:
                 cfg = self._config or load_funding_collector_config(env_path=self._config_path)
                 import mysql.connector
                 self._conn = mysql.connector.connect(**cfg.to_dict())
                 self._owned_connection = True
+            except Exception as e:
+                self._acquired = False
+                self.release()
+                err_str = str(e)
+                logger.error(f"Failed to connect to MariaDB for advisory lock '{self.LOCK_NAME}': {err_str}")
+                if (
+                    isinstance(e, (ValueError, PermissionError))
+                    or (hasattr(e, "errno") and e.errno == 1045)
+                    or "access denied" in err_str.lower()
+                    or "credential" in err_str.lower()
+                    or "password" in err_str.lower()
+                ):
+                    raise FundingPollerLockAuthenticationError(
+                        f"Authentication failure connecting to MariaDB for advisory lock: {err_str}"
+                    ) from e
+                raise FundingPollerLockConnectionError(
+                    f"Connection failure connecting to MariaDB for advisory lock: {err_str}"
+                ) from e
 
+        cur = None
+        try:
             cur = self._conn.cursor()
             cur.execute("SELECT GET_LOCK(%s, 0)", (self.LOCK_NAME,))
             res = cur.fetchone()
             cur.close()
-
-            if res is not None and res[0] == 1:
-                self._acquired = True
-                logger.info(f"Acquired MariaDB advisory lock '{self.LOCK_NAME}'.")
-                return True
-            else:
-                self._acquired = False
-                logger.warning(
-                    f"MariaDB advisory lock '{self.LOCK_NAME}' is held by another process (result={res})."
-                )
-                self.release()
-                return False
+            cur = None
         except Exception as e:
-            logger.error(f"Error acquiring MariaDB advisory lock '{self.LOCK_NAME}': {e}")
+            if cur is not None:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
             self._acquired = False
+            self.release()
+            err_str = str(e)
+            logger.error(f"Unexpected database exception executing GET_LOCK for '{self.LOCK_NAME}': {err_str}")
+            raise FundingPollerLockQueryError(
+                f"Unexpected database error executing advisory lock query: {err_str}"
+            ) from e
+
+        if res is not None and res[0] == 1:
+            self._acquired = True
+            logger.info(f"Acquired MariaDB advisory lock '{self.LOCK_NAME}'.")
+            return True
+        else:
+            self._acquired = False
+            logger.warning(
+                f"MariaDB advisory lock '{self.LOCK_NAME}' is held by another process (result={res})."
+            )
             self.release()
             return False
 
@@ -491,7 +546,18 @@ def poll_all_symbols(
     lock_ctx: Optional[FundingPollerLock] = None
     if acquire_lock:
         lock_ctx = lock if lock is not None else FundingPollerLock(config_path=config_path)
-        if not lock_ctx.acquire():
+        try:
+            acquired = lock_ctx.acquire()
+        except FundingPollerLockError as lock_err:
+            logger.error(f"Funding poller advisory lock error: {lock_err}")
+            results["error"] = str(lock_err)
+            results["lock_error"] = type(lock_err).__name__
+            try:
+                heartbeat("funding_poller", status="error", detail=f"Lock error: {str(lock_err)[:240]}", pool=pool)
+            except Exception as hb_err:
+                logger.warning(f"Failed to record error heartbeat: {hb_err}")
+            raise
+        if not acquired:
             logger.warning(
                 "MariaDB advisory lock 'signal_bot_funding_poller' is currently held by another process; "
                 "skipping funding poller cycle cleanly."
@@ -610,7 +676,12 @@ def run_standalone_loop(
     logger.info("Funding collector standalone loop stopped cleanly.")
 
 
-async def run(symbols: Optional[List[str]] = None, poll_interval: Optional[int] = None, pool: Any = None):
+async def run(
+    symbols: Optional[List[str]] = None,
+    poll_interval: Optional[int] = None,
+    pool: Any = None,
+    config_path: Optional[str] = None,
+):
     """
     Continuous asyncio poller loop for integration into daemon runners.
     Executes polling calls via asyncio.to_thread to prevent blocking the
@@ -621,13 +692,20 @@ async def run(symbols: Optional[List[str]] = None, poll_interval: Optional[int] 
 
     active_pool = pool
     if active_pool is None:
-        active_pool = get_funding_pool()
+        cfg = load_funding_collector_config(env_path=config_path)
+        active_pool = get_funding_pool(config=cfg)
 
     with requests.Session() as session:
         while True:
             start_t = time.time()
             try:
-                await asyncio.to_thread(poll_all_symbols, symbols=symbols, pool=active_pool, session=session)
+                await asyncio.to_thread(
+                    poll_all_symbols,
+                    symbols=symbols,
+                    pool=active_pool,
+                    session=session,
+                    config_path=config_path,
+                )
             except Exception as e:
                 logger.error(f"Unhandled exception in funding poller loop: {e}")
                 try:
@@ -669,7 +747,7 @@ def main():
     elif args.async_loop:
         cfg = load_funding_collector_config(env_path=args.config)
         pool = get_funding_pool(config=cfg)
-        asyncio.run(run(symbols=symbols, poll_interval=args.interval, pool=pool))
+        asyncio.run(run(symbols=symbols, poll_interval=args.interval, pool=pool, config_path=args.config))
     else:
         run_standalone_loop(symbols=symbols, poll_interval=args.interval, config_path=args.config)
 

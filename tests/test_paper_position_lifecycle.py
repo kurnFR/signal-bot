@@ -984,6 +984,140 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         cur.close()
         conn.close()
 
+    def test_29_pairs_ratio_v1_skips_single_leg_funding(self):
+        """29. pairs_ratio_v1 position on futures skips single-leg funding calculation."""
+        # Insert funding rate event for the working symbol
+        conn = self.pool.get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO funding_rate (symbol, event_time, funding_rate, mark_price)
+            VALUES ('BNBUSDT', 1500, 0.0010, 600.0)
+            """
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        cfg_id = self._create_config(symbol="BNBUSDT", market="futures", strategy_name="pairs_ratio_v1")
+        pos_id = self._create_position(
+            config_id=cfg_id, symbol="BNBUSDT", market="futures", strategy_name="pairs_ratio_v1",
+            quantity=1.0, entry_time=1000, last_update_time=1000
+        )
+
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM paper_positions WHERE id=%s", (pos_id,))
+        pos = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        with self.assertLogs("paper.engine", level="WARNING") as cm:
+            funding_cost = pe._funding_cost_for_position(pos, exit_time=2000)
+            self.assertEqual(funding_cost, 0.0)
+            self.assertTrue(any("unsupported_pairs_ratio_two_leg" in log for log in cm.output))
+
+        # Close position in DB and verify funding_pnl is 0.0
+        res = pe.close_position_in_db(pos, exit_price=650.0, exit_time=2000, exit_reason="TP")
+        self.assertTrue(res)
+
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT funding_pnl FROM paper_trades WHERE position_id=%s", (pos_id,))
+        t = cur.fetchone()
+        cur.close()
+        conn.close()
+        self.assertAlmostEqual(float(t["funding_pnl"]), 0.0, places=4)
+
+    def test_30_futures_supported_strategy_accrues_funding(self):
+        """30. Supported single-symbol Futures strategies continue to accrue funding."""
+        conn = self.pool.get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO funding_rate (symbol, event_time, funding_rate, mark_price)
+            VALUES ('BTCUSDT', 1500, 0.0005, 50000.0)
+            """
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        cfg_id = self._create_config(symbol="BTCUSDT", market="futures", strategy_name="trend_alignment_v1")
+        pos_id = self._create_position(
+            config_id=cfg_id, symbol="BTCUSDT", market="futures", strategy_name="trend_alignment_v1",
+            quantity=0.1, entry_time=1000, last_update_time=1000
+        )
+
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM paper_positions WHERE id=%s", (pos_id,))
+        pos = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        # Expected funding cost: 0.1 * 50000.0 * 0.0005 = 2.5
+        funding_cost = pe._funding_cost_for_position(pos, exit_time=2000)
+        self.assertAlmostEqual(funding_cost, 2.5, places=4)
+
+    def test_31_spot_position_funding_unaffected(self):
+        """31. Spot positions always have zero funding cost regardless of funding_rate records."""
+        conn = self.pool.get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO funding_rate (symbol, event_time, funding_rate, mark_price)
+            VALUES ('BTCUSDT', 1500, 0.0010, 50000.0)
+            """
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        cfg_id = self._create_config(symbol="BTCUSDT", market="spot", strategy_name="ema_crossover")
+        pos_id = self._create_position(
+            config_id=cfg_id, symbol="BTCUSDT", market="spot", strategy_name="ema_crossover",
+            quantity=0.1, entry_time=1000, last_update_time=1000
+        )
+
+        conn = self.pool.get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT * FROM paper_positions WHERE id=%s", (pos_id,))
+        pos = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        funding_cost = pe._funding_cost_for_position(pos, exit_time=2000)
+        self.assertEqual(funding_cost, 0.0)
+
+    def test_32_unrelated_strategies_not_accidentally_excluded(self):
+        """32. Guard strictly targets pairs_ratio_v1; unrelated strategies are not accidentally excluded."""
+        conn = self.pool.get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO funding_rate (symbol, event_time, funding_rate, mark_price)
+            VALUES ('ETHUSDT', 1500, 0.0008, 3000.0)
+            """
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        for strat in ["ema_crossover", "rsi_bb_reversal", "orderblock_v1", "breakout_volume"]:
+            pos = {
+                "id": 999,
+                "symbol": "ETHUSDT",
+                "market": "futures",
+                "strategy_name": strat,
+                "direction": "LONG",
+                "quantity": 1.0,
+                "entry_time": 1000,
+            }
+            # Expected funding cost: 1.0 * 3000.0 * 0.0008 = 2.4
+            cost = pe._funding_cost_for_position(pos, exit_time=2000)
+            self.assertAlmostEqual(cost, 2.4, places=4, msg=f"Strategy {strat} was unexpectedly excluded")
+
 
 if __name__ == "__main__":
     unittest.main()
