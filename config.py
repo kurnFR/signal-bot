@@ -4,6 +4,8 @@ Loads secrets from .env, defines symbols/timeframes/endpoints used across
 all collectors, backtester, and the future signal engine.
 """
 import os
+import stat
+from typing import Dict, Any, Optional
 
 try:
     from dotenv import load_dotenv
@@ -178,6 +180,8 @@ KLINE_FETCH_LIMIT = 1000  # Binance max per request
 # ---------------------------------------------------------------------------
 OI_POLL_INTERVAL_SECONDS = int(os.getenv("OI_POLL_INTERVAL_SECONDS", 60))
 FUNDING_WRITE_INTERVAL_SECONDS = int(os.getenv("FUNDING_WRITE_INTERVAL_SECONDS", 60))
+FUNDING_POLL_INTERVAL_SECONDS = int(os.getenv("FUNDING_POLL_INTERVAL_SECONDS", 300))
+
 
 # ---------------------------------------------------------------------------
 # MySQL
@@ -368,6 +372,134 @@ MYSQL_CONFIG = {
 # Dashboard reads the same database and endpoint as the rest of signal-bot.
 # Keep this alias for existing callers; do not allow a separate Binance DB.
 RETAILBOT2_DB_CONFIG = dict(MYSQL_CONFIG)
+
+# ---------------------------------------------------------------------------
+# Dedicated Binance Futures Funding Rate REST Collector Database Configuration
+# ---------------------------------------------------------------------------
+DEFAULT_FUNDING_COLLECTOR_ENV = "/etc/signal-bot/funding-collector.env"
+FORBIDDEN_FUNDING_DB_USERS = {"cms", "root"}
+
+
+class FundingDBConfig:
+    """
+    Dedicated, isolated database configuration for funding rate collector.
+    Never exposes passwords in string conversions, representations, or logs.
+    """
+    def __init__(self, host: str, port: int, database: str, user: str, password: str):
+        self.host = str(host).strip()
+        self.port = int(port)
+        self.database = str(database).strip()
+        self.user = str(user).strip()
+        self.password = str(password)
+
+        if not self.user:
+            raise ValueError("Dedicated database username (FUNDING_DB_USER) cannot be empty. Fail-closed.")
+        if not self.password:
+            raise ValueError("Dedicated database password (FUNDING_DB_PASSWORD) cannot be empty. Fail-closed.")
+        if self.user.lower() in FORBIDDEN_FUNDING_DB_USERS:
+            raise ValueError(
+                f"Prohibited database user '{self.user}'. Funding collector must use a dedicated "
+                "least-privilege account and is strictly forbidden from falling back to cms or root."
+            )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "host": self.host,
+            "port": self.port,
+            "database": self.database,
+            "user": self.user,
+            "password": self.password,
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"FundingDBConfig(host={self.host!r}, port={self.port}, "
+            f"database={self.database!r}, user={self.user!r}, password='***REDACTED***')"
+        )
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
+
+def validate_credential_file_security(file_path: str, enforce_ownership: bool = True) -> None:
+    """
+    Validate that the credential file exists, is a regular file,
+    has strict permissions (0600: user read/write only, no group/other permissions),
+    and is owned by the current process user (or root).
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Dedicated credential file not found: {file_path}")
+
+    st = os.stat(file_path)
+    if not stat.S_ISREG(st.st_mode):
+        raise ValueError(f"Credential file must be a regular file: {file_path}")
+
+    mode = stat.S_IMODE(st.st_mode)
+    if mode & 0o077:
+        raise PermissionError(
+            f"Insecure permissions {oct(mode)} on {file_path}. "
+            f"Expected 0600 (-rw-------). Refusing to load credentials."
+        )
+
+    if enforce_ownership:
+        current_uid = os.getuid()
+        if st.st_uid != current_uid and st.st_uid != 0:
+            raise PermissionError(
+                f"Credential file {file_path} is owned by UID {st.st_uid}, "
+                f"expected current UID {current_uid} or root. Refusing to load credentials."
+            )
+
+
+def load_funding_collector_config(
+    env_path: Optional[str] = None,
+    enforce_security: bool = True,
+    enforce_ownership: bool = True,
+) -> FundingDBConfig:
+    """
+    Load dedicated funding collector database credentials.
+    Priority:
+    1. env_path argument
+    2. FUNDING_COLLECTOR_ENV environment variable
+    3. /etc/signal-bot/funding-collector.env (if present)
+    4. FUNDING_DB_* environment variables directly (e.g. for testing)
+    Strict security invariants:
+    - Never falls back to MYSQL_USER, MYSQL_PASSWORD, DB_USER, DB_PASSWORD, or cms.
+    - Validates file permissions (0600) and ownership if loaded from a file.
+    - Fails closed on missing or invalid configuration.
+    """
+    target_path = env_path or os.getenv("FUNDING_COLLECTOR_ENV")
+    if target_path is None and os.path.exists(DEFAULT_FUNDING_COLLECTOR_ENV):
+        target_path = DEFAULT_FUNDING_COLLECTOR_ENV
+
+    values: Dict[str, Optional[str]] = {}
+    if target_path:
+        if enforce_security:
+            validate_credential_file_security(target_path, enforce_ownership=enforce_ownership)
+        import dotenv
+        values = dotenv.dotenv_values(target_path)
+
+    host = values.get("FUNDING_DB_HOST") or os.getenv("FUNDING_DB_HOST", "127.0.0.1")
+    port_val = values.get("FUNDING_DB_PORT") or os.getenv("FUNDING_DB_PORT", "3306")
+    try:
+        port = int(port_val)
+    except (ValueError, TypeError) as e:
+        raise ValueError(f"Invalid FUNDING_DB_PORT '{port_val}': {e}")
+    database = values.get("FUNDING_DB_NAME") or os.getenv("FUNDING_DB_NAME", "crypto_signals")
+    user = values.get("FUNDING_DB_USER") or os.getenv("FUNDING_DB_USER")
+    password = values.get("FUNDING_DB_PASSWORD") or os.getenv("FUNDING_DB_PASSWORD")
+
+    if not user:
+        raise ValueError(
+            "Dedicated database username (FUNDING_DB_USER) is missing. "
+            "Refusing to fall back to shared application credentials (cms)."
+        )
+    if not password:
+        raise ValueError(
+            "Dedicated database password (FUNDING_DB_PASSWORD) is missing. "
+            "Refusing to fall back to shared application credentials (cms)."
+        )
+
+    return FundingDBConfig(host=host, port=port, database=database, user=user, password=password)
 
 
 # =============================================================================

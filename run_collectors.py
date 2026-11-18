@@ -1,9 +1,13 @@
 """
 Runs all real-time collectors concurrently in one process:
   - kline (spot + futures, all timeframes)
-  - funding rate / mark price
-  - liquidations
+  - funding rate / mark price (polled REST)
   - open interest (polled)
+
+Historical note:
+  - Liquidations WebSocket collector (ws_liquidations.py) is deprecated and
+    no longer started here because Binance Futures !forceOrder@arr stream is
+    unusable from the current network origin.
 
 Run this after backfill_klines.py has completed at least once.
 
@@ -15,8 +19,7 @@ import logging
 
 from config import ENABLE_FUTURES
 from collectors.ws_kline import main as ws_kline_main
-from collectors.ws_funding import run as ws_funding_run
-from collectors.ws_liquidations import run as ws_liquidations_run
+from collectors.funding_poller import run as funding_poller_run
 from collectors.oi_poller import run as oi_poller_run
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -28,10 +31,10 @@ async def main():
     tasks = [ws_kline_main()]
 
     if ENABLE_FUTURES:
-        tasks += [ws_funding_run(), ws_liquidations_run(), oi_poller_run()]
+        tasks += [funding_poller_run(), oi_poller_run()]
     else:
         logger.info(
-            "ENABLE_FUTURES is false -- skipping funding/liquidations/open-interest "
+            "ENABLE_FUTURES is false -- skipping funding/open-interest "
             "collectors (these are futures-only). Set ENABLE_FUTURES=true in .env "
             "once you've confirmed futures WS is reachable from your network."
         )

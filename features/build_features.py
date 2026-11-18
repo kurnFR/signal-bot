@@ -65,7 +65,7 @@ def call_with_retry(fn, description, attempts=3):
 
 def build_one(symbol, market, timeframe):
     desc = f"{symbol} {market} {timeframe}"
-    df = call_with_retry(lambda: fetch_ohlcv_df(symbol, market, timeframe), f"{desc} fetch")
+    df = call_with_retry(lambda: fetch_ohlcv_df(symbol, market, timeframe, closed_only=True), f"{desc} fetch")
     min_required = max(RSI_WINDOW, MACD_SLOW, ATR_PERIOD, VOLUME_SMA_PERIOD, HTF_S_R_LOOKBACK_BARS) + 1
     if len(df) < min_required:
         logger.warning(

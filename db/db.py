@@ -19,6 +19,29 @@ logger = logging.getLogger("db")
 
 _pool = None
 _retailbot2_pool = None
+_funding_pool = None
+
+
+def get_funding_pool(config=None, reset=False):
+    """
+    Dedicated connection pool for Binance Futures Funding Rate REST Collector.
+    Uses only dedicated credentials loaded via load_funding_collector_config().
+    Never falls back to global _pool or cms.
+    """
+    global _funding_pool
+    if reset and _funding_pool is not None:
+        _funding_pool = None
+
+    if _funding_pool is None:
+        from config import load_funding_collector_config
+        cfg = config or load_funding_collector_config()
+        _funding_pool = pooling.MySQLConnectionPool(
+            pool_name="funding_collector_pool",
+            pool_size=3,
+            init_command="SET time_zone = '+00:00'",
+            **cfg.to_dict(),
+        )
+    return _funding_pool
 
 
 def get_retailbot2_pool():
@@ -85,12 +108,34 @@ def init_schema():
     logger.info("Schema initialized.")
 
 
-def upsert_ohlcv(rows):
+def upsert_ohlcv(rows, pool=None, conn=None, commit=None):
     """
     rows: list of tuples matching the ohlcv table column order
     (symbol, market, timeframe, open_time, close_time, open, high, low,
      close, volume, quote_volume, num_trades, taker_buy_base_vol,
      taker_buy_quote_vol, is_closed)
+
+    State Transition Rules (ON DUPLICATE KEY UPDATE):
+    1. A partial / forming candle (is_closed=0) must NEVER overwrite an already verified
+       closed candle (ohlcv.is_closed=1) with partial OHLCV data.
+    2. A verified closed candle (VALUES(is_closed)=1) can update an earlier forming candle
+       (ohlcv.is_closed=0) and transition is_closed from 0 to 1.
+    3. Live in-progress updates (0 -> 0) update ongoing bar metrics.
+    4. Duplicate finalized updates (1 -> 1) remain idempotent.
+
+    Transaction Ownership Semantics:
+    1. Function-created or Pooled connection (conn is None):
+       Function acquires connection and owns the transaction boundary.
+       Commits on success, rolls back on failure, and closes connection in finally.
+    2. Caller-owned transaction (conn is not None, and either commit=False or conn.in_transaction):
+       Caller owns transaction boundary. Function does NOT commit. Function creates a
+       MariaDB SAVEPOINT before executemany; on batch failure, rolls back strictly to
+       the savepoint to protect caller's prior uncommitted operations, then re-raises
+       the original exception.
+    3. Recovery-owned transaction (conn is not None, commit=True, or commit=None with not in_transaction):
+       Function manages batch transaction on conn. Commits on success, rolls back on failure.
+    4. Rollback safety:
+       Rollback errors never mask or suppress the original database exception.
     """
     if not rows:
         return
@@ -101,25 +146,66 @@ def upsert_ohlcv(rows):
             taker_buy_base_vol, taker_buy_quote_vol, is_closed
         ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON DUPLICATE KEY UPDATE
-            close_time=VALUES(close_time),
-            open=VALUES(open), high=VALUES(high), low=VALUES(low), close=VALUES(close),
-            volume=VALUES(volume), quote_volume=VALUES(quote_volume),
-            num_trades=VALUES(num_trades),
-            taker_buy_base_vol=VALUES(taker_buy_base_vol),
-            taker_buy_quote_vol=VALUES(taker_buy_quote_vol),
-            is_closed=VALUES(is_closed)
+            close_time = IF(ohlcv.is_closed = 1 AND VALUES(is_closed) = 0, ohlcv.close_time, VALUES(close_time)),
+            open = IF(ohlcv.is_closed = 1 AND VALUES(is_closed) = 0, ohlcv.open, VALUES(open)),
+            high = IF(ohlcv.is_closed = 1 AND VALUES(is_closed) = 0, ohlcv.high, VALUES(high)),
+            low = IF(ohlcv.is_closed = 1 AND VALUES(is_closed) = 0, ohlcv.low, VALUES(low)),
+            close = IF(ohlcv.is_closed = 1 AND VALUES(is_closed) = 0, ohlcv.close, VALUES(close)),
+            volume = IF(ohlcv.is_closed = 1 AND VALUES(is_closed) = 0, ohlcv.volume, VALUES(volume)),
+            quote_volume = IF(ohlcv.is_closed = 1 AND VALUES(is_closed) = 0, ohlcv.quote_volume, VALUES(quote_volume)),
+            num_trades = IF(ohlcv.is_closed = 1 AND VALUES(is_closed) = 0, ohlcv.num_trades, VALUES(num_trades)),
+            taker_buy_base_vol = IF(ohlcv.is_closed = 1 AND VALUES(is_closed) = 0, ohlcv.taker_buy_base_vol, VALUES(taker_buy_base_vol)),
+            taker_buy_quote_vol = IF(ohlcv.is_closed = 1 AND VALUES(is_closed) = 0, ohlcv.taker_buy_quote_vol, VALUES(taker_buy_quote_vol)),
+            is_closed = GREATEST(ohlcv.is_closed, VALUES(is_closed))
     """
-    conn = get_pool().get_connection()
+    if conn is not None:
+        c = conn
+        should_close = False
+        if commit is None:
+            should_commit = not getattr(c, "in_transaction", False)
+        else:
+            should_commit = bool(commit)
+    else:
+        p = pool or get_pool()
+        c = p.get_connection()
+        should_close = True
+        should_commit = True if commit is None else bool(commit)
+
+    cur = c.cursor()
+    sp_name = None
     try:
-        cur = conn.cursor()
+        if not should_commit:
+            sp_name = f"sp_upsert_ohlcv_{abs(hash(c)) % 10000000}"
+            cur.execute(f"SAVEPOINT {sp_name};")
+
         cur.executemany(sql, rows)
-        conn.commit()
-        cur.close()
+
+        if should_commit:
+            c.commit()
+        elif sp_name:
+            cur.execute(f"RELEASE SAVEPOINT {sp_name};")
+    except Exception as original_exc:
+        try:
+            if should_commit:
+                c.rollback()
+            elif sp_name:
+                cur.execute(f"ROLLBACK TO SAVEPOINT {sp_name};")
+        except Exception as rb_exc:
+            logger.warning(f"Error during rollback/savepoint rollback: {rb_exc}")
+        raise original_exc
     finally:
-        conn.close()
+        try:
+            cur.close()
+        except Exception:
+            pass
+        if should_close:
+            try:
+                c.close()
+            except Exception:
+                pass
 
 
-def upsert_funding(rows):
+def upsert_funding(rows, pool=None):
     """rows: (symbol, event_time, mark_price, index_price, funding_rate, next_funding_time)"""
     if not rows:
         return
@@ -132,12 +218,27 @@ def upsert_funding(rows):
             funding_rate=VALUES(funding_rate),
             next_funding_time=VALUES(next_funding_time)
     """
-    conn = get_pool().get_connection()
+    p = pool or get_funding_pool()
+    conn = p.get_connection()
     try:
         cur = conn.cursor()
         cur.executemany(sql, rows)
         conn.commit()
         cur.close()
+    finally:
+        conn.close()
+
+
+def get_latest_funding_time(symbol, pool=None):
+    """Return max event_time (ms) for symbol, or None if no records exist."""
+    p = pool or get_funding_pool()
+    conn = p.get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT MAX(event_time) FROM funding_rate WHERE symbol = %s", (symbol,))
+        row = cur.fetchone()
+        cur.close()
+        return row[0] if row and row[0] is not None else None
     finally:
         conn.close()
 
@@ -182,7 +283,7 @@ def insert_liquidations(rows):
         conn.close()
 
 
-def heartbeat(collector_name, status="ok", detail=None):
+def heartbeat(collector_name, status="ok", detail=None, pool=None):
     sql = """
         INSERT INTO collector_heartbeat (collector_name, status, detail, last_beat_time)
         VALUES (%s,%s,%s,NOW())
@@ -191,7 +292,8 @@ def heartbeat(collector_name, status="ok", detail=None):
             detail=VALUES(detail),
             last_beat_time=NOW()
     """
-    conn = get_pool().get_connection()
+    p = pool or (get_funding_pool() if collector_name == "funding_poller" else get_pool())
+    conn = p.get_connection()
     try:
         cur = conn.cursor()
         cur.execute(sql, (collector_name, status, detail))
@@ -280,18 +382,24 @@ def fetch_latest_open_candle(symbol, market, timeframe):
 
 
 
-def fetch_ohlcv_df(symbol, market, timeframe):
+def fetch_ohlcv_df(symbol, market, timeframe, closed_only=True):
     """
-    Returns the full OHLCV history for one symbol/market/timeframe as a
+    Returns the OHLCV history for one symbol/market/timeframe as a
     pandas DataFrame, sorted ascending by open_time, numeric dtypes (not
     Decimal) so indicator math works correctly.
+
+    closed_only: if True (default), filters WHERE is_closed = 1 so that
+    forming / incomplete candles are excluded from indicator computation
+    and strategy feature pipelines. Pass closed_only=False only when
+    explicitly required for diagnostics or forming-candle analysis.
     """
     import pandas as pd
 
-    sql = """
+    closed_clause = "AND is_closed = 1" if closed_only else ""
+    sql = f"""
         SELECT open_time, open, high, low, close, volume
         FROM ohlcv
-        WHERE symbol=%s AND market=%s AND timeframe=%s
+        WHERE symbol=%s AND market=%s AND timeframe=%s {closed_clause}
         ORDER BY open_time ASC
     """
     engine = get_sqlalchemy_engine()
@@ -393,23 +501,24 @@ def fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, in
                 ORDER BY open_time DESC
                 LIMIT %(limit)s
             ) o
-            JOIN features f
+            LEFT JOIN features f
               ON f.symbol = o.symbol AND f.market = o.market AND f.timeframe = o.timeframe
              AND f.open_time = o.open_time
             ORDER BY o.open_time ASC
         """
     else:
-        sql = """
+        closed_clause = "AND o.is_closed = 1" if closed_only else ""
+        sql = f"""
             SELECT o.open_time, o.open, o.high, o.low, o.close, o.volume, o.is_closed,
                    f.rsi, f.macd, f.macd_signal, f.macd_hist, f.atr, f.atr_pct,
                    f.volume_sma, f.volume_ratio, f.support, f.resistance,
                    f.swing_high, f.swing_low, f.fib_0, f.fib_236, f.fib_382,
                    f.fib_5, f.fib_618, f.fib_786, f.fib_1
             FROM ohlcv o
-            JOIN features f
+            LEFT JOIN features f
               ON f.symbol = o.symbol AND f.market = o.market AND f.timeframe = o.timeframe
              AND f.open_time = o.open_time
-            WHERE o.symbol=%(symbol)s AND o.market=%(market)s AND o.timeframe=%(timeframe)s
+            WHERE o.symbol=%(symbol)s AND o.market=%(market)s AND o.timeframe=%(timeframe)s {closed_clause}
             ORDER BY o.open_time ASC
         """
     engine = get_sqlalchemy_engine()
@@ -424,6 +533,92 @@ def fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, in
         return df
 
     df["open_time"] = df["open_time"].astype("int64")
+
+    feature_cols = [
+        "rsi", "macd", "macd_signal", "macd_hist", "atr", "atr_pct",
+        "volume_sma", "volume_ratio", "support", "resistance",
+        "swing_high", "swing_low", "fib_0", "fib_236", "fib_382",
+        "fib_5", "fib_618", "fib_786", "fib_1",
+    ]
+    for col in feature_cols:
+        if col not in df.columns:
+            df[col] = float("nan")
+
+    # In-memory feature calculation fallback:
+    # Triggered when persisted feature rows are missing, stale, or incomplete on recent bars.
+    needs_calc = False
+    if len(df) > 0:
+        latest_features = df[feature_cols].iloc[-1]
+        if latest_features.isna().any():
+            needs_calc = True
+        elif len(df) > 50 and df[feature_cols].iloc[50:].isna().any().any():
+            needs_calc = True
+
+    if needs_calc:
+        from config import (
+            RSI_WINDOW, MACD_FAST, MACD_SLOW, MACD_SIGNAL, ATR_PERIOD,
+            VOLUME_SMA_PERIOD, HTF_S_R_LOOKBACK_BARS
+        )
+        from features.indicators import compute_all_features
+        import time
+
+        calc_params = {
+            "RSI_WINDOW": RSI_WINDOW,
+            "MACD_FAST": MACD_FAST,
+            "MACD_SLOW": MACD_SLOW,
+            "MACD_SIGNAL": MACD_SIGNAL,
+            "ATR_PERIOD": ATR_PERIOD,
+            "VOLUME_SMA_PERIOD": VOLUME_SMA_PERIOD,
+            "HTF_S_R_LOOKBACK_BARS": HTF_S_R_LOOKBACK_BARS,
+        }
+        min_required = max(
+            calc_params["RSI_WINDOW"],
+            calc_params["MACD_SLOW"],
+            calc_params["ATR_PERIOD"],
+            calc_params["VOLUME_SMA_PERIOD"],
+            calc_params["HTF_S_R_LOOKBACK_BARS"]
+        ) + 1  # 51 bars
+
+        if len(df) < min_required:
+            logger.warning(
+                "Insufficient OHLCV history for indicator warm-up for %s %s %s: "
+                "available=%d, required>=%d bars",
+                symbol, market, timeframe, len(df), min_required
+            )
+
+        missing_mask = df[feature_cols].isna().any(axis=1)
+        missing_count = int(missing_mask.sum())
+        t0 = time.perf_counter()
+
+        try:
+            ohlcv_input = pd.DataFrame({
+                "open": df["open"].astype(float),
+                "high": df["high"].astype(float),
+                "low": df["low"].astype(float),
+                "close": df["close"].astype(float),
+                "volume": df["volume"].astype(float),
+            }, index=df.index)
+
+            computed_df = compute_all_features(ohlcv_input, calc_params)
+
+            for col in feature_cols:
+                if col in computed_df.columns:
+                    mask = df[col].isna()
+                    if mask.all():
+                        df[col] = computed_df[col].astype(float)
+                    elif mask.any():
+                        df.loc[mask, col] = computed_df.loc[mask, col].astype(float)
+
+            duration_ms = (time.perf_counter() - t0) * 1000
+            logger.info(
+                "Calculated in-memory features for %s %s %s: %d/%d bars missing features (computed in %.2f ms)",
+                symbol, market, timeframe, missing_count, len(df), duration_ms
+            )
+        except Exception as exc:
+            logger.error(
+                "In-memory feature calculation failed for %s %s %s: %s",
+                symbol, market, timeframe, exc, exc_info=True
+            )
 
     numeric_cols = [c for c in df.columns if c not in ("open_time", "is_closed")]
     for col in numeric_cols:
