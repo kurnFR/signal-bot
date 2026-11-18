@@ -1426,7 +1426,9 @@ print(json.dumps({"reset_state": reset_state}, default=str))
     const ml04Symbol = `MLS${RUN_ID.slice(0, 4)}USDT`;
     const ml04ManifestPath = path.resolve(REPO_ROOT, `ml_models/${ml04ModelId}.json`);
     const ml04WeightsPath = path.resolve(REPO_ROOT, `ml_models/${ml04ModelId}.joblib`);
-    testFixtures.mlFiles.push(ml04ManifestPath, ml04WeightsPath);
+    const rejectedModelId = ml04ModelId + "_ineligible";
+    const rejectedManifestPath = path.resolve(REPO_ROOT, `ml_models/${rejectedModelId}.json`);
+    testFixtures.mlFiles.push(ml04ManifestPath, ml04WeightsPath, rejectedManifestPath);
 
     // Create real serialized scikit-learn model weights and verified manifest
     const ml04CreateScript = `
@@ -1441,6 +1443,7 @@ y = np.array([0, 1, 0, 1, 0, 0, 1, 1, 0, 1])
 clf.fit(X, y)
 
 weights_path = Path("${ml04WeightsPath}")
+weights_path.parent.mkdir(parents=True, exist_ok=True)
 joblib.dump(clf, weights_path)
 with open(weights_path, "rb") as f:
     weights_sha256 = hashlib.sha256(f.read()).hexdigest()
@@ -1473,6 +1476,8 @@ manifest = {
 
 manifest_path = Path("${ml04ManifestPath}")
 manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+rejected = dict(manifest, model_id="${rejectedModelId}", test_metrics={}, eligible_for_paper=False)
+Path("${rejectedManifestPath}").write_text(json.dumps(rejected), encoding="utf-8")
 
 # Verify model loading
 loaded_clf = joblib.load(weights_path)
@@ -1521,12 +1526,13 @@ print(json.dumps({"after_config": row}, default=str))
 
     // Promotion gate verification: Ineligible model rejected with HTTP 409 Conflict
     const gateCheckRes = await apiRequest("POST", "/api/ml/deploy-to-paper", traderToken, {
-      model_id: "real-btcusdt-spot-1h-trend_ema_v1-tournament-binary_positive_r",
+      model_id: rejectedModelId,
       allocated_capital: 5000.0,
       risk_per_trade_pct: 1.0,
       send_telegram: false,
     });
     assert(gateCheckRes.status === 409, `Ineligible model must return 409 Conflict, got: ${gateCheckRes.status}`);
+    assert(gateCheckRes.data?.detail?.includes("not eligible for paper trading"), "Expected the eligibility gate to reject the model");
     console.log(`  [4] Gate enforcement verified: Ineligible model strictly rejected with HTTP 409 Conflict.`);
 
     // RBAC check: Viewer denied 403 on exact frontend endpoint POST /api/ml/deploy-to-paper

@@ -18,6 +18,8 @@ The default supervisor startup is strictly limited to the Phase 2A stack:
 3. `screener` (`Screen/screening.py`)
 4. `wallet_tracker` (`run_wallet_tracker.py`)
 
+Funding rate collection runs through the separate `signal-funding-collector.service` unit. When updating a server that already uses this unit, restart it after pulling and verify its journal and funding watermarks. Use the existing dedicated `FUNDING_DB_*` configuration. The supervisor's collectors process handles candles and open interest.
+
 ### Held-Back Processes (Strict Independent Opt-Ins)
 - **Paper Engine** (`run_paper_engine.py`): Excluded by default. Requires explicit `PAPER_ENGINE_ENABLED=1`.
 - **News AI** (`run_news_ai.py`): Excluded by default. Requires explicit `NEWS_AI_ENABLED=1`.
