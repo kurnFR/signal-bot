@@ -38,14 +38,15 @@ class TestTelegramRouteContracts(unittest.TestCase):
 
     def test_status_exposes_chat_id_only_to_admin(self):
         config = {"is_configured": True, "chat_id": "-100123456789", "token": "test-token"}
-        with patch("web.routes.telegram_routes.get_telegram_config", return_value=config):
+        with patch("web.routes.telegram_routes.get_retailbot2_outbox_counts", return_value={"PENDING": 2}) as counts, patch("web.routes.telegram_routes.get_telegram_config", return_value=config):
             admin = self._get("/api/telegram/status", "admin")
             trader = self._get("/api/telegram/status", "trader")
             viewer = self._get("/api/telegram/status", "viewer")
 
+        counts.assert_called_once_with()
         self.assertEqual(admin.status_code, 200)
         self.assertEqual(admin.json(), {
-            "configured": True, "chatId": "-100123456789", "hasToken": True,
+            "configured": True, "chatId": "-100123456789", "hasToken": True, "outbox": {"PENDING": 2},
         })
         for response in (trader, viewer):
             self.assertEqual(response.status_code, 200)

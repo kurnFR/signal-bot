@@ -182,6 +182,8 @@ def calculate_trade_accounting(
         _require_finite(stop_price=stop_price)
     if quantity <= 0:
         raise ValueError("quantity must be positive")
+    if fee_pct >= 1:
+        raise ValueError("fee_pct must be less than one")
     if fee_pct < 0 or entry_slippage_pct < 0:
         raise ValueError("cost rates cannot be negative")
     if exit_slippage_pct is None:

@@ -20,6 +20,8 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
     runtime-only chronological bounds. Historical rows remain available for
     indicator warm-up, but no signal/entry/exit is allowed outside the window.
     """
+    if df is None or df.empty:
+        return []
     trades = []
     n = len(df)
     i = 1
@@ -32,8 +34,6 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
     ml_filter = params.get("_ml_signal_filter")
     simulation_start = params.get("_simulation_start_open_time")
     simulation_end = params.get("_simulation_end_open_time")
-
-    import numpy as np
 
     if ml_filter is not None and not hasattr(ml_filter, "predict_probability"):
         raise TypeError("_ml_signal_filter must expose predict_probability()")
@@ -62,6 +62,7 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
     funding_events_all: list = []
     funding_data_missing: bool = False
 
+    interval_ms = int(np.min(np.diff(open_times))) if market == "futures" and n >= 2 else 0
     if market == "futures":
         if is_pairs:
             # Pairs ratio trades a synthetic ratio without an executable two-leg sizing model.
@@ -90,7 +91,9 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
                 )
         elif symbol:
             win_start = int(df["open_time"].min())
-            win_end = int(df["open_time"].max()) + int(max_hold * 86400 * 1000)
+            win_end = int(open_times[-1]) + interval_ms - 1
+            if "close_time" in df and pd.notna(df["close_time"].iloc[-1]):
+                win_end = int(df["close_time"].iloc[-1])
             try:
                 from db.db import fetch_settled_funding_events
                 funding_events_all = fetch_settled_funding_events(
@@ -155,8 +158,7 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
         atr_at_signal = row["atr"]
         if pd.isna(atr_at_signal) or atr_at_signal <= 0:
             if use_trailing:
-                import logging
-                logging.getLogger("backtest.simulate").warning(
+                logger.warning(
                     "Signal at bar index %d (open_time=%s) has NaN or non-positive ATR (%s); skipping to avoid invalid stop/trailing calculation",
                     i, row_time, atr_at_signal
                 )
@@ -240,10 +242,18 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
                 funding_cost = 0.0
                 trade_funding_status = "missing_data_zero_cost_fallback"
             else:
+                exit_bar = df.iloc[exit_idx]
+                # OHLC provides no intrabar fill timestamp. Model those fills at bar end.
+                if exit_reason in ("SL", "TP", "TRAIL") and exit_price == float(exit_bar["open"]):
+                    funding_end = exit_t - 1
+                elif pd.notna(exit_bar.get("close_time")):
+                    funding_end = int(exit_bar["close_time"])
+                else:
+                    funding_end = exit_t + interval_ms - 1
                 trade_events = [
                     (ev[1], ev[2])
                     for ev in funding_events_all
-                    if entry_t < ev[0] <= exit_t
+                    if entry_t < ev[0] <= funding_end
                 ]
                 if trade_events:
                     long_cost = calculate_funding_cost(qty, trade_events)
@@ -276,7 +286,8 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
             "entry_time": entry_t,
             "entry_price": float(accounting["entry_exec_price"]),
             "exit_time": exit_t,
-            "exit_price": float(exit_price),
+            "exit_price": float(accounting["exit_exec_price"]),
+            "raw_exit_price": float(exit_price),
             "exit_reason": exit_reason,
             "stop_loss": float(stop_loss),
             "take_profit": float(take_profit),

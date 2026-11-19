@@ -522,7 +522,7 @@ export function PaperTradingPanel() {
         {loading && !data ? <p className="empty-state" role="status">Loading open positions…</p> : data?.positions.length ? (
           <div className="status-table-wrap">
             <table className="status-table">
-              <thead><tr><th>Symbol / strategy</th><th>Side</th><th>Entry</th><th>Mark</th><th>Stop / target</th><th>Unrealized R</th><th>Updated</th><th>Action</th></tr></thead>
+              <thead><tr><th>Symbol / strategy</th><th>Side</th><th>Entry</th><th>Mark</th><th>Stop / target</th><th>Booked funding</th><th>Unrealized R</th><th>Updated</th><th>Action</th></tr></thead>
               <tbody>
                 {data.positions.map((p) => (
                   <tr key={p.id}>
@@ -531,6 +531,7 @@ export function PaperTradingPanel() {
                     <td>{number.format(p.entry_price)}</td>
                     <td>{number.format(p.current_price)}</td>
                     <td>{p.stop_loss == null ? "—" : number.format(p.stop_loss)} / {p.take_profit == null ? "—" : number.format(p.take_profit)}</td>
+                    <td>{p.funding_pnl == null ? "—" : money.format(p.funding_pnl)}</td>
                     <td className={pnlClass(p.unrealized_r)}>{p.unrealized_r == null ? "—" : `${number.format(p.unrealized_r)} R`}</td>
                     <td>{dateLabel(p.last_update_time)}</td>
                     <td>
@@ -650,13 +651,14 @@ export function PaperTradingPanel() {
         {data?.trades.length ? (
           <div className="status-table-wrap">
             <table className="status-table">
-              <thead><tr><th>Symbol / strategy</th><th>Direction</th><th>Entry → exit</th><th>Net PnL</th><th>Return</th><th>R multiple</th><th>Exit reason</th></tr></thead>
+              <thead><tr><th>Symbol / strategy</th><th>Direction</th><th>Entry → exit</th><th>Funding PnL</th><th>Net PnL</th><th>Return</th><th>R multiple</th><th>Exit reason</th></tr></thead>
               <tbody>
                 {data.trades.map((t) => (
                   <tr key={t.id}>
                     <td><strong>{t.symbol}</strong><small>{t.strategy_name} · {t.market} · {t.timeframe}</small></td>
                     <td>{t.direction}</td>
                     <td>{number.format(t.entry_price)} → {number.format(t.exit_price)}</td>
+                    <td>{t.funding_pnl == null ? "—" : money.format(t.funding_pnl)}</td>
                     <td className={pnlClass(t.net_pnl)}>{money.format(t.net_pnl)}</td>
                     <td className={pnlClass(t.net_return_pct)}>{number.format(t.net_return_pct)}%</td>
                     <td className={pnlClass(t.r_multiple)}>{number.format(t.r_multiple)} R</td>

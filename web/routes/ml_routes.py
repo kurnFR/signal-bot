@@ -151,11 +151,22 @@ _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
 _EXPERIMENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
 
 
+def _finite_response(value):
+    """Represent undefined/unbounded metrics as JSON null in dashboard responses."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _finite_response(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_finite_response(item) for item in value]
+    return value
+
+
 def _normalize_experiment_payload(data: Dict[str, Any]) -> Dict[str, Any]:
     """Expose stable dashboard aliases for current and legacy experiment files."""
     if not isinstance(data, dict):
         raise ValueError("Experiment result must be a JSON object")
-    normalized = dict(data)
+    normalized = _finite_response(data)
     experiment = normalized.get("experiment")
     if not isinstance(experiment, dict):
         return normalized
@@ -312,7 +323,7 @@ def list_saved_models() -> Dict[str, Any]:
             if not data["has_weights"]:
                 reasons.append("model weights (.joblib) are missing")
             data["eligibility"] = {"eligible": not reasons, "reasons": reasons}
-            models.append(data)
+            models.append(_finite_response(data))
         except Exception as exc:
             logger.warning("Failed to parse model manifest %s (%s)", safe_manifest.name, type(exc).__name__)
 
@@ -342,7 +353,7 @@ def trigger_experiment(req: RunExperimentRequest):
             target_type=req.target_type.strip(),
             min_validation_trades=req.min_validation_trades,
         )
-        data = json.loads(result_path.read_text(encoding="utf-8"))
+        data = _normalize_experiment_payload(json.loads(result_path.read_text(encoding="utf-8")))
         return {
             "status": "success",
             "experiment_id": data.get("experiment_id"),

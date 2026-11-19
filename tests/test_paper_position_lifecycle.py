@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import db.db as db
 import paper.engine as pe
-from backtest.accounting import calculate_trade_accounting
+from backtest.accounting import apply_exit_slippage, calculate_trade_accounting
 from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT
 
 
@@ -216,7 +216,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         self.assertEqual(len(trades), 1)
         t = trades[0]
         self.assertEqual(t["exit_reason"], "TP")
-        self.assertEqual(float(t["exit_price"]), 54000.0)
+        self.assertAlmostEqual(float(t["exit_price"]), apply_exit_slippage(54000.0, t["direction"], BACKTEST_SLIPPAGE_PCT), places=6)
         self.assertEqual(t["exit_time"], 2000)
         self.assertGreater(float(t["net_pnl"]), 0.0)
         self.assertEqual(t["holding_bars"], 2)
@@ -243,7 +243,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         trades = cur.fetchall()
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]["exit_reason"], "TP")
-        self.assertEqual(float(trades[0]["exit_price"]), 46000.0)
+        self.assertAlmostEqual(float(trades[0]["exit_price"]), apply_exit_slippage(46000.0, trades[0]["direction"], BACKTEST_SLIPPAGE_PCT), places=6)
         self.assertGreater(float(trades[0]["net_pnl"]), 0.0)
         cur.close()
         conn.close()
@@ -268,7 +268,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         trades = cur.fetchall()
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]["exit_reason"], "SL")
-        self.assertEqual(float(trades[0]["exit_price"]), 48000.0)
+        self.assertAlmostEqual(float(trades[0]["exit_price"]), apply_exit_slippage(48000.0, trades[0]["direction"], BACKTEST_SLIPPAGE_PCT), places=6)
         self.assertLess(float(trades[0]["net_pnl"]), 0.0)
         cur.close()
         conn.close()
@@ -292,7 +292,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         cur.execute("SELECT * FROM paper_trades WHERE position_id=%s", (pos_id,))
         trades = cur.fetchall()
         self.assertEqual(trades[0]["exit_reason"], "TP")
-        self.assertEqual(float(trades[0]["exit_price"]), 53000.0)
+        self.assertAlmostEqual(float(trades[0]["exit_price"]), apply_exit_slippage(53000.0, trades[0]["direction"], BACKTEST_SLIPPAGE_PCT), places=6)
         cur.close()
         conn.close()
 
@@ -416,7 +416,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         cur.execute("SELECT * FROM paper_trades WHERE position_id=%s", (pos_id,))
         t = cur.fetchone()
         self.assertEqual(t["exit_reason"], "TIMEOUT")
-        self.assertEqual(float(t["exit_price"]), 50800.0)
+        self.assertAlmostEqual(float(t["exit_price"]), apply_exit_slippage(50800.0, t["direction"], BACKTEST_SLIPPAGE_PCT), places=6)
         self.assertEqual(t["holding_bars"], 3)
         cur.close()
         conn.close()
@@ -642,7 +642,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         t = cur.fetchone()
         # MUST exit on bar 3000 with SL, NOT on bar 4000 with TP!
         self.assertEqual(t["exit_reason"], "SL")
-        self.assertEqual(float(t["exit_price"]), 84000.0)
+        self.assertAlmostEqual(float(t["exit_price"]), apply_exit_slippage(84000.0, t["direction"], BACKTEST_SLIPPAGE_PCT), places=6)
         self.assertEqual(t["exit_time"], 3000)
         self.assertEqual(t["holding_bars"], 3)
         cur.close()
@@ -735,7 +735,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         conn.close()
 
         self.assertEqual(trade["exit_reason"], "SL")
-        self.assertEqual(float(trade["exit_price"]), 46000.0)
+        self.assertAlmostEqual(float(trade["exit_price"]), apply_exit_slippage(46000.0, trade["direction"], BACKTEST_SLIPPAGE_PCT), places=6)
         # Canonical accounting applies BACKTEST_SLIPPAGE_PCT (0.05%) to exit execution
         # Exit fill = 46000 * (1 - 0.0005) = 45977.0 -> gross = (45977 - 50000) * 0.1 = -402.30
         expected_gross = -402.3
@@ -793,7 +793,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         conn2.close()
 
         self.assertEqual(trade["exit_reason"], "TRAIL")
-        self.assertAlmostEqual(float(trade["exit_price"]), 51000.0, places=2)
+        self.assertAlmostEqual(float(trade["exit_price"]), apply_exit_slippage(51000.0, trade["direction"], BACKTEST_SLIPPAGE_PCT), places=2)
 
     def test_23_news_ai_position_lifecycle(self):
         """23. News AI created position is managed and closed via central engine loop."""
@@ -834,7 +834,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
 
         self.assertEqual(t["strategy_name"], "news_ai_overlay")
         self.assertEqual(t["exit_reason"], "TP")
-        self.assertAlmostEqual(float(t["exit_price"]), 72000.0, places=2)
+        self.assertAlmostEqual(float(t["exit_price"]), apply_exit_slippage(72000.0, t["direction"], BACKTEST_SLIPPAGE_PCT), places=2)
 
     def test_24_advisory_lock_prevents_simultaneous_engine_execution(self):
         """24. Dedicated connection advisory lock skips overlapping engine invocation cleanly."""
@@ -1359,7 +1359,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         self.assertEqual(len(trades), 1)
         t = trades[0]
         self.assertEqual(t["exit_reason"], "TP")
-        self.assertEqual(float(t["exit_price"]), 54000.0)
+        self.assertAlmostEqual(float(t["exit_price"]), apply_exit_slippage(54000.0, t["direction"], BACKTEST_SLIPPAGE_PCT), places=6)
         self.assertEqual(t["exit_time"], 3000)
         # Expected funding cost: 0.1 * 52000.0 * 0.0005 = 2.6 -> funding_pnl = -2.6
         self.assertAlmostEqual(float(t["funding_pnl"]), -2.6, places=4)

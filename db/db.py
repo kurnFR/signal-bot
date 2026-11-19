@@ -6,6 +6,8 @@ backfill or restarting a WS collector is always safe (idempotent).
 import mysql.connector
 from mysql.connector import pooling
 import logging
+from contextlib import closing, contextmanager
+from threading import Lock
 import json
 import math
 from datetime import datetime, timezone
@@ -21,6 +23,7 @@ logger = logging.getLogger("db")
 _pool = None
 _retailbot2_pool = None
 _funding_pool = None
+_pool_lock = Lock()
 
 
 def get_funding_pool(config=None, reset=False):
@@ -30,19 +33,20 @@ def get_funding_pool(config=None, reset=False):
     Never falls back to global _pool or cms.
     """
     global _funding_pool
-    if reset and _funding_pool is not None:
-        _funding_pool = None
+    with _pool_lock:
+        if reset and _funding_pool is not None:
+            _funding_pool = None
 
-    if _funding_pool is None:
-        from config import load_funding_collector_config
-        cfg = config or load_funding_collector_config()
-        _funding_pool = pooling.MySQLConnectionPool(
-            pool_name="funding_collector_pool",
-            pool_size=3,
-            init_command="SET time_zone = '+00:00'",
-            **cfg.to_dict(),
-        )
-    return _funding_pool
+        if _funding_pool is None:
+            from config import load_funding_collector_config
+            cfg = config or load_funding_collector_config()
+            _funding_pool = pooling.MySQLConnectionPool(
+                pool_name="funding_collector_pool",
+                pool_size=3,
+                init_command="SET time_zone = '+00:00'",
+                **cfg.to_dict(),
+            )
+        return _funding_pool
 
 
 def get_retailbot2_pool():
@@ -50,28 +54,42 @@ def get_retailbot2_pool():
     It uses the same centralized MYSQL_CONFIG as every other component;
     this separate pool preserves existing callers only."""
     global _retailbot2_pool
-    if _retailbot2_pool is None:
-        import config
-        _retailbot2_pool = pooling.MySQLConnectionPool(
-            pool_name="retailbot2_pool",
-            pool_size=3,
-            init_command="SET time_zone = '+00:00'",
-            **config.RETAILBOT2_DB_CONFIG,
-        )
-    return _retailbot2_pool
+    with _pool_lock:
+        if _retailbot2_pool is None:
+            import config
+            _retailbot2_pool = pooling.MySQLConnectionPool(
+                pool_name="retailbot2_pool",
+                pool_size=3,
+                init_command="SET time_zone = '+00:00'",
+                **config.RETAILBOT2_DB_CONFIG,
+            )
+        return _retailbot2_pool
 
 
 def get_pool():
     global _pool
-    if _pool is None:
-        import config
-        _pool = pooling.MySQLConnectionPool(
-            pool_name="crypto_bot_pool",
-            pool_size=10,
-            init_command="SET time_zone = '+00:00'",  # force UTC session tz -- see note in schema.sql
-            **config.MYSQL_CONFIG,
-        )
-    return _pool
+    with _pool_lock:
+        if _pool is None:
+            import config
+            _pool = pooling.MySQLConnectionPool(
+                pool_name="crypto_bot_pool",
+                pool_size=10,
+                init_command="SET time_zone = '+00:00'",  # force UTC session tz -- see note in schema.sql
+                **config.MYSQL_CONFIG,
+            )
+        return _pool
+
+
+@contextmanager
+def _owned_cursor(conn, **kwargs):
+    """Release a helper-owned connection on all paths, rolling back failed work."""
+    with closing(conn):
+        try:
+            with closing(conn.cursor(**kwargs)) as cursor:
+                yield cursor
+        except Exception:
+            conn.rollback()
+            raise
 
 
 def _strip_sql_comments(sql_text):
@@ -100,14 +118,12 @@ def init_schema():
 
     cfg = {k: v for k, v in MYSQL_CONFIG.items() if k != "database"}
     conn = mysql.connector.connect(init_command="SET time_zone = '+00:00'", **cfg)
-    cur = conn.cursor()
-    for stmt in statements:
-        stmt = stmt.strip()
-        if stmt:
-            cur.execute(stmt)
-    conn.commit()
-    cur.close()
-    conn.close()
+    with _owned_cursor(conn) as cur:
+        for stmt in statements:
+            stmt = stmt.strip()
+            if stmt:
+                cur.execute(stmt)
+        conn.commit()
     logger.info("Schema initialized.")
 
 
@@ -223,27 +239,19 @@ def upsert_funding(rows, pool=None):
     """
     p = pool or get_funding_pool()
     conn = p.get_connection()
-    try:
-        cur = conn.cursor()
+    with _owned_cursor(conn) as cur:
         cur.executemany(sql, rows)
         conn.commit()
-        cur.close()
-    finally:
-        conn.close()
 
 
 def get_latest_funding_time(symbol, pool=None):
     """Return max event_time (ms) for symbol, or None if no records exist."""
     p = pool or get_funding_pool()
     conn = p.get_connection()
-    try:
-        cur = conn.cursor()
+    with _owned_cursor(conn) as cur:
         cur.execute("SELECT MAX(event_time) FROM funding_rate WHERE symbol = %s", (symbol,))
         row = cur.fetchone()
-        cur.close()
         return row[0] if row and row[0] is not None else None
-    finally:
-        conn.close()
 
 
 def fetch_settled_funding_events(
@@ -326,13 +334,9 @@ def upsert_open_interest(rows):
             open_interest_value=VALUES(open_interest_value)
     """
     conn = get_pool().get_connection()
-    try:
-        cur = conn.cursor()
+    with _owned_cursor(conn) as cur:
         cur.executemany(sql, rows)
         conn.commit()
-        cur.close()
-    finally:
-        conn.close()
 
 
 def insert_liquidations(rows):
@@ -345,13 +349,9 @@ def insert_liquidations(rows):
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
     """
     conn = get_pool().get_connection()
-    try:
-        cur = conn.cursor()
+    with _owned_cursor(conn) as cur:
         cur.executemany(sql, rows)
         conn.commit()
-        cur.close()
-    finally:
-        conn.close()
 
 
 def heartbeat(collector_name, status="ok", detail=None, pool=None):
@@ -365,13 +365,9 @@ def heartbeat(collector_name, status="ok", detail=None, pool=None):
     """
     p = pool or (get_funding_pool() if collector_name == "funding_poller" else get_pool())
     conn = p.get_connection()
-    try:
-        cur = conn.cursor()
+    with _owned_cursor(conn) as cur:
         cur.execute(sql, (collector_name, status, detail))
         conn.commit()
-        cur.close()
-    finally:
-        conn.close()
 
 
 _sqlalchemy_engine = None
@@ -560,13 +556,13 @@ def fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, in
         params["limit"] = int(limit)
         closed_clause = "AND is_closed = 1" if closed_only else ""
         sql = f"""
-            SELECT o.open_time, o.open, o.high, o.low, o.close, o.volume, o.is_closed,
+            SELECT o.open_time, o.close_time, o.open, o.high, o.low, o.close, o.volume, o.is_closed,
                    f.rsi, f.macd, f.macd_signal, f.macd_hist, f.atr, f.atr_pct,
                    f.volume_sma, f.volume_ratio, f.support, f.resistance,
                    f.swing_high, f.swing_low, f.fib_0, f.fib_236, f.fib_382,
                    f.fib_5, f.fib_618, f.fib_786, f.fib_1
             FROM (
-                SELECT open_time, open, high, low, close, volume, is_closed, symbol, market, timeframe
+                SELECT open_time, close_time, open, high, low, close, volume, is_closed, symbol, market, timeframe
                 FROM ohlcv
                 WHERE symbol=%(symbol)s AND market=%(market)s AND timeframe=%(timeframe)s {closed_clause}
                 ORDER BY open_time DESC
@@ -580,7 +576,7 @@ def fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, in
     else:
         closed_clause = "AND o.is_closed = 1" if closed_only else ""
         sql = f"""
-            SELECT o.open_time, o.open, o.high, o.low, o.close, o.volume, o.is_closed,
+            SELECT o.open_time, o.close_time, o.open, o.high, o.low, o.close, o.volume, o.is_closed,
                    f.rsi, f.macd, f.macd_signal, f.macd_hist, f.atr, f.atr_pct,
                    f.volume_sma, f.volume_ratio, f.support, f.resistance,
                    f.swing_high, f.swing_low, f.fib_0, f.fib_236, f.fib_382,
@@ -738,8 +734,7 @@ def insert_backtest_run(symbol, market, timeframe, strategy_name, params, data_s
         ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     """
     conn = get_pool().get_connection()
-    try:
-        cur = conn.cursor()
+    with _owned_cursor(conn) as cur:
         cur.execute(sql, (
             symbol, market, timeframe, strategy_name, data_segment, json.dumps(params),
             data_start_time, data_end_time, total_trades, win_rate_pct,
@@ -747,10 +742,7 @@ def insert_backtest_run(symbol, market, timeframe, strategy_name, params, data_s
         ))
         conn.commit()
         run_id = cur.lastrowid
-        cur.close()
         return run_id
-    finally:
-        conn.close()
 
 
 
@@ -864,14 +856,10 @@ def get_unprocessed_news_events(limit=100):
         LIMIT %s
     """
     conn = get_pool().get_connection()
-    try:
-        cur = conn.cursor(dictionary=True)
+    with _owned_cursor(conn, dictionary=True) as cur:
         cur.execute(sql, (limit,))
         rows = cur.fetchall()
-        cur.close()
         return rows
-    finally:
-        conn.close()
 
 
 def mark_news_events_processed(event_ids):
@@ -884,13 +872,9 @@ def mark_news_events_processed(event_ids):
         ",".join(["%s"] * len(event_ids))
     )
     conn = get_pool().get_connection()
-    try:
-        cur = conn.cursor()
+    with _owned_cursor(conn) as cur:
         cur.execute(sql, tuple(event_ids))
         conn.commit()
-        cur.close()
-    finally:
-        conn.close()
 
 
 def insert_news_ai_signal(signal):
@@ -1032,14 +1016,10 @@ def count_news_trades_opened_today(strategy_name="news_ai_overlay"):
           AND entry_time >= UNIX_TIMESTAMP(UTC_DATE()) * 1000
     """
     conn = get_pool().get_connection()
-    try:
-        cur = conn.cursor(dictionary=True)
+    with _owned_cursor(conn, dictionary=True) as cur:
         cur.execute(sql, (strategy_name,))
         row = cur.fetchone()
-        cur.close()
         return int(row["n"]) if row else 0
-    finally:
-        conn.close()
 
 
 def get_technical_paper_config(symbol, market, timeframe, exclude_strategy="news_ai_overlay"):
@@ -1081,13 +1061,9 @@ def ensure_overlay_paper_config(symbol, market, timeframe, strategy_name, alloca
         ON DUPLICATE KEY UPDATE id = id
     """
     conn = get_pool().get_connection()
-    try:
-        cur = conn.cursor()
+    with _owned_cursor(conn) as cur:
         cur.execute(sql, (symbol, market, timeframe, strategy_name, allocated_capital, risk_per_trade_pct))
         conn.commit()
-        cur.close()
-    finally:
-        conn.close()
 
 
 # ----------------------------------------------------------------------------
@@ -1325,19 +1301,25 @@ def get_retailbot2_recent_trades(limit=50):
         conn.close()
 
 
+def get_retailbot2_outbox_counts():
+    conn = get_retailbot2_pool().get_connection()
+    with _owned_cursor(conn) as cur:
+        cur.execute("SELECT status, COUNT(*) FROM rdt_telegram_outbox GROUP BY status")
+        return {status: int(count) for status, count in cur.fetchall()}
+
+
 def get_retailbot2_stats():
     """Per-strategy/mode win-rate stats plus overall equity summary
     (initial_capital isn't stored in this DB -- the dashboard adds it from
     its own config if needed; realized_pnl sums are enough on their own to
     show relative performance)."""
     conn = get_retailbot2_pool().get_connection()
-    try:
-        cur = conn.cursor(dictionary=True)
+    with _owned_cursor(conn, dictionary=True) as cur:
         cur.execute("""
             SELECT t.strategy, t.mode,
                    COUNT(*) AS total_trades,
                    SUM(CASE WHEN t.net_pnl > 0 THEN 1 ELSE 0 END) AS wins,
-                   SUM(CASE WHEN t.net_pnl <= 0 THEN 1 ELSE 0 END) AS losses,
+                   SUM(CASE WHEN t.net_pnl < 0 THEN 1 ELSE 0 END) AS losses,
                    COALESCE(SUM(t.net_pnl), 0) AS total_pnl,
                    MAX(t.exit_time) AS last_updated
             FROM rdt_trades t
@@ -1355,8 +1337,9 @@ def get_retailbot2_stats():
             r["last_updated"] = str(r["last_updated"]) if r.get("last_updated") else None
 
         cur.execute("""
-            SELECT mode, COUNT(*) AS open_count FROM rdt_trades
-            WHERE status='OPEN' GROUP BY mode
+            SELECT t.mode, COUNT(*) AS open_count FROM rdt_trades t
+            LEFT JOIN rdt_strategy_lifecycle l ON l.strategy_id = t.strategy AND l.mode = t.mode
+            WHERE t.status='OPEN' AND COALESCE(l.report_enabled, TRUE) = TRUE GROUP BY t.mode
         """)
         open_counts = {r["mode"]: r["open_count"] for r in cur.fetchall()}
 
@@ -1388,10 +1371,7 @@ def get_retailbot2_stats():
                 "realized_pnl": 0.0, "closed_count": 0, "wins": 0,
                 "win_rate": None, "open_count": open_counts.get(mode, 0),
             })
-        cur.close()
         return {"by_strategy": stats_rows, "by_mode": by_mode}
-    finally:
-        conn.close()
 
 
 # ----------------------------------------------------------------------------
@@ -1617,11 +1597,9 @@ def set_retailbot2_strategy_lifecycle_setting(strategy_id, mode, settings):
 
 def get_retailbot2_control():
     conn = get_retailbot2_pool().get_connection()
-    try:
-        cur = conn.cursor(dictionary=True)
+    with _owned_cursor(conn, dictionary=True) as cur:
         cur.execute("SELECT enabled, overrides_json, updated_at FROM bot_control WHERE id=1")
         row = cur.fetchone()
-        cur.close()
         if not row:
             return {"enabled": False, "overrides": {}, "updated_at": None}
         raw_overrides = row.get("overrides_json")
@@ -1645,8 +1623,6 @@ def get_retailbot2_control():
             "overrides": overrides,
             "updated_at": str(row["updated_at"]) if row.get("updated_at") else None,
         }
-    finally:
-        conn.close()
 
 
 def set_retailbot2_control(enabled, overrides):
@@ -1896,53 +1872,49 @@ def verify_strategy_auto_promotion_schema():
 
 def get_strategy_auto_promotion_policy():
     conn = get_pool().get_connection()
-    try:
-        cur = conn.cursor(dictionary=True)
+    with _owned_cursor(conn, dictionary=True) as cur:
         cur.execute("SELECT * FROM strategy_auto_promotion_policy WHERE id=1")
         row = cur.fetchone() or {}
-        cur.close()
-        policy = dict(_STRATEGY_AUTO_PROMOTION_DEFAULTS)
-        policy.update(row)
-        for key in ("enabled", "require_holdout", "send_telegram"):
-            value = policy[key]
-            if isinstance(value, bool):
-                continue
-            if isinstance(value, int) and value in (0, 1):
-                policy[key] = bool(value)
-                continue
-            raise ValueError(f"Invalid persisted auto-promotion policy: {key} must be boolean/0/1")
-        min_trades = policy["min_test_trades"]
-        if type(min_trades) is not int or not 30 <= min_trades <= 10000:
-            raise ValueError(
-                "Invalid persisted auto-promotion policy: min_test_trades must be an integer from 30 to 10000"
-            )
+    policy = dict(_STRATEGY_AUTO_PROMOTION_DEFAULTS)
+    policy.update(row)
+    for key in ("enabled", "require_holdout", "send_telegram"):
+        value = policy[key]
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int) and value in (0, 1):
+            policy[key] = bool(value)
+            continue
+        raise ValueError(f"Invalid persisted auto-promotion policy: {key} must be boolean/0/1")
+    min_trades = policy["min_test_trades"]
+    if type(min_trades) is not int or not 30 <= min_trades <= 10000:
+        raise ValueError(
+            "Invalid persisted auto-promotion policy: min_test_trades must be an integer from 30 to 10000"
+        )
 
-        numeric_bounds = {
-            "min_profit_factor": (1.0, 10.0, True),
-            "min_expectancy_r": (0.0, 10.0, True),
-            "max_drawdown_r": (0.0, 100.0, False),
-            "min_rank_score": (0.01, 1.0, True),
-        }
-        for key, (minimum, maximum, minimum_inclusive) in numeric_bounds.items():
-            raw_value = policy[key]
-            if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float, Decimal)):
-                raise ValueError(
-                    f"Invalid persisted auto-promotion policy: {key} must be a finite number"
-                )
-            value = float(raw_value)
-            if not math.isfinite(value):
-                raise ValueError(
-                    f"Invalid persisted auto-promotion policy: {key} must be a finite number"
-                )
-            if (value < minimum if minimum_inclusive else value <= minimum) or value > maximum:
-                raise ValueError(
-                    f"Invalid persisted auto-promotion policy: {key} is outside the supported range"
-                )
-            policy[key] = value
-        policy["updated_at"] = str(policy.get("updated_at")) if policy.get("updated_at") else None
-        return policy
-    finally:
-        conn.close()
+    numeric_bounds = {
+        "min_profit_factor": (1.0, 10.0, True),
+        "min_expectancy_r": (0.0, 10.0, True),
+        "max_drawdown_r": (0.0, 100.0, False),
+        "min_rank_score": (0.01, 1.0, True),
+    }
+    for key, (minimum, maximum, minimum_inclusive) in numeric_bounds.items():
+        raw_value = policy[key]
+        if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float, Decimal)):
+            raise ValueError(
+                f"Invalid persisted auto-promotion policy: {key} must be a finite number"
+            )
+        value = float(raw_value)
+        if not math.isfinite(value):
+            raise ValueError(
+                f"Invalid persisted auto-promotion policy: {key} must be a finite number"
+            )
+        if (value < minimum if minimum_inclusive else value <= minimum) or value > maximum:
+            raise ValueError(
+                f"Invalid persisted auto-promotion policy: {key} is outside the supported range"
+            )
+        policy[key] = value
+    policy["updated_at"] = str(policy.get("updated_at")) if policy.get("updated_at") else None
+    return policy
 
 
 def set_strategy_auto_promotion_policy(policy):

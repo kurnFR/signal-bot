@@ -75,6 +75,8 @@ def parse_retry_after(header_val: Optional[str], now_epoch: Optional[float] = No
     try:
         dt = email.utils.parsedate_to_datetime(val)
         if dt is not None:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
             now_dt = datetime.fromtimestamp(now_epoch if now_epoch is not None else time.time(), tz=timezone.utc)
             delta = (dt - now_dt).total_seconds()
             return max(0.0, float(delta))
@@ -112,6 +114,10 @@ def reset_ban_cooldown_for_testing() -> None:
     with _BAN_COOLDOWN_LOCK:
         global _BAN_COOLDOWN_UNTIL
         _BAN_COOLDOWN_UNTIL = 0.0
+
+
+class BinanceBanCooldownError(RuntimeError):
+    """The final request exhausted retries during an exchange ban."""
 
 
 class FundingPollerLockError(Exception):
@@ -293,7 +299,7 @@ def parse_funding_item(item: Dict[str, Any]) -> Tuple[str, int, Optional[str], O
         raise ValueError(f"Malformed funding item: expected dict, got {type(item).__name__}")
 
     symbol_raw = item.get("symbol")
-    if not symbol_raw or not isinstance(symbol_raw, str):
+    if not isinstance(symbol_raw, str) or not symbol_raw.strip():
         raise ValueError(f"Missing or invalid symbol in funding item: {item}")
     symbol = symbol_raw.strip().upper()
 
@@ -387,8 +393,7 @@ def fetch_funding_page(
                 if attempt < max_retries - 1:
                     time.sleep(wait)
                     continue
-                else:
-                    break
+                raise BinanceBanCooldownError(f"Failed to fetch funding rates for {symbol} after {max_retries} retries (HTTP 418)")
 
             # 3. Rate limit handling (HTTP 429) - retains existing Retry-After behavior
             if resp.status_code == 429:
@@ -487,21 +492,17 @@ def poll_symbol_incremental(
 
         rows = []
         for item in raw_items:
-            try:
-                row = parse_funding_item(item)
-                rows.append(row)
-            except ValueError as e:
-                logger.warning(f"Skipping malformed funding item for {symbol}: {e}")
+            # Validate the entire page before writing. A partial commit would move
+            # the MAX(event_time) watermark past a settlement we could not parse.
+            row = parse_funding_item(item)
+            if row[0] != symbol.strip().upper():
+                raise ValueError(f"Unexpected funding symbol {row[0]} for {symbol}")
+            rows.append(row)
 
-        if rows:
-            # Sort rows by event_time to ensure monotonic processing
-            rows.sort(key=lambda r: r[1])
-            upsert_funding(rows, pool=pool)
-            total_inserted += len(rows)
-
-        # Pagination advancement based on highest fundingTime in the batch
-        highest_time = max(int(item["fundingTime"]) for item in raw_items if "fundingTime" in item)
-        next_cursor = highest_time + 1
+        rows.sort(key=lambda r: r[1])
+        upsert_funding(rows, pool=pool)
+        total_inserted += len(rows)
+        next_cursor = rows[-1][1] + 1
         if next_cursor <= cursor:
             # Prevent infinite loop if exchange returns static or non-advancing timestamp
             break
@@ -533,7 +534,7 @@ def poll_all_symbols(
     """
     target_symbols = symbols if symbols is not None else SYMBOLS
     managed_session = session is None
-    req_session = session or requests.Session()
+    req_session = session
 
     results: Dict[str, Any] = {
         "symbols_total": len(target_symbols),
@@ -567,6 +568,8 @@ def poll_all_symbols(
             return results
 
     try:
+        if managed_session:
+            req_session = requests.Session()
         for symbol in target_symbols:
             try:
                 inserted = poll_symbol_incremental(
@@ -583,6 +586,9 @@ def poll_all_symbols(
                 results["symbols_failed"] += 1
                 results["errors"][symbol] = str(e)
                 logger.error(f"Error polling funding rates for {symbol}: {e}")
+                if isinstance(e, BinanceBanCooldownError):
+                    results["symbols_skipped"] = len(target_symbols) - results["symbols_failed"] - results["symbols_ok"]
+                    break
 
         if results["symbols_failed"] == 0:
             status = "ok"
@@ -592,15 +598,17 @@ def poll_all_symbols(
             detail = f"Partial: {results['symbols_ok']} ok, {results['symbols_failed']} failed"
         else:
             status = "error"
-            detail = f"All {results['symbols_total']} symbols failed"
+            detail = f"{results['symbols_failed']} failed, {results.get('symbols_skipped', 0)} skipped"
 
         heartbeat("funding_poller", status=status, detail=detail, pool=pool)
 
     finally:
-        if managed_session:
-            req_session.close()
-        if lock_ctx is not None:
-            lock_ctx.release()
+        try:
+            if managed_session and req_session is not None:
+                req_session.close()
+        finally:
+            if lock_ctx is not None:
+                lock_ctx.release()
 
     return results
 

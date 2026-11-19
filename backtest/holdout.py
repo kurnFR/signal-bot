@@ -15,6 +15,10 @@ import pandas as pd
 
 def compute_holdout_cutoff(df: pd.DataFrame, holdout_fraction: float) -> int:
     """Returns the open_time (ms) at which the holdout period begins."""
+    if df.empty or not 0 <= holdout_fraction <= 1:
+        raise ValueError("holdout requires data and a fraction between zero and one")
+    if holdout_fraction == 0:
+        return int(df["open_time"].max()) + 1
     split_idx = int(len(df) * (1 - holdout_fraction))
     split_idx = min(split_idx, len(df) - 1)
     return int(df.iloc[split_idx]["open_time"])

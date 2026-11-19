@@ -240,7 +240,7 @@ export function ResearchPanel() {
         <div className="panel-heading">
           <div>
             <h2 id="research-performance-title">Performance by mode</h2>
-            <p>Realized results and open-trade counts from the saved Research stats API.</p>
+            <p>Shadow and inverse PnL excludes fees, slippage, and funding.</p>
           </div>
           <span className="panel-counter">{data ? 2 : 0} MODES</span>
         </div>
@@ -252,7 +252,7 @@ export function ResearchPanel() {
               <thead>
                 <tr>
                   <th scope="col">Mode</th>
-                  <th scope="col">Realized PnL</th>
+                  <th scope="col">Gross realized PnL</th>
                   <th scope="col">Closed trades</th>
                   <th scope="col">Wins</th>
                   <th scope="col">Win rate</th>
@@ -299,7 +299,7 @@ export function ResearchPanel() {
                   <th scope="col">Closed trades</th>
                   <th scope="col">Wins</th>
                   <th scope="col">Losses</th>
-                  <th scope="col">Realized PnL</th>
+                  <th scope="col">Gross realized PnL</th>
                   <th scope="col">Last updated</th>
                 </tr>
               </thead>

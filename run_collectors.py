@@ -27,12 +27,29 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("run_collectors")
 
 
+async def supervise(name, run):
+    delay = 1
+    while True:
+        started = asyncio.get_running_loop().time()
+        try:
+            await run()
+            logger.warning("%s collector returned unexpectedly", name)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("%s collector failed", name)
+        if asyncio.get_running_loop().time() - started >= 60:
+            delay = 1
+        await asyncio.sleep(delay)
+        delay = min(60, delay * 2)
+
+
 async def main():
     logger.info("Starting all collectors...")
-    tasks = [ws_kline_main()]
+    tasks = [supervise("kline", ws_kline_main)]
 
     if ENABLE_FUTURES:
-        tasks += [oi_poller_run()]
+        tasks += [supervise("open interest", oi_poller_run)]
     else:
         logger.info(
             "ENABLE_FUTURES is false -- skipping open-interest "

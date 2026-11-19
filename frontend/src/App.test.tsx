@@ -11,11 +11,22 @@ const statusResponse = {
 describe("frontend foundation shell", () => {
   beforeEach(() => {
     cleanup();
+    window.history.replaceState(null, "", "/");
     window.localStorage.clear();
     document.documentElement.removeAttribute("data-theme");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(statusResponse), { status: 200, headers: { "content-type": "application/json" } })));
   });
   afterEach(() => vi.unstubAllGlobals());
+  it("restores the requested view on direct entry and browser navigation", () => {
+    window.history.replaceState(null, "", "/modern/paper-trading");
+    render(<App />);
+    expect(screen.getByRole("heading", { name: "Paper Trading", level: 1 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Overview/ }));
+    expect(window.location.pathname).toBe("/modern/overview");
+    window.history.replaceState(null, "", "/modern/paper-trading");
+    fireEvent.popState(window);
+    expect(screen.getByRole("heading", { name: "Paper Trading", level: 1 })).toBeInTheDocument();
+  });
   it("renders the quantitative platform header and footer", () => {
     render(<App />);
     expect(screen.getByText("Signal Bot Quantitative Platform")).toBeInTheDocument();

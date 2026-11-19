@@ -237,6 +237,7 @@ def list_orders(*, status: str | None = None, limit: int = 50) -> list[dict[str,
         if status not in ORDER_STATUSES:
             raise OrderValidationError(f"invalid order state: {status}")
     conn = get_pool().get_connection()
+    cur = None
     try:
         cur = conn.cursor(dictionary=True)
         if status:
@@ -250,10 +251,13 @@ def list_orders(*, status: str | None = None, limit: int = 50) -> list[dict[str,
                 (limit,),
             )
         rows = cur.fetchall()
-        cur.close()
         return rows
     finally:
-        conn.close()
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
 
 
 def cancel_pending_order(order_id: int, *, actor_user_id: int) -> bool:
@@ -272,6 +276,7 @@ def fill_pending_order(order_id: int, fill_price: float, position_writer) -> dic
     """
     fill_price = _finite_positive(fill_price, "fill_price")
     conn = get_pool().get_connection()
+    cur = None
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute("SELECT * FROM paper_orders WHERE id=%s FOR UPDATE", (int(order_id),))
@@ -330,4 +335,8 @@ def fill_pending_order(order_id: int, fill_price: float, position_writer) -> dic
         conn.rollback()
         raise
     finally:
-        conn.close()
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()

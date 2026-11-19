@@ -52,6 +52,8 @@ from db.db import (
     count_news_trades_opened_today, get_technical_paper_config, ensure_overlay_paper_config,
     fetch_ohlcv_with_features_df, heartbeat, claim_news_signal, release_news_signal_claim,
 )
+from backtest.accounting import apply_entry_slippage
+from config import BACKTEST_SLIPPAGE_PCT
 from paper.engine import get_active_positions, insert_paper_position, OVERLAY_STRATEGIES
 from paper.circuit_breaker import check_circuit_breakers
 from notifications.telegram_notifier import send_news_signal_alert
@@ -131,7 +133,7 @@ def _compute_trade(symbol, market, timeframe, bias, time_horizon):
 
     return {
         "direction": direction,
-        "entry_price": entry_price,
+        "entry_price": apply_entry_slippage(entry_price, direction, BACKTEST_SLIPPAGE_PCT),
         "stop_loss": stop_loss,
         "take_profit": take_profit,
         "atr_at_signal": atr,

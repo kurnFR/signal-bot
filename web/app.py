@@ -292,11 +292,24 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 FRONTEND_DIST_DIR = os.path.join(BASE_DIR, "frontend", "dist")
-if os.path.exists(FRONTEND_DIST_DIR):
+MODERN_VIEWS = {"overview", "market-screener", "paper-trading", "strategy-library", "wallet-tracking",
+                "backtest-studio", "ml-studio", "research", "news-ai", "master-data", "settings"}
+modern_index_path = os.path.join(FRONTEND_DIST_DIR, "index.html")
+if os.path.isfile(modern_index_path):
+    @app.get("/modern/{view}", include_in_schema=False)
+    def serve_modern_view(view: str):
+        if view != "index.html" and view not in MODERN_VIEWS:
+            raise HTTPException(404)
+        return FileResponse(modern_index_path)
+
+
     app.mount("/modern", StaticFiles(directory=FRONTEND_DIST_DIR, html=True), name="modern")
     assets_dir = os.path.join(FRONTEND_DIST_DIR, "assets")
     if os.path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend_assets")
+
+elif os.getenv("SIGNAL_BOT_USE_MODERN_UI", "0").lower() in ("1", "true", "yes"):
+    logger.warning("Modern UI enabled but frontend/dist/index.html is missing. Serving legacy dashboard.")
 
 
 @app.get("/")

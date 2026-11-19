@@ -794,6 +794,8 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
         {telegramLoading && <p className="empty-state">Loading Telegram status…</p>}
         {telegramStatus && <div className="settings-telegram-status">
           <div><span>Configuration</span><strong>{telegramStatus.configured ? "Configured" : "Incomplete"}</strong></div>
+          <div><span>RetailBot2 outbox</span><strong>{telegramStatus.outbox == null ? "Unavailable" :
+            Object.entries(telegramStatus.outbox).map(([state, count]) => count + " " + state).join(", ") || "Empty"}</strong></div>
           <div><span>Bot token</span><strong>{telegramStatus.hasToken ? "Present (hidden)" : "Missing"}</strong></div>
           <div><span>Target chat ID</span><strong>{telegramStatus.chatId || "Not configured"}</strong></div>
           <button className="button button-secondary" type="button" disabled={telegramLoading || telegramTestBusy} onClick={() => setTelegramRefreshAttempt((value) => value + 1)}><RefreshCw size={15} /> Refresh status</button>

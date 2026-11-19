@@ -165,7 +165,7 @@ class TestFundingBacktestAccrual(unittest.TestCase):
         params = _base_params(market="futures")
         params["funding_events"] = [
             (1500, 100.0, 0.005),  # before entry at 2000
-            (3500, 100.0, 0.005),  # after exit at 3000
+            (4000, 100.0, 0.005),  # first millisecond after the modeled intrabar exit
         ]
         trades = simulate(df, params, _dummy_long_condition, _dummy_short_condition, _dummy_stop_target)
         self.assertEqual(trades[0]["funding_cost"], 0.0)

@@ -20,7 +20,7 @@ def compute_metrics(trades: list) -> dict:
     empty_result = {
         "total_trades": 0, "scored_trades": 0, "win_rate_pct": None, "expectancy_r": None,
         "profit_factor": None, "max_drawdown_r": None, "total_pnl_r": None,
-        "sharpe_ratio": None, "sortino_ratio": None, "calmar_ratio": None,
+        "sharpe_ratio": None, "sortino_ratio": None, "calmar_ratio": None, "recovery_factor": None,
         "sqn": None, "avg_win_r": None, "avg_loss_r": None, "payoff_ratio": None,
         "max_consecutive_wins": 0, "max_consecutive_losses": 0,
         "max_drawdown_duration_trades": 0,
@@ -35,7 +35,7 @@ def compute_metrics(trades: list) -> dict:
         return res
 
     wins = [r for r in r_multiples if r > 0]
-    losses = [r for r in r_multiples if r <= 0]
+    losses = [r for r in r_multiples if r < 0]
 
     total_trades = len(trades)
     win_rate_pct = (len(wins) / len(r_multiples) * 100) if r_multiples else None
@@ -71,18 +71,21 @@ def compute_metrics(trades: list) -> dict:
             consecutive_wins += 1
             consecutive_losses = 0
             max_consecutive_wins = max(max_consecutive_wins, consecutive_wins)
-        else:
+        elif r < 0:
             consecutive_losses += 1
             consecutive_wins = 0
             max_consecutive_losses = max(max_consecutive_losses, consecutive_losses)
+
+        else:
+            consecutive_wins = consecutive_losses = 0
 
     # Advanced statistical and risk-adjusted metrics
     sharpe_ratio = None
     sortino_ratio = None
     calmar_ratio = None
     sqn = None
-    avg_win_r = round(sum(wins) / len(wins), 4) if wins else None
-    avg_loss_r = round(sum(losses) / len(losses), 4) if losses else None
+    avg_win_r = sum(wins) / len(wins) if wins else None
+    avg_loss_r = sum(losses) / len(losses) if losses else None
     payoff_ratio = round(abs(avg_win_r / avg_loss_r), 4) if (avg_win_r is not None and avg_loss_r is not None and avg_loss_r != 0) else None
 
     if len(r_multiples) > 1 and expectancy_r is not None:
@@ -101,6 +104,7 @@ def compute_metrics(trades: list) -> dict:
         if max_dd > 1e-9:
             calmar_ratio = round(sum(r_multiples) / max_dd, 4)
 
+    recovery_factor = round(sum(r_multiples) / max_dd, 4) if max_dd > 0 else None
     return {
         "total_trades": total_trades,
         "scored_trades": len(r_multiples),
@@ -111,10 +115,11 @@ def compute_metrics(trades: list) -> dict:
         "total_pnl_r": round(sum(r_multiples), 4) if r_multiples else None,
         "sharpe_ratio": sharpe_ratio,
         "sortino_ratio": sortino_ratio,
-        "calmar_ratio": calmar_ratio,
+        "recovery_factor": recovery_factor,
+        "calmar_ratio": calmar_ratio,  # Legacy non-annualized recovery metric
         "sqn": sqn,
-        "avg_win_r": avg_win_r,
-        "avg_loss_r": avg_loss_r,
+        "avg_win_r": round(avg_win_r, 4) if wins else None,
+        "avg_loss_r": round(avg_loss_r, 4) if losses else None,
         "payoff_ratio": payoff_ratio,
         "max_consecutive_wins": max_consecutive_wins,
         "max_consecutive_losses": max_consecutive_losses,

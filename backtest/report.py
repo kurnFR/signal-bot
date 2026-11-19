@@ -54,7 +54,7 @@ def exit_reason_breakdown(run_id):
 
 def direction_breakdown(run_id):
     return query(
-        "SELECT direction, COUNT(*) as n, "
+        "SELECT direction, COUNT(*) as n, COUNT(r_multiple) as scored, "
         "SUM(CASE WHEN r_multiple > 0 THEN 1 ELSE 0 END) as wins, "
         "AVG(net_return_pct) as avg_return, AVG(r_multiple) as avg_r, "
         "MAX(r_multiple) as best_r, MIN(r_multiple) as worst_r "
@@ -142,11 +142,13 @@ def print_report(symbol, market, timeframe, strategy_name):
     dir_breakdown = direction_breakdown(run["id"])
     print(f"\n  By direction:")
     for d in dir_breakdown:
-        win_rate = (d["wins"] / d["n"] * 100) if d["n"] else 0
+        win_rate = f"{d['wins'] / d['scored'] * 100:.1f}%" if d["scored"] else "N/A"
+        best = f"{d['best_r']:+.3f}" if d["best_r"] is not None else "N/A"
+        worst = f"{d['worst_r']:+.3f}" if d["worst_r"] is not None else "N/A"
         pct_of_total = d["n"] / run["total_trades"] * 100
-        print(f"    {d['direction']:6s}: {d['n']:5d} trades ({pct_of_total:5.1f}%)  win_rate={win_rate:5.1f}%  "
+        print(f"    {d['direction']:6s}: {d['n']:5d} trades ({pct_of_total:5.1f}%)  win_rate={win_rate}  "
               f"avg_return={float(d['avg_return']):+.3f}%  avg_R={float(d['avg_r'] or 0):+.3f}  "
-              f"best_R={float(d['best_r']):+.3f}  worst_R={float(d['worst_r']):+.3f}")
+              f"best_R={best}  worst_R={worst}")
 
         # $ PnL for this direction alone, at the same default capital/risk
         dir_trades = query(

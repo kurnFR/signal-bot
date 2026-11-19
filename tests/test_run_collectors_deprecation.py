@@ -104,8 +104,8 @@ def test_run_collectors_main_futures_enabled_schedules_intended_tasks():
             return []
 
         with patch("run_collectors.ENABLE_FUTURES", True), \
-             patch("run_collectors.ws_kline_main", return_value=mock_kline_coro()), \
-             patch("run_collectors.oi_poller_run", return_value=mock_oi_coro()), \
+             patch("run_collectors.ws_kline_main", side_effect=mock_kline_coro), \
+             patch("run_collectors.oi_poller_run", side_effect=mock_oi_coro), \
              patch("run_collectors.asyncio.gather", side_effect=fake_gather):
 
             await run_collectors.main()
@@ -137,7 +137,7 @@ def test_run_collectors_main_futures_disabled_schedules_only_spot():
             return []
 
         with patch("run_collectors.ENABLE_FUTURES", False), \
-             patch("run_collectors.ws_kline_main", return_value=mock_kline_coro()), \
+             patch("run_collectors.ws_kline_main", side_effect=mock_kline_coro), \
              patch("run_collectors.asyncio.gather", side_effect=fake_gather):
 
             await run_collectors.main()

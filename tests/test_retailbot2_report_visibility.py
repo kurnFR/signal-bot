@@ -180,8 +180,9 @@ def test_report_mode_aggregates_exclude_hidden_strategies_but_keep_open_counts(m
     result = db_module.get_retailbot2_stats()
 
     # Report-level mode aggregates must use the same visibility rule as the
-    # per-strategy rows. Operational open-position counts remain independent:
-    # stopping/hiding a strategy does not force-close its existing positions.
+    # per-strategy rows and visible open-position counts.
+    open_query = next(query for query in cursor.queries if "AS open_count" in query)
+    assert "COALESCE(l.report_enabled, TRUE) = TRUE" in open_query
     mode_query = next(
         query for query in cursor.queries
         if "realized_pnl" in query and "closed_count" in query
