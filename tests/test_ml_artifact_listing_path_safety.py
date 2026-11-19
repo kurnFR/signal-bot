@@ -28,7 +28,9 @@ class TestMLArtifactListingPathSafety(unittest.TestCase):
             (root / "escape.json").symlink_to(outside)
             (root / "safe.json").write_text(json.dumps({
                 "experiment_id": "safe-experiment",
-                "experiment": {"symbol": "BTCUSDT"},
+                "experiment": {"symbol": "BTCUSDT", "market": "spot", "threshold": 0.4,
+                               "baseline_test_metrics": {"total_outcome_r": 1},
+                               "ml_test_metrics": {"trade_count": 2, "total_outcome_r": 1, "win_rate_pct": 50}},
                 "winner": {"model_type": "logistic_regression"},
             }), encoding="utf-8")
 

@@ -4904,6 +4904,7 @@ const App = {
                 }
             }
 
+            const deployableModels = new Set();
             // 2. Fetch models count
             const [modelsRes, generatorModelsRes] = await Promise.all([
                 fetch(`${API_BASE}/api/ml/models`, { headers: this.getAuthHeaders() }),
@@ -4915,6 +4916,9 @@ const App = {
                 if (md === null || typeof md !== "object" || Array.isArray(md) ||
                     !Array.isArray(md.models)) {
                     throw new Error("Invalid ML models response");
+                }
+                for (const model of md.models) {
+                    if (model?.eligibility?.eligible === true && model.has_weights) deployableModels.add(model.model_id);
                 }
                 let generatorModelCount = 0;
                 if (generatorModelsRes && generatorModelsRes.ok) {
@@ -4955,7 +4959,7 @@ const App = {
                 const tbody = document.getElementById("ml-experiments-table-body");
                 if (tbody) {
                     if (experiments.length === 0) {
-                        tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-500 text-xs">No ML tournaments found. Launch a new tournament using the button above.</td></tr>`;
+                        tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-500 text-xs">No tournaments with a recorded market and usable out-of-sample trades.</td></tr>`;
                     } else {
                         tbody.innerHTML = experiments.map(exp => {
                             const threshold = this._safeNumber(exp.threshold, 0.5);
@@ -4997,9 +5001,9 @@ const App = {
                                             <button type="button" data-ml-action="inspect" data-experiment-id="${safeExperimentId}" class="px-2.5 py-1 rounded text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors">
                                                 Inspect
                                             </button>
-                                            <button type="button" data-ml-action="deploy" data-experiment-id="${safeExperimentId}" data-winner-model="${safeWinnerModel}" data-threshold="${this._escapeHtml(String(threshold))}" class="px-2.5 py-1 rounded text-[11px] font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-sm transition-all flex items-center gap-1">
+                                            ${deployableModels.has(experimentId) ? `<button type="button" data-ml-action="deploy" data-experiment-id="${safeExperimentId}" data-winner-model="${safeWinnerModel}" data-threshold="${this._escapeHtml(String(threshold))}" class="px-2.5 py-1 rounded text-[11px] font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-sm transition-all flex items-center gap-1">
                                                 <i data-lucide="zap" class="w-3 h-3"></i> Deploy
-                                            </button>
+                                            </button>` : ""}
                                         </div>
                                     </td>
                                 </tr>
@@ -5244,8 +5248,8 @@ const App = {
             const baseProfitFactor = this._safeNumber(baseTest.profit_factor);
             const hasMlProfitFactor = mlTest.profit_factor !== null && mlTest.profit_factor !== undefined && Number.isFinite(Number(mlTest.profit_factor));
             const mlProfitFactor = this._safeNumber(mlTest.profit_factor);
-            const baseTradeCount = this._safeNumber(baseTest.trade_count);
-            const mlTradeCount = this._safeNumber(mlTest.trade_count);
+            const baseTradeCount = Number.isInteger(baseTest.trade_count) ? baseTest.trade_count : "—";
+            const mlTradeCount = Number.isInteger(mlTest.trade_count) ? mlTest.trade_count : "—";
             const baseDrawdownR = this._safeNumber(baseTest.max_drawdown_r);
             const mlDrawdownR = this._safeNumber(mlTest.max_drawdown_r);
             const datasetRows = this._safeNumber(data.dataset_rows);
