@@ -1388,7 +1388,7 @@ def get_recent_smart_money_signals(limit=50):
             SELECT id, symbol, signal_type, rvol, volume, quote_volume, price,
                    price_change_pct, volume_velocity, quality_score, candle_time,
                    telegram_sent, detected_at
-            FROM smart_money_signals
+            FROM smart_money_signals WHERE parent_watch_id IS NULL
             ORDER BY detected_at DESC LIMIT %s
         """, (limit,))
         rows = cur.fetchall()
@@ -1408,16 +1408,16 @@ def get_smart_money_stats():
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT COUNT(*) AS n FROM smart_money_signals")
+        cur.execute("SELECT COUNT(*) AS n FROM smart_money_signals WHERE parent_watch_id IS NULL")
         total = cur.fetchone()["n"]
         cur.execute("""
             SELECT COUNT(*) AS n FROM smart_money_signals
-            WHERE detected_at >= NOW() - INTERVAL 24 HOUR
+            WHERE parent_watch_id IS NULL AND detected_at >= NOW() - INTERVAL 24 HOUR
         """)
         last_24h = cur.fetchone()["n"]
         cur.execute("""
             SELECT signal_type, COUNT(*) AS n FROM smart_money_signals
-            WHERE detected_at >= NOW() - INTERVAL 24 HOUR
+            WHERE parent_watch_id IS NULL AND detected_at >= NOW() - INTERVAL 24 HOUR
             GROUP BY signal_type
         """)
         by_type = {r["signal_type"]: r["n"] for r in cur.fetchall()}

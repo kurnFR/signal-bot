@@ -41,6 +41,7 @@ class TestScreenerMigrationManagedStartup(unittest.TestCase):
                 {"table_name": "smart_money_signals", "column_name": name, "column_type": col_type}
                 for name, col_type in (
                     ("quality_score", "decimal(6,2)"),
+                    ("watch_context", "longtext"), ("parent_watch_id", "bigint"),
                     ("direction", "varchar(10)"),
                     ("taker_buy_ratio", "decimal(8,6)"),
                     ("htf_alignment", "tinyint(4)"),

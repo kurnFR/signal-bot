@@ -93,6 +93,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("028_retailbot2_safe_control_defaults", "migrate_retailbot2_safe_control_defaults.sql", "Ensure RetailBot2 defaults to trading disabled and transition legacy control state"),
     Migration("029_custom_exit_policy", "migrate_custom_exit_policy.sql", "Snapshot custom exit settings on paper orders and positions"),
     Migration("030_wallet_telegram_selection", "migrate_wallet_telegram_selection.sql", "Select wallets for future Telegram swap alerts"),
+    Migration("031_screener_momentum", "migrate_screener_momentum.sql", "Link volume watches to closed-candle momentum confirmations"),
 )
 
 

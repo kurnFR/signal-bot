@@ -1,0 +1,100 @@
+"""Closed one-minute spot candle rules shared by the screener and its replay."""
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import math
+import requests
+
+MINUTE = 60_000
+WINDOW = 5
+HISTORY = 20
+
+
+@dataclass(frozen=True)
+class Bar:
+    start: int
+    open: float
+    high: float
+    low: float
+    close: float
+
+
+def utc_ms(value):
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return int(value.timestamp() * 1000)
+
+
+def iso(ms):
+    return datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def bars_between(symbol, start, end, now):
+    response = requests.get("https://api.binance.com/api/v3/klines", params={
+        "symbol": symbol, "interval": "1m", "startTime": start, "endTime": min(now - 1, end),
+        "limit": 1000}, timeout=5)
+    response.raise_for_status()
+    bars = {}
+    for raw in response.json():
+        t = int(raw[0])
+        if t + MINUTE > now or int(raw[6]) != t + MINUTE - 1:
+            continue
+        prices = tuple(map(float, raw[1:5]))
+        o, h, l, c = prices
+        if all(math.isfinite(p) and p > 0 for p in prices) and l <= min(o, c) <= max(o, c) <= h:
+            bars[t] = Bar(t, *prices)
+    return bars
+
+
+def first_break(bars, start, delivered, direction):
+    """Require continuous bars and invalidate on an opposite close or pre-delivery break."""
+    if direction not in ("BULLISH", "BEARISH") or start not in bars:
+        return None
+    watch = bars[start]
+    for offset in range(1, WINDOW + 1):
+        bar = bars.get(start + offset * MINUTE)
+        if bar is None:
+            return None
+        if watch.low <= bar.close <= watch.high:
+            continue
+        if bar.start + MINUTE <= delivered or (bar.close > watch.high) != (direction == "BULLISH"):
+            return None
+        prior = [bars.get(start - n * MINUTE) for n in range(1, HISTORY + 1)]
+        average = sum(b.high - b.low for b in prior) / HISTORY if all(prior) else 0
+        distance = abs(bar.close - (watch.high if direction == "BULLISH" else watch.low))
+        return bar, distance / average if average > 0 else None
+    return None
+
+
+def message(signal):
+    from html import escape
+
+    ctx = getattr(signal, "watch_context", None) or {}
+    pair = escape(str(signal.symbol))
+    when = escape(str(signal.candle_time))
+    direction = escape(str(signal.direction))
+    if getattr(signal, "parent_watch_id", None):
+        multiple = ctx.get("range_multiple")
+        strength = f"{multiple:.2f}× prior mean 1m range" if multiple is not None else "unavailable"
+        return (
+            f"📍 <b>MOMENTUM CONFIRMED · {direction}</b>\n{pair} · Watch #{signal.parent_watch_id} "
+            f"({escape(ctx['watch_time'])} UTC)\n"
+            f"1m close {ctx['close']:.8g} crossed the watch {'high' if direction == 'BULLISH' else 'low'} "
+            f"{ctx['level']:.8g}.\nDistance beyond level: {strength}\n"
+            f"Confirmation candle closed: {escape(ctx['confirmed_at'])} UTC"
+        )
+    ratio = signal.taker_buy_ratio
+    flow = "unavailable" if ratio is None else (
+        "buyer-led" if ratio >= .55 else "seller-led" if ratio <= .45 else "balanced")
+    flow_pct = "" if ratio is None else f" ({ratio:.1%} taker buy)"
+    levels = f"Watch high {ctx['high']:.8g} · low {ctx['low']:.8g}\n" if "high" in ctx else ""
+    return (
+        f"⚡ <b>SMART MONEY EARLY SIGNAL · VOLUME WATCH</b>\n{pair} · {escape(signal.signal_type)}\n"
+        f"Candle bias: {direction} · Flow: {flow}{flow_pct}\n"
+        f"Momentum unconfirmed · Watch ranking score {signal.quality_score:.0f}/100\n"
+        f"RVOL {signal.rvol:.2f}× long EMA · Quote volume {signal.volume_velocity:.2f}× recent average\n"
+        f"HTF: {escape(str(signal.htf_context))}\nClose {signal.price:.8g} ({signal.price_change_pct:+.3f}%)\n"
+        f"Volume {signal.volume:,.0f} · Quote {signal.quote_volume:,.0f}\n{levels}"
+        f"Candle opened: {when} UTC"
+    )
