@@ -153,7 +153,9 @@ test("sign-in, navigation, and theme preference work in a real browser", async (
   await page.locator(".topbar").getByRole("button", { name: "Switch to light theme" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await page.reload();
-  // The active view is intentionally session-local; theme preference persists across reloads.
+  await expect(page).toHaveURL(/\/modern\/market-screener$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Market Screener" })).toBeVisible();
+  await page.goBack();
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 });
@@ -724,7 +726,7 @@ test("responsive acceptance matrix covers every preview view across tablet and d
 
   for (const theme of ["dark", "light"] as const) {
     await page.evaluate((value) => window.localStorage.setItem("signal-bot-ui-theme", value), theme);
-    await page.reload();
+    await page.goto("/modern/overview");
     await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
 
     for (const width of widths) {
