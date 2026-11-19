@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from web.app import app
+from web.routes import ml_routes
 from web.auth import create_access_token
 
 
@@ -207,3 +208,31 @@ class TestMLWebRoutes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_leaderboard_filters_incomplete_oos_results_and_recovers_legacy_counts(tmp_path):
+    def save(name, metrics, market="spot"):
+        experiment = {"symbol": "BTCUSDT", "timeframe": "1h", "base_strategy": "trend_ema_v1",
+                      "threshold": 0.35, "baseline_metrics": {"total_outcome_r": -50.27},
+                      "ml_test_metrics": metrics}
+        payload = {"experiment": experiment, "market": market, "winner": {"model_type": "test"}}
+        (tmp_path / f"{name}.json").write_text(json.dumps(payload))
+
+    metrics = {"win_rate_pct": 32, "total_outcome_r": -8.41}
+    for key in ("trade_count", "selected_trades", "total_trades"):
+        save(key, {key: 25, **metrics})
+    save("nested", {"trading": {"selected_trades": 25, **metrics}})
+    save("unknown-market", {"trade_count": 25, **metrics}, market=None)
+    save("missing-count", metrics)
+    save("zero-count", {"trade_count": 0, **metrics})
+    save("conflicting-counts", {"trade_count": 0, "selected_trades": 25, **metrics})
+    save("validation-only", {"candidate_signals": 25, **metrics})
+    save("missing-rate", {"trade_count": 25, "total_outcome_r": 1})
+    save("zero-rate", {"trade_count": 4, "win_rate_pct": 0, "total_outcome_r": -4})
+    with patch.object(ml_routes, "ML_RESULTS_DIR", tmp_path):
+        rows = {row["experiment_id"]: row for row in ml_routes.list_experiments()["experiments"]}
+    assert set(rows) == {"trade_count", "selected_trades", "total_trades", "nested", "zero-rate"}
+    assert rows["nested"]["ml_test_trades"] == 25
+    assert rows["nested"]["ml_test_win_rate"] == 32
+    assert rows["nested"]["baseline_test_win_rate"] is None
+    assert rows["zero-rate"]["ml_test_win_rate"] == 0

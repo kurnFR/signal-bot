@@ -64,7 +64,7 @@ describe("MLStudioPanel", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<MLStudioPanel />);
 
-    expect(await screen.findByText("No saved ML experiments were returned.")).toBeInTheDocument();
+    expect(await screen.findByText("No experiments with a recorded market and usable test trades.")).toBeInTheDocument();
     expect(screen.getByText("No saved model manifests were returned.")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);

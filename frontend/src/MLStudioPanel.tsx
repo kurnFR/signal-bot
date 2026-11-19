@@ -337,7 +337,7 @@ export function MLStudioPanel() {
       )}
 
       <section className="metrics-grid" aria-label="ML research summary">
-        <article className="metric-card"><div className="metric-top"><span>Saved experiments</span><span className="metric-icon"><BrainCircuit size={17} /></span></div><div className="metric-value">{loading && !experiments.length ? "Loading…" : experiments.length}</div><div className="metric-foot"><span>Persisted result manifests</span></div></article>
+        <article className="metric-card"><div className="metric-top"><span>Listed experiments</span><span className="metric-icon"><BrainCircuit size={17} /></span></div><div className="metric-value">{loading && !experiments.length ? "Loading…" : experiments.length}</div><div className="metric-foot"><span>Recorded market and usable test trades</span></div></article>
         <article className="metric-card"><div className="metric-top"><span>Model artifacts</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !models.length ? "Loading…" : models.length}</div><div className="metric-foot"><span>Model manifests found</span></div></article>
         <article className="metric-card"><div className="metric-top"><span>Passing eligibility checks</span><span className="metric-icon"><ShieldCheck size={17} /></span></div><div className="metric-value">{eligibleModels}</div><div className="metric-foot"><span>Manifest, metrics, and weights required</span></div></article>
         <article className="metric-card"><div className="metric-top"><span>Selected ML test trades</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{selectedId ? num(experiments.find((item) => item.experiment_id === selectedId)?.ml_test_trades) : "—"}</div><div className="metric-foot"><span>Stored untouched-test result</span></div></article>
@@ -420,7 +420,7 @@ export function MLStudioPanel() {
             </table>
           </div>
         ) : (
-          <p className="empty-state">{experiments.length ? "No experiments match this filter." : "No saved ML experiments were returned."}</p>
+          <p className="empty-state">{experiments.length ? "No experiments match this filter." : "No experiments with a recorded market and usable test trades."}</p>
         )}
       </section>
 

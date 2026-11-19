@@ -162,6 +162,24 @@ def _finite_response(value):
     return value
 
 
+def _test_trading_metrics(metrics):
+    if not isinstance(metrics, dict):
+        return {}
+    trading = metrics.get("trading", metrics)
+    if not isinstance(trading, dict):
+        return {}
+    counts = [trading[key] for key in ("trade_count", "selected_trades", "total_trades")
+              if trading.get(key) is not None]
+    count = None
+    if counts and all(type(n) is int and n >= 0 and n == counts[0] for n in counts):
+        count = counts[0]
+    return {**metrics, **trading, "trade_count": count}
+
+
+def _number_in_range(value, low=-math.inf, high=math.inf):
+    return type(value) in (int, float) and math.isfinite(value) and low <= value <= high
+
+
 def _normalize_experiment_payload(data: Dict[str, Any]) -> Dict[str, Any]:
     """Expose stable dashboard aliases for current and legacy experiment files."""
     if not isinstance(data, dict):
@@ -175,10 +193,12 @@ def _normalize_experiment_payload(data: Dict[str, Any]) -> Dict[str, Any]:
     baseline_test = experiment.get("baseline_test_metrics")
     if not isinstance(baseline_test, dict):
         baseline = experiment.get("baseline_metrics")
-        baseline_test = baseline.get("test") if isinstance(baseline, dict) else {}
-    experiment["baseline_test_metrics"] = (
-        baseline_test if isinstance(baseline_test, dict) else {}
-    )
+        baseline_test = baseline.get("test", baseline) if isinstance(baseline, dict) else {}
+    experiment["baseline_test_metrics"] = _test_trading_metrics(baseline_test)
+    ml_test = _test_trading_metrics(experiment.get("ml_test_metrics"))
+    if not ml_test.get("trade_count"):
+        ml_test["win_rate_pct"] = None
+    experiment["ml_test_metrics"] = ml_test
 
     diagnostics = experiment.get("probability_diagnostics")
     if not isinstance(diagnostics, dict):
@@ -235,21 +255,33 @@ def list_experiments() -> Dict[str, Any]:
             base_test = exp.get("baseline_test_metrics", {})
             diagnostics = exp.get("probability_diagnostics", {})
 
+            # Only publish comparable, observed OOS results. Historical files
+            # stay available through the detail endpoint, including zero-trade runs.
+            if (exp.get("market") not in ("spot", "futures")
+                    or data.get("market") not in (None, exp["market"])
+                    or not ml_test.get("trade_count")
+                    or not _number_in_range(ml_test.get("win_rate_pct"), 0, 100)
+                    or not _number_in_range(ml_test.get("total_outcome_r"))
+                    or not _number_in_range(base_test.get("total_outcome_r"))
+                    or not _number_in_range(exp.get("threshold"), 0, 1)):
+                continue
+
             summary = {
                 "experiment_id": data.get("experiment_id", file.stem),
                 "symbol": exp.get("symbol", "N/A"),
-                "market": exp.get("market", "N/A"),
+                "market": exp["market"],
                 "timeframe": exp.get("timeframe", "N/A"),
                 "strategy": exp.get("base_strategy", "N/A"),
                 "winner_model": winner.get("model_type", "N/A"),
-                "threshold": exp.get("threshold", 0.5),
+                "threshold": exp.get("threshold"),
                 "roc_auc": diagnostics.get("roc_auc"),
                 "brier_score": diagnostics.get("brier_score"),
-                "baseline_test_r": base_test.get("total_outcome_r", 0.0),
-                "baseline_test_win_rate": base_test.get("win_rate_pct", 0.0),
-                "ml_test_r": ml_test.get("total_outcome_r", 0.0),
-                "ml_test_win_rate": ml_test.get("win_rate_pct", 0.0),
-                "ml_test_trades": ml_test.get("trade_count", 0),
+                "baseline_test_r": base_test.get("total_outcome_r"),
+                "baseline_test_win_rate": (base_test.get("win_rate_pct")
+                    if _number_in_range(base_test.get("win_rate_pct"), 0, 100) else None),
+                "ml_test_r": ml_test.get("total_outcome_r"),
+                "ml_test_win_rate": ml_test.get("win_rate_pct"),
+                "ml_test_trades": ml_test.get("trade_count"),
                 "dataset_rows": data.get("dataset_rows", 0),
                 "file_mtime": file.stat().st_mtime,
             }

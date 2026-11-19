@@ -80,7 +80,7 @@ export interface MLExperimentSummary {
   roc_auc: number | null;
   brier_score: number | null;
   baseline_test_r: number;
-  baseline_test_win_rate: number;
+  baseline_test_win_rate: number | null;
   ml_test_r: number;
   ml_test_win_rate: number;
   ml_test_trades: number;
@@ -130,10 +130,11 @@ function validExperimentSummary(value: unknown): value is MLExperimentSummary {
       !isNonEmptyString(value.strategy) || !isNonEmptyString(value.winner_model) ||
       !isFiniteNumber(value.threshold) || value.threshold < 0 || value.threshold > 1 ||
       !nullableFiniteNumber(value.roc_auc) || !nullableFiniteNumber(value.brier_score) ||
-      !isFiniteNumber(value.baseline_test_r) || !isFiniteNumber(value.baseline_test_win_rate) ||
+      !isFiniteNumber(value.baseline_test_r) || !nullableFiniteNumber(value.baseline_test_win_rate) ||
       !isFiniteNumber(value.ml_test_r) || !isFiniteNumber(value.ml_test_win_rate) ||
       !isCount(value.ml_test_trades) || !isCount(value.dataset_rows) || !isFiniteNumber(value.file_mtime)) return false;
-  return value.baseline_test_win_rate >= 0 && value.baseline_test_win_rate <= 100 &&
+  return (value.baseline_test_win_rate === null || (isFiniteNumber(value.baseline_test_win_rate) &&
+    value.baseline_test_win_rate >= 0 && value.baseline_test_win_rate <= 100)) &&
     value.ml_test_win_rate >= 0 && value.ml_test_win_rate <= 100;
 }
 function validModelManifest(value: unknown): value is MLModelManifest {
