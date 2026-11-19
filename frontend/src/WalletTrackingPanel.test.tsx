@@ -8,6 +8,10 @@ vi.mock("./AuthGate", () => ({
 }));
 
 const responses: Record<string, unknown> = {
+  "/api/wallets/performance?period_hours=24&metric=pnl_usd": { wallets: [{
+    chain: "eth", wallet: "0x1234567890123456789012345678901234567890", pairs: ["ETH/ABC"],
+    matched_sells: 2, cost_usd: 100, pnl_usd: 25, roi_pct: 25,
+  }] },
   "/api/wallets/meta": { periods_hours: [24, 72], chains: { eth: "Ethereum", solana: "Solana" }, min_net_usd: 1000, auto_track_net_usd: 5000 },
   "/api/wallets/settings": { enabled: true, networks: ["eth", "solana"], pools_per_network: 4, min_trade_usd: 10000, min_net_usd: 150000, auto_track_net_usd: 500000, poll_interval_seconds: 300, retention_days: 8, api_delay_seconds: 4, token_mode: "all", token_addresses: [], has_birdeye_key: false },
   "/api/wallets/status": { id: 1, last_cycle_at: "2026-10-26T10:00:00Z", last_cycle_seconds: 1.5, pools_scanned: 10, swaps_ingested: 3, candidates: 2, tracked_wallets: 1, swaps_24h: 5, enabled: true, networks: ["eth", "solana"], birdeye_fallback_active: false, pool_discovery_sources: ["GeckoTerminal"], trade_sources: ["GeckoTerminal"] },
@@ -34,6 +38,7 @@ describe("WalletTrackingPanel", () => {
   it("renders tracker health, tracked wallets, token flow, and recent events", async () => {
     render(<WalletTrackingPanel />);
     expect(await screen.findByText("Test wallet")).toBeInTheDocument();
+    expect(await screen.findByText("25.00%")).toBeInTheDocument();
     expect(screen.getByText("Cycle observed")).toBeInTheDocument();
     expect(screen.getAllByText("Ethereum").length).toBeGreaterThan(0);
     expect(screen.getAllByText("ETH/ABC").length).toBeGreaterThan(0);
@@ -50,6 +55,7 @@ describe("WalletTrackingPanel", () => {
 
   it("renders successful empty wallet snapshots without an API error", async () => {
     const emptyResponses: Record<string, unknown> = {
+      "/api/wallets/performance?period_hours=24&metric=pnl_usd": { wallets: [] },
       "/api/wallets/meta": { periods_hours: [24, 72], chains: {}, min_net_usd: 1000, auto_track_net_usd: 5000 },
       "/api/wallets/settings": { enabled: false, networks: [], pools_per_network: 4, min_trade_usd: 10000, min_net_usd: 1000, auto_track_net_usd: 5000, poll_interval_seconds: 300, retention_days: 8, api_delay_seconds: 4, token_mode: "all", token_addresses: [] },
       "/api/wallets/status": { id: 1, last_cycle_at: null, last_cycle_seconds: null, pools_scanned: 0, swaps_ingested: 0, candidates: 0, tracked_wallets: 0, swaps_24h: 0, enabled: false, networks: [], birdeye_fallback_active: false, pool_discovery_sources: [], trade_sources: [] },
@@ -106,6 +112,26 @@ describe("Wallet Tracking Workflows (WT-04 & WT-05) with RBAC", () => {
     });
   });
   afterEach(() => vi.unstubAllGlobals());
+
+  it("enables Telegram for the selected wallet only", async () => {
+    let enabled = false;
+    vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
+      if (url.endsWith("/tracked/7/telegram")) {
+        expect(init?.method).toBe("PUT");
+        enabled = JSON.parse(String(init?.body)).enabled;
+        return Promise.resolve(Response.json({ enabled }));
+      }
+      if (url.endsWith("/tracked") && enabled) {
+        const { tracked } = responses["/api/wallets/tracked"] as { tracked: object[] };
+        return Promise.resolve(Response.json({ tracked: [{ ...tracked[0], telegram_after_id: 0 }] }));
+      }
+      return Promise.resolve(responseFor(url));
+    }));
+    render(<WalletTrackingPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "Enable Telegram" }));
+    expect(await screen.findByRole("button", { name: "Disable Telegram" })).toBeInTheDocument();
+    expect(enabled).toBe(true);
+  });
 
   it("WT-04: tracks a new wallet address", async () => {
     let trackPayload: unknown = null;

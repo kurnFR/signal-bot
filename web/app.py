@@ -164,6 +164,7 @@ AUTHENTICATED_READ_PATHS = (
     "/api/wallets/settings",
     "/api/wallets/status",
     "/api/wallets/positions",
+    "/api/wallets/performance",
     "/api/wallets/token-flow",
     "/api/wallets/events",
     "/api/wallets/tracked",

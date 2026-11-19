@@ -75,15 +75,17 @@ def ensure_tables():
                       COLUMN_TYPE AS column_type
                FROM information_schema.columns
                WHERE TABLE_SCHEMA = DATABASE()
-                 AND ((TABLE_NAME = %s AND COLUMN_NAME = %s)
+                 AND ((TABLE_NAME = %s AND COLUMN_NAME IN (%s, %s))
                    OR (TABLE_NAME = %s AND COLUMN_NAME = %s))""",
-            ("tracked_wallets", "status", "wallet_tracker_settings", "birdeye_api_key"),
+            ("tracked_wallets", "status", "telegram_after_id", "wallet_tracker_settings", "birdeye_api_key"),
         )
         columns = {
             (str(row["table_name"]), str(row["column_name"])): str(row["column_type"])
             for row in cur.fetchall()
         }
         missing_columns = []
+        if ("tracked_wallets", "telegram_after_id") not in columns:
+            missing_columns.append("tracked_wallets.telegram_after_id")
         status_type = columns.get(("tracked_wallets", "status"), "")
         if "inactive" not in status_type.lower():
             missing_columns.append("tracked_wallets.status with INACTIVE")
@@ -171,7 +173,7 @@ def queue_new_wallet_alerts(min_trade_usd, max_age_minutes=30):
                JOIN tracked_wallets t
                  ON t.chain = s.chain AND t.wallet = s.wallet
                WHERE s.id > %s AND s.id <= %s
-                 AND s.usd_value >= %s AND t.status = 'ACTIVE'
+                 AND s.usd_value >= %s AND t.status = 'ACTIVE' AND s.id > t.telegram_after_id
                  AND s.block_time >= UTC_TIMESTAMP() - INTERVAL %s MINUTE
                ORDER BY s.id""",
             (last_id, max_id, float(min_trade_usd), max_age_minutes),
@@ -206,7 +208,8 @@ def get_pending_wallet_alerts(limit=50, max_attempts=5, cooldown_minutes=10):
                  ON t.chain = s.chain AND t.wallet = s.wallet
                SET a.delivery_status = 'CANCELLED', a.updated_at = UTC_TIMESTAMP()
                WHERE a.delivery_status = 'PENDING'
-                 AND (t.id IS NULL OR t.status <> 'ACTIVE')"""
+                 AND (t.id IS NULL OR t.status <> 'ACTIVE' OR t.telegram_after_id IS NULL
+                      OR s.id <= t.telegram_after_id OR s.block_time < UTC_TIMESTAMP() - INTERVAL 30 MINUTE)"""
         )
         cur.execute(
             """SELECT MIN(a.swap_id) AS swap_id,
@@ -216,7 +219,7 @@ def get_pending_wallet_alerts(limit=50, max_attempts=5, cooldown_minutes=10):
                       COUNT(DISTINCT s.pair) AS pair_count,
                       CASE WHEN COUNT(DISTINCT s.pair) = 1
                            THEN MIN(s.pair)
-                           ELSE CONCAT(COUNT(DISTINCT s.pair), ' pairs') END AS pair,
+                           ELSE LEFT(GROUP_CONCAT(DISTINCT CONCAT(UPPER(s.side), ' ', s.pair) ORDER BY s.pair SEPARATOR ', '), 500) END AS pair,
                       CASE WHEN COUNT(DISTINCT s.pair) = 1
                            THEN SUM(s.token_amount) ELSE NULL END AS token_amount,
                       MAX(s.price_usd) AS price_usd,
@@ -236,7 +239,7 @@ def get_pending_wallet_alerts(limit=50, max_attempts=5, cooldown_minutes=10):
                JOIN tracked_wallets t
                  ON t.chain = s.chain AND t.wallet = s.wallet
                WHERE a.delivery_status = 'PENDING'
-                 AND t.status = 'ACTIVE' AND a.attempts < %s
+                 AND t.status = 'ACTIVE' AND s.id > t.telegram_after_id AND a.attempts < %s
                  AND (a.next_attempt_at IS NULL OR a.next_attempt_at <= UTC_TIMESTAMP())
                  AND NOT EXISTS (
                      SELECT 1
@@ -451,7 +454,7 @@ def expire_inactive_auto_wallets(inactive_days=7):
         cur = conn.cursor()
         cur.execute(
             """UPDATE tracked_wallets
-               SET status = 'INACTIVE'
+               SET status = 'INACTIVE', telegram_after_id=NULL
                WHERE source = 'auto' AND status = 'ACTIVE'
                  AND last_seen_at < UTC_TIMESTAMP() - INTERVAL %s DAY""",
             (inactive_days,),
@@ -717,7 +720,7 @@ def toggle_wallet_tracking(chain, wallet, label=None):
         current_status = row[0]
         if current_status == "ACTIVE":
             cur.execute(
-                "UPDATE tracked_wallets SET status = 'IGNORED' WHERE chain = %s AND wallet = %s",
+                "UPDATE tracked_wallets SET status = 'IGNORED', telegram_after_id=NULL WHERE chain = %s AND wallet = %s",
                 (chain, wallet),
             )
             tracked = False
@@ -788,7 +791,7 @@ def untrack_wallet(tracked_id):
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
-        cur.execute("UPDATE tracked_wallets SET status='IGNORED' WHERE id=%s", (int(tracked_id),))
+        cur.execute("UPDATE tracked_wallets SET status='IGNORED', telegram_after_id=NULL WHERE id=%s", (int(tracked_id),))
         conn.commit()
         changed = cur.rowcount
         cur.close()
@@ -802,7 +805,7 @@ def untrack_wallet_by_address(chain, wallet):
     conn = get_pool().get_connection()
     try:
         cur = conn.cursor()
-        cur.execute("UPDATE tracked_wallets SET status='IGNORED' WHERE chain=%s AND wallet=%s", (chain, wallet))
+        cur.execute("UPDATE tracked_wallets SET status='IGNORED', telegram_after_id=NULL WHERE chain=%s AND wallet=%s", (chain, wallet))
         conn.commit()
         changed = cur.rowcount
         cur.close()
@@ -824,5 +827,53 @@ def get_status():
         row["swaps_24h"] = int(cur.fetchone()["n"])
         cur.close()
         return _clean(row, wallet_chain_keys=False)
+    finally:
+        conn.close()
+
+
+def wallet_performance(period_hours, metric, limit):
+    from wallet_tracker.performance import rank_wallets
+
+    conn = get_pool().get_connection()
+    try:
+        with conn.cursor(dictionary=True) as cur:
+            cur.execute(
+                """SELECT chain, wallet, pool_address, pair, block_time, side, token_amount, usd_value
+                   FROM wallet_swaps
+                   WHERE block_time BETWEEN UTC_TIMESTAMP() - INTERVAL %s HOUR AND UTC_TIMESTAMP()
+                   ORDER BY chain, wallet, pool_address, block_time""", (period_hours,))
+            return [_clean(row) for row in rank_wallets(cur, metric, limit)]
+    finally:
+        conn.close()
+
+
+def set_wallet_telegram(tracked_id, enabled):
+    conn = get_pool().get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM tracked_wallets WHERE id=%s AND status='ACTIVE' FOR UPDATE",
+                        (tracked_id,))
+            if not cur.fetchone():
+                return False
+            cur.execute(
+                """UPDATE tracked_wallets SET telegram_after_id =
+                   CASE WHEN %s THEN COALESCE(telegram_after_id, (SELECT COALESCE(MAX(id),0) FROM wallet_swaps))
+                        ELSE NULL END WHERE id=%s""", (enabled, tracked_id))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def wallet_alert_selected(alert):
+    """Recheck selection immediately before sending a previously fetched digest."""
+    conn = get_pool().get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id FROM tracked_wallets WHERE chain=%s AND wallet=%s
+                   AND status='ACTIVE' AND telegram_after_id < %s""",
+                (alert["chain"], alert["wallet"], alert["swap_id"]))
+            return cur.fetchone() is not None
     finally:
         conn.close()

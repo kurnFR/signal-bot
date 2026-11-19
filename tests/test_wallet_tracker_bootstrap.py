@@ -16,6 +16,7 @@ class TestWalletTrackerSchemaBootstrap(unittest.TestCase):
     def test_schema_check_is_read_only(self):
         tables = [{"table_name": name} for name in store._REQUIRED_TABLES]
         columns = [
+            {"table_name": "tracked_wallets", "column_name": "telegram_after_id", "column_type": "bigint"},
             {
                 "table_name": "tracked_wallets",
                 "column_name": "status",

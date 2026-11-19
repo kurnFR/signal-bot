@@ -5,6 +5,9 @@ import { ApiError } from "./lib/api";
 import { trapFocus } from "./lib/dialog";
 import {
   fetchWalletTrackingSnapshot,
+  fetchWalletPerformance,
+  setWalletTelegram,
+  type WalletPerformance,
   saveWalletSettings,
   trackWallet,
   untrackWallet,
@@ -37,6 +40,23 @@ export function WalletTrackingPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+
+  const [period, setPeriod] = useState(24);
+  const [metric, setMetric] = useState("pnl_usd");
+  const [ranking, setRanking] = useState<WalletPerformance[]>([]);
+  const [rankingError, setRankingError] = useState(false);
+  const [rankingBusy, setRankingBusy] = useState(true);
+  const [changingAlert, setChangingAlert] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    setRankingBusy(true);
+    setRankingError(false);
+    fetchWalletPerformance(period, metric, controller.signal)
+      .then(result => { if (!controller.signal.aborted) setRanking(result.wallets); })
+      .catch(() => { if (!controller.signal.aborted) setRankingError(true); })
+      .finally(() => { if (!controller.signal.aborted) setRankingBusy(false); });
+    return () => controller.abort();
+  }, [period, metric, attempt]);
 
   // Feedback notifications
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
@@ -395,6 +415,30 @@ export function WalletTrackingPanel() {
         )}
       </section>
 
+      <section className="panel">
+        <h2>Wallet realized P&amp;L</h2>
+        <p>Estimated gross return on sales matched to earlier observed buys in the same pool and period.
+          Open holdings, unmatched quantities, gas and separate fees are excluded.</p>
+        <label>Period <select value={period} onChange={e => setPeriod(Number(e.target.value))}>
+          {(data?.meta.periods_hours ?? [24]).map(h => <option key={h} value={h}>{h} hours</option>)}
+        </select></label>{" "}
+        <label>Rank by <select value={metric} onChange={e => setMetric(e.target.value)}>
+          <option value="pnl_usd">Realized profit (USD)</option><option value="roi_pct">Return on matched cost (%)</option>
+        </select></label>
+        {rankingBusy ? <p role="status">Loading returns…</p> : rankingError ? <p role="alert">Wallet returns could not be loaded. Use Refresh to retry.</p> :
+          ranking.length === 0 ? <p>No sales with an observed cost basis in this period.</p> :
+          <div className="table-scroll"><table><thead><tr>
+            <th>Wallet</th><th>Observed pairs</th><th>Matched cost</th><th>Realized P&amp;L</th><th>Return</th><th>Matched sells</th><th>Monitoring</th>
+          </tr></thead><tbody>{ranking.map(w => <tr key={w.chain + ":" + w.wallet}>
+            <td>{w.chain} <code title={w.wallet}>{shorten(w.wallet)}</code></td><td>{w.pairs.join(", ")}</td>
+            <td>${w.cost_usd.toFixed(2)}</td><td>${w.pnl_usd.toFixed(2)}</td><td>{w.roi_pct.toFixed(2)}%</td><td>{w.matched_sells}</td>
+            <td>{data?.tracked.some(t => t.chain === w.chain && t.wallet === w.wallet) ? "Tracked" :
+              canTrade && <button className="button button-small" onClick={() => {
+                openTrackModal(); setTrackChain(w.chain); setTrackAddress(w.wallet);
+              }}>Track wallet</button>}</td>
+          </tr>)}</tbody></table></div>}
+      </section>
+
       {/* Tracked Wallets & WT-04 Add/Untrack */}
       <section className="panel">
         <div className="panel-heading">
@@ -428,6 +472,7 @@ export function WalletTrackingPanel() {
                   <th scope="col">Chain</th>
                   <th scope="col">Status</th>
                   <th scope="col">Added</th>
+                  <th scope="col">Telegram swap alerts</th>
                   <th scope="col">Action</th>
                 </tr>
               </thead>
@@ -441,6 +486,19 @@ export function WalletTrackingPanel() {
                     <td>{data.meta.chains[wallet.chain] ?? wallet.chain}</td>
                     <td>{wallet.status}</td>
                     <td>{dateLabel(wallet.first_flagged_at ?? null)}</td>
+                    <td>{canTrade ? <button className="button button-small" disabled={changingAlert || loading}
+                      aria-pressed={wallet.telegram_after_id != null}
+                      onClick={async () => {
+                        const enabled = wallet.telegram_after_id == null;
+                        setChangingAlert(true); setActionError(null); setActionSuccess(null);
+                        try {
+                          await setWalletTelegram(wallet.id, enabled);
+                          setActionSuccess(`Telegram alerts ${enabled ? "selected" : "disabled"} for ${shorten(wallet.wallet)}.`);
+                          setAttempt(n => n + 1);
+                        } catch { setActionError("Could not update Telegram alerts."); }
+                        finally { setChangingAlert(false); }
+                      }}>{wallet.telegram_after_id == null ? "Enable Telegram" : "Disable Telegram"}</button> :
+                      wallet.telegram_after_id == null ? "Off" : "Selected"}</td>
                     <td>
                       {canTrade ? (
                         <button

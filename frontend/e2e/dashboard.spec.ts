@@ -111,6 +111,7 @@ async function mockApi(page: Page, options: { expiredScreener?: boolean; expired
     if (path === "/api/wallets/tracked") return json({ tracked: [] });
     if (path === "/api/wallets/positions") return json({ positions: [] });
     if (path === "/api/wallets/token-flow") return json({ flows: [] });
+    if (path === "/api/wallets/performance") return json({ wallets: [] });
     if (path === "/api/wallets/events") return json({ events: [] });
 
     if (path === "/api/backtest/strategies") return json({ strategies: [] });

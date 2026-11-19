@@ -246,7 +246,8 @@ class TestWalletTelegramDispatch(unittest.TestCase):
         {"swap_id": 20, "max_swap_id": 20, "wallet": "wallet-b"},
     ])
     @patch.object(worker.store, "mark_wallet_alert_attempt")
-    def test_dispatch_persists_one_delivery_per_wallet_digest(self, mark, pending, queued, settings):
+    @patch.object(worker.store, "wallet_alert_selected", return_value=True)
+    def test_dispatch_persists_one_delivery_per_wallet_digest(self, selected, mark, pending, queued, settings):
         notifier = MagicMock()
         notifier.configured = True
         notifier.send.side_effect = [True, False]

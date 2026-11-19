@@ -104,6 +104,7 @@ export interface WalletStatus {
   trade_sources: string[];
 }
 export interface TrackedWallet {
+  telegram_after_id?: number | null;
   id: number;
   chain: string;
   wallet: string;
@@ -416,4 +417,36 @@ export async function saveWalletSettings(
     throw new WalletActionError(502, "Server returned invalid wallet settings after save");
   }
   return payload;
+}
+
+export interface WalletPerformance {
+  chain: string;
+  wallet: string;
+  pairs: string[];
+  matched_sells: number;
+  pnl_usd: number;
+  roi_pct: number;
+  cost_usd: number;
+}
+
+export async function fetchWalletPerformance(hours: number, metric: string, signal: AbortSignal) {
+  const payload = await getJson<unknown>(
+    `/api/wallets/performance?period_hours=${hours}&metric=${metric}`, signal,
+  );
+  if (!isRecord(payload) || !Array.isArray(payload.wallets) ||
+      !payload.wallets.every((row): row is WalletPerformance =>
+        isRecord(row) && isNonEmptyString(row.wallet) && isNonEmptyString(row.chain) &&
+        Array.isArray(row.pairs) && row.pairs.every(isNonEmptyString) &&
+        isCount(row.matched_sells) && row.matched_sells > 0 &&
+        isFiniteNumber(row.cost_usd) && row.cost_usd > 0 &&
+        isFiniteNumber(row.pnl_usd) && isFiniteNumber(row.roi_pct))) {
+    throw new WalletActionError(502, "Invalid wallet performance response");
+  }
+  return { wallets: payload.wallets };
+}
+
+export function setWalletTelegram(id: number, enabled: boolean) {
+  return walletMutationRequest(`/api/wallets/tracked/${id}/telegram`, {
+    method: "PUT", body: JSON.stringify({ enabled }),
+  });
 }
