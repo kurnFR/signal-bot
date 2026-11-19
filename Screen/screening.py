@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from Screen import momentum
 from db.db import get_pool, update_screener_heartbeat
 
 CONFIG = {
@@ -104,6 +105,9 @@ class SmartMoneySignal:
     taker_buy_ratio: Optional[float] = field(compare=False, default=None)
     htf_alignment: int = field(compare=False, default=0)
     htf_context: str = field(compare=False, default="UNAVAILABLE")
+
+    watch_context: Optional[dict] = field(compare=False, default=None)
+    parent_watch_id: Optional[int] = field(compare=False, default=None)
 
 class SmartMoneyState:
     def __init__(self, ema_length: int, rvol_threshold: float, max_alerts_per_hour: int):
@@ -374,6 +378,7 @@ class SmartMoneyState:
             taker_buy_ratio=taker_buy_ratio,
             htf_alignment=htf_alignment,
             htf_context=htf_context,
+            watch_context={"high": high, "low": low, "interval": CONFIG["timeframe"]},
         )
 
     def register_signal(self, signal):
@@ -419,11 +424,11 @@ class SmartMoneyState:
             )
             return True
 
-    def _can_alert(self, symbol):
+    def _can_alert(self, symbol, followup=False):
         now = time.time()
         with self.lock:
             self._check_hourly_reset()
-            if now - self.last_alert_time.get(symbol, 0) < CONFIG["alert_cooldown_sec"]: return False
+            if not followup and now - self.last_alert_time.get(symbol, 0) < CONFIG["alert_cooldown_sec"]: return False
             if self.hourly_alert_count["global"] >= CONFIG["max_alerts_per_hour"]: return False
             if self.hourly_alert_count[symbol] >= CONFIG["max_alerts_per_symbol_per_hour"]: return False
             self.last_alert_time[symbol] = now; self.hourly_alert_count["global"] += 1; self.hourly_alert_count[symbol] += 1
@@ -593,35 +598,7 @@ class SmartMoneyTelegram:
         return "unknown"
 
     def send_early_alert(self, signal):
-        emoji = {"RVOL_SPIKE": "⚡", "DIVERGENCE_ACCUMULATION": "🤫", "DIVERGENCE_DISTRIBUTION": "🚨", "VELOCITY_SURGE": "🚀"}.get(signal.signal_type, "🔍")
-        if "ACCUMULATION" in signal.signal_type:
-            interpretation, action_hint = "🟢 Possible accumulation (high volume, limited price movement)", "Watch for upside breakout"
-        elif "DISTRIBUTION" in signal.signal_type:
-            interpretation, action_hint = "🔴 Possible distribution (high volume, limited price movement)", "Watch for downside breakdown"
-        elif signal.price_change_pct > 0.5:
-            interpretation, action_hint = "🟢 Strong buying pressure", "Momentum building"
-        elif signal.price_change_pct < -0.5:
-            interpretation, action_hint = "🔴 Strong selling pressure", "Momentum breaking down"
-        else:
-            interpretation, action_hint = "🟡 Unusual volume - watch direction", "Wait for price confirmation"
-        orderflow = f"{signal.taker_buy_ratio:.1%}" if getattr(signal, "taker_buy_ratio", None) is not None else "n/a"
-        message = (
-            f"{emoji} <b>SMART MONEY EARLY SIGNAL</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"Pair: <b>{escape(str(signal.symbol))}</b>\n"
-            f"Signal: <code>{escape(str(signal.signal_type))}</code>\n"
-            f"Quality: <b>{signal.quality_score:.0f}/100</b>\n"
-            f"Bias: <b>{signal.direction}</b>\n"
-            f"RVOL: <b>{signal.rvol:.2f}x</b> (vs {CONFIG['ema_length']}-EMA)\n"
-            f"Velocity: <b>{signal.volume_velocity:.2f}x</b> acceleration\n"
-            f"Taker Buy: <b>{orderflow}</b>\n"
-            f"HTF: <b>{escape(signal.htf_context or '')}</b>\n"
-            f"Price: <code>${signal.price:.6f}</code> ({signal.price_change_pct:+.3f}%)\n"
-            f"Volume: <code>{signal.volume:,.0f}</code> | Quote: <code>${signal.quote_volume:,.0f}</code>\n"
-            f"Time: <code>{escape(str(signal.candle_time))}</code> UTC\n━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"<b>Interpretation:</b> {interpretation}\n"
-            f"<i>Action: {action_hint}</i>\n"
-            f"<i>⚠️ Early signal - confirm with your strategy before entry</i>"
-        )
+        message = momentum.message(signal)
         if not self.delivery_authorized:
             logger.info(
                 "ℹ️ Screener early alert suppressed (delivery unauthorized): %s | %s | Quality %.0f",
@@ -719,7 +696,7 @@ def verify_signal_schema():
                 "quality_score", "direction", "taker_buy_ratio", "htf_alignment",
                 "htf_context", "delivery_status", "delivery_attempts",
                 "next_attempt_at", "delivery_updated_at", "delivered_at",
-                "last_delivery_error", "candle_time",
+                "last_delivery_error", "candle_time", "watch_context", "parent_watch_id",
             },
             "screener_heartbeat": {"timeframe"},
         }
@@ -804,14 +781,15 @@ def save_signal_to_db(signal, telegram_sent):
             (symbol, signal_type, rvol, volume, quote_volume, price,
              price_change_pct, volume_velocity, quality_score, direction,
              taker_buy_ratio, htf_alignment, htf_context, candle_time,
-             telegram_sent, detected_at)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, UTC_TIMESTAMP())
+             telegram_sent, watch_context, parent_watch_id, detected_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, UTC_TIMESTAMP())
         ON DUPLICATE KEY UPDATE
             quality_score=VALUES(quality_score),
             direction=VALUES(direction),
             taker_buy_ratio=VALUES(taker_buy_ratio),
             htf_alignment=VALUES(htf_alignment),
             htf_context=VALUES(htf_context),
+            watch_context=COALESCE(watch_context, VALUES(watch_context)),
             telegram_sent=telegram_sent OR VALUES(telegram_sent)
     """
     params = (
@@ -819,7 +797,8 @@ def save_signal_to_db(signal, telegram_sent):
         signal.quote_volume, signal.price, signal.price_change_pct,
         signal.volume_velocity, signal.quality_score, signal.direction,
         signal.taker_buy_ratio, signal.htf_alignment, signal.htf_context,
-        signal.candle_time, telegram_sent,
+        signal.candle_time, telegram_sent, json.dumps(signal.watch_context) if getattr(signal, "watch_context", None) else None,
+        getattr(signal, "parent_watch_id", None),
     )
 
     persisted = False
@@ -998,6 +977,10 @@ def claim_next_pending_signal():
                            delivery_updated_at=UTC_TIMESTAMP()
                        WHERE delivery_status='PENDING' AND quality_score < %s""", (min_quality,))
         cur.execute("UPDATE smart_money_signals SET delivery_status='EXPIRED', last_delivery_error='Signal expired before delivery', delivery_updated_at=UTC_TIMESTAMP() WHERE delivery_status='PENDING' AND detected_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)", (max_age,))
+        cur.execute("""UPDATE smart_money_signals SET delivery_status='EXPIRED', delivery_updated_at=UTC_TIMESTAMP(),
+                       last_delivery_error='Confirmation superseded by next candle'
+                       WHERE delivery_status='PENDING' AND parent_watch_id IS NOT NULL AND
+                         candle_time <= DATE_FORMAT(UTC_TIMESTAMP() - INTERVAL 2 MINUTE, '%Y-%m-%dT%H:%i:%sZ')""")
         conn.commit()
 
         # Avoid repeatedly claiming/releasing rows while the global rolling-hour cap is full.
@@ -1010,9 +993,10 @@ def claim_next_pending_signal():
             conn.commit()
             return None
 
-        cur.execute("""SELECT id,symbol,signal_type,rvol,volume,quote_volume,price,price_change_pct,volume_velocity,quality_score,direction,taker_buy_ratio,htf_alignment,htf_context,candle_time,detected_at
+        cur.execute("""SELECT id,symbol,signal_type,rvol,volume,quote_volume,price,price_change_pct,volume_velocity,quality_score,direction,taker_buy_ratio,htf_alignment,htf_context,candle_time,detected_at,watch_context,parent_watch_id
                        FROM smart_money_signals
                        WHERE delivery_status='PENDING' AND quality_score >= %s
+                         AND (parent_watch_id IS NULL OR candle_time > CONCAT(REPLACE(UTC_TIMESTAMP() - INTERVAL 2 MINUTE, ' ', 'T'), 'Z'))
                          AND (next_attempt_at IS NULL OR next_attempt_at <= UTC_TIMESTAMP())
                          AND detected_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)
                        ORDER BY quality_score DESC, rvol DESC, detected_at ASC, id ASC LIMIT 1 FOR UPDATE""", (min_quality, max_age))
@@ -1041,6 +1025,8 @@ def claim_next_pending_signal():
             taker_buy_ratio=float(row["taker_buy_ratio"]) if row.get("taker_buy_ratio") is not None else None,
             htf_alignment=int(row.get("htf_alignment") or 0),
             htf_context=str(row.get("htf_context") or "UNAVAILABLE"),
+            watch_context=json.loads(row["watch_context"]) if row.get("watch_context") else None,
+            parent_watch_id=row.get("parent_watch_id"),
         )
     except Exception as exc:
         if conn:
@@ -1112,16 +1098,16 @@ def release_signal_claim(signal):
             try: conn.close()
             except Exception: pass
 
-def persistent_alert_limit_allows(symbol):
+def persistent_alert_limit_allows(symbol, parent_id=None):
     """Enforce hourly and per-symbol limits across process restarts using delivery history."""
     conn = None
     cur = None
     try:
         conn = get_pool().get_connection()
         cur = conn.cursor()
-        cur.execute("""SELECT COUNT(*), COALESCE(SUM(symbol=%s),0), MAX(CASE WHEN symbol=%s THEN delivered_at ELSE NULL END)
+        cur.execute("""SELECT COUNT(*), COALESCE(SUM(symbol=%s),0), MAX(CASE WHEN symbol=%s AND id <> %s THEN delivered_at ELSE NULL END)
                        FROM smart_money_signals
-                       WHERE delivery_status='SENT' AND delivered_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR)""", (symbol, symbol))
+                       WHERE delivery_status='SENT' AND delivered_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR)""", (symbol, symbol, parent_id or 0))
         row = cur.fetchone() or (0, 0, None)
         total_sent, symbol_sent, last_symbol_sent = int(row[0] or 0), int(row[1] or 0), row[2]
         if total_sent >= int(CONFIG.get("max_alerts_per_hour", 5)):
@@ -1148,6 +1134,62 @@ def persistent_alert_limit_allows(symbol):
             try: conn.close()
             except Exception: pass
 
+def queue_watch_confirmations(now_ms):
+    # Only delivered watches can have follow-ups. The DB link survives restarts.
+    with get_pool().get_connection() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute("""SELECT w.* FROM smart_money_signals w
+                       WHERE w.delivery_status='SENT' AND w.parent_watch_id IS NULL
+                         AND w.watch_context IS NOT NULL AND w.direction IN ('BULLISH','BEARISH')
+                         AND w.delivered_at >= UTC_TIMESTAMP() - INTERVAL 7 MINUTE
+                         AND NOT EXISTS (SELECT 1 FROM smart_money_signals c WHERE c.parent_watch_id=w.id)
+                       ORDER BY w.delivered_at DESC""")
+        watches = cur.fetchall()
+    for w in watches:
+        ctx = json.loads(w["watch_context"])
+        start = momentum.utc_ms(w["candle_time"])
+        age = now_ms - start
+        if ctx["interval"] != "1m" or not 2 * momentum.MINUTE <= age < (momentum.WINDOW + 2) * momentum.MINUTE:
+            continue
+        bars = momentum.bars_between(w["symbol"], start - momentum.HISTORY * momentum.MINUTE,
+                                     start + (momentum.WINDOW + 1) * momentum.MINUTE - 1, now_ms)
+        watch = bars.get(start)
+        if not watch or watch.high != ctx["high"] or watch.low != ctx["low"]:
+            continue
+        result = momentum.first_break(bars, start, momentum.utc_ms(w["delivered_at"]), w["direction"])
+        if not result:
+            continue
+        bar, multiple = result
+        closed_at = bar.start + momentum.MINUTE
+        if now_ms - closed_at >= momentum.MINUTE:
+            continue
+        # Keep metrics on this linked row as a snapshot of the originating watch.
+        # The new close and normalization belong to the confirmation context.
+        signal = SmartMoneySignal(
+            0, w["symbol"], "MOMENTUM_CONFIRMED", w["rvol"], w["volume"], w["quote_volume"],
+            w["price"], w["price_change_pct"], w["volume_velocity"], time.time(), momentum.iso(bar.start),
+            w["quality_score"], direction=w["direction"], parent_watch_id=w["id"],
+            watch_context={"watch_time": w["candle_time"], "confirmed_at": momentum.iso(closed_at),
+                           "close": bar.close, "range_multiple": multiple,
+                           "level": watch.high if w["direction"] == "BULLISH" else watch.low},
+        )
+        save_signal_to_db(signal, telegram_sent=False)
+
+
+def confirmation_loop():
+    while not state.shutdown_flag:
+        try:
+            if CONFIG.get("enabled") and telegram.delivery_authorized and CONFIG["timeframe"] == "1m":
+                queue_watch_confirmations(int(time.time() * 1000))
+        except requests.HTTPError as exc:
+            logger.warning("Confirmation market data unavailable: HTTP %s", exc.response.status_code)
+            if exc.response.status_code in (418, 429):
+                retry = exc.response.headers.get("Retry-After", "")
+                time.sleep(max(120, int(retry) if retry.isdigit() else 120))
+        except Exception:
+            logger.exception("Momentum confirmation check failed")
+        time.sleep(60 - time.time() % 60 + 2)
+
+
 def dispatch_alerts():
     """Deliver from MySQL so pending work survives process restarts."""
     while not state.shutdown_flag:
@@ -1163,7 +1205,12 @@ def dispatch_alerts():
         if candidate is None:
             time.sleep(max(0.25, CONFIG.get("delivery_poll_interval_sec", 1.0)))
             continue
-        if not persistent_alert_limit_allows(candidate.symbol) or not state._can_alert(candidate.symbol):
+        if candidate.parent_watch_id:
+            allowed = (persistent_alert_limit_allows(candidate.symbol, candidate.parent_watch_id)
+                       and state._can_alert(candidate.symbol, followup=True))
+        else:
+            allowed = persistent_alert_limit_allows(candidate.symbol) and state._can_alert(candidate.symbol)
+        if not allowed:
             release_signal_claim(candidate)
             time.sleep(1.0)
             continue
@@ -1224,6 +1271,7 @@ def main():
         update_screener_heartbeat(pid=os.getpid(), timeframe=CONFIG.get("timeframe", "1m"), symbols_monitored=0)
     except Exception as e:
         logger.warning("⚠️ initial screener heartbeat failed: %s", e)
+    threading.Thread(target=confirmation_loop, daemon=True, name="SmartMoney-Confirmation").start()
     cleanup_thread=threading.Thread(target=expired_signal_cleanup_loop,daemon=True,name="SmartMoney-ExpiredCleanup"); cleanup_thread.start(); dispatch_thread=threading.Thread(target=dispatch_alerts,daemon=True,name="SmartMoney-Dispatcher"); dispatch_thread.start(); threads=[]; ws_stop_event=threading.Event(); last_universe_refresh=0.0
     def start_connections(symbols):
         nonlocal threads,ws_stop_event
