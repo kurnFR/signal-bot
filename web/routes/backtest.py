@@ -831,6 +831,10 @@ def execute_backtest(req: BacktestRunRequest):
     # Run the simulation
     trades = strategy_fn(segment_df, run_params)
     metrics = compute_metrics(trades)
+    # All-win runs have an unbounded profit factor. SQL DECIMAL and JSON
+    # represent an unavailable finite ratio as null.
+    if metrics["profit_factor"] is not None and not math.isfinite(metrics["profit_factor"]):
+        metrics["profit_factor"] = None
     equity_res = simulate_equity_curve(trades, req.initial_capital, req.risk_per_trade_pct)
 
     # Save to database if requested
@@ -869,7 +873,7 @@ def execute_backtest(req: BacktestRunRequest):
             "exitReason": t.get("exit_reason"),
             "stopLoss": round(float(t.get("stop_loss", 0)), 4),
             "takeProfit": round(float(t.get("take_profit", 0)), 4),
-            "netReturnPct": round(float(t.get("net_return_pct", 0)) * 100, 3),
+            "netReturnPct": round(float(t.get("net_return_pct", 0)), 3),
             "rMultiple": round(float(t.get("r_multiple", 0)), 4) if t.get("r_multiple") is not None else None,
             "holdingBars": t.get("holding_bars", 0),
         })
@@ -1388,7 +1392,7 @@ def get_run_details(run_id: int):
                 "exitReason": t["exit_reason"],
                 "stopLoss": float(t["stop_loss"]),
                 "takeProfit": float(t["take_profit"]),
-                "netReturnPct": round(float(t["net_return_pct"]) * 100, 3),
+                "netReturnPct": round(float(t["net_return_pct"]), 3),
                 "rMultiple": float(t["r_multiple"]) if t["r_multiple"] is not None else None,
                 "holdingBars": t["holding_bars"],
             })

@@ -5,6 +5,12 @@ Never mutates production database `crypto_signals`.
 Covers all 20 scenarios required by Work Order 71918.
 """
 import os
+import json
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from textwrap import dedent
 import unittest
 import pandas as pd
 from mysql.connector import Error as DatabaseError
@@ -188,6 +194,82 @@ class TestPaperPositionLifecycle(unittest.TestCase):
             }
             rows.append(row)
         return pd.DataFrame(rows)
+
+    def _exercise_chat_strategy(self, enabled):
+        # The worker module is already loaded. Only the separate web process saves the draft.
+        hour = 3_600_000
+        entry = 1795003200000
+        bars = [dict(open_time=entry - n * hour, open=100, high=101, low=99, close=100,
+                     atr=1) for n in range(60, 0, -1)]
+        bars.extend([dict(open_time=entry, open=100, high=108, low=99, close=107, atr=4),
+                     dict(open_time=entry + hour, open=107, high=108, low=102, close=103, atr=4)])
+        frame = self._make_df(bars)
+        frame.loc[59, "rsi"] = 25
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "custom_strategies.json"
+            fixture = Path(tmp) / "candles.json"
+            frame.to_json(fixture, orient="records")
+            script = dedent("""
+                import json, sys, pandas as pd
+                from unittest.mock import patch
+                from fastapi import FastAPI
+                from fastapi.testclient import TestClient
+                from web.routes import custom_strategy as web, backtest as bt
+                app = FastAPI()
+                app.include_router(bt.router)
+                app.include_router(web.router)
+                client = TestClient(app)
+                web.CUSTOM_FILE = sys.argv[1]
+                web.LLM_PROVIDER = "offline"
+                web.OPENROUTER_API_KEY = web.ANTHROPIC_API_KEY = ""
+                draft = client.post("/api/custom-strategy/generate-ai", json={"prompt": "RSI below 35, stop 2 ATR, RR 3"}).json()
+                rule = web.CustomStrategyRequest(**draft["strategy"])
+                rule.useTrailingStop = bool(int(sys.argv[3]))
+                rule.trailActivationR, rule.trailDistanceAtrMult = 2, 2.5
+                name = client.post("/api/custom-strategy/create", json=rule.model_dump()).json()["name"]
+                frame = pd.read_json(sys.argv[2], orient="records", convert_dates=False)
+                with patch.object(bt, "fetch_ohlcv_with_features_df", return_value=frame):
+                    result = client.post("/api/backtest/run", json=dict(strategy=name, symbol="BTCUSDT",
+                        market="spot", timeframe="1h", data_segment="full", save_to_db=False)).json()
+                assert result["metrics"]["profit_factor"] is None
+                assert len(result["trades"]) == 1
+                print(json.dumps([name, result["trades"][0]]))
+            """)
+            expected = subprocess.check_output(
+                [sys.executable, "-c", script, str(path), str(fixture), str(int(enabled))], text=True)
+            name, reference = json.loads(expected)
+            pe.set_paper_config("BTCUSDT", "spot", "1h", name, True, telegram_enabled=enabled)
+            with (patch("backtest.custom_strategy.CUSTOM_FILE", str(path)),
+                  patch.object(pe, "fetch_ohlcv_with_features_df", return_value=frame.iloc[:60]) as candles,
+                  patch.object(pe, "fetch_latest_open_candle", return_value=frame.iloc[60].to_dict()) as forming,
+                  patch("time.time", return_value=entry / 1000 + 5),
+                  patch("notifications.telegram_notifier.send_telegram_message") as transport):
+                # Leave a durable pending order, then delete the catalog definition before recovery.
+                with patch.object(pe, "fill_pending_order", return_value={"status": "pending"}):
+                    pe.sync_and_evaluate_paper_trading()
+                path.write_text("[]")
+                result = pe.sync_and_evaluate_paper_trading()
+                self.assertEqual(result["new_positions_opened"], 1)
+                position, = pe.get_active_positions()
+                self.assertEqual(position["trail_activation_r"], 2)
+                self.assertEqual(position["trail_distance_atr_mult"], 2.5)
+                self.assertEqual(transport.call_count, int(enabled))
+                candles.return_value = frame
+                forming.return_value = None
+                self.assertEqual(pe.sync_and_evaluate_paper_trading()["positions_closed"], 1)
+                trade, = pe.get_paper_trades()
+                self.assertEqual(trade["exit_reason"], "TRAIL" if enabled else "TP")
+                self.assertEqual(trade["exit_reason"], reference["exitReason"])
+                self.assertAlmostEqual(trade["exit_price"], reference["exitPrice"], delta=0.000051)
+                self.assertAlmostEqual(trade["net_return_pct"], reference["netReturnPct"], delta=0.00051)
+                pe.sync_and_evaluate_paper_trading()
+                self.assertEqual(transport.call_count, 2 * int(enabled))
+
+    def test_chat_strategy_trailing_and_telegram_enabled(self):
+        self._exercise_chat_strategy(True)
+
+    def test_chat_strategy_fixed_target_and_telegram_disabled(self):
+        self._exercise_chat_strategy(False)
 
     def test_01_normal_long_entry_and_exit(self):
         """1. Normal long entry and take-profit exit."""
