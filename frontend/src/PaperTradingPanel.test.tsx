@@ -21,6 +21,7 @@ function json(payload: unknown, status = 200) {
 }
 
 const baseFixture = {
+  "/api/backtest/strategies": { strategies: [{ id: "confluence_ensemble_v1" }, { id: "custom_rsi_v1" }] },
   "/api/paper/positions": {
     positions: [
       {
@@ -267,7 +268,7 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
 
       if (path === "/api/paper/deploy" && method === "POST") {
         deployPayload = JSON.parse(String(init?.body));
-        return Promise.resolve(json({ status: "success", message: "Strategy trend_ema_v1 deployed" }));
+        return Promise.resolve(json({ status: "success", message: "Strategy custom_rsi_v1 deployed" }));
       }
       const payload = baseFixture[path as keyof typeof baseFixture];
       return Promise.resolve(payload ? json(payload) : json({ detail: "Unexpected route" }, 404));
@@ -281,7 +282,8 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
     fireEvent.click(deployBtn);
 
     const dialog = screen.getByRole("dialog", { name: "Deploy Strategy to Paper Trading" });
-    expect(dialog).toBeInTheDocument();
+    await within(dialog).findByRole("option", { name: "custom_rsi_v1" });
+    fireEvent.change(within(dialog).getByLabelText("Strategy"), { target: { value: "custom_rsi_v1" } });
 
     const submitBtn = within(dialog).getByRole("button", { name: "Deploy to Paper Trading" });
     fireEvent.click(submitBtn);
@@ -291,12 +293,12 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
       symbol: "BTCUSDT",
       market: "spot",
       timeframe: "1d",
-      strategy_name: "confluence_ensemble_v1",
+      strategy_name: "custom_rsi_v1",
       allocated_capital: 5000,
       risk_per_trade_pct: 1.0,
       send_telegram: false,
     });
-    const successMsg = await screen.findByText(/Strategy trend_ema_v1 deployed/i);
+    const successMsg = await screen.findByText(/Strategy custom_rsi_v1 deployed/i);
     expect(successMsg).toBeInTheDocument();
     expect(successMsg.closest(".control-success")).toBeInTheDocument();
     expect(successMsg).not.toHaveTextContent(/telegram/i);
@@ -345,6 +347,7 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
     fireEvent.click(deployBtn);
 
     const dialog = screen.getByRole("dialog", { name: "Deploy Strategy to Paper Trading" });
+    await within(dialog).findByRole("option", { name: "custom_rsi_v1" });
     const submitBtn = within(dialog).getByRole("button", { name: "Deploy to Paper Trading" });
     fireEvent.click(submitBtn);
 
@@ -387,6 +390,7 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
     fireEvent.click(deployBtn);
 
     const dialog = screen.getByRole("dialog", { name: "Deploy Strategy to Paper Trading" });
+    await within(dialog).findByRole("option", { name: "custom_rsi_v1" });
     const submitBtn = within(dialog).getByRole("button", { name: "Deploy to Paper Trading" });
     fireEvent.click(submitBtn);
 
@@ -426,6 +430,7 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Deploy strategy/i }));
     const dialog = screen.getByRole("dialog", { name: "Deploy Strategy to Paper Trading" });
+    await within(dialog).findByRole("option", { name: "custom_rsi_v1" });
 
     // Explicitly enable Telegram
     const telegramCheckbox = within(dialog).getByLabelText(/Broadcast signal alerts to Telegram/i);
@@ -469,6 +474,7 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Deploy strategy/i }));
     const dialog = screen.getByRole("dialog", { name: "Deploy Strategy to Paper Trading" });
+    await within(dialog).findByRole("option", { name: "custom_rsi_v1" });
 
     fireEvent.click(within(dialog).getByLabelText(/Broadcast signal alerts to Telegram/i));
     fireEvent.click(within(dialog).getByRole("button", { name: "Deploy to Paper Trading" }));
@@ -510,6 +516,7 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Deploy strategy/i }));
     const dialog = screen.getByRole("dialog", { name: "Deploy Strategy to Paper Trading" });
+    await within(dialog).findByRole("option", { name: "custom_rsi_v1" });
 
     fireEvent.click(within(dialog).getByLabelText(/Broadcast signal alerts to Telegram/i));
     fireEvent.click(within(dialog).getByRole("button", { name: "Deploy to Paper Trading" }));
@@ -546,6 +553,7 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Deploy strategy/i }));
     const dialog = screen.getByRole("dialog", { name: "Deploy Strategy to Paper Trading" });
+    await within(dialog).findByRole("option", { name: "custom_rsi_v1" });
 
     fireEvent.click(within(dialog).getByLabelText(/Broadcast signal alerts to Telegram/i));
     fireEvent.click(within(dialog).getByRole("button", { name: "Deploy to Paper Trading" }));

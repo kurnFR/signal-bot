@@ -12,6 +12,7 @@ uses the existing strategy runner for signal discovery. It must not be treated
 as live execution.
 """
 import time
+import json
 import logging
 import re
 import pandas as pd
@@ -26,6 +27,8 @@ from backtest.strategies import (
     PAIRS_STRATEGIES,
 )
 from backtest.strategies.trend_alignment import HTF_TIMEFRAME
+from backtest.custom_strategy import paper_strategy_registry
+from backtest.simulate import trailing_bar
 from backtest.params import BASE_PARAMS
 from backtest.accounting import calculate_position_size, calculate_trade_accounting, resolve_stop_target_exit
 from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT, PAIRS_BASE_SYMBOL
@@ -479,7 +482,7 @@ def get_active_positions() -> List[Dict[str, Any]]:
                 id, symbol, market, timeframe, strategy_name, direction,
                 entry_time, entry_time_wib, entry_price, current_price,
                 stop_loss, take_profit, current_stop, trailing_active,
-                trail_activation_r, trail_distance_atr_mult, initial_risk,
+                trail_activation_r, trail_distance_atr_mult, initial_risk, custom_exit_policy,
                 allocated_capital, risk_per_trade_pct, risk_amount,
                 stop_distance, quantity, notional_value, entry_fee, funding_pnl,
                 unrealized_pnl_pct, unrealized_r, holding_bars,
@@ -871,6 +874,9 @@ def _insert_position(
     covers this symbol/market/timeframe/strategy). Callers that only care
     whether a position was opened (not the id) can still use this in a
     boolean context -- 0 is never a valid auto-increment id."""
+    policy = trade.get("custom_exit_policy")
+    if isinstance(policy, str):
+        policy = json.loads(policy)
     direction = trade["direction"]
     entry_fill = float(trade["entry_price"])
     stop_loss = float(trade["stop_loss"])
@@ -889,7 +895,7 @@ def _insert_position(
         return None
     entry_fee = entry_fill * size.quantity * BACKTEST_FEE_PCT
     atr = float(trade.get("atr_at_signal", 0.0) or 0.0)
-    raw_max_hold_bars = trade.get("max_hold_bars")
+    raw_max_hold_bars = policy["max_hold_bars"] if policy else trade.get("max_hold_bars")
     if ml_generator_model_id:
         # Verify the model contract again at fill time. Pending orders can be
         # recovered after a process restart or server-cost configuration change.
@@ -946,15 +952,16 @@ def _insert_position(
             INSERT INTO paper_positions (
                 symbol, market, timeframe, strategy_name, direction,
                 entry_time, entry_price, current_price, stop_loss, take_profit,
-                current_stop, trailing_active, trail_activation_r, trail_distance_atr_mult,
+                current_stop, trailing_active,
                 atr_at_signal, initial_risk, unrealized_pnl_pct, unrealized_r,
                 holding_bars, max_hold_bars, last_update_time, status,
                 allocated_capital, risk_per_trade_pct, risk_amount, stop_distance,
                 quantity, notional_value, entry_fee, exit_fee, funding_pnl,
-                ml_model_id, ml_probability, config_id, ml_generator_model_id
+                ml_model_id, ml_probability, config_id, ml_generator_model_id,
+                custom_exit_policy, trail_activation_r, trail_distance_atr_mult
             ) VALUES (
-                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0,1.0,1.5,%s,%s,0.0,0.0,
-                0,%s,%s,'OPEN',%s,%s,%s,%s,%s,%s,%s,0.0,0.0,%s,%s,%s,%s
+                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0,%s,%s,0.0,0.0,
+                0,%s,%s,'OPEN',%s,%s,%s,%s,%s,%s,%s,0.0,0.0,%s,%s,%s,%s,%s,%s,%s
             )
             """,
             (
@@ -964,6 +971,8 @@ def _insert_position(
                 cfg["risk_per_trade_pct"], size.risk_amount, size.stop_distance,
                 size.quantity, size.notional, entry_fee, ml_model_id, ml_probability,
                 cfg.get("id"), ml_generator_model_id or cfg.get("ml_generator_model_id"),
+                json.dumps(policy) if policy else None,
+                policy["activation_r"] if policy else 1.0, policy["distance_atr"] if policy else 1.5,
             ),
         )
         if owns_connection:
@@ -1064,6 +1073,19 @@ def _send_paper_entry_alert(order: Dict[str, Any], ml_threshold: Optional[float]
         logger.warning("Telegram entry alert failed for paper order #%s: %s", order.get("id"), tel_err)
 
 
+def _trade_from_order(order):
+    trade = {
+        "direction": order["direction"],
+        "entry_price": float(order["requested_entry_price"]),
+        "stop_loss": float(order["stop_loss"]),
+        "take_profit": float(order["take_profit"]),
+        "atr_at_signal": float(order["atr_at_signal"]),
+    }
+    if order.get("custom_exit_policy") is not None:
+        trade["custom_exit_policy"] = order["custom_exit_policy"]
+    return trade
+
+
 def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, int]:
     """Recover pending orders and fill only during their intended next-open window."""
     config_by_id = {int(cfg["id"]): cfg for cfg in configs if cfg.get("id") is not None}
@@ -1129,13 +1151,7 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
         if candle_time != entry_time or not open_candle:
             continue
 
-        trade = {
-            "direction": order["direction"],
-            "entry_price": float(order["requested_entry_price"]),
-            "stop_loss": float(order["stop_loss"]),
-            "take_profit": float(order["take_profit"]),
-            "atr_at_signal": float(order["atr_at_signal"]),
-        }
+        trade = _trade_from_order(order)
         try:
             from paper.circuit_breaker import check_circuit_breakers
             allowed, breaker_msg = check_circuit_breakers()
@@ -1155,7 +1171,7 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
             )
             if fill["status"] == "filled":
                 result["filled"] += 1
-                if bool(cfg.get("telegram_enabled", False)):
+                if cfg.get("telegram_enabled", False):
                     _send_paper_entry_alert(order)
             elif fill["status"] == "rejected":
                 result["rejected"] += 1
@@ -1199,6 +1215,9 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
         current_stop = float(pos["current_stop"])
         take_profit = float(pos["take_profit"])
         trailing_active = bool(pos["trailing_active"])
+        policy = pos.get("custom_exit_policy")
+        if isinstance(policy, str):
+            policy = json.loads(policy)
         trail_act_r = float(pos["trail_activation_r"])
         trail_dist_mult = float(pos["trail_distance_atr_mult"])
         holding_bars = int(pos["holding_bars"])
@@ -1249,7 +1268,7 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
             raw_atr = bar.get("atr")
             if pd.isna(raw_atr) or float(raw_atr or 0.0) <= 0:
                 atr = 0.0
-                if unrealized_r >= trail_act_r:
+                if policy is None and unrealized_r >= trail_act_r:
                     logger.warning(
                         "Paper position #%s: trailing stop threshold reached (unrealized_r=%.2f >= %.2f) "
                         "but ATR is invalid/NaN (%s); cannot trail stop on this bar",
@@ -1261,7 +1280,14 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
             exit_reason = None
             exit_price = None
 
-            if trailing_active:
+            if policy and policy["enabled"]:
+                entry_open = policy["entry_open"]
+                exit_price, exit_reason, current_stop, trailing_active = trailing_bar(
+                    direction, bar, current_stop, trailing_active, entry_open,
+                    abs(entry_open - float(pos["stop_loss"])), trail_act_r,
+                    trail_dist_mult * policy["atr"],
+                )
+            elif trailing_active:
                 if direction == "LONG":
                     if bar_open <= current_stop:
                         exit_reason, exit_price = "TRAIL", bar_open
@@ -1287,7 +1313,7 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
 
             if exit_reason is None and holding_bars >= max_hold_bars:
                 exit_reason, exit_price = "TIMEOUT", bar_close
-            elif exit_reason is None and unrealized_r >= trail_act_r and atr > 0:
+            elif policy is None and exit_reason is None and unrealized_r >= trail_act_r and atr > 0:
                 if direction == "LONG":
                     trailing_active = True
                     current_stop = max(current_stop, bar_close - trail_dist_mult * atr)
@@ -1368,6 +1394,7 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
         for p in remaining_open_positions
     }
 
+    strategies = paper_strategy_registry(STRATEGIES)
     for cfg in active_cfgs:
         symbol, market, timeframe, strategy_name = cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"]
         cfg_id = int(cfg["id"]) if cfg.get("id") is not None else None
@@ -1380,7 +1407,8 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
 
         is_generator_strategy = strategy_name == "ml_signal_generator_v1"
         is_overlay_strategy = strategy_name in OVERLAY_STRATEGIES
-        if strategy_name not in STRATEGIES and not is_overlay_strategy:
+        if strategy_name not in strategies and not is_overlay_strategy:
+            logger.warning("Unknown paper strategy %s for config %s", strategy_name, cfg_id)
             continue
         if is_overlay_strategy:
             continue
@@ -1449,7 +1477,7 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
                 run_params["pair_df"] = pair_df.copy()
             run_params["pair_symbol"] = PAIRS_BASE_SYMBOL
 
-        sim_trades = STRATEGIES[strategy_name](signal_df, run_params)
+        sim_trades = strategies[strategy_name](signal_df, run_params)
         if sim_trades:
             latest_trade = sim_trades[-1]
             # Accept only a trade signaled on the latest closed candle
@@ -1475,7 +1503,7 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
                         ml_filter = MLSignalFilter.from_artifact(
                             artifact=artifact,
                             model=model,
-                            base_strategy=STRATEGIES[strategy_name],
+                            base_strategy=strategies[strategy_name],
                         )
 
                         # Evaluate features on current candle
@@ -1507,6 +1535,7 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
                         "timeframe": timeframe, "strategy_name": strategy_name,
                         "signal_open_time": candle_open_time, "entry_time": entry_candle_time,
                         "direction": latest_trade["direction"],
+                        "custom_exit_policy": latest_trade.get("custom_exit_policy"),
                         "requested_entry_price": float(latest_trade["entry_price"]),
                         "stop_loss": float(latest_trade["stop_loss"]),
                         "take_profit": float(latest_trade["take_profit"]),
@@ -1538,13 +1567,7 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
                         or (order.get("ml_model_id") or None) != (cfg.get("ml_model_id") or None)
                         or (order.get("ml_generator_model_id") or None) != (cfg.get("ml_generator_model_id") or None)):
                     continue
-                durable_trade = {
-                    "direction": order["direction"],
-                    "entry_price": float(order["requested_entry_price"]),
-                    "stop_loss": float(order["stop_loss"]),
-                    "take_profit": float(order["take_profit"]),
-                    "atr_at_signal": float(order["atr_at_signal"]),
-                }
+                durable_trade = _trade_from_order(order)
                 durable_ml_model_id = order.get("ml_model_id")
                 durable_ml_probability = order.get("ml_probability")
                 durable_generator_model_id = order.get("ml_generator_model_id")
@@ -1565,7 +1588,7 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
                     result["new_positions_opened"] += 1
                     result["orders_filled"] += 1
                     logger.info("Filled paper order #%s for %s (%s) via %s", order["id"], symbol, latest_trade["direction"], strategy_name)
-                    if order.get("telegram_enabled", cfg.get("telegram_enabled", False)):
+                    if cfg.get("telegram_enabled", False):
                         _send_paper_entry_alert(order, ml_threshold=ml_threshold)
 
 

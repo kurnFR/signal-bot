@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity, AlertTriangle, CheckCircle, Plus, RefreshCw, ShieldCheck, WalletCards, X } from "lucide-react";
 import { useAuth } from "./AuthGate";
+import { fetchBacktestStrategies } from "./lib/backtestStudio";
 import { ApiError } from "./lib/api";
 import { trapFocus } from "./lib/dialog";
 import {
@@ -27,16 +28,6 @@ function dateLabel(value: string | number | null | undefined) {
 function pnlClass(value: number | null | undefined) {
   return value == null || value === 0 ? "" : value > 0 ? "paper-positive" : "paper-negative";
 }
-
-const SUPPORTED_PAPER_STRATEGIES = [
-  "confluence_ensemble_v1",
-  "trend_ema_v1",
-  "rsi_momentum_v1",
-  "bollinger_trend_v1",
-  "macd_cross_v1",
-  "vwap_reversion_v1",
-  "atr_breakout_v1",
-] as const;
 
 export function PaperTradingPanel() {
   const auth = useAuth();
@@ -76,6 +67,8 @@ export function PaperTradingPanel() {
   const [deploySymbol, setDeploySymbol] = useState("BTCUSDT");
   const [deployMarket, setDeployMarket] = useState<"spot" | "futures">("spot");
   const [deployTimeframe, setDeployTimeframe] = useState<"15m" | "1h" | "4h" | "1d">("1d");
+  const [catalog, setCatalog] = useState<string[]>([]);
+  const [catalogError, setCatalogError] = useState(false);
   const [deployStrategy, setDeployStrategy] = useState("confluence_ensemble_v1");
   const [deployCapital, setDeployCapital] = useState(5000);
   const [deployRisk, setDeployRisk] = useState(1.0);
@@ -111,6 +104,22 @@ export function PaperTradingPanel() {
       });
     return () => controller.abort();
   }, [attempt]);
+
+  useEffect(() => {
+    if (!showDeployModal) return;
+    const controller = new AbortController();
+    setCatalog([]);
+    setCatalogError(false);
+    fetchBacktestStrategies(controller.signal).then(({ strategies }) => {
+      if (controller.signal.aborted) return;
+      const ids = strategies.map((strategy) => strategy.id).filter((id) => id !== "ml_signal_generator_v1");
+      setCatalog(ids);
+      setDeployStrategy((selected) => ids.includes(selected) ? selected : ids[0] ?? "");
+    }).catch(() => {
+      if (!controller.signal.aborted) setCatalogError(true);
+    });
+    return () => controller.abort();
+  }, [showDeployModal]);
 
   // Modal lifecycles
   useEffect(() => {
@@ -258,7 +267,7 @@ export function PaperTradingPanel() {
   // PT-09: Deploy strategy handler
   const handleExecuteDeploy = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (deployBusy) return;
+    if (deployBusy || !catalog.includes(deployStrategy)) return;
     setDeployError(null);
     setActionError(null);
     setActionSuccess(null);
@@ -828,10 +837,12 @@ export function PaperTradingPanel() {
                   disabled={deployBusy}
                   onChange={(e) => setDeployStrategy(e.target.value)}
                 >
-                  {SUPPORTED_PAPER_STRATEGIES.map((s) => (
+                  {!catalog.length && <option value="">Select a registered strategy</option>}
+                  {catalog.map((s) => (
                     <option key={s} value={s}>{s}</option>
                   ))}
                 </select>
+                {catalogError && <p role="alert">Cannot load the strategy catalog. Reopen the form to retry.</p>}
               </div>
             </div>
 
@@ -885,7 +896,7 @@ export function PaperTradingPanel() {
 
             <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
               <button type="button" className="button button-secondary" onClick={closeDeployModal} disabled={deployBusy}>Cancel</button>
-              <button type="submit" className="button button-primary" disabled={deployBusy}>
+              <button type="submit" className="button button-primary" disabled={deployBusy || !catalog.includes(deployStrategy)}>
                 {deployBusy ? "Deploying…" : "Deploy to Paper Trading"}
               </button>
             </div>

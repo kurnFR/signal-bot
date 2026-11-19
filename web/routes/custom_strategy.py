@@ -10,7 +10,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 import requests
 from backtest.strategies import STRATEGIES
-from backtest.simulate import simulate
+from backtest.custom_strategy import (
+    CUSTOM_FILE, _create_strategy_runner, _eval_condition, _normalize_indicator_name,
+    read_definitions,
+)
 from backtest.params import BASE_PARAMS
 from backtest.metrics import compute_metrics
 from db.db import fetch_ohlcv_with_features_df
@@ -37,22 +40,12 @@ MAX_AI_HISTORY_MESSAGE_CHARS = 2_000
 MAX_AI_CURRENT_CONFIG_CHARS = 8_000
 MAX_AI_CONTEXT_CHARS = 16_000
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-CUSTOM_FILE = os.path.join(BASE_DIR, "custom_strategies.json")
-
-
 def _read_saved_strategies() -> list:
     """Read persisted strategies without silently discarding corrupt state."""
-    if not os.path.exists(CUSTOM_FILE):
-        return []
     try:
-        with open(CUSTOM_FILE, "r", encoding="utf-8") as f:
-            saved = json.load(f)
-    except (OSError, json.JSONDecodeError) as exc:
+        return read_definitions(CUSTOM_FILE)
+    except (OSError, ValueError) as exc:
         raise HTTPException(status_code=500, detail="Saved custom strategies could not be read safely") from exc
-    if not isinstance(saved, list) or any(not isinstance(item, dict) for item in saved):
-        raise HTTPException(status_code=500, detail="Saved custom strategies have an invalid format")
-    return saved
 
 
 def _write_saved_strategies(saved: list) -> None:
@@ -225,32 +218,6 @@ INDICATOR_DEFINITIONS = {
     },
 }
 
-INDICATOR_ALIASES = {
-    "relative_strength_index": "rsi",
-    "rsi_14": "rsi",
-    "volume": "volume_ratio",
-    "vol": "volume_ratio",
-    "vol_ratio": "volume_ratio",
-    "volume_multiplier": "volume_ratio",
-    "macd_histogram": "macd_hist",
-    "histogram": "macd_hist",
-    "hist": "macd_hist",
-    "macd_line": "macd",
-    "signal_line": "macd_signal",
-    "price": "close",
-    "supp": "support",
-    "res": "resistance",
-    "fib_50": "fib_5",
-    "fib_500": "fib_5",
-    "fib_05": "fib_5",
-}
-
-
-def _normalize_indicator_name(name: str) -> str:
-    cleaned = str(name).strip().lower()
-    return INDICATOR_ALIASES.get(cleaned, cleaned)
-
-
 class RuleCondition(BaseModel):
     indicator: str = Field(..., json_schema_extra={"example": "rsi"})
     operator: str = Field(..., json_schema_extra={"example": "<"})
@@ -335,107 +302,11 @@ class QuickTestRequest(BaseModel):
         return normalized
 
 
-def _eval_condition(row, prev_row, cond: dict) -> bool:
-    ind = _normalize_indicator_name(cond.get("indicator", ""))
-    val = cond.get("value")
-    op = cond.get("operator", "==")
-
-    current_val = row.get(ind)
-    if current_val is None or (isinstance(current_val, float) and current_val != current_val):
-        return False
-
-    target_val = None
-    if isinstance(val, str):
-        normalized_val_indicator = _normalize_indicator_name(val)
-        if normalized_val_indicator in row and not (isinstance(row.get(normalized_val_indicator), float) and row.get(normalized_val_indicator) != row.get(normalized_val_indicator)):
-            target_val = row.get(normalized_val_indicator)
-        else:
-            try:
-                target_val = float(val)
-            except (ValueError, TypeError):
-                return False
-    else:
-        try:
-            target_val = float(val)
-        except (ValueError, TypeError):
-            return False
-
-    if target_val is None or (isinstance(target_val, float) and target_val != target_val):
-        return False
-
-    c_val = float(current_val)
-    t_val = float(target_val)
-
-    if op == "<":
-        return c_val < t_val
-    elif op == "<=":
-        return c_val <= t_val
-    elif op == ">":
-        return c_val > t_val
-    elif op == ">=":
-        return c_val >= t_val
-    elif op == "==":
-        return abs(c_val - t_val) < 1e-6
-    elif op == "!=":
-        return abs(c_val - t_val) >= 1e-6
-    return False
-
-
-def _create_strategy_runner(def_dict: dict):
-    long_conds = def_dict.get("longConditions", [])
-    short_conds = def_dict.get("shortConditions", [])
-    sl_mult = float(def_dict.get("slAtrMult", 1.5))
-    rr = float(def_dict.get("riskRewardRatio", 2.5))
-    use_trailing = bool(def_dict.get("useTrailingStop", False))
-    trail_act = float(def_dict.get("trailActivationR", 1.0))
-    trail_dist = float(def_dict.get("trailDistanceAtrMult", 1.5))
-
-    def long_condition(row, prev_row, params):
-        if not long_conds:
-            return False
-        return all(_eval_condition(row, prev_row, c if isinstance(c, dict) else c.dict()) for c in long_conds)
-
-    def short_condition(row, prev_row, params):
-        if not short_conds:
-            return False
-        return all(_eval_condition(row, prev_row, c if isinstance(c, dict) else c.dict()) for c in short_conds)
-
-    def stop_target(direction, entry_price, atr, row, params):
-        cur_sl_mult = params.get("CUSTOM_SL_ATR_MULT", sl_mult)
-        cur_rr = params.get("CUSTOM_RISK_REWARD_RATIO", rr)
-        stop_dist = cur_sl_mult * atr
-        target_dist = stop_dist * cur_rr
-        if direction == "LONG":
-            return entry_price - stop_dist, entry_price + target_dist
-        else:
-            return entry_price + stop_dist, entry_price - target_dist
-
-    def run(df, params):
-        p = dict(params)
-        if use_trailing:
-            p["USE_TRAILING_STOP"] = True
-            p["TRAIL_ACTIVATION_R"] = trail_act
-            p["TRAIL_DISTANCE_ATR_MULT"] = trail_dist
-        return simulate(df, p, long_condition, short_condition, stop_target)
-
-    def run_inverse(df, params):
-        p = dict(params)
-        if use_trailing:
-            p["USE_TRAILING_STOP"] = True
-            p["TRAIL_ACTIVATION_R"] = trail_act
-            p["TRAIL_DISTANCE_ATR_MULT"] = trail_dist
-        return simulate(df, p, short_condition, long_condition, stop_target)
-
-    return run, run_inverse
-
-
 def load_custom_strategies():
     if not os.path.exists(CUSTOM_FILE):
         return
     try:
-        with open(CUSTOM_FILE, "r") as f:
-            saved = json.load(f)
-        for s in saved:
+        for s in read_definitions(CUSTOM_FILE):
             name = s.get("name")
             if not name:
                 continue

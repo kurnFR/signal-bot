@@ -13,6 +13,23 @@ from backtest.accounting import (
 logger = logging.getLogger("backtest.simulate")
 
 
+def trailing_bar(direction, bar, stop, active, entry_open, risk, activation_r, distance):
+    """Check the existing stop before tightening it using this bar's favorable extreme."""
+    long = direction == "LONG"
+    opened = float(bar["open"])
+    adverse = float(bar["low"] if long else bar["high"])
+    hit = min(adverse, opened) <= stop if long else max(adverse, opened) >= stop
+    if hit:
+        price = min(opened, stop) if long else max(opened, stop)
+        return price, "TRAIL" if active else "SL", stop, active
+    extreme = float(bar["high"] if long else bar["low"])
+    gain = extreme - entry_open if long else entry_open - extreme
+    if active or gain >= risk * activation_r:
+        stop = max(stop, extreme - distance) if long else min(stop, extreme + distance)
+        active = True
+    return None, None, stop, active
+
+
 def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, stop_target) -> list:
     """Simulate closed-candle signals with next-bar-open execution.
 
@@ -170,7 +187,6 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
         exit_price = exit_reason = exit_idx = None
         current_stop = stop_loss
         trailing_active = False
-        favorable_extreme = raw_entry_price
 
         j = entry_idx
         last_allowed_idx = max_allowed_idx
@@ -180,35 +196,10 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
         while j <= last_allowed_idx:
             bar = df.iloc[j]
             if use_trailing and initial_risk_price > 0:
-                if direction == "LONG":
-                    if float(bar["open"]) <= current_stop:
-                        exit_price = float(bar["open"])
-                    elif bar["low"] <= current_stop:
-                        exit_price = current_stop
-                    if exit_price is not None:
-                        exit_reason = "TRAIL" if trailing_active else "SL"
-                elif direction == "SHORT":
-                    if float(bar["open"]) >= current_stop:
-                        exit_price = float(bar["open"])
-                    elif bar["high"] >= current_stop:
-                        exit_price = current_stop
-                    if exit_price is not None:
-                        exit_reason = "TRAIL" if trailing_active else "SL"
-                if exit_price is None:
-                    if direction == "LONG":
-                        favorable_extreme = max(favorable_extreme, bar["high"])
-                        unrealized_r = (favorable_extreme - raw_entry_price) / initial_risk_price
-                        if not trailing_active and unrealized_r >= trail_activation_r:
-                            trailing_active = True
-                        if trailing_active:
-                            current_stop = max(current_stop, favorable_extreme - trail_distance_atr_mult * atr_at_signal)
-                    else:
-                        favorable_extreme = min(favorable_extreme, bar["low"])
-                        unrealized_r = (raw_entry_price - favorable_extreme) / initial_risk_price
-                        if not trailing_active and unrealized_r >= trail_activation_r:
-                            trailing_active = True
-                        if trailing_active:
-                            current_stop = min(current_stop, favorable_extreme + trail_distance_atr_mult * atr_at_signal)
+                exit_price, exit_reason, current_stop, trailing_active = trailing_bar(
+                    direction, bar, current_stop, trailing_active, raw_entry_price,
+                    initial_risk_price, trail_activation_r, trail_distance_atr_mult * atr_at_signal,
+                )
             else:
                 resolved_exit = resolve_stop_target_exit(
                     direction,
@@ -282,6 +273,8 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
         )
         trade = {
             "direction": direction,
+            "raw_entry_price": raw_entry_price,
+            "atr_at_signal": float(atr_at_signal),
             "signal_open_time": int(row["open_time"]),
             "entry_time": entry_t,
             "entry_price": float(accounting["entry_exec_price"]),

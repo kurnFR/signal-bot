@@ -7,6 +7,7 @@ tested and reviewed before they control position creation.
 """
 from __future__ import annotations
 
+import json
 import math
 import re
 import os
@@ -129,14 +130,15 @@ def create_pending_order(order: dict[str, Any]) -> dict[str, Any]:
                 config_id, symbol, market, timeframe, strategy_name,
                 signal_open_time, entry_time, direction, requested_entry_price,
                 stop_loss, take_profit, atr_at_signal, ml_model_id, ml_generator_model_id,
-                ml_probability, telegram_enabled
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ml_probability, telegram_enabled, custom_exit_policy
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """,
             (
                 o["config_id"], o["symbol"], o["market"], o["timeframe"], o["strategy_name"],
                 o["signal_open_time"], o["entry_time"], o["direction"], o["requested_entry_price"],
                 o["stop_loss"], o["take_profit"], o["atr_at_signal"], o.get("ml_model_id"),
                 o.get("ml_generator_model_id"), o.get("ml_probability"), o["telegram_enabled"],
+                json.dumps(o["custom_exit_policy"], allow_nan=False) if o.get("custom_exit_policy") else None,
             ),
         )
         order_id = int(cur.lastrowid or 0)
