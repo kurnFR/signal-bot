@@ -39,6 +39,7 @@ class TestMariaDBAtomicWalletToggle(unittest.TestCase):
                     label VARCHAR(80) NULL,
                     source ENUM('auto','manual') NOT NULL DEFAULT 'auto',
                     status ENUM('ACTIVE','IGNORED','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+                    telegram_after_id BIGINT NULL,
                     last_net_usd DECIMAL(24,2) NULL,
                     first_flagged_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -185,6 +186,7 @@ class TestMariaDBWalletAlertDigest(unittest.TestCase):
                     label VARCHAR(80) NULL,
                     source ENUM('auto','manual') NOT NULL DEFAULT 'auto',
                     status ENUM('ACTIVE','IGNORED','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+                    telegram_after_id BIGINT NULL,
                     last_net_usd DECIMAL(24,2) NULL,
                     first_flagged_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -258,9 +260,10 @@ class TestMariaDBWalletAlertDigest(unittest.TestCase):
                 (start_id,),
             )
             cur.execute(
-                "INSERT INTO tracked_wallets (chain, wallet, source, status) VALUES (%s,%s,'manual','ACTIVE')",
+                "INSERT INTO tracked_wallets (chain, wallet, source, status, telegram_after_id) VALUES (%s,%s,'manual','ACTIVE',0)",
                 (self.chain, self.wallet),
             )
+            self.tracked_id = cur.lastrowid
             now = store._utcnow() - timedelta(minutes=5)
             rows = []
             for index, (side, value) in enumerate((
@@ -311,6 +314,16 @@ class TestMariaDBWalletAlertDigest(unittest.TestCase):
         finally:
             conn.close()
         super().tearDown()
+
+    def test_reselect_excludes_prior_queued_swaps(self):
+        self.assertEqual(store.queue_new_wallet_alerts(10000), 4)
+        digest, = store.get_pending_wallet_alerts()
+        self.assertTrue(store.wallet_alert_selected(digest))
+        self.assertTrue(store.set_wallet_telegram(self.tracked_id, False))
+        self.assertFalse(store.wallet_alert_selected(digest))
+        self.assertTrue(store.set_wallet_telegram(self.tracked_id, True))
+        self.assertFalse(store.wallet_alert_selected(digest))
+        self.assertEqual(store.get_pending_wallet_alerts(), [])
 
     def test_burst_is_delivered_as_one_digest_and_later_swaps_wait_for_cooldown(self):
         from wallet_tracker.telegram import WalletTelegramNotifier

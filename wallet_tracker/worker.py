@@ -111,6 +111,8 @@ def dispatch_telegram_alerts(notifier=None):
     sent = 0
     for alert in store.get_pending_wallet_alerts(limit=50, cooldown_minutes=cooldown_minutes):
         try:
+            if not store.wallet_alert_selected(alert):
+                continue
             ok = notifier.send(alert)
         except Exception as exc:
             ok = False

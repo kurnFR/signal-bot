@@ -275,3 +275,20 @@ def wallets_untrack(tracked_id: int):
     except Exception as e:
         logger.exception("wallets_untrack failed")
         raise HTTPException(status_code=500, detail="Failed to stop monitoring wallet")
+
+
+@router.get("/performance")
+def wallets_performance(period_hours: int = Query(24), metric: Literal["pnl_usd", "roi_pct"] = "pnl_usd",
+                        limit: int = Query(100, ge=1, le=300)):
+    return {"wallets": store.wallet_performance(_check_period(period_hours), metric, limit)}
+
+
+class WalletTelegramPreference(BaseModel):
+    enabled: bool
+
+
+@router.put("/tracked/{tracked_id}/telegram")
+def wallets_set_telegram(tracked_id: int, req: WalletTelegramPreference):
+    if not store.set_wallet_telegram(tracked_id, req.enabled):
+        raise HTTPException(status_code=404, detail="Active tracked wallet not found")
+    return {"enabled": req.enabled}
