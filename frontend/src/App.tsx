@@ -84,9 +84,23 @@ function readInitialTheme(): Theme {
   return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
+const viewPath = (label: string) => "/modern/" + label.toLowerCase().replaceAll(" ", "-");
+function viewFromLocation() {
+  return Object.keys(VIEW_METADATA).find(label => viewPath(label) === window.location.pathname) ?? "Overview";
+}
+
 export function App() {
   const [theme, setTheme] = useState<Theme>(readInitialTheme);
-  const [activeView, setActiveView] = useState<string>("Overview");
+  const [activeView, setActiveView] = useState<string>(viewFromLocation);
+  useEffect(() => {
+    const restore = () => setActiveView(viewFromLocation());
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, []);
+  const selectView = (label: string) => {
+    if (activeView !== label) window.history.pushState(null, "", viewPath(label));
+    setActiveView(label);
+  };
   const [pendingBacktestStrategyId, setPendingBacktestStrategyId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -122,7 +136,7 @@ export function App() {
   }, [sidebarOpen]);
 
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
-  const handleSelectStrategyForBacktest = (strategyId: string) => { setPendingBacktestStrategyId(strategyId); setActiveView("Backtest Studio"); setSidebarOpen(false); };
+  const handleSelectStrategyForBacktest = (strategyId: string) => { setPendingBacktestStrategyId(strategyId); selectView("Backtest Studio"); setSidebarOpen(false); };
   const clearPendingBacktestStrategy = () => setPendingBacktestStrategyId(null);
 
   const viewMeta = VIEW_METADATA[activeView] ?? {
@@ -144,7 +158,7 @@ export function App() {
         {NAV_ITEMS.map(({ label, description, icon: Icon }) => <button key={label}
           className={"nav-item " + (activeView === label ? "nav-item-active" : "")}
           aria-current={activeView === label ? "page" : undefined} title={description}
-          onClick={() => { setActiveView(label); setSidebarOpen(false); }}>
+          onClick={() => { selectView(label); setSidebarOpen(false); }}>
           <Icon size={18} aria-hidden="true" /><span>{label}</span>
           {label === "Market Screener" && <span className="nav-count">V2</span>}
         </button>)}

@@ -479,7 +479,7 @@ def get_active_positions() -> List[Dict[str, Any]]:
                 stop_loss, take_profit, current_stop, trailing_active,
                 trail_activation_r, trail_distance_atr_mult, initial_risk,
                 allocated_capital, risk_per_trade_pct, risk_amount,
-                stop_distance, quantity, notional_value, entry_fee,
+                stop_distance, quantity, notional_value, entry_fee, funding_pnl,
                 unrealized_pnl_pct, unrealized_r, holding_bars,
                 max_hold_bars, status, last_update_time, config_id,
                 ml_model_id, ml_generator_model_id, ml_probability
@@ -494,7 +494,7 @@ def get_active_positions() -> List[Dict[str, Any]]:
             "entry_price", "current_price", "stop_loss", "take_profit",
             "current_stop", "initial_risk", "allocated_capital",
             "risk_per_trade_pct", "risk_amount", "stop_distance",
-            "quantity", "notional_value", "entry_fee", "unrealized_pnl_pct",
+            "quantity", "notional_value", "entry_fee", "funding_pnl", "unrealized_pnl_pct",
             "unrealized_r", "trail_activation_r", "trail_distance_atr_mult",
         )
         for r in rows:
@@ -559,7 +559,7 @@ def get_paper_metrics() -> Dict[str, Any]:
             """
             SELECT COUNT(*) AS total_trades,
                    SUM(CASE WHEN t.r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
-                   SUM(CASE WHEN t.r_multiple <= 0 THEN 1 ELSE 0 END) AS losses,
+                   SUM(CASE WHEN t.r_multiple < 0 THEN 1 ELSE 0 END) AS losses,
                    SUM(t.r_multiple) AS sum_r,
                    AVG(t.r_multiple) AS avg_r,
                    SUM(t.net_pnl) AS net_pnl
@@ -574,7 +574,7 @@ def get_paper_metrics() -> Dict[str, Any]:
             SELECT t.strategy_name, t.config_id, t.ml_generator_model_id, t.ml_model_id,
                    COUNT(*) AS total_trades,
                    SUM(CASE WHEN t.r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
-                   SUM(CASE WHEN t.r_multiple <= 0 THEN 1 ELSE 0 END) AS losses,
+                   SUM(CASE WHEN t.r_multiple < 0 THEN 1 ELSE 0 END) AS losses,
                    SUM(t.r_multiple) AS sum_r,
                    AVG(t.r_multiple) AS avg_r,
                    SUM(t.net_pnl) AS net_pnl
@@ -633,7 +633,7 @@ def _funding_cost_for_position(pos: Dict[str, Any], exit_time: int) -> float:
         PaperFundingRetrievalError: if settled funding events cannot be retrieved
             or validated for a supported Futures position.
     """
-    if pos.get("market") != "futures":
+    if str(pos.get("market") or "").strip().lower() != "futures":
         return 0.0
 
     strategy_name = str(pos.get("strategy_name") or "")
@@ -677,6 +677,7 @@ def close_position_in_db(
     exit_time: int,
     exit_reason: str,
     holding_bars: Optional[int] = None,
+    funding_end_time: Optional[int] = None,
 ) -> bool:
     """Close one position using canonical accounting and persist the ledger."""
     if pos.get("status") != "OPEN":
@@ -688,7 +689,7 @@ def close_position_in_db(
     quantity = float(pos["quantity"])
     entry_price = float(pos["entry_price"])
     stop_loss = float(pos["stop_loss"])
-    funding_cost = _funding_cost_for_position(pos, exit_time)
+    funding_cost = _funding_cost_for_position(pos, exit_time if funding_end_time is None else funding_end_time)
     accounting = calculate_trade_accounting(
         direction=direction,
         quantity=quantity,
@@ -702,6 +703,7 @@ def close_position_in_db(
     )
 
     conn = get_pool().get_connection()
+    cur = None
     try:
         cur = conn.cursor()
         # Compare-and-set status makes repeated sync calls idempotent.
@@ -753,7 +755,7 @@ def close_position_in_db(
             """,
             (
                 pos["id"], pos["symbol"], pos["market"], pos["timeframe"], pos["strategy_name"],
-                direction, pos["entry_time"], entry_price, int(exit_time), float(exit_price), exit_reason,
+                direction, pos["entry_time"], entry_price, int(exit_time), accounting["exit_exec_price"], exit_reason,
                 stop_loss, pos["take_profit"], pos["allocated_capital"], pos["risk_per_trade_pct"],
                 accounting["risk_amount"], pos["stop_distance"], quantity, pos["notional_value"],
                 accounting["gross_pnl"], pos["entry_fee"], accounting["fees"] - float(pos["entry_fee"]),
@@ -763,7 +765,6 @@ def close_position_in_db(
             ),
         )
         conn.commit()
-        cur.close()
         pos["status"] = "CLOSED"
         pos["holding_bars"] = final_holding_bars
         pos["last_update_time"] = int(exit_time)
@@ -780,7 +781,11 @@ def close_position_in_db(
             pass
         raise
     finally:
-        conn.close()
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
 
     # Gated by telegram_enabled: only send trade closure alert if enabled for this strategy
     send_close_alert = False
@@ -816,7 +821,7 @@ def close_position_in_db(
             from notifications.telegram_notifier import send_trade_close_alert
             send_trade_close_alert(
                 symbol=pos["symbol"], strategy_name=pos["strategy_name"], direction=direction,
-                entry_price=entry_price, exit_price=float(exit_price), exit_reason=exit_reason,
+                entry_price=entry_price, exit_price=accounting["exit_exec_price"], exit_reason=exit_reason,
                 net_return_pct=accounting["return_pct_on_entry_notional"],
                 r_multiple=accounting["r_multiple"] or 0.0, holding_bars=pos.get("holding_bars", 0),
                 ml_generator_model_id=pos.get("ml_generator_model_id"),
@@ -865,13 +870,13 @@ def _insert_position(
     whether a position was opened (not the id) can still use this in a
     boolean context -- 0 is never a valid auto-increment id."""
     direction = trade["direction"]
-    raw_entry = float(trade["entry_price"])
+    entry_fill = float(trade["entry_price"])
     stop_loss = float(trade["stop_loss"])
     take_profit = float(trade["take_profit"])
     size = calculate_position_size(
         equity=float(cfg["allocated_capital"]),
         risk_pct=float(cfg["risk_per_trade_pct"]),
-        entry_price=raw_entry,
+        entry_price=entry_fill,
         stop_price=stop_loss,
     )
     # Portfolio-level cap: applies to every entry path (strategies and news overlay).
@@ -880,7 +885,7 @@ def _insert_position(
     if not exposure_ok:
         logger.warning("Paper entry for %s/%s blocked: %s", cfg["symbol"], cfg["strategy_name"], exposure_msg)
         return None
-    entry_fee = raw_entry * size.quantity * BACKTEST_FEE_PCT
+    entry_fee = entry_fill * size.quantity * BACKTEST_FEE_PCT
     atr = float(trade.get("atr_at_signal", 0.0) or 0.0)
     raw_max_hold_bars = trade.get("max_hold_bars")
     if ml_generator_model_id:
@@ -951,7 +956,7 @@ def _insert_position(
             """,
             (
                 cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"], direction,
-                int(candle_open_time), raw_entry, current_close, stop_loss, take_profit, stop_loss,
+                int(candle_open_time), entry_fill, current_close, stop_loss, take_profit, stop_loss,
                 atr, size.stop_distance, max_hold_bars, last_applied_candle, cfg["allocated_capital"],
                 cfg["risk_per_trade_pct"], size.risk_amount, size.stop_distance,
                 size.quantity, size.notional, entry_fee, ml_model_id, ml_probability,
@@ -1287,7 +1292,13 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
 
             if exit_reason:
                 try:
-                    if close_position_in_db(pos, float(exit_price), bar_open_time, exit_reason, holding_bars=holding_bars):
+                    funding_end = bar.get("close_time")
+                    if exit_reason != "TIMEOUT" and exit_price == bar_open:
+                        funding_end = bar_open_time - 1
+                    elif pd.isna(funding_end):
+                        funding_end = bar_open_time + _TIMEFRAME_MS[timeframe] - 1
+                    if close_position_in_db(pos, float(exit_price), bar_open_time, exit_reason,
+                                            holding_bars=holding_bars, funding_end_time=int(funding_end)):
                         result["positions_closed"] += 1
                         position_closed = True
                 except PaperFundingRetrievalError as exc:

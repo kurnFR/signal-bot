@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AuthGate } from "./AuthGate";
 import { StrategyLibraryPanel } from "./StrategyLibraryPanel";
 
@@ -161,6 +161,7 @@ describe("read-only strategy library", () => {
 
     fireEvent.change(await screen.findByRole("textbox", { name: "AI strategy prompt" }), { target: { value: "Use RSI extremes with a wider stop" } });
     expect(calls.filter((call) => call.method === "POST")).toEqual([]);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Generate draft" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
     expect((await screen.findAllByText("Draft ready.")).length).toBeGreaterThan(0);
     expect(screen.getByText("Offline Quantitative Engine")).toBeInTheDocument();

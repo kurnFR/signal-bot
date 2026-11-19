@@ -173,6 +173,8 @@ def run_rolling_walk_forward(
     train_df, _ = split_by_cutoff(full_df, cutoff)
     n_rows = len(train_df)
 
+    if min(train_window_bars, test_window_bars, step_bars) <= 0:
+        raise ValueError("rolling window sizes and step must be positive")
     windows = []
     start = 0
     while start + train_window_bars + test_window_bars <= n_rows:
@@ -184,8 +186,8 @@ def run_rolling_walk_forward(
     if not windows:
         raise ValueError("Not enough train rows to construct at least one rolling window.")
 
-    is_trades_all = []
-    oos_trades_all = []
+    is_by_entry = {}
+    oos_by_entry = {}
     window_reports = []
 
     for idx, (is_df, oos_df) in enumerate(windows, start=1):
@@ -196,8 +198,10 @@ def run_rolling_walk_forward(
         is_m = compute_metrics(is_trades)
         oos_m = compute_metrics(oos_trades)
 
-        is_trades_all.extend(is_trades)
-        oos_trades_all.extend(oos_trades)
+        # The earliest fold observing an entry owns its simulated outcome.
+        for pool, trades in ((is_by_entry, is_trades), (oos_by_entry, oos_trades)):
+            for trade in trades:
+                pool.setdefault((trade["entry_time"], trade["direction"]), trade)
 
         window_reports.append({
             "window": idx,
@@ -209,8 +213,8 @@ def run_rolling_walk_forward(
             "oos_metrics": oos_m,
         })
 
-    total_is_metrics = compute_metrics(is_trades_all)
-    total_oos_metrics = compute_metrics(oos_trades_all)
+    total_is_metrics = compute_metrics([is_by_entry[key] for key in sorted(is_by_entry)])
+    total_oos_metrics = compute_metrics([oos_by_entry[key] for key in sorted(oos_by_entry)])
 
     # Walk-Forward Efficiency (WFE) = OOS Expectancy / IS Expectancy
     is_exp = total_is_metrics.get("expectancy_r")

@@ -907,7 +907,7 @@ print(json.dumps({"rows": rows}))
     const viewerToken = viewerLoginRes.data.token;
 
     // 4. Launch Browser & Verify Admin Session
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, executablePath: process.env.STAGING_CHROMIUM_PATH || undefined });
 
     // Admin Browser Session
     console.log(`[*] Authenticating Admin browser session (${ADMIN_USER})...`);
@@ -1379,44 +1379,37 @@ print(json.dumps({"reset_state": reset_state}, default=str))
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, "ml03_tournament_modal.png") });
     console.log(`  [1] Battle Royale tournament modal opened and captured.`);
 
-    // Close dialog
-    await page.locator("dialog[open] button:has-text('Cancel')").first().click();
-
-    // Direct API contract verification for ML-03 (POST /api/ml/run-experiment)
-    console.log(`  [*] Testing tournament execution API contract (POST /api/ml/run-experiment)...`);
-    const tournamentPayload = {
-      symbol: "BTCUSDT",
-      market: "spot",
-      timeframe: "1h",
-      strategy_name: "trend_ema_v1",
-      model_type: "tournament",
-      target_type: "binary_positive_r",
-      min_validation_trades: 10,
-    };
-    const experimentRes = await apiRequest("POST", "/api/ml/run-experiment", traderToken, tournamentPayload);
-    // On empty OHLCV dataset in test DB, server raises handled error (500)
-    console.log(`  [*] Direct API response status: HTTP ${experimentRes.status}.`);
-    assert(experimentRes.status === 500, `Expected HTTP 500 from run-experiment on empty dataset, got: ${experimentRes.status}`);
-    assert(
-      experimentRes.data && experimentRes.data.detail === "ML experiment execution failed; check server logs for diagnostics",
-      `Expected handled error detail, got: ${JSON.stringify(experimentRes.data)}`
-    );
-    console.log(`  [2] Handled error response contract verified: HTTP 500 with detail "${experimentRes.data.detail}".`);
-
-    // RBAC check: Viewer denied 403 on exact frontend endpoint POST /api/ml/run-experiment
-    const viewerExperimentRes = await apiRequest("POST", "/api/ml/run-experiment", viewerToken, tournamentPayload);
-    assert(viewerExperimentRes.status === 403, `Viewer run-experiment must return 403, got: ${viewerExperimentRes.status}`);
-    console.log(`  [3] RBAC contract verified: Viewer rejected with HTTP 403 Forbidden on exact frontend endpoint.`);
-
-    workflowResults["ML-03"] = {
-      classification: "API_CONTRACT_ONLY / RBAC_ONLY",
-      boundaryReason: "Full model training execution unverified on staging; empty OHLCV dataset triggers expected handled HTTP 500 error contract. Browser verified modal render and cancel (no browser-driven error recovery); Trader direct API verified handled HTTP 500 error response (detail: 'ML experiment execution failed; check server logs for diagnostics'); RBAC strictly verified with Viewer 403.",
-      apiContract: {
-        status: experimentRes.status,
-        detail: experimentRes.data?.detail,
-      },
-      rbac: "Viewer 403 Verified (POST /api/ml/run-experiment)",
-    };
+    const populatedSymbol = process.env.STAGING_ML_SYMBOL;
+    const symbol = populatedSymbol || ("EMPTY" + RUN_ID.toUpperCase());
+    assert(/^[A-Z0-9]{1,24}$/.test(symbol), "Invalid staging market symbol");
+    await page.locator("#t-symbol").fill(symbol);
+    const experimentResponse = page.waitForResponse(r => r.url().endsWith("/api/ml/run-experiment") &&
+      r.request().method() === "POST", { timeout: 600000 });
+    await page.locator("dialog[open] button[type=submit]").click();
+    const response = await experimentResponse;
+    const experiment = await response.json();
+    if (populatedSymbol) {
+      assert(response.ok() && experiment.status === "success", "Tournament failed: " + JSON.stringify(experiment));
+      assert(/^real-[a-z0-9_-]+$/.test(experiment.experiment_id), "Unexpected tournament ID");
+      const id = experiment.experiment_id;
+      for (const [dir, ext] of [["ml_results", "json"], ["ml_models", "json"], ["ml_models", "joblib"]]) {
+        testFixtures.mlFiles.push(path.join(REPO_ROOT, dir, id + "." + ext));
+      }
+      assert(experiment.result.market_rows >= 200 && experiment.result.dataset_rows > 0 &&
+        experiment.result.winner?.model_type, "Missing trained tournament result");
+      await page.getByText(/Tournament completed successfully/).waitFor();
+      workflowResults["ML-03"] = { classification: "BROWSER_TOURNAMENT_VERIFIED",
+        experiment: id, rows: experiment.result.market_rows, signals: experiment.result.dataset_rows,
+        winner: experiment.result.winner.model_type };
+    } else {
+      assert(response.status() === 500 && experiment.detail === "ML experiment execution failed; check server logs for diagnostics",
+        "Missing handled error for empty staging symbol");
+      await page.locator("dialog[open] button:has-text('Cancel')").click();
+      workflowResults["ML-03"] = { classification: "EMPTY_DATA_ERROR_ONLY", status: response.status() };
+    }
+    const viewerExperimentRes = await apiRequest("POST", "/api/ml/run-experiment", viewerToken,
+      { symbol, market: "spot", timeframe: "1h", strategy_name: "trend_ema_v1", model_type: "all" });
+    assert(viewerExperimentRes.status === 403, "Viewer run-experiment must return 403");
 
     // =================================================================
     // WORKFLOW 6: ML-04 — Deploy ML Filter Model to Paper
@@ -1453,7 +1446,7 @@ manifest = {
     "experiment_id": "exp_staging_${RUN_ID}",
     "model_type": "logistic_regression",
     "base_strategy": "trend_ema_v1",
-    "feature_columns": ["f1", "f2"],
+    "feature_columns": ["rsi", "atr"],
     "strategy_params": {
         "symbol": "${ml04Symbol}",
         "market": "spot",
@@ -1493,15 +1486,16 @@ print(json.dumps({
     assert(ml04Created.verified_load === true, "Model loading verification failed");
     console.log(`  [1] Created valid scikit-learn model artifact: ${ml04ModelId} (weights SHA-256: ${ml04Created.weights_sha256.slice(0, 12)}..., verified loadable).`);
 
-    // Execute deployment mutation via Trader API (POST /api/ml/deploy-to-paper)
-    const ml04DeployRes = await apiRequest("POST", "/api/ml/deploy-to-paper", traderToken, {
-      model_id: ml04ModelId,
-      allocated_capital: 7500.0,
-      risk_per_trade_pct: 1.2,
-      send_telegram: false,
-    });
-    assert(ml04DeployRes.status === 200, `Expected 200 from deploy-to-paper, got: ${ml04DeployRes.status}`);
-    console.log(`  [2] Deployment API response verified: HTTP 200 OK.`);
+    await page.reload();
+    const modelRow = page.locator("tr").filter({ has: page.getByText(ml04ModelId, { exact: true }) });
+    await modelRow.getByRole("button", { name: "Deploy to paper" }).click();
+    await page.locator("#d-capital").fill("7500");
+    await page.locator("#d-risk").fill("1.2");
+    assert(!await page.locator("dialog[open] input[type=checkbox]").isChecked(), "Unexpected Telegram opt-in");
+    const deployment = page.waitForResponse(r => r.url().endsWith("/api/ml/deploy-to-paper") &&
+      r.request().method() === "POST");
+    await page.getByRole("button", { name: "Deploy to Paper Trading", exact: true }).click();
+    assert((await deployment).status() === 200, "Browser deployment failed");
 
     // Verify DB persistence in paper_configs
     const ml04VerifyScript = `
@@ -1523,6 +1517,27 @@ print(json.dumps({"after_config": row}, default=str))
     const ml04ConfigId = ml04VerifyRes.after_config.id;
     testFixtures.paperConfigs.push(ml04ConfigId);
     console.log(`  [3] Database persistence verified: Config #${ml04ConfigId} active with ml_model_id = '${ml04ModelId}', capital=$7,500, telegram_enabled=0.`);
+
+    const persisted = ml04VerifyRes.after_config;
+    assert(Number(persisted.is_active) === 1 && Number(persisted.telegram_enabled) === 0 &&
+      persisted.allocated_capital === 7500 && persisted.risk_per_trade_pct === 1.2, "Incorrect deployed config");
+    let inference = null;
+    if (populatedSymbol) {
+      inference = await runPythonHelper(`
+import json, os, math
+from db.db import fetch_ohlcv_with_features_df
+from paper.engine import _load_verified_ml_model
+from ml.strategy import MLSignalFilter
+from backtest.strategies import STRATEGIES
+artifact, model = _load_verified_ml_model("${ml04ModelId}")
+predictor = MLSignalFilter.from_artifact(artifact=artifact, model=model, base_strategy=STRATEGIES[artifact.base_strategy])
+frame = fetch_ohlcv_with_features_df(os.environ["STAGING_ML_SYMBOL"], "spot", "1h", closed_only=True, limit=300)
+probability = float(predictor.predict_probability(frame.tail(1))[0])
+assert math.isfinite(probability) and 0 <= probability <= 1
+print(json.dumps({"open_time": int(frame.iloc[-1]["open_time"]), "probability": probability}))
+`);
+      assert(typeof inference?.probability === "number", "Missing paper filter inference evidence");
+    }
 
     // Promotion gate verification: Ineligible model rejected with HTTP 409 Conflict
     const gateCheckRes = await apiRequest("POST", "/api/ml/deploy-to-paper", traderToken, {
@@ -1546,8 +1561,8 @@ print(json.dumps({"after_config": row}, default=str))
     console.log(`  [5] RBAC contract verified: Viewer rejected with HTTP 403 Forbidden on exact frontend endpoint.`);
 
     workflowResults["ML-04"] = {
-      classification: "API_PERSISTENCE_VERIFIED",
-      note: "Deployment configuration persistence verified. Inference model loadable via joblib; live execution loops bypassed. UI view load gated on baseline by manifest globbing defect (remediated in PR #702).",
+      classification: "BROWSER_DEPLOYMENT_VERIFIED",
+      inference,
       after: ml04VerifyRes.after_config,
       gateCheck: "HTTP 409 on Ineligible Model Verified",
       rbac: "Viewer 403 Verified (POST /api/ml/deploy-to-paper)",

@@ -12,6 +12,8 @@ entry/stop distance and current equity would have given -- no separate
 per-unit position sizing math needed.
 """
 
+import math
+
 
 def simulate_equity_curve(trades: list, initial_capital: float, risk_per_trade_pct: float) -> dict:
     """
@@ -21,6 +23,9 @@ def simulate_equity_curve(trades: list, initial_capital: float, risk_per_trade_p
     Returns initial_capital, final_equity, total_return_pct,
     max_drawdown_dollars, max_drawdown_pct, and the full per-trade curve.
     """
+    for name, value in (("initial_capital", initial_capital), ("risk_per_trade_pct", risk_per_trade_pct)):
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{name} must be finite and positive")
     equity = initial_capital
     peak = initial_capital
     max_drawdown_dollars = 0.0
@@ -34,8 +39,10 @@ def simulate_equity_curve(trades: list, initial_capital: float, risk_per_trade_p
         r = t.get("r_multiple")
         if r is None:
             continue
+        if not math.isfinite(r):
+            raise ValueError("r_multiple must be finite")
         risk_dollars = equity * (risk_per_trade_pct / 100)
-        pnl_dollars = risk_dollars * r
+        pnl_dollars = max(-equity, risk_dollars * r)
         equity += pnl_dollars
         peak = max(peak, equity)
         dd_dollars = peak - equity

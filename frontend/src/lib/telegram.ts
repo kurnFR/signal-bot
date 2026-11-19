@@ -1,6 +1,7 @@
 import { assertApiPath, getJson } from "./api";
 
 export interface TelegramStatus {
+  outbox?: Record<string, number> | null;
   configured: boolean;
   chatId: string | null;
   hasToken: boolean;

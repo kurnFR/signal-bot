@@ -4,6 +4,8 @@ Telegram API Routes for status, testing, and alerting diagnostics.
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
+import logging
+from db.db import get_retailbot2_outbox_counts
 from web.auth import require_admin
 from notifications.telegram_notifier import (
     get_telegram_config,
@@ -23,11 +25,18 @@ def get_status(request: Request):
     cfg = get_telegram_config()
     role = str(getattr(request.state, "user", {}).get("role", "")).lower()
     # The target chat identifier is operationally sensitive; only admins may view it.
-    return {
+    result = {
         "configured": cfg["is_configured"],
         "chatId": cfg["chat_id"] if role == "admin" else None,
         "hasToken": bool(cfg["token"]),
     }
+    if role == "admin":
+        try:
+            result["outbox"] = get_retailbot2_outbox_counts()
+        except Exception:
+            logging.getLogger(__name__).exception("RetailBot2 outbox health unavailable")
+            result["outbox"] = None
+    return result
 
 
 @router.post("/test")

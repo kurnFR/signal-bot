@@ -1832,6 +1832,7 @@ class DatabaseManager:
         conn = self.get_conn()
         if not conn:
             return False
+        c = None
         try:
             c = conn.cursor()
             c.execute("""
@@ -1840,7 +1841,6 @@ class DatabaseManager:
                 pnl_percent=%s, exit_time=%s WHERE id=%s
             """, (exit_price, reason, pnl, pnl_pct, datetime.now(timezone.utc).replace(tzinfo=None), trade_id))
             conn.commit()
-            c.close()
             return True
         except Exception as e:
             try:
@@ -1850,7 +1850,11 @@ class DatabaseManager:
             self.logger.error(f"❌ close_trade: {e}")
             return False
         finally:
-            conn.close()
+            try:
+                if c is not None:
+                    c.close()
+            finally:
+                conn.close()
 
     def close_trade_and_update_stats(
             self, trade_id: int, exit_price: float, reason: str,
@@ -1895,8 +1899,8 @@ class DatabaseManager:
                     total_pnl = total_pnl + %s
             """, (
                 strategy, mode,
-                1 if pnl > 0 else 0, 0 if pnl > 0 else 1, pnl,
-                1 if pnl > 0 else 0, 0 if pnl > 0 else 1, pnl,
+                1 if pnl > 0 else 0, int(pnl < 0), pnl,
+                1 if pnl > 0 else 0, int(pnl < 0), pnl,
             ))
 
             enqueue_cfg = getattr(self, "config", None)
