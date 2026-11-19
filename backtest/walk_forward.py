@@ -217,7 +217,9 @@ def run_rolling_walk_forward(
     total_oos_metrics = compute_metrics([oos_by_entry[key] for key in sorted(oos_by_entry)])
 
     # Walk-Forward Efficiency (WFE) = OOS Expectancy / IS Expectancy
-    is_exp = total_is_metrics.get("expectancy_r")
+    fold_expectancies = [window["is_metrics"]["expectancy_r"] for window in window_reports
+                         if window["is_metrics"]["expectancy_r"] is not None]
+    is_exp = sum(fold_expectancies) / len(fold_expectancies) if fold_expectancies else None
     oos_exp = total_oos_metrics.get("expectancy_r")
     wfe_pct = None
     if is_exp and is_exp > 0 and oos_exp is not None:
@@ -245,6 +247,7 @@ def run_rolling_walk_forward(
         "total_windows": len(windows),
         "in_sample_metrics": total_is_metrics,
         "out_of_sample_metrics": total_oos_metrics,
+        "mean_fold_is_expectancy_r": is_exp,
         "walk_forward_efficiency_pct": wfe_pct,
         "robustness": robustness,
         "windows": window_reports,

@@ -1,4 +1,14 @@
-# Modern UI Staging Acceptance Report (Post PR #699)
+# Modern UI staging acceptance
+
+## WO71946 populated staging verification
+
+On 2026-11-19, Chromium submitted the ML Studio tournament against 8,784 finalized BTCUSDT spot hourly candles from the 2024 Binance public monthly archives in a disposable MariaDB instance. The archives passed their published SHA-256 checks. The run produced 149 signal observations and selected hist_gradient_boosting. This records a functional training result.
+
+The trader session deployed an eligible test filter through the browser. The persisted paper configuration referenced that model, allocated 7,500 in simulated capital, and had Telegram disabled. The paper-engine artifact loader and inference path returned a finite probability on a closed staging candle. The API rejected the ineligible model with HTTP 409 and the viewer deployment with HTTP 403. This exercised a dedicated test artifact independently of the tournament winner.
+
+The browser also tripped and reset the staging circuit breaker. The harness reported successful cleanup of its registered fixtures. See [the CMS verification work order](WO71946_CMS_VERIFICATION.md) to reproduce the populated run and verify the local deployment.
+
+## Historical acceptance report after PR 699
 
 **Repository:** `kurnFR/signal-bot`
 **PR:** #704 (Branch: `test/modern-ui-staging-acceptance`)

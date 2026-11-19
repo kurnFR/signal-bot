@@ -135,3 +135,15 @@ def test_pool_created_once(monkeypatch):
         pools = list(workers.map(lambda _: db.get_pool(), range(20)))
     factory.assert_called_once()
     assert all(pool is pools[0] for pool in pools)
+
+
+def test_tournament_response_with_unbounded_metrics(tmp_path, monkeypatch):
+    import json
+    from web.routes import ml_routes
+
+    result = tmp_path / "experiment.json"
+    result.write_text('{"experiment_id":"test","ranked":[{"pf":Infinity}]}')
+    monkeypatch.setattr(ml_routes, "run_real_experiment", lambda **kw: result)
+    response = ml_routes.trigger_experiment(ml_routes.RunExperimentRequest())
+    assert response["result"]["ranked"][0]["pf"] is None
+    json.dumps(response, allow_nan=False)

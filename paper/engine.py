@@ -248,6 +248,8 @@ def _append_next_open_candle(closed_df, open_candle, timeframe):
     import pandas as pd
     row = closed_df.iloc[-1].copy()
     row["open_time"] = entry_time
+    if "close_time" in row.index:
+        row["close_time"] = entry_time + interval_ms - 1
     for column in ("open", "high", "low", "close", "volume"):
         row[column] = float(open_candle[column])
     if "is_closed" in row.index:
@@ -936,6 +938,7 @@ def _insert_position(
 
     owns_connection = connection is None
     conn = connection or get_pool().get_connection()
+    cur = None
     try:
         cur = conn.cursor()
         cur.execute(
@@ -965,9 +968,7 @@ def _insert_position(
         )
         if owns_connection:
             conn.commit()
-        new_id = cur.lastrowid
-        cur.close()
-        return new_id
+        return cur.lastrowid
     except Exception as exc:
         if owns_connection:
             conn.rollback()
@@ -978,8 +979,12 @@ def _insert_position(
             return None
         raise
     finally:
-        if owns_connection:
-            conn.close()
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            if owns_connection:
+                conn.close()
 
 
 # Public alias -- ai/news_execution.py (and any other overlay-strategy

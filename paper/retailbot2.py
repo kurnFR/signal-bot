@@ -1956,8 +1956,8 @@ class DatabaseManager:
                     total_pnl = total_pnl + %s
             """, (
                 strategy, mode,
-                1 if won else 0, 0 if won else 1, pnl,
-                1 if won else 0, 0 if won else 1, pnl,
+                int(won), int(not won and pnl < 0), pnl,
+                int(won), int(not won and pnl < 0), pnl,
             ))
             conn.commit()
             c.close()

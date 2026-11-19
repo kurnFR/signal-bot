@@ -654,7 +654,7 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
     fireEvent.click(confirmResetBtn);
 
     await waitFor(() => expect(resetCalled).toBe(true));
-    expect(await screen.findByText(/Circuit breaker reset/i)).toBeInTheDocument();
+    expect(await screen.findByText("Circuit breaker reset. New paper trade entries are re-enabled.")).toBeInTheDocument();
   });
 
   it("RBAC: viewer role renders view-only badges and suppresses mutating buttons", async () => {

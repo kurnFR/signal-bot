@@ -91,7 +91,9 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
                 )
         elif symbol:
             win_start = int(df["open_time"].min())
-            win_end = int(df["open_time"].max()) + int(max_hold * 86400 * 1000)
+            win_end = int(open_times[-1]) + interval_ms - 1
+            if "close_time" in df and pd.notna(df["close_time"].iloc[-1]):
+                win_end = int(df["close_time"].iloc[-1])
             try:
                 from db.db import fetch_settled_funding_events
                 funding_events_all = fetch_settled_funding_events(

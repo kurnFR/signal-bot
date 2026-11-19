@@ -556,13 +556,13 @@ def fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, in
         params["limit"] = int(limit)
         closed_clause = "AND is_closed = 1" if closed_only else ""
         sql = f"""
-            SELECT o.open_time, o.open, o.high, o.low, o.close, o.volume, o.is_closed,
+            SELECT o.open_time, o.close_time, o.open, o.high, o.low, o.close, o.volume, o.is_closed,
                    f.rsi, f.macd, f.macd_signal, f.macd_hist, f.atr, f.atr_pct,
                    f.volume_sma, f.volume_ratio, f.support, f.resistance,
                    f.swing_high, f.swing_low, f.fib_0, f.fib_236, f.fib_382,
                    f.fib_5, f.fib_618, f.fib_786, f.fib_1
             FROM (
-                SELECT open_time, open, high, low, close, volume, is_closed, symbol, market, timeframe
+                SELECT open_time, close_time, open, high, low, close, volume, is_closed, symbol, market, timeframe
                 FROM ohlcv
                 WHERE symbol=%(symbol)s AND market=%(market)s AND timeframe=%(timeframe)s {closed_clause}
                 ORDER BY open_time DESC
@@ -576,7 +576,7 @@ def fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, in
     else:
         closed_clause = "AND o.is_closed = 1" if closed_only else ""
         sql = f"""
-            SELECT o.open_time, o.open, o.high, o.low, o.close, o.volume, o.is_closed,
+            SELECT o.open_time, o.close_time, o.open, o.high, o.low, o.close, o.volume, o.is_closed,
                    f.rsi, f.macd, f.macd_signal, f.macd_hist, f.atr, f.atr_pct,
                    f.volume_sma, f.volume_ratio, f.support, f.resistance,
                    f.swing_high, f.swing_low, f.fib_0, f.fib_236, f.fib_382,

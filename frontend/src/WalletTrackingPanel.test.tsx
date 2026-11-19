@@ -340,7 +340,9 @@ describe("Wallet Tracking Workflows (WT-04 & WT-05) with RBAC", () => {
     await waitFor(() => expect(putRequestCount).toBe(1));
     expect(savedSettings).toMatchObject({ poll_interval_seconds: 15 });
 
-    // Reopen dialog to test 3600 seconds
+    // Wait for the completed save and refreshed settings before reopening.
+    await screen.findByText("Wallet tracker settings updated successfully.");
+    await waitFor(() => expect(screen.getByRole("button", { name: /Edit settings/i })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /Edit settings/i }));
     const dialog2 = screen.getByRole("dialog", { name: "Wallet Tracker Configuration" });
     const pollInput2 = within(dialog2).getByLabelText(/Poll Interval/i);
@@ -372,6 +374,6 @@ describe("Wallet Tracking Workflows (WT-04 & WT-05) with RBAC", () => {
     expect(screen.queryByRole("button", { name: "Untrack" })).not.toBeInTheDocument();
 
     // View only label present
-    expect(screen.getByText("View only")).toBeInTheDocument();
+    expect(await screen.findByText("View only")).toBeInTheDocument();
   });
 });
