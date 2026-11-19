@@ -845,7 +845,9 @@
                     </div>
                     <form id="paper-config-form" onsubmit="App.addPaperStrategyConfig(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                         <label class="text-[11px] text-slate-400">Symbol
-                            <input id="paper-config-symbol" type="text" required maxlength="32" value="BTCUSDT" autocomplete="off" class="cfg-input">
+                            <select id="paper-config-symbol" required class="cfg-input">
+                                <option value="BTCUSDT">BTCUSDT</option>
+                            </select>
                         </label>
                         <label class="text-[11px] text-slate-400">Market
                             <select id="paper-config-market" class="cfg-input">

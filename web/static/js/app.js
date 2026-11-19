@@ -2083,6 +2083,7 @@ const App = {
             this.paperOrders = ordersData.orders;
             this.renderPaperView();
             await this.fetchPaperStrategyOptions();
+            this.updateSymbolSelectors();
         } catch (e) {
             const message = e && e.message ? e.message : String(e || "Unknown error");
             const safeMessage = this._escapeHtml(message);
@@ -2554,6 +2555,11 @@ const App = {
         } else if (tabId === "paper") {
             if (titleEl) titleEl.innerText = "Phase B: Live Paper Trading";
             if (descEl) descEl.innerText = "Simulate forward order execution against real market data without risk";
+            if (!this.coverageData || this.coverageData.length === 0) {
+                this.fetchCoverage().then(() => this.updateSymbolSelectors());
+            } else {
+                this.updateSymbolSelectors();
+            }
             this.fetchPaperData();
         } else if (tabId === "ml-studio") {
             if (titleEl) titleEl.innerText = "Machine Learning Forecast & Tournament Studio";
@@ -3110,21 +3116,30 @@ const App = {
 
     updateSymbolSelectors() {
         const symbolSelect = document.getElementById("bt-symbol-select");
-        if (!symbolSelect) return;
+        const paperSymbolSelect = document.getElementById("paper-config-symbol");
+        if (!symbolSelect && !paperSymbolSelect) return;
 
-        const uniqueSymbols = [...new Set(this.coverageData.map(c => c.symbol))];
-        if (uniqueSymbols.length === 0) {
-            symbolSelect.innerHTML = `<option value="BTCUSDT">BTCUSDT</option>`;
-            return;
-        }
+        const uniqueSymbols = [...new Set(
+            (this.coverageData || [])
+                .filter(c => c && Number(c.candleCount) > 0 && typeof c.symbol === "string" && c.symbol.trim())
+                .map(c => String(c.symbol).trim().toUpperCase())
+        )].sort();
 
-        const currentVal = symbolSelect.value;
-        symbolSelect.innerHTML = uniqueSymbols.map(s => {
-            const safeSymbol = this._escapeHtml(s);
-            return `
-                <option value="${safeSymbol}" ${s === currentVal ? "selected" : ""}>${safeSymbol}</option>
-            `;
-        }).join("");
+        const symbolsToRender = uniqueSymbols.length > 0 ? uniqueSymbols : ["BTCUSDT"];
+
+        [symbolSelect, paperSymbolSelect].forEach(select => {
+            if (!select) return;
+            const currentVal = select.value || "BTCUSDT";
+            select.innerHTML = symbolsToRender.map(s => {
+                const safeSymbol = this._escapeHtml(s);
+                return `<option value="${safeSymbol}" ${s === currentVal ? "selected" : ""}>${safeSymbol}</option>`;
+            }).join("");
+            if (symbolsToRender.includes(currentVal)) {
+                select.value = currentVal;
+            } else if (symbolsToRender.length > 0) {
+                select.value = symbolsToRender[0];
+            }
+        });
     },
 
     updateStrategySelectors() {

@@ -3,6 +3,7 @@ import { useAuth } from "./AuthGate";
 import { Activity, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, RefreshCw, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
 import { PromotionStatusPanel } from "./PromotionStatusPanel";
+import { fetchBackfilledSymbols } from "./lib/masterData";
 import { BacktestExecutionError, executeBacktest, fetchBacktestHistory, fetchBacktestRunDetails, fetchBacktestStrategies, type BacktestExecutionInput, type BacktestExecutionResult, type BacktestRunDetails, type BacktestRunSummary, type BacktestStrategy, type BacktestStrategyParameter, type PromotionPolicy } from "./lib/backtestStudio";
 
 const pct = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
@@ -85,6 +86,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
   const [tradeSortDirection, setTradeSortDirection] = useState<SortDirection>("asc");
   const auth = useAuth();
   const canRunBacktest = ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
+  const [availableSymbols, setAvailableSymbols] = useState<string[]>(["BTCUSDT"]);
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [market, setMarket] = useState<"spot" | "futures">("spot");
   const [timeframe, setTimeframe] = useState("1d");
@@ -115,6 +117,15 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [attempt]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchBackfilledSymbols(controller.signal).then((symbols) => {
+      if (controller.signal.aborted) return;
+      setAvailableSymbols(symbols);
+    }).catch(() => {});
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     if (selectedId == null) { setDetails(null); setTrades([]); return; }
@@ -296,7 +307,23 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
     {canRunBacktest ? <section className="panel" aria-labelledby="backtest-run-config-title">
       <div className="panel-heading"><div><h2 id="backtest-run-config-title">Run a backtest</h2><p>Configure a simulation using stored market data. Results are submitted for persistence in history.</p></div><span className="panel-counter">ADMIN / TRADER</span></div>
       <form className="screener-control-grid" onSubmit={(event) => { event.preventDefault(); reviewRun(); }}>
-        <label className="screener-control-field">Symbol<input aria-label="Backtest symbol" value={symbol} maxLength={30} required onChange={(event) => setSymbol(event.target.value)} /></label>
+        <label className="screener-control-field">
+          Symbol
+          <input
+            role="textbox"
+            list="backtest-symbols-list"
+            aria-label="Backtest symbol"
+            value={symbol}
+            maxLength={30}
+            required
+            onChange={(event) => setSymbol(event.target.value.toUpperCase())}
+          />
+          <datalist id="backtest-symbols-list">
+            {availableSymbols.map((sym) => (
+              <option key={sym} value={sym} />
+            ))}
+          </datalist>
+        </label>
         <label className="screener-control-field">Market<select aria-label="Backtest market" value={market} onChange={(event) => setMarket(event.target.value as "spot" | "futures")}><option value="spot">Spot</option><option value="futures">Futures</option></select></label>
         <label className="screener-control-field">Timeframe<select aria-label="Backtest timeframe" value={timeframe} onChange={(event) => setTimeframe(event.target.value)}>{["1m", "5m", "15m", "1h", "4h", "1d"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
         <label className="screener-control-field">Strategy<select aria-label="Backtest strategy" value={strategyId} onChange={(event) => setStrategyId(event.target.value)} required>{strategies.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.displayName}</option>)}</select></label>

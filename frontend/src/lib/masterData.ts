@@ -205,3 +205,21 @@ export function triggerMasterDataBackfill(input: BackfillInput): Promise<MasterD
 export function triggerMasterDataFeatureBuild(input: FeatureBuildInput): Promise<MasterDataJob> {
   return postMasterDataJob("/api/master-data/build-features", input);
 }
+
+/** Fetch distinct symbols that have backfilled candle data (candleCount > 0) in the database. */
+export async function fetchBackfilledSymbols(signal?: AbortSignal): Promise<string[]> {
+  try {
+    const data = await getJson<{ summary?: unknown; coverage?: CoverageRow[] }>("/api/master-data/coverage", signal);
+    if (!data || !Array.isArray(data.coverage)) return ["BTCUSDT"];
+    const symbols = Array.from(
+      new Set(
+        data.coverage
+          .filter((row) => row && typeof row.symbol === "string" && row.symbol.trim() && (row.candleCount ?? 0) > 0)
+          .map((row) => row.symbol.trim().toUpperCase())
+      )
+    ).sort();
+    return symbols.length > 0 ? symbols : ["BTCUSDT"];
+  } catch {
+    return ["BTCUSDT"];
+  }
+}

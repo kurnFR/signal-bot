@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity, AlertTriangle, CheckCircle, Plus, RefreshCw, ShieldCheck, WalletCards, X } from "lucide-react";
 import { useAuth } from "./AuthGate";
 import { fetchBacktestStrategies } from "./lib/backtestStudio";
+import { fetchBackfilledSymbols } from "./lib/masterData";
 import { ApiError } from "./lib/api";
 import { trapFocus } from "./lib/dialog";
 import {
@@ -61,9 +62,10 @@ export function PaperTradingPanel() {
   const [deployBusy, setDeployBusy] = useState(false);
   const [deployError, setDeployError] = useState<string | null>(null);
   const deployDialogRef = useRef<HTMLDialogElement | null>(null);
-  const deploySymbolInputRef = useRef<HTMLInputElement | null>(null);
+  const deploySymbolSelectRef = useRef<HTMLSelectElement | null>(null);
   const deployTriggerRef = useRef<HTMLElement | null>(null);
 
+  const [availableSymbols, setAvailableSymbols] = useState<string[]>(["BTCUSDT"]);
   const [deploySymbol, setDeploySymbol] = useState("BTCUSDT");
   const [deployMarket, setDeployMarket] = useState<"spot" | "futures">("spot");
   const [deployTimeframe, setDeployTimeframe] = useState<"15m" | "1h" | "4h" | "1d">("1d");
@@ -118,6 +120,11 @@ export function PaperTradingPanel() {
     }).catch(() => {
       if (!controller.signal.aborted) setCatalogError(true);
     });
+    fetchBackfilledSymbols(controller.signal).then((symbols) => {
+      if (controller.signal.aborted) return;
+      setAvailableSymbols(symbols);
+      setDeploySymbol((curr) => (symbols.includes(curr) ? curr : symbols[0] ?? "BTCUSDT"));
+    }).catch(() => {});
     return () => controller.abort();
   }, [showDeployModal]);
 
@@ -157,7 +164,7 @@ export function PaperTradingPanel() {
           deployDialogRef.current.setAttribute("open", "");
         }
       }
-      deploySymbolInputRef.current?.focus();
+      deploySymbolSelectRef.current?.focus();
     }
   }, [showDeployModal]);
 
@@ -789,16 +796,17 @@ export function PaperTradingPanel() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
               <div className="screener-control-field">
                 <label htmlFor="paper-deploy-symbol">Symbol</label>
-                <input
-                  ref={deploySymbolInputRef}
+                <select
+                  ref={deploySymbolSelectRef}
                   id="paper-deploy-symbol"
-                  type="text"
-                  required
                   value={deploySymbol}
                   disabled={deployBusy}
-                  onChange={(e) => setDeploySymbol(e.target.value.toUpperCase())}
-                  placeholder="e.g. BTCUSDT"
-                />
+                  onChange={(e) => setDeploySymbol(e.target.value)}
+                >
+                  {availableSymbols.map((sym) => (
+                    <option key={sym} value={sym}>{sym}</option>
+                  ))}
+                </select>
               </div>
               <div className="screener-control-field">
                 <label htmlFor="paper-deploy-market">Market</label>
