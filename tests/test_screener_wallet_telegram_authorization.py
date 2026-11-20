@@ -213,7 +213,15 @@ class TestScreenerTelegramAuthorization(unittest.TestCase):
             args0, kwargs0 = session.post.call_args_list[0]
             self.assertIn("/bot123:bot/sendMessage", args0[0])
             self.assertEqual(kwargs0["json"]["chat_id"], "chat-2")
-            self.assertIn("SMART MONEY EARLY SIGNAL", kwargs0["json"]["text"])
+            message = kwargs0["json"]["text"]
+            self.assertEqual(kwargs0["json"]["parse_mode"], "HTML")
+            self.assertIn("⚡ <b>SMART MONEY EARLY SIGNAL</b>\n━", message)
+            self.assertIn("Pair: <b>BTCUSDT</b>\nSignal: <code>RVOL_SPIKE</code> · Volume Watch", message)
+            self.assertIn("Quality: <b>88/100</b> (watch score)\nBias: <b>BULLISH</b>", message)
+            self.assertIn("Taker Buy: <b>68.0%</b> (buyer-led)", message)
+            self.assertIn("Quote: <code>45,000,000 USDT</code>", message)
+            self.assertIn("momentum unconfirmed", message)
+            self.assertIn("Action: Wait for price confirmation", message)
 
             args1, kwargs1 = session.post.call_args_list[1]
             self.assertIn("/bot123:bot/sendMessage", args1[0])

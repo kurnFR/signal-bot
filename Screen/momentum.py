@@ -102,7 +102,7 @@ def first_break(bars, start, delivered, direction):
     return None
 
 
-def message(signal):
+def message(signal, *, ema_length=None):
     from html import escape
 
     ctx = getattr(signal, "watch_context", None) or {}
@@ -120,16 +120,32 @@ def message(signal):
             f"Confirmation candle closed: {escape(ctx['confirmed_at'])} UTC"
         )
     ratio = signal.taker_buy_ratio
-    flow = "unavailable" if ratio is None else (
-        "buyer-led" if ratio >= .55 else "seller-led" if ratio <= .45 else "balanced")
-    flow_pct = "" if ratio is None else f" ({ratio:.1%} taker buy)"
-    levels = f"Watch high {ctx['high']:.8g} · low {ctx['low']:.8g}\n" if "high" in ctx else ""
+    if ratio is None:
+        taker_buy = "Unavailable"
+    else:
+        flow = "buyer-led" if ratio >= .55 else "seller-led" if ratio <= .45 else "balanced"
+        taker_buy = f"<b>{ratio:.1%}</b> ({flow})"
+    baseline = f"{ema_length:d}-EMA" if ema_length is not None else "long EMA"
+    levels = (
+        f"Watch range: <code>${ctx['low']:.8g}</code> to <code>${ctx['high']:.8g}</code>\n"
+        if ctx.get("low") is not None and ctx.get("high") is not None else ""
+    )
     return (
-        f"⚡ <b>SMART MONEY EARLY SIGNAL · VOLUME WATCH</b>\n{pair} · {escape(signal.signal_type)}\n"
-        f"Candle bias: {direction} · Flow: {flow}{flow_pct}\n"
-        f"Momentum unconfirmed · Watch ranking score {signal.quality_score:.0f}/100\n"
-        f"RVOL {signal.rvol:.2f}× long EMA · Quote volume {signal.volume_velocity:.2f}× recent average\n"
-        f"HTF: {escape(str(signal.htf_context))}\nClose {signal.price:.8g} ({signal.price_change_pct:+.3f}%)\n"
-        f"Volume {signal.volume:,.0f} · Quote {signal.quote_volume:,.0f}\n{levels}"
-        f"Candle opened: {when} UTC"
+        "⚡ <b>SMART MONEY EARLY SIGNAL</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Pair: <b>{pair}</b>\n"
+        f"Signal: <code>{escape(signal.signal_type)}</code> · Volume Watch\n\n"
+        f"Quality: <b>{signal.quality_score:.0f}/100</b> (watch score)\n"
+        f"Bias: <b>{direction}</b>\n"
+        f"RVOL: <b>{signal.rvol:.2f}x</b> (vs {baseline})\n"
+        f"Velocity: <b>{signal.volume_velocity:.2f}x</b> (vs recent average)\n"
+        f"Taker Buy: {taker_buy}\n"
+        f"HTF: <b>{escape(str(signal.htf_context))}</b>\n"
+        f"Price: <code>${signal.price:.8g}</code> ({signal.price_change_pct:+.3f}%)\n"
+        f"Volume: <code>{signal.volume:,.0f}</code> | Quote: <code>{signal.quote_volume:,.0f} USDT</code>\n"
+        f"{levels}\n"
+        f"Candle opened: <code>{when}</code> UTC\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "<b>Interpretation:</b> 🟡 Unusual volume · momentum unconfirmed\n"
+        "<i>Action: Wait for price confirmation</i>"
     )

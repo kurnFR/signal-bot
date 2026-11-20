@@ -599,7 +599,7 @@ class SmartMoneyTelegram:
         return "unknown"
 
     def send_early_alert(self, signal):
-        message = momentum.message(signal)
+        message = momentum.message(signal, ema_length=CONFIG["ema_length"])
         if not self.delivery_authorized:
             logger.info(
                 "ℹ️ Screener early alert suppressed (delivery unauthorized): %s | %s | Quality %.0f",
