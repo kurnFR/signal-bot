@@ -853,20 +853,63 @@ def save_signal_to_db(signal, telegram_sent):
         logger.warning("⚠️ screener heartbeat signal update failed: %s", exc)
     return True
 
+_CACHED_MARKET_CAPS = {}
+_MARKET_CAPS_FILE = "/tmp/screener_market_caps.json"
+
 def get_market_caps():
-    if CONFIG["min_market_cap_usd"]<=0: return {}
-    ticker_caps=defaultdict(set)
+    global _CACHED_MARKET_CAPS
+    if CONFIG["min_market_cap_usd"] <= 0:
+        return {}
+    ticker_caps = defaultdict(set)
     try:
-        for page in range(1,max(1,CONFIG.get("market_cap_pages",5))+1):
-            resp=requests.get("https://api.coingecko.com/api/v3/coins/markets",params={"vs_currency":"usd","order":"market_cap_desc","per_page":250,"page":page,"sparkline":"false"},timeout=20); resp.raise_for_status(); rows=resp.json()
-            if not rows: break
+        for page in range(1, max(1, CONFIG.get("market_cap_pages", 5)) + 1):
+            try:
+                resp = requests.get(
+                    "https://api.coingecko.com/api/v3/coins/markets",
+                    params={"vs_currency": "usd", "order": "market_cap_desc", "per_page": 250, "page": page, "sparkline": "false"},
+                    timeout=20
+                )
+                resp.raise_for_status()
+                rows = resp.json()
+            except Exception as page_exc:
+                logger.warning("CoinGecko market cap fetch failed for page %d: %s", page, page_exc)
+                break
+            if not rows:
+                break
             for row in rows:
-                ticker=str(row.get("symbol","")).upper(); cap=float(row.get("market_cap") or 0)
-                if ticker and cap>0: ticker_caps[ticker].add(cap)
-            if len(rows)<250: break
-            time.sleep(0.2)
-        caps={ticker:next(iter(values)) for ticker,values in ticker_caps.items() if len(values)==1}; logger.info("Loaded market-cap metadata for %d unambiguous tickers; excluded %d ambiguous tickers",len(caps),len(ticker_caps)-len(caps)); return caps
-    except Exception as e: logger.warning("Market-cap metadata unavailable; unknown assets will be excluded: %s",e); return {}
+                ticker = str(row.get("symbol", "")).upper()
+                cap = float(row.get("market_cap") or 0)
+                if ticker and cap > 0:
+                    ticker_caps[ticker].add(cap)
+            if len(rows) < 250:
+                break
+            time.sleep(1.0)
+        caps = {ticker: next(iter(values)) for ticker, values in ticker_caps.items() if len(values) == 1}
+        if caps:
+            logger.info("Loaded market-cap metadata for %d unambiguous tickers; excluded %d ambiguous tickers", len(caps), len(ticker_caps) - len(caps))
+            _CACHED_MARKET_CAPS = caps
+            try:
+                with open(_MARKET_CAPS_FILE, "w") as f:
+                    json.dump(caps, f)
+            except Exception:
+                pass
+            return caps
+    except Exception as e:
+        logger.warning("Market-cap metadata unavailable; trying cached fallback: %s", e)
+
+    if _CACHED_MARKET_CAPS:
+        logger.info("Using memory-cached market-cap metadata (%d tickers)", len(_CACHED_MARKET_CAPS))
+        return _CACHED_MARKET_CAPS
+    if os.path.exists(_MARKET_CAPS_FILE):
+        try:
+            with open(_MARKET_CAPS_FILE) as f:
+                _CACHED_MARKET_CAPS = json.load(f)
+                logger.info("Using disk-cached market-cap metadata (%d tickers)", len(_CACHED_MARKET_CAPS))
+                return _CACHED_MARKET_CAPS
+        except Exception:
+            pass
+    logger.warning("Market-cap metadata completely unavailable; unknown assets will be excluded")
+    return {}
 
 def get_liquid_symbols():
     market_caps=get_market_caps()
@@ -1383,7 +1426,9 @@ def main():
                         update_screener_heartbeat(pid=os.getpid(), symbols_monitored=len(symbols), last_universe_refresh_at=datetime.utcfromtimestamp(last_universe_refresh))
                     except Exception as e:
                         logger.warning("⚠️ screener universe heartbeat update failed: %s", e)
-                else: logger.error("❌ Universe refresh returned no eligible symbols; keeping screener disconnected until next refresh"); last_universe_refresh=time.time()
+                else:
+                    logger.error("❌ Universe refresh returned no eligible symbols; will retry in 60s")
+                    last_universe_refresh = 0
     except KeyboardInterrupt: pass
     finally:
         logger.info("🔄 Shutting down..."); state.shutdown_flag=True; ws_stop_event.set(); stop_connections(); dispatch_thread.join(timeout=5); logger.info("✅ Shutdown complete")
