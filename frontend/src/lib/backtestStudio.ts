@@ -37,10 +37,10 @@ export interface BacktestRunSummary {
 }
 export interface BacktestTrade {
   direction: string;
-  entryTime: string | null;
+  entryTime: string | number | null;
   entryTimeWib: string;
   entryPrice: number;
-  exitTime: string | null;
+  exitTime: string | number | null;
   exitTimeWib: string;
   exitPrice: number;
   exitReason: string;
@@ -84,8 +84,8 @@ function isBacktestRunSummary(value: unknown): value is BacktestRunSummary {
 function isBacktestTrade(value: unknown): value is BacktestTrade {
   if (!isRecord(value)) return false;
   return ["direction", "entryTimeWib", "exitTimeWib", "exitReason"].every((key) => typeof value[key] === "string") &&
-    (value.entryTime === null || typeof value.entryTime === "string") &&
-    (value.exitTime === null || typeof value.exitTime === "string") &&
+    (value.entryTime === null || typeof value.entryTime === "string" || typeof value.entryTime === "number") &&
+    (value.exitTime === null || typeof value.exitTime === "string" || typeof value.exitTime === "number") &&
     ["entryPrice", "exitPrice", "stopLoss", "takeProfit", "netReturnPct"].every((key) => typeof value[key] === "number" && Number.isFinite(value[key])) &&
     isFiniteNullableNumber(value.rMultiple) &&
     isNonNegativeSafeInteger(value.holdingBars);

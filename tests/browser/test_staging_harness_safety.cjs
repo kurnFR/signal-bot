@@ -2186,7 +2186,7 @@ print(json.dumps({"reg_id": reg_id, "unreg_id": unreg_id}))
         globalRegistry.registerAuditLog(test6RegAuditId);
 
         const payload = JSON.stringify({
-          symbol: "BTCUSDT",
+          symbol: process.env.STAGING_EMPTY_SYMBOL || "EMPTYBTCUSDT",
           market: "spot",
           timeframe: "1h",
           strategy_name: "trend_ema_v1",

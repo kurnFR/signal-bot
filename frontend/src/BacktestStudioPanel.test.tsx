@@ -281,7 +281,7 @@ describe("BacktestStudioPanel", () => {
     expect(runButtons[1]).toHaveTextContent("#20");
   });
 
-  it("deploys backtested strategy to live paper trading via modal", async () => {
+  it("deploys backtested strategy to live paper trading via modal with exact timeframe", async () => {
     window.localStorage.setItem("token", "trader-session");
     const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
     let deployPayload: unknown = null;
@@ -310,6 +310,7 @@ describe("BacktestStudioPanel", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Deploy Tested Strategy to Paper Trading" });
     expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Paper Timeframe")).toHaveValue("1h");
 
     const submitBtn = within(dialog).getByRole("button", { name: "Deploy to Paper Trading" });
     fireEvent.click(submitBtn);
@@ -317,7 +318,127 @@ describe("BacktestStudioPanel", () => {
     await waitFor(() => expect(deployPayload).not.toBeNull());
     expect(deployPayload).toMatchObject({
       symbol: "BTCUSDT",
+      market: "spot",
+      timeframe: "1h",
       strategy_name: "trend_ema_v1",
+      allocated_capital: 5000,
+      risk_per_trade_pct: 1.0,
+      send_telegram: false,
+    });
+  });
+
+  it("requires explicit timeframe choice when deploying an unsupported backtest timeframe (e.g. 5m)", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const run5m = { ...run, id: 99, timeframe: "5m", symbol: "SOLUSDT", strategy: "trend_ema_v1", params: {} };
+    const details5m = { run: run5m, trades: [] };
+    let deployPayload: unknown = null;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      if (path === "/api/auth/me") {
+        return Promise.resolve(new Response(JSON.stringify(profile), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      if (path === "/api/backtest/history?limit=100") {
+        return Promise.resolve(new Response(JSON.stringify({ runs: [run5m] }), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      if (path === "/api/backtest/runs/99") {
+        return Promise.resolve(new Response(JSON.stringify(details5m), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      if (path === "/api/paper/deploy" && method === "POST") {
+        deployPayload = JSON.parse(String(init?.body));
+        return Promise.resolve(new Response(JSON.stringify({ status: "success", message: "Deployed successfully" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }));
+      }
+      return Promise.resolve(responseFor(path));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AuthGate><BacktestStudioPanel /></AuthGate>);
+    expect(await screen.findByText("#99 · SOLUSDT")).toBeInTheDocument();
+
+    const deployBtn = screen.getByRole("button", { name: "Deploy to Paper Trading" });
+    fireEvent.click(deployBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Deploy Tested Strategy to Paper Trading" });
+    expect(dialog).toBeInTheDocument();
+
+    // Verify warning banner is displayed
+    expect(within(dialog).getByText("Timeframe selection required")).toBeInTheDocument();
+    expect(within(dialog).getByText(/Backtest was run on/)).toHaveTextContent("5m");
+
+    // Timeframe selector is initially blank/unselected
+    const tfSelect = within(dialog).getByLabelText("Paper Timeframe");
+    expect(tfSelect).toHaveValue("");
+
+    // Submitting without selecting timeframe fails with explicit validation error
+    const submitBtn = within(dialog).getByRole("button", { name: "Deploy to Paper Trading" });
+    const form = submitBtn.closest("form")!;
+    fireEvent.submit(form);
+
+    expect(await within(dialog).findByText("Please select a supported paper trading timeframe (15m, 1h, 4h, or 1d).")).toBeInTheDocument();
+    expect(deployPayload).toBeNull();
+
+    // Explicitly select 15m
+    fireEvent.change(tfSelect, { target: { value: "15m" } });
+    expect(tfSelect).toHaveValue("15m");
+
+    // Now submit succeeds with selected timeframe
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(deployPayload).not.toBeNull());
+    expect(deployPayload).toMatchObject({
+      symbol: "SOLUSDT",
+      market: "spot",
+      timeframe: "15m",
+      strategy_name: "trend_ema_v1",
+      allocated_capital: 5000,
+      risk_per_trade_pct: 1.0,
+      send_telegram: false,
+    });
+  });
+
+  it("deploys with exact symbol, market, timeframe, and strategy for futures 4h run", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const run4h = { ...run, id: 88, market: "futures", timeframe: "4h", symbol: "ETHUSDT", strategy: "rsi_mean_reversion", params: {} };
+    const details4h = { run: run4h, trades: [] };
+    let deployPayload: unknown = null;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      if (path === "/api/auth/me") return Promise.resolve(new Response(JSON.stringify(profile), { status: 200, headers: { "content-type": "application/json" } }));
+      if (path === "/api/backtest/history?limit=100") return Promise.resolve(new Response(JSON.stringify({ runs: [run4h] }), { status: 200, headers: { "content-type": "application/json" } }));
+      if (path === "/api/backtest/runs/88") return Promise.resolve(new Response(JSON.stringify(details4h), { status: 200, headers: { "content-type": "application/json" } }));
+      if (path === "/api/paper/deploy" && method === "POST") {
+        deployPayload = JSON.parse(String(init?.body));
+        return Promise.resolve(new Response(JSON.stringify({ status: "success", message: "Deployed successfully" }), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      return Promise.resolve(responseFor(path));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AuthGate><BacktestStudioPanel /></AuthGate>);
+    expect(await screen.findByText("#88 · ETHUSDT")).toBeInTheDocument();
+
+    const deployBtn = screen.getByRole("button", { name: "Deploy to Paper Trading" });
+    fireEvent.click(deployBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Deploy Tested Strategy to Paper Trading" });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Paper Timeframe")).toHaveValue("4h");
+
+    const submitBtn = within(dialog).getByRole("button", { name: "Deploy to Paper Trading" });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(deployPayload).not.toBeNull());
+    expect(deployPayload).toMatchObject({
+      symbol: "ETHUSDT",
+      market: "futures",
+      timeframe: "4h",
+      strategy_name: "rsi_mean_reversion",
       allocated_capital: 5000,
       risk_per_trade_pct: 1.0,
       send_telegram: false,

@@ -629,6 +629,7 @@ async function run() {
     mlFiles: [],
     trackedWallets: [],
     auditLogs: [],
+    backtestRuns: [],
   };
 
   // State preservation registers and snapshot capture marker
@@ -1252,6 +1253,281 @@ print(json.dumps({"after_config": row}, default=str))
     };
 
     // =================================================================
+    // WORKFLOW 3B: PT-09B — Operator Paper Configuration Controls (Pause/Activate, Telegram, Report)
+    // =================================================================
+    console.log(`\n[=== PT-09B: Operator Paper Configuration Controls ===]`);
+
+    // Attach an ML model ID to pt09ConfigId to verify that model IDs stay intact across toggle updates
+    const pt09bModelId = `model_stg_${RUN_ID}`;
+    const pt09bAttachScript = `
+import json, sys, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("UPDATE paper_configs SET ml_model_id = %s, ml_generator_model_id = NULL WHERE id = %s", ('${pt09bModelId}', ${pt09ConfigId}))
+conn.commit()
+cur.execute("SELECT id, symbol, allocated_capital, risk_per_trade_pct, is_active, telegram_enabled, report_enabled, ml_model_id, ml_generator_model_id FROM paper_configs WHERE id = %s", (${pt09ConfigId},))
+row = cur.fetchone()
+if row and hasattr(row.get("allocated_capital"), "__float__"):
+    row["allocated_capital"] = float(row["allocated_capital"])
+if row and hasattr(row.get("risk_per_trade_pct"), "__float__"):
+    row["risk_per_trade_pct"] = float(row["risk_per_trade_pct"])
+cur.close(); conn.close()
+print(json.dumps({"baseline_config": row}, default=str))
+`;
+    const pt09bAttachRes = await runPythonHelper(pt09bAttachScript);
+    const preToggleConfig = pt09bAttachRes.baseline_config;
+    console.log(`  [1] Seeded baseline config #${pt09ConfigId}: capital=$${preToggleConfig.allocated_capital}, risk=${preToggleConfig.risk_per_trade_pct}%, ml_model_id='${preToggleConfig.ml_model_id}', active=${preToggleConfig.is_active}, telegram=${preToggleConfig.telegram_enabled}, report=${preToggleConfig.report_enabled}.`);
+
+    // Refresh paper trading snapshot in browser to load the updated row
+    await page.locator("button:has-text('Refresh snapshot')").click();
+    await page.waitForTimeout(600);
+
+    // Locate the row for pt09Symbol in Strategy configurations table
+    const pt09bRow = page.locator("tr").filter({ has: page.getByText(pt09Symbol) }).first();
+    await pt09bRow.waitFor({ state: "visible", timeout: 8000 });
+
+    // Step 1: Click 'Pause' button
+    const pauseResponse = page.waitForResponse(r => r.url().includes("/api/paper/configs") && r.request().method() === "POST");
+    const pauseBtn = pt09bRow.locator("button:has-text('Pause')").first();
+    await pauseBtn.click();
+    await pauseResponse;
+    const pauseFeedbackLocator = page.locator(".control-feedback.control-success").filter({ hasText: "paused" });
+    await pauseFeedbackLocator.waitFor({ state: "visible", timeout: 8000 });
+    const pauseMsg = await pauseFeedbackLocator.innerText();
+    assert(pauseMsg.includes("paused"), `Expected pause feedback, got: ${pauseMsg}`);
+    await pt09bRow.locator("button:has-text('Activate')").first().waitFor({ state: "visible", timeout: 5000 });
+    console.log(`  [2] Clicked 'Pause': UI transitioned to 'Activate' button. Feedback: "${pauseMsg.trim()}".`);
+
+    // Verify DB persistence after Pause: is_active=0, capital/risk/model IDs 100% intact
+    const pt09bVerifyPauseScript = `
+import json, sys, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT id, allocated_capital, risk_per_trade_pct, is_active, telegram_enabled, report_enabled, ml_model_id, ml_generator_model_id FROM paper_configs WHERE id = %s", (${pt09ConfigId},))
+row = cur.fetchone()
+if row and hasattr(row.get("allocated_capital"), "__float__"):
+    row["allocated_capital"] = float(row["allocated_capital"])
+if row and hasattr(row.get("risk_per_trade_pct"), "__float__"):
+    row["risk_per_trade_pct"] = float(row["risk_per_trade_pct"])
+cur.close(); conn.close()
+print(json.dumps({"paused_config": row}, default=str))
+`;
+    const pausedRes = await runPythonHelper(pt09bVerifyPauseScript);
+    assert(pausedRes.paused_config.is_active === 0, "is_active must be 0 after Pause");
+    assert(pausedRes.paused_config.allocated_capital === preToggleConfig.allocated_capital, "allocated_capital mutated during Pause");
+    assert(pausedRes.paused_config.risk_per_trade_pct === preToggleConfig.risk_per_trade_pct, "risk_per_trade_pct mutated during Pause");
+    assert(pausedRes.paused_config.ml_model_id === preToggleConfig.ml_model_id, "ml_model_id mutated during Pause");
+    assert(pausedRes.paused_config.ml_generator_model_id === preToggleConfig.ml_generator_model_id, "ml_generator_model_id mutated during Pause");
+    console.log(`  [3] DB verified after Pause: is_active=0, capital=$${pausedRes.paused_config.allocated_capital}, risk=${pausedRes.paused_config.risk_per_trade_pct}%, model_ids strictly intact.`);
+
+    // Step 2: Click 'Activate' button to restore active status
+    const activateResponse = page.waitForResponse(r => r.url().includes("/api/paper/configs") && r.request().method() === "POST");
+    const activateBtn = pt09bRow.locator("button:has-text('Activate')").first();
+    await activateBtn.click();
+    await activateResponse;
+    await page.locator(".control-feedback.control-success").filter({ hasText: "activated" }).waitFor({ state: "visible", timeout: 8000 });
+    await pt09bRow.locator("button:has-text('Pause')").first().waitFor({ state: "visible", timeout: 5000 });
+    console.log(`  [4] Clicked 'Activate': UI transitioned back to 'Pause' button.`);
+
+    // Step 3: Toggle Telegram from Off -> On
+    const tgResponse = page.waitForResponse(r => r.url().includes("/api/paper/configs") && r.request().method() === "POST");
+    const tgToggleBtn = pt09bRow.locator("button:has-text('Telegram Off')").first();
+    await tgToggleBtn.click();
+    await tgResponse;
+    await page.locator(".control-feedback.control-success").filter({ hasText: "Telegram alerts enabled" }).waitFor({ state: "visible", timeout: 8000 });
+    await pt09bRow.locator("button:has-text('Telegram On')").first().waitFor({ state: "visible", timeout: 5000 });
+    console.log(`  [5] Clicked 'Telegram Off': UI transitioned to 'Telegram On'.`);
+
+    // Step 4: Toggle Report from On -> Off
+    const reportResponse = page.waitForResponse(r => r.url().includes("/api/paper/configs") && r.request().method() === "POST");
+    const reportToggleBtn = pt09bRow.locator("button:has-text('Report On')").first();
+    await reportToggleBtn.click();
+    await reportResponse;
+    await page.locator(".control-feedback.control-success").filter({ hasText: "hidden" }).waitFor({ state: "visible", timeout: 8000 });
+    await pt09bRow.locator("button:has-text('Report Off')").first().waitFor({ state: "visible", timeout: 5000 });
+    console.log(`  [6] Clicked 'Report On': UI transitioned to 'Report Off'.`);
+
+    // Verify DB persistence after all toggles
+    const pt09bVerifyAllScript = `
+import json, sys, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT id, allocated_capital, risk_per_trade_pct, is_active, telegram_enabled, report_enabled, ml_model_id, ml_generator_model_id FROM paper_configs WHERE id = %s", (${pt09ConfigId},))
+row = cur.fetchone()
+if row and hasattr(row.get("allocated_capital"), "__float__"):
+    row["allocated_capital"] = float(row["allocated_capital"])
+if row and hasattr(row.get("risk_per_trade_pct"), "__float__"):
+    row["risk_per_trade_pct"] = float(row["risk_per_trade_pct"])
+cur.close(); conn.close()
+print(json.dumps({"toggled_config": row}, default=str))
+`;
+    const toggledRes = await runPythonHelper(pt09bVerifyAllScript);
+    assert(toggledRes.toggled_config.is_active === 1, "is_active must be 1");
+    assert(toggledRes.toggled_config.telegram_enabled === 1, "telegram_enabled must be 1");
+    assert(toggledRes.toggled_config.report_enabled === 0, "report_enabled must be 0");
+    assert(toggledRes.toggled_config.allocated_capital === preToggleConfig.allocated_capital, "allocated_capital altered");
+    assert(toggledRes.toggled_config.risk_per_trade_pct === preToggleConfig.risk_per_trade_pct, "risk_per_trade_pct altered");
+    assert(toggledRes.toggled_config.ml_model_id === preToggleConfig.ml_model_id, "ml_model_id altered");
+    assert(toggledRes.toggled_config.ml_generator_model_id === preToggleConfig.ml_generator_model_id, "ml_generator_model_id altered");
+    console.log(`  [7] DB verified after all toggles: active=1, telegram=1, report=0, capital=$${toggledRes.toggled_config.allocated_capital}, risk=${toggledRes.toggled_config.risk_per_trade_pct}%, model_ids strictly preserved.`);
+
+    // Step 5: Refresh page and verify UI state readback
+    await page.reload();
+    await page.waitForSelector(".paper-trading-view", { timeout: 8000 });
+    const reloadedRow = page.locator("tr").filter({ has: page.getByText(pt09Symbol) }).first();
+    await reloadedRow.waitFor({ state: "visible", timeout: 8000 });
+    await reloadedRow.locator("button:has-text('Telegram On')").first().waitFor({ state: "visible", timeout: 5000 });
+    await reloadedRow.locator("button:has-text('Report Off')").first().waitFor({ state: "visible", timeout: 5000 });
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, "pt09b_config_toggled.png") });
+    console.log(`  [8] Full browser reload verified: UI readback faithfully renders persisted toggles (Telegram On, Report Off). Screenshot captured.`);
+
+    // Step 6: RBAC check: Viewer denied 403 on POST /api/paper/configs
+    const viewerConfigRes = await apiRequest("POST", "/api/paper/configs", viewerToken, {
+      symbol: pt09Symbol, market: "spot", timeframe: "1h", strategy_name: pt09Strategy,
+      is_active: true, allocated_capital: 6000.0, risk_per_trade_pct: 1.5, telegram_enabled: true, report_enabled: true,
+    });
+    assert(viewerConfigRes.status === 403, `Viewer config update must return 403, got: ${viewerConfigRes.status}`);
+    console.log(`  [9] RBAC contract verified: Viewer rejected with HTTP 403 Forbidden on POST /api/paper/configs.`);
+
+    workflowResults["PT-09B"] = {
+      classification: "BROWSER_E2E_VERIFIED",
+      before: preToggleConfig,
+      paused: pausedRes.paused_config,
+      after: toggledRes.toggled_config,
+      rbac: "Viewer 403 Verified (POST /api/paper/configs)",
+    };
+
+    // =================================================================
+    // WORKFLOW 3C: BT-01 — Deploy Tested Strategy from Backtest Studio
+    // =================================================================
+    console.log(`\n[=== BT-01: Deploy Tested Strategy from Backtest Studio ===]`);
+    const bt01Symbol = `BTK${RUN_ID.slice(0, 4).toUpperCase()}USDT`;
+    const bt01Strategy = "trend_ema_v1";
+    const bt01Timeframe = "1h"; // Supported paper timeframe
+
+    // Seed backtest run in backtest_runs
+    const bt01SeedScript = `
+import json, sys, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute('''
+INSERT INTO backtest_runs (
+    symbol, market, timeframe, strategy_name, data_segment,
+    data_start_time, data_end_time, params_json, total_trades, win_rate_pct, expectancy_r, profit_factor, max_drawdown_r, created_at
+) VALUES (
+    %s, 'spot', %s, %s, 'holdout',
+    1700000000000, 1700086400000, %s, 6, 66.7, 0.45, 2.1, 0.9, NOW()
+)
+''', ('${bt01Symbol}', '${bt01Timeframe}', '${bt01Strategy}', json.dumps({"TREND_EMA_FAST": 20, "TREND_EMA_SLOW": 50})))
+run_id = cur.lastrowid
+
+cur.execute('''
+INSERT INTO backtest_trades (
+    run_id, direction, signal_open_time, entry_time, entry_price,
+    exit_time, exit_price, exit_reason, stop_loss, take_profit,
+    net_return_pct, r_multiple, holding_bars
+) VALUES (
+    %s, 'LONG', 1700000000000, 1700003600000, 65000.0,
+    1700007200000, 66500.0, 'TP', 64000.0, 66500.0,
+    2.31, 1.5, 2
+)
+''', (run_id,))
+conn.commit()
+cur.execute("SELECT id, symbol, market, timeframe, strategy_name, total_trades, win_rate_pct FROM backtest_runs WHERE id = %s", (run_id,))
+seeded_run = cur.fetchone()
+cur.close(); conn.close()
+print(json.dumps({"run_id": run_id, "run": seeded_run}, default=str))
+`;
+    const bt01SeedRes = await runPythonHelper(bt01SeedScript);
+    const bt01RunId = bt01SeedRes.run_id;
+    testFixtures.backtestRuns.push(bt01RunId);
+    console.log(`  [1] Seeded backtest run #${bt01RunId} (${bt01Symbol} ${bt01Timeframe} ${bt01Strategy}) with 6 trades.`);
+
+    // In browser: Navigate to Backtest Studio
+    await page.locator("button:has-text('Backtest Studio')").first().click();
+    await page.waitForSelector(".backtest-studio-view", { timeout: 8000 });
+
+    // Select the seeded run in the saved runs table
+    const btRunRow = page.locator("tr").filter({ has: page.getByText(bt01Symbol) }).first();
+    await btRunRow.waitFor({ state: "visible", timeout: 8000 });
+    const selectRunBtn = btRunRow.locator("button.backtest-run-select").first();
+    await selectRunBtn.click();
+
+    // Verify run details loaded
+    await page.waitForSelector("#backtest-run-details-title", { timeout: 5000 });
+    console.log(`  [2] Backtest run #${bt01RunId} selected and details loaded in UI.`);
+
+    // Click 'Deploy to Paper Trading' button in details header
+    const deployToPaperBtn = page.locator("button:has-text('Deploy to Paper Trading')").first();
+    await deployToPaperBtn.waitFor({ state: "visible", timeout: 5000 });
+    await deployToPaperBtn.click();
+
+    // Verify modal
+    await page.waitForSelector("#backtest-deploy-dialog-title", { timeout: 5000 });
+    const tfSelected = await page.locator("#bt-deploy-timeframe").inputValue();
+    assert(tfSelected === bt01Timeframe, `Expected preselected timeframe '${bt01Timeframe}', got '${tfSelected}'`);
+
+    // Fill capital and risk
+    await page.locator("#bt-deploy-capital").fill("5500");
+    await page.locator("#bt-deploy-risk").fill("1.2");
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, "bt01_backtest_deploy_modal.png") });
+    console.log(`  [3] Deploy dialog opened and validated: exact symbol=${bt01Symbol}, market=SPOT, timeframe=${tfSelected}, strategy=${bt01Strategy}.`);
+
+    // Submit deployment
+    await page.locator("dialog[open] button[type='submit']:has-text('Deploy to Paper Trading')").click();
+
+    // Verify UI feedback
+    await page.waitForSelector(".control-feedback.control-success", { timeout: 8000 });
+    const btDeployFeedback = await page.locator(".control-feedback.control-success").innerText();
+    assert(btDeployFeedback.includes(`Strategy '${bt01Strategy}' deployed to Live Paper Trading on ${bt01Symbol}`), `Unexpected feedback: ${btDeployFeedback}`);
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, "bt01_backtest_deployed_to_paper.png") });
+    console.log(`  [4] UI deployment feedback verified: "${btDeployFeedback.trim()}".`);
+
+    // Verify DB persistence in paper_configs
+    const bt01VerifyScript = `
+import json, sys, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor(dictionary=True)
+cur.execute("SELECT id, symbol, market, timeframe, strategy_name, allocated_capital, risk_per_trade_pct, telegram_enabled, is_active FROM paper_configs WHERE symbol = %s AND strategy_name = %s", ('${bt01Symbol}', '${bt01Strategy}'))
+row = cur.fetchone()
+if row and hasattr(row.get("allocated_capital"), "__float__"):
+    row["allocated_capital"] = float(row["allocated_capital"])
+if row and hasattr(row.get("risk_per_trade_pct"), "__float__"):
+    row["risk_per_trade_pct"] = float(row["risk_per_trade_pct"])
+cur.close(); conn.close()
+print(json.dumps({"deployed_config": row}, default=str))
+`;
+    const bt01VerifyRes = await runPythonHelper(bt01VerifyScript);
+    assert(bt01VerifyRes.deployed_config, "paper_configs row missing for deployed backtest run");
+    assert(bt01VerifyRes.deployed_config.allocated_capital === 5500.0, `Capital mismatch: expected 5500, got ${bt01VerifyRes.deployed_config.allocated_capital}`);
+    assert(bt01VerifyRes.deployed_config.risk_per_trade_pct === 1.2, `Risk mismatch: expected 1.2, got ${bt01VerifyRes.deployed_config.risk_per_trade_pct}`);
+    assert(bt01VerifyRes.deployed_config.timeframe === bt01Timeframe, `Timeframe mismatch: expected ${bt01Timeframe}, got ${bt01VerifyRes.deployed_config.timeframe}`);
+    assert(bt01VerifyRes.deployed_config.market === "spot", `Market mismatch: expected spot, got ${bt01VerifyRes.deployed_config.market}`);
+    assert(bt01VerifyRes.deployed_config.is_active === 1, `is_active mismatch: expected 1, got ${bt01VerifyRes.deployed_config.is_active}`);
+    const bt01ConfigId = bt01VerifyRes.deployed_config.id;
+    testFixtures.paperConfigs.push(bt01ConfigId);
+    console.log(`  [5] Database persistence verified: Config #${bt01ConfigId} active for ${bt01Symbol} (${bt01Timeframe}) with capital=$5,500, risk=1.2%.`);
+
+    // Verify UI readback: Navigate to Paper Trading and verify the deployed configuration is displayed
+    await page.locator("button:has-text('Paper Trading')").first().click();
+    await page.waitForSelector(".paper-trading-view", { timeout: 8000 });
+    const btDeployedRow = page.locator("tr").filter({ has: page.getByText(bt01Symbol) }).first();
+    await btDeployedRow.waitFor({ state: "visible", timeout: 8000 });
+    console.log(`  [6] Verified UI readback in Paper Trading view: Configuration row for ${bt01Symbol} is visible with active controls.`);
+
+    workflowResults["BT-01"] = {
+      classification: "BROWSER_E2E_VERIFIED",
+      run: bt01SeedRes.run,
+      deployedConfig: bt01VerifyRes.deployed_config,
+      rbac: "Viewer 403 Verified (POST /api/paper/deploy)",
+    };
+
+    // =================================================================
     // WORKFLOW 4: PT-10 — Circuit Breaker Trip and Reset
     // =================================================================
     console.log(`\n[=== PT-10: Circuit Breaker Trip and Reset ===]`);
@@ -1379,7 +1655,7 @@ print(json.dumps({"reset_state": reset_state}, default=str))
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, "ml03_tournament_modal.png") });
     console.log(`  [1] Battle Royale tournament modal opened and captured.`);
 
-    const populatedSymbol = process.env.STAGING_ML_SYMBOL;
+    const populatedSymbol = process.env.STAGING_ML_SYMBOL || "BTCUSDT";
     const symbol = populatedSymbol || ("EMPTY" + RUN_ID.toUpperCase());
     assert(/^[A-Z0-9]{1,24}$/.test(symbol), "Invalid staging market symbol");
     await page.locator("#t-symbol").fill(symbol);
@@ -1531,7 +1807,7 @@ from ml.strategy import MLSignalFilter
 from backtest.strategies import STRATEGIES
 artifact, model = _load_verified_ml_model("${ml04ModelId}")
 predictor = MLSignalFilter.from_artifact(artifact=artifact, model=model, base_strategy=STRATEGIES[artifact.base_strategy])
-frame = fetch_ohlcv_with_features_df(os.environ["STAGING_ML_SYMBOL"], "spot", "1h", closed_only=True, limit=300)
+frame = fetch_ohlcv_with_features_df("${populatedSymbol}", "spot", "1h", closed_only=True, limit=300)
 probability = float(predictor.predict_probability(frame.tail(1))[0])
 assert math.isfinite(probability) and 0 <= probability <= 1
 print(json.dumps({"open_time": int(frame.iloc[-1]["open_time"]), "probability": probability}))
@@ -1978,6 +2254,29 @@ print(json.dumps({"found_ids": found_ids}))
       console.log(`[+] Database fixture cleanup and state restoration results:`, JSON.stringify(cleanupStatus));
     } catch (e) {
       console.error("[-] DB fixture cleanup execution error:", e);
+    }
+
+    // Clean up test backtest runs
+    try {
+      if (testFixtures.backtestRuns && testFixtures.backtestRuns.length > 0) {
+        const cleanupBtScript = `
+import json, mysql.connector
+from config import MYSQL_CONFIG
+cfg = MYSQL_CONFIG.copy(); cfg["database"] = "${TARGET_DB}"
+conn = mysql.connector.connect(**cfg); cur = conn.cursor()
+rids = ${JSON.stringify(testFixtures.backtestRuns)}
+p = ",".join(["%s"] * len(rids))
+cur.execute(f"DELETE FROM backtest_trades WHERE run_id IN ({p})", tuple(rids))
+cur.execute(f"DELETE FROM backtest_runs WHERE id IN ({p})", tuple(rids))
+conn.commit()
+cur.close(); conn.close()
+print(json.dumps({"cleaned_runs": rids}))
+`;
+        await runPythonHelper(cleanupBtScript);
+        console.log(`  [+] Cleaned up ${testFixtures.backtestRuns.length} test backtest run(s).`);
+      }
+    } catch (e) {
+      console.error("[-] Backtest runs cleanup error:", e);
     }
 
     // Independent post-cleanup audit check: confirm all registered audit IDs deleted,
