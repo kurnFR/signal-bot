@@ -7,6 +7,8 @@ import requests
 MINUTE = 60_000
 WINDOW = 5
 HISTORY = 20
+WATCH_FOLLOWUP_MAX_MINUTES = WINDOW + 1  # 6 minutes from watch open (5 minutes from watch close)
+EXPIRED_WATCH_REASON = "Watch expired: past 5-candle follow-up window"
 
 
 @dataclass(frozen=True)
@@ -19,15 +21,48 @@ class Bar:
 
 
 def utc_ms(value):
+    if isinstance(value, (int, float)):
+        return int(value)
     if isinstance(value, str):
         value = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return int(value.timestamp() * 1000)
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return int(value.timestamp() * 1000)
+    raise TypeError(f"Unsupported timestamp value: {type(value)}")
 
 
 def iso(ms):
     return datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def watch_deadline_ms(candle_time, max_signal_age_sec=None):
+    """Last eligible delivery instant for a directional 1m parent watch.
+
+    Strictly before the fifth follow-up candle closes: watch open + 6 minutes
+    (or watch close + 5 minutes). Uses the earlier of that deadline and the
+    existing signal-age limit. Derived from candle time so delayed detection
+    cannot extend it.
+    """
+    start_ms = utc_ms(candle_time)
+    window_limit_sec = WATCH_FOLLOWUP_MAX_MINUTES * 60
+    if max_signal_age_sec is not None:
+        max_sec = min(window_limit_sec, int(max_signal_age_sec))
+    else:
+        max_sec = window_limit_sec
+    return start_ms + max_sec * 1000
+
+
+def is_watch_expired(candle_time, now_ms=None, max_signal_age_sec=None):
+    """True if current instant is at or after the watch deadline."""
+    if now_ms is None:
+        import time
+        now_ms = int(time.time() * 1000)
+    elif isinstance(now_ms, (datetime, str)):
+        now_ms = utc_ms(now_ms)
+    else:
+        now_ms = int(now_ms)
+    return now_ms >= watch_deadline_ms(candle_time, max_signal_age_sec)
 
 
 def bars_between(symbol, start, end, now):

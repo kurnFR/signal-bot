@@ -968,6 +968,7 @@ def claim_next_pending_signal():
         conn = get_pool().get_connection()
         cur = conn.cursor(dictionary=True)
         max_age = max(1, int(CONFIG.get("max_signal_age_sec", 180)))
+        watch_max_sec = min(momentum.WATCH_FOLLOWUP_MAX_MINUTES * 60, max_age)
         # Recover abandoned claims and classify candidates without deleting history.
         cur.execute("UPDATE smart_money_signals SET delivery_status='PENDING', delivery_updated_at=UTC_TIMESTAMP() WHERE delivery_status='SENDING' AND delivery_updated_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 MINUTE)")
         min_quality = float(CONFIG.get("min_alert_quality_score", 80))
@@ -976,7 +977,17 @@ def claim_next_pending_signal():
                            last_delivery_error='Quality below Telegram alert threshold',
                            delivery_updated_at=UTC_TIMESTAMP()
                        WHERE delivery_status='PENDING' AND quality_score < %s""", (min_quality,))
+        # 1. Expire directional 1m parent watches past their 5-candle follow-up deadline (or max_age derived from candle_time)
+        cur.execute("""UPDATE smart_money_signals
+                       SET delivery_status='EXPIRED',
+                           last_delivery_error=%s,
+                           delivery_updated_at=UTC_TIMESTAMP()
+                       WHERE delivery_status='PENDING' AND parent_watch_id IS NULL AND direction IN ('BULLISH', 'BEARISH')
+                         AND candle_time <= DATE_FORMAT(UTC_TIMESTAMP() - INTERVAL %s SECOND, '%Y-%m-%dT%H:%i:%sZ')""",
+                    (momentum.EXPIRED_WATCH_REASON, watch_max_sec))
+        # 2. General signal expiry based on detected_at for non-directional/other signals
         cur.execute("UPDATE smart_money_signals SET delivery_status='EXPIRED', last_delivery_error='Signal expired before delivery', delivery_updated_at=UTC_TIMESTAMP() WHERE delivery_status='PENDING' AND detected_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)", (max_age,))
+        # 3. Confirmation child expiry: superseded by next candle (after 1m close)
         cur.execute("""UPDATE smart_money_signals SET delivery_status='EXPIRED', delivery_updated_at=UTC_TIMESTAMP(),
                        last_delivery_error='Confirmation superseded by next candle'
                        WHERE delivery_status='PENDING' AND parent_watch_id IS NOT NULL AND
@@ -993,13 +1004,15 @@ def claim_next_pending_signal():
             conn.commit()
             return None
 
+        # Exclude expired watches when selecting a claim
         cur.execute("""SELECT id,symbol,signal_type,rvol,volume,quote_volume,price,price_change_pct,volume_velocity,quality_score,direction,taker_buy_ratio,htf_alignment,htf_context,candle_time,detected_at,watch_context,parent_watch_id
                        FROM smart_money_signals
                        WHERE delivery_status='PENDING' AND quality_score >= %s
                          AND (parent_watch_id IS NULL OR candle_time > CONCAT(REPLACE(UTC_TIMESTAMP() - INTERVAL 2 MINUTE, ' ', 'T'), 'Z'))
+                         AND (parent_watch_id IS NOT NULL OR direction NOT IN ('BULLISH', 'BEARISH') OR candle_time > DATE_FORMAT(UTC_TIMESTAMP() - INTERVAL %s SECOND, '%Y-%m-%dT%H:%i:%sZ'))
                          AND (next_attempt_at IS NULL OR next_attempt_at <= UTC_TIMESTAMP())
                          AND detected_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)
-                       ORDER BY quality_score DESC, rvol DESC, detected_at ASC, id ASC LIMIT 1 FOR UPDATE""", (min_quality, max_age))
+                       ORDER BY quality_score DESC, rvol DESC, detected_at ASC, id ASC LIMIT 1 FOR UPDATE""", (min_quality, watch_max_sec, max_age))
         row = cur.fetchone()
         if not row:
             conn.commit()
@@ -1061,6 +1074,18 @@ def complete_signal_delivery(signal, sent, error=None):
                 status, delay = "FAILED", 0
             else:
                 status, delay = "PENDING", min(900, 30 * (2 ** max(0, attempts - 1)))
+            # Recheck deadline for retries: if retry crosses deadline, expire immediately
+            now_ms = int(time.time() * 1000)
+            max_age_sec = max(1, int(CONFIG.get("max_signal_age_sec", 180)))
+            if getattr(signal, "parent_watch_id", None) is None and getattr(signal, "direction", None) in ("BULLISH", "BEARISH"):
+                if momentum.is_watch_expired(signal.candle_time, now_ms + delay * 1000, max_age_sec):
+                    status, delay = "EXPIRED", 0
+                    error = momentum.EXPIRED_WATCH_REASON
+            elif getattr(signal, "parent_watch_id", None) is not None:
+                child_start_ms = momentum.utc_ms(signal.candle_time)
+                if now_ms + delay * 1000 >= child_start_ms + 2 * momentum.MINUTE:
+                    status, delay = "EXPIRED", 0
+                    error = "Confirmation superseded by next candle"
             cur.execute("""UPDATE smart_money_signals SET delivery_status=%s, delivery_updated_at=UTC_TIMESTAMP(), next_attempt_at=IF(%s='PENDING', DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s SECOND), NULL), last_delivery_error=%s WHERE symbol=%s AND signal_type=%s AND candle_time=%s""", (status, status, delay, str(error or "Telegram delivery failed")[:500], *key))
         conn.commit()
     except Exception as exc:
@@ -1090,6 +1115,33 @@ def release_signal_claim(signal):
             try: conn.rollback()
             except Exception: pass
         logger.error("Failed to release alert claim for %s: %s", signal.symbol, exc)
+    finally:
+        if cur:
+            try: cur.close()
+            except Exception: pass
+        if conn:
+            try: conn.close()
+            except Exception: pass
+
+def expire_claimed_signal(signal, reason):
+    """Mark a claimed signal as expired in MySQL and finalize its status."""
+    conn = None
+    cur = None
+    try:
+        conn = get_pool().get_connection()
+        cur = conn.cursor()
+        cur.execute("""UPDATE smart_money_signals
+                       SET delivery_status='EXPIRED',
+                           last_delivery_error=%s,
+                           delivery_updated_at=UTC_TIMESTAMP()
+                       WHERE symbol=%s AND signal_type=%s AND candle_time=%s AND delivery_status='SENDING'""",
+                    (reason, signal.symbol, signal.signal_type, signal.candle_time))
+        conn.commit()
+    except Exception as exc:
+        if conn:
+            try: conn.rollback()
+            except Exception: pass
+        logger.error("Failed to expire claimed signal for %s: %s", signal.symbol, exc)
     finally:
         if cur:
             try: cur.close()
@@ -1214,6 +1266,24 @@ def dispatch_alerts():
             release_signal_claim(candidate)
             time.sleep(1.0)
             continue
+
+        # Recheck deadline immediately before the Telegram send, including retries
+        now_ms = int(time.time() * 1000)
+        max_age_sec = max(1, int(CONFIG.get("max_signal_age_sec", 180)))
+        if candidate.parent_watch_id is None and candidate.direction in ("BULLISH", "BEARISH"):
+            if momentum.is_watch_expired(candidate.candle_time, now_ms, max_age_sec):
+                state.release_alert_slot(candidate.symbol)
+                expire_claimed_signal(candidate, momentum.EXPIRED_WATCH_REASON)
+                logger.info("Watch expired immediately before Telegram send: %s %s (candle: %s)", candidate.symbol, candidate.direction, candidate.candle_time)
+                continue
+        elif candidate.parent_watch_id is not None:
+            child_start_ms = momentum.utc_ms(candidate.candle_time)
+            if now_ms >= child_start_ms + 2 * momentum.MINUTE:
+                state.release_alert_slot(candidate.symbol)
+                expire_claimed_signal(candidate, "Confirmation superseded by next candle")
+                logger.info("Confirmation expired immediately before Telegram send: %s (candle: %s)", candidate.symbol, candidate.candle_time)
+                continue
+
         try:
             sent = telegram.send_early_alert(candidate)
         except Exception as exc:
