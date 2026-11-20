@@ -1,0 +1,38 @@
+[Unit]
+Description=Signal Bot Full Stack Supervisor (run_all.py)
+Documentation=https://github.com/kurnFR/signal-bot/blob/master/docs/DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md
+After=network-online.target mariadb.service
+Wants=network-online.target mariadb.service
+
+[Service]
+Type=simple
+User=BIS
+Group=BIS
+WorkingDirectory=/home/BIS/signal-bot
+
+# Load configuration from production .env
+EnvironmentFile=-/home/BIS/signal-bot/.env
+Environment=PYTHONUNBUFFERED=1
+Environment="SIGNAL_BOT_USE_MODERN_UI=0"
+
+# Process supervisor entry point (runs web, collectors, screener, wallet_tracker, paper_engine, retailbot2, outbox)
+ExecStart=/home/BIS/.pyenv/versions/3.12.14/bin/python3 run_all.py
+
+# Process lifecycle and recovery
+Restart=always
+RestartSec=5s
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+
+# Journal logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=signal-bot
+
+# Security isolation
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

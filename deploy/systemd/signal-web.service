@@ -1,0 +1,37 @@
+[Unit]
+Description=Signal Bot Web Dashboard & REST API
+Documentation=https://github.com/kurnFR/signal-bot
+After=network-online.target mariadb.service
+Wants=network-online.target mariadb.service
+
+[Service]
+Type=simple
+User=BIS
+Group=BIS
+WorkingDirectory=/home/BIS/signal-bot
+
+# Load production parameters from environment file
+EnvironmentFile=-/home/BIS/signal-bot/.env
+Environment=PYTHONUNBUFFERED=1
+
+# Web server entry point (FastAPI / Uvicorn)
+ExecStart=/home/BIS/.pyenv/versions/3.12.14/bin/python3 run_web.py --host 0.0.0.0 --port 8050
+
+# Process lifecycle and recovery
+Restart=always
+RestartSec=5s
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=15s
+
+# Journal logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=signal-web
+
+# Security isolation
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

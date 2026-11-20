@@ -2191,37 +2191,117 @@ const App = {
             }
         }
 
-        // 3. Render Strategy Activation Manager
+        // 3. Render Strategy Activation Manager (Grouped by Strategy)
         const cfgContainer = document.getElementById("paper-configs-container");
         if (cfgContainer) {
-            cfgContainer.innerHTML = this.paperConfigs.map(c => `
-                <div class="p-4 rounded-xl bg-slate-900 border ${c.is_active ? "border-emerald-800/60" : "border-slate-800"} flex items-center justify-between">
-                    <div>
-                        <div class="flex items-center gap-2">
-                            <span class="font-bold text-slate-100 font-mono">${this._escapeHtml(c.symbol)}</span>
-                            <span class="text-xs text-slate-400 uppercase">${this._escapeHtml(c.market)} • ${this._escapeHtml(c.timeframe)}</span>
-                            ${c.is_active ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">ACTIVE LIVE</span>` : `<span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-500">PAUSED</span>`}
+            if (!this.paperConfigs || !this.paperConfigs.length) {
+                cfgContainer.innerHTML = `<div class="p-6 rounded-xl bg-slate-900 border border-slate-800 text-center text-slate-500 text-xs">No paper trading strategies deployed yet. Use the form above to add one.</div>`;
+            } else {
+                const byStrategy = {};
+                for (const c of this.paperConfigs) {
+                    const strat = c.strategy_name || "Unknown";
+                    if (!byStrategy[strat]) byStrategy[strat] = [];
+                    byStrategy[strat].push(c);
+                }
+
+                cfgContainer.innerHTML = Object.entries(byStrategy).map(([strat, items]) => {
+                    const totalPairs = items.length;
+                    const activePairs = items.filter(c => c.is_active).length;
+                    const telegramPairs = items.filter(c => c.telegram_enabled).length;
+                    const allActive = activePairs === totalPairs;
+                    const someActive = activePairs > 0;
+                    const allTelegram = telegramPairs === totalPairs;
+
+                    return `
+                        <div class="p-5 rounded-xl bg-slate-900 border ${someActive ? "border-slate-800" : "border-slate-800/60"} space-y-4">
+                            <!-- Strategy Master Header -->
+                            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                                <div>
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-sm font-bold text-sky-400 font-mono">${this._escapeHtml(strat)}</span>
+                                        <span class="px-2 py-0.5 rounded text-[10px] font-bold ${allActive ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : someActive ? "bg-amber-950 text-amber-400 border border-amber-800" : "bg-slate-800 text-slate-500 border border-slate-700"}">
+                                            ${activePairs}/${totalPairs} PAIRS ACTIVE
+                                        </span>
+                                        <span class="px-2 py-0.5 rounded text-[10px] font-semibold ${allTelegram ? "bg-sky-950 text-sky-400 border border-sky-800" : telegramPairs > 0 ? "bg-sky-950/60 text-sky-300 border border-sky-800/50" : "bg-slate-800 text-slate-500 border border-slate-700"}">
+                                            Telegram: ${telegramPairs}/${totalPairs} On
+                                        </span>
+                                    </div>
+                                    <div class="text-[11px] text-slate-500 mt-1">${totalPairs} pair${totalPairs === 1 ? "" : "s"} assigned &bull; Master controls apply to all pairs below</div>
+                                </div>
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <button type="button" data-strategy-batch="${this._escapeHtml(strat)}" data-action="${allActive ? "pause_all" : "activate_all"}"
+                                        class="px-3 py-1.5 rounded text-xs font-semibold transition-colors ${allActive ? "bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30" : "bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30"}">
+                                        ${allActive ? "Pause All Pairs" : "Activate All Pairs"}
+                                    </button>
+                                    <button type="button" data-strategy-batch="${this._escapeHtml(strat)}" data-action="${allTelegram ? "telegram_all_off" : "telegram_all_on"}"
+                                        class="px-3 py-1.5 rounded text-xs font-semibold transition-colors ${allTelegram ? "bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30" : "bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30"}">
+                                        Telegram: ${allTelegram ? "Turn All Off" : "Turn All On"}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Assigned Pairs List -->
+                            <div class="space-y-2">
+                                ${items.map(c => `
+                                    <div class="p-3 rounded-lg bg-slate-950/60 border ${c.is_active ? "border-slate-800" : "border-slate-800/40 opacity-70"} flex flex-wrap items-center justify-between gap-3">
+                                        <div class="flex flex-wrap items-center gap-3">
+                                            <span class="font-bold text-slate-100 font-mono text-xs">${this._escapeHtml(c.symbol)}</span>
+                                            <span class="text-[10px] text-slate-400 uppercase bg-slate-800 px-1.5 py-0.5 rounded">${this._escapeHtml(c.market)} &bull; ${this._escapeHtml(c.timeframe)}</span>
+                                            ${c.is_active ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">ACTIVE</span>` : `<span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-500 border border-slate-700">PAUSED</span>`}
+                                            <span class="text-[11px] text-slate-400 font-mono">$${Number(c.allocated_capital).toLocaleString()} <span class="text-slate-600">&bull;</span> ${this._escapeHtml(String(c.risk_per_trade_pct))}% risk</span>
+                                            ${c.ml_generator_model_id ? `<span class="text-[10px] text-purple-300">Gen: ${this._escapeHtml(c.ml_generator_model_id)}</span>` : c.ml_model_id ? `<span class="text-[10px] text-slate-400">Filter: ${this._escapeHtml(c.ml_model_id)}</span>` : ""}
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <button type="button" data-paper-config-toggle data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-generator-model-id="${this._escapeHtml(c.ml_generator_model_id || "")}" data-ml-model-id="${this._escapeHtml(c.ml_model_id || "")}" data-next-active="${!c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
+                                                class="px-2.5 py-1 rounded text-xs font-semibold ${c.is_active ? "bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30" : "bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30"}">
+                                                ${c.is_active ? "Pause" : "Activate"}
+                                            </button>
+                                            <button type="button" data-paper-config-telegram data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-generator-model-id="${this._escapeHtml(c.ml_generator_model_id || "")}" data-ml-model-id="${this._escapeHtml(c.ml_model_id || "")}" data-next-telegram="${!c.telegram_enabled}" data-active="${c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
+                                                class="px-2.5 py-1 rounded text-xs font-semibold ${c.telegram_enabled ? "bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30" : "bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700"}">
+                                                Telegram ${c.telegram_enabled ? "On" : "Off"}
+                                            </button>
+                                            <button type="button" data-paper-config-report data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-generator-model-id="${this._escapeHtml(c.ml_generator_model_id || "")}" data-ml-model-id="${this._escapeHtml(c.ml_model_id || "")}" data-next-report="${!c.report_enabled}" data-active="${c.is_active}" data-telegram="${c.telegram_enabled}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
+                                                class="px-2.5 py-1 rounded text-xs font-semibold ${c.report_enabled ? "bg-violet-600/20 hover:bg-violet-600 text-violet-300 hover:text-white border border-violet-500/30" : "bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700"}">
+                                                Report ${c.report_enabled ? "On" : "Off"}
+                                            </button>
+                                            <button type="button" data-paper-config-delete="${this._escapeHtml(String(c.id))}" data-symbol="${this._escapeHtml(c.symbol)}" data-strategy="${this._escapeHtml(c.strategy_name)}"
+                                                title="Remove this pair configuration" aria-label="Remove ${this._escapeHtml(c.symbol)} from ${this._escapeHtml(c.strategy_name)}"
+                                                class="px-2 py-1 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 border border-slate-700 hover:border-rose-500/40 text-xs font-semibold transition-colors flex items-center gap-1">
+                                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                                                <span>Remove</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                `).join("")}
+                            </div>
                         </div>
-                        <div class="text-xs font-mono text-sky-400 mt-1">${this._escapeHtml(c.strategy_name)}</div>
-                        ${c.ml_generator_model_id ? `<div class="text-[10px] text-purple-300 mt-0.5">Generator: ${this._escapeHtml(c.ml_generator_model_id)}</div>` : c.ml_model_id ? `<div class="text-[10px] text-slate-400 mt-0.5">Filter: ${this._escapeHtml(c.ml_model_id)}</div>` : ""}
-                        <div class="text-[10px] text-slate-500 mt-0.5">${this._escapeHtml(Number(c.allocated_capital).toLocaleString())} capital &middot; ${this._escapeHtml(String(c.risk_per_trade_pct))}% risk/trade</div>
-                    </div>
-                    <div class="flex flex-col gap-2 items-end">
-                        <button type="button" data-paper-config-toggle data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-generator-model-id="${this._escapeHtml(c.ml_generator_model_id || "")}" data-ml-model-id="${this._escapeHtml(c.ml_model_id || "")}" data-next-active="${!c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
-                            class="px-3 py-1.5 rounded text-xs font-semibold ${c.is_active ? "bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30" : "bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30"}">
-                            ${c.is_active ? "Pause" : "Activate"}
-                        </button>
-                        <button type="button" data-paper-config-telegram data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-generator-model-id="${this._escapeHtml(c.ml_generator_model_id || "")}" data-ml-model-id="${this._escapeHtml(c.ml_model_id || "")}" data-next-telegram="${!c.telegram_enabled}" data-active="${c.is_active}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
-                            class="px-3 py-1.5 rounded text-xs font-semibold ${c.telegram_enabled ? "bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white border border-sky-500/30" : "bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700"}">
-                            Telegram ${c.telegram_enabled ? "On" : "Off"}
-                        </button>
-                        <button type="button" data-paper-config-report data-symbol="${this._escapeHtml(c.symbol)}" data-market="${this._escapeHtml(c.market)}" data-timeframe="${this._escapeHtml(c.timeframe)}" data-strategy="${this._escapeHtml(c.strategy_name)}" data-generator-model-id="${this._escapeHtml(c.ml_generator_model_id || "")}" data-ml-model-id="${this._escapeHtml(c.ml_model_id || "")}" data-next-report="${!c.report_enabled}" data-active="${c.is_active}" data-telegram="${c.telegram_enabled}" data-capital="${this._escapeHtml(String(c.allocated_capital))}" data-risk="${this._escapeHtml(String(c.risk_per_trade_pct))}"
-                            class="px-3 py-1.5 rounded text-xs font-semibold ${c.report_enabled ? "bg-violet-600/20 hover:bg-violet-600 text-violet-300 hover:text-white border border-violet-500/30" : "bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700"}">
-                            Report ${c.report_enabled ? "On" : "Off"}
-                        </button>
-                    </div>
-                </div>
-            `).join("");
+                    `;
+                }).join("");
+
+                // Batch strategy toggles
+                cfgContainer.querySelectorAll("[data-strategy-batch]").forEach(button => {
+                    button.addEventListener("click", () => {
+                        const strategy = button.dataset.strategyBatch || "";
+                        const action = button.dataset.action || "";
+                        if (strategy && action) {
+                            this.batchTogglePaperStrategy(strategy, action);
+                        }
+                    });
+                });
+
+                // Delete configuration
+                cfgContainer.querySelectorAll("[data-paper-config-delete]").forEach(button => {
+                    button.addEventListener("click", () => {
+                        const id = Number(button.dataset.paperConfigDelete);
+                        const symbol = button.dataset.symbol || "";
+                        const strategy = button.dataset.strategy || "";
+                        if (Number.isSafeInteger(id) && id > 0) {
+                            this.deletePaperConfig(id, symbol, strategy);
+                        }
+                    });
+                });
+            }
+
             cfgContainer.querySelectorAll("[data-paper-config-toggle]").forEach(button => {
                 button.addEventListener("click", () => {
                     const capital = Number(button.dataset.capital);
@@ -2451,6 +2531,48 @@ const App = {
             }
         } catch (e) {
             alert("Error toggling paper config: " + e);
+        }
+    },
+
+    async batchTogglePaperStrategy(strategyName, action) {
+        try {
+            const res = await fetch(`${API_BASE}/api/paper/configs/batch`, {
+                method: "POST",
+                headers: {
+                    ...this.getAuthHeaders(),
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ strategy_name: strategyName, action }),
+            });
+            if (res.ok) {
+                const data = await res.json().catch(() => ({}));
+                this.showToast(`Updated ${data.updated ?? 0} pair(s) for strategy ${strategyName}`, "success");
+                await this.fetchPaperData();
+            } else {
+                const err = await res.json().catch(() => ({}));
+                this.showToast(`Batch update failed: ${err.detail || res.statusText}`, "error");
+            }
+        } catch (e) {
+            this.showToast(`Network error during batch update: ${e.message || e}`, "error");
+        }
+    },
+
+    async deletePaperConfig(configId, symbol, strategy) {
+        if (!confirm(`Are you sure you want to permanently remove ${symbol} (${strategy}) from paper trading?`)) return;
+        try {
+            const res = await fetch(`${API_BASE}/api/paper/configs/${configId}`, {
+                method: "DELETE",
+                headers: this.getAuthHeaders(),
+            });
+            if (res.ok) {
+                this.showToast(`Removed ${symbol} (${strategy}) from paper trading`, "success");
+                await this.fetchPaperData();
+            } else {
+                const err = await res.json().catch(() => ({}));
+                this.showToast(`Failed to remove configuration: ${err.detail || res.statusText}`, "error");
+            }
+        } catch (e) {
+            this.showToast(`Network error while removing configuration: ${e.message || e}`, "error");
         }
     },
 

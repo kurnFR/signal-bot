@@ -196,6 +196,44 @@ class TestPaperOrderRoutes(unittest.TestCase):
         save.assert_not_called()
         sync.assert_not_called()
 
+    def test_delete_paper_config_success(self):
+        with patch("web.app.authenticate_request", return_value=_user("admin")), \
+             patch("web.routes.paper_routes.delete_paper_config", return_value=True) as delete_mock:
+            response = self.client.delete("/api/paper/configs/15")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "success", "id": 15})
+        delete_mock.assert_called_once_with(15)
+
+    def test_delete_paper_config_rejects_when_open_position_exists(self):
+        with patch("web.app.authenticate_request", return_value=_user("admin")), \
+             patch("web.routes.paper_routes.delete_paper_config", side_effect=ValueError("Cannot delete with open position")):
+            response = self.client.delete("/api/paper/configs/15")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Cannot delete with open position", response.json()["detail"])
+
+    def test_batch_update_paper_configs_success(self):
+        with patch("web.app.authenticate_request", return_value=_user("trader")), \
+             patch("web.routes.paper_routes.batch_update_paper_configs", return_value=3) as batch_mock, \
+             patch("web.routes.paper_routes._sync_retailbot2_lifecycle") as sync_rb2:
+            response = self.client.post("/api/paper/configs/batch", json={
+                "strategy_name": "BB_REV_INV", "action": "telegram_all_on"
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            "status": "success", "strategy": "BB_REV_INV", "action": "telegram_all_on", "updated": 3
+        })
+        batch_mock.assert_called_once_with("BB_REV_INV", "telegram_all_on")
+        sync_rb2.assert_called_once()
+
+    def test_batch_update_paper_configs_rejects_invalid_action(self):
+        with patch("web.app.authenticate_request", return_value=_user("trader")), \
+             patch("web.routes.paper_routes.batch_update_paper_configs", side_effect=ValueError("Unknown batch action: invalid")):
+            response = self.client.post("/api/paper/configs/batch", json={
+                "strategy_name": "BB_REV_INV", "action": "invalid"
+            })
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Unknown batch action", response.json()["detail"])
+
 
 if __name__ == "__main__":
     unittest.main()

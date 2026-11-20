@@ -472,6 +472,55 @@ def set_paper_config(
         conn.close()
 
 
+def delete_paper_config(config_id: int) -> bool:
+    """Delete a paper configuration by ID, ensuring no open position exists for it."""
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "SELECT id, symbol, strategy_name FROM paper_positions WHERE config_id = %s AND status = 'OPEN' LIMIT 1",
+            (config_id,),
+        )
+        open_pos = cur.fetchone()
+        if open_pos:
+            raise ValueError(
+                f"Cannot delete paper config #{config_id}: position #{open_pos['id']} "
+                f"({open_pos['symbol']} / {open_pos['strategy_name']}) is currently OPEN. Close the position first."
+            )
+        cur.execute("DELETE FROM paper_configs WHERE id = %s", (config_id,))
+        deleted = cur.rowcount > 0
+        conn.commit()
+        cur.close()
+        return deleted
+    finally:
+        conn.close()
+
+
+def batch_update_paper_configs(strategy_name: str, action: str) -> int:
+    """Batch update active, telegram, or report status across all pairs for a strategy."""
+    action = action.strip().lower()
+    sql_map = {
+        "activate_all": "UPDATE paper_configs SET is_active = 1 WHERE strategy_name = %s",
+        "pause_all": "UPDATE paper_configs SET is_active = 0 WHERE strategy_name = %s",
+        "telegram_all_on": "UPDATE paper_configs SET telegram_enabled = 1 WHERE strategy_name = %s",
+        "telegram_all_off": "UPDATE paper_configs SET telegram_enabled = 0 WHERE strategy_name = %s",
+        "report_all_on": "UPDATE paper_configs SET report_enabled = 1 WHERE strategy_name = %s",
+        "report_all_off": "UPDATE paper_configs SET report_enabled = 0 WHERE strategy_name = %s",
+    }
+    if action not in sql_map:
+        raise ValueError(f"Unknown batch action: {action}")
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql_map[action], (strategy_name,))
+        updated_count = cur.rowcount
+        conn.commit()
+        cur.close()
+        return updated_count
+    finally:
+        conn.close()
+
+
 def get_active_positions() -> List[Dict[str, Any]]:
     conn = get_pool().get_connection()
     try:
