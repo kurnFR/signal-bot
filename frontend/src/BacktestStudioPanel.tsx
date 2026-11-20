@@ -22,6 +22,9 @@ function errorMessage(cause: unknown) {
   return "Backtest data could not be loaded. Check API/database health, then retry.";
 }
 
+export const SUPPORTED_PAPER_TIMEFRAMES = ["15m", "1h", "4h", "1d"] as const;
+export type PaperTimeframe = (typeof SUPPORTED_PAPER_TIMEFRAMES)[number];
+
 type SortDirection = "asc" | "desc";
 type RunSortField = "id" | "symbol" | "market" | "dataSegment" | "totalTrades" | "winRatePct" | "profitFactor" | "expectancyR" | "maxDrawdownR" | "createdAt";
 type TradeSortField = "direction" | "entryTimeWib" | "entryPrice" | "exitTimeWib" | "exitPrice" | "netReturnPct" | "rMultiple" | "exitReason" | "holdingBars";
@@ -107,6 +110,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
 
   // Deploy to Paper Trading modal state
   const [deployRun, setDeployRun] = useState<BacktestRunDetails | null>(null);
+  const [deployTimeframe, setDeployTimeframe] = useState<PaperTimeframe | "">("");
   const [deployCapital, setDeployCapital] = useState(5000);
   const [deployRisk, setDeployRisk] = useState(1.0);
   const [deployTelegram, setDeployTelegram] = useState(false);
@@ -118,6 +122,8 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
   const openDeployModal = (run: BacktestRunDetails, trigger?: HTMLButtonElement) => {
     deployTriggerRef.current = trigger ?? null;
     setDeployRun(run);
+    const isSupported = (SUPPORTED_PAPER_TIMEFRAMES as readonly string[]).includes(run.timeframe);
+    setDeployTimeframe(isSupported ? (run.timeframe as PaperTimeframe) : "");
     setDeployCapital(5000);
     setDeployRisk(1.0);
     setDeployTelegram(false);
@@ -126,6 +132,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
 
   const closeDeployModal = () => {
     setDeployRun(null);
+    setDeployTimeframe("");
     setDeployError(null);
     deployTriggerRef.current?.focus();
   };
@@ -146,6 +153,10 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
     e.preventDefault();
     if (!deployRun || deployBusy) return;
     setDeployError(null);
+    if (!deployTimeframe || !(SUPPORTED_PAPER_TIMEFRAMES as readonly string[]).includes(deployTimeframe)) {
+      setDeployError("Please select a supported paper trading timeframe (15m, 1h, 4h, or 1d).");
+      return;
+    }
     if (deployCapital < 100) {
       setDeployError("Allocated capital must be at least $100.");
       return;
@@ -156,17 +167,18 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
     }
     setDeployBusy(true);
     try {
+      const targetTimeframe = deployTimeframe as PaperTimeframe;
       const res = await deployPaperStrategy({
         symbol: deployRun.symbol,
         market: (deployRun.market.toLowerCase() === "futures" ? "futures" : "spot") as "spot" | "futures",
-        timeframe: (["15m", "1h", "4h", "1d"].includes(deployRun.timeframe) ? deployRun.timeframe : "1h") as "15m" | "1h" | "4h" | "1d",
+        timeframe: targetTimeframe,
         strategy_name: deployRun.strategy,
         allocated_capital: deployCapital,
         risk_per_trade_pct: deployRisk,
         send_telegram: deployTelegram,
       });
       setRunNotice(
-        res.message || `Strategy '${deployRun.strategy}' deployed to Live Paper Trading on ${deployRun.symbol} (${deployRun.market} · ${deployRun.timeframe}).`
+        res.message || `Strategy '${deployRun.strategy}' deployed to Live Paper Trading on ${deployRun.symbol} (${deployRun.market.toUpperCase()} · ${targetTimeframe}).`
       );
       closeDeployModal();
     } catch (cause) {
@@ -504,21 +516,49 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
           <div>
             <h3 id="backtest-deploy-dialog-title">Deploy Tested Strategy to Paper Trading</h3>
             <p id="backtest-deploy-dialog-desc">
-              Activate simulated execution for <strong>{deployRun.strategy}</strong> on <strong>{deployRun.symbol}</strong> ({deployRun.market.toUpperCase()} · {deployRun.timeframe}).
+              Activate simulated execution for <strong>{deployRun.strategy}</strong> on <strong>{deployRun.symbol}</strong> ({deployRun.market.toUpperCase()}{deployTimeframe ? ` · ${deployTimeframe}` : ""}).
             </p>
           </div>
           <button type="button" aria-label="Close dialog" onClick={closeDeployModal} className="icon-button"><X size={16} /></button>
         </div>
 
         <form onSubmit={handleExecuteDeploy} style={{ marginTop: "14px" }}>
+          {!(SUPPORTED_PAPER_TIMEFRAMES as readonly string[]).includes(deployRun.timeframe) && (
+            <div className="api-error" role="status" style={{ marginBottom: "14px", background: "var(--surface-sunken)" }}>
+              <div>
+                <strong>Timeframe selection required</strong>
+                <p>
+                  Backtest was run on <code>{deployRun.timeframe}</code>. Live Paper Trading only supports <code>15m</code>, <code>1h</code>, <code>4h</code>, and <code>1d</code>. You must choose an explicit paper timeframe or run a backtest on a supported timeframe.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="paper-risk-grid" style={{ marginBottom: "14px" }}>
             <div><span>Symbol</span><strong>{deployRun.symbol}</strong></div>
-            <div><span>Market / Timeframe</span><strong>{deployRun.market.toUpperCase()} · {deployRun.timeframe}</strong></div>
+            <div><span>Market</span><strong>{deployRun.market.toUpperCase()}</strong></div>
+            <div><span>Backtest Timeframe</span><strong>{deployRun.timeframe}</strong></div>
             <div><span>Strategy</span><strong>{strategyNames.get(deployRun.strategy) ?? deployRun.strategy}</strong></div>
             <div><span>Backtest Win Rate</span><strong>{deployRun.winRatePct == null ? "—" : `${pct.format(deployRun.winRatePct)}%`}</strong></div>
+            <div><span>Target Paper Timeframe</span><strong>{deployTimeframe || "Explicit selection required"}</strong></div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+            <div className="screener-control-field">
+              <label htmlFor="bt-deploy-timeframe">Paper Timeframe</label>
+              <select
+                id="bt-deploy-timeframe"
+                value={deployTimeframe}
+                disabled={deployBusy}
+                required
+                onChange={(e) => setDeployTimeframe(e.target.value as PaperTimeframe | "")}
+              >
+                <option value="" disabled>Select supported timeframe</option>
+                {SUPPORTED_PAPER_TIMEFRAMES.map((tf) => (
+                  <option key={tf} value={tf}>{tf}</option>
+                ))}
+              </select>
+            </div>
             <div className="screener-control-field">
               <label htmlFor="bt-deploy-capital">Allocated Virtual Capital ($)</label>
               <input
