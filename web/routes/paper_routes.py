@@ -9,7 +9,8 @@ import math
 
 from paper.engine import (
     get_active_positions, get_paper_trades, get_paper_configs,
-    set_paper_config, manual_close_position, sync_and_evaluate_paper_trading,
+    set_paper_config, delete_paper_config, batch_update_paper_configs,
+    manual_close_position, sync_and_evaluate_paper_trading,
     get_paper_metrics, OVERLAY_STRATEGIES,
 )
 from backtest.strategies import STRATEGIES
@@ -191,6 +192,46 @@ def update_config(req: PaperConfigRequest):
         req.report_enabled,
     )
     return res
+
+
+class BatchPaperConfigRequest(BaseModel):
+    strategy_name: str = Field(..., min_length=1, max_length=50)
+    action: str = Field(..., min_length=1, max_length=30)
+
+
+@router.post("/configs/batch")
+def batch_update_configs(req: BatchPaperConfigRequest):
+    strategy_name = req.strategy_name.strip()
+    action = req.action.strip().lower()
+    try:
+        count = batch_update_paper_configs(strategy_name, action)
+        if action == "activate_all":
+            _sync_retailbot2_lifecycle(strategy_name, is_active=True, telegram_enabled=None, report_enabled=None)
+        elif action == "pause_all":
+            _sync_retailbot2_lifecycle(strategy_name, is_active=False, telegram_enabled=None, report_enabled=None)
+        elif action == "telegram_all_on":
+            _sync_retailbot2_lifecycle(strategy_name, is_active=True, telegram_enabled=True, report_enabled=None)
+        elif action == "telegram_all_off":
+            _sync_retailbot2_lifecycle(strategy_name, is_active=None, telegram_enabled=False, report_enabled=None)
+        return {
+            "status": "success",
+            "strategy": strategy_name,
+            "action": action,
+            "updated": count,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/configs/{config_id}")
+def delete_config(config_id: int = Path(..., gt=0)):
+    try:
+        deleted = delete_paper_config(config_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Paper config not found")
+        return {"status": "success", "id": config_id}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/positions/{position_id}/close")

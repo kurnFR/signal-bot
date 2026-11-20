@@ -247,4 +247,27 @@ describe("MasterDataPanel", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(fetchMasterDataSnapshot()).rejects.toThrow(/jobs returned an invalid response/i);
   });
+
+  it("accepts numeric epoch timestamps for minOpenTime and maxCloseTime", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      const body = path === "/api/master-data/coverage"
+        ? {
+            summary: { totalCandles: 181047, distinctSymbols: 1, coverageEntries: 1 },
+            coverage: [{
+              symbol: "BNBUSDT", market: "spot", timeframe: "15m", candleCount: 181047,
+              featureCount: 177937, hasFeatures: true,
+              minOpenTime: 1628607600000, maxCloseTime: 1795184099999,
+              startDate: "2021-08-10 22:00:00", endDate: "2026-11-20 21:14:59",
+            }],
+          }
+        : responses["/api/master-data/jobs"];
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const snapshot = await fetchMasterDataSnapshot();
+    expect(snapshot.coverage).toHaveLength(1);
+    expect(snapshot.coverage[0].minOpenTime).toBe(1628607600000);
+    expect(snapshot.coverage[0].maxCloseTime).toBe(1795184099999);
+  });
 });

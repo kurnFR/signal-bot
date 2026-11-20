@@ -60,8 +60,8 @@ export interface PopularCryptoResponse {
 }
 export interface CoverageRow {
   symbol: string; market: string; timeframe: string; candleCount: number;
-  featureCount: number; hasFeatures: boolean; minOpenTime: string | null;
-  maxCloseTime: string | null; startDate: string | null; endDate: string | null;
+  featureCount: number; hasFeatures: boolean; minOpenTime: number | string | null;
+  maxCloseTime: number | string | null; startDate: string | null; endDate: string | null;
 }
 export interface CoverageSummary {
   totalCandles: number; distinctSymbols: number; coverageEntries: number;
@@ -97,7 +97,7 @@ function validCoverageRow(value: unknown): value is CoverageRow {
       !isNonEmptyString(value.timeframe) || !isCount(value.candleCount) ||
       !isCount(value.featureCount) || typeof value.hasFeatures !== "boolean") return false;
   return ["minOpenTime", "maxCloseTime", "startDate", "endDate"].every((key) =>
-    value[key] === null || typeof value[key] === "string");
+    value[key] === null || typeof value[key] === "string" || isFiniteNumber(value[key]));
 }
 function validJobTimestamp(value: unknown): boolean {
   return typeof value === "string" || isFiniteNumber(value);
