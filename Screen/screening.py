@@ -983,7 +983,7 @@ def claim_next_pending_signal():
                            last_delivery_error=%s,
                            delivery_updated_at=UTC_TIMESTAMP()
                        WHERE delivery_status='PENDING' AND parent_watch_id IS NULL AND direction IN ('BULLISH', 'BEARISH')
-                         AND candle_time <= DATE_FORMAT(UTC_TIMESTAMP() - INTERVAL %s SECOND, '%Y-%m-%dT%H:%i:%sZ')""",
+                         AND candle_time <= CONCAT(REPLACE(UTC_TIMESTAMP() - INTERVAL %s SECOND, ' ', 'T'), 'Z')""",
                     (momentum.EXPIRED_WATCH_REASON, watch_max_sec))
         # 2. General signal expiry based on detected_at for non-directional/other signals
         cur.execute("UPDATE smart_money_signals SET delivery_status='EXPIRED', last_delivery_error='Signal expired before delivery', delivery_updated_at=UTC_TIMESTAMP() WHERE delivery_status='PENDING' AND detected_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)", (max_age,))
@@ -991,7 +991,7 @@ def claim_next_pending_signal():
         cur.execute("""UPDATE smart_money_signals SET delivery_status='EXPIRED', delivery_updated_at=UTC_TIMESTAMP(),
                        last_delivery_error='Confirmation superseded by next candle'
                        WHERE delivery_status='PENDING' AND parent_watch_id IS NOT NULL AND
-                         candle_time <= DATE_FORMAT(UTC_TIMESTAMP() - INTERVAL 2 MINUTE, '%Y-%m-%dT%H:%i:%sZ')""")
+                         candle_time <= CONCAT(REPLACE(UTC_TIMESTAMP() - INTERVAL 2 MINUTE, ' ', 'T'), 'Z')""")
         conn.commit()
 
         # Avoid repeatedly claiming/releasing rows while the global rolling-hour cap is full.
@@ -1009,7 +1009,7 @@ def claim_next_pending_signal():
                        FROM smart_money_signals
                        WHERE delivery_status='PENDING' AND quality_score >= %s
                          AND (parent_watch_id IS NULL OR candle_time > CONCAT(REPLACE(UTC_TIMESTAMP() - INTERVAL 2 MINUTE, ' ', 'T'), 'Z'))
-                         AND (parent_watch_id IS NOT NULL OR direction NOT IN ('BULLISH', 'BEARISH') OR candle_time > DATE_FORMAT(UTC_TIMESTAMP() - INTERVAL %s SECOND, '%Y-%m-%dT%H:%i:%sZ'))
+                         AND (parent_watch_id IS NOT NULL OR direction NOT IN ('BULLISH', 'BEARISH') OR candle_time > CONCAT(REPLACE(UTC_TIMESTAMP() - INTERVAL %s SECOND, ' ', 'T'), 'Z'))
                          AND (next_attempt_at IS NULL OR next_attempt_at <= UTC_TIMESTAMP())
                          AND detected_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)
                        ORDER BY quality_score DESC, rvol DESC, detected_at ASC, id ASC LIMIT 1 FOR UPDATE""", (min_quality, watch_max_sec, max_age))
