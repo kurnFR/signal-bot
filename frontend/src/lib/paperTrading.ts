@@ -3,12 +3,31 @@ import { parseTelegramDeliveryStatus, type TelegramDeliveryOutcome } from "./tel
 export { parseTelegramDeliveryStatus, type TelegramDeliveryOutcome };
 
 export interface PaperPosition { funding_pnl?: number | null; id: number; symbol: string; market: string; timeframe: string; strategy_name: string; direction: string; entry_price: number; current_price: number; stop_loss: number | null; take_profit: number | null; quantity: number; unrealized_pnl_pct: number | null; unrealized_r: number | null; allocated_capital: number; status: string; last_update_time: number }
-export interface PaperConfig { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; is_active: boolean; allocated_capital: number; risk_per_trade_pct: number; telegram_enabled: boolean; report_enabled: boolean; created_at: string }
+export interface PaperConfig { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; is_active: boolean; allocated_capital: number; risk_per_trade_pct: number; telegram_enabled: boolean; report_enabled: boolean; ml_model_id?: string | null; ml_generator_model_id?: string | null; created_at: string }
 export interface PaperOrder { id: number; config_id: number; symbol: string; market: string; timeframe: string; strategy_name: string; signal_open_time: number; entry_time: number; direction: string; requested_entry_price: number; stop_loss: number; take_profit: number; atr_at_signal: number; ml_model_id: string | null; ml_probability: number | null; status: string; state_reason: string | null; fill_price: number | null; position_id: number | null; created_at: string; updated_at: string; filled_at: string | null; terminal_at: string | null }
 export interface PaperTrade { funding_pnl?: number | null; id: number; symbol: string; market: string; timeframe: string; strategy_name: string; direction: string; entry_price: number; exit_price: number; net_pnl: number; net_return_pct: number; r_multiple: number; exit_reason: string; entry_time_wib: string; exit_time_wib: string }
 export interface PaperMetrics { totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number; byStrategy: Array<{ strategy: string; totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number }> }
 export interface PaperCircuitBreaker { status: string; emergency_stop_active: boolean; emergency_stop_reason: string | null; active_positions: number; max_concurrent_positions: number; today_realized_pnl_usd: number | null; max_daily_loss_usd: number; open_notional_usd: number | null; max_total_notional_usd: number; can_open_new_position: boolean; message: string }
 export interface PaperTradingSnapshot { positions: PaperPosition[]; configs: PaperConfig[]; orders: PaperOrder[]; trades: PaperTrade[]; metrics: PaperMetrics; breaker: PaperCircuitBreaker }
+
+export interface UpdatePaperConfigRequest {
+  symbol: string;
+  market: string;
+  timeframe: string;
+  strategy_name: string;
+  is_active: boolean;
+  allocated_capital: number;
+  risk_per_trade_pct: number;
+  ml_model_id?: string | null;
+  ml_generator_model_id?: string | null;
+  telegram_enabled: boolean;
+  report_enabled: boolean;
+}
+
+export interface UpdatePaperConfigResponse {
+  status: string;
+  config?: unknown;
+}
 
 export interface DeployPaperStrategyRequest {
   symbol: string;
@@ -288,4 +307,43 @@ export async function resetPaperCircuitBreaker(
     throw new PaperTradingActionError(502, "Server returned an invalid circuit breaker reset response");
   }
   return { status: "success", message: String(payload.message || "Circuit breaker reset"), breaker: payload.breaker };
+}
+
+/** Update an existing paper strategy configuration (activate/pause, toggle telegram, toggle report). */
+export async function updatePaperConfig(
+  req: UpdatePaperConfigRequest,
+  signal?: AbortSignal,
+): Promise<UpdatePaperConfigResponse> {
+  if (!requiredText(req.symbol) || !requiredText(req.strategy_name)) {
+    throw new PaperTradingActionError(400, "Symbol and strategy name are required");
+  }
+  if (!finite(req.allocated_capital) || req.allocated_capital <= 0) {
+    throw new PaperTradingActionError(400, "Allocated capital must be positive");
+  }
+  if (!finite(req.risk_per_trade_pct) || req.risk_per_trade_pct <= 0) {
+    throw new PaperTradingActionError(400, "Risk per trade must be positive");
+  }
+
+  const payload = await paperMutationRequest<unknown>("/api/paper/configs", {
+    method: "POST",
+    body: JSON.stringify({
+      symbol: req.symbol.trim().toUpperCase(),
+      market: req.market.trim().toLowerCase(),
+      timeframe: req.timeframe.trim(),
+      strategy_name: req.strategy_name.trim(),
+      is_active: Boolean(req.is_active),
+      allocated_capital: req.allocated_capital,
+      risk_per_trade_pct: req.risk_per_trade_pct,
+      ml_model_id: req.ml_model_id ?? null,
+      ml_generator_model_id: req.ml_generator_model_id ?? null,
+      telegram_enabled: Boolean(req.telegram_enabled),
+      report_enabled: Boolean(req.report_enabled),
+    }),
+    signal,
+  });
+
+  if (!isRecord(payload) || payload.status !== "success") {
+    throw new PaperTradingActionError(502, "Server returned an invalid configuration update response");
+  }
+  return { status: "success", config: payload.config };
 }

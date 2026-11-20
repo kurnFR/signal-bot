@@ -14,6 +14,8 @@ import {
   parseTelegramDeliveryStatus,
   resetPaperCircuitBreaker,
   tripPaperCircuitBreaker,
+  updatePaperConfig,
+  type PaperConfig,
   type PaperOrder,
   type PaperPosition,
   type PaperTradingSnapshot,
@@ -62,8 +64,9 @@ export function PaperTradingPanel() {
   const [deployBusy, setDeployBusy] = useState(false);
   const [deployError, setDeployError] = useState<string | null>(null);
   const deployDialogRef = useRef<HTMLDialogElement | null>(null);
-  const deploySymbolSelectRef = useRef<HTMLSelectElement | null>(null);
+  const deploySymbolInputRef = useRef<HTMLInputElement | null>(null);
   const deployTriggerRef = useRef<HTMLElement | null>(null);
+  const [togglingConfigId, setTogglingConfigId] = useState<number | null>(null);
 
   const [availableSymbols, setAvailableSymbols] = useState<string[]>(["BTCUSDT"]);
   const [deploySymbol, setDeploySymbol] = useState("BTCUSDT");
@@ -123,7 +126,6 @@ export function PaperTradingPanel() {
     fetchBackfilledSymbols(controller.signal).then((symbols) => {
       if (controller.signal.aborted) return;
       setAvailableSymbols(symbols);
-      setDeploySymbol((curr) => (symbols.includes(curr) ? curr : symbols[0] ?? "BTCUSDT"));
     }).catch(() => {});
     return () => controller.abort();
   }, [showDeployModal]);
@@ -164,7 +166,7 @@ export function PaperTradingPanel() {
           deployDialogRef.current.setAttribute("open", "");
         }
       }
-      deploySymbolSelectRef.current?.focus();
+      deploySymbolInputRef.current?.focus();
     }
   }, [showDeployModal]);
 
@@ -363,6 +365,90 @@ export function PaperTradingPanel() {
       setDeployError(cause instanceof PaperTradingActionError ? cause.message : "Strategy deployment failed.");
     } finally {
       setDeployBusy(false);
+    }
+  };
+
+  const handleToggleConfigActive = async (c: PaperConfig) => {
+    if (!canTrade || togglingConfigId !== null) return;
+    setTogglingConfigId(c.id);
+    setActionError(null);
+    setActionWarning(null);
+    try {
+      await updatePaperConfig({
+        symbol: c.symbol,
+        market: c.market,
+        timeframe: c.timeframe,
+        strategy_name: c.strategy_name,
+        is_active: !c.is_active,
+        allocated_capital: c.allocated_capital,
+        risk_per_trade_pct: c.risk_per_trade_pct,
+        ml_model_id: c.ml_model_id,
+        ml_generator_model_id: c.ml_generator_model_id,
+        telegram_enabled: c.telegram_enabled,
+        report_enabled: c.report_enabled,
+      });
+      setActionSuccess(`Paper trading for ${c.symbol} ${c.strategy_name} ${!c.is_active ? "activated" : "paused"}.`);
+      setAttempt((v) => v + 1);
+    } catch (cause) {
+      setActionError(cause instanceof PaperTradingActionError ? cause.message : "Failed to update strategy configuration.");
+    } finally {
+      setTogglingConfigId(null);
+    }
+  };
+
+  const handleToggleConfigTelegram = async (c: PaperConfig) => {
+    if (!canTrade || togglingConfigId !== null) return;
+    setTogglingConfigId(c.id);
+    setActionError(null);
+    setActionWarning(null);
+    try {
+      await updatePaperConfig({
+        symbol: c.symbol,
+        market: c.market,
+        timeframe: c.timeframe,
+        strategy_name: c.strategy_name,
+        is_active: c.is_active,
+        allocated_capital: c.allocated_capital,
+        risk_per_trade_pct: c.risk_per_trade_pct,
+        ml_model_id: c.ml_model_id,
+        ml_generator_model_id: c.ml_generator_model_id,
+        telegram_enabled: !c.telegram_enabled,
+        report_enabled: c.report_enabled,
+      });
+      setActionSuccess(`Telegram alerts ${!c.telegram_enabled ? "enabled" : "disabled"} for ${c.strategy_name} (${c.symbol}).`);
+      setAttempt((v) => v + 1);
+    } catch (cause) {
+      setActionError(cause instanceof PaperTradingActionError ? cause.message : "Failed to update Telegram preference.");
+    } finally {
+      setTogglingConfigId(null);
+    }
+  };
+
+  const handleToggleConfigReport = async (c: PaperConfig) => {
+    if (!canTrade || togglingConfigId !== null) return;
+    setTogglingConfigId(c.id);
+    setActionError(null);
+    setActionWarning(null);
+    try {
+      await updatePaperConfig({
+        symbol: c.symbol,
+        market: c.market,
+        timeframe: c.timeframe,
+        strategy_name: c.strategy_name,
+        is_active: c.is_active,
+        allocated_capital: c.allocated_capital,
+        risk_per_trade_pct: c.risk_per_trade_pct,
+        ml_model_id: c.ml_model_id,
+        ml_generator_model_id: c.ml_generator_model_id,
+        telegram_enabled: c.telegram_enabled,
+        report_enabled: !c.report_enabled,
+      });
+      setActionSuccess(`Performance report ${!c.report_enabled ? "included" : "hidden"} for ${c.strategy_name} (${c.symbol}).`);
+      setAttempt((v) => v + 1);
+    } catch (cause) {
+      setActionError(cause instanceof PaperTradingActionError ? cause.message : "Failed to update report visibility.");
+    } finally {
+      setTogglingConfigId(null);
     }
   };
 
@@ -597,7 +683,7 @@ export function PaperTradingPanel() {
         {data?.configs.length ? (
           <div className="status-table-wrap">
             <table className="status-table">
-              <thead><tr><th>Symbol / strategy</th><th>Market</th><th>State</th><th>Capital</th><th>Risk / trade</th><th>Telegram</th><th>Report</th></tr></thead>
+              <thead><tr><th>Symbol / strategy</th><th>Market</th><th>State</th><th>Capital</th><th>Risk / trade</th><th>Telegram</th><th>Report</th>{canTrade && <th>Actions</th>}</tr></thead>
               <tbody>
                 {data.configs.map((c) => (
                   <tr key={c.id}>
@@ -608,6 +694,39 @@ export function PaperTradingPanel() {
                     <td>{number.format(c.risk_per_trade_pct)}%</td>
                     <td>{c.telegram_enabled ? "Enabled" : "Disabled"}</td>
                     <td>{c.report_enabled ? "Included" : "Hidden"}</td>
+                    {canTrade && (
+                      <td>
+                        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                          <button
+                            type="button"
+                            className={`button ${c.is_active ? "button-secondary" : "button-primary"} button-sm`}
+                            disabled={togglingConfigId === c.id}
+                            onClick={() => handleToggleConfigActive(c)}
+                            title={c.is_active ? "Pause paper trading for this strategy" : "Activate paper trading for this strategy"}
+                          >
+                            {togglingConfigId === c.id ? "…" : c.is_active ? "Pause" : "Activate"}
+                          </button>
+                          <button
+                            type="button"
+                            className={`button ${c.telegram_enabled ? "button-primary" : "button-secondary"} button-sm`}
+                            disabled={togglingConfigId === c.id}
+                            onClick={() => handleToggleConfigTelegram(c)}
+                            title={c.telegram_enabled ? "Disable Telegram alerts for this strategy" : "Enable Telegram alerts for this strategy"}
+                          >
+                            Telegram {c.telegram_enabled ? "On" : "Off"}
+                          </button>
+                          <button
+                            type="button"
+                            className={`button ${c.report_enabled ? "button-primary" : "button-secondary"} button-sm`}
+                            disabled={togglingConfigId === c.id}
+                            onClick={() => handleToggleConfigReport(c)}
+                            title={c.report_enabled ? "Hide from performance reports" : "Include in performance reports"}
+                          >
+                            Report {c.report_enabled ? "On" : "Off"}
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -796,17 +915,25 @@ export function PaperTradingPanel() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
               <div className="screener-control-field">
                 <label htmlFor="paper-deploy-symbol">Symbol</label>
-                <select
-                  ref={deploySymbolSelectRef}
+                <input
+                  ref={deploySymbolInputRef}
                   id="paper-deploy-symbol"
+                  type="text"
+                  role="combobox"
+                  aria-expanded="false"
+                  aria-autocomplete="list"
+                  list="paper-deploy-symbols-list"
+                  required
+                  placeholder="e.g. BTCUSDT"
                   value={deploySymbol}
                   disabled={deployBusy}
-                  onChange={(e) => setDeploySymbol(e.target.value)}
-                >
+                  onChange={(e) => setDeploySymbol(e.target.value.toUpperCase())}
+                />
+                <datalist id="paper-deploy-symbols-list">
                   {availableSymbols.map((sym) => (
-                    <option key={sym} value={sym}>{sym}</option>
+                    <option key={sym} value={sym} />
                   ))}
-                </select>
+                </datalist>
               </div>
               <div className="screener-control-field">
                 <label htmlFor="paper-deploy-market">Market</label>

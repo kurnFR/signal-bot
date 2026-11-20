@@ -691,4 +691,32 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
     // View only indicators are present
     expect(screen.getByText(/Actions are view-only for this account/i)).toBeInTheDocument();
   });
+
+  it("allows operator to pause/activate, toggle telegram, and toggle report on paper configs", async () => {
+    let updateBody: unknown = null;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      const path = url.pathname + url.search;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/paper/configs" && method === "POST") {
+        updateBody = JSON.parse(String(init?.body));
+        return Promise.resolve(json({ status: "success", config: { id: 1 } }));
+      }
+      const payload = baseFixture[path as keyof typeof baseFixture];
+      return Promise.resolve(payload ? json(payload) : json({ detail: "Unexpected route" }, 404));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaperTradingPanel />);
+    expect(await screen.findByRole("heading", { name: "Open positions" })).toBeInTheDocument();
+
+    const pauseButton = screen.getAllByRole("button", { name: "Pause" })[0];
+    fireEvent.click(pauseButton);
+
+    await waitFor(() => expect(updateBody).not.toBeNull());
+    expect(updateBody).toMatchObject({
+      is_active: false,
+    });
+  });
 });
