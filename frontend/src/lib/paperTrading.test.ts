@@ -16,6 +16,7 @@ import {
   PaperTradingActionError,
   resetPaperCircuitBreaker,
   tripPaperCircuitBreaker,
+  updatePaperConfig,
 } from "./paperTrading";
 
 const metrics = {
@@ -318,6 +319,86 @@ describe("Paper Trading mutation contracts", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/paper/circuit-breakers/reset", expect.objectContaining({
         method: "POST",
       }));
+    });
+  });
+
+  describe("updatePaperConfig", () => {
+    it("submits configuration update to /api/paper/configs", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          status: "success",
+          config: {
+            id: 1,
+            symbol: "BTCUSDT",
+            market: "spot",
+            timeframe: "1h",
+            strategy_name: "trend_ema_v1",
+            is_active: false,
+            allocated_capital: 5000,
+            risk_per_trade_pct: 1.0,
+            telegram_enabled: true,
+            report_enabled: true,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await updatePaperConfig({
+        symbol: "BTCUSDT",
+        market: "spot",
+        timeframe: "1h",
+        strategy_name: "trend_ema_v1",
+        is_active: false,
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1.0,
+        telegram_enabled: true,
+        report_enabled: true,
+      });
+
+      expect(res.status).toBe("success");
+      expect(fetchMock).toHaveBeenCalledWith("/api/paper/configs", expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          symbol: "BTCUSDT",
+          market: "spot",
+          timeframe: "1h",
+          strategy_name: "trend_ema_v1",
+          is_active: false,
+          allocated_capital: 5000,
+          risk_per_trade_pct: 1.0,
+          ml_model_id: null,
+          ml_generator_model_id: null,
+          telegram_enabled: true,
+          report_enabled: true,
+        }),
+      }));
+    });
+
+    it("rejects invalid inputs", async () => {
+      await expect(updatePaperConfig({
+        symbol: "",
+        market: "spot",
+        timeframe: "1h",
+        strategy_name: "trend_ema_v1",
+        is_active: true,
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1.0,
+        telegram_enabled: false,
+        report_enabled: true,
+      })).rejects.toThrow("Symbol and strategy name are required");
+
+      await expect(updatePaperConfig({
+        symbol: "BTCUSDT",
+        market: "spot",
+        timeframe: "1h",
+        strategy_name: "trend_ema_v1",
+        is_active: true,
+        allocated_capital: -100,
+        risk_per_trade_pct: 1.0,
+        telegram_enabled: false,
+        report_enabled: true,
+      })).rejects.toThrow("Allocated capital must be positive");
     });
   });
 });

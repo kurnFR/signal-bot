@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { AuthGate } from "./AuthGate";
 import { BacktestStudioPanel } from "./BacktestStudioPanel";
 
@@ -279,5 +279,48 @@ describe("BacktestStudioPanel", () => {
     runButtons = screen.getAllByRole("button", { name: /#\d+/ });
     expect(runButtons[0]).toHaveTextContent("#10");
     expect(runButtons[1]).toHaveTextContent("#20");
+  });
+
+  it("deploys backtested strategy to live paper trading via modal", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    let deployPayload: unknown = null;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      if (path === "/api/auth/me") {
+        return Promise.resolve(new Response(JSON.stringify(profile), { status: 200, headers: { "content-type": "application/json" } }));
+      }
+      if (path === "/api/paper/deploy" && method === "POST") {
+        deployPayload = JSON.parse(String(init?.body));
+        return Promise.resolve(new Response(JSON.stringify({ status: "success", message: "Deployed successfully" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }));
+      }
+      return Promise.resolve(responseFor(path));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AuthGate><BacktestStudioPanel /></AuthGate>);
+    expect(await screen.findByText("#42 · BTCUSDT")).toBeInTheDocument();
+
+    const deployBtn = screen.getByRole("button", { name: "Deploy to Paper Trading" });
+    fireEvent.click(deployBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Deploy Tested Strategy to Paper Trading" });
+    expect(dialog).toBeInTheDocument();
+
+    const submitBtn = within(dialog).getByRole("button", { name: "Deploy to Paper Trading" });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(deployPayload).not.toBeNull());
+    expect(deployPayload).toMatchObject({
+      symbol: "BTCUSDT",
+      strategy_name: "trend_ema_v1",
+      allocated_capital: 5000,
+      risk_per_trade_pct: 1.0,
+      send_telegram: false,
+    });
   });
 });

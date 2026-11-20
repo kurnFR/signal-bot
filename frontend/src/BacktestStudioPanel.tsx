@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "./AuthGate";
-import { Activity, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, RefreshCw, ShieldCheck } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { ApiError } from "./lib/api";
 import { PromotionStatusPanel } from "./PromotionStatusPanel";
 import { fetchBackfilledSymbols } from "./lib/masterData";
+import { trapFocus } from "./lib/dialog";
+import { deployPaperStrategy, PaperTradingActionError } from "./lib/paperTrading";
 import { BacktestExecutionError, executeBacktest, fetchBacktestHistory, fetchBacktestRunDetails, fetchBacktestStrategies, type BacktestExecutionInput, type BacktestExecutionResult, type BacktestRunDetails, type BacktestRunSummary, type BacktestStrategy, type BacktestStrategyParameter, type PromotionPolicy } from "./lib/backtestStudio";
 
 const pct = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
@@ -102,6 +104,77 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
   const [executionResult, setExecutionResult] = useState<BacktestExecutionResult | null>(null);
   const [promotionPolicy, setPromotionPolicy] = useState<PromotionPolicy | null>(null);
   const [promotionSideEffectAcknowledged, setPromotionSideEffectAcknowledged] = useState(false);
+
+  // Deploy to Paper Trading modal state
+  const [deployRun, setDeployRun] = useState<BacktestRunDetails | null>(null);
+  const [deployCapital, setDeployCapital] = useState(5000);
+  const [deployRisk, setDeployRisk] = useState(1.0);
+  const [deployTelegram, setDeployTelegram] = useState(false);
+  const [deployBusy, setDeployBusy] = useState(false);
+  const [deployError, setDeployError] = useState<string | null>(null);
+  const deployDialogRef = useRef<HTMLDialogElement | null>(null);
+  const deployTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const openDeployModal = (run: BacktestRunDetails, trigger?: HTMLButtonElement) => {
+    deployTriggerRef.current = trigger ?? null;
+    setDeployRun(run);
+    setDeployCapital(5000);
+    setDeployRisk(1.0);
+    setDeployTelegram(false);
+    setDeployError(null);
+  };
+
+  const closeDeployModal = () => {
+    setDeployRun(null);
+    setDeployError(null);
+    deployTriggerRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (deployRun && deployDialogRef.current) {
+      if (!deployDialogRef.current.open) {
+        if (typeof deployDialogRef.current.showModal === "function") {
+          deployDialogRef.current.showModal();
+        } else {
+          deployDialogRef.current.setAttribute("open", "");
+        }
+      }
+    }
+  }, [deployRun]);
+
+  const handleExecuteDeploy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deployRun || deployBusy) return;
+    setDeployError(null);
+    if (deployCapital < 100) {
+      setDeployError("Allocated capital must be at least $100.");
+      return;
+    }
+    if (deployRisk < 0.1 || deployRisk > 10.0) {
+      setDeployError("Risk per trade must be between 0.1% and 10.0%.");
+      return;
+    }
+    setDeployBusy(true);
+    try {
+      const res = await deployPaperStrategy({
+        symbol: deployRun.symbol,
+        market: (deployRun.market.toLowerCase() === "futures" ? "futures" : "spot") as "spot" | "futures",
+        timeframe: (["15m", "1h", "4h", "1d"].includes(deployRun.timeframe) ? deployRun.timeframe : "1h") as "15m" | "1h" | "4h" | "1d",
+        strategy_name: deployRun.strategy,
+        allocated_capital: deployCapital,
+        risk_per_trade_pct: deployRisk,
+        send_telegram: deployTelegram,
+      });
+      setRunNotice(
+        res.message || `Strategy '${deployRun.strategy}' deployed to Live Paper Trading on ${deployRun.symbol} (${deployRun.market} · ${deployRun.timeframe}).`
+      );
+      closeDeployModal();
+    } catch (cause) {
+      setDeployError(cause instanceof PaperTradingActionError ? cause.message : "Failed to deploy strategy to Paper Trading.");
+    } finally {
+      setDeployBusy(false);
+    }
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -375,7 +448,24 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       </tr></thead><tbody>{sortedRuns.map((run) => <tr key={run.id} className={selectedId === run.id ? "backtest-row-selected" : ""}><td><button className="backtest-run-select" aria-pressed={selectedId === run.id} onClick={() => setSelectedId(run.id)}>#{run.id}</button></td><td><strong>{run.symbol}</strong><div>{strategyNames.get(run.strategy) ?? run.strategy}</div><code>{run.strategy}</code></td><td>{run.market} · {run.timeframe}</td><td>{run.dataSegment}</td><td>{run.totalTrades}</td><td>{run.winRatePct == null ? "—" : `${pct.format(run.winRatePct)}%`}</td><td>{moneyish(run.profitFactor)}</td><td>{run.expectancyR == null ? "—" : `${numeric.format(run.expectancyR)} R`}</td><td>{run.maxDrawdownR == null ? "—" : `${numeric.format(run.maxDrawdownR)} R`}</td><td>{dateLabel(run.createdAt)}</td></tr>)}</tbody></table></div> : <p className="empty-state">{runs.length ? "No saved runs match this filter." : "No saved backtest runs were returned."}</p>}
     </section>
     <section className="panel" aria-labelledby="backtest-run-details-title">
-      <div className="panel-heading"><div><h2 id="backtest-run-details-title">Run details and closed trades</h2><p>Stored execution outcomes; values are displayed as returned by the API.</p></div><span className="panel-counter">{trades.length} TRADES</span></div>
+      <div className="panel-heading">
+        <div>
+          <h2 id="backtest-run-details-title">Run details and closed trades</h2>
+          <p>Stored execution outcomes; values are displayed as returned by the API.</p>
+        </div>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <span className="panel-counter">{trades.length} TRADES</span>
+          {canRunBacktest && details && (
+            <button
+              className="button button-primary button-sm"
+              type="button"
+              onClick={(e) => openDeployModal(details, e.currentTarget)}
+            >
+              Deploy to Paper Trading
+            </button>
+          )}
+        </div>
+      </div>
       {detailError && <p role="alert" className="error-banner">{detailError}</p>}
       {detailLoading ? <p className="empty-state" role="status">Loading selected run details…</p> : details ? <>
         <div className="paper-risk-grid"><div><span>Run</span><strong>#{details.id} · {details.symbol}</strong></div><div><span>Strategy</span><strong>{strategyNames.get(details.strategy) ?? details.strategy}</strong></div><div><span>Market / timeframe</span><strong>{details.market} · {details.timeframe}</strong></div><div><span>Data segment</span><strong>{details.dataSegment}</strong></div><div><span>Win rate</span><strong>{details.winRatePct == null ? "—" : `${pct.format(details.winRatePct)}%`}</strong></div><div><span>Profit factor</span><strong>{moneyish(details.profitFactor)}</strong></div><div><span>Expectancy</span><strong>{details.expectancyR == null ? "—" : `${numeric.format(details.expectancyR)} R`}</strong></div><div><span>Max drawdown</span><strong>{details.maxDrawdownR == null ? "—" : `${numeric.format(details.maxDrawdownR)} R`}</strong></div></div>
@@ -401,6 +491,91 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       {promotionPolicy?.enabled && <label className="screener-alert-toggle"><input aria-label="Acknowledge auto-promotion side effects" type="checkbox" checked={promotionSideEffectAcknowledged} onChange={(event) => setPromotionSideEffectAcknowledged(event.target.checked)} /><span><strong>I understand this backtest may activate a paper strategy and, if enabled, send a Telegram alert.</strong></span></label>}
       <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={runBusy} onClick={() => { setPendingRun(null); setPromotionSideEffectAcknowledged(false); }}>Cancel</button><button className="button button-primary" type="button" disabled={runBusy || !promotionPolicy || (promotionPolicy.enabled && !promotionSideEffectAcknowledged)} onClick={() => void confirmRun()}>{runBusy ? "Running simulation…" : "Run backtest"}</button></div>
     </section>}
+    {deployRun && (
+      <dialog
+        ref={deployDialogRef}
+        className="app-dialog"
+        aria-labelledby="backtest-deploy-dialog-title"
+        aria-describedby="backtest-deploy-dialog-desc"
+        onCancel={(e) => { e.preventDefault(); closeDeployModal(); }}
+        onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); closeDeployModal(); } else { trapFocus(e); } }}
+      >
+        <div className="panel-heading">
+          <div>
+            <h3 id="backtest-deploy-dialog-title">Deploy Tested Strategy to Paper Trading</h3>
+            <p id="backtest-deploy-dialog-desc">
+              Activate simulated execution for <strong>{deployRun.strategy}</strong> on <strong>{deployRun.symbol}</strong> ({deployRun.market.toUpperCase()} · {deployRun.timeframe}).
+            </p>
+          </div>
+          <button type="button" aria-label="Close dialog" onClick={closeDeployModal} className="icon-button"><X size={16} /></button>
+        </div>
+
+        <form onSubmit={handleExecuteDeploy} style={{ marginTop: "14px" }}>
+          <div className="paper-risk-grid" style={{ marginBottom: "14px" }}>
+            <div><span>Symbol</span><strong>{deployRun.symbol}</strong></div>
+            <div><span>Market / Timeframe</span><strong>{deployRun.market.toUpperCase()} · {deployRun.timeframe}</strong></div>
+            <div><span>Strategy</span><strong>{strategyNames.get(deployRun.strategy) ?? deployRun.strategy}</strong></div>
+            <div><span>Backtest Win Rate</span><strong>{deployRun.winRatePct == null ? "—" : `${pct.format(deployRun.winRatePct)}%`}</strong></div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+            <div className="screener-control-field">
+              <label htmlFor="bt-deploy-capital">Allocated Virtual Capital ($)</label>
+              <input
+                id="bt-deploy-capital"
+                type="number"
+                min={100}
+                step={100}
+                required
+                value={deployCapital}
+                disabled={deployBusy}
+                onChange={(e) => setDeployCapital(Number(e.target.value))}
+              />
+            </div>
+            <div className="screener-control-field">
+              <label htmlFor="bt-deploy-risk">Risk per Trade (%)</label>
+              <input
+                id="bt-deploy-risk"
+                type="number"
+                min={0.1}
+                max={10.0}
+                step={0.1}
+                required
+                value={deployRisk}
+                disabled={deployBusy}
+                onChange={(e) => setDeployRisk(Number(e.target.value))}
+              />
+            </div>
+          </div>
+
+          <label className="screener-alert-toggle" style={{ margin: "14px 0" }}>
+            <input
+              type="checkbox"
+              checked={deployTelegram}
+              disabled={deployBusy}
+              onChange={(e) => setDeployTelegram(e.target.checked)}
+            />
+            <span>
+              <strong>Send deployment alert to Telegram</strong>
+              <small>Sends a one-time deployment notification via configured bot.</small>
+            </span>
+          </label>
+
+          {deployError && (
+            <div className="api-error" role="alert" style={{ marginBottom: "12px" }}>
+              <div><strong>Deployment failed</strong><p>{deployError}</p></div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "16px" }}>
+            <button type="button" className="button button-secondary" onClick={closeDeployModal} disabled={deployBusy}>Cancel</button>
+            <button type="submit" className="button button-primary" disabled={deployBusy}>
+              {deployBusy ? "Deploying…" : "Deploy to Paper Trading"}
+            </button>
+          </div>
+        </form>
+      </dialog>
+    )}
     <PromotionStatusPanel onPolicyLoaded={setPromotionPolicy} />
     <p className="page-description">Backtest execution is an explicit, role-gated POST action. Promotion policy and audit are read-only; editing, activation, and Telegram actions remain unavailable.</p>
   </div>;
