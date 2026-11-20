@@ -570,6 +570,7 @@ def test_durable_queue_claims_highest_quality_fresh_candidate(monkeypatch):
     reset_limits()
     module.CONFIG["min_alert_quality_score"] = 80
     module.CONFIG["max_signal_age_sec"] = 900
+    monkeypatch.setitem(module.CONFIG, "min_alert_quote_volume", 100_000)
     monkeypatch.setattr(module, "get_pool", lambda: FakePool())
 
     selected = module.claim_next_pending_signal()
@@ -577,9 +578,16 @@ def test_durable_queue_claims_highest_quality_fresh_candidate(monkeypatch):
     assert selected is not None
     assert selected.symbol == "STRONGUSDT"
     assert selected.quality_score == 91
+    assert selected.quote_volume == 100_000
+    volume_updates = [(q, p) for q, p in connection.fake_cursor.queries
+                      if "Candle quote volume below Telegram alert threshold" in q]
+    assert len(volume_updates) == 1
+    assert "quote_volume < %s" in volume_updates[0][0]
+    assert volume_updates[0][1] == (100_000,)
     select_queries = [q for q, _ in connection.fake_cursor.queries if q.startswith("SELECT id,symbol")]
     assert len(select_queries) == 1
     assert "quality_score >= %s" in select_queries[0]
+    assert "quote_volume >= %s" in select_queries[0]
     assert "detected_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)" in select_queries[0]
     assert connection.commits >= 2
     assert not connection.rolled_back
