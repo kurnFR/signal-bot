@@ -102,7 +102,7 @@ def first_break(bars, start, delivered, direction):
     return None
 
 
-def message(signal, *, ema_length=None):
+def message(signal, *, ema_length=None, quote_asset="USDT"):
     from html import escape
 
     ctx = getattr(signal, "watch_context", None) or {}
@@ -126,8 +126,11 @@ def message(signal, *, ema_length=None):
         flow = "buyer-led" if ratio >= .55 else "seller-led" if ratio <= .45 else "balanced"
         taker_buy = f"<b>{ratio:.1%}</b> ({flow})"
     baseline = f"{ema_length:d}-EMA" if ema_length is not None else "long EMA"
+    quote = escape(quote_asset)
+    price_prefix, price_suffix = ("$", "") if quote_asset == "USDT" else ("", f" {quote}")
     levels = (
-        f"Watch range: <code>${ctx['low']:.8g}</code> to <code>${ctx['high']:.8g}</code>\n"
+        f"Watch range: <code>{price_prefix}{ctx['low']:.8g}</code> to "
+        f"<code>{price_prefix}{ctx['high']:.8g}{price_suffix}</code>\n"
         if ctx.get("low") is not None and ctx.get("high") is not None else ""
     )
     return (
@@ -141,8 +144,8 @@ def message(signal, *, ema_length=None):
         f"Velocity: <b>{signal.volume_velocity:.2f}x</b> (vs recent average)\n"
         f"Taker Buy: {taker_buy}\n"
         f"HTF: <b>{escape(str(signal.htf_context))}</b>\n"
-        f"Price: <code>${signal.price:.8g}</code> ({signal.price_change_pct:+.3f}%)\n"
-        f"Volume: <code>{signal.volume:,.0f}</code> | Quote: <code>{signal.quote_volume:,.0f} USDT</code>\n"
+        f"Price: <code>{price_prefix}{signal.price:.8g}{price_suffix}</code> ({signal.price_change_pct:+.3f}%)\n"
+        f"Volume: <code>{signal.volume:,.0f}</code> | Quote: <code>{signal.quote_volume:,.0f} {quote}</code>\n"
         f"{levels}\n"
         f"Candle opened: <code>{when}</code> UTC\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
