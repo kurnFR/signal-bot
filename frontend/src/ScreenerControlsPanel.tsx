@@ -16,6 +16,7 @@ const NUMBER_FIELDS = [
   { key: "min_quote_volume_24h", label: "Minimum 24h quote volume (USD)", min: 0, max: 1000000000000, step: 100000 },
   { key: "min_market_cap_usd", label: "Minimum market cap (USD)", min: 0, max: 1000000000000, step: 1000000 },
   { key: "min_quality_score", label: "Minimum quality score", min: 0, max: 100, step: 1 },
+  { key: "min_alert_quote_volume", label: "Minimum signal candle quote volume (USDT)", min: 0, max: 1000000000000, step: 1 },
   { key: "min_alert_quality_score", label: "Minimum Telegram alert quality", min: 0, max: 100, step: 1 },
   { key: "max_signal_age_sec", label: "Maximum signal age (seconds)", min: 1, max: 86400, step: 30 },
   { key: "expired_signal_retention_days", label: "Expired signal retention (days)", min: 1, max: 3650, step: 1 },

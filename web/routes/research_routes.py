@@ -130,6 +130,7 @@ def _filter_overrides(overrides: Dict, allowed: set, bot_label: str) -> Dict:
         "min_quote_volume_24h": (0, 1e12), "min_market_cap_usd": (0, 1e12),
         "min_quality_score": (0, 100),
         "min_alert_quality_score": (0, 100),
+        "min_alert_quote_volume": (0, 1e12),
         "max_signal_age_sec": (1, 86400),
         "expired_signal_retention_days": (1, 3650),
         "expired_signal_cleanup_interval_days": (1, 365),

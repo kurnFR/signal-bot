@@ -60,6 +60,7 @@ CONFIG = {
     "use_taker_buy_confirmation": os.getenv("USE_TAKER_BUY_CONFIRMATION", "true").lower() == "true",
     "alert_selection_window_sec": float(os.getenv("ALERT_SELECTION_WINDOW_SEC", "3")),
     "max_pending_signals": int(os.getenv("MAX_PENDING_SIGNALS", "200")),
+    "min_alert_quote_volume": float(os.getenv("MIN_ALERT_QUOTE_VOLUME", "0")),
     "min_alert_quality_score": float(os.getenv("MIN_ALERT_QUALITY_SCORE", "80")),
     "max_signal_age_sec": int(os.getenv("MAX_SIGNAL_AGE_SEC", "900")),
     "expired_signal_retention_days": max(1, int(os.getenv("EXPIRED_SIGNAL_RETENTION_DAYS", "30"))),
@@ -741,7 +742,7 @@ def verify_signal_schema():
         finally:
             conn.close()
 
-_TUNABLE_CONFIG_KEYS={"rvol_multiplier","divergence_max_price_change","velocity_threshold","enable_divergence_detection","enable_velocity_detection","max_alerts_per_hour","max_alerts_per_symbol_per_hour","alert_cooldown_sec","require_confluence","min_signal_rvol","min_signal_velocity","min_quote_volume_24h","min_market_cap_usd","min_quality_score","min_alert_quality_score","max_signal_age_sec","expired_signal_retention_days","expired_signal_cleanup_interval_days"}
+_TUNABLE_CONFIG_KEYS={"rvol_multiplier","divergence_max_price_change","velocity_threshold","enable_divergence_detection","enable_velocity_detection","max_alerts_per_hour","max_alerts_per_symbol_per_hour","alert_cooldown_sec","require_confluence","min_signal_rvol","min_signal_velocity","min_quote_volume_24h","min_market_cap_usd","min_quality_score","min_alert_quality_score","min_alert_quote_volume","max_signal_age_sec","expired_signal_retention_days","expired_signal_cleanup_interval_days"}
 
 def reload_control():
     conn=get_pool().get_connection()
@@ -1020,6 +1021,13 @@ def claim_next_pending_signal():
                            last_delivery_error='Quality below Telegram alert threshold',
                            delivery_updated_at=UTC_TIMESTAMP()
                        WHERE delivery_status='PENDING' AND quality_score < %s""", (min_quality,))
+        min_alert_volume = float(CONFIG["min_alert_quote_volume"])
+        if min_alert_volume > 0:
+            cur.execute("""UPDATE smart_money_signals
+                           SET delivery_status='FILTERED',
+                               last_delivery_error='Candle quote volume below Telegram alert threshold',
+                               delivery_updated_at=UTC_TIMESTAMP()
+                           WHERE delivery_status='PENDING' AND quote_volume < %s""", (min_alert_volume,))
         # 1. Expire directional 1m parent watches past their 5-candle follow-up deadline (or max_age derived from candle_time)
         cur.execute("""UPDATE smart_money_signals
                        SET delivery_status='EXPIRED',
@@ -1051,11 +1059,12 @@ def claim_next_pending_signal():
         cur.execute("""SELECT id,symbol,signal_type,rvol,volume,quote_volume,price,price_change_pct,volume_velocity,quality_score,direction,taker_buy_ratio,htf_alignment,htf_context,candle_time,detected_at,watch_context,parent_watch_id
                        FROM smart_money_signals
                        WHERE delivery_status='PENDING' AND quality_score >= %s
+                         AND (%s <= 0 OR quote_volume >= %s)
                          AND (parent_watch_id IS NULL OR candle_time > CONCAT(REPLACE(UTC_TIMESTAMP() - INTERVAL 2 MINUTE, ' ', 'T'), 'Z'))
                          AND (parent_watch_id IS NOT NULL OR direction NOT IN ('BULLISH', 'BEARISH') OR candle_time > CONCAT(REPLACE(UTC_TIMESTAMP() - INTERVAL %s SECOND, ' ', 'T'), 'Z'))
                          AND (next_attempt_at IS NULL OR next_attempt_at <= UTC_TIMESTAMP())
                          AND detected_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)
-                       ORDER BY quality_score DESC, rvol DESC, detected_at ASC, id ASC LIMIT 1 FOR UPDATE""", (min_quality, watch_max_sec, max_age))
+                       ORDER BY quality_score DESC, rvol DESC, detected_at ASC, id ASC LIMIT 1 FOR UPDATE""", (min_quality, min_alert_volume, min_alert_volume, watch_max_sec, max_age))
         row = cur.fetchone()
         if not row:
             conn.commit()
