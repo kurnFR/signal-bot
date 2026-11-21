@@ -63,6 +63,7 @@ const App = {
     },
 
     bindEvents() {
+        this.initSidebarState();
         document.querySelectorAll(".nav-btn").forEach(btn => {
             btn.addEventListener("click", () => {
                 const tab = btn.dataset.tab;
@@ -76,6 +77,45 @@ const App = {
         const savePromotionPolicyButton = document.getElementById("btn-save-promotion-policy");
         if (savePromotionPolicyButton) {
             savePromotionPolicyButton.addEventListener("click", () => this.saveStrategyPromotionPolicy());
+        }
+    },
+
+    initSidebarState() {
+        try {
+            const isCollapsed = localStorage.getItem("sidebar_collapsed") === "1";
+            if (isCollapsed) {
+                document.body.classList.add("sidebar-collapsed");
+                this._updateSidebarToggleIcons(true);
+            }
+        } catch (_) {}
+    },
+
+    toggleSidebar() {
+        const isCollapsed = document.body.classList.toggle("sidebar-collapsed");
+        try {
+            localStorage.setItem("sidebar_collapsed", isCollapsed ? "1" : "0");
+        } catch (_) {}
+        this._updateSidebarToggleIcons(isCollapsed);
+        if (window.lucide && typeof window.lucide.createIcons === "function") {
+            window.lucide.createIcons();
+        }
+        window.dispatchEvent(new Event("resize"));
+    },
+
+    _updateSidebarToggleIcons(isCollapsed) {
+        const sideBtn = document.getElementById("btn-toggle-sidebar");
+        if (sideBtn) {
+            sideBtn.setAttribute("title", isCollapsed ? "Expand sidebar" : "Collapse sidebar");
+            sideBtn.setAttribute("aria-label", isCollapsed ? "Expand sidebar" : "Collapse sidebar");
+            const icon = sideBtn.querySelector(".sidebar-collapse-icon");
+            if (icon) {
+                icon.setAttribute("data-lucide", isCollapsed ? "chevron-right" : "chevron-left");
+            }
+        }
+        const topBtn = document.getElementById("btn-top-toggle-sidebar");
+        if (topBtn) {
+            topBtn.setAttribute("title", isCollapsed ? "Expand sidebar" : "Collapse sidebar");
+            topBtn.setAttribute("aria-label", isCollapsed ? "Expand sidebar" : "Collapse sidebar");
         }
     },
 
@@ -2096,7 +2136,7 @@ const App = {
             const cfgContainer = document.getElementById("paper-configs-container");
             if (cfgContainer) cfgContainer.innerHTML = `<div class="text-xs text-rose-300">Unable to refresh paper strategy configurations. ${safeMessage}</div>`;
             const tradesBody = document.getElementById("paper-trades-body");
-            if (tradesBody) tradesBody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-rose-300 text-xs">Unable to refresh paper trade history. ${safeMessage}</td></tr>`;
+            if (tradesBody) tradesBody.innerHTML = `<tr><td colspan="10" class="text-center py-6 text-rose-300 text-xs">Unable to refresh paper trade history. ${safeMessage}</td></tr>`;
             const ordersBody = document.getElementById("paper-orders-body");
             if (ordersBody) ordersBody.innerHTML = `<tr><td colspan="9" class="text-center py-6 text-rose-300 text-xs">Unable to refresh paper order history. ${safeMessage}</td></tr>`;
             this.showToast(`Failed to load paper trading data: ${message}`, "error");
@@ -2365,10 +2405,18 @@ const App = {
         const tradesBody = document.getElementById("paper-trades-body");
         if (tradesBody) {
             if (this.paperTrades.length === 0) {
-                tradesBody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-slate-500 text-xs">No closed paper trades recorded yet.</td></tr>`;
+                tradesBody.innerHTML = `<tr><td colspan="10" class="text-center py-6 text-slate-500 text-xs">No closed paper trades recorded yet.</td></tr>`;
             } else {
                 tradesBody.innerHTML = this.paperTrades.map(t => {
                     const isWin = t.r_multiple > 0;
+                    const formatPrice = (v) => {
+                        if (v === null || v === undefined || isNaN(v)) return "-";
+                        const num = Number(v);
+                        const maxDigits = num < 0.01 ? 6 : num < 1 ? 4 : 2;
+                        return "$" + num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: maxDigits });
+                    };
+                    const entryPriceStr = formatPrice(t.entry_price);
+                    const exitPriceStr = formatPrice(t.exit_price);
                     return `
                         <tr>
                             <td class="font-bold font-mono text-slate-200">${this._escapeHtml(t.symbol)}</td>
@@ -2378,6 +2426,8 @@ const App = {
                                     ${this._escapeHtml(t.direction)}
                                 </span>
                             </td>
+                            <td class="font-mono text-xs text-slate-200">${this._escapeHtml(entryPriceStr)}</td>
+                            <td class="font-mono text-xs text-slate-200 font-semibold">${this._escapeHtml(exitPriceStr)}</td>
                             <td class="font-mono text-xs text-slate-300">${this._escapeHtml(t.entry_time_wib)}</td>
                             <td class="font-mono text-xs text-slate-300">${this._escapeHtml(t.exit_time_wib)}</td>
                             <td>

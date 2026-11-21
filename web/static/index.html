@@ -134,96 +134,102 @@
     </div>
 
     <!-- LEFT SIDEBAR PANEL -->
-    <aside class="w-64 border-r border-slate-800/80 bg-[#0c1222] flex flex-col justify-between shrink-0 h-screen sticky top-0 z-30">
+    <aside id="dashboard-sidebar" class="w-64 border-r border-slate-800/80 bg-[#0c1222] flex flex-col justify-between shrink-0 h-screen sticky top-0 z-30 transition-all duration-200">
         <!-- Logo & Title -->
         <div>
-            <div class="p-5 border-b border-slate-800/80 flex items-center gap-3">
-                <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-sky-500/20 text-white font-black text-lg">
-                    ⚡
+            <div class="sidebar-brand-row p-5 border-b border-slate-800/80 flex items-center justify-between gap-3">
+                <div class="flex items-center gap-3 overflow-hidden cursor-pointer" onclick="if(document.body.classList.contains('sidebar-collapsed')) App.toggleSidebar()" title="Signal Bot Pro">
+                    <div class="w-9 h-9 shrink-0 rounded-lg bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-sky-500/20 text-white font-black text-lg">
+                        ⚡
+                    </div>
+                    <div class="sidebar-text-label whitespace-nowrap overflow-hidden">
+                        <div class="font-black text-sm tracking-wider text-slate-100 uppercase">Signal Bot Pro</div>
+                        <div class="text-[10px] text-sky-400 font-mono tracking-tight font-medium">Institutional Quant</div>
+                    </div>
                 </div>
-                <div>
-                    <div class="font-black text-sm tracking-wider text-slate-100 uppercase">Signal Bot Pro</div>
-                    <div class="text-[10px] text-sky-400 font-mono tracking-tight font-medium">Institutional Quant</div>
-                </div>
+                <button type="button" id="btn-toggle-sidebar" onclick="App.toggleSidebar()" title="Collapse sidebar" aria-label="Collapse sidebar" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors shrink-0">
+                    <i data-lucide="chevron-left" class="w-4 h-4 sidebar-collapse-icon"></i>
+                </button>
             </div>
 
             <!-- Navigation Links -->
             <nav aria-label="Dashboard sections" class="p-3 space-y-1.5 mt-2">
-                <button type="button" data-tab="home" aria-controls="view-home" aria-current="page" class="nav-btn active w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
-                    <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
-                    <span>Home & Overview</span>
+                <button type="button" data-tab="home" aria-controls="view-home" aria-current="page" title="Home & Overview" class="nav-btn active w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="layout-dashboard" class="w-4 h-4 shrink-0"></i>
+                    <span class="sidebar-text-label whitespace-nowrap">Home & Overview</span>
                 </button>
-                <button type="button" data-tab="master-data" aria-controls="view-master-data" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
-                    <i data-lucide="database" class="w-4 h-4"></i>
-                    <span>Master Data</span>
+                <button type="button" data-tab="master-data" aria-controls="view-master-data" title="Master Data" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="database" class="w-4 h-4 shrink-0"></i>
+                    <span class="sidebar-text-label whitespace-nowrap">Master Data</span>
                 </button>
-                <button type="button" data-tab="backtest" aria-controls="view-backtest" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
-                    <i data-lucide="play-circle" class="w-4 h-4"></i>
-                    <span>Backtest Studio</span>
+                <button type="button" data-tab="backtest" aria-controls="view-backtest" title="Backtest Studio" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="play-circle" class="w-4 h-4 shrink-0"></i>
+                    <span class="sidebar-text-label whitespace-nowrap">Backtest Studio</span>
                 </button>
-                <button type="button" data-tab="paper" aria-controls="view-paper" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-emerald-400 hover:text-white hover:bg-slate-800/50 transition-all">
-                    <i data-lucide="briefcase" class="w-4 h-4 text-emerald-400"></i>
-                    <div class="flex items-center justify-between w-full">
-                        <span>Paper Trading</span>
-                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-emerald-950 text-emerald-300 border border-emerald-800">PHASE B</span>
+                <button type="button" data-tab="paper" aria-controls="view-paper" title="Paper Trading" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-emerald-400 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="briefcase" class="w-4 h-4 text-emerald-400 shrink-0"></i>
+                    <div class="flex items-center justify-between w-full sidebar-text-label overflow-hidden">
+                        <span class="whitespace-nowrap">Paper Trading</span>
+                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-emerald-950 text-emerald-300 border border-emerald-800 shrink-0">PHASE B</span>
                     </div>
                 </button>
-                <button type="button" data-tab="ml-studio" aria-controls="view-ml-studio" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-purple-400 hover:text-white hover:bg-slate-800/50 transition-all">
-                    <i data-lucide="brain-circuit" class="w-4 h-4 text-purple-400"></i>
-                    <div class="flex items-center justify-between w-full">
-                        <span>ML Forecast Studio</span>
-                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-purple-950 text-purple-300 border border-purple-800">AI</span>
+                <button type="button" data-tab="ml-studio" aria-controls="view-ml-studio" title="ML Forecast Studio" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-purple-400 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="brain-circuit" class="w-4 h-4 text-purple-400 shrink-0"></i>
+                    <div class="flex items-center justify-between w-full sidebar-text-label overflow-hidden">
+                        <span class="whitespace-nowrap">ML Forecast Studio</span>
+                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-purple-950 text-purple-300 border border-purple-800 shrink-0">AI</span>
                     </div>
                 </button>
-                <button type="button" data-tab="strategies" aria-controls="view-strategies" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
-                    <i data-lucide="layers" class="w-4 h-4"></i>
-                    <span>Strategy Library</span>
+                <button type="button" data-tab="strategies" aria-controls="view-strategies" title="Strategy Library" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="layers" class="w-4 h-4 shrink-0"></i>
+                    <span class="sidebar-text-label whitespace-nowrap">Strategy Library</span>
                 </button>
-                <button type="button" data-tab="news-ai" aria-controls="view-news-ai" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-amber-400 hover:text-white hover:bg-slate-800/50 transition-all">
-                    <i data-lucide="newspaper" class="w-4 h-4 text-amber-400"></i>
-                    <div class="flex items-center justify-between w-full">
-                        <span>News AI Signals</span>
-                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-amber-950 text-amber-300 border border-amber-800">NEW</span>
+                <button type="button" data-tab="news-ai" aria-controls="view-news-ai" title="News AI Signals" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-amber-400 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="newspaper" class="w-4 h-4 text-amber-400 shrink-0"></i>
+                    <div class="flex items-center justify-between w-full sidebar-text-label overflow-hidden">
+                        <span class="whitespace-nowrap">News AI Signals</span>
+                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-amber-950 text-amber-300 border border-amber-800 shrink-0">NEW</span>
                     </div>
                 </button>
-                <button type="button" data-tab="research" aria-controls="view-research" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-purple-300 hover:text-white hover:bg-slate-800/50 transition-all">
-                    <i data-lucide="flask-conical" class="w-4 h-4 text-purple-400"></i>
-                    <div class="flex items-center justify-between w-full">
-                        <span>Research Bots</span>
-                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-purple-950 text-purple-300 border border-purple-800">NEW</span>
+                <button type="button" data-tab="research" aria-controls="view-research" title="Research Bots" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-purple-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="flask-conical" class="w-4 h-4 text-purple-400 shrink-0"></i>
+                    <div class="flex items-center justify-between w-full sidebar-text-label overflow-hidden">
+                        <span class="whitespace-nowrap">Research Bots</span>
+                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-purple-950 text-purple-300 border border-purple-800 shrink-0">NEW</span>
                     </div>
                 </button>
-                <button type="button" data-tab="market-screener" aria-controls="view-market-screener" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-amber-300 hover:text-white hover:bg-slate-800/50 transition-all">
-                    <i data-lucide="scan-search" class="w-4 h-4 text-amber-400"></i>
-                    <div class="flex items-center justify-between w-full">
-                        <span>Market Screener</span>
-                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-amber-950 text-amber-300 border border-amber-800">V2</span>
+                <button type="button" data-tab="market-screener" aria-controls="view-market-screener" title="Market Screener" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-amber-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="scan-search" class="w-4 h-4 text-amber-400 shrink-0"></i>
+                    <div class="flex items-center justify-between w-full sidebar-text-label overflow-hidden">
+                        <span class="whitespace-nowrap">Market Screener</span>
+                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-amber-950 text-amber-300 border border-amber-800 shrink-0">V2</span>
                     </div>
                 </button>
-                <button type="button" data-tab="wallet-tracking" aria-controls="view-wallet-tracking" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-cyan-300 hover:text-white hover:bg-slate-800/50 transition-all">
-                    <i data-lucide="wallet" class="w-4 h-4 text-cyan-400"></i>
-                    <div class="flex items-center justify-between w-full">
-                        <span>Wallet Tracking</span>
-                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-cyan-950 text-cyan-300 border border-cyan-800">NEW</span>
+                <button type="button" data-tab="wallet-tracking" aria-controls="view-wallet-tracking" title="Wallet Tracking" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-cyan-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="wallet" class="w-4 h-4 text-cyan-400 shrink-0"></i>
+                    <div class="flex items-center justify-between w-full sidebar-text-label overflow-hidden">
+                        <span class="whitespace-nowrap">Wallet Tracking</span>
+                        <span class="px-1.5 py-0.2 text-[9px] font-bold rounded bg-cyan-950 text-cyan-300 border border-cyan-800 shrink-0">NEW</span>
                     </div>
                 </button>
-                <button type="button" data-tab="settings" aria-controls="view-settings" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
-                    <i data-lucide="settings" class="w-4 h-4"></i>
-                    <span>Settings & Users</span>
+                <button type="button" data-tab="settings" aria-controls="view-settings" title="Settings & Users" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <i data-lucide="settings" class="w-4 h-4 shrink-0"></i>
+                    <span class="sidebar-text-label whitespace-nowrap">Settings & Users</span>
                 </button>
             </nav>
         </div>
 
         <!-- Sidebar Footer Status -->
-        <div class="p-4 border-t border-slate-800/80 bg-[#090e1c] space-y-2.5">
-            <div class="flex items-center justify-between text-[11px]">
+        <div class="p-4 border-t border-slate-800/80 bg-[#090e1c] space-y-2.5 sidebar-footer overflow-hidden">
+            <div class="flex items-center justify-between text-[11px] sidebar-text-label">
                 <span class="text-slate-500 font-medium">Clock (UTC+7):</span>
                 <span id="wib-clock" class="font-mono text-sky-400 font-semibold">--:--:-- WIB</span>
             </div>
             <div id="status-db-badge" role="status" aria-live="polite" aria-atomic="true" class="px-2 py-1 text-[11px] rounded font-medium flex items-center gap-1.5 bg-slate-900 border border-slate-800 text-slate-400">
-                <span class="w-2 h-2 rounded-full bg-slate-500"></span> Checking DB...
+                <span class="w-2 h-2 rounded-full bg-slate-500 shrink-0"></span>
+                <span class="sidebar-text-label whitespace-nowrap">Checking DB...</span>
             </div>
-            <div class="text-[10px] text-slate-500 text-center font-mono">v2.0.0 • MariaDB 10.9</div>
+            <div class="text-[10px] text-slate-500 text-center font-mono sidebar-text-label whitespace-nowrap">v2.0.0 • MariaDB 10.9</div>
         </div>
     </aside>
 
@@ -232,9 +238,14 @@
         
         <!-- Top App Bar -->
         <header class="h-16 border-b border-slate-800/80 bg-[#0b1020]/90 backdrop-blur sticky top-0 z-20 px-8 flex items-center justify-between">
-            <div>
-                <h1 id="view-header-title" aria-live="polite" aria-atomic="true" class="text-base font-bold text-slate-100">Executive Trading Overview</h1>
-                <p id="view-header-desc" class="text-xs text-slate-400">System health, database metrics, and backtest leaderboard</p>
+            <div class="flex items-center gap-3">
+                <button type="button" id="btn-top-toggle-sidebar" onclick="App.toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar" class="p-2 -ml-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/70 transition-colors flex items-center justify-center shrink-0">
+                    <i data-lucide="menu" class="w-5 h-5"></i>
+                </button>
+                <div>
+                    <h1 id="view-header-title" aria-live="polite" aria-atomic="true" class="text-base font-bold text-slate-100">Executive Trading Overview</h1>
+                    <p id="view-header-desc" class="text-xs text-slate-400">System health, database metrics, and backtest leaderboard</p>
+                </div>
             </div>
             <div class="flex items-center gap-4">
                 <button type="button" aria-label="New Backfill" onclick="App.openBackfillModal()" class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white text-xs font-semibold shadow-md shadow-sky-500/20 flex items-center gap-2 transition-all">
@@ -928,6 +939,8 @@
                                     <th scope="col">Symbol</th>
                                     <th scope="col">Strategy</th>
                                     <th scope="col">Side</th>
+                                    <th scope="col">Entry Price</th>
+                                    <th scope="col">Exit Price</th>
                                     <th scope="col">Entry (WIB)</th>
                                     <th scope="col">Exit (WIB)</th>
                                     <th scope="col">Exit Reason</th>
@@ -936,7 +949,7 @@
                                 </tr>
                             </thead>
                             <tbody id="paper-trades-body">
-                                <tr><td colspan="8" class="text-center py-6 text-slate-500 text-xs">No closed paper trades yet.</td></tr>
+                                <tr><td colspan="10" class="text-center py-6 text-slate-500 text-xs">No closed paper trades yet.</td></tr>
                             </tbody>
                         </table>
                     </div>

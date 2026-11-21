@@ -1400,7 +1400,7 @@ class TestDashboardTableColumnHeaderScopes(unittest.TestCase):
     def test_every_static_table_header_declares_column_scope(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
         headers = re.findall(r'<th\b([^>]*)>', html, flags=re.IGNORECASE)
-        self.assertEqual(len(headers), 152)
+        self.assertEqual(len(headers), 154)
         for index, attrs in enumerate(headers):
             with self.subTest(header_index=index):
                 self.assertRegex(attrs, r'\bscope="col"')
@@ -1545,3 +1545,30 @@ class TestResponsiveDashboardWorkspace(unittest.TestCase):
     def test_responsive_stylesheet_change_bumps_cache_token(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
         self.assertIn('dashboard_enhancements.css?v=20261104-1', html)
+
+
+class TestSidebarCollapseAndPaperTradesPricing(unittest.TestCase):
+    def test_sidebar_toggle_buttons_exist(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        self.assertIn('id="dashboard-sidebar"', html)
+        self.assertIn('id="btn-toggle-sidebar"', html)
+        self.assertIn('id="btn-top-toggle-sidebar"', html)
+        self.assertIn('onclick="App.toggleSidebar()"', html)
+
+    def test_sidebar_toggle_methods_in_app_js(self):
+        app_js = APP_JS.read_text(encoding="utf-8")
+        self.assertIn("toggleSidebar()", app_js)
+        self.assertIn("initSidebarState()", app_js)
+        self.assertIn('"sidebar_collapsed"', app_js)
+        self.assertIn('classList.toggle("sidebar-collapsed")', app_js)
+
+    def test_closed_paper_trades_has_entry_and_exit_price(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        self.assertIn('<th scope="col">Entry Price</th>', html)
+        self.assertIn('<th scope="col">Exit Price</th>', html)
+        self.assertIn('<td colspan="10" class="text-center py-6 text-slate-500 text-xs">No closed paper trades yet.</td>', html)
+
+        app_js = APP_JS.read_text(encoding="utf-8")
+        self.assertIn("t.entry_price", app_js)
+        self.assertIn("t.exit_price", app_js)
+        self.assertIn('colspan="10"', app_js)
