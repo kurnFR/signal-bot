@@ -23,7 +23,7 @@ const NAV_ITEMS = [
   { label: "Wallet Tracking", description: "On-chain wallet and token flow monitor", icon: WalletCards },
   { label: "Backtest Studio", description: "Saved backtest results and trade evidence", icon: BarChart3 },
   { label: "ML Studio", description: "Saved ML experiments and model artifacts", icon: BrainCircuit },
-  { label: "Research", description: "RetailBot2 positions and strategy performance", icon: Activity },
+  { label: "Research", description: "Historical RetailBot2 positions and performance", icon: Activity },
   { label: "News AI", description: "Sentiment signals and macro events", icon: Activity },
   { label: "Master Data", description: "Historical candle and feature coverage", icon: Database },
   { label: "Settings", description: "Preferences and access", icon: Settings2 },
@@ -60,7 +60,7 @@ const VIEW_METADATA: Record<string, { eyebrow: string; description: string }> = 
   },
   Research: {
     eyebrow: "RESEARCH / BOT LAB",
-    description: "RetailBot2 shadow and inverse trade monitor, lifecycle flags, and experimental tracking.",
+    description: "Historical RetailBot2 Shadow and Inverse results. Use Strategy Library and Paper Trading for new simulations.",
   },
   "News AI": {
     eyebrow: "SENTIMENT / MACRO AI",
@@ -102,6 +102,7 @@ export function App() {
     setActiveView(label);
   };
   const [pendingBacktestStrategyId, setPendingBacktestStrategyId] = useState<string | null>(null);
+  const [pendingPaperStrategyId, setPendingPaperStrategyId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarCloseButtonRef = useRef<HTMLButtonElement>(null);
@@ -137,6 +138,11 @@ export function App() {
 
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
   const handleSelectStrategyForBacktest = (strategyId: string) => { setPendingBacktestStrategyId(strategyId); selectView("Backtest Studio"); setSidebarOpen(false); };
+  const handleSelectStrategyForPaper = (strategyId: string) => {
+    setPendingPaperStrategyId(strategyId);
+    selectView("Paper Trading");
+    setSidebarOpen(false);
+  };
   const clearPendingBacktestStrategy = () => setPendingBacktestStrategyId(null);
 
   const viewMeta = VIEW_METADATA[activeView] ?? {
@@ -203,9 +209,9 @@ export function App() {
         ) : activeView === "Market Screener" ? (
           <><ScreenerPanel /><ScreenerControlsPanel /></>
         ) : activeView === "Paper Trading" ? (
-          <PaperTradingPanel />
+          <PaperTradingPanel initialStrategyId={pendingPaperStrategyId} onInitialStrategyApplied={() => setPendingPaperStrategyId(null)} />
         ) : activeView === "Strategy Library" ? (
-          <StrategyLibraryPanel onSelectForBacktest={handleSelectStrategyForBacktest} />
+          <StrategyLibraryPanel onSelectForBacktest={handleSelectStrategyForBacktest} onSelectForPaper={handleSelectStrategyForPaper} />
         ) : activeView === "Wallet Tracking" ? (
           <WalletTrackingPanel />
         ) : activeView === "Backtest Studio" ? (
@@ -213,7 +219,7 @@ export function App() {
         ) : activeView === "ML Studio" ? (
           <MLStudioPanel />
         ) : activeView === "Research" ? (
-          <ResearchPanel />
+          <ResearchPanel historyOnly />
         ) : activeView === "News AI" ? (
           <NewsAIPanel />
         ) : activeView === "Master Data" ? (

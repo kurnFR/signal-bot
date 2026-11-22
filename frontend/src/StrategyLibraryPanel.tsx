@@ -5,7 +5,7 @@ import { ApiError } from "./lib/api";
 import { fetchBacktestStrategies, type BacktestStrategy } from "./lib/backtestStudio";
 import { createCustomStrategy, deleteCustomStrategy, fetchCustomStrategies, fetchStrategyIndicators, generateAIStrategyDraft, quickTestCustomStrategy, StrategyLibraryActionError, StrategyQuickTestError, type AIStrategyChatMessage, type AIStrategyDraftResponse, type CustomStrategy, type QuickTestResult, type StrategyConditionInput, type StrategyIndicator } from "./lib/strategyLibrary";
 
-interface StrategyLibraryPanelProps { onSelectForBacktest?: (strategyId: string) => void; }
+interface StrategyLibraryPanelProps { onSelectForBacktest?: (strategyId: string) => void; onSelectForPaper?: (strategyId: string) => void; }
 function messageFor(cause: unknown) {
   if (cause instanceof ApiError && cause.status === 401) return "Your session has expired. Sign in again to view the strategy library.";
   if (cause instanceof ApiError && cause.status === 403) return "Your account cannot access the strategy library.";
@@ -14,7 +14,7 @@ function messageFor(cause: unknown) {
 function Conditions({ label, items }: { label: string; items?: CustomStrategy["longConditions"] }) {
   return <div className="strategy-conditions"><strong>{label}</strong>{items?.length ? <ul>{items.map((condition, index) => <li key={label + index}><code>{condition.indicator ?? "indicator"} {condition.operator ?? "?"} {String(condition.value ?? "—")}</code></li>)}</ul> : <p className="empty-state">No conditions defined.</p>}</div>;
 }
-export function StrategyLibraryPanel({ onSelectForBacktest }: StrategyLibraryPanelProps = {}) {
+export function StrategyLibraryPanel({ onSelectForBacktest, onSelectForPaper }: StrategyLibraryPanelProps = {}) {
   const [strategies, setStrategies] = useState<CustomStrategy[]>([]);
   const [catalogStrategies, setCatalogStrategies] = useState<BacktestStrategy[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -273,7 +273,7 @@ export function StrategyLibraryPanel({ onSelectForBacktest }: StrategyLibraryPan
     {actionMessage && <p className="control-feedback control-success" role="status">{actionMessage}</p>}
     {canQuickTest ? <section className="panel" aria-labelledby="strategy-quick-test-config-title"><div className="panel-heading"><div><h2 id="strategy-quick-test-config-title">Quick-test configuration</h2><p>Runs a non-persisted simulation against up to the latest 1,000 stored candles. It does not create, activate, or promote a strategy.</p></div><span className="panel-counter">ADMIN / TRADER</span></div><div className="screener-control-grid"><label className="screener-control-field">Symbol<input aria-label="Quick-test symbol" value={testSymbol} maxLength={30} onChange={(event) => setTestSymbol(event.target.value)} /></label><label className="screener-control-field">Market<select aria-label="Quick-test market" value={testMarket} onChange={(event) => setTestMarket(event.target.value as "spot" | "futures")}><option value="spot">Spot</option><option value="futures">Futures</option></select></label><label className="screener-control-field">Timeframe<select aria-label="Quick-test timeframe" value={testTimeframe} onChange={(event) => setTestTimeframe(event.target.value)}>{["1m", "5m", "15m", "1h", "4h", "1d"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label></div></section> : <p className="empty-state">Strategy quick tests are restricted to admin and trader roles. This session can review saved definitions only.</p>}
     {shouldLoadCatalog && <section className="panel" aria-labelledby="strategy-catalog-title" aria-busy={catalogLoading}>
-      <div className="panel-heading"><div><h2 id="strategy-catalog-title">Strategy catalog</h2><p>Browse backend-registered strategies. Selecting one opens Backtest Studio with it preselected; no simulation starts automatically.</p></div><span className="panel-counter">{catalogStrategies.length} STRATEGIES</span></div>
+      <div className="panel-heading"><div><h2 id="strategy-catalog-title">Strategy catalog</h2><p>Browse backend-registered strategies. Choose a strategy to open Backtest Studio or configure a paper deployment.</p></div><span className="panel-counter">{catalogStrategies.length} STRATEGIES</span></div>
       <div className="screener-control-grid">
         <label className="screener-control-field">Search catalog<input aria-label="Search strategy catalog" value={catalogSearch} onChange={(event) => setCatalogSearch(event.target.value)} placeholder="Name, ID, category, or description" /></label>
         <label className="screener-control-field">Category<select aria-label="Strategy catalog category" value={catalogFilter} onChange={(event) => setCatalogFilter(event.target.value as "all" | "builtin" | "custom")}><option value="all">All strategies</option><option value="builtin">Built-in</option><option value="custom">Custom</option></select></label>
@@ -283,7 +283,9 @@ export function StrategyLibraryPanel({ onSelectForBacktest }: StrategyLibraryPan
         <div className="panel-heading"><div><h3>{strategy.displayName || strategy.id}</h3><p>{strategy.id}</p></div><span className="panel-counter">{strategy.category || "General"}</span></div>
         <p>{strategy.description || "No description provided."}</p>
         <div className="strategy-param-list"><span>{(strategy.params?.length ?? 0) + (strategy.sharedParams?.length ?? 0)} parameters</span>{strategy.validated && <span>Holdout validated</span>}{strategy.isInverse && <span>Inverse variant</span>}</div>
-        <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={loading || catalogLoading} onClick={() => onSelectForBacktest?.(strategy.id)}>Use in Backtest Studio</button></div>
+        <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={loading || catalogLoading} onClick={() => onSelectForBacktest?.(strategy.id)}>Use in Backtest Studio</button>
+          {onSelectForPaper && strategy.id !== "ml_signal_generator_v1" && <button className="button button-secondary" type="button" onClick={() => onSelectForPaper(strategy.id)}>Deploy to Paper</button>}
+        </div>
       </article>)}</div>}
     </section>}
     {canManageStrategies && <section className="panel" aria-labelledby="strategy-ai-title" aria-busy={aiBusy}>
@@ -341,7 +343,7 @@ export function StrategyLibraryPanel({ onSelectForBacktest }: StrategyLibraryPan
       <div className="panel-heading"><div><h2 id="indicator-catalog-title">Indicator catalog</h2><p>Definitions and descriptions provided by the backend.</p></div><span className="panel-counter">{indicators.length} INDICATORS</span></div>
       {loading && !indicators.length && !error ? <p className="empty-state" role="status">Loading indicator catalog…</p> : <div className="table-scroll"><table><thead><tr><th scope="col">Indicator</th><th scope="col">Category</th><th scope="col">Description</th><th scope="col">Default</th></tr></thead><tbody>{indicators.map((item) => <tr key={item.name}><td><strong>{item.label || item.name}</strong><div><code>{item.name}</code></div></td><td>{item.category || "—"}</td><td>{item.description || "—"}</td><td>{item.default ?? "—"}</td></tr>)}</tbody></table></div>}
     </section>
-    <p className="page-description">Safety: admin/trader users can generate a draft, quick-test, create, and delete saved definitions. AI generation and quick tests are non-persisted; generated drafts must be reviewed and explicitly saved. Creation/deletion changes the saved library but does not activate or promote a strategy. Promotion and activation remain unavailable here.</p>
+    <p className="page-description">Safety: admin/trader users can generate a draft, quick-test, create, and delete saved definitions. AI generation and quick tests are non-persisted; generated drafts must be reviewed and explicitly saved. Creation/deletion changes the saved library but does not activate or promote a strategy. Use the catalog to review a backtest or configure a paper deployment.</p>
     {pendingDelete && <section className="panel" aria-labelledby="strategy-delete-confirm-title"><div className="panel-heading"><div><h2 id="strategy-delete-confirm-title">Delete strategy?</h2><p>This permanently removes the saved definition and its inverse registration. It does not delete historical backtest records.</p></div></div><p><strong>{pendingDelete.displayName || pendingDelete.name}</strong> ({pendingDelete.name})</p><div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={actionBusy !== null} onClick={() => setPendingDelete(null)}>Cancel</button><button className="button button-primary" type="button" disabled={actionBusy !== null} onClick={() => void confirmDeleteStrategy()}>{actionBusy === "delete" ? "Deleting…" : "Delete strategy"}</button></div></section>}
   </>;
 }

@@ -3,10 +3,10 @@ import { parseTelegramDeliveryStatus, type TelegramDeliveryOutcome } from "./tel
 export { parseTelegramDeliveryStatus, type TelegramDeliveryOutcome };
 
 export interface PaperPosition { funding_pnl?: number | null; id: number; symbol: string; market: string; timeframe: string; strategy_name: string; direction: string; entry_price: number; current_price: number; stop_loss: number | null; take_profit: number | null; quantity: number; unrealized_pnl_pct: number | null; unrealized_r: number | null; allocated_capital: number; status: string; last_update_time: number }
-export interface PaperConfig { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; is_active: boolean; allocated_capital: number; risk_per_trade_pct: number; telegram_enabled: boolean; report_enabled: boolean; ml_model_id?: string | null; ml_generator_model_id?: string | null; created_at: string }
+export interface PaperConfig { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; is_active: boolean; allocated_capital: number; risk_per_trade_pct: number; telegram_enabled: boolean; report_enabled: boolean; archived_at?: string | null; realized_equity?: number; ml_model_id?: string | null; ml_generator_model_id?: string | null; created_at: string }
 export interface PaperOrder { id: number; config_id: number; symbol: string; market: string; timeframe: string; strategy_name: string; signal_open_time: number; entry_time: number; direction: string; requested_entry_price: number; stop_loss: number; take_profit: number; atr_at_signal: number; ml_model_id: string | null; ml_probability: number | null; status: string; state_reason: string | null; fill_price: number | null; position_id: number | null; created_at: string; updated_at: string; filled_at: string | null; terminal_at: string | null }
 export interface PaperTrade { funding_pnl?: number | null; id: number; symbol: string; market: string; timeframe: string; strategy_name: string; direction: string; entry_price: number; exit_price: number; net_pnl: number; net_return_pct: number; r_multiple: number; exit_reason: string; entry_time_wib: string; exit_time_wib: string }
-export interface PaperMetrics { totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number; byStrategy: Array<{ strategy: string; symbol?: string | null; configId?: number | null; totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number }> }
+export interface PaperMetrics { totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number; byStrategy: Array<{ strategy: string; symbol?: string | null; market?: string; timeframe?: string; configId?: number | null; totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number }> }
 export interface PaperCircuitBreaker { status: string; emergency_stop_active: boolean; emergency_stop_reason: string | null; active_positions: number; max_concurrent_positions: number; today_realized_pnl_usd: number | null; max_daily_loss_usd: number; open_notional_usd: number | null; max_total_notional_usd: number; can_open_new_position: boolean; message: string }
 export interface PaperTradingSnapshot { positions: PaperPosition[]; configs: PaperConfig[]; orders: PaperOrder[]; trades: PaperTrade[]; metrics: PaperMetrics; breaker: PaperCircuitBreaker }
 
@@ -362,4 +362,22 @@ export async function updatePaperReportPreference(
     throw new PaperTradingActionError(502, "Server returned an invalid preference update response");
   }
   return payload.updated as number;
+}
+
+export async function archivePaperConfig(id: number): Promise<void> {
+  await paperMutationRequest(`/api/paper/configs/${id}`, { method: "DELETE" });
+}
+
+export type PaperDeploymentSettings = Partial<Pick<PaperConfig,
+  "is_active" | "allocated_capital" | "risk_per_trade_pct" | "telegram_enabled" | "report_enabled"
+>>;
+
+export async function patchPaperDeployment(id: number, settings: PaperDeploymentSettings): Promise<void> {
+  await paperMutationRequest(`/api/paper/configs/${id}`, { method: "PATCH", body: JSON.stringify(settings) });
+}
+
+export async function fetchPaperReportForPeriod(days: number, signal: AbortSignal): Promise<PaperMetrics> {
+  const payload = await getJson<{ metrics: PaperMetrics }>(`/api/paper/metrics?days=${days}`, signal);
+  if (!isRecord(payload) || !validMetrics(payload.metrics)) throw new Error("Invalid paper performance response");
+  return payload.metrics;
 }

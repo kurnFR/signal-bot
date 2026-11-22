@@ -14,8 +14,12 @@ import {
   parseTelegramDeliveryStatus,
   resetPaperCircuitBreaker,
   tripPaperCircuitBreaker,
-  updatePaperConfig,
+  patchPaperDeployment,
+  fetchPaperReportForPeriod,
+  type PaperDeploymentSettings,
+  type PaperMetrics,
   updatePaperReportPreference,
+  archivePaperConfig,
   type PaperConfig,
   type PaperOrder,
   type PaperPosition,
@@ -33,7 +37,12 @@ function pnlClass(value: number | null | undefined) {
   return value == null || value === 0 ? "" : value > 0 ? "paper-positive" : "paper-negative";
 }
 
-export function PaperTradingPanel() {
+interface PaperTradingPanelProps {
+  initialStrategyId?: string | null;
+  onInitialStrategyApplied?: () => void;
+}
+
+export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied }: PaperTradingPanelProps = {}) {
   const auth = useAuth();
   const canTrade = ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
 
@@ -67,6 +76,12 @@ export function PaperTradingPanel() {
   const deployDialogRef = useRef<HTMLDialogElement | null>(null);
   const deploySymbolInputRef = useRef<HTMLInputElement | null>(null);
   const deployTriggerRef = useRef<HTMLElement | null>(null);
+  const [editingConfig, setEditingConfig] = useState<PaperConfig | null>(null);
+  const [pendingArchive, setPendingArchive] = useState<PaperConfig | null>(null);
+  const [reportDays, setReportDays] = useState(0);
+  const [periodResult, setPeriodResult] = useState<{ days: number; metrics?: PaperMetrics; failed?: true } | null>(null);
+  const [reportMarket, setReportMarket] = useState("");
+  const [reportTimeframe, setReportTimeframe] = useState("");
   const [reportSymbol, setReportSymbol] = useState("");
   const [reportStrategy, setReportStrategy] = useState("");
   const [savingPreference, setSavingPreference] = useState(false);
@@ -113,6 +128,14 @@ export function PaperTradingPanel() {
       });
     return () => controller.abort();
   }, [attempt]);
+
+  useEffect(() => {
+    if (canTrade && initialStrategyId) {
+      setDeployStrategy(initialStrategyId);
+      setShowDeployModal(true);
+      onInitialStrategyApplied?.();
+    }
+  }, [canTrade, initialStrategyId, onInitialStrategyApplied]);
 
   useEffect(() => {
     if (!showDeployModal) return;
@@ -372,85 +395,24 @@ export function PaperTradingPanel() {
     }
   };
 
-  const handleToggleConfigActive = async (c: PaperConfig) => {
-    if (!canTrade || savingPreference || togglingConfigId !== null) return;
-    setTogglingConfigId(c.id);
+  const saveDeploymentSettings = async (
+    config: PaperConfig,
+    settings: PaperDeploymentSettings,
+    message: string,
+  ) => {
+    if (!canTrade || savingPreference || togglingConfigId !== null) return false;
+    setTogglingConfigId(config.id);
     setActionError(null);
+    setActionSuccess(null);
     setActionWarning(null);
     try {
-      await updatePaperConfig({
-        symbol: c.symbol,
-        market: c.market,
-        timeframe: c.timeframe,
-        strategy_name: c.strategy_name,
-        is_active: !c.is_active,
-        allocated_capital: c.allocated_capital,
-        risk_per_trade_pct: c.risk_per_trade_pct,
-        ml_model_id: c.ml_model_id,
-        ml_generator_model_id: c.ml_generator_model_id,
-        telegram_enabled: c.telegram_enabled,
-        report_enabled: c.report_enabled,
-      });
-      setActionSuccess(`Paper trading for ${c.symbol} ${c.strategy_name} ${!c.is_active ? "activated" : "paused"}.`);
-      setAttempt((v) => v + 1);
+      await patchPaperDeployment(config.id, settings);
+      setActionSuccess(message);
+      setAttempt((current) => current + 1);
+      return true;
     } catch (cause) {
-      setActionError(cause instanceof PaperTradingActionError ? cause.message : "Failed to update strategy configuration.");
-    } finally {
-      setTogglingConfigId(null);
-    }
-  };
-
-  const handleToggleConfigTelegram = async (c: PaperConfig) => {
-    if (!canTrade || savingPreference || togglingConfigId !== null) return;
-    setTogglingConfigId(c.id);
-    setActionError(null);
-    setActionWarning(null);
-    try {
-      await updatePaperConfig({
-        symbol: c.symbol,
-        market: c.market,
-        timeframe: c.timeframe,
-        strategy_name: c.strategy_name,
-        is_active: c.is_active,
-        allocated_capital: c.allocated_capital,
-        risk_per_trade_pct: c.risk_per_trade_pct,
-        ml_model_id: c.ml_model_id,
-        ml_generator_model_id: c.ml_generator_model_id,
-        telegram_enabled: !c.telegram_enabled,
-        report_enabled: c.report_enabled,
-      });
-      setActionSuccess(`Telegram alerts ${!c.telegram_enabled ? "enabled" : "disabled"} for ${c.strategy_name} (${c.symbol}).`);
-      setAttempt((v) => v + 1);
-    } catch (cause) {
-      setActionError(cause instanceof PaperTradingActionError ? cause.message : "Failed to update Telegram preference.");
-    } finally {
-      setTogglingConfigId(null);
-    }
-  };
-
-  const handleToggleConfigReport = async (c: PaperConfig) => {
-    if (!canTrade || savingPreference || togglingConfigId !== null) return;
-    setTogglingConfigId(c.id);
-    setActionError(null);
-    setActionWarning(null);
-    try {
-      await updatePaperConfig({
-        symbol: c.symbol,
-        market: c.market,
-        timeframe: c.timeframe,
-        strategy_name: c.strategy_name,
-        is_active: c.is_active,
-        allocated_capital: c.allocated_capital,
-        risk_per_trade_pct: c.risk_per_trade_pct,
-        ml_model_id: c.ml_model_id,
-        ml_generator_model_id: c.ml_generator_model_id,
-        telegram_enabled: c.telegram_enabled,
-        report_enabled: !c.report_enabled,
-      });
-      setActionSuccess(`Performance report ${!c.report_enabled ? "included" : "hidden"} for ${c.strategy_name} (${c.symbol}).`);
-      setAttempt((v) => v + 1);
-    } catch (cause) {
-      setActionError(cause instanceof PaperTradingActionError ? cause.message : "Failed to update report visibility.");
+      setActionError(cause instanceof PaperTradingActionError ? cause.message : "Could not update the deployment.");
+      return false;
     } finally {
       setTogglingConfigId(null);
     }
@@ -480,32 +442,78 @@ export function PaperTradingPanel() {
     }
   };
 
-  const allMetrics = data?.metrics;
+  const archiveDeployment = async (config: PaperConfig) => {
+    setTogglingConfigId(config.id);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      await archivePaperConfig(config.id);
+      setPendingArchive(null);
+      setActionSuccess("Deployment archived. Existing positions and trade history are preserved.");
+      setAttempt((current) => current + 1);
+    } catch (cause) {
+      setActionError(cause instanceof PaperTradingActionError ? cause.message : "Could not archive the deployment.");
+    } finally {
+      setTogglingConfigId(null);
+    }
+  };
+
+  const saveDeployment = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingConfig || togglingConfigId !== null) return;
+    const { allocated_capital, risk_per_trade_pct } = editingConfig;
+    if (await saveDeploymentSettings(editingConfig, { allocated_capital, risk_per_trade_pct }, "Deployment settings saved.")) {
+      setEditingConfig(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!reportDays) return;
+    const controller = new AbortController();
+    setPeriodResult(null);
+    fetchPaperReportForPeriod(reportDays, controller.signal)
+      .then((metrics) => {
+        if (!controller.signal.aborted) setPeriodResult({ days: reportDays, metrics });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setPeriodResult({ days: reportDays, failed: true });
+      });
+    return () => controller.abort();
+  }, [reportDays, attempt]);
+
+  const allMetrics = reportDays
+    ? (periodResult?.days === reportDays ? periodResult.metrics : undefined)
+    : data?.metrics;
   const configs = data?.configs ?? [];
   const symbols = [...new Set([
     ...configs.map((config) => config.symbol),
-    ...(allMetrics?.byStrategy.flatMap((row) => row.symbol ? [row.symbol] : []) ?? []),
+    ...(data?.metrics.byStrategy.flatMap((row) => row.symbol ? [row.symbol] : []) ?? []),
   ])].sort();
   const strategies = [...new Set([
     ...configs.filter((config) => !reportSymbol || config.symbol === reportSymbol).map((config) => config.strategy_name),
-    ...(allMetrics?.byStrategy.filter((row) => !reportSymbol || row.symbol === reportSymbol).map((row) => row.strategy) ?? []),
+    ...(data?.metrics.byStrategy.filter((row) => !reportSymbol || row.symbol === reportSymbol).map((row) => row.strategy) ?? []),
   ])].sort();
   const scopedConfigs = configs.filter((config) =>
     (!reportSymbol || config.symbol === reportSymbol) && (!reportStrategy || config.strategy_name === reportStrategy),
   );
-  const filtered = Boolean(reportSymbol || reportStrategy);
+  const preferenceScopeSelected = Boolean(reportSymbol || reportStrategy);
+  const filtered = preferenceScopeSelected || Boolean(reportMarket || reportTimeframe);
+  const isReportMarketAndTimeframe = (market?: string, timeframe?: string) =>
+    (!reportMarket || market === reportMarket) && (!reportTimeframe || timeframe === reportTimeframe);
   const reportRows = allMetrics?.byStrategy ?? [];
   const closedRows = reportRows.filter((row) =>
-    (!reportSymbol || row.symbol === reportSymbol) && (!reportStrategy || row.strategy === reportStrategy),
+    (!reportSymbol || row.symbol === reportSymbol) && (!reportStrategy || row.strategy === reportStrategy) && isReportMarketAndTimeframe(row.market, row.timeframe),
   );
   const rows = [...closedRows];
-  const shown = new Set(closedRows.map((row) => JSON.stringify([row.symbol, row.strategy])));
+  const configById = new Map(configs.map((config) => [config.id, config]));
+  const shown = new Set(closedRows.map((row) => JSON.stringify([row.configId, row.symbol, row.strategy, row.market, row.timeframe])));
   for (const config of scopedConfigs) {
-    const key = JSON.stringify([config.symbol, config.strategy_name]);
+    if (!isReportMarketAndTimeframe(config.market, config.timeframe) || config.archived_at) continue;
+    const key = JSON.stringify([config.id, config.symbol, config.strategy_name, config.market, config.timeframe]);
     if (!config.report_enabled || shown.has(key)) continue;
     shown.add(key);
     rows.push({
-      symbol: config.symbol, strategy: config.strategy_name, totalTrades: 0, wins: 0, losses: 0,
+      symbol: config.symbol, strategy: config.strategy_name, configId: config.id, market: config.market, timeframe: config.timeframe, totalTrades: 0, wins: 0, losses: 0,
       netPnl: 0, cumulativeR: 0, winRatePct: 0, expectancyR: 0,
     });
   }
@@ -612,9 +620,30 @@ export function PaperTradingPanel() {
               {strategies.map((strategy) => <option key={strategy} value={strategy}>{strategy}</option>)}
             </select>
           </label>
+          <label className="screener-control-field">Report period
+            <select value={reportDays} onChange={(event) => setReportDays(Number(event.target.value))}>
+              <option value={0}>All time</option><option value={7}>Last 7 days</option>
+              <option value={30}>Last 30 days</option><option value={90}>Last 90 days</option>
+            </select>
+          </label>
+          <label className="screener-control-field">Report market
+            <select value={reportMarket} onChange={(event) => setReportMarket(event.target.value)}>
+              <option value="">All markets</option><option value="spot">Spot</option><option value="futures">Futures</option>
+            </select>
+          </label>
+          <label className="screener-control-field">Report timeframe
+            <select value={reportTimeframe} onChange={(event) => setReportTimeframe(event.target.value)}>
+              <option value="">All timeframes</option>
+              {["15m", "1h", "4h", "1d"].map((timeframe) => <option key={timeframe}>{timeframe}</option>)}
+            </select>
+          </label>
         </div>
-        {filtered && <p>{scopedConfigs.filter((c) => c.report_enabled).length} of {scopedConfigs.length} configurations included in reports · {scopedConfigs.filter((c) => c.telegram_enabled).length} with Telegram trade alerts</p>}
-        {canTrade && filtered && scopedConfigs.length > 0 && <div className="screener-control-footer">
+        {reportDays > 0 && !allMetrics && <p role="status">
+          {periodResult?.failed ? "Period totals could not be loaded." : "Loading period totals…"}
+          {periodResult?.failed && <button type="button" className="button button-secondary" onClick={() => setAttempt((current) => current + 1)}>Retry</button>}
+        </p>}
+        {preferenceScopeSelected && <p>{scopedConfigs.filter((c) => c.report_enabled).length} of {scopedConfigs.length} configurations included in reports · {scopedConfigs.filter((c) => c.telegram_enabled).length} with Telegram trade alerts</p>}
+        {canTrade && preferenceScopeSelected && scopedConfigs.length > 0 && <div className="screener-control-footer">
           {([
             ["report_enabled", true, "Enable reporting"],
             ["report_enabled", false, "Disable reporting"],
@@ -644,18 +673,21 @@ export function PaperTradingPanel() {
         {loading && !data ? <p className="empty-state">Loading strategy performance…</p> : m?.byStrategy.length ? (
           <div className="status-table-wrap">
             <table className="status-table">
-              <thead><tr><th>Pair</th><th>Strategy</th><th>Closed trades</th><th>Wins / losses</th><th>Win rate</th><th>Cumulative R</th><th>Expectancy</th><th>Net PnL</th></tr></thead>
+              <thead><tr><th>Pair</th><th>Strategy</th><th>Market / timeframe</th><th>Closed trades</th><th>Wins / losses</th><th>Win rate</th><th>Cumulative R</th><th>Expectancy</th><th>Net PnL</th><th>Realized equity (all time)</th></tr></thead>
               <tbody>
                 {m.byStrategy.map((row, index) => (
                   <tr key={`${row.symbol}-${row.strategy}-${row.configId}-${index}`}>
                     <td>{row.symbol ?? "—"}</td>
                     <td><strong>{row.strategy}</strong></td>
+                    <td>{row.market && row.timeframe ? `${row.market} · ${row.timeframe}` : "—"}</td>
                     <td>{number.format(row.totalTrades)}</td>
                     <td>{row.wins} / {row.losses}</td>
                     <td>{row.totalTrades ? `${number.format(row.winRatePct)}%` : "—"}</td>
                     <td className={pnlClass(row.cumulativeR)}>{number.format(row.cumulativeR)} R</td>
                     <td className={pnlClass(row.expectancyR)}>{number.format(row.expectancyR)} R</td>
                     <td className={pnlClass(row.netPnl)}>{money.format(row.netPnl)}</td>
+                    <td>{configById.get(row.configId ?? 0)?.realized_equity == null
+                      ? "—" : money.format(configById.get(row.configId ?? 0)!.realized_equity!)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -786,14 +818,15 @@ export function PaperTradingPanel() {
         {data?.configs.length ? (
           <div className="status-table-wrap">
             <table className="status-table">
-              <thead><tr><th>Symbol / strategy</th><th>Market</th><th>State</th><th>Capital</th><th>Risk / trade</th><th>Telegram</th><th>Report</th>{canTrade && <th>Actions</th>}</tr></thead>
+              <thead><tr><th>Symbol / strategy</th><th>Market</th><th>State</th><th>Capital</th><th>Realized equity</th><th>Risk / trade</th><th>Telegram</th><th>Report</th>{canTrade && <th>Actions</th>}</tr></thead>
               <tbody>
                 {data.configs.map((c) => (
                   <tr key={c.id}>
                     <td><strong>{c.symbol}</strong><small>{c.strategy_name} · {c.timeframe}</small></td>
                     <td>{c.market}</td>
-                    <td><span className={"status-pill " + (c.is_active ? "status-positive" : "status-neutral")}>{c.is_active ? "Active" : "Inactive"}</span></td>
+                    <td><span className={"status-pill " + (c.is_active ? "status-positive" : "status-neutral")}>{c.archived_at ? "Archived" : c.is_active ? "Active" : "Paused"}</span></td>
                     <td>{money.format(c.allocated_capital)}</td>
+                    <td>{c.realized_equity == null ? "—" : money.format(c.realized_equity)}</td>
                     <td>{number.format(c.risk_per_trade_pct)}%</td>
                     <td>{c.telegram_enabled ? "Enabled" : "Disabled"}</td>
                     <td>{c.report_enabled ? "Included" : "Hidden"}</td>
@@ -804,16 +837,16 @@ export function PaperTradingPanel() {
                             type="button"
                             className={`button ${c.is_active ? "button-secondary" : "button-primary"} button-sm`}
                             disabled={savingPreference || togglingConfigId !== null || loading}
-                            onClick={() => handleToggleConfigActive(c)}
+                            onClick={() => void saveDeploymentSettings(c, { is_active: !c.is_active }, c.is_active ? "Deployment paused." : "Deployment activated.")}
                             title={c.is_active ? "Pause paper trading for this strategy" : "Activate paper trading for this strategy"}
                           >
-                            {togglingConfigId === c.id ? "…" : c.is_active ? "Pause" : "Activate"}
+                            {togglingConfigId === c.id ? "…" : c.archived_at ? "Restore and activate" : c.is_active ? "Pause" : "Activate"}
                           </button>
                           <button
                             type="button"
                             className={`button ${c.telegram_enabled ? "button-primary" : "button-secondary"} button-sm`}
                             disabled={savingPreference || togglingConfigId !== null || loading}
-                            onClick={() => handleToggleConfigTelegram(c)}
+                            onClick={() => void saveDeploymentSettings(c, { telegram_enabled: !c.telegram_enabled }, c.telegram_enabled ? "Telegram alerts disabled." : "Telegram alerts enabled.")}
                             title={c.telegram_enabled ? "Disable Telegram alerts for this strategy" : "Enable Telegram alerts for this strategy"}
                           >
                             Telegram {c.telegram_enabled ? "On" : "Off"}
@@ -822,11 +855,15 @@ export function PaperTradingPanel() {
                             type="button"
                             className={`button ${c.report_enabled ? "button-primary" : "button-secondary"} button-sm`}
                             disabled={savingPreference || togglingConfigId !== null || loading}
-                            onClick={() => handleToggleConfigReport(c)}
+                            onClick={() => void saveDeploymentSettings(c, { report_enabled: !c.report_enabled }, c.report_enabled ? "Performance report hidden." : "Performance report included.")}
                             title={c.report_enabled ? "Hide from performance reports" : "Include in performance reports"}
                           >
                             Report {c.report_enabled ? "On" : "Off"}
                           </button>
+                          {!c.archived_at && <>
+                            <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={() => setEditingConfig(c)}>Edit</button>
+                            <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={() => setPendingArchive(c)}>Archive</button>
+                          </>}
                         </div>
                       </td>
                     )}
@@ -837,6 +874,28 @@ export function PaperTradingPanel() {
           </div>
         ) : <p className="empty-state">{loading ? "Loading strategy configurations…" : "No paper strategy configurations found."}</p>}
       </section>
+
+      {editingConfig && <section className="panel" aria-label="Edit paper deployment">
+        <h2>Edit {editingConfig.symbol} · {editingConfig.strategy_name}</h2>
+        <form onSubmit={(event) => void saveDeployment(event)}>
+          <div className="paper-risk-grid">
+            <label className="screener-control-field">Allocated capital
+              <input type="number" min={100} step="0.01" required value={editingConfig.allocated_capital} onChange={(event) => setEditingConfig({ ...editingConfig, allocated_capital: event.target.valueAsNumber })} />
+            </label>
+            <label className="screener-control-field">Risk per trade (%)
+              <input type="number" min={0.1} max={10} step="0.01" required value={editingConfig.risk_per_trade_pct} onChange={(event) => setEditingConfig({ ...editingConfig, risk_per_trade_pct: event.target.valueAsNumber })} />
+            </label>
+          </div>
+          <button className="button button-secondary" type="button" disabled={togglingConfigId !== null} onClick={() => setEditingConfig(null)}>Cancel edit</button>
+          <button className="button button-primary" type="submit" disabled={togglingConfigId !== null}>Save deployment</button>
+        </form>
+      </section>}
+      {pendingArchive && <section className="panel" aria-label="Confirm archive">
+        <h2>Archive {pendingArchive.symbol} · {pendingArchive.strategy_name}?</h2>
+        <p>New entries stop and pending orders are cancelled. Open positions continue to be managed and closed trades remain in history.</p>
+        <button className="button button-secondary" type="button" disabled={togglingConfigId !== null} onClick={() => setPendingArchive(null)}>Cancel archive</button>
+        <button className="button button-primary" type="button" disabled={togglingConfigId !== null} onClick={() => void archiveDeployment(pendingArchive)}>Confirm archive</button>
+      </section>}
 
       {/* PT-07: Recent orders with cancel order action */}
       <section className="panel" aria-labelledby="paper-orders-title">

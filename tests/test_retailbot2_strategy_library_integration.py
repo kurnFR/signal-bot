@@ -4,7 +4,7 @@ Test Strategy Library, Paper Trading, and Telegram Alert Gating for RetailBot2 s
 Verifies:
 1. All RetailBot2 strategies (BB_REV, BB_REV_INV, DBL_PAT, DBL_PAT_INV, etc.) appear in Strategy Library.
 2. Strategies can be added to Paper Trading configurations.
-3. Adding/updating RetailBot2 paper configs synchronizes with rdt_strategy_lifecycle.
+3. Adding/updating RetailBot2 paper configs is independent of rdt_strategy_lifecycle.
 4. Only chosen strategies with telegram_enabled=True send trade open/close signals to Telegram.
 5. Background shadow/inverse execution continues recording paper trades.
 """
@@ -61,9 +61,9 @@ def test_strategy_library_catalog_exposes_bb_rev_inv_and_dbl_pat_inv():
     assert dbl_pat_inv["category"] == "RetailBot2 (Research)"
 
 
-def test_paper_config_accepts_bb_rev_inv_and_syncs_lifecycle():
+def test_paper_config_accepts_bb_rev_inv_without_changing_research_lifecycle():
     with patch("web.routes.paper_routes.set_paper_config") as mock_set_cfg, \
-         patch("web.routes.paper_routes._sync_retailbot2_lifecycle") as mock_sync:
+         patch("db.db.set_retailbot2_strategy_lifecycle_setting") as mock_sync:
         mock_set_cfg.return_value = {"status": "success", "strategy": "BB_REV_INV"}
 
         from web.routes.paper_routes import update_config, PaperConfigRequest
@@ -83,24 +83,7 @@ def test_paper_config_accepts_bb_rev_inv_and_syncs_lifecycle():
         assert res["status"] == "success"
 
         mock_set_cfg.assert_called_once()
-        mock_sync.assert_called_once_with("BB_REV_INV", True, True, True)
-
-
-def test_sync_retailbot2_lifecycle_updates_db():
-    from web.routes.paper_routes import _sync_retailbot2_lifecycle
-    with patch("db.db.get_retailbot2_strategy_lifecycle_settings", return_value=[]), \
-         patch("db.db.set_retailbot2_strategy_lifecycle_setting") as mock_db_set:
-        _sync_retailbot2_lifecycle("BB_REV_INV", is_active=True, telegram_enabled=True, report_enabled=True)
-        mock_db_set.assert_called_once_with(
-            "BB_REV_INV", "inverse",
-            {
-                "evaluation_enabled": True,
-                "paper_enabled": True,
-                "telegram_enabled": True,
-                "report_enabled": True,
-                "auto_promote_enabled": False,
-            }
-        )
+        mock_sync.assert_not_called()
 
 
 def test_trade_close_alert_suppressed_when_telegram_disabled():

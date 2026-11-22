@@ -109,6 +109,11 @@ def build_processes(environ=None):
                 "RetailBot2 outbox worker requested but RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 "
                 "is missing; worker will remain disabled"
             )
+    report_enabled = (env.get("PAPER_REPORT_ENABLED") or "").strip()
+    if not report_enabled:
+        report_enabled = (env.get("RETAILBOT2_ENABLED") or "").strip()
+    if report_enabled == "1" and "retailbot2_outbox" in processes:
+        processes["paper_report"] = [sys.executable, "-m", "paper.report_scheduler"]
     return processes
 
 

@@ -29,9 +29,9 @@ function errorMessage(cause: unknown) {
   return "Research data could not be loaded. Check API/database health, then retry.";
 }
 
-export function ResearchPanel() {
+export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean } = {}) {
   const auth = useAuth();
-  const canTrade = ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
+  const canTrade = !historyOnly && ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
 
   const [data, setData] = useState<ResearchSnapshot | null>(null);
   const [strategies, setStrategies] = useState<ResearchStrategy[]>([]);
@@ -418,7 +418,7 @@ export function ResearchPanel() {
         <div className="panel-heading">
           <div>
             <h2 id="research-strategies-title">Strategy lifecycle snapshot</h2>
-            <p>Evaluation, paper, Telegram, and report visibility controls for registered RetailBot2 strategies.</p>
+            <p>{historyOnly ? "Saved settings from the legacy research worker. Manage new simulations in Paper Trading." : "Evaluation, paper, Telegram, and report visibility controls for registered RetailBot2 strategies."}</p>
           </div>
           <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
             <span className="panel-counter">{filteredStrategies.length} ROWS</span>
