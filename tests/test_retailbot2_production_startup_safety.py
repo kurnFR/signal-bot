@@ -214,67 +214,35 @@ class TestOperationalNotificationRouting:
         assert "BB_SQUEEZE" in text
         assert "WR=80% Net=$+350" in text
 
-    def test_format_stats_includes_all_chosen_paper_strategies_with_winrate_and_pnl(self):
-        """TelegramAlert.format_stats reflects winrate, wins, losses, pnl and paper configs."""
+    def test_paper_report_formats_closed_trades_and_hides_zero_trade_rows(self):
         mock_metrics = {
             "totalTrades": 10,
             "wins": 7,
             "losses": 3,
             "winRatePct": 70.0,
-            "netPnl": 450.50,
+            "netPnl": -450.50,
             "byStrategy": [
-                {
-                    "symbol": "BTCUSDT",
-                    "strategy": "confluence_ensemble_v1",
-                    "totalTrades": 6,
-                    "wins": 4,
-                    "losses": 2,
-                    "netPnl": 250.50,
-                },
-                {
-                    "symbol": "ETHUSDT",
-                    "strategy": "BB_REV_INV",
-                    "totalTrades": 4,
-                    "wins": 3,
-                    "losses": 1,
-                    "netPnl": 200.00,
-                },
+                {"symbol": "BTCUSDT", "strategy": "trend_v1", "totalTrades": 6,
+                 "wins": 4, "losses": 2, "netPnl": -450.50},
+                {"symbol": "ETHUSDT", "strategy": "trend_v1", "totalTrades": 4,
+                 "wins": 3, "losses": 1, "netPnl": 0.0},
+                {"symbol": "ETHUSDT", "strategy": "idle_v1", "totalTrades": 0,
+                 "wins": 0, "losses": 0, "netPnl": 0.0},
+                {"symbol": "XAUTUSDT", "strategy": "trend_v1", "totalTrades": 0,
+                 "wins": 0, "losses": 0, "netPnl": 0.0},
             ],
         }
-        mock_configs = [
-            {"symbol": "BTCUSDT", "strategy_name": "confluence_ensemble_v1", "report_enabled": True, "telegram_enabled": False},
-            {"symbol": "ETHUSDT", "strategy_name": "BB_REV_INV", "report_enabled": True, "telegram_enabled": True},
-            {"symbol": "ETHUSDT", "strategy_name": "rsi_dip_buyer_v1", "report_enabled": True, "telegram_enabled": False},
-            {"symbol": "SOLUSDT", "strategy_name": "hidden_strat", "report_enabled": False, "telegram_enabled": True},
-        ]
-        retail_stats = {
-            "SR_TRAP_shadow": {"total": 5, "wins": 4, "losses": 1, "net_pnl": 350.0},
-        }
-        with patch("paper.engine.get_paper_metrics", return_value=mock_metrics), \
-             patch("paper.engine.get_paper_configs", return_value=mock_configs):
-            text = TelegramAlert.format_stats(retail_stats, equity_shadow=10500.0, equity_inverse=9800.0)
+        with patch("paper.engine.get_paper_metrics", return_value=mock_metrics):
+            text = TelegramAlert.format_paper_report()
 
-        # Headline verification
-        assert "Net P&amp;L: <code>$+450.50</code> · Closed: 10 · WR: <code>70%</code> · Wins: 7 · Losses: 3" in text
-
-        # Traded strategies verification (including winrate, wins, losses, pnl)
-        assert "🟢 <b>confluence_ensemble_v1</b>: T=6 W=4 L=2 WR=67% Net=$+250.50" in text
-        assert "🟢 <b>BB_REV_INV</b>: T=4 W=3 L=1 WR=75% Net=$+200.00" in text
-
-        # Chosen strategy listed in paper trading with 0 trades verification
-        # (even though telegram_enabled=False)
-        assert "⚪ <b>rsi_dip_buyer_v1</b>: T=0 W=0 L=0 WR=0% Net=$+0.00" in text
-
-        # Hidden strategy with report_enabled=False must NOT appear
-        assert "hidden_strat" not in text
-        assert "<b>BTCUSDT</b> · Net=$+250.50" in text
-        assert "<b>ETHUSDT</b> · Net=$+200.00" in text
-        assert "SOLUSDT" not in text
-
-        # RetailBot2 section verification
-        assert "RetailBot2 Research · Shadow / Inverse" in text
-        assert "SR_TRAP_shadow" in text
-        assert "WR=80% Net=$+350" in text
+        assert "Net P&amp;L: <b>−$450.50</b>" in text
+        assert "10 closed · Wins 7 · Losses 3 · 70% win rate" in text
+        assert "<b>BTCUSDT</b> · −$450.50\n6 closed · 67% win rate" in text
+        assert "<b>ETHUSDT</b> · $0.00\n4 closed · 75% win rate" in text
+        assert "• <b>trend_v1</b> · $0.00\n  4 closed · Wins 3 · Losses 1 · 75% win rate" in text
+        assert text.count("<b>trend_v1</b>") == 2
+        assert "idle_v1" not in text
+        assert "XAUTUSDT" not in text
 
     def test_paper_performance_lines_standalone_execution_resolves_paper_engine(self):
         """When executed from paper/ or as standalone script, paper.engine imports resolve without ModuleNotFoundError."""
