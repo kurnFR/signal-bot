@@ -276,6 +276,36 @@ class TestOperationalNotificationRouting:
         assert "SR_TRAP_shadow" in text
         assert "WR=80% Net=$+350" in text
 
+    def test_paper_performance_lines_standalone_execution_resolves_paper_engine(self):
+        """When executed from paper/ or as standalone script, paper.engine imports resolve without ModuleNotFoundError."""
+        import subprocess
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        paper_dir = os.path.join(repo_root, "paper")
+        code = (
+            "import sys\n"
+            "from retailbot2 import TelegramAlert\n"
+            "lines = TelegramAlert._paper_performance_lines()\n"
+            "assert 'Paper trade totals unavailable' not in lines, f'Failed: {lines}'\n"
+            "assert any('Paper Trading Engine' in l for l in lines), f'Missing header: {lines}'\n"
+            "print('RESOLVED_OK')\n"
+        )
+        res = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=paper_dir,
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode == 0, f"STDOUT: {res.stdout}\nSTDERR: {res.stderr}"
+        assert "RESOLVED_OK" in res.stdout
+
+    def test_paper_performance_lines_logs_detailed_exception_on_failure(self, caplog):
+        """When paper.engine raises an exception, the exception name and string are logged."""
+        with patch("paper.engine.get_paper_metrics", side_effect=RuntimeError("db connection failed")):
+            with caplog.at_level(logging.WARNING):
+                lines = TelegramAlert._paper_performance_lines()
+        assert "Paper trade totals unavailable" in lines
+        assert any("Paper performance report unavailable (RuntimeError: db connection failed)" in record.message for record in caplog.records)
+
     def test_startup_message_routes_through_notify_operational(self):
         """_startup_msg uses notify_operational instead of direct send."""
         bot = object.__new__(RetailDeathTrapBot)

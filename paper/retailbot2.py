@@ -20,6 +20,13 @@ FIXES IN v2.1:
   [F12] Strategy signal logging shows actual reasons
 """
 
+import sys
+import os
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 import numpy as np
 import pandas as pd
 from typing import Any, Dict, List, Optional, Tuple
@@ -937,11 +944,14 @@ class TelegramAlert:
         """Read the same realized paper ledger totals shown on the dashboard."""
         lines = ["📝 <b>Paper Trading Engine · Realized P&amp;L</b>"]
         try:
-            from paper.engine import get_paper_metrics
+            try:
+                from paper.engine import get_paper_metrics
+            except ModuleNotFoundError:
+                from engine import get_paper_metrics
 
             metrics = get_paper_metrics()
         except Exception as exc:
-            logging.getLogger(__name__).warning("Paper performance report unavailable (%s)", type(exc).__name__)
+            logging.getLogger(__name__).warning("Paper performance report unavailable (%s: %s)", type(exc).__name__, exc)
             return [*lines, "Paper trade totals unavailable"]
 
         if not metrics["totalTrades"]:
@@ -956,13 +966,16 @@ class TelegramAlert:
         )
         by_pair: dict[str, dict[str, list]] = {}
         try:
-            from paper.engine import get_paper_configs
+            try:
+                from paper.engine import get_paper_configs
+            except ModuleNotFoundError:
+                from engine import get_paper_configs
 
             for cfg in get_paper_configs():
                 if cfg.get("report_enabled", True):
                     by_pair.setdefault(cfg["symbol"], {}).setdefault(cfg["strategy_name"], [0, 0, 0, 0.0])
         except Exception as exc:
-            logging.getLogger(__name__).debug("Paper configs lookup failed (%s)", type(exc).__name__)
+            logging.getLogger(__name__).debug("Paper configs lookup failed (%s: %s)", type(exc).__name__, exc)
 
         for row in metrics["byStrategy"]:
             strategies = by_pair.setdefault(row["symbol"], {})
