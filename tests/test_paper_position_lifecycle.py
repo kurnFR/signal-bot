@@ -622,7 +622,20 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         after = TelegramAlert.format_stats(retail_stats, 10000, 10050)
         self.assertIn(f"Net P&amp;L: <code>${net_pnl:+,.2f}</code> · Closed: 1", after)
         self.assertIn("WR: <code>100%</code>", after)
+        self.assertIn(f"<b>BTCUSDT</b> · Net=${net_pnl:+,.2f}", after)
         self.assertIn(f"<b>BB_REV_INV</b>: T=1 W=1 L=0 WR=100% Net=${net_pnl:+,.2f}", after)
+
+        self._create_config(symbol="ETHUSDT", strategy_name="BB_REV_INV")
+        self._create_config(strategy_name="trend_ema_v1")
+        self.assertEqual(pe.batch_update_paper_configs("BB_REV_INV", "report_all_off", symbol="BTCUSDT"), 1)
+        self.assertEqual(pe.batch_update_paper_configs(None, "telegram_all_on", symbol="BTCUSDT"), 2)
+        configs = {(c["symbol"], c["strategy_name"]): c for c in pe.get_paper_configs()}
+        self.assertFalse(configs["BTCUSDT", "BB_REV_INV"]["report_enabled"])
+        self.assertTrue(configs["BTCUSDT", "trend_ema_v1"]["report_enabled"])
+        self.assertTrue(configs["BTCUSDT", "BB_REV_INV"]["telegram_enabled"])
+        self.assertTrue(configs["ETHUSDT", "BB_REV_INV"]["report_enabled"])
+        self.assertFalse(configs["ETHUSDT", "BB_REV_INV"]["telegram_enabled"])
+        self.assertEqual(pe.get_paper_metrics()["totalTrades"], 0)
         self.assertIn("BB_REV_INV_inverse</b>: T=2 W=1 L=1 WR=50% Net=$+50", after)
 
     def test_15_duplicate_trade_prevention(self):

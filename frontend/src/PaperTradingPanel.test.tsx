@@ -123,6 +123,7 @@ const baseFixture = {
       byStrategy: [
         {
           strategy: "trend_ema_v1",
+          symbol: "BTCUSDT",
           totalTrades: 3,
           wins: 2,
           losses: 1,
@@ -690,6 +691,36 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
 
     // View only indicators are present
     expect(screen.getByText(/Actions are view-only for this account/i)).toBeInTheDocument();
+  });
+
+  it("filters reporting by pair and updates only reporting for that pair", async () => {
+    const fixtures = structuredClone(baseFixture);
+    const first = fixtures["/api/paper/metrics"].metrics.byStrategy[0];
+    fixtures["/api/paper/metrics"].metrics.byStrategy = [
+      { ...first, symbol: "BTCUSDT", netPnl: 10.25 },
+      { ...first, symbol: "ETHUSDT", strategy: "other_pair", netPnl: 250 },
+    ];
+    let payload: unknown;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/paper/configs/preferences" && init?.method === "POST") {
+        payload = JSON.parse(String(init.body));
+        fixtures["/api/paper/configs"].configs[0].report_enabled = false;
+        fixtures["/api/paper/metrics"].metrics.byStrategy = fixtures["/api/paper/metrics"].metrics.byStrategy.filter(
+          (row) => row.symbol !== "BTCUSDT",
+        );
+        return Promise.resolve(json({ status: "success", updated: 1 }));
+      }
+      return Promise.resolve(json(fixtures[path as keyof typeof fixtures]));
+    }));
+    render(<PaperTradingPanel />);
+    expect(await screen.findByText("other_pair")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Pair" }), { target: { value: "BTCUSDT" } });
+    expect(screen.queryByText("other_pair")).not.toBeInTheDocument();
+    const disable = screen.getByRole("button", { name: "Disable reporting" });
+    fireEvent.click(disable);
+    await waitFor(() => expect(payload).toEqual({ symbol: "BTCUSDT", report_enabled: false }));
+    expect(await screen.findByText(/0 of 1 configurations included in reports/)).toBeInTheDocument();
   });
 
   it("allows operator to pause/activate, toggle telegram, and toggle report on paper configs", async () => {
