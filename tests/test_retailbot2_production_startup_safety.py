@@ -203,7 +203,10 @@ class TestOperationalNotificationRouting:
             "SR_TRAP": {"total": 5, "wins": 4, "losses": 1, "net_pnl": 350.0},
             "BB_SQUEEZE": {"total": 5, "wins": 3, "losses": 2, "net_pnl": 150.0},
         }
-        text = TelegramAlert.format_stats(stats, equity_shadow=10500.0, equity_inverse=9800.0)
+        with patch("paper.engine.get_paper_metrics", side_effect=RuntimeError("DB unavailable")):
+            text = TelegramAlert.format_stats(stats, equity_shadow=10500.0, equity_inverse=9800.0)
+        assert "Paper trade totals unavailable" in text
+        assert "RetailBot2 Research · Shadow / Inverse" in text
         assert "PERFORMANCE REPORT" in text
         assert "Shadow Equity:  <code>$10,500.00</code>" in text
         assert "Inverse Equity: <code>$9,800.00</code>" in text

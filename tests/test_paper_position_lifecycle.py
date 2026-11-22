@@ -291,7 +291,6 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         cur.execute("SELECT * FROM paper_positions WHERE id=%s", (pos_id,))
         pos = cur.fetchone()
         self.assertEqual(pos["status"], "CLOSED")
-        self.assertEqual(float(pos["current_price"]), 54000.0)
 
         cur.execute("SELECT * FROM paper_trades WHERE position_id=%s", (pos_id,))
         trades = cur.fetchall()
@@ -299,6 +298,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         t = trades[0]
         self.assertEqual(t["exit_reason"], "TP")
         self.assertAlmostEqual(float(t["exit_price"]), apply_exit_slippage(54000.0, t["direction"], BACKTEST_SLIPPAGE_PCT), places=6)
+        self.assertEqual(pos["current_price"], t["exit_price"])
         self.assertEqual(t["exit_time"], 2000)
         self.assertGreater(float(t["net_pnl"]), 0.0)
         self.assertEqual(t["holding_bars"], 2)
@@ -596,6 +596,33 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         self.assertEqual(cur.fetchone()["cnt"], 0, "No duplicate or exit orders placed in entry order ledger")
         cur.close()
         conn.close()
+
+    def test_telegram_performance_report_reflects_committed_paper_trailing_exit(self):
+        from paper.retailbot2 import TelegramAlert
+
+        cfg_id = self._create_config(strategy_name="BB_REV_INV")
+        pos_id = self._create_position(
+            config_id=cfg_id, strategy_name="BB_REV_INV", direction="SHORT",
+            stop_loss=52000.0, take_profit=46000.0,
+        )
+        with self.pool.get_connection() as conn, conn.cursor(dictionary=True) as cur:
+            cur.execute("SELECT * FROM paper_positions WHERE id=%s", (pos_id,))
+            pos = cur.fetchone()
+
+        retail_stats = {"BB_REV_INV_inverse": {"total": 2, "wins": 1, "losses": 1, "net_pnl": 50}}
+        before = TelegramAlert.format_stats(retail_stats, 10000, 10050)
+        self.assertIn("No closed trades included in reporting", before)
+
+        exit_time = pos["entry_time"] + 10 * 3_600_000
+        self.assertTrue(pe.close_position_in_db(pos, 47000.0, exit_time, "TRAIL", holding_bars=10))
+        with self.pool.get_connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT net_pnl FROM paper_trades WHERE position_id=%s", (pos_id,))
+            net_pnl, = cur.fetchone()
+        self.assertGreater(net_pnl, 0)
+        after = TelegramAlert.format_stats(retail_stats, 10000, 10050)
+        self.assertIn(f"Net P&amp;L: <code>${net_pnl:+,.2f}</code> · Closed: 1", after)
+        self.assertIn(f"<b>BB_REV_INV</b>: T=1 Net=${net_pnl:+,.2f}", after)
+        self.assertIn("BB_REV_INV_inverse</b>: T=2 W=1 L=1 WR=50% Net=$+50", after)
 
     def test_15_duplicate_trade_prevention(self):
         """15. Direct call to close_position_in_db is strictly idempotent via CAS update."""
@@ -1434,7 +1461,6 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         cur.execute("SELECT status, current_price, funding_pnl FROM paper_positions WHERE id=%s", (pos_id,))
         p2 = cur.fetchone()
         self.assertEqual(p2["status"], "CLOSED")
-        self.assertEqual(float(p2["current_price"]), 54000.0)
 
         cur.execute("SELECT * FROM paper_trades WHERE position_id=%s", (pos_id,))
         trades = cur.fetchall()
@@ -1442,6 +1468,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         t = trades[0]
         self.assertEqual(t["exit_reason"], "TP")
         self.assertAlmostEqual(float(t["exit_price"]), apply_exit_slippage(54000.0, t["direction"], BACKTEST_SLIPPAGE_PCT), places=6)
+        self.assertEqual(p2["current_price"], t["exit_price"])
         self.assertEqual(t["exit_time"], 3000)
         # Expected funding cost: 0.1 * 52000.0 * 0.0005 = 2.6 -> funding_pnl = -2.6
         self.assertAlmostEqual(float(t["funding_pnl"]), -2.6, places=4)
