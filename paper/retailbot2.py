@@ -972,7 +972,7 @@ class TelegramAlert:
                 from engine import get_paper_configs
 
             for cfg in get_paper_configs():
-                if cfg.get("report_enabled", True):
+                if cfg.get("report_enabled", True) and not cfg.get("archived_at"):
                     by_pair.setdefault(cfg["symbol"], {}).setdefault(cfg["strategy_name"], [0, 0, 0, 0.0])
         except Exception as exc:
             logging.getLogger(__name__).debug("Paper configs lookup failed (%s: %s)", type(exc).__name__, exc)
@@ -988,7 +988,11 @@ class TelegramAlert:
         omitted = 0
         remaining = 1750
         for symbol, strategies in sorted(by_pair.items()):
-            heading = f"<b>{escape(symbol)}</b> · Net=${sum(row[3] for row in strategies.values()):+,.2f}"
+            pair_trades = sum(row[0] for row in strategies.values())
+            pair_wins = sum(row[1] for row in strategies.values())
+            pair_pnl = sum(row[3] for row in strategies.values())
+            pair_win_rate = f"{pair_wins / pair_trades:.0%}" if pair_trades else "—"
+            heading = f"<b>{escape(symbol)}</b> · Net=${pair_pnl:+,.2f} · T={pair_trades} · WR={pair_win_rate}"
             pair_lines = [heading]
             for name, (trades, wins, losses, pnl) in sorted(strategies.items()):
                 wr = f"{wins / trades:.0%}" if trades else "0%"
@@ -1011,6 +1015,14 @@ class TelegramAlert:
         if omitted:
             lines.append(f"Total includes {omitted} more pair/strategy rows. View all in Paper Trading.")
         return lines
+
+    @staticmethod
+    def format_paper_report() -> str:
+        return "\n".join([
+            "📊 <b>PAPER TRADING PERFORMANCE</b>",
+            "─" * 30,
+            *TelegramAlert._paper_performance_lines(),
+        ])
 
     @staticmethod
     def format_stats(stats: Dict, equity_shadow: float, equity_inverse: float) -> str:
@@ -2424,6 +2436,8 @@ class DatabaseManager:
         payload: Dict[str, Any],
         trade_id: int = 0,
         conn=None,
+        *,
+        deduplicate: bool = False,
     ) -> bool:
         """Enqueue an event into rdt_telegram_outbox for asynchronous delivery by outbox_worker.
         Blocked fail-closed if observation-only mode is active, configuration is missing,
@@ -2442,10 +2456,13 @@ class DatabaseManager:
         cursor = None
         try:
             cursor = active_conn.cursor()
-            cursor.execute(
-                """INSERT INTO rdt_telegram_outbox
+            statement = """INSERT INTO rdt_telegram_outbox
                    (trade_id, event_key, event_type, payload_json, status, next_attempt_at)
-                   VALUES (%s, %s, %s, %s, 'pending', UTC_TIMESTAMP())""",
+                   VALUES (%s, %s, %s, %s, 'pending', UTC_TIMESTAMP())"""
+            if deduplicate:
+                statement += " ON DUPLICATE KEY UPDATE id = id"
+            cursor.execute(
+                statement,
                 (int(trade_id), str(event_key)[:128], str(event_type)[:16], json.dumps(payload)),
             )
             if own_conn:
@@ -3453,7 +3470,6 @@ class RetailDeathTrapBot:
     def run(self):
         self.logger.info("🚀 Bot running — CTRL+C or SIGTERM to stop")
         loop_count = 0
-        stats_every = 720  # Every hour at 5s interval
 
         def _handle_signal(signum, frame):
             sig_name = "SIGTERM" if signum == sys_signal.SIGTERM else "SIGINT"
@@ -3495,14 +3511,6 @@ class RetailDeathTrapBot:
                             f"💓 Shadow: {s_open} open ${self.equity_shadow:,.2f} | "
                             f"Inverse: {i_open} open ${self.equity_inverse:,.2f}"
                         )
-
-                    # Stats report every hour
-                    if loop_count % stats_every == 0:
-                        stats = self.db.get_stats()
-                        stats_msg = self.tg.format_stats(
-                            stats, self.equity_shadow, self.equity_inverse
-                        )
-                        self.notify_operational(stats_msg, event_key=f"stats:{int(time.time())}")
 
                     # Sliced sleep to respond promptly to shutdown signals
                     sleep_remaining = float(self.config.exit_check_interval)

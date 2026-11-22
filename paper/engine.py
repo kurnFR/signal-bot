@@ -296,17 +296,23 @@ def seed_validated_paper_configs():
         conn.close()
 
 
-def get_paper_configs() -> List[Dict[str, Any]]:
+def get_paper_configs(*, include_equity: bool = False) -> List[Dict[str, Any]]:
+    equity_column = """
+        , allocated_capital + COALESCE((
+            SELECT SUM(t.net_pnl) FROM paper_trades t WHERE t.config_id = paper_configs.id
+        ), 0) AS realized_equity
+    """ if include_equity else ""
     conn = get_pool().get_connection()
     cur = None
     try:
         cur = conn.cursor(dictionary=True)
         try:
             cur.execute(
-                """
+                f"""
                 SELECT id, symbol, market, timeframe, strategy_name, is_active,
                        allocated_capital, risk_per_trade_pct, ml_model_id,
-                       ml_generator_model_id, telegram_enabled, report_enabled, created_at
+                       ml_generator_model_id, telegram_enabled, report_enabled, created_at, archived_at
+                       {equity_column}
                 FROM paper_configs
                 ORDER BY is_active DESC, symbol ASC
                 """
@@ -323,6 +329,9 @@ def get_paper_configs() -> List[Dict[str, Any]]:
             r["telegram_enabled"] = bool(r.get("telegram_enabled", False))
             r["report_enabled"] = bool(r.get("report_enabled", True))
             r["created_at"] = str(r["created_at"])
+            r["archived_at"] = str(r["archived_at"]) if r.get("archived_at") else None
+            if include_equity:
+                r["realized_equity"] = float(r["realized_equity"])
         return rows
     finally:
         conn.close()
@@ -387,6 +396,7 @@ def set_paper_config(
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     is_active = VALUES(is_active),
+                    archived_at = NULL,
                     allocated_capital = VALUES(allocated_capital),
                     risk_per_trade_pct = VALUES(risk_per_trade_pct),
                     ml_model_id = VALUES(ml_model_id),
@@ -404,6 +414,7 @@ def set_paper_config(
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     is_active = VALUES(is_active),
+                    archived_at = NULL,
                     allocated_capital = VALUES(allocated_capital),
                     risk_per_trade_pct = VALUES(risk_per_trade_pct),
                     ml_model_id = VALUES(ml_model_id),
@@ -422,6 +433,7 @@ def set_paper_config(
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     is_active = VALUES(is_active),
+                    archived_at = NULL,
                     allocated_capital = VALUES(allocated_capital),
                     risk_per_trade_pct = VALUES(risk_per_trade_pct),
                     ml_model_id = VALUES(ml_model_id),
@@ -441,6 +453,7 @@ def set_paper_config(
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     is_active = VALUES(is_active),
+                    archived_at = NULL,
                     allocated_capital = VALUES(allocated_capital),
                     risk_per_trade_pct = VALUES(risk_per_trade_pct),
                     ml_model_id = VALUES(ml_model_id),
@@ -482,32 +495,78 @@ def set_paper_config(
             conn.close()
 
 
-def delete_paper_config(config_id: int) -> bool:
-    """Delete a paper configuration by ID, ensuring no open position exists for it."""
-    conn = get_pool().get_connection()
-    cur = None
+def update_paper_deployment(config_id: int, **settings: Any) -> bool:
+    """Patch one deployment by ID without overwriting unrelated preferences."""
+    columns = {"is_active", "allocated_capital", "risk_per_trade_pct", "telegram_enabled", "report_enabled"}
+    if not settings or not settings.keys() <= columns:
+        raise ValueError("No valid deployment settings provided")
+    lock = PaperEngineAdvisoryLock(timeout=2)
+    if not lock.acquire():
+        raise ValueError("Paper engine is processing deployments. Retry in a moment.")
     try:
-        cur = conn.cursor(dictionary=True)
-        cur.execute(
-            "SELECT id, symbol, strategy_name FROM paper_positions WHERE config_id = %s AND status = 'OPEN' LIMIT 1",
-            (config_id,),
-        )
-        open_pos = cur.fetchone()
-        if open_pos:
-            raise ValueError(
-                f"Cannot delete paper config #{config_id}: position #{open_pos['id']} "
-                f"({open_pos['symbol']} / {open_pos['strategy_name']}) is currently OPEN. Close the position first."
-            )
-        cur.execute("DELETE FROM paper_configs WHERE id = %s", (config_id,))
-        deleted = cur.rowcount > 0
-        conn.commit()
-        return deleted
-    finally:
+        conn = get_pool().get_connection()
         try:
-            if cur is not None:
-                cur.close()
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM paper_configs WHERE id = %s FOR UPDATE", (config_id,))
+                if cur.fetchone() is None:
+                    conn.rollback()
+                    return False
+                updates = [f"{column} = %s" for column in settings]
+                if settings.get("is_active") is True:
+                    updates.append("archived_at = NULL")
+                cur.execute(
+                    f"UPDATE paper_configs SET {', '.join(updates)} WHERE id = %s",
+                    (*settings.values(), config_id),
+                )
+                if settings.get("is_active") is False:
+                    _cancel_deployment_orders(cur, config_id, "Deployment paused")
+                conn.commit()
+                return True
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
+    finally:
+        lock.release()
+
+
+def _cancel_deployment_orders(cur, config_id: int, reason: str) -> None:
+    cur.execute(
+        """UPDATE paper_orders
+           SET status = 'CANCELLED', state_reason = %s,
+               terminal_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+           WHERE config_id = %s AND status = 'PENDING'""",
+        (reason, config_id),
+    )
+
+
+def delete_paper_config(config_id: int) -> bool:
+    """Archive a deployment while preserving its configuration and ledger links."""
+    lock = PaperEngineAdvisoryLock(timeout=2)
+    if not lock.acquire():
+        raise ValueError("Paper engine is processing deployments. Retry in a moment.")
+    try:
+        conn = get_pool().get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE paper_configs SET is_active = 0, archived_at = CURRENT_TIMESTAMP
+                       WHERE id = %s AND archived_at IS NULL""",
+                    (config_id,),
+                )
+                archived = cur.rowcount > 0
+                if archived:
+                    _cancel_deployment_orders(cur, config_id, "Deployment archived")
+                conn.commit()
+                return archived
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    finally:
+        lock.release()
 
 
 def batch_update_paper_configs(strategy_name: Optional[str], action: str, *, symbol: Optional[str] = None) -> int:
@@ -536,6 +595,8 @@ def batch_update_paper_configs(strategy_name: Optional[str], action: str, *, sym
     if symbol:
         conditions.append("symbol = %s")
         params.append(symbol)
+    if column != "report_enabled":
+        conditions.append("archived_at IS NULL")
     where = " AND ".join(conditions)
     conn = get_pool().get_connection()
     cur = None
@@ -645,13 +706,15 @@ def get_paper_trades(limit: int = 50) -> List[Dict[str, Any]]:
             conn.close()
 
 
-def get_paper_metrics() -> Dict[str, Any]:
+def get_paper_metrics(*, closed_since_ms: Optional[int] = None) -> Dict[str, Any]:
+    date_filter = "AND t.exit_time >= %s" if closed_since_ms is not None else ""
+    params = (closed_since_ms,) if closed_since_ms is not None else ()
     conn = get_pool().get_connection()
     cur = None
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            """
+            f"""
             SELECT COUNT(*) AS total_trades,
                    SUM(CASE WHEN t.r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
                    SUM(CASE WHEN t.r_multiple < 0 THEN 1 ELSE 0 END) AS losses,
@@ -660,13 +723,13 @@ def get_paper_metrics() -> Dict[str, Any]:
                    SUM(t.net_pnl) AS net_pnl
             FROM paper_trades t
             LEFT JOIN paper_configs c ON c.id = t.config_id
-            WHERE COALESCE(c.report_enabled, TRUE) = TRUE
-            """
+            WHERE COALESCE(c.report_enabled, TRUE) = TRUE {date_filter}
+            """, params
         )
         summary = cur.fetchone()
         cur.execute(
-            """
-            SELECT t.symbol, t.strategy_name, t.config_id, t.ml_generator_model_id, t.ml_model_id,
+            f"""
+            SELECT t.symbol, t.market, t.timeframe, t.strategy_name, t.config_id, t.ml_generator_model_id, t.ml_model_id,
                    COUNT(*) AS total_trades,
                    SUM(CASE WHEN t.r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
                    SUM(CASE WHEN t.r_multiple < 0 THEN 1 ELSE 0 END) AS losses,
@@ -675,10 +738,10 @@ def get_paper_metrics() -> Dict[str, Any]:
                    SUM(t.net_pnl) AS net_pnl
             FROM paper_trades t
             LEFT JOIN paper_configs c ON c.id = t.config_id
-            WHERE COALESCE(c.report_enabled, TRUE) = TRUE
-            GROUP BY t.symbol, t.strategy_name, t.config_id, t.ml_generator_model_id, t.ml_model_id
+            WHERE COALESCE(c.report_enabled, TRUE) = TRUE {date_filter}
+            GROUP BY t.symbol, t.market, t.timeframe, t.strategy_name, t.config_id, t.ml_generator_model_id, t.ml_model_id
             ORDER BY t.strategy_name, t.config_id
-            """
+            """, params
         )
         strategy_rows = cur.fetchall()
         total = int(summary["total_trades"] or 0)
@@ -691,6 +754,8 @@ def get_paper_metrics() -> Dict[str, Any]:
             by_strategy.append({
                 "strategy": row["strategy_name"],
                 "symbol": row.get("symbol"),
+                "market": row.get("market"),
+                "timeframe": row.get("timeframe"),
                 "configId": row.get("config_id"),
                 "ml_generator_model_id": row.get("ml_generator_model_id"),
                 "ml_model_id": row.get("ml_model_id"),

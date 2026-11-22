@@ -211,10 +211,20 @@ class TestPaperOrderRoutes(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Cannot delete with open position", response.json()["detail"])
 
+    def test_paper_deployment_patch_updates_only_selected_value(self):
+        with patch("web.app.authenticate_request", return_value=_user("trader")), \
+             patch("web.routes.paper_routes.update_paper_deployment", return_value=True) as update:
+            response = self.client.patch("/api/paper/configs/15", json={"telegram_enabled": False})
+        self.assertEqual(response.status_code, 200)
+        update.assert_called_once_with(15, telegram_enabled=False)
+        with patch("web.app.authenticate_request", return_value=_user("viewer")):
+            denied = self.client.patch("/api/paper/configs/15", json={"telegram_enabled": False})
+        self.assertEqual(denied.status_code, 403)
+
     def test_batch_update_paper_configs_success(self):
         with patch("web.app.authenticate_request", return_value=_user("trader")), \
              patch("web.routes.paper_routes.batch_update_paper_configs", return_value=3) as batch_mock, \
-             patch("web.routes.paper_routes._sync_retailbot2_lifecycle") as sync_rb2:
+             patch("db.db.set_retailbot2_strategy_lifecycle_setting") as sync_rb2:
             response = self.client.post("/api/paper/configs/batch", json={
                 "strategy_name": "BB_REV_INV", "action": "telegram_all_on"
             })
@@ -223,13 +233,13 @@ class TestPaperOrderRoutes(unittest.TestCase):
             "status": "success", "strategy": "BB_REV_INV", "action": "telegram_all_on", "updated": 3
         })
         batch_mock.assert_called_once_with("BB_REV_INV", "telegram_all_on")
-        sync_rb2.assert_called_once()
+        sync_rb2.assert_not_called()
 
     def test_paper_report_preferences_apply_only_to_selected_configurations(self):
         request = {"symbol": "btcusdt", "strategy_name": "BB_REV_INV", "report_enabled": False}
         with patch("web.app.authenticate_request", return_value=_user("trader")), \
              patch("web.routes.paper_routes.batch_update_paper_configs", return_value=1) as update, \
-             patch("web.routes.paper_routes._sync_retailbot2_lifecycle") as sync:
+             patch("db.db.set_retailbot2_strategy_lifecycle_setting") as sync:
             response = self.client.post("/api/paper/configs/preferences", json=request)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["updated"], 1)

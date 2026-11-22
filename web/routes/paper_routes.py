@@ -6,12 +6,13 @@ from fastapi import APIRouter, HTTPException, Depends, Query, Path, Request
 from pydantic import BaseModel, Field
 from typing import Optional
 import math
+import time
 
 from paper.engine import (
     get_active_positions, get_paper_trades, get_paper_configs,
     set_paper_config, delete_paper_config, batch_update_paper_configs,
     manual_close_position, sync_and_evaluate_paper_trading,
-    get_paper_metrics, OVERLAY_STRATEGIES,
+    get_paper_metrics, update_paper_deployment, OVERLAY_STRATEGIES,
 )
 from backtest.strategies import STRATEGIES
 from paper.orders import (
@@ -75,44 +76,17 @@ def cancel_paper_order(request: Request, order_id: int = Path(..., gt=0)):
 
 
 @router.get("/metrics")
-def get_metrics():
-    metrics = get_paper_metrics()
+def get_metrics(days: Optional[int] = Query(None, ge=1, le=366)):
+    metrics = get_paper_metrics(closed_since_ms=int(time.time() * 1000) - days * 86_400_000) if days else get_paper_metrics()
     return {"metrics": metrics}
 
 
 @router.get("/configs")
 def list_configs():
-    configs = get_paper_configs()
+    configs = get_paper_configs(include_equity=True)
     return {"configs": configs}
 
 
-
-def _sync_retailbot2_lifecycle(strategy_name: str, is_active: bool, telegram_enabled: Optional[bool], report_enabled: Optional[bool]):
-    """If strategy is in RetailBot2, keep rdt_strategy_lifecycle in sync with paper config."""
-    from backtest.strategies.retailbot2_strategies import RETAILBOT2_STRATEGY_NAMES
-    cleaned = strategy_name.strip()
-    if cleaned not in RETAILBOT2_STRATEGY_NAMES:
-        return
-    mode = "inverse" if (cleaned.endswith("_INV") or cleaned.startswith("inverse_")) else "shadow"
-    strat_id = cleaned if not cleaned.startswith("inverse_") else (cleaned[8:] + "_INV")
-    if strat_id == "DBL_PAT_INV_inverse":
-        strat_id = "DBL_PAT_INV"
-    elif strat_id == "BB_REV_INV_inverse":
-        strat_id = "BB_REV_INV"
-    try:
-        from db.db import set_retailbot2_strategy_lifecycle_setting, get_retailbot2_strategy_lifecycle_settings
-        existing_rows = get_retailbot2_strategy_lifecycle_settings()
-        existing = next((r for r in existing_rows if r.get("strategy_id") == strat_id and r.get("mode") == mode), {})
-        lifecycle_settings = {
-            "evaluation_enabled": True,
-            "paper_enabled": bool(is_active),
-            "telegram_enabled": bool(telegram_enabled) if telegram_enabled is not None else bool(existing.get("telegram_enabled", False)),
-            "report_enabled": bool(report_enabled) if report_enabled is not None else bool(existing.get("report_enabled", True)),
-            "auto_promote_enabled": False,
-        }
-        set_retailbot2_strategy_lifecycle_setting(strat_id, mode, lifecycle_settings)
-    except Exception as exc:
-        logging.getLogger("web.paper_routes").warning("Could not sync RetailBot2 lifecycle: %s", exc)
 
 def _validate_generator_config(
     symbol: str, market: str, timeframe: str, strategy_name: str,
@@ -185,12 +159,6 @@ def update_config(req: PaperConfigRequest):
         report_enabled=req.report_enabled,
         ml_generator_model_id=req.ml_generator_model_id.strip() if req.ml_generator_model_id else None,
     )
-    _sync_retailbot2_lifecycle(
-        req.strategy_name.strip(),
-        req.is_active,
-        req.telegram_enabled,
-        req.report_enabled,
-    )
     return res
 
 
@@ -205,14 +173,6 @@ def batch_update_configs(req: BatchPaperConfigRequest):
     action = req.action.strip().lower()
     try:
         count = batch_update_paper_configs(strategy_name, action)
-        if action == "activate_all":
-            _sync_retailbot2_lifecycle(strategy_name, is_active=True, telegram_enabled=None, report_enabled=None)
-        elif action == "pause_all":
-            _sync_retailbot2_lifecycle(strategy_name, is_active=False, telegram_enabled=None, report_enabled=None)
-        elif action == "telegram_all_on":
-            _sync_retailbot2_lifecycle(strategy_name, is_active=True, telegram_enabled=True, report_enabled=None)
-        elif action == "telegram_all_off":
-            _sync_retailbot2_lifecycle(strategy_name, is_active=None, telegram_enabled=False, report_enabled=None)
         return {
             "status": "success",
             "strategy": strategy_name,
@@ -244,6 +204,35 @@ def update_report_preferences(req: PaperReportPreferences):
         action = "telegram_all_on" if req.telegram_enabled else "telegram_all_off"
     count = batch_update_paper_configs(strategy, action, symbol=symbol)
     return {"status": "success", "updated": count}
+
+
+class PaperDeploymentPatch(BaseModel):
+    is_active: Optional[bool] = None
+    allocated_capital: Optional[float] = Field(None, ge=100, allow_inf_nan=False)
+    risk_per_trade_pct: Optional[float] = Field(None, ge=0.1, le=10, allow_inf_nan=False)
+    telegram_enabled: Optional[bool] = None
+    report_enabled: Optional[bool] = None
+
+
+@router.patch("/configs/{config_id}")
+def edit_deployment(req: PaperDeploymentPatch, config_id: int = Path(..., gt=0)):
+    if req.is_active is True:
+        config = next((row for row in get_paper_configs() if row["id"] == config_id), None)
+        if config is None:
+            raise HTTPException(status_code=404, detail="Paper deployment not found")
+        strategy = config["strategy_name"]
+        if strategy not in STRATEGIES and strategy not in OVERLAY_STRATEGIES:
+            raise HTTPException(status_code=400, detail="This strategy is no longer available in the Strategy Library.")
+        _validate_generator_config(
+            config["symbol"], config["market"], config["timeframe"], strategy,
+            config.get("ml_generator_model_id"), config.get("ml_model_id"), True,
+        )
+    try:
+        if not update_paper_deployment(config_id, **req.model_dump(exclude_none=True)):
+            raise HTTPException(status_code=404, detail="Paper deployment not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": "success", "id": config_id}
 
 
 @router.delete("/configs/{config_id}")
@@ -337,12 +326,6 @@ def deploy_strategy(req: DeployStrategyRequest):
         allocated_capital=req.allocated_capital,
         risk_per_trade_pct=req.risk_per_trade_pct,
         ml_model_id=req.ml_model_id.strip() if req.ml_model_id else None,
-        telegram_enabled=req.send_telegram,
-        report_enabled=True,
-    )
-    _sync_retailbot2_lifecycle(
-        strategy_name,
-        is_active=True,
         telegram_enabled=req.send_telegram,
         report_enabled=True,
     )

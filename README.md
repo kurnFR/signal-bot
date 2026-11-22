@@ -20,6 +20,14 @@ A research and paper-trading platform for crypto strategies on Binance data. It 
 | Wallet Tracking | Large on-chain wallet flows and a monitored-wallet activity feed |
 | Settings & Users | System status, user management (admin) |
 
+### Strategy workflow
+
+In the Modern UI, select a built-in, RetailBot2 variant, or saved custom/AI strategy in **Strategy Library**. Use **Backtest Studio** for historical evaluation, then **Deploy to Paper** to choose a pair, market, timeframe, capital and risk. Paper deployments have separate controls for new entries, telegram trade alerts and reporting. Archiving stops new entries and cancels pending orders. Open positions can still reach their normal exits.
+
+**Paper Trading → Performance report filters** compares realized results by pair, strategy, market, timeframe, and period. Realized equity uses the deployment’s current capital allocation plus its all-time net closed P&L. Period filters affect P&L and trade statistics. Execution on an exchange is manual.
+
+For CMS, apply migration **032** using the configured migration account before restarting services. Configure the supervisor with `PAPER_REPORT_ENABLED=1` for the independent hourly paper report and the existing authorized Telegram outbox (delivery, worker, and enqueue settings). If the supervisor uses `--only`, include `paper_report` alongside the supervised services already selected. Keep real-money trading disabled and use `RETAILBOT2_ENABLED=0` when moving exclusively to Paper Trading. Review remaining legacy open research positions before stopping that worker. Historic Shadow/Inverse results remain available in **Research**.
+
 ## How it fits together
 
 ```

@@ -731,7 +731,7 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
       const path = url.pathname + url.search;
       const method = init?.method ?? "GET";
 
-      if (path === "/api/paper/configs" && method === "POST") {
+      if (path === "/api/paper/configs/2" && method === "PATCH") {
         updateBody = JSON.parse(String(init?.body));
         return Promise.resolve(json({ status: "success", config: { id: 1 } }));
       }

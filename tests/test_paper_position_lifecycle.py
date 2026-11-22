@@ -637,6 +637,20 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         self.assertFalse(configs["ETHUSDT", "BB_REV_INV"]["telegram_enabled"])
         self.assertEqual(pe.get_paper_metrics()["totalTrades"], 0)
         self.assertIn("BB_REV_INV_inverse</b>: T=2 W=1 L=1 WR=50% Net=$+50", after)
+        self.assertTrue(pe.update_paper_deployment(cfg_id, report_enabled=True))
+        self.assertEqual(pe.get_paper_metrics(closed_since_ms=exit_time)["totalTrades"], 1)
+        self.assertEqual(pe.get_paper_metrics(closed_since_ms=exit_time + 1)["totalTrades"], 0)
+        self.assertTrue(pe.delete_paper_config(cfg_id))
+        cfg = next(row for row in pe.get_paper_configs(include_equity=True) if row["id"] == cfg_id)
+        self.assertFalse(cfg["is_active"])
+        self.assertTrue(cfg["archived_at"])
+        self.assertAlmostEqual(cfg["realized_equity"], 5000 + float(net_pnl), places=6)
+        self.assertEqual(pe.get_paper_metrics()["totalTrades"], 1)
+        self.assertNotIn("Shadow Equity", TelegramAlert.format_paper_report())
+        self.assertTrue(pe.update_paper_deployment(cfg_id, is_active=True))
+        restored = next(row for row in pe.get_paper_configs() if row["id"] == cfg_id)
+        self.assertTrue(restored["is_active"])
+        self.assertIsNone(restored["archived_at"])
 
     def test_15_duplicate_trade_prevention(self):
         """15. Direct call to close_position_in_db is strictly idempotent via CAS update."""
