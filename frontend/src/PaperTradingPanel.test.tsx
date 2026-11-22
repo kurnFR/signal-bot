@@ -164,7 +164,7 @@ describe("read-only Paper Trading panel", () => {
     expect((await screen.findAllByText("demo_strategy", { exact: false })).length).toBeGreaterThan(0);
     expect(screen.getByText("$125.50")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Strategy performance" })).toBeInTheDocument();
-    expect(screen.getByText("trend_ema_v1")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Strategy performance" })).getByText("trend_ema_v1")).toBeInTheDocument();
     expect(screen.getByText("66.67%")).toBeInTheDocument();
     expect(screen.getByText("1.25 R")).toBeInTheDocument();
     expect(screen.getByText("$10.25")).toBeInTheDocument();
@@ -714,9 +714,10 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
       return Promise.resolve(json(fixtures[path as keyof typeof fixtures]));
     }));
     render(<PaperTradingPanel />);
-    expect(await screen.findByText("other_pair")).toBeInTheDocument();
+    const report = within(screen.getByRole("region", { name: "Strategy performance" }));
+    expect(await report.findByText("other_pair")).toBeInTheDocument();
     fireEvent.change(screen.getByRole("combobox", { name: "Pair" }), { target: { value: "BTCUSDT" } });
-    expect(screen.queryByText("other_pair")).not.toBeInTheDocument();
+    expect(report.queryByText("other_pair")).not.toBeInTheDocument();
     const disable = screen.getByRole("button", { name: "Disable reporting" });
     fireEvent.click(disable);
     await waitFor(() => expect(payload).toEqual({ symbol: "BTCUSDT", report_enabled: false }));
