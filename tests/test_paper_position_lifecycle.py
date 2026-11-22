@@ -597,6 +597,33 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         cur.close()
         conn.close()
 
+    def test_telegram_performance_report_reflects_committed_paper_trailing_exit(self):
+        from paper.retailbot2 import TelegramAlert
+
+        cfg_id = self._create_config(strategy_name="BB_REV_INV")
+        pos_id = self._create_position(
+            config_id=cfg_id, strategy_name="BB_REV_INV", direction="SHORT",
+            stop_loss=52000.0, take_profit=46000.0,
+        )
+        with self.pool.get_connection() as conn, conn.cursor(dictionary=True) as cur:
+            cur.execute("SELECT * FROM paper_positions WHERE id=%s", (pos_id,))
+            pos = cur.fetchone()
+
+        retail_stats = {"BB_REV_INV_inverse": {"total": 2, "wins": 1, "losses": 1, "net_pnl": 50}}
+        before = TelegramAlert.format_stats(retail_stats, 10000, 10050)
+        self.assertIn("No closed trades included in reporting", before)
+
+        exit_time = pos["entry_time"] + 10 * 3_600_000
+        self.assertTrue(pe.close_position_in_db(pos, 47000.0, exit_time, "TRAIL", holding_bars=10))
+        with self.pool.get_connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT net_pnl FROM paper_trades WHERE position_id=%s", (pos_id,))
+            net_pnl, = cur.fetchone()
+        self.assertGreater(net_pnl, 0)
+        after = TelegramAlert.format_stats(retail_stats, 10000, 10050)
+        self.assertIn(f"Net P&amp;L: <code>${net_pnl:+,.2f}</code> · Closed: 1", after)
+        self.assertIn(f"<b>BB_REV_INV</b>: T=1 Net=${net_pnl:+,.2f}", after)
+        self.assertIn("BB_REV_INV_inverse</b>: T=2 W=1 L=1 WR=50% Net=$+50", after)
+
     def test_15_duplicate_trade_prevention(self):
         """15. Direct call to close_position_in_db is strictly idempotent via CAS update."""
         cfg_id = self._create_config()

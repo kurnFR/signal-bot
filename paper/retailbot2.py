@@ -933,10 +933,46 @@ class TelegramAlert:
         return self.send(msg)
 
     @staticmethod
+    def _paper_performance_lines() -> list[str]:
+        """Read the same realized paper ledger totals shown on the dashboard."""
+        lines = ["📝 <b>Paper Trading Engine · Realized P&amp;L</b>"]
+        try:
+            from paper.engine import get_paper_metrics
+
+            metrics = get_paper_metrics()
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Paper performance report unavailable (%s)", type(exc).__name__)
+            return [*lines, "Paper trade totals unavailable"]
+
+        if not metrics["totalTrades"]:
+            return [*lines, "No closed trades included in reporting"]
+
+        lines.append(
+            f"Net P&amp;L: <code>${metrics['netPnl']:+,.2f}</code> · "
+            f"Closed: {metrics['totalTrades']} · Wins: {metrics['wins']} · Losses: {metrics['losses']}"
+        )
+        by_strategy = {}
+        for row in metrics["byStrategy"]:
+            name = row["strategy"]
+            trades, pnl = by_strategy.get(name, (0, 0.0))
+            by_strategy[name] = trades + row["totalTrades"], pnl + row["netPnl"]
+
+        ranked = sorted(by_strategy.items(), key=lambda item: (-item[1][0], item[0]))
+        # Keep the summary compact even when the paper ledger has many custom strategies.
+        for name, (trades, pnl) in ranked[:8]:
+            lines.append(f"<b>{escape(name)}</b>: T={trades} Net=${pnl:+,.2f}")
+        if len(ranked) > 8:
+            lines.append(f"Total includes {len(ranked) - 8} additional strategies")
+        return lines
+
+    @staticmethod
     def format_stats(stats: Dict, equity_shadow: float, equity_inverse: float) -> str:
         lines = [
             "📊 <b>PERFORMANCE REPORT</b>",
             "─" * 30,
+            *TelegramAlert._paper_performance_lines(),
+            "",
+            "🔬 <b>RetailBot2 Research · Shadow / Inverse</b>",
             f"💰 Shadow Equity:  <code>${equity_shadow:,.2f}</code>",
             f"🔄 Inverse Equity: <code>${equity_inverse:,.2f}</code>",
             "",
@@ -951,7 +987,7 @@ class TelegramAlert:
             net = float(data.get('net_pnl', 0))
             color = "🟢" if net >= 0 else "🔴"
             lines.append(
-                f"{color} <b>{key}</b>: "
+                f"{color} <b>{escape(key)}</b>: "
                 f"T={total} W={wins} L={losses} "
                 f"WR={wr:.0f}% Net=${net:+.0f}"
             )
