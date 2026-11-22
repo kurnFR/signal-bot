@@ -267,47 +267,53 @@ def seed_validated_paper_configs():
     at module import because importing the engine must not mutate the database.
     """
     conn = get_pool().get_connection()
+    cur = None
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute("SELECT COUNT(*) AS cnt FROM paper_configs")
-        if cur.fetchone()["cnt"] == 0:
-            defaults = [
-                ("ETHUSDT", "spot", "1d", "confluence_ensemble_v1", 1, 5000.0, 1.0),
-                ("BNBUSDT", "futures", "1d", "pairs_ratio_v1", 1, 5000.0, 1.0),
-            ]
-            for row in defaults:
-                cur.execute(
-                    """
-                    INSERT INTO paper_configs
-                        (symbol, market, timeframe, strategy_name, is_active,
-                         allocated_capital, risk_per_trade_pct)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE is_active = VALUES(is_active)
-                    """,
-                    row,
-                )
-            conn.commit()
-            logger.info("Initialized validated paper trading configs")
-        cur.close()
+        try:
+            cur.execute("SELECT COUNT(*) AS cnt FROM paper_configs")
+            if cur.fetchone()["cnt"] == 0:
+                defaults = [
+                    ("ETHUSDT", "spot", "1d", "confluence_ensemble_v1", 1, 5000.0, 1.0),
+                    ("BNBUSDT", "futures", "1d", "pairs_ratio_v1", 1, 5000.0, 1.0),
+                ]
+                for row in defaults:
+                    cur.execute(
+                        """
+                        INSERT INTO paper_configs
+                            (symbol, market, timeframe, strategy_name, is_active,
+                             allocated_capital, risk_per_trade_pct)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE is_active = VALUES(is_active)
+                        """,
+                        row,
+                    )
+                conn.commit()
+                logger.info("Initialized validated paper trading configs")
+        finally:
+            cur.close()
     finally:
         conn.close()
 
 
 def get_paper_configs() -> List[Dict[str, Any]]:
     conn = get_pool().get_connection()
+    cur = None
     try:
         cur = conn.cursor(dictionary=True)
-        cur.execute(
-            """
-            SELECT id, symbol, market, timeframe, strategy_name, is_active,
-                   allocated_capital, risk_per_trade_pct, ml_model_id,
-                   ml_generator_model_id, telegram_enabled, report_enabled, created_at
-            FROM paper_configs
-            ORDER BY is_active DESC, symbol ASC
-            """
-        )
-        rows = cur.fetchall()
-        cur.close()
+        try:
+            cur.execute(
+                """
+                SELECT id, symbol, market, timeframe, strategy_name, is_active,
+                       allocated_capital, risk_per_trade_pct, ml_model_id,
+                       ml_generator_model_id, telegram_enabled, report_enabled, created_at
+                FROM paper_configs
+                ORDER BY is_active DESC, symbol ASC
+                """
+            )
+            rows = cur.fetchall()
+        finally:
+            cur.close()
         for r in rows:
             r["is_active"] = bool(r["is_active"])
             r["allocated_capital"] = float(r["allocated_capital"])
@@ -367,6 +373,7 @@ def set_paper_config(
         raise ValueError("ml_generator_model_id is only valid for ml_signal_generator_v1")
 
     conn = get_pool().get_connection()
+    cur = None
     try:
         cur = conn.cursor(dictionary=True)
         if telegram_enabled is None and report_enabled is None:
@@ -458,7 +465,6 @@ def set_paper_config(
         config_row = cur.fetchone()
         config_id = config_row.get("id") if isinstance(config_row, dict) else None
         conn.commit()
-        cur.close()
         return {
             "status": "success",
             "id": config_id,
@@ -469,12 +475,17 @@ def set_paper_config(
             "ml_generator_model_id": ml_generator_model_id,
         }
     finally:
-        conn.close()
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
 
 
 def delete_paper_config(config_id: int) -> bool:
     """Delete a paper configuration by ID, ensuring no open position exists for it."""
     conn = get_pool().get_connection()
+    cur = None
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
@@ -490,10 +501,13 @@ def delete_paper_config(config_id: int) -> bool:
         cur.execute("DELETE FROM paper_configs WHERE id = %s", (config_id,))
         deleted = cur.rowcount > 0
         conn.commit()
-        cur.close()
         return deleted
     finally:
-        conn.close()
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
 
 
 def batch_update_paper_configs(strategy_name: str, action: str) -> int:
@@ -510,19 +524,24 @@ def batch_update_paper_configs(strategy_name: str, action: str) -> int:
     if action not in sql_map:
         raise ValueError(f"Unknown batch action: {action}")
     conn = get_pool().get_connection()
+    cur = None
     try:
         cur = conn.cursor()
         cur.execute(sql_map[action], (strategy_name,))
         updated_count = cur.rowcount
         conn.commit()
-        cur.close()
         return updated_count
     finally:
-        conn.close()
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
 
 
 def get_active_positions() -> List[Dict[str, Any]]:
     conn = get_pool().get_connection()
+    cur = None
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
@@ -543,7 +562,6 @@ def get_active_positions() -> List[Dict[str, Any]]:
             """
         )
         rows = cur.fetchall()
-        cur.close()
         numeric = (
             "entry_price", "current_price", "stop_loss", "take_profit",
             "current_stop", "initial_risk", "allocated_capital",
@@ -559,12 +577,17 @@ def get_active_positions() -> List[Dict[str, Any]]:
             r["entry_time_wib"] = str(r["entry_time_wib"]) if r["entry_time_wib"] else ""
         return rows
     finally:
-        conn.close()
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
 
 
 def get_paper_trades(limit: int = 50) -> List[Dict[str, Any]]:
     limit = max(1, min(int(limit), 500))
     conn = get_pool().get_connection()
+    cur = None
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
@@ -587,7 +610,6 @@ def get_paper_trades(limit: int = 50) -> List[Dict[str, Any]]:
             (limit,),
         )
         rows = cur.fetchall()
-        cur.close()
         for r in rows:
             for key in (
                 "entry_price", "exit_price", "stop_loss", "take_profit", "quantity",
@@ -602,11 +624,16 @@ def get_paper_trades(limit: int = 50) -> List[Dict[str, Any]]:
             r["created_at"] = str(r["created_at"])
         return rows
     finally:
-        conn.close()
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
 
 
 def get_paper_metrics() -> Dict[str, Any]:
     conn = get_pool().get_connection()
+    cur = None
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
@@ -640,7 +667,6 @@ def get_paper_metrics() -> Dict[str, Any]:
             """
         )
         strategy_rows = cur.fetchall()
-        cur.close()
         total = int(summary["total_trades"] or 0)
         wins = int(summary["wins"] or 0)
         losses = int(summary["losses"] or 0)
@@ -672,7 +698,11 @@ def get_paper_metrics() -> Dict[str, Any]:
             "byStrategy": by_strategy,
         }
     finally:
-        conn.close()
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
 
 
 class PaperFundingRetrievalError(RuntimeError):
@@ -768,7 +798,7 @@ def close_position_in_db(
                 funding_pnl = %s, holding_bars = %s
             WHERE id = %s AND status = 'OPEN'
             """,
-            (float(exit_price), int(exit_time), -funding_cost, final_holding_bars, pos["id"]),
+            (accounting["exit_exec_price"], int(exit_time), -funding_cost, final_holding_bars, pos["id"]),
         )
         if cur.rowcount != 1:
             conn.rollback()
@@ -789,7 +819,7 @@ def close_position_in_db(
             pos["status"] = "CLOSED"
             pos["holding_bars"] = final_holding_bars
             pos["last_update_time"] = int(exit_time)
-            pos["current_price"] = float(exit_price)
+            pos["current_price"] = accounting["exit_exec_price"]
             return True
 
         cur.execute(
@@ -822,7 +852,7 @@ def close_position_in_db(
         pos["status"] = "CLOSED"
         pos["holding_bars"] = final_holding_bars
         pos["last_update_time"] = int(exit_time)
-        pos["current_price"] = float(exit_price)
+        pos["current_price"] = accounting["exit_exec_price"]
         logger.info(
             "Closed paper position #%s (%s %s) via %s: %+.2fR net_pnl=%+.4f funding=%+.4f",
             pos["id"], pos["symbol"], direction, exit_reason,
@@ -845,6 +875,7 @@ def close_position_in_db(
     send_close_alert = False
     try:
         conn_cfg = get_pool().get_connection()
+        cur_cfg = None
         try:
             cur_cfg = conn_cfg.cursor(dictionary=True)
             if pos.get("config_id") is not None:
@@ -862,11 +893,14 @@ def close_position_in_db(
                     (pos["symbol"], pos["market"], pos["timeframe"], pos["strategy_name"]),
                 )
             cfg_row = cur_cfg.fetchone()
-            cur_cfg.close()
             if cfg_row and cfg_row.get("telegram_enabled"):
                 send_close_alert = True
         finally:
-            conn_cfg.close()
+            try:
+                if cur_cfg is not None:
+                    cur_cfg.close()
+            finally:
+                conn_cfg.close()
     except Exception as exc:
         logger.warning("Could not check telegram_enabled for close alert: %s", exc)
 
@@ -887,13 +921,17 @@ def close_position_in_db(
 
 def manual_close_position(position_id: int) -> Dict[str, Any]:
     conn = get_pool().get_connection()
+    cur = None
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute("SELECT * FROM paper_positions WHERE id = %s AND status = 'OPEN'", (position_id,))
         pos = cur.fetchone()
-        cur.close()
     finally:
-        conn.close()
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
     if not pos:
         raise ValueError(f"Open position #{position_id} not found")
     now_ms = int(time.time() * 1000)
@@ -1092,10 +1130,13 @@ def _signal_already_traded(cfg: Dict[str, Any], entry_candle: int) -> bool:
                 (cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"], int(entry_candle)),
             )
         found = cur.fetchone() is not None
-        cur.close()
         return found
     finally:
-        conn.close()
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
 
 
 
@@ -1407,6 +1448,7 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
                 final_unrealized_r = (entry_price - latest_close) / initial_risk if initial_risk > 0 else 0.0
 
             conn = get_pool().get_connection()
+            cur = None
             try:
                 cur = conn.cursor()
                 cur.execute(
@@ -1422,7 +1464,6 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
                      latest_candle_time, pos_id),
                 )
                 conn.commit()
-                cur.close()
                 result["positions_updated"] += 1
                 pos["holding_bars"] = holding_bars
                 pos["last_update_time"] = latest_candle_time
@@ -1431,7 +1472,11 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
                 pos["trailing_active"] = trailing_active
                 remaining_open_positions.append(pos)
             finally:
-                conn.close()
+                try:
+                    if cur is not None:
+                        cur.close()
+                finally:
+                    conn.close()
 
     # =========================================================================
     # Phase 2: Signal Discovery & Entry Evaluation

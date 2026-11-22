@@ -462,6 +462,10 @@ def poll_symbol_incremental(
     Paginates if necessary until reaching the current watermark.
     Returns total rows inserted/updated.
     """
+    if not isinstance(symbol, str) or not symbol.strip():
+        raise ValueError("symbol cannot be empty or whitespace-only")
+    symbol = symbol.strip().upper()
+
     now_ms = int(time.time() * 1000)
     target_end_ms = end_ms if end_ms is not None else now_ms
 
@@ -532,7 +536,17 @@ def poll_all_symbols(
     Acquires MariaDB advisory lock 'signal_bot_funding_poller' using a dedicated unpooled connection.
     If another poller owns the lock, skips the cycle cleanly.
     """
-    target_symbols = symbols if symbols is not None else SYMBOLS
+    raw_symbols = symbols if symbols is not None else SYMBOLS
+    target_symbols: List[str] = []
+    for s in raw_symbols:
+        if not isinstance(s, str) or not s.strip():
+            logger.warning("Rejecting empty or whitespace-only symbol: %r", s)
+            continue
+        target_symbols.append(s.strip().upper())
+
+    if not target_symbols:
+        raise ValueError("Symbols list cannot be empty or contain only whitespace")
+
     managed_session = session is None
     req_session = session
 
@@ -736,7 +750,13 @@ def main():
     parser.add_argument("--async-loop", action="store_true", help="Run using asyncio loop instead of standalone synchronous loop")
     args = parser.parse_args()
 
-    symbols = [args.symbol] if args.symbol else SYMBOLS
+    if args.symbol is not None:
+        cleaned_sym = args.symbol.strip().upper()
+        if not cleaned_sym:
+            parser.error("Symbol cannot be empty or whitespace-only")
+        symbols = [cleaned_sym]
+    else:
+        symbols = [s.strip().upper() for s in SYMBOLS if isinstance(s, str) and s.strip()]
 
     if args.once:
         logger.info(f"Running one-shot funding poll for symbols: {symbols}")

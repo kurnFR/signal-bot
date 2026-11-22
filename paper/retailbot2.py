@@ -1806,7 +1806,6 @@ class DatabaseManager:
                     (f"retailbot2:entry:{tid}", tid, json.dumps(entry_alert, default=str)),
                 )
             conn.commit()
-            c.close()
             return tid
         except Exception as e:
             try:
@@ -1816,7 +1815,11 @@ class DatabaseManager:
             self.logger.error(f"❌ save_trade: {e}")
             return None
         finally:
-            conn.close()
+            try:
+                if c is not None:
+                    c.close()
+            finally:
+                conn.close()
 
     def close_trade(self, trade_id: int, exit_price: float,
                     reason: str, pnl: float, pnl_pct: float):
@@ -1960,21 +1963,24 @@ class DatabaseManager:
                 int(won), int(not won and pnl < 0), pnl,
             ))
             conn.commit()
-            c.close()
         except Exception as e:
             self.logger.error(f"❌ update_stats: {e}")
         finally:
-            conn.close()
+            try:
+                if c is not None:
+                    c.close()
+            finally:
+                conn.close()
 
     def load_open_trades(self) -> List[Dict]:
         conn = self.get_conn()
         if not conn:
             return []
+        c = None
         try:
             c = conn.cursor(dictionary=True)
             c.execute("SELECT * FROM rdt_trades WHERE status='OPEN'")
             rows = c.fetchall()
-            c.close()
             for r in rows:
                 for k, v in r.items():
                     if isinstance(v, Decimal):
@@ -1984,12 +1990,17 @@ class DatabaseManager:
             self.logger.error(f"❌ load_open_trades: {e}")
             return []
         finally:
-            conn.close()
+            try:
+                if c is not None:
+                    c.close()
+            finally:
+                conn.close()
 
     def count_open(self, mode: str = None, symbol: str = None, strategy: str = None) -> int:
         conn = self.get_conn()
         if not conn:
             return 0
+        c = None
         try:
             c = conn.cursor()
             sql = "SELECT COUNT(*) FROM rdt_trades WHERE status='OPEN'"
@@ -2005,13 +2016,16 @@ class DatabaseManager:
                 params.append(strategy)
             c.execute(sql, params)
             count = c.fetchone()[0]
-            c.close()
             return count
         except Exception as e:
             self.logger.error(f"❌ count_open: {e}")
             return 0
         finally:
-            conn.close()
+            try:
+                if c is not None:
+                    c.close()
+            finally:
+                conn.close()
 
     def get_stats(self) -> Dict:
         """Build performance statistics from the closed trade ledger.
@@ -2024,6 +2038,7 @@ class DatabaseManager:
         conn = self.get_conn()
         if not conn:
             return {}
+        c = None
         try:
             c = conn.cursor(dictionary=True)
             c.execute("""
@@ -2043,7 +2058,6 @@ class DatabaseManager:
                 ORDER BY t.strategy, t.mode
             """)
             rows = c.fetchall()
-            c.close()
             result = {}
             for r in rows:
                 key = f"{r['strategy']}_{r['mode']}"
@@ -2060,7 +2074,11 @@ class DatabaseManager:
             self.logger.error(f"❌ get_stats: {e}")
             return {}
         finally:
-            conn.close()
+            try:
+                if c is not None:
+                    c.close()
+            finally:
+                conn.close()
 
     def get_realized_pnl_by_mode(self) -> Dict[str, float]:
         """Sum of net_pnl for CLOSED trades, grouped by mode. Used to
@@ -2070,6 +2088,7 @@ class DatabaseManager:
         conn = self.get_conn()
         if not conn:
             return {}
+        c = None
         try:
             c = conn.cursor(dictionary=True)
             c.execute("""
@@ -2077,13 +2096,16 @@ class DatabaseManager:
                 FROM rdt_trades WHERE status='CLOSED' GROUP BY mode
             """)
             rows = c.fetchall()
-            c.close()
             return {r['mode']: float(r['total_pnl']) for r in rows}
         except Exception as e:
             self.logger.error(f"❌ get_realized_pnl_by_mode: {e}")
             return {}
         finally:
-            conn.close()
+            try:
+                if c is not None:
+                    c.close()
+            finally:
+                conn.close()
 
     def get_last_trade_times(self) -> Dict[str, Dict[str, Dict[str, datetime]]]:
         """Most recent entry per (symbol, mode, strategy), so strategies
@@ -2091,6 +2113,7 @@ class DatabaseManager:
         conn = self.get_conn()
         if not conn:
             return {}
+        c = None
         try:
             c = conn.cursor(dictionary=True)
             c.execute("""
@@ -2098,7 +2121,6 @@ class DatabaseManager:
                 FROM rdt_trades GROUP BY symbol, mode, strategy
             """)
             rows = c.fetchall()
-            c.close()
             result: Dict[str, Dict[str, Dict[str, datetime]]] = {}
             for r in rows:
                 result.setdefault(r['symbol'], {}).setdefault(r['mode'], {})[r['strategy']] = r['last_entry']
@@ -2107,7 +2129,11 @@ class DatabaseManager:
             self.logger.error(f"❌ get_last_trade_times: {e}")
             return {}
         finally:
-            conn.close()
+            try:
+                if c is not None:
+                    c.close()
+            finally:
+                conn.close()
 
 
     def acquire_outbox_lock(self, conn, timeout_seconds: int = 0) -> bool:
@@ -3057,13 +3083,35 @@ class RetailDeathTrapBot:
             return
 
         units = trade['units']
-        if trade['side'] == 'LONG':
-            pnl = (exit_price - trade['entry']) * units
-        else:
-            pnl = (trade['entry'] - exit_price) * units
+        side = trade['side']
+        entry_price = trade['entry']
 
-        base_value = trade['entry'] * units
-        pnl_pct = (pnl / base_value * 100) if base_value > 0 else 0.0
+        if getattr(getattr(self, "config", None), "deduct_fees_slippage", False):
+            from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT
+            from backtest.accounting import calculate_trade_accounting
+            accounting = calculate_trade_accounting(
+                direction=side,
+                quantity=float(units),
+                entry_price=float(entry_price),
+                exit_price=float(exit_price),
+                fee_pct=BACKTEST_FEE_PCT,
+                entry_slippage_pct=0.0,
+                exit_slippage_pct=BACKTEST_SLIPPAGE_PCT,
+                stop_price=float(trade.get('stop')) if trade.get('stop') is not None else None,
+                funding_cost=0.0,
+            )
+            pnl = float(accounting['net_pnl'])
+            pnl_pct = float(accounting['return_pct_on_entry_notional'] or 0.0)
+            exit_price = float(accounting['exit_exec_price'])
+        else:
+            # RetailBot2 paper shadow/inverse equity metrics explicitly track gross PnL (zero fees/slippage).
+            if side == 'LONG':
+                gross_pnl = (exit_price - entry_price) * units
+            else:
+                gross_pnl = (entry_price - exit_price) * units
+            base_value = entry_price * units
+            pnl = gross_pnl
+            pnl_pct = (gross_pnl / base_value * 100) if base_value > 0 else 0.0
 
         # Persistence is the commit boundary. Do not mutate in-memory
         # equity or remove the active trade until both DB writes commit.
@@ -3106,10 +3154,11 @@ class RetailDeathTrapBot:
         del active[tid]
 
         result_icon = "✅" if pnl > 0 else "❌"
+        pnl_label = "Net P&L" if getattr(getattr(self, "config", None), "deduct_fees_slippage", False) else "Gross P&L"
         self.logger.info(
             f"🛑 [{mode.upper()}] #{tid} {trade['symbol']} closed: "
             f"{reason} {result_icon} | "
-            f"P&L: ${pnl:+.2f} ({pnl_pct:+.2f}%)"
+            f"{pnl_label}: ${pnl:+.2f} ({pnl_pct:+.2f}%)"
         )
 
     # ──────────────────────────────────────────────────────────────

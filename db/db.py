@@ -1251,8 +1251,7 @@ def get_news_overlay_stats():
 
 def get_retailbot2_open_trades(limit=100):
     conn = get_retailbot2_pool().get_connection()
-    try:
-        cur = conn.cursor(dictionary=True)
+    with _owned_cursor(conn, dictionary=True) as cur:
         cur.execute("""
             SELECT id, symbol, side, mode, entry_price, stop_price, target_price,
                    atr, rr, units, strategy, strategies_json, confluence_score,
@@ -1261,21 +1260,17 @@ def get_retailbot2_open_trades(limit=100):
             ORDER BY entry_time DESC LIMIT %s
         """, (limit,))
         rows = cur.fetchall()
-        cur.close()
         for r in rows:
             for k, v in r.items():
                 if isinstance(v, Decimal):
                     r[k] = float(v)
             r["entry_time"] = str(r["entry_time"]) if r.get("entry_time") else None
         return rows
-    finally:
-        conn.close()
 
 
 def get_retailbot2_recent_trades(limit=50):
     conn = get_retailbot2_pool().get_connection()
-    try:
-        cur = conn.cursor(dictionary=True)
+    with _owned_cursor(conn, dictionary=True) as cur:
         cur.execute("""
             SELECT t.id, t.symbol, t.side, t.mode, t.entry_price, t.stop_price, t.target_price,
                    t.units, t.strategy, t.confluence_score, t.status, t.exit_price,
@@ -1288,7 +1283,6 @@ def get_retailbot2_recent_trades(limit=50):
             ORDER BY t.exit_time DESC LIMIT %s
         """, (limit,))
         rows = cur.fetchall()
-        cur.close()
         for r in rows:
             for k, v in r.items():
                 if isinstance(v, Decimal):
@@ -1297,8 +1291,6 @@ def get_retailbot2_recent_trades(limit=50):
                 if r.get(dt_key) is not None:
                     r[dt_key] = str(r[dt_key])
         return rows
-    finally:
-        conn.close()
 
 
 def get_retailbot2_outbox_counts():
@@ -1566,8 +1558,7 @@ def get_retailbot2_strategy_lifecycle_settings():
 def set_retailbot2_strategy_lifecycle_setting(strategy_id, mode, settings):
     """Atomically replace one strategy/mode lifecycle setting row."""
     conn = get_retailbot2_pool().get_connection()
-    try:
-        cur = conn.cursor()
+    with _owned_cursor(conn) as cur:
         # The lifecycle table is provisioned and verified by the migration/startup
         # path. Runtime writes must not call a table-creation helper here.
         cur.execute("""
@@ -1587,12 +1578,6 @@ def set_retailbot2_strategy_lifecycle_setting(strategy_id, mode, settings):
             settings["report_enabled"], settings["auto_promote_enabled"]
         ))
         conn.commit()
-        cur.close()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
 
 
 def get_retailbot2_control():
