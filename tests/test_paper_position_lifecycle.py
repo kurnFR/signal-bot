@@ -291,7 +291,6 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         cur.execute("SELECT * FROM paper_positions WHERE id=%s", (pos_id,))
         pos = cur.fetchone()
         self.assertEqual(pos["status"], "CLOSED")
-        self.assertEqual(float(pos["current_price"]), 54000.0)
 
         cur.execute("SELECT * FROM paper_trades WHERE position_id=%s", (pos_id,))
         trades = cur.fetchall()
@@ -299,6 +298,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         t = trades[0]
         self.assertEqual(t["exit_reason"], "TP")
         self.assertAlmostEqual(float(t["exit_price"]), apply_exit_slippage(54000.0, t["direction"], BACKTEST_SLIPPAGE_PCT), places=6)
+        self.assertEqual(pos["current_price"], t["exit_price"])
         self.assertEqual(t["exit_time"], 2000)
         self.assertGreater(float(t["net_pnl"]), 0.0)
         self.assertEqual(t["holding_bars"], 2)
@@ -1461,7 +1461,6 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         cur.execute("SELECT status, current_price, funding_pnl FROM paper_positions WHERE id=%s", (pos_id,))
         p2 = cur.fetchone()
         self.assertEqual(p2["status"], "CLOSED")
-        self.assertEqual(float(p2["current_price"]), 54000.0)
 
         cur.execute("SELECT * FROM paper_trades WHERE position_id=%s", (pos_id,))
         trades = cur.fetchall()
@@ -1469,6 +1468,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         t = trades[0]
         self.assertEqual(t["exit_reason"], "TP")
         self.assertAlmostEqual(float(t["exit_price"]), apply_exit_slippage(54000.0, t["direction"], BACKTEST_SLIPPAGE_PCT), places=6)
+        self.assertEqual(p2["current_price"], t["exit_price"])
         self.assertEqual(t["exit_time"], 3000)
         # Expected funding cost: 0.1 * 52000.0 * 0.0005 = 2.6 -> funding_pnl = -2.6
         self.assertAlmostEqual(float(t["funding_pnl"]), -2.6, places=4)
