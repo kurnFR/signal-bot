@@ -955,29 +955,23 @@ class TelegramAlert:
             return [*lines, "Paper trade totals unavailable"]
 
         if not metrics["totalTrades"]:
-            lines.append("No closed trades included in reporting")
+            return [*lines, "No closed trades included in reporting yet."]
 
-        wr = float(metrics.get("winRatePct", 0.0))
-        lines.append(
-            f"Net P&amp;L: <code>${metrics['netPnl']:+,.2f}</code> · "
-            f"Closed: {metrics['totalTrades']} · "
-            f"WR: <code>{wr:.0f}%</code> · "
-            f"Wins: {metrics['wins']} · Losses: {metrics['losses']}"
-        )
+        def pnl_label(value: float) -> str:
+            if abs(value) < 0.005:
+                return "$0.00"
+            sign = "+" if value > 0 else "−"
+            return f"{sign}${abs(value):,.2f}"
+
+        lines.extend([
+            f"Net P&amp;L: <b>{pnl_label(metrics['netPnl'])}</b>",
+            f"{metrics['totalTrades']} closed · Wins {metrics['wins']} · Losses {metrics['losses']}"
+            f" · {metrics['winRatePct']:g}% win rate",
+        ])
         by_pair: dict[str, dict[str, list]] = {}
-        try:
-            try:
-                from paper.engine import get_paper_configs
-            except ModuleNotFoundError:
-                from engine import get_paper_configs
-
-            for cfg in get_paper_configs():
-                if cfg.get("report_enabled", True) and not cfg.get("archived_at"):
-                    by_pair.setdefault(cfg["symbol"], {}).setdefault(cfg["strategy_name"], [0, 0, 0, 0.0])
-        except Exception as exc:
-            logging.getLogger(__name__).debug("Paper configs lookup failed (%s: %s)", type(exc).__name__, exc)
-
         for row in metrics["byStrategy"]:
+            if not row["totalTrades"]:
+                continue
             strategies = by_pair.setdefault(row["symbol"], {})
             stats = strategies.setdefault(row["strategy"], [0, 0, 0, 0.0])
             stats[0] += row["totalTrades"]
@@ -991,22 +985,24 @@ class TelegramAlert:
             pair_trades = sum(row[0] for row in strategies.values())
             pair_wins = sum(row[1] for row in strategies.values())
             pair_pnl = sum(row[3] for row in strategies.values())
-            pair_win_rate = f"{pair_wins / pair_trades:.0%}" if pair_trades else "—"
-            heading = f"<b>{escape(symbol)}</b> · Net=${pair_pnl:+,.2f} · T={pair_trades} · WR={pair_win_rate}"
-            pair_lines = [heading]
+            heading = (
+                f"<b>{escape(symbol)}</b> · {pnl_label(pair_pnl)}\n"
+                f"{pair_trades} closed · {pair_wins / pair_trades:.0%} win rate"
+            )
+            pair_lines = []
             for name, (trades, wins, losses, pnl) in sorted(strategies.items()):
-                wr = f"{wins / trades:.0%}" if trades else "0%"
-                color = "⚪" if trades == 0 else ("🟢" if pnl >= 0 else "🔴")
                 pair_lines.append(
-                    f"{color} <b>{escape(name)}</b>: T={trades} W={wins} L={losses} WR={wr} Net=${pnl:+,.2f}"
+                    f"• <b>{escape(name)}</b> · {pnl_label(pnl)}\n"
+                    f"  {trades} closed · Wins {wins} · Losses {losses} · {wins / trades:.0%} win rate"
                 )
-            # Keep each pair heading with at least one strategy. Totals above cover every enabled row.
-            if remaining < len(heading) + len(pair_lines[1]) + 2:
-                omitted += len(strategies)
+            # Keep the pair heading and its first strategy together.
+            heading_size = len(heading) + 2
+            if remaining < heading_size + len(pair_lines[0]) + 1:
+                omitted += len(pair_lines)
                 continue
-            lines.append(heading)
-            remaining -= len(heading) + 1
-            for line in pair_lines[1:]:
+            lines.extend(["", heading])
+            remaining -= heading_size
+            for line in pair_lines:
                 if remaining < len(line) + 1:
                     omitted += 1
                     continue
