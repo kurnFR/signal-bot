@@ -947,22 +947,51 @@ class TelegramAlert:
         if not metrics["totalTrades"]:
             return [*lines, "No closed trades included in reporting"]
 
+        wr = float(metrics.get("winRatePct", 0.0))
         lines.append(
             f"Net P&amp;L: <code>${metrics['netPnl']:+,.2f}</code> · "
-            f"Closed: {metrics['totalTrades']} · Wins: {metrics['wins']} · Losses: {metrics['losses']}"
+            f"Closed: {metrics['totalTrades']} · "
+            f"WR: <code>{wr:.0f}%</code> · "
+            f"Wins: {metrics['wins']} · Losses: {metrics['losses']}"
         )
         by_strategy = {}
+        try:
+            from paper.engine import get_paper_configs
+
+            for cfg in get_paper_configs():
+                if cfg.get("report_enabled", True):
+                    s_name = str(cfg.get("strategy_name") or "").strip()
+                    if s_name and s_name not in by_strategy:
+                        by_strategy[s_name] = (0, 0, 0, 0.0)
+        except Exception as exc:
+            logging.getLogger(__name__).debug("Paper configs lookup failed (%s)", type(exc).__name__)
+
         for row in metrics["byStrategy"]:
             name = row["strategy"]
-            trades, pnl = by_strategy.get(name, (0, 0.0))
-            by_strategy[name] = trades + row["totalTrades"], pnl + row["netPnl"]
+            trades, wins, losses, pnl = by_strategy.get(name, (0, 0, 0, 0.0))
+            by_strategy[name] = (
+                trades + row["totalTrades"],
+                wins + row["wins"],
+                losses + row["losses"],
+                pnl + row["netPnl"],
+            )
 
-        ranked = sorted(by_strategy.items(), key=lambda item: (-item[1][0], item[0]))
-        # Keep the summary compact even when the paper ledger has many custom strategies.
-        for name, (trades, pnl) in ranked[:8]:
-            lines.append(f"<b>{escape(name)}</b>: T={trades} Net=${pnl:+,.2f}")
-        if len(ranked) > 8:
-            lines.append(f"Total includes {len(ranked) - 8} additional strategies")
+        ranked = sorted(
+            by_strategy.items(),
+            key=lambda item: (-item[1][0], -item[1][3], item[0]),
+        )
+        # Keep summary clean and bounded for Telegram message limits (up to 20 strategies).
+        max_display = 20
+        for name, (trades, wins, losses, pnl) in ranked[:max_display]:
+            strat_wr = (wins / trades * 100) if trades > 0 else 0.0
+            color = "⚪" if trades == 0 else ("🟢" if pnl >= 0 else "🔴")
+            lines.append(
+                f"{color} <b>{escape(name)}</b>: "
+                f"T={trades} W={wins} L={losses} "
+                f"WR={strat_wr:.0f}% Net=${pnl:+,.2f}"
+            )
+        if len(ranked) > max_display:
+            lines.append(f"Total includes {len(ranked) - max_display} additional strategies")
         return lines
 
     @staticmethod

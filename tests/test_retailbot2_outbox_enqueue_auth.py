@@ -137,6 +137,7 @@ def test_actual_signal_bot_test_connection_permits_enqueue_with_delivery_unset(m
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
     monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+    monkeypatch.delenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", raising=False)
 
     config = SimpleNamespace(db_name="signal_bot_test", observation_only=False, allow_trading=True)
     cursor = MockCursor(db_name="signal_bot_test")
@@ -167,6 +168,7 @@ def test_config_signal_bot_test_actual_connection_reports_another_db_rejected(mo
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
     monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+    monkeypatch.delenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", raising=False)
 
     config = SimpleNamespace(db_name="signal_bot_test", observation_only=False, allow_trading=True)
     cursor = MockCursor(db_name="other_database")
@@ -194,6 +196,7 @@ def test_config_crypto_signals_actual_connection_signal_bot_test_rejected(monkey
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
     monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+    monkeypatch.delenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", raising=False)
 
     config = SimpleNamespace(db_name="crypto_signals", observation_only=False, allow_trading=True)
     cursor = MockCursor(db_name="signal_bot_test")
@@ -221,6 +224,7 @@ def test_config_agrees_with_actual_connection_database_accepted(monkeypatch):
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
     monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+    monkeypatch.delenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", raising=False)
 
     # 4a. signal_bot_test match
     cfg_test = SimpleNamespace(db_name="signal_bot_test", observation_only=False)
@@ -540,6 +544,7 @@ def test_promoted_and_unpromoted_strategy_outbox_persistence(monkeypatch):
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
     monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+    monkeypatch.delenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", raising=False)
 
     config = SimpleNamespace(
         db_name="signal_bot_test",
@@ -603,6 +608,7 @@ def test_transaction_rollback_and_idempotency(monkeypatch):
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
     monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+    monkeypatch.delenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", raising=False)
 
     config = SimpleNamespace(
         db_name="signal_bot_test",
@@ -650,6 +656,7 @@ def test_close_trade_and_update_stats_connection_identity_verification(monkeypat
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
     monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+    monkeypatch.delenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", raising=False)
 
     config = SimpleNamespace(db_name="signal_bot_test", observation_only=False)
 
@@ -696,6 +703,7 @@ def test_no_default_botconfig_fallback_when_configuration_absent(monkeypatch):
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
     monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
+    monkeypatch.delenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", raising=False)
 
     cursor = MockCursor(db_name="signal_bot_test")
     conn = MockConnection(cursor)

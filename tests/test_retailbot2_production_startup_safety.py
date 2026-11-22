@@ -214,6 +214,63 @@ class TestOperationalNotificationRouting:
         assert "BB_SQUEEZE" in text
         assert "WR=80% Net=$+350" in text
 
+    def test_format_stats_includes_all_chosen_paper_strategies_with_winrate_and_pnl(self):
+        """TelegramAlert.format_stats reflects winrate, wins, losses, pnl and paper configs."""
+        mock_metrics = {
+            "totalTrades": 10,
+            "wins": 7,
+            "losses": 3,
+            "winRatePct": 70.0,
+            "netPnl": 450.50,
+            "byStrategy": [
+                {
+                    "strategy": "confluence_ensemble_v1",
+                    "totalTrades": 6,
+                    "wins": 4,
+                    "losses": 2,
+                    "netPnl": 250.50,
+                },
+                {
+                    "strategy": "BB_REV_INV",
+                    "totalTrades": 4,
+                    "wins": 3,
+                    "losses": 1,
+                    "netPnl": 200.00,
+                },
+            ],
+        }
+        mock_configs = [
+            {"strategy_name": "confluence_ensemble_v1", "report_enabled": True, "telegram_enabled": False},
+            {"strategy_name": "BB_REV_INV", "report_enabled": True, "telegram_enabled": True},
+            {"strategy_name": "rsi_dip_buyer_v1", "report_enabled": True, "telegram_enabled": False},
+            {"strategy_name": "hidden_strat", "report_enabled": False, "telegram_enabled": True},
+        ]
+        retail_stats = {
+            "SR_TRAP_shadow": {"total": 5, "wins": 4, "losses": 1, "net_pnl": 350.0},
+        }
+        with patch("paper.engine.get_paper_metrics", return_value=mock_metrics), \
+             patch("paper.engine.get_paper_configs", return_value=mock_configs):
+            text = TelegramAlert.format_stats(retail_stats, equity_shadow=10500.0, equity_inverse=9800.0)
+
+        # Headline verification
+        assert "Net P&amp;L: <code>$+450.50</code> · Closed: 10 · WR: <code>70%</code> · Wins: 7 · Losses: 3" in text
+
+        # Traded strategies verification (including winrate, wins, losses, pnl)
+        assert "🟢 <b>confluence_ensemble_v1</b>: T=6 W=4 L=2 WR=67% Net=$+250.50" in text
+        assert "🟢 <b>BB_REV_INV</b>: T=4 W=3 L=1 WR=75% Net=$+200.00" in text
+
+        # Chosen strategy listed in paper trading with 0 trades verification
+        # (even though telegram_enabled=False)
+        assert "⚪ <b>rsi_dip_buyer_v1</b>: T=0 W=0 L=0 WR=0% Net=$+0.00" in text
+
+        # Hidden strategy with report_enabled=False must NOT appear
+        assert "hidden_strat" not in text
+
+        # RetailBot2 section verification
+        assert "RetailBot2 Research · Shadow / Inverse" in text
+        assert "SR_TRAP_shadow" in text
+        assert "WR=80% Net=$+350" in text
+
     def test_startup_message_routes_through_notify_operational(self):
         """_startup_msg uses notify_operational instead of direct send."""
         bot = object.__new__(RetailDeathTrapBot)

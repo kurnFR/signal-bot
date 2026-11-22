@@ -621,7 +621,8 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         self.assertGreater(net_pnl, 0)
         after = TelegramAlert.format_stats(retail_stats, 10000, 10050)
         self.assertIn(f"Net P&amp;L: <code>${net_pnl:+,.2f}</code> · Closed: 1", after)
-        self.assertIn(f"<b>BB_REV_INV</b>: T=1 Net=${net_pnl:+,.2f}", after)
+        self.assertIn("WR: <code>100%</code>", after)
+        self.assertIn(f"<b>BB_REV_INV</b>: T=1 W=1 L=0 WR=100% Net=${net_pnl:+,.2f}", after)
         self.assertIn("BB_REV_INV_inverse</b>: T=2 W=1 L=1 WR=50% Net=$+50", after)
 
     def test_15_duplicate_trade_prevention(self):
