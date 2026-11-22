@@ -224,6 +224,7 @@ class TestOperationalNotificationRouting:
             "netPnl": 450.50,
             "byStrategy": [
                 {
+                    "symbol": "BTCUSDT",
                     "strategy": "confluence_ensemble_v1",
                     "totalTrades": 6,
                     "wins": 4,
@@ -231,6 +232,7 @@ class TestOperationalNotificationRouting:
                     "netPnl": 250.50,
                 },
                 {
+                    "symbol": "ETHUSDT",
                     "strategy": "BB_REV_INV",
                     "totalTrades": 4,
                     "wins": 3,
@@ -240,10 +242,10 @@ class TestOperationalNotificationRouting:
             ],
         }
         mock_configs = [
-            {"strategy_name": "confluence_ensemble_v1", "report_enabled": True, "telegram_enabled": False},
-            {"strategy_name": "BB_REV_INV", "report_enabled": True, "telegram_enabled": True},
-            {"strategy_name": "rsi_dip_buyer_v1", "report_enabled": True, "telegram_enabled": False},
-            {"strategy_name": "hidden_strat", "report_enabled": False, "telegram_enabled": True},
+            {"symbol": "BTCUSDT", "strategy_name": "confluence_ensemble_v1", "report_enabled": True, "telegram_enabled": False},
+            {"symbol": "ETHUSDT", "strategy_name": "BB_REV_INV", "report_enabled": True, "telegram_enabled": True},
+            {"symbol": "ETHUSDT", "strategy_name": "rsi_dip_buyer_v1", "report_enabled": True, "telegram_enabled": False},
+            {"symbol": "SOLUSDT", "strategy_name": "hidden_strat", "report_enabled": False, "telegram_enabled": True},
         ]
         retail_stats = {
             "SR_TRAP_shadow": {"total": 5, "wins": 4, "losses": 1, "net_pnl": 350.0},
@@ -265,6 +267,9 @@ class TestOperationalNotificationRouting:
 
         # Hidden strategy with report_enabled=False must NOT appear
         assert "hidden_strat" not in text
+        assert "<b>BTCUSDT</b> · Net=$+250.50" in text
+        assert "<b>ETHUSDT</b> · Net=$+200.00" in text
+        assert "SOLUSDT" not in text
 
         # RetailBot2 section verification
         assert "RetailBot2 Research · Shadow / Inverse" in text

@@ -225,6 +225,21 @@ class TestPaperOrderRoutes(unittest.TestCase):
         batch_mock.assert_called_once_with("BB_REV_INV", "telegram_all_on")
         sync_rb2.assert_called_once()
 
+    def test_paper_report_preferences_apply_only_to_selected_configurations(self):
+        request = {"symbol": "btcusdt", "strategy_name": "BB_REV_INV", "report_enabled": False}
+        with patch("web.app.authenticate_request", return_value=_user("trader")), \
+             patch("web.routes.paper_routes.batch_update_paper_configs", return_value=1) as update, \
+             patch("web.routes.paper_routes._sync_retailbot2_lifecycle") as sync:
+            response = self.client.post("/api/paper/configs/preferences", json=request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["updated"], 1)
+        update.assert_called_once_with("BB_REV_INV", "report_all_off", symbol="BTCUSDT")
+        sync.assert_not_called()
+
+        with patch("web.app.authenticate_request", return_value=_user("viewer")):
+            denied = self.client.post("/api/paper/configs/preferences", json=request)
+        self.assertEqual(denied.status_code, 403)
+
     def test_batch_update_paper_configs_rejects_invalid_action(self):
         with patch("web.app.authenticate_request", return_value=_user("trader")), \
              patch("web.routes.paper_routes.batch_update_paper_configs", side_effect=ValueError("Unknown batch action: invalid")):

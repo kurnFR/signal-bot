@@ -510,24 +510,38 @@ def delete_paper_config(config_id: int) -> bool:
             conn.close()
 
 
-def batch_update_paper_configs(strategy_name: str, action: str) -> int:
-    """Batch update active, telegram, or report status across all pairs for a strategy."""
+def batch_update_paper_configs(strategy_name: Optional[str], action: str, *, symbol: Optional[str] = None) -> int:
+    """Set a preference on existing configurations in the requested scope."""
     action = action.strip().lower()
-    sql_map = {
-        "activate_all": "UPDATE paper_configs SET is_active = 1 WHERE strategy_name = %s",
-        "pause_all": "UPDATE paper_configs SET is_active = 0 WHERE strategy_name = %s",
-        "telegram_all_on": "UPDATE paper_configs SET telegram_enabled = 1 WHERE strategy_name = %s",
-        "telegram_all_off": "UPDATE paper_configs SET telegram_enabled = 0 WHERE strategy_name = %s",
-        "report_all_on": "UPDATE paper_configs SET report_enabled = 1 WHERE strategy_name = %s",
-        "report_all_off": "UPDATE paper_configs SET report_enabled = 0 WHERE strategy_name = %s",
+    assignments = {
+        "activate_all": ("is_active", True),
+        "pause_all": ("is_active", False),
+        "telegram_all_on": ("telegram_enabled", True),
+        "telegram_all_off": ("telegram_enabled", False),
+        "report_all_on": ("report_enabled", True),
+        "report_all_off": ("report_enabled", False),
     }
-    if action not in sql_map:
+    if action not in assignments:
         raise ValueError(f"Unknown batch action: {action}")
+    if not strategy_name and not symbol:
+        raise ValueError("Select a symbol or strategy")
+    if symbol and action in {"activate_all", "pause_all"}:
+        raise ValueError("Pair controls support reporting and Telegram preferences only")
+    column, enabled = assignments[action]
+    conditions = []
+    params = [enabled]
+    if strategy_name:
+        conditions.append("strategy_name = %s")
+        params.append(strategy_name)
+    if symbol:
+        conditions.append("symbol = %s")
+        params.append(symbol)
+    where = " AND ".join(conditions)
     conn = get_pool().get_connection()
     cur = None
     try:
         cur = conn.cursor()
-        cur.execute(sql_map[action], (strategy_name,))
+        cur.execute(f"UPDATE paper_configs SET {column} = %s WHERE {where}", tuple(params))
         updated_count = cur.rowcount
         conn.commit()
         return updated_count
@@ -652,7 +666,7 @@ def get_paper_metrics() -> Dict[str, Any]:
         summary = cur.fetchone()
         cur.execute(
             """
-            SELECT t.strategy_name, t.config_id, t.ml_generator_model_id, t.ml_model_id,
+            SELECT t.symbol, t.strategy_name, t.config_id, t.ml_generator_model_id, t.ml_model_id,
                    COUNT(*) AS total_trades,
                    SUM(CASE WHEN t.r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
                    SUM(CASE WHEN t.r_multiple < 0 THEN 1 ELSE 0 END) AS losses,
@@ -662,7 +676,7 @@ def get_paper_metrics() -> Dict[str, Any]:
             FROM paper_trades t
             LEFT JOIN paper_configs c ON c.id = t.config_id
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE
-            GROUP BY t.strategy_name, t.config_id, t.ml_generator_model_id, t.ml_model_id
+            GROUP BY t.symbol, t.strategy_name, t.config_id, t.ml_generator_model_id, t.ml_model_id
             ORDER BY t.strategy_name, t.config_id
             """
         )
@@ -676,6 +690,7 @@ def get_paper_metrics() -> Dict[str, Any]:
             strategy_wins = int(row["wins"] or 0)
             by_strategy.append({
                 "strategy": row["strategy_name"],
+                "symbol": row.get("symbol"),
                 "configId": row.get("config_id"),
                 "ml_generator_model_id": row.get("ml_generator_model_id"),
                 "ml_model_id": row.get("ml_model_id"),

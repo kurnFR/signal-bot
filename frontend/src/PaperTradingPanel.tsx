@@ -15,6 +15,7 @@ import {
   resetPaperCircuitBreaker,
   tripPaperCircuitBreaker,
   updatePaperConfig,
+  updatePaperReportPreference,
   type PaperConfig,
   type PaperOrder,
   type PaperPosition,
@@ -66,6 +67,9 @@ export function PaperTradingPanel() {
   const deployDialogRef = useRef<HTMLDialogElement | null>(null);
   const deploySymbolInputRef = useRef<HTMLInputElement | null>(null);
   const deployTriggerRef = useRef<HTMLElement | null>(null);
+  const [reportSymbol, setReportSymbol] = useState("");
+  const [reportStrategy, setReportStrategy] = useState("");
+  const [savingPreference, setSavingPreference] = useState(false);
   const [togglingConfigId, setTogglingConfigId] = useState<number | null>(null);
 
   const [availableSymbols, setAvailableSymbols] = useState<string[]>(["BTCUSDT"]);
@@ -369,7 +373,7 @@ export function PaperTradingPanel() {
   };
 
   const handleToggleConfigActive = async (c: PaperConfig) => {
-    if (!canTrade || togglingConfigId !== null) return;
+    if (!canTrade || savingPreference || togglingConfigId !== null) return;
     setTogglingConfigId(c.id);
     setActionError(null);
     setActionWarning(null);
@@ -397,7 +401,7 @@ export function PaperTradingPanel() {
   };
 
   const handleToggleConfigTelegram = async (c: PaperConfig) => {
-    if (!canTrade || togglingConfigId !== null) return;
+    if (!canTrade || savingPreference || togglingConfigId !== null) return;
     setTogglingConfigId(c.id);
     setActionError(null);
     setActionWarning(null);
@@ -425,7 +429,7 @@ export function PaperTradingPanel() {
   };
 
   const handleToggleConfigReport = async (c: PaperConfig) => {
-    if (!canTrade || togglingConfigId !== null) return;
+    if (!canTrade || savingPreference || togglingConfigId !== null) return;
     setTogglingConfigId(c.id);
     setActionError(null);
     setActionWarning(null);
@@ -476,7 +480,70 @@ export function PaperTradingPanel() {
     }
   };
 
-  const m = data?.metrics;
+  const allMetrics = data?.metrics;
+  const configs = data?.configs ?? [];
+  const symbols = [...new Set([
+    ...configs.map((config) => config.symbol),
+    ...(allMetrics?.byStrategy.flatMap((row) => row.symbol ? [row.symbol] : []) ?? []),
+  ])].sort();
+  const strategies = [...new Set([
+    ...configs.filter((config) => !reportSymbol || config.symbol === reportSymbol).map((config) => config.strategy_name),
+    ...(allMetrics?.byStrategy.filter((row) => !reportSymbol || row.symbol === reportSymbol).map((row) => row.strategy) ?? []),
+  ])].sort();
+  const scopedConfigs = configs.filter((config) =>
+    (!reportSymbol || config.symbol === reportSymbol) && (!reportStrategy || config.strategy_name === reportStrategy),
+  );
+  const filtered = Boolean(reportSymbol || reportStrategy);
+  const reportRows = allMetrics?.byStrategy ?? [];
+  const closedRows = reportRows.filter((row) =>
+    (!reportSymbol || row.symbol === reportSymbol) && (!reportStrategy || row.strategy === reportStrategy),
+  );
+  const rows = [...closedRows];
+  const shown = new Set(closedRows.map((row) => JSON.stringify([row.symbol, row.strategy])));
+  for (const config of scopedConfigs) {
+    const key = JSON.stringify([config.symbol, config.strategy_name]);
+    if (!config.report_enabled || shown.has(key)) continue;
+    shown.add(key);
+    rows.push({
+      symbol: config.symbol, strategy: config.strategy_name, totalTrades: 0, wins: 0, losses: 0,
+      netPnl: 0, cumulativeR: 0, winRatePct: 0, expectancyR: 0,
+    });
+  }
+  rows.sort((a, b) => (a.symbol ?? "").localeCompare(b.symbol ?? "") || a.strategy.localeCompare(b.strategy));
+  const total = rows.reduce(
+    (sum, row) => ({
+      totalTrades: sum.totalTrades + row.totalTrades,
+      wins: sum.wins + row.wins,
+      losses: sum.losses + row.losses,
+      netPnl: sum.netPnl + row.netPnl,
+      cumulativeR: sum.cumulativeR + row.cumulativeR,
+    }),
+    { totalTrades: 0, wins: 0, losses: 0, netPnl: 0, cumulativeR: 0 },
+  );
+  const m = allMetrics && filtered ? {
+    ...total,
+    winRatePct: total.totalTrades ? total.wins / total.totalTrades * 100 : 0,
+    expectancyR: total.totalTrades ? total.cumulativeR / total.totalTrades : 0,
+    byStrategy: rows,
+  } : allMetrics && { ...allMetrics, byStrategy: rows };
+  const savePreference = async (field: "report_enabled" | "telegram_enabled", enabled: boolean) => {
+    if (!canTrade || !filtered || !scopedConfigs.length || savingPreference || togglingConfigId !== null) return;
+    setSavingPreference(true);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      const updated = await updatePaperReportPreference({
+        symbol: reportSymbol || undefined,
+        strategy_name: reportStrategy || undefined,
+      }, field, enabled);
+      setActionSuccess(`${field === "report_enabled" ? "Reporting" : "Telegram trade alerts"} ${enabled ? "enabled" : "disabled"} · ${updated} configurations changed.`);
+      setAttempt((v) => v + 1);
+    } catch (cause) {
+      setActionError(cause instanceof PaperTradingActionError ? cause.message : "Failed to save preference.");
+    } finally {
+      setSavingPreference(false);
+    }
+  };
   const breaker = data?.breaker;
   const metric = (label: string, value: string, note: string, icon: ReactNode, className = "") => (
     <article className="metric-card" key={label}>
@@ -527,6 +594,41 @@ export function PaperTradingPanel() {
         </p>
       )}
 
+      <section className="panel" aria-labelledby="paper-report-filters">
+        <h2 id="paper-report-filters">Performance report filters</h2>
+        <div className="paper-risk-grid">
+          <label className="screener-control-field">Pair
+            <select value={reportSymbol} disabled={savingPreference} onChange={(event) => {
+              setReportSymbol(event.target.value);
+              setReportStrategy("");
+            }}>
+              <option value="">All pairs</option>
+              {symbols.map((symbol) => <option key={symbol} value={symbol}>{symbol}</option>)}
+            </select>
+          </label>
+          <label className="screener-control-field">Strategy
+            <select value={reportStrategy} disabled={savingPreference} onChange={(event) => setReportStrategy(event.target.value)}>
+              <option value="">All strategies</option>
+              {strategies.map((strategy) => <option key={strategy} value={strategy}>{strategy}</option>)}
+            </select>
+          </label>
+        </div>
+        {filtered && <p>{scopedConfigs.filter((c) => c.report_enabled).length} of {scopedConfigs.length} configurations included in reports · {scopedConfigs.filter((c) => c.telegram_enabled).length} with Telegram trade alerts</p>}
+        {canTrade && filtered && scopedConfigs.length > 0 && <div className="screener-control-footer">
+          {([
+            ["report_enabled", true, "Enable reporting"],
+            ["report_enabled", false, "Disable reporting"],
+            ["telegram_enabled", true, "Enable Telegram trade alerts"],
+            ["telegram_enabled", false, "Disable Telegram trade alerts"],
+          ] as const).map(([field, enabled, label]) => (
+            <button key={label} type="button" className="button button-secondary button-sm"
+              disabled={loading || savingPreference || togglingConfigId !== null || scopedConfigs.every((c) => c[field] === enabled)}
+              onClick={() => void savePreference(field, enabled)}>{label}</button>
+          ))}
+        </div>}
+        {canTrade && <p>Preferences apply to existing configurations in the selected scope, across markets and timeframes.</p>}
+      </section>
+
       <section className="metrics-grid" aria-label="Paper trading performance">
         {metric("Net realized PnL", m ? money.format(m.netPnl) : loading ? "Loading…" : "—", "Report-enabled strategies", <Activity size={17} />, pnlClass(m?.netPnl))}
         {metric("Win rate", m ? `${number.format(m.winRatePct)}%` : loading ? "Loading…" : "—", m ? `${m.wins} wins · ${m.losses} losses` : "Closed paper trades", <Activity size={17} />)}
@@ -537,19 +639,20 @@ export function PaperTradingPanel() {
       <section className="panel" aria-labelledby="paper-strategy-performance-title">
         <div className="panel-heading">
           <div><h2 id="paper-strategy-performance-title">Strategy performance</h2><p>Closed-trade aggregates from the paper ledger, filtered by report visibility.</p></div>
-          <span className="panel-counter">{m?.byStrategy.length ?? 0} STRATEGIES</span>
+          <span className="panel-counter">{m?.byStrategy.length ?? 0} ROWS</span>
         </div>
         {loading && !data ? <p className="empty-state">Loading strategy performance…</p> : m?.byStrategy.length ? (
           <div className="status-table-wrap">
             <table className="status-table">
-              <thead><tr><th>Strategy</th><th>Closed trades</th><th>Wins / losses</th><th>Win rate</th><th>Cumulative R</th><th>Expectancy</th><th>Net PnL</th></tr></thead>
+              <thead><tr><th>Pair</th><th>Strategy</th><th>Closed trades</th><th>Wins / losses</th><th>Win rate</th><th>Cumulative R</th><th>Expectancy</th><th>Net PnL</th></tr></thead>
               <tbody>
-                {m.byStrategy.map((row) => (
-                  <tr key={row.strategy}>
+                {m.byStrategy.map((row, index) => (
+                  <tr key={`${row.symbol}-${row.strategy}-${row.configId}-${index}`}>
+                    <td>{row.symbol ?? "—"}</td>
                     <td><strong>{row.strategy}</strong></td>
                     <td>{number.format(row.totalTrades)}</td>
                     <td>{row.wins} / {row.losses}</td>
-                    <td>{number.format(row.winRatePct)}%</td>
+                    <td>{row.totalTrades ? `${number.format(row.winRatePct)}%` : "—"}</td>
                     <td className={pnlClass(row.cumulativeR)}>{number.format(row.cumulativeR)} R</td>
                     <td className={pnlClass(row.expectancyR)}>{number.format(row.expectancyR)} R</td>
                     <td className={pnlClass(row.netPnl)}>{money.format(row.netPnl)}</td>
@@ -700,7 +803,7 @@ export function PaperTradingPanel() {
                           <button
                             type="button"
                             className={`button ${c.is_active ? "button-secondary" : "button-primary"} button-sm`}
-                            disabled={togglingConfigId === c.id}
+                            disabled={savingPreference || togglingConfigId !== null || loading}
                             onClick={() => handleToggleConfigActive(c)}
                             title={c.is_active ? "Pause paper trading for this strategy" : "Activate paper trading for this strategy"}
                           >
@@ -709,7 +812,7 @@ export function PaperTradingPanel() {
                           <button
                             type="button"
                             className={`button ${c.telegram_enabled ? "button-primary" : "button-secondary"} button-sm`}
-                            disabled={togglingConfigId === c.id}
+                            disabled={savingPreference || togglingConfigId !== null || loading}
                             onClick={() => handleToggleConfigTelegram(c)}
                             title={c.telegram_enabled ? "Disable Telegram alerts for this strategy" : "Enable Telegram alerts for this strategy"}
                           >
@@ -718,7 +821,7 @@ export function PaperTradingPanel() {
                           <button
                             type="button"
                             className={`button ${c.report_enabled ? "button-primary" : "button-secondary"} button-sm`}
-                            disabled={togglingConfigId === c.id}
+                            disabled={savingPreference || togglingConfigId !== null || loading}
                             onClick={() => handleToggleConfigReport(c)}
                             title={c.report_enabled ? "Hide from performance reports" : "Include in performance reports"}
                           >

@@ -945,7 +945,7 @@ class TelegramAlert:
             return [*lines, "Paper trade totals unavailable"]
 
         if not metrics["totalTrades"]:
-            return [*lines, "No closed trades included in reporting"]
+            lines.append("No closed trades included in reporting")
 
         wr = float(metrics.get("winRatePct", 0.0))
         lines.append(
@@ -954,44 +954,49 @@ class TelegramAlert:
             f"WR: <code>{wr:.0f}%</code> · "
             f"Wins: {metrics['wins']} · Losses: {metrics['losses']}"
         )
-        by_strategy = {}
+        by_pair: dict[str, dict[str, list]] = {}
         try:
             from paper.engine import get_paper_configs
 
             for cfg in get_paper_configs():
                 if cfg.get("report_enabled", True):
-                    s_name = str(cfg.get("strategy_name") or "").strip()
-                    if s_name and s_name not in by_strategy:
-                        by_strategy[s_name] = (0, 0, 0, 0.0)
+                    by_pair.setdefault(cfg["symbol"], {}).setdefault(cfg["strategy_name"], [0, 0, 0, 0.0])
         except Exception as exc:
             logging.getLogger(__name__).debug("Paper configs lookup failed (%s)", type(exc).__name__)
 
         for row in metrics["byStrategy"]:
-            name = row["strategy"]
-            trades, wins, losses, pnl = by_strategy.get(name, (0, 0, 0, 0.0))
-            by_strategy[name] = (
-                trades + row["totalTrades"],
-                wins + row["wins"],
-                losses + row["losses"],
-                pnl + row["netPnl"],
-            )
+            strategies = by_pair.setdefault(row["symbol"], {})
+            stats = strategies.setdefault(row["strategy"], [0, 0, 0, 0.0])
+            stats[0] += row["totalTrades"]
+            stats[1] += row["wins"]
+            stats[2] += row["losses"]
+            stats[3] += row["netPnl"]
 
-        ranked = sorted(
-            by_strategy.items(),
-            key=lambda item: (-item[1][0], -item[1][3], item[0]),
-        )
-        # Keep summary clean and bounded for Telegram message limits (up to 20 strategies).
-        max_display = 20
-        for name, (trades, wins, losses, pnl) in ranked[:max_display]:
-            strat_wr = (wins / trades * 100) if trades > 0 else 0.0
-            color = "⚪" if trades == 0 else ("🟢" if pnl >= 0 else "🔴")
-            lines.append(
-                f"{color} <b>{escape(name)}</b>: "
-                f"T={trades} W={wins} L={losses} "
-                f"WR={strat_wr:.0f}% Net=${pnl:+,.2f}"
-            )
-        if len(ranked) > max_display:
-            lines.append(f"Total includes {len(ranked) - max_display} additional strategies")
+        omitted = 0
+        remaining = 1750
+        for symbol, strategies in sorted(by_pair.items()):
+            heading = f"<b>{escape(symbol)}</b> · Net=${sum(row[3] for row in strategies.values()):+,.2f}"
+            pair_lines = [heading]
+            for name, (trades, wins, losses, pnl) in sorted(strategies.items()):
+                wr = f"{wins / trades:.0%}" if trades else "0%"
+                color = "⚪" if trades == 0 else ("🟢" if pnl >= 0 else "🔴")
+                pair_lines.append(
+                    f"{color} <b>{escape(name)}</b>: T={trades} W={wins} L={losses} WR={wr} Net=${pnl:+,.2f}"
+                )
+            # Keep each pair heading with at least one strategy. Totals above cover every enabled row.
+            if remaining < len(heading) + len(pair_lines[1]) + 2:
+                omitted += len(strategies)
+                continue
+            lines.append(heading)
+            remaining -= len(heading) + 1
+            for line in pair_lines[1:]:
+                if remaining < len(line) + 1:
+                    omitted += 1
+                    continue
+                lines.append(line)
+                remaining -= len(line) + 1
+        if omitted:
+            lines.append(f"Total includes {omitted} more pair/strategy rows. View all in Paper Trading.")
         return lines
 
     @staticmethod

@@ -223,6 +223,29 @@ def batch_update_configs(req: BatchPaperConfigRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+class PaperReportPreferences(BaseModel):
+    symbol: Optional[str] = Field(None, max_length=20, pattern=r"^[A-Za-z0-9]+$")
+    strategy_name: Optional[str] = Field(None, min_length=1, max_length=50)
+    report_enabled: Optional[bool] = None
+    telegram_enabled: Optional[bool] = None
+
+
+@router.post("/configs/preferences")
+def update_report_preferences(req: PaperReportPreferences):
+    symbol = req.symbol.upper() if req.symbol else None
+    strategy = req.strategy_name.strip() if req.strategy_name else None
+    if not symbol and not strategy:
+        raise HTTPException(status_code=400, detail="Select a pair or strategy")
+    if (req.report_enabled is None) == (req.telegram_enabled is None):
+        raise HTTPException(status_code=400, detail="Set exactly one preference")
+    if req.report_enabled is not None:
+        action = "report_all_on" if req.report_enabled else "report_all_off"
+    else:
+        action = "telegram_all_on" if req.telegram_enabled else "telegram_all_off"
+    count = batch_update_paper_configs(strategy, action, symbol=symbol)
+    return {"status": "success", "updated": count}
+
+
 @router.delete("/configs/{config_id}")
 def delete_config(config_id: int = Path(..., gt=0)):
     try:
