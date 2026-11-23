@@ -815,7 +815,7 @@ export function WalletTrackingPanel() {
                   id="s-min-trade"
                   type="number"
                   min={0.01}
-                  step={100}
+                  step="any"
                   required
                   value={sMinTrade}
                   onChange={(e) => setSMinTrade(e.target.value)}
@@ -830,7 +830,7 @@ export function WalletTrackingPanel() {
                   id="s-min-net"
                   type="number"
                   min={0.01}
-                  step={1000}
+                  step="any"
                   required
                   value={sMinNet}
                   onChange={(e) => setSMinNet(e.target.value)}
@@ -845,7 +845,7 @@ export function WalletTrackingPanel() {
                   id="s-auto-track"
                   type="number"
                   min={typeof sMinNet === "number" ? sMinNet : (parseFloat(sMinNet) || 0.01)}
-                  step={1000}
+                  step="any"
                   required
                   value={sAutoTrackNet}
                   onChange={(e) => setSAutoTrackNet(e.target.value)}

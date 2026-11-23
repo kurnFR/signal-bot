@@ -5,7 +5,7 @@
     "deploy/systemd/retailbot2-outbox-worker.service": "35b76b4c545f36ba70229472abbf1dc2567c0c9f9cf0092fa238edce85bd7f29",
     "deploy/env/outbox-worker.env.example": "d157da69214647835b540fb56b2238b2290d1215a63ff52aaadd16bc06038051",
     "deploy/requirements-worker.txt": "597580c344905b902d0d7ca7f9e17041561e655ec97029288f2d516370f844fa",
-    "paper/outbox_worker.py": "6a3d1eda9b300e163ae05e0a429820263cf62c6f302806d97a30f9b3e30e5e13",
+    "paper/outbox_worker.py": "22fcc634b05eccb37047e42fabaeda59b91f2df8a47d2496a0f80e05623c5cde",
     "paper/outbox_transport.py": "84630db3c4666bc3d24df0757e15d42014768ec9d03f856d8c0ca3619d22b8f0",
     "paper/outbox_health.py": "496f13f777eb1029d94b9232321da6e0061691c9923bd807a3c59df92e024091",
     "paper/outbox_retention.py": "3f14306a4bc678c7cc439c80e95e84bfa5fc898fa7bf5642a33e6f6d3b5e100a",

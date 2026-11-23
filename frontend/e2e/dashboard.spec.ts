@@ -223,7 +223,7 @@ test("Market Screener exposes role-gated control settings to an authorized trade
   await signIn(page);
   await page.getByRole("button", { name: /Market Screener/ }).click();
   await expect(page.getByRole("heading", { name: "Screener configuration" })).toBeVisible();
-  await expect(page.getByLabel(/Telegram alerting enabled/)).toBeVisible();
+  await expect(page.getByLabel(/Smart Money Screener enabled/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Save changes" })).toBeVisible();
 });
 
@@ -569,10 +569,11 @@ test("Market Screener saves control changes only after the explicit Save changes
   await signIn(page);
   await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: /Market Screener/ }).click();
   await expect(page.getByRole("heading", { name: "Screener configuration" })).toBeVisible();
-  await expect(page.getByLabel(/Telegram alerting enabled/)).toBeChecked();
+  await expect(page.getByLabel(/Smart Money Screener enabled/)).toBeChecked();
   expect(saveRequests.filter((request) => request.method === "POST")).toEqual([]);
 
-  await page.getByLabel(/Telegram alerting enabled/).uncheck();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByLabel(/Smart Money Screener enabled/).uncheck();
   expect(saveRequests.filter((request) => request.method === "POST")).toEqual([]);
   await page.getByRole("button", { name: "Save changes" }).click();
 
