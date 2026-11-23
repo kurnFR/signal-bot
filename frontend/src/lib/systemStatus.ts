@@ -5,6 +5,21 @@ export interface LoginRateLimiterStatus {
   degraded: boolean;
 }
 
+export interface BrandingConfig {
+  brandName: string;
+  logoUrl: string | null;
+}
+
+export interface LicenseStatus {
+  valid: boolean;
+  mode: string;
+  customer: string | null;
+  tier: string;
+  maxUsers: number | null;
+  expiresAt: string | null;
+  reason: string | null;
+}
+
 export interface SystemStatusResponse {
   database: {
     status: string;
@@ -22,6 +37,8 @@ export interface SystemStatusResponse {
     enableFuturesConfig: boolean;
   };
   loginRateLimiter?: LoginRateLimiterStatus;
+  branding?: BrandingConfig;
+  license?: LicenseStatus;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

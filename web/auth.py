@@ -94,36 +94,132 @@ TOKEN_EXPIRY_SECONDS = int(os.getenv("ACCESS_TOKEN_EXPIRE_SECONDS", str(DEFAULT_
 security_bearer = HTTPBearer(auto_error=False)
 
 
+def validate_production_secret_config() -> None:
+    """Fail fast at startup when running in production with a missing or weak APP_SECRET_KEY."""
+    if os.getenv("SIGNAL_BOT_ENV", "").strip().lower() != "production":
+        return
+    env_secret = os.getenv("APP_SECRET_KEY", "").strip()
+    if len(env_secret) < 32:
+        raise RuntimeError(
+            "APP_SECRET_KEY must be set to at least 32 characters when SIGNAL_BOT_ENV=production"
+        )
+
+
 # ============================================================================
-# Single-Use WebSocket Authentication Tickets
+# Single-Use WebSocket Authentication Tickets (MariaDB-backed with local fallback)
 # ============================================================================
 _ws_tickets: Dict[str, Dict[str, Any]] = {}
 _ws_tickets_lock = threading.Lock()
 WS_TICKET_TTL_SECONDS = 30
 
 
+def _ws_ticket_hash(ticket: str) -> str:
+    return hashlib.sha256(ticket.encode("utf-8")).hexdigest()
+
+
 def create_ws_ticket(user: Dict[str, Any]) -> str:
-    """Generate a short-lived (30s), single-use opaque ticket for WS connection."""
+    """Generate a short-lived (30s), single-use opaque ticket for WS connection.
+
+    Persists hashed tickets in MariaDB (`ws_auth_tickets`) for multi-worker
+    consistency, falling back to process-local memory when the DB is unavailable.
+    """
     ticket = secrets.token_urlsafe(32)
+    ticket_hash = _ws_ticket_hash(ticket)
     now = time.time()
-    with _ws_tickets_lock:
-        expired = [t for t, data in _ws_tickets.items() if data.get("expires_at", 0) <= now]
-        for t in expired:
-            _ws_tickets.pop(t, None)
-        _ws_tickets[ticket] = {
-            "user": user,
-            "expires_at": now + WS_TICKET_TTL_SECONDS,
-        }
+    expires_at = now + WS_TICKET_TTL_SECONDS
+    user_json = json.dumps(user, default=str)
+
+    persisted = False
+    conn = None
+    cur = None
+    try:
+        conn = get_pool().get_connection()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM ws_auth_tickets WHERE expires_at <= %s LIMIT 200", (now,))
+        cur.execute(
+            "INSERT INTO ws_auth_tickets (ticket_hash, user_payload, expires_at) VALUES (%s, %s, %s)",
+            (ticket_hash, user_json, expires_at),
+        )
+        conn.commit()
+        persisted = True
+    except Exception as exc:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.debug("WS ticket DB persistence unavailable (%s); using in-memory store", type(exc).__name__)
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    if not persisted:
+        with _ws_tickets_lock:
+            expired = [t for t, data in _ws_tickets.items() if data.get("expires_at", 0) <= now]
+            for t in expired:
+                _ws_tickets.pop(t, None)
+            _ws_tickets[ticket_hash] = {
+                "user": user,
+                "expires_at": expires_at,
+            }
     return ticket
 
 
 def consume_ws_ticket(ticket: str) -> Optional[Dict[str, Any]]:
-    """Validate and immediately consume a single-use WS ticket."""
+    """Validate and atomically consume a single-use WS ticket across workers."""
     if not ticket:
         return None
+    ticket_hash = _ws_ticket_hash(ticket)
     now = time.time()
+
+    conn = None
+    cur = None
+    try:
+        conn = get_pool().get_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute(
+            "UPDATE ws_auth_tickets SET consumed_at = %s "
+            "WHERE ticket_hash = %s AND consumed_at IS NULL AND expires_at >= %s",
+            (now, ticket_hash, now),
+        )
+        if cur.rowcount == 1:
+            cur.execute("SELECT user_payload FROM ws_auth_tickets WHERE ticket_hash = %s", (ticket_hash,))
+            row = cur.fetchone()
+            conn.commit()
+            if row and row.get("user_payload") is not None:
+                raw_payload = row["user_payload"]
+                return json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
+        else:
+            conn.commit()
+    except Exception as exc:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.debug("WS ticket DB lookup unavailable (%s); checking in-memory store", type(exc).__name__)
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     with _ws_tickets_lock:
-        data = _ws_tickets.pop(ticket, None)
+        data = _ws_tickets.pop(ticket_hash, None)
         if not data:
             return None
         if data.get("expires_at", 0) < now:
@@ -132,7 +228,7 @@ def consume_ws_ticket(ticket: str) -> Optional[Dict[str, Any]]:
 
 
 # ============================================================================
-# Compute-Heavy Endpoint Rate Limiting
+# Compute-Heavy Endpoint Rate Limiting (MariaDB-backed with local fallback)
 # ============================================================================
 _compute_rate_limit_history: Dict[str, list[float]] = {}
 _compute_rate_limit_lock = threading.Lock()
@@ -141,12 +237,57 @@ COMPUTE_RATE_LIMIT_WINDOW = int(os.getenv("COMPUTE_RATE_LIMIT_WINDOW", "60"))
 
 
 def check_compute_rate_limit(key: str, max_requests: int = COMPUTE_RATE_LIMIT_MAX, window_seconds: int = COMPUTE_RATE_LIMIT_WINDOW) -> tuple[bool, int]:
-    """In-memory sliding window rate limiter for expensive compute endpoints.
-    
+    """Sliding window rate limiter for expensive compute endpoints.
+
+    Uses MariaDB (`compute_rate_limits`) when available for multi-worker consistency,
+    falling back to process-local memory when the database is unavailable.
     Returns (allowed: bool, retry_after: int).
     """
     now = time.time()
     cutoff = now - window_seconds
+
+    conn = None
+    cur = None
+    try:
+        conn = get_pool().get_connection()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM compute_rate_limits WHERE rate_key = %s AND requested_at <= %s", (key, cutoff))
+        cur.execute(
+            "SELECT COUNT(*), MIN(requested_at) FROM compute_rate_limits WHERE rate_key = %s AND requested_at > %s",
+            (key, cutoff),
+        )
+        row = cur.fetchone()
+        count = int(row[0] or 0) if row else 0
+        earliest = float(row[1]) if (row and row[1] is not None) else now
+        if count >= max_requests:
+            conn.commit()
+            retry_after = max(1, int(earliest + window_seconds - now))
+            return False, retry_after
+        cur.execute(
+            "INSERT INTO compute_rate_limits (rate_key, requested_at) VALUES (%s, %s)",
+            (key, now),
+        )
+        conn.commit()
+        return True, 0
+    except Exception as exc:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.debug("Compute rate limit DB unavailable (%s); using in-memory store", type(exc).__name__)
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     with _compute_rate_limit_lock:
         timestamps = _compute_rate_limit_history.get(key, [])
         valid_timestamps = [ts for ts in timestamps if ts > cutoff]

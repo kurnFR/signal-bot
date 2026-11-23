@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchSystemStatus } from "./lib/systemStatus";
+import { fetchSystemStatus, type BrandingConfig } from "./lib/systemStatus";
+import { getTokenExpiryMs, refreshSessionToken } from "./lib/auth";
 import { SystemStatusPanel } from "./SystemStatusPanel";
 import { ScreenerPanel } from "./ScreenerPanel";
 import { ScreenerControlsPanel } from "./ScreenerControlsPanel";
@@ -128,6 +129,7 @@ export function App() {
   const sidebarCloseButtonRef = useRef<HTMLButtonElement>(null);
   const wasSidebarOpen = useRef(false);
   const auth = useAuth();
+  const [branding, setBranding] = useState<BrandingConfig>({ brandName: "Signal Bot", logoUrl: null });
   const [systemHealth, setSystemHealth] = useState<{
     status: "connected" | "degraded" | "disconnected";
     tooltip: string;
@@ -142,6 +144,7 @@ export function App() {
       try {
         const res = await fetchSystemStatus();
         if (!mounted) return;
+        if (res.branding?.brandName) setBranding(res.branding);
         const dbOk = res.database.status === "ok";
         const heartbeatsOk = res.heartbeats.every((h) => h.status === "ok");
         if (!dbOk || !heartbeatsOk) {
@@ -172,6 +175,23 @@ export function App() {
       mounted = false;
       window.clearInterval(interval);
     };
+  }, []);
+
+
+  useEffect(() => {
+    const checkAndRefresh = () => {
+      try {
+        const token = window.localStorage.getItem("token");
+        const expMs = getTokenExpiryMs(token);
+        if (expMs !== null && expMs - Date.now() < 5 * 60 * 1000 && expMs > Date.now()) {
+          void refreshSessionToken();
+        }
+      } catch {
+        /* Storage unavailable */
+      }
+    };
+    const timer = window.setInterval(checkAndRefresh, 60000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -220,8 +240,8 @@ export function App() {
     {sidebarOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
     <aside id="dashboard-sidebar" className={"sidebar " + (sidebarOpen ? "sidebar-open" : "")} aria-label="Dashboard sidebar">
       <div className="brand">
-        <div className="brand-mark" aria-hidden="true"><Activity size={20} strokeWidth={2.5} /></div>
-        <div className="brand-copy"><strong>Signal Bot</strong><span>QUANTITATIVE PLATFORM</span></div>
+        <div className="brand-mark" aria-hidden="true">{branding.logoUrl ? <img src={branding.logoUrl} alt="" style={{ width: 20, height: 20, objectFit: "contain" }} /> : <Activity size={20} strokeWidth={2.5} />}</div>
+        <div className="brand-copy"><strong>{branding.brandName}</strong><span>QUANTITATIVE PLATFORM</span></div>
         <button ref={sidebarCloseButtonRef} className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
       </div>
       <div className="workspace-label">WORKSPACE</div>
@@ -325,7 +345,7 @@ export function App() {
 
         <footer className="page-footer" style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "center" }}>
           <div style={{ display: "flex", justifyContent: "space-between", width: "100%", flexWrap: "wrap", gap: "8px" }}>
-            <span><Activity size={14} /> Signal Bot Quantitative Platform</span>
+            <span><Activity size={14} /> {branding.brandName} Quantitative Platform</span>
             <span>FastAPI Engine · Binance Market Data · MariaDB</span>
           </div>
           <div className="footer-disclaimer" style={{ fontSize: "11px", color: "var(--color-muted)", textAlign: "center" }}>

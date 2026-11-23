@@ -27,6 +27,7 @@ from web.auth import (
     authenticate_request,
     enable_durable_rate_limit,
     check_compute_rate_limit,
+    validate_production_secret_config,
 )
 from web.routes.auth_routes import router as auth_router
 from web.routes.paper_routes import router as paper_router
@@ -45,6 +46,7 @@ from web.routes.ws_routes import router as ws_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_production_secret_config()
     seed_default_admin()
     enable_durable_rate_limit()
     try:

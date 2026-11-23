@@ -203,3 +203,47 @@ export async function deleteUser(userId: number): Promise<string> {
   }
   return payload.message.trim();
 }
+
+
+export interface AuditLogEntry {
+  id: number;
+  user_id: number | null;
+  username: string;
+  action: string;
+  details: Record<string, unknown> | string | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
+/** Fetch immutable operator audit logs (Admin only). */
+export async function fetchAuditLogs(
+  options: { limit?: number; action?: string; username?: string } = {},
+  signal?: AbortSignal,
+): Promise<AuditLogEntry[]> {
+  const params = new URLSearchParams();
+  if (options.limit != null) params.set("limit", String(options.limit));
+  if (options.action) params.set("action", options.action);
+  if (options.username) params.set("username", options.username);
+  const query = params.toString();
+  const path = query ? `/api/auth/audit-logs?${query}` : "/api/auth/audit-logs";
+  const payload = await userRequest<{ items?: unknown }>(path, { method: "GET", signal });
+  if (!isRecord(payload) || !Array.isArray(payload.items)) {
+    throw new UserActionError(502, "Server returned an invalid audit logs response");
+  }
+  return payload.items
+    .filter(isRecord)
+    .map((item) => ({
+      id: typeof item.id === "number" ? item.id : 0,
+      user_id: typeof item.user_id === "number" ? item.user_id : null,
+      username: typeof item.username === "string" ? item.username : "system",
+      action: typeof item.action === "string" ? item.action : "UNKNOWN",
+      details:
+        item.details === null || item.details === undefined
+          ? null
+          : typeof item.details === "string" || isRecord(item.details)
+          ? (item.details as Record<string, unknown> | string)
+          : String(item.details),
+      ip_address: typeof item.ip_address === "string" ? item.ip_address : null,
+      created_at: typeof item.created_at === "string" ? item.created_at : "",
+    }));
+}

@@ -47,6 +47,7 @@ describe("SettingsPanel", () => {
       }
       if (path === "/api/telegram/status" && method === "GET") return json({ configured: true, deliveryAuthorized: false, chatId: "-100123456789", hasToken: true });
       if (path === "/api/telegram/test" && method === "POST") return json({ success: true, bot: { username: "signal_test_bot" }, chat_id: "-100123456789" });
+      if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
       if (path === "/api/users" && method === "GET") return json({ users: [] });
       throw new Error("Unexpected endpoint: " + method + " " + path);
     });
@@ -121,6 +122,7 @@ describe("SettingsPanel", () => {
       const json = (payload: unknown, status = 200) =>
         Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
+      if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
       if (path === "/api/users" && method === "GET") return json({ users: currentUsers });
       if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
       if (path === "/api/settings/status") return json({ database: { status: "ok", host: "127.0.0.1", port: 3306, database: "test", tables: {} }, heartbeats: [], binance: { spotApi: "online", futuresApi: "online" } });
@@ -181,6 +183,7 @@ describe("SettingsPanel", () => {
       const json = (payload: unknown, status = 200) =>
         Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
+      if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
       if (path === "/api/users" && method === "GET") return json({ users: currentUsers });
       if (path === "/api/settings/status") return json(validAdminStatus);
       if (path === "/api/telegram/status") return json({ configured: true, deliveryAuthorized: true, chatId: "-100", hasToken: true });
@@ -289,7 +292,8 @@ describe("SettingsPanel", () => {
         const json = (payload: unknown, status = 200) =>
           Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
-        if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
+        if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+      if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
         if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
         if (path === "/api/settings/status") return json(validAdminStatus);
         if (path === "/api/users/2/reset-password" && method === "POST") {
@@ -364,7 +368,8 @@ describe("SettingsPanel", () => {
         const json = (payload: unknown, status = 200) =>
           Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
-        if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
+        if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+      if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
         if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
         if (path === "/api/settings/status") return json(validAdminStatus);
         if (path === "/api/users/2/reset-password" && method === "POST") {
@@ -405,7 +410,8 @@ describe("SettingsPanel", () => {
         const json = (payload: unknown, status = 200) =>
           Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
-        if (path === "/api/users" && method === "GET") {
+        if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+      if (path === "/api/users" && method === "GET") {
           return json({
             users: [
               baseUsers[0],
@@ -464,7 +470,8 @@ describe("SettingsPanel", () => {
         const json = (payload: unknown, status = 200) =>
           Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
-        if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
+        if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+      if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
         if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
         if (path === "/api/settings/status") return json(validAdminStatus);
         if (path === "/api/users/2" && method === "DELETE") {
@@ -522,7 +529,8 @@ describe("SettingsPanel", () => {
         const json = (payload: unknown, status = 200) =>
           Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
-        if (path === "/api/users" && method === "GET") return json({ users: usersList });
+        if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+      if (path === "/api/users" && method === "GET") return json({ users: usersList });
         if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
         if (path === "/api/settings/status") return json(validAdminStatus);
         if (path === "/api/users/2" && method === "DELETE") {
@@ -557,7 +565,8 @@ describe("SettingsPanel", () => {
         const json = (payload: unknown, status = 200) =>
           Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
-        if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
+        if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+      if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
         if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
         if (path === "/api/settings/status") return json(validAdminStatus);
         if (path === "/api/users/2" && method === "DELETE") {
@@ -594,6 +603,7 @@ describe("SettingsPanel", () => {
 
         if (path === "/api/telegram/status" && method === "GET") return json({ configured: true, chatId: "-100123456789", hasToken: true });
         if (path === "/api/settings/status") return json(validAdminStatus);
+        if (path.startsWith("/api/auth/audit-logs")) return json({ items: [] });
         if (path === "/api/users") return json({ users: [] });
         if (path === "/api/telegram/test" && method === "POST") {
           telegramTestCalled = true;
@@ -644,7 +654,8 @@ describe("SettingsPanel", () => {
         const json = (payload: unknown, status = 200) =>
           Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
-        if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
+        if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+      if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
         if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
         if (path === "/api/settings/status") return json(validAdminStatus);
         throw new Error("Unexpected: " + method + " " + path);

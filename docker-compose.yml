@@ -4,10 +4,10 @@ services:
     container_name: signal-bot-mariadb
     restart: unless-stopped
     environment:
-      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-signal_bot_prod_root}
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set in .env}
       MARIADB_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
       MARIADB_USER: ${MYSQL_USER:-signal_bot}
-      MARIADB_PASSWORD: ${MYSQL_PASSWORD:-signal_bot_secret_pw}
+      MARIADB_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
     ports:
       - "127.0.0.1:3306:3306"
     volumes:
@@ -36,9 +36,13 @@ services:
       MYSQL_HOST: mariadb
       MYSQL_PORT: 3306
       MYSQL_USER: ${MYSQL_USER:-signal_bot}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-signal_bot_secret_pw}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
-      APP_SECRET_KEY: ${APP_SECRET_KEY:-}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY must be set in .env (min 32 chars)}
+      SIGNAL_BOT_LICENSE_KEY: ${SIGNAL_BOT_LICENSE_KEY:-}
+      SIGNAL_BOT_LICENSE_SIGNING_KEY: ${SIGNAL_BOT_LICENSE_SIGNING_KEY:-}
+      SIGNAL_BOT_BRAND_NAME: ${SIGNAL_BOT_BRAND_NAME:-Signal Bot}
+      SIGNAL_BOT_LOGO_URL: ${SIGNAL_BOT_LOGO_URL:-}
       SIGNAL_BOT_ALLOWED_ORIGINS: ${SIGNAL_BOT_ALLOWED_ORIGINS:-http://localhost:8050,http://127.0.0.1:8050}
       ENABLE_FUTURES: ${ENABLE_FUTURES:-True}
       RETAILBOT2_ALLOW_TRADING: "0"
@@ -65,7 +69,7 @@ services:
       MYSQL_HOST: mariadb
       MYSQL_PORT: 3306
       MYSQL_USER: ${MYSQL_USER:-signal_bot}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-signal_bot_secret_pw}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
       ENABLE_FUTURES: ${ENABLE_FUTURES:-True}
 
@@ -83,7 +87,7 @@ services:
       MYSQL_HOST: mariadb
       MYSQL_PORT: 3306
       MYSQL_USER: ${MYSQL_USER:-signal_bot}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-signal_bot_secret_pw}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
 
   outbox-worker:
@@ -100,7 +104,7 @@ services:
       MYSQL_HOST: mariadb
       MYSQL_PORT: 3306
       MYSQL_USER: ${MYSQL_USER:-signal_bot}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-signal_bot_secret_pw}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
       RETAILBOT2_OUTBOX_WORKER_ENABLED: 1
       RETAILBOT2_ALLOW_TRADING: "0"

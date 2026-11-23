@@ -1,0 +1,40 @@
+# Git & CI metadata
+.git
+.gitignore
+.github
+
+# Local secrets & environment files
+.env
+.env.*
+!.env.example
+.app_secret
+.app_secret.*
+
+# Python caches & virtual environments
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Frontend build & dev artifacts (rebuilt in Stage 1)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/playwright-report/
+frontend/test-results/
+
+# Local docs, screenshots, logs & work orders
+docs/screenshots/
+*.log
+*.png
+*.jpg
+*.jpeg
+work_order_*.md
+*.bat
+.DS_Store
+Thumbs.db

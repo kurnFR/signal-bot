@@ -423,18 +423,34 @@ def change_password(req: ChangePasswordRequest, request: Request, current_user: 
 
 
 @router.get("/auth/audit-logs")
-def get_audit_logs(limit: int = 50, current_user: dict = Depends(require_admin)):
+def get_audit_logs(
+    limit: int = 50,
+    action: Optional[str] = None,
+    username: Optional[str] = None,
+    current_user: dict = Depends(require_admin),
+):
     conn = _get_required_connection()
     try:
         cur = conn.cursor(dictionary=True)
+        clauses = []
+        params: list = []
+        if action and action.strip():
+            clauses.append("action = %s")
+            params.append(action.strip().upper())
+        if username and username.strip():
+            clauses.append("username = %s")
+            params.append(username.strip().lower())
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(max(1, min(200, limit)))
         cur.execute(
-            """
+            f"""
             SELECT id, user_id, username, action, details, ip_address, created_at
             FROM audit_logs
+            {where_sql}
             ORDER BY created_at DESC
             LIMIT %s
             """,
-            (max(1, min(100, limit)),)
+            tuple(params),
         )
         rows = cur.fetchall()
         cur.close()
@@ -499,6 +515,20 @@ def create_user(req: CreateUserRequest, admin: dict = Depends(require_admin)):
     conn = _get_required_connection()
     try:
         cur = conn.cursor(dictionary=True)
+        # Enforce commercial license user limit when active
+        from web.licensing import verify_license_key
+        lic = verify_license_key()
+        max_users = lic.get("maxUsers")
+        if max_users is not None:
+            cur.execute("SELECT COUNT(*) AS cnt FROM users WHERE is_active = 1")
+            cnt_row = cur.fetchone() or {}
+            active_count = int(cnt_row.get("cnt", 0) if isinstance(cnt_row, dict) else cnt_row[0])
+            if not lic.get("valid") or active_count >= int(max_users):
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"License user limit reached ({active_count}/{max_users}) for tier '{lic.get('tier', 'unlicensed')}'",
+                )
+
         # Check collision using parameterized query
         cur.execute("SELECT id FROM users WHERE username = %s", (clean_username,))
         if cur.fetchone():
