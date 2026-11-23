@@ -818,15 +818,24 @@ def execute_backtest(req: BacktestRunRequest):
                 run_params["htf_df"] = htf_full
 
     # Pairs handling for pairs_ratio
-    if strategy_name in PAIRS_STRATEGIES and req.symbol != PAIRS_BASE_SYMBOL:
+    if strategy_name in PAIRS_STRATEGIES:
+        if req.symbol == PAIRS_BASE_SYMBOL:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid pair comparison: target symbol cannot be the same as comparator (BTCUSDT). Choose an altcoin pair.",
+            )
         pair_full = fetch_ohlcv_with_features_df(PAIRS_BASE_SYMBOL, req.market, req.timeframe, closed_only=True)
-        if len(pair_full) > 0:
-            if data_segment in ("train", "holdout"):
-                p_train, p_holdout = split_by_cutoff(pair_full, cutoff)
-                run_params["pair_df"] = p_train if data_segment == "train" else p_holdout
-            else:
-                run_params["pair_df"] = pair_full
-            run_params["pair_symbol"] = PAIRS_BASE_SYMBOL
+        if pair_full is None or len(pair_full) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Comparator data unavailable: no candle data found for {PAIRS_BASE_SYMBOL} {req.market} {req.timeframe}.",
+            )
+        if data_segment in ("train", "holdout"):
+            p_train, p_holdout = split_by_cutoff(pair_full, cutoff)
+            run_params["pair_df"] = p_train if data_segment == "train" else p_holdout
+        else:
+            run_params["pair_df"] = pair_full
+        run_params["pair_symbol"] = PAIRS_BASE_SYMBOL
 
     # Run the simulation
     trades = strategy_fn(segment_df, run_params)
@@ -928,6 +937,11 @@ class WalkForwardBacktestRequest(BaseModel):
 @router.post("/walk-forward")
 def execute_walk_forward_backtest(req: WalkForwardBacktestRequest):
     """Run rolling or fixed-fold walk-forward analysis with Walk-Forward Efficiency (WFE)."""
+    if req.strategy in PAIRS_STRATEGIES and req.symbol == PAIRS_BASE_SYMBOL:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid pair comparison: target symbol cannot be the same as comparator (BTCUSDT). Choose an altcoin pair.",
+        )
     from backtest.walk_forward import run_rolling_walk_forward, run_walk_forward
 
     if req.rolling:

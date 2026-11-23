@@ -401,8 +401,8 @@ class BotConfig:
     db_name: str = field(default_factory=lambda: os.getenv('MYSQL_DATABASE', 'crypto_signals'))
     db_user: str = field(default_factory=lambda: os.getenv('MYSQL_USER', os.getenv('DB_USER', 'cms')))
     db_password: str = field(default_factory=lambda: os.getenv('MYSQL_PASSWORD', os.getenv('DB_PASS', '')))
-    telegram_token: str = field(default_factory=lambda: os.getenv('TELEGRAM_TOKEN', os.getenv('TELEGRAM_BOT_TOKEN', '')))
-    telegram_chat_id: str = field(default_factory=lambda: os.getenv('TELEGRAM_CHAT_ID', ''))
+    telegram_token: str = field(default_factory=lambda: (os.getenv('TELEGRAM_BOT_TOKEN') or os.getenv('TELEGRAM_TOKEN') or '').strip())
+    telegram_chat_id: str = field(default_factory=lambda: (os.getenv('TELEGRAM_CHAT_ID') or os.getenv('TELEGRAM_TARGET_CHAT_ID') or '').strip())
 
 
     exit_check_interval: int = 5
@@ -3593,8 +3593,8 @@ def main():
         db_name=os.getenv('MYSQL_DATABASE', 'crypto_signals'),
 
         # ── Telegram ──
-        telegram_token=os.getenv('TELEGRAM_TOKEN', os.getenv('TELEGRAM_BOT_TOKEN', '')),
-        telegram_chat_id=os.getenv('TELEGRAM_CHAT_ID', ''),
+        telegram_token=(os.getenv('TELEGRAM_BOT_TOKEN') or os.getenv('TELEGRAM_TOKEN') or '').strip(),
+        telegram_chat_id=(os.getenv('TELEGRAM_CHAT_ID') or os.getenv('TELEGRAM_TARGET_CHAT_ID') or '').strip(),
     )
 
 

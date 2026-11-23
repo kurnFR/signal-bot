@@ -119,13 +119,35 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
   const deployDialogRef = useRef<HTMLDialogElement | null>(null);
   const deployTriggerRef = useRef<HTMLButtonElement | null>(null);
 
+  const extractStrategyOverrides = (run: BacktestRunDetails | null): Record<string, unknown> | undefined => {
+    if (!run?.params) return undefined;
+    const standardKeys = new Set([
+      "symbol", "market", "timeframe", "data_segment",
+      "initial_capital", "risk_per_trade_pct", "save_to_db",
+      "htf_df", "pair_df", "funding_events",
+    ]);
+    const overrides: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(run.params)) {
+      if (!standardKeys.has(key) && !key.endsWith("_df") && value !== undefined && value !== null) {
+        overrides[key] = value;
+      }
+    }
+    return Object.keys(overrides).length > 0 ? overrides : undefined;
+  };
+
   const openDeployModal = (run: BacktestRunDetails, trigger?: HTMLButtonElement) => {
     deployTriggerRef.current = trigger ?? null;
     setDeployRun(run);
     const isSupported = (SUPPORTED_PAPER_TIMEFRAMES as readonly string[]).includes(run.timeframe);
     setDeployTimeframe(isSupported ? (run.timeframe as PaperTimeframe) : "");
-    setDeployCapital(5000);
-    setDeployRisk(1.0);
+    const initialCap = typeof run.params?.initial_capital === "number" && run.params.initial_capital >= 100
+      ? run.params.initial_capital
+      : 5000;
+    const initialRisk = typeof run.params?.risk_per_trade_pct === "number" && run.params.risk_per_trade_pct >= 0.1 && run.params.risk_per_trade_pct <= 10.0
+      ? run.params.risk_per_trade_pct
+      : 1.0;
+    setDeployCapital(initialCap);
+    setDeployRisk(initialRisk);
     setDeployTelegram(false);
     setDeployError(null);
   };
@@ -168,6 +190,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
     setDeployBusy(true);
     try {
       const targetTimeframe = deployTimeframe as PaperTimeframe;
+      const strategyOverrides = extractStrategyOverrides(deployRun);
       const res = await deployPaperStrategy({
         symbol: deployRun.symbol,
         market: (deployRun.market.toLowerCase() === "futures" ? "futures" : "spot") as "spot" | "futures",
@@ -176,6 +199,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
         allocated_capital: deployCapital,
         risk_per_trade_pct: deployRisk,
         send_telegram: deployTelegram,
+        params: strategyOverrides,
       });
       setRunNotice(
         res.message || `Strategy '${deployRun.strategy}' deployed to Live Paper Trading on ${deployRun.symbol} (${deployRun.market.toUpperCase()} · ${targetTimeframe}).`
@@ -542,6 +566,25 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
             <div><span>Backtest Win Rate</span><strong>{deployRun.winRatePct == null ? "—" : `${pct.format(deployRun.winRatePct)}%`}</strong></div>
             <div><span>Target Paper Timeframe</span><strong>{deployTimeframe || "Explicit selection required"}</strong></div>
           </div>
+
+          {(() => {
+            const overrides = extractStrategyOverrides(deployRun);
+            if (!overrides) return null;
+            return (
+              <div style={{ marginBottom: "14px", padding: "8px 12px", background: "var(--surface-sunken)", borderRadius: 6 }}>
+                <span style={{ fontSize: "11px", fontWeight: 600, textTransform: "uppercase", color: "var(--color-text-secondary)" }}>
+                  Carried Backtest Overrides ({Object.keys(overrides).length})
+                </span>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px" }}>
+                  {Object.entries(overrides).map(([k, v]) => (
+                    <span key={k} className="status-pill" style={{ fontSize: "11px" }}>
+                      <code>{k}</code>: {String(v)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "12px" }}>
             <div className="screener-control-field">

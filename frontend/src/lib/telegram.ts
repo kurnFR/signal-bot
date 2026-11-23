@@ -3,6 +3,7 @@ import { assertApiPath, getJson } from "./api";
 export interface TelegramStatus {
   outbox?: Record<string, number> | null;
   configured: boolean;
+  deliveryAuthorized?: boolean;
   chatId: string | null;
   hasToken: boolean;
 }
@@ -56,7 +57,7 @@ export async function fetchTelegramStatus(signal?: AbortSignal): Promise<Telegra
   return status;
 }
 /** Sends a real test ping. Callers must gate this to admins and require explicit confirmation. */
-export async function sendTelegramTestPing(): Promise<TelegramTestResult> {
+export async function sendTelegramTestPing(customMessage?: string): Promise<TelegramTestResult> {
   const path = "/api/telegram/test";
   assertApiPath(path);
   const headers: Record<string, string> = { Accept: "application/json", "Content-Type": "application/json" };
@@ -66,11 +67,12 @@ export async function sendTelegramTestPing(): Promise<TelegramTestResult> {
   } catch {
     // The server rejects the request if no session token is available.
   }
+  const requestBody = customMessage && customMessage.trim().length > 0 ? { custom_message: customMessage.trim() } : {};
   const response = await fetch(path, {
     method: "POST",
     credentials: "same-origin",
     headers,
-    body: JSON.stringify({}),
+    body: JSON.stringify(requestBody),
   });
   let payload: unknown;
   try { payload = await response.json(); } catch { payload = null; }

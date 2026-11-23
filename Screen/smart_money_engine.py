@@ -64,8 +64,8 @@ CONFIG = {
     "daily_reset_utc_hour": 0,
 
     # === Telegram ===
-    "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN"),
-    "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID"),
+    "telegram_bot_token": (os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN") or "").strip(),
+    "telegram_chat_id": (os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_TARGET_CHAT_ID") or "").strip(),
 
     # === WebSocket ===
     "ws_ping_interval": 20,

@@ -21,7 +21,21 @@ function json(payload: unknown, status = 200) {
 }
 
 const baseFixture = {
-  "/api/backtest/strategies": { strategies: [{ id: "confluence_ensemble_v1" }, { id: "custom_rsi_v1" }] },
+  "/api/backtest/strategies": { strategies: [{ id: "confluence_ensemble_v1" }, { id: "custom_rsi_v1" }, { id: "ml_signal_generator_v1" }] },
+  "/api/ml/generator-models": {
+    models: [
+      {
+        model_id: "generator-test-123",
+        experiment_id: "exp-1",
+        model_type: "random_forest",
+        symbol: "BTCUSDT",
+        market: "spot",
+        timeframe: "1d",
+        eligible_for_paper: true,
+        eligibility: { eligible: true, reasons: [] },
+      },
+    ],
+  },
   "/api/paper/positions": {
     positions: [
       {
@@ -305,6 +319,55 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
     expect(successMsg).not.toHaveTextContent(/telegram/i);
     expect(screen.queryByText(/Configuration was saved, but immediate evaluation failed/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Telegram notification delivered successfully/i)).not.toBeInTheDocument();
+  });
+
+  it("PT-09: deploys ml_signal_generator_v1 with typed generator model via /api/paper/configs", async () => {
+    let configPayload: unknown = null;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      const path = url.pathname + url.search;
+      const method = init?.method ?? "GET";
+
+      if (path === "/api/paper/configs" && method === "POST") {
+        configPayload = JSON.parse(String(init?.body));
+        return Promise.resolve(json({ status: "success", config: { id: 99 } }));
+      }
+      const payload = baseFixture[path as keyof typeof baseFixture];
+      return Promise.resolve(payload ? json(payload) : json({ detail: "Unexpected route" }, 404));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaperTradingPanel />);
+    expect(await screen.findByRole("heading", { name: "Open positions" })).toBeInTheDocument();
+
+    const deployBtn = screen.getByRole("button", { name: /Deploy strategy/i });
+    fireEvent.click(deployBtn);
+
+    const dialog = screen.getByRole("dialog", { name: "Deploy Strategy to Paper Trading" });
+    await within(dialog).findByRole("option", { name: "ml_signal_generator_v1" });
+    fireEvent.change(within(dialog).getByLabelText("Strategy"), { target: { value: "ml_signal_generator_v1" } });
+
+    await within(dialog).findByRole("option", { name: /generator-test-123/i });
+    fireEvent.change(within(dialog).getByLabelText("Generator Model Artifact"), { target: { value: "generator-test-123" } });
+
+    const submitBtn = within(dialog).getByRole("button", { name: "Deploy to Paper Trading" });
+    expect(submitBtn).toBeEnabled();
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(configPayload).not.toBeNull());
+    expect(configPayload).toMatchObject({
+      symbol: "BTCUSDT",
+      market: "spot",
+      timeframe: "1d",
+      strategy_name: "ml_signal_generator_v1",
+      ml_generator_model_id: "generator-test-123",
+      allocated_capital: 5000,
+      risk_per_trade_pct: 1.0,
+      is_active: true,
+      report_enabled: true,
+      telegram_enabled: false,
+    });
+    expect(await screen.findByText(/Strategy 'ml_signal_generator_v1' deployed to Paper Trading with model generator-test-123/i)).toBeInTheDocument();
   });
 
   it("PT-09: partial deployment displays warning, refreshes configuration, and avoids automatic retries", async () => {

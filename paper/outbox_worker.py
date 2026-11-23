@@ -1248,8 +1248,8 @@ def main():
         "database": args.database,
     }
 
-    telegram_token = "" if args.observation else os.getenv("TELEGRAM_BOT_TOKEN", "")
-    telegram_chat_id = "" if args.observation else os.getenv("TELEGRAM_CHAT_ID", "")
+    telegram_token = "" if args.observation else (os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN") or "").strip()
+    telegram_chat_id = "" if args.observation else (os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_TARGET_CHAT_ID") or "").strip()
 
     worker = OutboxWorker(
         db_config=db_cfg,
