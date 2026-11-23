@@ -8,6 +8,13 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
+const validAdminStatus = {
+  database: { status: "ok", host: "db.internal", port: 3306, database: "signal_bot", tables: { signals: 10 } },
+  heartbeats: [],
+  binance: { spotApi: "online", futuresApi: "online", enableFuturesConfig: true },
+  system: { timezone: "Asia/Jakarta (WIB UTC+7)" },
+};
+
 describe("SettingsPanel", () => {
   it("shows safe session metadata and toggles only local appearance preference", () => {
     const onToggleTheme = vi.fn();
@@ -38,7 +45,7 @@ describe("SettingsPanel", () => {
           system: { timezone: "Asia/Jakarta (WIB UTC+7)" },
         });
       }
-      if (path === "/api/telegram/status" && method === "GET") return json({ configured: true, chatId: "-100123456789", hasToken: true });
+      if (path === "/api/telegram/status" && method === "GET") return json({ configured: true, deliveryAuthorized: false, chatId: "-100123456789", hasToken: true });
       if (path === "/api/telegram/test" && method === "POST") return json({ success: true, bot: { username: "signal_test_bot" }, chat_id: "-100123456789" });
       if (path === "/api/users" && method === "GET") return json({ users: [] });
       throw new Error("Unexpected endpoint: " + method + " " + path);
@@ -47,6 +54,7 @@ describe("SettingsPanel", () => {
     render(<SettingsPanel theme="dark" onToggleTheme={() => undefined} username="admin01" role="admin" />);
 
     expect(await screen.findByText("-100123456789")).toBeInTheDocument();
+    expect(screen.getByText("Configured · delivery disabled")).toBeInTheDocument();
     expect(screen.getByText("Present (hidden)")).toBeInTheDocument();
     expect(screen.getByText("db.internal")).toBeInTheDocument();
     expect(screen.getByText("signal_bot")).toBeInTheDocument();
@@ -155,6 +163,62 @@ describe("SettingsPanel", () => {
     expect((passwordInput as HTMLInputElement).value).toBe("");
     // Catalog refreshed with new user
     expect(await screen.findByText("new@bot.internal")).toBeInTheDocument();
+  });
+
+  it("handles user role change with confirmation, server update, and self-demotion restriction", async () => {
+    window.localStorage.setItem("token", "admin-session");
+    const mockUsers = [
+      { id: 1, username: "admin", email: "admin@bot.internal", role: "admin", is_active: true, must_change_password: false, created_at: "2026-10-01 10:00:00", updated_at: "2026-10-01 10:00:00" },
+      { id: 2, username: "trader_alice", email: null, role: "trader", is_active: true, must_change_password: false, created_at: "2026-10-01 10:00:00", updated_at: "2026-10-01 10:00:00" },
+    ];
+    let currentUsers = [...mockUsers];
+    const calls: Array<{ path: string; method: string; body?: unknown }> = [];
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      const path = url.pathname;
+      const method = init?.method ?? "GET";
+      calls.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const json = (payload: unknown, status = 200) =>
+        Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+
+      if (path === "/api/users" && method === "GET") return json({ users: currentUsers });
+      if (path === "/api/settings/status") return json(validAdminStatus);
+      if (path === "/api/telegram/status") return json({ configured: true, deliveryAuthorized: true, chatId: "-100", hasToken: true });
+      if (path === "/api/users/2" && method === "PUT") {
+        currentUsers = currentUsers.map((u) => u.id === 2 ? { ...u, role: "viewer" } : u);
+        return json({ status: "success", message: "User 'trader_alice' role updated to viewer." });
+      }
+      throw new Error("Unexpected: " + method + " " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<SettingsPanel theme="dark" onToggleTheme={() => undefined} username="admin" role="admin" />);
+
+    expect(await screen.findByText("trader_alice")).toBeInTheDocument();
+    expect(screen.getByText("Configured · delivery enabled")).toBeInTheDocument();
+
+    // Open Change Role dialog for trader_alice
+    fireEvent.click(screen.getByRole("button", { name: "Change role for trader_alice" }));
+    const roleDialog = await screen.findByRole("dialog", { name: "Change Role for 'trader_alice'" });
+    expect(roleDialog).toBeInTheDocument();
+
+    // Select viewer role
+    const roleSelect = within(roleDialog).getByLabelText("Role");
+    fireEvent.change(roleSelect, { target: { value: "viewer" } });
+    fireEvent.click(within(roleDialog).getByRole("button", { name: "Confirm Role Change" }));
+
+    expect(await screen.findByText(/User 'trader_alice' role updated to viewer/i)).toBeInTheDocument();
+    const putCall = calls.find((c) => c.path === "/api/users/2" && c.method === "PUT");
+    expect(putCall?.body).toEqual({ role: "viewer" });
+
+    // Verify self-demotion warning on admin user
+    fireEvent.click(screen.getByRole("button", { name: "Change role for admin" }));
+    const selfDialog = await screen.findByRole("dialog", { name: "Change Role for 'admin'" });
+    const selfRoleSelect = within(selfDialog).getByLabelText("Role");
+    fireEvent.change(selfRoleSelect, { target: { value: "trader" } });
+    expect(screen.getByText(/Cannot change your own role from admin/i)).toBeInTheDocument();
+    expect(within(selfDialog).getByRole("button", { name: "Confirm Role Change" })).toBeDisabled();
+    fireEvent.click(within(selfDialog).getByRole("button", { name: "Cancel" }));
   });
 
   it("handles self password change with validation", async () => {

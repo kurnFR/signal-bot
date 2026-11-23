@@ -22,6 +22,21 @@ export interface UpdatePaperConfigRequest {
   ml_generator_model_id?: string | null;
   telegram_enabled: boolean;
   report_enabled: boolean;
+  params?: Record<string, unknown> | null;
+}
+
+export interface GeneratorModelSummary {
+  model_id: string;
+  experiment_id: string;
+  model_type: string;
+  symbol?: string | null;
+  market?: string | null;
+  timeframe?: string | null;
+  feature_columns?: string[];
+  created_at?: string;
+  eligible_for_paper: boolean;
+  eligibility: { eligible: boolean; reasons: string[] };
+  test_metrics?: Record<string, unknown>;
 }
 
 export interface UpdatePaperConfigResponse {
@@ -40,6 +55,7 @@ export interface DeployPaperStrategyRequest {
   rank?: number | null;
   rank_score?: number | null;
   ml_model_id?: string | null;
+  params?: Record<string, unknown> | null;
 }
 
 export interface DeployPaperStrategyResponse {
@@ -262,6 +278,7 @@ export async function deployPaperStrategy(
       rank: req.rank ?? undefined,
       rank_score: req.rank_score ?? undefined,
       ml_model_id: req.ml_model_id ?? undefined,
+      params: req.params ?? undefined,
     }),
     signal,
   });
@@ -338,6 +355,7 @@ export async function updatePaperConfig(
       ml_generator_model_id: req.ml_generator_model_id ?? null,
       telegram_enabled: Boolean(req.telegram_enabled),
       report_enabled: Boolean(req.report_enabled),
+      params: req.params ?? undefined,
     }),
     signal,
   });
@@ -346,6 +364,14 @@ export async function updatePaperConfig(
     throw new PaperTradingActionError(502, "Server returned an invalid configuration update response");
   }
   return { status: "success", config: payload.config };
+}
+
+export async function fetchGeneratorModels(signal?: AbortSignal): Promise<GeneratorModelSummary[]> {
+  const payload = await getJson<{ models: GeneratorModelSummary[] }>("/api/ml/generator-models", signal);
+  if (!isRecord(payload) || !Array.isArray(payload.models)) {
+    throw new Error("Invalid generator models response");
+  }
+  return payload.models;
 }
 
 

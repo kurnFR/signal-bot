@@ -18,6 +18,9 @@ import {
   fetchPaperReportForPeriod,
   type PaperDeploymentSettings,
   type PaperMetrics,
+  updatePaperConfig,
+  fetchGeneratorModels,
+  type GeneratorModelSummary,
   updatePaperReportPreference,
   archivePaperConfig,
   type PaperConfig,
@@ -97,6 +100,24 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
   const [deployCapital, setDeployCapital] = useState(5000);
   const [deployRisk, setDeployRisk] = useState(1.0);
   const [deployTelegram, setDeployTelegram] = useState(false);
+  const [generatorModels, setGeneratorModels] = useState<GeneratorModelSummary[]>([]);
+  const [selectedGeneratorModelId, setSelectedGeneratorModelId] = useState("");
+
+  const matchingGeneratorModels = generatorModels.filter(
+    (m) =>
+      m.eligible_for_paper &&
+      (!m.symbol || m.symbol === deploySymbol.trim().toUpperCase()) &&
+      (!m.market || m.market === deployMarket) &&
+      (!m.timeframe || m.timeframe === deployTimeframe)
+  );
+
+  useEffect(() => {
+    if (deployStrategy === "ml_signal_generator_v1" && matchingGeneratorModels.length > 0) {
+      if (!selectedGeneratorModelId || !matchingGeneratorModels.some((m) => m.model_id === selectedGeneratorModelId)) {
+        setSelectedGeneratorModelId(matchingGeneratorModels[0].model_id);
+      }
+    }
+  }, [deployStrategy, deploySymbol, deployMarket, deployTimeframe, matchingGeneratorModels, selectedGeneratorModelId]);
 
   // PT-10: Trip / reset circuit breaker
   const [breakerAction, setBreakerAction] = useState<"trip" | "reset" | null>(null);
@@ -144,7 +165,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
     setCatalogError(false);
     fetchBacktestStrategies(controller.signal).then(({ strategies }) => {
       if (controller.signal.aborted) return;
-      const ids = strategies.map((strategy) => strategy.id).filter((id) => id !== "ml_signal_generator_v1");
+      const ids = strategies.map((strategy) => strategy.id);
       setCatalog(ids);
       setDeployStrategy((selected) => ids.includes(selected) ? selected : ids[0] ?? "");
     }).catch(() => {
@@ -153,6 +174,10 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
     fetchBackfilledSymbols(controller.signal).then((symbols) => {
       if (controller.signal.aborted) return;
       setAvailableSymbols(symbols);
+    }).catch(() => {});
+    fetchGeneratorModels(controller.signal).then((models) => {
+      if (controller.signal.aborted) return;
+      setGeneratorModels(models);
     }).catch(() => {});
     return () => controller.abort();
   }, [showDeployModal]);
@@ -320,6 +345,36 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
     }
     if (deployRisk < 0.1 || deployRisk > 10.0) {
       setDeployError("Risk per trade must be between 0.1% and 10.0%.");
+      return;
+    }
+
+    if (deployStrategy === "ml_signal_generator_v1") {
+      if (!selectedGeneratorModelId) {
+        setDeployError("Select an eligible ML generator model for this deployment.");
+        return;
+      }
+      setDeployBusy(true);
+      try {
+        await updatePaperConfig({
+          symbol: sym,
+          market: deployMarket,
+          timeframe: deployTimeframe,
+          strategy_name: deployStrategy,
+          is_active: true,
+          allocated_capital: deployCapital,
+          risk_per_trade_pct: deployRisk,
+          ml_generator_model_id: selectedGeneratorModelId,
+          telegram_enabled: deployTelegram,
+          report_enabled: true,
+        });
+        setActionSuccess(`Strategy 'ml_signal_generator_v1' deployed to Paper Trading with model ${selectedGeneratorModelId}.`);
+        closeDeployModal();
+        setAttempt((v) => v + 1);
+      } catch (cause) {
+        setDeployError(cause instanceof PaperTradingActionError ? cause.message : "Strategy deployment failed.");
+      } finally {
+        setDeployBusy(false);
+      }
       return;
     }
 
@@ -1143,6 +1198,30 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
               </div>
             </div>
 
+            {deployStrategy === "ml_signal_generator_v1" && (
+              <div className="screener-control-field" style={{ marginBottom: "12px" }}>
+                <label htmlFor="paper-deploy-generator-model">Generator Model Artifact</label>
+                <select
+                  id="paper-deploy-generator-model"
+                  value={selectedGeneratorModelId}
+                  disabled={deployBusy}
+                  onChange={(e) => setSelectedGeneratorModelId(e.target.value)}
+                >
+                  <option value="">Select an eligible generator model</option>
+                  {matchingGeneratorModels.map((m) => (
+                    <option key={m.model_id} value={m.model_id}>
+                      {m.model_id} ({m.model_type})
+                    </option>
+                  ))}
+                </select>
+                {matchingGeneratorModels.length === 0 && (
+                  <p role="alert" style={{ fontSize: "0.8rem", color: "#e53e3e", marginTop: "4px" }}>
+                    No eligible generator models available for {deploySymbol || "symbol"} {deployMarket} {deployTimeframe}.
+                  </p>
+                )}
+              </div>
+            )}
+
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
               <div className="screener-control-field">
                 <label htmlFor="paper-deploy-capital">Allocated Virtual Capital ($)</label>
@@ -1193,7 +1272,15 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
 
             <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
               <button type="button" className="button button-secondary" onClick={closeDeployModal} disabled={deployBusy}>Cancel</button>
-              <button type="submit" className="button button-primary" disabled={deployBusy || !catalog.includes(deployStrategy)}>
+              <button
+                type="submit"
+                className="button button-primary"
+                disabled={
+                  deployBusy ||
+                  !catalog.includes(deployStrategy) ||
+                  (deployStrategy === "ml_signal_generator_v1" && !selectedGeneratorModelId)
+                }
+              >
                 {deployBusy ? "Deploying…" : "Deploy to Paper Trading"}
               </button>
             </div>

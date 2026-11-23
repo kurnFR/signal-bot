@@ -59,6 +59,7 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
   const [telegramError, setTelegramError] = useState<string | null>(null);
   const [telegramRefreshAttempt, setTelegramRefreshAttempt] = useState(0);
   const [confirmTelegramTest, setConfirmTelegramTest] = useState(false);
+  const [telegramCustomMessage, setTelegramCustomMessage] = useState("");
   const [telegramTestBusy, setTelegramTestBusy] = useState(false);
   const [telegramTestError, setTelegramTestError] = useState<string | null>(null);
   const [telegramTestMessage, setTelegramTestMessage] = useState<string | null>(null);
@@ -115,6 +116,15 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
   const deleteCancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const deleteTriggerRef = useRef<HTMLElement | null>(null);
 
+  // Action states and refs for Change Role Dialog
+  const [selectedUserForRole, setSelectedUserForRole] = useState<ManagedUser | null>(null);
+  const [editRoleSelection, setEditRoleSelection] = useState<"admin" | "trader" | "viewer">("trader");
+  const [roleChangeBusy, setRoleChangeBusy] = useState(false);
+  const [roleChangeError, setRoleChangeError] = useState<string | null>(null);
+  const roleDialogRef = useRef<HTMLDialogElement | null>(null);
+  const roleCancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const roleTriggerRef = useRef<HTMLElement | null>(null);
+
   // Focus management and modal lifecycle for Reset Password Dialog
   useEffect(() => {
     if (selectedUserForReset && resetDialogRef.current) {
@@ -142,6 +152,20 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
       deleteCancelButtonRef.current?.focus();
     }
   }, [selectedUserForDelete]);
+
+  // Focus management and modal lifecycle for Change Role Dialog
+  useEffect(() => {
+    if (selectedUserForRole && roleDialogRef.current) {
+      if (!roleDialogRef.current.open) {
+        if (typeof roleDialogRef.current.showModal === "function") {
+          roleDialogRef.current.showModal();
+        } else {
+          roleDialogRef.current.setAttribute("open", "");
+        }
+      }
+      roleCancelButtonRef.current?.focus();
+    }
+  }, [selectedUserForRole]);
 
   // Focus management and modal lifecycle for Telegram Test Confirmation Dialog
   useEffect(() => {
@@ -199,7 +223,24 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
       }
     }
     setConfirmTelegramTest(false);
+    setTelegramCustomMessage("");
     const trigger = telegramTriggerRef.current;
+    if (trigger && document.body.contains(trigger)) {
+      trigger.focus();
+    }
+  };
+
+  const closeRoleDialog = () => {
+    if (roleDialogRef.current?.open) {
+      if (typeof roleDialogRef.current.close === "function") {
+        roleDialogRef.current.close();
+      } else {
+        roleDialogRef.current.removeAttribute("open");
+      }
+    }
+    setSelectedUserForRole(null);
+    setRoleChangeError(null);
+    const trigger = roleTriggerRef.current;
     if (trigger && document.body.contains(trigger)) {
       trigger.focus();
     }
@@ -404,13 +445,37 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
     }
   };
 
+  const handleRoleChangeSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!isAdmin || !selectedUserForRole || roleChangeBusy) return;
+    const isSelf = (username ?? "").toLowerCase() === selectedUserForRole.username.toLowerCase();
+    if (isSelf && editRoleSelection !== "admin") {
+      setRoleChangeError("Cannot change your own role from admin");
+      return;
+    }
+    setRoleChangeBusy(true);
+    setRoleChangeError(null);
+    setUserActionError(null);
+    setUserActionSuccess(null);
+    try {
+      const message = await updateUser(selectedUserForRole.id, { role: editRoleSelection });
+      closeRoleDialog();
+      setUserActionSuccess(message || `User '${selectedUserForRole.username}' role updated to ${editRoleSelection}.`);
+      setUsersAttempt((n) => n + 1);
+    } catch (cause) {
+      setRoleChangeError(cause instanceof UserActionError ? cause.message : "Failed to update user role.");
+    } finally {
+      setRoleChangeBusy(false);
+    }
+  };
+
   const runTelegramTest = async () => {
     if (!isAdmin || !confirmTelegramTest || telegramTestBusy || !telegramStatus?.hasToken) return;
     setTelegramTestBusy(true);
     setTelegramTestError(null);
     setTelegramTestMessage(null);
     try {
-      const result = await sendTelegramTestPing();
+      const result = await sendTelegramTestPing(telegramCustomMessage);
       closeTelegramDialog();
       if (result.success) {
         setTelegramTestMessage(result.chat_id
@@ -551,6 +616,20 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
                       }}
                     >
                       Reset Pass
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      style={{ padding: "4px 8px", fontSize: 11 }}
+                      aria-label={`Change role for ${u.username}`}
+                      onClick={(e) => {
+                        roleTriggerRef.current = e.currentTarget;
+                        setSelectedUserForRole(u);
+                        setEditRoleSelection(u.role);
+                        setRoleChangeError(null);
+                      }}
+                    >
+                      Change Role
                     </button>
                     {!isSelf && (
                       <button
@@ -709,6 +788,78 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
         </dialog>
       )}
 
+      {/* Accessible Native HTML Modal Dialog: Change Role */}
+      {selectedUserForRole && (
+        <dialog
+          ref={roleDialogRef}
+          className="settings-dialog"
+          aria-labelledby="role-dialog-title"
+          aria-describedby="role-dialog-desc"
+          onCancel={(e) => {
+            e.preventDefault();
+            closeRoleDialog();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              closeRoleDialog();
+            } else {
+              trapFocus(e);
+            }
+          }}
+        >
+          <div className="panel-heading">
+            <div>
+              <h3 id="role-dialog-title">Change Role for '{selectedUserForRole.username}'</h3>
+              <p id="role-dialog-desc">Select a new system role. Changing a role updates permissions immediately and revokes active sessions.</p>
+            </div>
+          </div>
+          <form onSubmit={handleRoleChangeSubmit} style={{ marginTop: 14 }}>
+            <div className="screener-control-field">
+              <label htmlFor="admin-change-user-role">Role</label>
+              <select
+                id="admin-change-user-role"
+                value={editRoleSelection}
+                disabled={roleChangeBusy}
+                onChange={(e) => setEditRoleSelection(e.target.value as "admin" | "trader" | "viewer")}
+              >
+                <option value="admin">Administrator (admin)</option>
+                <option value="trader">Trader (trader)</option>
+                <option value="viewer">Viewer (viewer)</option>
+              </select>
+            </div>
+            {(username ?? "").toLowerCase() === selectedUserForRole.username.toLowerCase() && editRoleSelection !== "admin" && (
+              <div className="api-error" role="alert" style={{ marginTop: 10 }}>
+                <div><p>Cannot change your own role from admin. Self-demotion is restricted to prevent administrative lockout.</p></div>
+              </div>
+            )}
+            {roleChangeError && (
+              <div className="api-error" role="alert" style={{ marginTop: 10 }}>
+                <div><p>{roleChangeError}</p></div>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
+              <button
+                ref={roleCancelButtonRef}
+                type="button"
+                className="button button-secondary"
+                disabled={roleChangeBusy}
+                onClick={closeRoleDialog}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="button button-primary"
+                disabled={roleChangeBusy || ((username ?? "").toLowerCase() === selectedUserForRole.username.toLowerCase() && editRoleSelection !== "admin")}
+              >
+                {roleChangeBusy ? "Updating…" : "Confirm Role Change"}
+              </button>
+            </div>
+          </form>
+        </dialog>
+      )}
+
       {/* Create New User Form */}
       <div className="panel-subsection" style={{ marginTop: 20 }}>
         <div className="panel-heading">
@@ -792,14 +943,25 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
       {!isAdmin ? <p className="empty-state">Telegram status and test controls are restricted to admins. This role does not fetch or display the configured chat ID.</p> : <>
         {telegramError && <div className="api-error" role="alert"><div><strong>Telegram status unavailable</strong><p>{telegramError}</p></div><button className="button button-secondary" type="button" onClick={() => setTelegramRefreshAttempt((value) => value + 1)}><RefreshCw size={15} /> Retry</button></div>}
         {telegramLoading && <p className="empty-state">Loading Telegram status…</p>}
-        {telegramStatus && <div className="settings-telegram-status">
-          <div><span>Configuration</span><strong>{telegramStatus.configured ? "Configured" : "Incomplete"}</strong></div>
-          <div><span>RetailBot2 outbox</span><strong>{telegramStatus.outbox == null ? "Unavailable" :
-            Object.entries(telegramStatus.outbox).map(([state, count]) => count + " " + state).join(", ") || "Empty"}</strong></div>
-          <div><span>Bot token</span><strong>{telegramStatus.hasToken ? "Present (hidden)" : "Missing"}</strong></div>
-          <div><span>Target chat ID</span><strong>{telegramStatus.chatId || "Not configured"}</strong></div>
-          <button className="button button-secondary" type="button" disabled={telegramLoading || telegramTestBusy} onClick={() => setTelegramRefreshAttempt((value) => value + 1)}><RefreshCw size={15} /> Refresh status</button>
-        </div>}
+        {telegramStatus && <>
+          <div className="settings-telegram-status">
+            <div><span>Configuration</span><strong>{
+              !telegramStatus.configured
+                ? "Incomplete"
+                : telegramStatus.deliveryAuthorized
+                  ? "Configured · delivery enabled"
+                  : "Configured · delivery disabled"
+            }</strong></div>
+            <div><span>RetailBot2 outbox</span><strong>{telegramStatus.outbox == null ? "Unavailable" :
+              Object.entries(telegramStatus.outbox).map(([state, count]) => count + " " + state).join(", ") || "Empty"}</strong></div>
+            <div><span>Bot token</span><strong>{telegramStatus.hasToken ? "Present (hidden)" : "Missing"}</strong></div>
+            <div><span>Target chat ID</span><strong>{telegramStatus.chatId || "Not configured"}</strong></div>
+            <button className="button button-secondary" type="button" disabled={telegramLoading || telegramTestBusy} onClick={() => setTelegramRefreshAttempt((value) => value + 1)}><RefreshCw size={15} /> Refresh status</button>
+          </div>
+          <p className="settings-preference-subtext" style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginTop: "6px" }}>
+            Delivery authorization reflects the web server's environment configuration (RETAILBOT2_ALLOW_TELEGRAM_DELIVERY).
+          </p>
+        </>}
         {telegramTestError && <div className="api-error" role="alert"><div><strong>Telegram test failed</strong><p>{telegramTestError}</p></div><button className="button button-secondary" type="button" onClick={() => setTelegramTestError(null)}>Dismiss</button></div>}
         {telegramTestMessage && <p className="control-feedback control-success" role="status">{telegramTestMessage}</p>}
         <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={telegramLoading || telegramTestBusy || !telegramStatus?.hasToken} onClick={(e) => { telegramTriggerRef.current = e.currentTarget; setConfirmTelegramTest(true); setTelegramTestError(null); setTelegramTestMessage(null); }}>Review Telegram test</button></div>
@@ -831,6 +993,21 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
                     : "No chat ID is configured. This will verify the bot token but should not send a message."}
                 </p>
               </div>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <label className="screener-control-field" htmlFor="telegram-custom-msg">
+                Custom test message (optional)
+              </label>
+              <input
+                id="telegram-custom-msg"
+                type="text"
+                maxLength={1000}
+                value={telegramCustomMessage}
+                placeholder="Enter optional test message text"
+                disabled={telegramTestBusy}
+                onChange={(e) => setTelegramCustomMessage(e.target.value)}
+                style={{ width: "100%", marginTop: 4 }}
+              />
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 16, justifyContent: "flex-end" }}>
               <button

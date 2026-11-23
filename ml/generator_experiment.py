@@ -316,6 +316,9 @@ def run_generator_experiment(
         label_config=artifact_label_config,
         data_boundaries={
             **times,
+            "symbol": effective_strategy_params.get("symbol"),
+            "market": effective_strategy_params.get("market"),
+            "timeframe": effective_strategy_params.get("timeframe"),
             "dataset_rows": len(dataset),
             "train_rows": len(split.train),
             "validation_rows": len(split.validation),

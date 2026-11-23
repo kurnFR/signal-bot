@@ -120,8 +120,11 @@ def send_telegram_message(text: str, parse_mode: str = "HTML", max_retries: int 
     return {"success": False, "error": last_error}
 
 
-def test_telegram_connection() -> Dict[str, Any]:
-    """Verifies bot connectivity and sends a test ping message."""
+def test_telegram_connection(custom_message: Optional[str] = None) -> Dict[str, Any]:
+    """Verifies bot connectivity and sends at most one test ping message."""
+    if custom_message is not None and len(str(custom_message)) > 1000:
+        return {"success": False, "error": "custom_message exceeds maximum length of 1000 characters"}
+
     if not is_telegram_delivery_authorized():
         logger.info(
             "Telegram connectivity test suppressed: global delivery authorization missing "
@@ -163,17 +166,28 @@ def test_telegram_connection() -> Dict[str, Any]:
         logger.warning("Telegram connectivity check failed (%s)", type(e).__name__)
         return {"success": False, "error": "Connection error while contacting Telegram API"}
 
-    # If chat_id is present, send a ping message
+    # If chat_id is present, send at most one ping message
     if cfg["chat_id"]:
         now_wib = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S WIB (UTC+7)")
-        test_msg = (
-            "🔔 <b>Crypto Signal Bot — Telegram Test</b>\n\n"
-            "✅ <b>Connection Status:</b> ACTIVE & VERIFIED\n"
-            f"🤖 <b>Bot:</b> @{bot_info.get('username', 'N/A')} ({bot_info.get('first_name', 'Bot')})\n"
-            f"💬 <b>Target Chat ID:</b> <code>{cfg['chat_id']}</code>\n"
-            f"⏱ <b>Timestamp:</b> {now_wib}\n\n"
-            "<i>Your paper trading signals and strategy alerts will appear here in real time.</i>"
-        )
+        if custom_message and str(custom_message).strip():
+            safe_text = escape(str(custom_message).strip()[:1000])
+            test_msg = (
+                "🔔 <b>Crypto Signal Bot — Telegram Test</b>\n\n"
+                f"📝 <b>Message:</b> {safe_text}\n\n"
+                "✅ <b>Connection Status:</b> ACTIVE & VERIFIED\n"
+                f"🤖 <b>Bot:</b> @{bot_info.get('username', 'N/A')} ({bot_info.get('first_name', 'Bot')})\n"
+                f"💬 <b>Target Chat ID:</b> <code>{cfg['chat_id']}</code>\n"
+                f"⏱ <b>Timestamp:</b> {now_wib}"
+            )
+        else:
+            test_msg = (
+                "🔔 <b>Crypto Signal Bot — Telegram Test</b>\n\n"
+                "✅ <b>Connection Status:</b> ACTIVE & VERIFIED\n"
+                f"🤖 <b>Bot:</b> @{bot_info.get('username', 'N/A')} ({bot_info.get('first_name', 'Bot')})\n"
+                f"💬 <b>Target Chat ID:</b> <code>{cfg['chat_id']}</code>\n"
+                f"⏱ <b>Timestamp:</b> {now_wib}\n\n"
+                "<i>Your paper trading signals and strategy alerts will appear here in real time.</i>"
+            )
         send_res = send_telegram_message(test_msg)
         return {
             "success": send_res.get("success", False),

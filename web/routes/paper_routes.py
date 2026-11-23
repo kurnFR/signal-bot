@@ -4,7 +4,7 @@ API Router for Phase B: Live Paper Trading.
 import logging
 from fastapi import APIRouter, HTTPException, Depends, Query, Path, Request
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Dict, Any
 import math
 import time
 
@@ -15,11 +15,17 @@ from paper.engine import (
     get_paper_metrics, update_paper_deployment, OVERLAY_STRATEGIES,
 )
 from backtest.strategies import STRATEGIES
+from backtest.custom_strategy import paper_strategy_registry
 from paper.orders import (
     OrderTransitionConflict, OrderValidationError, cancel_pending_order, list_orders,
 )
 
 router = APIRouter(prefix="/api/paper", tags=["paper-trading"])
+
+
+def _is_known_paper_strategy(strategy_name: str) -> bool:
+    name = (strategy_name or "").strip()
+    return name in paper_strategy_registry(STRATEGIES) or name in OVERLAY_STRATEGIES
 
 
 class PaperConfigRequest(BaseModel):
@@ -33,6 +39,8 @@ class PaperConfigRequest(BaseModel):
     ml_model_id: Optional[str] = Field(None, max_length=100, json_schema_extra={"example": "real-btcusdt-spot-1h-trend_ema_v1-logistic_regression-binary_positive_r"})
     ml_generator_model_id: Optional[str] = Field(None, max_length=100, description="Typed independent ML signal-generator artifact; separate from the legacy filter model")
     telegram_enabled: Optional[bool] = Field(None, description="Whether paper entry alerts should be sent to Telegram; omitted updates preserve the current preference")
+    report_enabled: Optional[bool] = Field(None)
+    params: Optional[Dict[str, Any]] = None
     report_enabled: Optional[bool] = Field(None, description="Whether this strategy appears in per-strategy performance summaries; omitted updates preserve the current preference")
 
 
@@ -133,7 +141,7 @@ def update_config(req: PaperConfigRequest):
         raise HTTPException(status_code=400, detail="allocated_capital and risk_per_trade_pct must be finite")
     if not req.symbol.strip() or not req.strategy_name.strip():
         raise HTTPException(status_code=400, detail="symbol and strategy_name must not be blank")
-    if req.strategy_name.strip() not in STRATEGIES and req.strategy_name.strip() not in OVERLAY_STRATEGIES:
+    if not _is_known_paper_strategy(req.strategy_name):
         raise HTTPException(
             status_code=400,
             detail="Unknown executable paper strategy. Refresh the Strategy Library and select a registered strategy.",
@@ -158,6 +166,7 @@ def update_config(req: PaperConfigRequest):
         telegram_enabled=req.telegram_enabled,
         report_enabled=req.report_enabled,
         ml_generator_model_id=req.ml_generator_model_id.strip() if req.ml_generator_model_id else None,
+        strategy_params=req.params,
     )
     return res
 
@@ -221,7 +230,7 @@ def edit_deployment(req: PaperDeploymentPatch, config_id: int = Path(..., gt=0))
         if config is None:
             raise HTTPException(status_code=404, detail="Paper deployment not found")
         strategy = config["strategy_name"]
-        if strategy not in STRATEGIES and strategy not in OVERLAY_STRATEGIES:
+        if not _is_known_paper_strategy(strategy):
             raise HTTPException(status_code=400, detail="This strategy is no longer available in the Strategy Library.")
         _validate_generator_config(
             config["symbol"], config["market"], config["timeframe"], strategy,
@@ -289,6 +298,7 @@ class DeployStrategyRequest(BaseModel):
     rank: Optional[int] = None
     rank_score: Optional[float] = None
     ml_model_id: Optional[str] = Field(None, max_length=100)
+    params: Optional[Dict[str, Any]] = None
 
 
 @router.post("/deploy")
@@ -307,7 +317,7 @@ def deploy_strategy(req: DeployStrategyRequest):
         )
     market = req.market.strip().lower()
     timeframe = req.timeframe.strip()
-    if strategy_name not in STRATEGIES and strategy_name not in OVERLAY_STRATEGIES:
+    if not _is_known_paper_strategy(strategy_name):
         raise HTTPException(
             status_code=400,
             detail="Unknown executable paper strategy. Refresh the Strategy Library and select a registered strategy.",
@@ -328,6 +338,7 @@ def deploy_strategy(req: DeployStrategyRequest):
         ml_model_id=req.ml_model_id.strip() if req.ml_model_id else None,
         telegram_enabled=req.send_telegram,
         report_enabled=True,
+        strategy_params=req.params,
     )
 
     # 2. Telegram deployment alert

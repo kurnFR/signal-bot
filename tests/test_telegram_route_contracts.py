@@ -46,12 +46,12 @@ class TestTelegramRouteContracts(unittest.TestCase):
         counts.assert_called_once_with()
         self.assertEqual(admin.status_code, 200)
         self.assertEqual(admin.json(), {
-            "configured": True, "chatId": "-100123456789", "hasToken": True, "outbox": {"PENDING": 2},
+            "configured": True, "deliveryAuthorized": False, "chatId": "-100123456789", "hasToken": True, "outbox": {"PENDING": 2},
         })
         for response in (trader, viewer):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json(), {
-                "configured": True, "chatId": None, "hasToken": True,
+                "configured": True, "deliveryAuthorized": False, "chatId": None, "hasToken": True,
             })
 
     def test_admin_test_endpoint_returns_mocked_result_without_real_telegram_calls(self):

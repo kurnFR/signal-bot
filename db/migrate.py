@@ -95,6 +95,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("030_wallet_telegram_selection", "migrate_wallet_telegram_selection.sql", "Select wallets for future Telegram swap alerts"),
     Migration("031_screener_momentum", "migrate_screener_momentum.sql", "Link volume watches to closed-candle momentum confirmations"),
     Migration("032_paper_deployment_archive", "migrate_paper_deployment_archive.sql", "Preserve archived paper deployments and their history"),
+    Migration("033_paper_config_strategy_params", "migrate_paper_config_strategy_params.sql", "Store validated backtest strategy parameter overrides for paper trading"),
 )
 
 

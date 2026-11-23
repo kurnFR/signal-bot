@@ -29,7 +29,7 @@ export function StrategyLibraryPanel({ onSelectForBacktest, onSelectForPaper }: 
   const auth = useAuth();
   const canQuickTest = ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
   const canManageStrategies = canQuickTest;
-  const shouldLoadCatalog = Boolean(onSelectForBacktest) && canManageStrategies;
+  const shouldLoadCatalog = Boolean(onSelectForBacktest || onSelectForPaper);
   const [testSymbol, setTestSymbol] = useState("BTCUSDT");
   const [testMarket, setTestMarket] = useState<"spot" | "futures">("spot");
   const [testTimeframe, setTestTimeframe] = useState("1h");
@@ -283,8 +283,9 @@ export function StrategyLibraryPanel({ onSelectForBacktest, onSelectForPaper }: 
         <div className="panel-heading"><div><h3>{strategy.displayName || strategy.id}</h3><p>{strategy.id}</p></div><span className="panel-counter">{strategy.category || "General"}</span></div>
         <p>{strategy.description || "No description provided."}</p>
         <div className="strategy-param-list"><span>{(strategy.params?.length ?? 0) + (strategy.sharedParams?.length ?? 0)} parameters</span>{strategy.validated && <span>Holdout validated</span>}{strategy.isInverse && <span>Inverse variant</span>}</div>
-        <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={loading || catalogLoading} onClick={() => onSelectForBacktest?.(strategy.id)}>Use in Backtest Studio</button>
-          {onSelectForPaper && strategy.id !== "ml_signal_generator_v1" && <button className="button button-secondary" type="button" onClick={() => onSelectForPaper(strategy.id)}>Deploy to Paper</button>}
+        <div className="screener-control-footer">
+          {onSelectForBacktest && canManageStrategies && <button className="button button-secondary" type="button" disabled={loading || catalogLoading} onClick={() => onSelectForBacktest(strategy.id)}>Use in Backtest Studio</button>}
+          {onSelectForPaper && canManageStrategies && <button className="button button-secondary" type="button" onClick={() => onSelectForPaper(strategy.id)}>Deploy to Paper</button>}
         </div>
       </article>)}</div>}
     </section>}

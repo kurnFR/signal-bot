@@ -210,10 +210,12 @@ describe("read-only strategy library", () => {
 
     const prompt = await screen.findByRole("textbox", { name: "AI strategy prompt" });
     fireEvent.change(prompt, { target: { value: "Create an RSI reversal strategy" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Generate draft" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
     expect((await screen.findAllByText("First response.")).length).toBeGreaterThan(0);
 
     fireEvent.change(screen.getByRole("textbox", { name: "AI strategy prompt" }), { target: { value: "Make the stop loss wider" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Generate draft" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
     expect((await screen.findAllByText("Refined response.")).length).toBeGreaterThan(0);
     expect(screen.getByText("Create an RSI reversal strategy")).toBeInTheDocument();
@@ -313,6 +315,64 @@ describe("read-only strategy library", () => {
     expect(screen.queryByRole("button", { name: "Generate draft" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete strategy" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST" || init?.method === "DELETE")).toBe(false);
+  });
+
+  it("makes the strategy catalog readable for authenticated viewers without mutation controls", async () => {
+    window.localStorage.setItem("token", "viewer-session");
+    const profile = { id: 9, username: "viewer01", email: null, role: "viewer", must_change_password: false };
+    const catalog = { strategies: [
+      { id: "trend_ema_v1", baseName: "trend_ema_v1", isInverse: false, displayName: "Trend EMA Crossover", category: "Trend Following", validated: true, description: "Trend-following EMA cross", params: [{ key: "fast" }], sharedParams: [] },
+    ] };
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/auth/me") return Promise.resolve(new Response(JSON.stringify(profile), { status: 200, headers: { "content-type": "application/json" } }));
+      if (path === "/api/backtest/strategies") return Promise.resolve(new Response(JSON.stringify(catalog), { status: 200, headers: { "content-type": "application/json" } }));
+      const payload = payloads[path];
+      if (!payload) throw new Error("Unexpected endpoint: " + path);
+      return Promise.resolve(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <AuthGate>
+        <StrategyLibraryPanel onSelectForBacktest={vi.fn()} onSelectForPaper={vi.fn()} />
+      </AuthGate>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Strategy catalog" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Trend EMA Crossover" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use in Backtest Studio" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deploy to Paper" })).not.toBeInTheDocument();
+  });
+
+  it("loads and allows deployment when mounted with only onSelectForPaper callback", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const onSelectPaper = vi.fn();
+    const catalog = { strategies: [
+      { id: "trend_ema_v1", baseName: "trend_ema_v1", isInverse: false, displayName: "Trend EMA Crossover", category: "Trend Following", validated: true, description: "Trend-following EMA cross", params: [{ key: "fast" }], sharedParams: [] },
+    ] };
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/auth/me") return Promise.resolve(new Response(JSON.stringify(profile), { status: 200, headers: { "content-type": "application/json" } }));
+      if (path === "/api/backtest/strategies") return Promise.resolve(new Response(JSON.stringify(catalog), { status: 200, headers: { "content-type": "application/json" } }));
+      const payload = payloads[path];
+      if (!payload) throw new Error("Unexpected endpoint: " + path);
+      return Promise.resolve(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <AuthGate>
+        <StrategyLibraryPanel onSelectForPaper={onSelectPaper} />
+      </AuthGate>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Strategy catalog" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Trend EMA Crossover" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use in Backtest Studio" })).not.toBeInTheDocument();
+    const deployButtons = screen.getAllByRole("button", { name: "Deploy to Paper" });
+    expect(deployButtons.length).toBeGreaterThan(0);
+    fireEvent.click(deployButtons[0]);
+    expect(onSelectPaper).toHaveBeenCalledWith("trend_ema_v1");
   });
 
   it("fails closed when saved strategy rows are malformed", async () => {
