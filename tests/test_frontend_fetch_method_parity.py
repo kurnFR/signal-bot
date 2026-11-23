@@ -13,7 +13,7 @@ from web.app import app
 
 ROOT = Path(__file__).resolve().parents[1]
 FETCH_CALL = re.compile(
-    r"""fetch\s*\(\s*(?:(['"`])([^'"`]+)\1|([A-Za-z_$][\w$]*))\s*,\s*\{"""
+    r"""(?:fetch|apiRequest)\s*(?:<[^>]+>)?\s*\(\s*(?:(['"`])([^'"`]+)\1|([A-Za-z_$][\w$]*))\s*(?:,\s*\{|\))"""
 )
 METHOD = re.compile(r"""\bmethod\s*:\s*(['"])(GET|POST|PUT|PATCH|DELETE)\1""", re.IGNORECASE)
 FUNCTION_BOUNDARY = re.compile(r"""(?:async\s+)?function\b|=>\s*\{""")

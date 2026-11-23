@@ -5,7 +5,7 @@ import time
 from typing import Optional, Dict, Any, List
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException, status
-from db.db import get_pool
+from db.db import get_pool, _owned_cursor
 from web.auth import verify_access_token
 from paper.engine import get_active_positions
 from paper.circuit_breaker import get_circuit_breaker_status
@@ -35,8 +35,7 @@ async def _authenticate_ws(websocket: WebSocket, query_token: Optional[str] = No
 def _get_candles_from_db(symbol: str, market: str, timeframe: str, limit: int) -> Dict[str, Any]:
     pool = get_pool()
     conn = pool.get_connection()
-    try:
-        cur = conn.cursor(dictionary=True)
+    with _owned_cursor(conn, dictionary=True) as cur:
         cur.execute(
             """
             SELECT open_time, open, high, low, close, volume
@@ -85,12 +84,6 @@ def _get_candles_from_db(symbol: str, market: str, timeframe: str, limit: int) -
             "mark_price": mark_price,
             "funding_rate": funding_rate,
         }
-    finally:
-        try:
-            cur.close()
-            conn.close()
-        except Exception:
-            pass
 
 
 @router.get("/api/market/candles")
@@ -124,7 +117,7 @@ async def ws_market(websocket: WebSocket, token: Optional[str] = Query(None)):
     active_timeframe = "1h"
 
     try:
-        initial_data = _get_candles_from_db(active_symbol, active_market, active_timeframe, 100)
+        initial_data = await asyncio.to_thread(_get_candles_from_db, active_symbol, active_market, active_timeframe, 100)
         await websocket.send_text(json.dumps({
             "type": "market_snapshot",
             "symbol": active_symbol,
@@ -142,6 +135,8 @@ async def ws_market(websocket: WebSocket, token: Optional[str] = Query(None)):
                 msg = json.loads(raw_text)
             except Exception:
                 continue
+            if not isinstance(msg, dict):
+                continue
 
             action = msg.get("action")
             if action == "ping":
@@ -154,7 +149,7 @@ async def ws_market(websocket: WebSocket, token: Optional[str] = Query(None)):
                     active_symbol = sym
                     active_market = mkt
                     active_timeframe = tf
-                    sub_data = _get_candles_from_db(active_symbol, active_market, active_timeframe, 100)
+                    sub_data = await asyncio.to_thread(_get_candles_from_db, active_symbol, active_market, active_timeframe, 100)
                     await websocket.send_text(json.dumps({
                         "type": "market_snapshot",
                         "symbol": active_symbol,
@@ -179,8 +174,8 @@ async def ws_paper(websocket: WebSocket, token: Optional[str] = Query(None)):
 
     try:
         # Send initial paper snapshot
-        positions = get_active_positions()
-        breaker = get_circuit_breaker_status()
+        positions = await asyncio.to_thread(get_active_positions)
+        breaker = await asyncio.to_thread(get_circuit_breaker_status)
         await websocket.send_text(json.dumps({
             "type": "paper_snapshot",
             "positions": positions,
@@ -194,13 +189,15 @@ async def ws_paper(websocket: WebSocket, token: Optional[str] = Query(None)):
                 msg = json.loads(raw_text)
             except Exception:
                 continue
+            if not isinstance(msg, dict):
+                continue
 
             action = msg.get("action")
             if action == "ping":
                 await websocket.send_text(json.dumps({"type": "pong", "timestamp": time.time()}))
             elif action in ("refresh", "poll"):
-                positions = get_active_positions()
-                breaker = get_circuit_breaker_status()
+                positions = await asyncio.to_thread(get_active_positions)
+                breaker = await asyncio.to_thread(get_circuit_breaker_status)
                 await websocket.send_text(json.dumps({
                     "type": "paper_snapshot",
                     "positions": positions,
@@ -220,7 +217,7 @@ async def ws_system(websocket: WebSocket, token: Optional[str] = Query(None)):
         return
 
     try:
-        status_data = get_public_system_status()
+        status_data = await asyncio.to_thread(get_public_system_status)
         await websocket.send_text(json.dumps({
             "type": "system_snapshot",
             "status": status_data,
@@ -233,12 +230,14 @@ async def ws_system(websocket: WebSocket, token: Optional[str] = Query(None)):
                 msg = json.loads(raw_text)
             except Exception:
                 continue
+            if not isinstance(msg, dict):
+                continue
 
             action = msg.get("action")
             if action == "ping":
                 await websocket.send_text(json.dumps({"type": "pong", "timestamp": time.time()}))
             elif action in ("refresh", "poll"):
-                status_data = get_public_system_status()
+                status_data = await asyncio.to_thread(get_public_system_status)
                 await websocket.send_text(json.dumps({
                     "type": "system_snapshot",
                     "status": status_data,

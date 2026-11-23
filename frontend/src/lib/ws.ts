@@ -33,16 +33,15 @@ export function connectWebSocketChannel(
     if (typeof window === "undefined") return null;
     let token: string | null = null;
     try {
-      token = window.localStorage.getItem("token");
+      token = window.localStorage.getItem("token")?.trim() ?? null;
     } catch {
       // Storage unavailable
     }
+    if (!token) return null;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
     const url = new URL(`${protocol}//${host}/ws/${channel}`);
-    if (token) {
-      url.searchParams.set("token", token.trim());
-    }
+    url.searchParams.set("token", token);
     return url.toString();
   };
 
@@ -65,7 +64,10 @@ export function connectWebSocketChannel(
   const connect = () => {
     if (closedManually) return;
     const url = getWebSocketUrl();
-    if (!url) return;
+    if (!url) {
+      setStatus("disconnected");
+      return;
+    }
 
     setStatus("connecting");
     try {
@@ -118,10 +120,19 @@ export function connectWebSocketChannel(
       // Socket error will trigger onclose
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event: CloseEvent) => {
       stopPing();
       setStatus("disconnected");
       ws = null;
+      if (event.code === 1008) {
+        try {
+          window.localStorage.removeItem("token");
+        } catch {
+          // Storage unavailable
+        }
+        window.dispatchEvent(new Event("signal-bot:session-expired"));
+        return;
+      }
       if (!closedManually) {
         scheduleReconnect();
       }

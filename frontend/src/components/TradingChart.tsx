@@ -7,6 +7,7 @@ import {
   ColorType,
   type IChartApi,
   type ISeriesApi,
+  type IPriceLine,
   type CandlestickData,
   type HistogramData,
   type UTCTimestamp,
@@ -47,12 +48,26 @@ export function TradingChart({
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const priceLinesRef = useRef<IPriceLine[]>([]);
 
   const [activeTimeframe, setActiveTimeframe] = useState(initialTimeframe);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [liveMarkPrice, setLiveMarkPrice] = useState<number | null>(propMarkPrice ?? null);
   const [liveFundingRate, setLiveFundingRate] = useState<number | null>(propFundingRate ?? null);
+
+  const clearPriceLines = () => {
+    if (candleSeriesRef.current) {
+      for (const line of priceLinesRef.current) {
+        try {
+          candleSeriesRef.current.removePriceLine(line);
+        } catch {
+          // Ignore removal errors if series is already disposed
+        }
+      }
+    }
+    priceLinesRef.current = [];
+  };
 
   const handleTimeframeClick = (tf: string) => {
     setActiveTimeframe(tf);
@@ -128,6 +143,7 @@ export function TradingChart({
 
     return () => {
       resizeObserver.disconnect();
+      clearPriceLines();
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
@@ -164,7 +180,11 @@ export function TradingChart({
         if (data.mark_price != null) setLiveMarkPrice(data.mark_price);
         if (data.funding_rate != null) setLiveFundingRate(data.funding_rate);
 
-        if (candleSeriesRef.current && volumeSeriesRef.current && data.candles?.length) {
+        if (!data.candles || data.candles.length === 0) {
+          candleSeriesRef.current?.setData([]);
+          volumeSeriesRef.current?.setData([]);
+          clearPriceLines();
+        } else if (candleSeriesRef.current && volumeSeriesRef.current) {
           const formattedCandles: CandlestickData<UTCTimestamp>[] = data.candles.map((c) => ({
             time: c.time as UTCTimestamp,
             open: c.open,
@@ -183,48 +203,58 @@ export function TradingChart({
           volumeSeriesRef.current.setData(formattedVolumes);
           chartRef.current?.timeScale().fitContent();
 
+          clearPriceLines();
+
           // Render price lines if series exists
           const series = candleSeriesRef.current;
           if (entryPrice != null && Number.isFinite(entryPrice)) {
-            series.createPriceLine({
-              price: entryPrice,
-              color: "#3b82f6",
-              lineWidth: 2,
-              lineStyle: LineStyle.Dashed,
-              axisLabelVisible: true,
-              title: "Entry",
-            });
+            priceLinesRef.current.push(
+              series.createPriceLine({
+                price: entryPrice,
+                color: "#3b82f6",
+                lineWidth: 2,
+                lineStyle: LineStyle.Dashed,
+                axisLabelVisible: true,
+                title: "Entry",
+              })
+            );
           }
           if (stopLoss != null && Number.isFinite(stopLoss)) {
-            series.createPriceLine({
-              price: stopLoss,
-              color: "#ef4444",
-              lineWidth: 2,
-              lineStyle: LineStyle.Dashed,
-              axisLabelVisible: true,
-              title: "SL",
-            });
+            priceLinesRef.current.push(
+              series.createPriceLine({
+                price: stopLoss,
+                color: "#ef4444",
+                lineWidth: 2,
+                lineStyle: LineStyle.Dashed,
+                axisLabelVisible: true,
+                title: "SL",
+              })
+            );
           }
           if (takeProfit != null && Number.isFinite(takeProfit)) {
-            series.createPriceLine({
-              price: takeProfit,
-              color: "#10b981",
-              lineWidth: 2,
-              lineStyle: LineStyle.Dashed,
-              axisLabelVisible: true,
-              title: "TP",
-            });
+            priceLinesRef.current.push(
+              series.createPriceLine({
+                price: takeProfit,
+                color: "#10b981",
+                lineWidth: 2,
+                lineStyle: LineStyle.Dashed,
+                axisLabelVisible: true,
+                title: "TP",
+              })
+            );
           }
           const activeMark = data.mark_price ?? propMarkPrice;
           if (activeMark != null && Number.isFinite(activeMark)) {
-            series.createPriceLine({
-              price: activeMark,
-              color: "#f59e0b",
-              lineWidth: 1,
-              lineStyle: LineStyle.Dotted,
-              axisLabelVisible: true,
-              title: "Mark",
-            });
+            priceLinesRef.current.push(
+              series.createPriceLine({
+                price: activeMark,
+                color: "#f59e0b",
+                lineWidth: 1,
+                lineStyle: LineStyle.Dotted,
+                axisLabelVisible: true,
+                title: "Mark",
+              })
+            );
           }
         }
       } catch (err: any) {
