@@ -801,7 +801,32 @@ def delete_custom_strategy(name: str):
     STRATEGIES.pop(f"inverse_{clean_name}", None)
     STRATEGY_METADATA.pop(clean_name, None)
 
-    return {"status": "success", "message": f"Strategy {clean_name} deleted."}
+    paused_deployments = 0
+    try:
+        from db.db import get_pool
+        pool = get_pool()
+        with pool.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE paper_configs
+                    SET is_active = 0
+                    WHERE strategy_name IN (%s, %s) AND is_active = 1
+                    """,
+                    (clean_name, f"inverse_{clean_name}"),
+                )
+                paused_deployments = cur.rowcount
+                conn.commit()
+    except Exception as exc:
+        logger.warning(
+            "Failed to pause active paper configs for deleted strategy %s: %s", clean_name, exc
+        )
+
+    return {
+        "status": "success",
+        "message": f"Strategy {clean_name} deleted.",
+        "paused_deployments": paused_deployments,
+    }
 
 
 @router.post("/quick-test")

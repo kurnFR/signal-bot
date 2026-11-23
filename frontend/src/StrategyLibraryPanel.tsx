@@ -29,7 +29,7 @@ export function StrategyLibraryPanel({ onSelectForBacktest, onSelectForPaper }: 
   const auth = useAuth();
   const canQuickTest = ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
   const canManageStrategies = canQuickTest;
-  const shouldLoadCatalog = Boolean(onSelectForBacktest || onSelectForPaper);
+  const shouldLoadCatalog = true;
   const [testSymbol, setTestSymbol] = useState("BTCUSDT");
   const [testMarket, setTestMarket] = useState<"spot" | "futures">("spot");
   const [testTimeframe, setTestTimeframe] = useState("1h");

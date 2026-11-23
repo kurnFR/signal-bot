@@ -450,3 +450,10 @@ export function setWalletTelegram(id: number, enabled: boolean) {
     method: "PUT", body: JSON.stringify({ enabled }),
   });
 }
+
+export function triggerWalletPoll(signal?: AbortSignal) {
+  return walletMutationRequest<{ status: string; message?: string }>("/api/wallets/poll", {
+    method: "POST",
+    signal,
+  });
+}

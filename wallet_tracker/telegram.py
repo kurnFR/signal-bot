@@ -12,15 +12,19 @@ import time
 import requests
 from requests.adapters import HTTPAdapter
 
+from notifications.telegram_notifier import (
+    get_telegram_config,
+    is_telegram_delivery_authorized,
+)
+
 logger = logging.getLogger("wallet_tracker.telegram")
 
 
 class WalletTelegramNotifier:
     def __init__(self, token=None, chat_id=None, session=None):
-        self.token = token if token is not None else (
-            os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN", "")
-        )
-        self.chat_id = chat_id if chat_id is not None else os.getenv("TELEGRAM_CHAT_ID", "")
+        cfg = get_telegram_config()
+        self.token = token if token is not None else cfg["token"]
+        self.chat_id = chat_id if chat_id is not None else cfg["chat_id"]
         self.url = f"https://api.telegram.org/bot{self.token}/sendMessage" if self.token else ""
         self.session = session or requests.Session()
         # Do not retry POST at the transport layer: a connection failure may
@@ -36,7 +40,7 @@ class WalletTelegramNotifier:
 
     @property
     def delivery_authorized(self) -> bool:
-        return os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
+        return is_telegram_delivery_authorized()
 
     @property
     def configured(self):

@@ -11,6 +11,7 @@ function response(payload: unknown, status = 200) {
 
 describe("screener control editor", () => {
   it("allows a trader to save alert-gate changes while preserving existing overrides", async () => {
+    vi.stubGlobal("confirm", () => true);
     window.localStorage.setItem("token", "session-token");
     const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
     const control = { enabled: true, overrides: { rvol_multiplier: 8, enable_velocity_detection: false }, updated_at: "2026-10-26 12:00:00", tunable_fields: ["rvol_multiplier", "enable_velocity_detection", "enable_divergence_detection", "require_confluence"] };
@@ -40,5 +41,23 @@ describe("screener control editor", () => {
     expect(await screen.findByText(/restricted to admin and trader roles/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Save changes/ })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/api/research/screener/control"))).toBe(false);
+  });
+  it("cancels disabling the screener if confirmation is rejected", async () => {
+    vi.stubGlobal("confirm", () => false);
+    window.localStorage.setItem("token", "session-token");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const control = { enabled: true, overrides: {}, updated_at: "2026-10-26 12:00:00", tunable_fields: [] };
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/auth/me") return Promise.resolve(response(profile));
+      if (path === "/api/research/screener/control") return Promise.resolve(response(control));
+      throw new Error("Unexpected endpoint: " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><ScreenerControlsPanel /></AuthGate>);
+    const checkbox = (await screen.findByLabelText(/Telegram alerting enabled/)) as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(true);
   });
 });

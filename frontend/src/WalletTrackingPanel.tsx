@@ -85,10 +85,10 @@ export function WalletTrackingPanel() {
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [sEnabled, setSEnabled] = useState(false);
   const [sNetworks, setSNetworks] = useState<string[]>([]);
-  const [sMinTrade, setSMinTrade] = useState(10000);
-  const [sMinNet, setSMinNet] = useState(150000);
-  const [sAutoTrackNet, setSAutoTrackNet] = useState(500000);
-  const [sPollInterval, setSPollInterval] = useState(300);
+  const [sMinTrade, setSMinTrade] = useState<number | string>(10000);
+  const [sMinNet, setSMinNet] = useState<number | string>(150000);
+  const [sAutoTrackNet, setSAutoTrackNet] = useState<number | string>(500000);
+  const [sPollInterval, setSPollInterval] = useState<number | string>(300);
   const [sBirdeyeKey, setSBirdeyeKey] = useState("");
   const [sClearBirdeyeKey, setSClearBirdeyeKey] = useState(false);
   const settingsDialogRef = useRef<HTMLDialogElement | null>(null);
@@ -267,19 +267,24 @@ export function WalletTrackingPanel() {
       setSettingsError("Select at least one network to monitor when the tracker is enabled.");
       return;
     }
-    if (sMinTrade <= 0) {
+    const minTrade = typeof sMinTrade === "number" ? sMinTrade : parseFloat(sMinTrade);
+    const minNet = typeof sMinNet === "number" ? sMinNet : parseFloat(sMinNet);
+    const autoTrackNet = typeof sAutoTrackNet === "number" ? sAutoTrackNet : parseFloat(sAutoTrackNet);
+    const pollInterval = typeof sPollInterval === "number" ? sPollInterval : parseInt(sPollInterval, 10);
+
+    if (!Number.isFinite(minTrade) || minTrade <= 0) {
       setSettingsError("Minimum trade size must be greater than zero.");
       return;
     }
-    if (sMinNet <= 0) {
+    if (!Number.isFinite(minNet) || minNet <= 0) {
       setSettingsError("Minimum net flow must be greater than zero.");
       return;
     }
-    if (sAutoTrackNet < sMinNet) {
+    if (!Number.isFinite(autoTrackNet) || autoTrackNet < minNet) {
       setSettingsError("Auto-track threshold must be greater than or equal to minimum net flow.");
       return;
     }
-    if (sPollInterval < 15 || sPollInterval > 3600) {
+    if (!Number.isInteger(pollInterval) || pollInterval < 15 || pollInterval > 3600) {
       setSettingsError("Polling interval must be between 15 and 3600 seconds.");
       return;
     }
@@ -289,10 +294,10 @@ export function WalletTrackingPanel() {
       const payload: Parameters<typeof saveWalletSettings>[0] = {
         enabled: sEnabled,
         networks: sNetworks,
-        min_trade_usd: sMinTrade,
-        min_net_usd: sMinNet,
-        auto_track_net_usd: sAutoTrackNet,
-        poll_interval_seconds: sPollInterval,
+        min_trade_usd: minTrade,
+        min_net_usd: minNet,
+        auto_track_net_usd: autoTrackNet,
+        poll_interval_seconds: pollInterval,
         pools_per_network: data.settings.pools_per_network,
         retention_days: data.settings.retention_days,
         api_delay_seconds: data.settings.api_delay_seconds,
@@ -323,10 +328,12 @@ export function WalletTrackingPanel() {
       <section className="panel paper-safety-banner">
         <ShieldCheck size={19} />
         <div>
-          <strong>Read-only Wallet Tracking monitor</strong>
+          <strong>{canTrade ? "Smart Money Wallet Tracker" : "Read-only Wallet Tracking monitor"}</strong>
           <p>
             Displays tracker health, monitored addresses, token flow, and recent DEX events.
-            Authorized operators can configure alert thresholds and add/remove monitored addresses.
+            {canTrade
+              ? " Authorized operators can configure alert thresholds and add/remove monitored addresses."
+              : " Read-only view for observing wallet tracking. Operator permissions required to modify settings."}
           </p>
         </div>
         <span className="panel-counter">TRACKER</span>
@@ -807,11 +814,11 @@ export function WalletTrackingPanel() {
                 <input
                   id="s-min-trade"
                   type="number"
-                  min={0}
+                  min={0.01}
                   step={100}
                   required
                   value={sMinTrade}
-                  onChange={(e) => setSMinTrade(parseFloat(e.target.value) || 0)}
+                  onChange={(e) => setSMinTrade(e.target.value)}
                   disabled={settingsBusy}
                   style={{ width: "100%", padding: "6px 8px" }}
                 />
@@ -822,11 +829,11 @@ export function WalletTrackingPanel() {
                 <input
                   id="s-min-net"
                   type="number"
-                  min={0}
+                  min={0.01}
                   step={1000}
                   required
                   value={sMinNet}
-                  onChange={(e) => setSMinNet(parseFloat(e.target.value) || 0)}
+                  onChange={(e) => setSMinNet(e.target.value)}
                   disabled={settingsBusy}
                   style={{ width: "100%", padding: "6px 8px" }}
                 />
@@ -837,11 +844,11 @@ export function WalletTrackingPanel() {
                 <input
                   id="s-auto-track"
                   type="number"
-                  min={sMinNet}
+                  min={typeof sMinNet === "number" ? sMinNet : (parseFloat(sMinNet) || 0.01)}
                   step={1000}
                   required
                   value={sAutoTrackNet}
-                  onChange={(e) => setSAutoTrackNet(parseFloat(e.target.value) || 0)}
+                  onChange={(e) => setSAutoTrackNet(e.target.value)}
                   disabled={settingsBusy}
                   style={{ width: "100%", padding: "6px 8px" }}
                 />
@@ -856,7 +863,7 @@ export function WalletTrackingPanel() {
                   max={3600}
                   required
                   value={sPollInterval}
-                  onChange={(e) => setSPollInterval(parseInt(e.target.value, 10) || 0)}
+                  onChange={(e) => setSPollInterval(e.target.value)}
                   disabled={settingsBusy}
                   style={{ width: "100%", padding: "6px 8px" }}
                 />
