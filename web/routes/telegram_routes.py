@@ -12,6 +12,7 @@ from notifications.telegram_notifier import (
     test_telegram_connection,
     send_telegram_message,
     is_telegram_delivery_authorized,
+    set_db_telegram_settings,
 )
 
 router = APIRouter(prefix="/api/telegram", tags=["telegram"])
@@ -19,6 +20,32 @@ router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 
 class TelegramTestRequest(BaseModel):
     custom_message: Optional[str] = Field(None, max_length=1000)
+
+
+class TelegramConfigUpdateRequest(BaseModel):
+    bot_token: Optional[str] = Field(None, max_length=256)
+    chat_id: Optional[str] = Field(None, max_length=128)
+    delivery_authorized: Optional[bool] = None
+
+
+@router.put("/config")
+def update_config(req: TelegramConfigUpdateRequest, request: Request, admin: dict = Depends(require_admin)):
+    """Admin-only: securely persist Telegram bot credentials and delivery permission."""
+    from web.auth import log_audit
+    set_db_telegram_settings(
+        bot_token=req.bot_token,
+        chat_id=req.chat_id,
+        delivery_authorized=req.delivery_authorized,
+    )
+    client_ip = request.client.host if request.client else "unknown"
+    log_audit(
+        "TELEGRAM_CONFIG_UPDATE",
+        admin["username"],
+        admin["id"],
+        {"has_token": bool(req.bot_token), "chat_id": req.chat_id, "delivery_authorized": req.delivery_authorized},
+        client_ip,
+    )
+    return get_status(request)
 
 
 @router.get("/status")

@@ -1,6 +1,6 @@
 import { Key, MessageCircle, Moon, Plus, RefreshCw, ShieldCheck, Sun, Trash2, UserPlus, UserRound, Users } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ApiError } from "./lib/api";
+import { ApiError, apiRequest } from "./lib/api";
 import { changePassword, AuthRequestError } from "./lib/auth";
 import { fetchTelegramStatus, sendTelegramTestPing, TelegramActionError, type TelegramStatus } from "./lib/telegram";
 import { fetchAdminSystemStatus, type AdminSystemStatusResponse } from "./lib/systemStatus";
@@ -63,6 +63,12 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
   const [telegramTestBusy, setTelegramTestBusy] = useState(false);
   const [telegramTestError, setTelegramTestError] = useState<string | null>(null);
   const [telegramTestMessage, setTelegramTestMessage] = useState<string | null>(null);
+  const [editTelegramToken, setEditTelegramToken] = useState("");
+  const [editTelegramChatId, setEditTelegramChatId] = useState("");
+  const [editTelegramDelivery, setEditTelegramDelivery] = useState(false);
+  const [savingTelegram, setSavingTelegram] = useState(false);
+  const [saveTelegramSuccess, setSaveTelegramSuccess] = useState<string | null>(null);
+  const [saveTelegramError, setSaveTelegramError] = useState<string | null>(null);
   const telegramDialogRef = useRef<HTMLDialogElement | null>(null);
   const telegramCancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const telegramTriggerRef = useRef<HTMLElement | null>(null);
@@ -271,6 +277,37 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
     });
     return () => controller.abort();
   }, [isAdmin, telegramRefreshAttempt]);
+
+  useEffect(() => {
+    if (telegramStatus) {
+      if (telegramStatus.chatId) setEditTelegramChatId(telegramStatus.chatId);
+      setEditTelegramDelivery(Boolean(telegramStatus.deliveryAuthorized));
+    }
+  }, [telegramStatus]);
+
+  const handleSaveTelegramConfig = async (e: FormEvent) => {
+    e.preventDefault();
+    setSavingTelegram(true);
+    setSaveTelegramSuccess(null);
+    setSaveTelegramError(null);
+    try {
+      await apiRequest("/api/telegram/config", {
+        method: "PUT",
+        body: JSON.stringify({
+          bot_token: editTelegramToken ? editTelegramToken.trim() : undefined,
+          chat_id: editTelegramChatId ? editTelegramChatId.trim() : undefined,
+          delivery_authorized: editTelegramDelivery,
+        }),
+      });
+      setSaveTelegramSuccess("Telegram credentials saved to encrypted database storage.");
+      setEditTelegramToken("");
+      setTelegramRefreshAttempt((v) => v + 1);
+    } catch (err: any) {
+      setSaveTelegramError(err.message || "Failed to save Telegram settings.");
+    } finally {
+      setSavingTelegram(false);
+    }
+  };
 
   // Load Diagnostics (Admin Only)
   useEffect(() => {
@@ -959,8 +996,52 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
             <button className="button button-secondary" type="button" disabled={telegramLoading || telegramTestBusy} onClick={() => setTelegramRefreshAttempt((value) => value + 1)}><RefreshCw size={15} /> Refresh status</button>
           </div>
           <p className="settings-preference-subtext" style={{ fontSize: "12px", color: "var(--color-text-secondary)", marginTop: "6px" }}>
-            Delivery authorization reflects the web server's environment configuration (RETAILBOT2_ALLOW_TELEGRAM_DELIVERY).
+            Delivery authorization reflects database settings when configured (app_telegram_settings) or environment fallback.
           </p>
+          {isAdmin && (
+            <form onSubmit={handleSaveTelegramConfig} style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10, padding: 12, backgroundColor: "var(--color-surface, #1e293b)", borderRadius: 8, border: "1px solid var(--color-border, #334155)" }}>
+              <strong style={{ fontSize: 13 }}>Update Telegram Settings (Encrypted DB Storage)</strong>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <div>
+                  <label style={{ fontSize: 11, color: "var(--color-muted)", display: "block", marginBottom: 2 }}>Bot Token</label>
+                  <input
+                    type="password"
+                    placeholder="Enter token (leave blank to keep)"
+                    value={editTelegramToken}
+                    onChange={(e) => setEditTelegramToken(e.target.value)}
+                    className="text-input"
+                    style={{ width: "100%", height: 32, fontSize: 12 }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, color: "var(--color-muted)", display: "block", marginBottom: 2 }}>Target Chat ID</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 1487656060"
+                    value={editTelegramChatId}
+                    onChange={(e) => setEditTelegramChatId(e.target.value)}
+                    className="text-input"
+                    style={{ width: "100%", height: 32, fontSize: 12 }}
+                  />
+                </div>
+              </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, cursor: "pointer", marginTop: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={editTelegramDelivery}
+                  onChange={(e) => setEditTelegramDelivery(e.target.checked)}
+                />
+                <span>Authorize Telegram message delivery</span>
+              </label>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button type="submit" className="button button-primary button-sm" disabled={savingTelegram}>
+                  {savingTelegram ? "Saving…" : "Save to Database"}
+                </button>
+              </div>
+              {saveTelegramSuccess && <p className="control-feedback control-success" role="status">{saveTelegramSuccess}</p>}
+              {saveTelegramError && <div className="api-error" role="alert"><div><p>{saveTelegramError}</p></div></div>}
+            </form>
+          )}
         </>}
         {telegramTestError && <div className="api-error" role="alert"><div><strong>Telegram test failed</strong><p>{telegramTestError}</p></div><button className="button button-secondary" type="button" onClick={() => setTelegramTestError(null)}>Dismiss</button></div>}
         {telegramTestMessage && <p className="control-feedback control-success" role="status">{telegramTestMessage}</p>}

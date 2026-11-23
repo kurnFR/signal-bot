@@ -12,12 +12,17 @@ import { ResearchPanel } from "./ResearchPanel";
 import { NewsAIPanel } from "./NewsAIPanel";
 import { MasterDataPanel } from "./MasterDataPanel";
 import { SettingsPanel } from "./SettingsPanel";
-import { Activity, BarChart3, BookOpen, BrainCircuit, Database, ChevronDown, LayoutDashboard, LogOut, Menu, Moon, Settings2, ShieldCheck, Sun, WalletCards, X } from "lucide-react";
+import { TradingDeskPanel } from "./TradingDeskPanel";
+import { CommandPalette } from "./components/CommandPalette";
+import { TermsModal } from "./components/TermsModal";
+import { OnboardingWizard } from "./components/OnboardingWizard";
+import { Activity, BarChart3, BookOpen, BrainCircuit, Command as CommandIcon, Database, ChevronDown, LayoutDashboard, LogOut, Menu, Moon, Settings2, ShieldCheck, Sun, WalletCards, X, Zap } from "lucide-react";
 import { useAuth } from "./AuthGate";
 
 type Theme = "dark" | "light";
 const NAV_ITEMS = [
   { label: "Overview", description: "System overview", icon: LayoutDashboard },
+  { label: "Trading Desk", description: "Pro trader multi-pane workstation", icon: Zap },
   { label: "Market Screener", description: "Signals and market coverage", icon: Activity },
   { label: "Paper Trading", description: "Simulated orders and positions", icon: WalletCards },
   { label: "Strategy Library", description: "Saved rules and indicator catalog", icon: BookOpen },
@@ -34,6 +39,10 @@ const VIEW_METADATA: Record<string, { eyebrow: string; description: string }> = 
   Overview: {
     eyebrow: "SIGNAL BOT / OPERATIONS",
     description: "Real-time engine status, collector health, and database metrics.",
+  },
+  "Trading Desk": {
+    eyebrow: "PRO TRADER / WORKSTATION",
+    description: "Multi-pane execution desk with real-time interactive charts, positions, microstructure strip, and blotter.",
   },
   "Market Screener": {
     eyebrow: "MARKET INTELLIGENCE / SCREENER V2",
@@ -104,6 +113,9 @@ export function App() {
   };
   const [pendingBacktestStrategyId, setPendingBacktestStrategyId] = useState<string | null>(null);
   const [pendingPaperStrategyId, setPendingPaperStrategyId] = useState<string | null>(null);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarCloseButtonRef = useRef<HTMLButtonElement>(null);
@@ -252,6 +264,17 @@ export function App() {
             </span>
           </div>
           <span className="topbar-divider" />
+          <button
+            className="button button-secondary button-sm"
+            onClick={() => setCommandPaletteOpen(true)}
+            aria-label="Open command palette (Cmd+K)"
+            title="Open command palette (Cmd+K)"
+            style={{ display: "inline-flex", alignItems: "center", gap: "6px", height: "30px", fontSize: "11px", padding: "0 10px" }}
+          >
+            <CommandIcon size={13} />
+            <span>Search (⌘K)</span>
+          </button>
+          <span className="topbar-divider" />
           <button className="icon-button theme-toggle" onClick={toggleTheme} aria-label={"Switch to " + (theme === "dark" ? "light" : "dark") + " theme"} title="Switch theme">
             {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
           </button>
@@ -269,6 +292,8 @@ export function App() {
 
         {activeView === "Overview" ? (
           <SystemStatusPanel />
+        ) : activeView === "Trading Desk" ? (
+          <TradingDeskPanel />
         ) : activeView === "Market Screener" ? (
           <><ScreenerPanel /><ScreenerControlsPanel /></>
         ) : activeView === "Paper Trading" ? (
@@ -291,11 +316,32 @@ export function App() {
           <SettingsPanel theme={theme} onToggleTheme={toggleTheme} username={auth?.user.username} role={auth?.user.role} />
         ) : null}
 
-        <footer className="page-footer">
-          <span><Activity size={14} /> Signal Bot Quantitative Platform</span>
-          <span>FastAPI Engine · Binance Market Data · MariaDB</span>
+        <footer className="page-footer" style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "center" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", width: "100%", flexWrap: "wrap", gap: "8px" }}>
+            <span><Activity size={14} /> Signal Bot Quantitative Platform</span>
+            <span>FastAPI Engine · Binance Market Data · MariaDB</span>
+          </div>
+          <div className="footer-disclaimer" style={{ fontSize: "11px", color: "var(--color-muted)", textAlign: "center" }}>
+            ⚠️ For informational, research, and simulated/paper trading purposes only; not financial advice. Real money execution disabled.
+          </div>
         </footer>
       </main>
     </div>
+
+    <CommandPalette
+      open={commandPaletteOpen}
+      onOpenChange={setCommandPaletteOpen}
+      onSelectView={selectView}
+    />
+
+    <TermsModal
+      isOpen={Boolean(auth?.user && !auth.user.terms_accepted_at && !termsAccepted)}
+      onAccepted={() => setTermsAccepted(true)}
+    />
+
+    <OnboardingWizard
+      isOpen={Boolean(auth?.user?.must_change_password && !onboardingDismissed)}
+      onComplete={() => setOnboardingDismissed(true)}
+    />
   </div>;
 }

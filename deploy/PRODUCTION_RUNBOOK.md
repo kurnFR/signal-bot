@@ -1,0 +1,97 @@
+# Crypto Signal Bot — Production Runbook & Operations Guide
+
+## 1. Architecture Overview
+
+Crypto Signal Bot is an institutional quantitative trading, backtesting, paper execution, and real-time market analysis platform.
+
+### Core Components
+- **Web API & Workstation Service (`web.app`)**: FastAPI service providing authenticated REST and WebSocket endpoints (`/ws/market`, `/ws/paper`, `/ws/system`), serving the Modern UI bundle from `frontend/dist`.
+- **Database (`mariadb`)**: MariaDB 10.11 storage for OHLCV bars, market microstructures, paper trading ledgers, user accounts, and immutable audit logs.
+- **Market Data Collectors (`run_collectors.py`)**: Real-time Binance spot/futures tick, kline, and open interest ingestion.
+- **Funding Rate Poller (`collectors/funding_poller.py`)**: 8-hour funding rate calculation and settlement tracking.
+- **Paper Execution Outbox Worker (`paper/outbox_worker.py`)**: Advisory-locked transactional outbox processor for Telegram notifications and paper order fills.
+
+---
+
+## 2. Quickstart Deployment (Docker Compose)
+
+### Prerequisites
+- Docker Engine 24+ and Docker Compose v2+
+- Port 8050 (HTTP/WS) accessible or behind reverse proxy (Caddy / Nginx)
+
+### Steps
+1. Clone repository and generate secrets:
+   ```bash
+   cp .env.example .env
+   # Set strong passwords for MYSQL_ROOT_PASSWORD, MYSQL_PASSWORD, and APP_SECRET_KEY
+   ```
+2. Build and launch all services:
+   ```bash
+   docker compose up -d --build
+   ```
+3. Run schema migrations:
+   ```bash
+   docker compose exec web python -m db.migrate
+   ```
+4. Verify service health:
+   ```bash
+   curl -s http://127.0.0.1:8050/healthz
+   curl -s http://127.0.0.1:8050/readyz
+   ```
+
+---
+
+## 3. Database Administration & Backup Procedures
+
+### Database Migrations
+Always run migrations after deploying updates:
+```bash
+docker compose exec web python -m db.migrate
+```
+To check migration status without making changes:
+```bash
+docker compose exec web python -m db.migrate --status
+```
+
+### Automated Backup Procedure (mariadb-dump)
+Execute a consistent transaction snapshot:
+```bash
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+docker compose exec mariadb mariadb-dump \
+  -u root -p"${MYSQL_ROOT_PASSWORD}" \
+  --single-transaction \
+  --quick \
+  --routines \
+  --triggers \
+  "${MYSQL_DATABASE}" | gzip > "backup_signal_bot_${TIMESTAMP}.sql.gz"
+```
+
+### Database Restore Procedure
+To restore from a backup file:
+```bash
+gunzip < backup_signal_bot_YYYYMMDD_HHMMSS.sql.gz | docker compose exec -T mariadb mariadb \
+  -u root -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DATABASE}"
+```
+
+---
+
+## 4. Security & Compliance Checklist
+
+1. **Secret Key & Tokens**:
+   - `APP_SECRET_KEY`: 32-byte hex key for Fernet database encryption of Telegram bot credentials.
+   - Initial admin password bootstrap is logged once on creation to `.initial_admin_credential` with `0600` permissions.
+2. **First-Login Compliance Gate**:
+   - All users must accept the Terms of Service & Financial Risk Disclaimer (`POST /api/auth/accept-terms`) and rotate default passwords before full workstation access is granted.
+3. **Safety Rail**:
+   - `RETAILBOT2_ALLOW_TRADING=0` is hardcoded across all environments to ensure no real funds are ever placed at risk. Real money trading is disabled.
+4. **Rate Limiting**:
+   - Compute-intensive routes (`POST /api/backtest/*`, `POST /api/ml/*`) are limited to 30 requests/minute per client with automatic HTTP 429 response containing `Retry-After`.
+
+---
+
+## 5. Monitoring & Health Probes
+
+- **Liveness Probe**: `GET /healthz` (200 OK)
+- **Readiness Probe**: `GET /readyz` (200 Ready / 503 Not Ready)
+- **Status API**: `GET /api/system/status`
+- **Operator Audit Log**: `GET /api/system/audit-logs` (Admin only)

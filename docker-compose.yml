@@ -1,0 +1,109 @@
+services:
+  mariadb:
+    image: mariadb:10.11
+    container_name: signal-bot-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-signal_bot_prod_root}
+      MARIADB_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
+      MARIADB_USER: ${MYSQL_USER:-signal_bot}
+      MARIADB_PASSWORD: ${MYSQL_PASSWORD:-signal_bot_secret_pw}
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: signal-bot-web
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      SIGNAL_BOT_ENV: production
+      SIGNAL_BOT_HOST: 0.0.0.0
+      WEB_PORT: 8050
+      SIGNAL_BOT_USE_MODERN_UI: 1
+      MYSQL_HOST: mariadb
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:-signal_bot}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-signal_bot_secret_pw}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-}
+      SIGNAL_BOT_ALLOWED_ORIGINS: ${SIGNAL_BOT_ALLOWED_ORIGINS:-http://localhost:8050,http://127.0.0.1:8050}
+      ENABLE_FUTURES: ${ENABLE_FUTURES:-True}
+      RETAILBOT2_ALLOW_TRADING: "0"
+    ports:
+      - "8050:8050"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8050/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  collectors:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: signal-bot-collectors
+    restart: unless-stopped
+    command: ["python", "run_collectors.py"]
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mariadb
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:-signal_bot}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-signal_bot_secret_pw}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
+      ENABLE_FUTURES: ${ENABLE_FUTURES:-True}
+
+  funding-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: signal-bot-funding
+    restart: unless-stopped
+    command: ["python", "collectors/funding_poller.py"]
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mariadb
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:-signal_bot}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-signal_bot_secret_pw}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
+
+  outbox-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: signal-bot-outbox-worker
+    restart: unless-stopped
+    command: ["python", "paper/outbox_worker.py"]
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mariadb
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:-signal_bot}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-signal_bot_secret_pw}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
+      RETAILBOT2_OUTBOX_WORKER_ENABLED: 1
+      RETAILBOT2_ALLOW_TRADING: "0"
+
+volumes:
+  mariadb_data:

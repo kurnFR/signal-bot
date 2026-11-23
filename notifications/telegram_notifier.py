@@ -4,6 +4,8 @@ Delivers real-time trade signals, position updates, and strategy deployment aler
 to Telegram using Bot API.
 """
 import os
+import base64
+import hashlib
 import logging
 import requests
 from html import escape
@@ -19,6 +21,72 @@ logger = logging.getLogger("notifications.telegram")
 TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/{method}"
 
 
+def _get_fernet():
+    try:
+        from cryptography.fernet import Fernet
+        from web.auth import SECRET_KEY
+        key_src = os.getenv("APP_SECRET_KEY") or SECRET_KEY
+        derived_key = base64.urlsafe_b64encode(hashlib.sha256(key_src.encode("utf-8")).digest())
+        return Fernet(derived_key)
+    except Exception as exc:
+        logger.warning("Could not initialize Fernet cipher for Telegram settings: %s", exc)
+        return None
+
+
+def _get_db_telegram_settings() -> Optional[Dict[str, Any]]:
+    try:
+        from db.db import get_pool, _owned_cursor
+        pool = get_pool()
+        conn = pool.get_connection()
+        with _owned_cursor(conn, dictionary=True) as cur:
+            cur.execute(
+                "SELECT encrypted_bot_token, chat_id, delivery_authorized "
+                "FROM app_telegram_settings ORDER BY id DESC LIMIT 1"
+            )
+            return cur.fetchone()
+    except Exception:
+        return None
+
+
+def set_db_telegram_settings(
+    bot_token: Optional[str] = None,
+    chat_id: Optional[str] = None,
+    delivery_authorized: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Store or update encrypted Telegram settings in database."""
+    from db.db import get_pool, _owned_cursor
+    current = _get_db_telegram_settings() or {}
+    
+    enc_token = current.get("encrypted_bot_token")
+    if bot_token is not None and bot_token.strip():
+        fernet = _get_fernet()
+        if fernet:
+            enc_token = fernet.encrypt(bot_token.strip().encode("utf-8")).decode("utf-8")
+        else:
+            enc_token = bot_token.strip()
+
+    new_chat_id = chat_id.strip() if chat_id is not None else current.get("chat_id")
+    new_auth = int(delivery_authorized) if delivery_authorized is not None else int(current.get("delivery_authorized", 0))
+
+    pool = get_pool()
+    conn = pool.get_connection()
+    with _owned_cursor(conn) as cur:
+        cur.execute(
+            """
+            INSERT INTO app_telegram_settings (id, encrypted_bot_token, chat_id, delivery_authorized)
+            VALUES (1, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                encrypted_bot_token = VALUES(encrypted_bot_token),
+                chat_id = VALUES(chat_id),
+                delivery_authorized = VALUES(delivery_authorized)
+            """,
+            (enc_token, new_chat_id, new_auth),
+        )
+        conn.commit()
+
+    return get_telegram_config()
+
+
 def _safe_http_status(status: Any) -> str:
     """Validates that status is an exact integer in the range 100-599, or returns 'unknown'."""
     if type(status) is int and 100 <= status <= 599:
@@ -28,18 +96,46 @@ def _safe_http_status(status: Any) -> str:
 
 def is_telegram_delivery_authorized() -> bool:
     """Returns True if global Telegram delivery is explicitly enabled."""
+    db_settings = _get_db_telegram_settings()
+    if db_settings and db_settings.get("delivery_authorized") is not None:
+        return bool(db_settings["delivery_authorized"])
     return os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
 
 
 def get_telegram_config() -> Dict[str, Any]:
-    """Retrieves current telegram credentials from environment."""
-    # Prefer canonical names, but remain compatible with the legacy retailbot name.
+    """Retrieves current telegram credentials from DB, falling back to environment."""
+    db_settings = _get_db_telegram_settings()
+    if db_settings:
+        raw_enc = db_settings.get("encrypted_bot_token")
+        chat_id = (db_settings.get("chat_id") or "").strip()
+        token = ""
+        if raw_enc:
+            fernet = _get_fernet()
+            if fernet:
+                try:
+                    token = fernet.decrypt(raw_enc.encode("utf-8")).decode("utf-8").strip()
+                except Exception:
+                    token = raw_enc.strip()
+            else:
+                token = raw_enc.strip()
+        if token or chat_id:
+            return {
+                "token": token,
+                "chat_id": chat_id,
+                "is_configured": bool(token and chat_id),
+                "delivery_authorized": bool(db_settings.get("delivery_authorized", 0)),
+                "source": "database",
+            }
+
+    # Fallback to environment variables
     token = (os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN") or "").strip()
     chat_id = (os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_TARGET_CHAT_ID") or "").strip()
     return {
         "token": token,
         "chat_id": chat_id,
-        "is_configured": bool(token and chat_id)
+        "is_configured": bool(token and chat_id),
+        "delivery_authorized": os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1",
+        "source": "environment",
     }
 
 
