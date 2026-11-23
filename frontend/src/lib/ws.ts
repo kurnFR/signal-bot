@@ -1,4 +1,5 @@
 import { useProTraderStore } from "./store";
+import { apiRequest } from "./api";
 
 export type WsChannel = "market" | "paper" | "system";
 
@@ -29,7 +30,7 @@ export function connectWebSocketChannel(
     options.onStatusChange?.(status);
   };
 
-  const getWebSocketUrl = (): string | null => {
+  const getWebSocketUrl = async (): Promise<string | null> => {
     if (typeof window === "undefined") return null;
     let token: string | null = null;
     try {
@@ -41,6 +42,17 @@ export function connectWebSocketChannel(
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
     const url = new URL(`${protocol}//${host}/ws/${channel}`);
+
+    try {
+      const ticketRes = await apiRequest<{ ticket: string }>("/api/auth/ws-ticket", { method: "POST" });
+      if (ticketRes?.ticket) {
+        url.searchParams.set("ticket", ticketRes.ticket);
+        return url.toString();
+      }
+    } catch {
+      // Ticket fallback if ws-ticket endpoint is unavailable or fails
+    }
+
     url.searchParams.set("token", token);
     return url.toString();
   };
@@ -61,15 +73,16 @@ export function connectWebSocketChannel(
     }
   };
 
-  const connect = () => {
+  const connect = async () => {
     if (closedManually) return;
-    const url = getWebSocketUrl();
+    setStatus("connecting");
+    const url = await getWebSocketUrl();
+    if (closedManually) return;
     if (!url) {
       setStatus("disconnected");
       return;
     }
 
-    setStatus("connecting");
     try {
       ws = new WebSocket(url);
     } catch {

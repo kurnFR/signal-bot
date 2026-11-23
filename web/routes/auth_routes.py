@@ -15,7 +15,8 @@ from web.auth import (
     admit_login_attempt, finalize_login_attempt,
     record_failed_login, reset_login_attempts,
     log_audit, log_audit_cursor, _token_from_request, RateLimitBackendUnavailable,
-    revoke_token_cursor, cache_revoked_token, cleanup_expired_revocations
+    revoke_token_cursor, cache_revoked_token, cleanup_expired_revocations,
+    create_ws_ticket, WS_TICKET_TTL_SECONDS, TOKEN_EXPIRY_SECONDS,
 )
 from fastapi import Request
 
@@ -263,6 +264,7 @@ def login(req: LoginRequest, request: Request):
             "email": user["email"],
             "role": user["role"],
             "must_change_password": bool(user.get("must_change_password", 0)),
+            "terms_accepted_at": str(user.get("terms_accepted_at")) if user.get("terms_accepted_at") else None,
         }
     }
 
@@ -288,6 +290,11 @@ def logout(request: Request, current_user: dict = Depends(get_current_user)):
                     status_code=503,
                     detail="Session revocation is temporarily unavailable. Please retry shortly.",
                 )
+        # Invalidate all active sessions for this user by incrementing session_version
+        try:
+            cur.execute("UPDATE users SET session_version = session_version + 1 WHERE id = %s", (current_user["id"],))
+        except Exception as exc:
+            logger.warning("Could not increment session_version on logout (%s)", exc)
         _commit_with_audit(
             conn, cur, "LOGOUT", current_user["username"], current_user["id"], None, client_ip
         )
@@ -316,6 +323,55 @@ def logout(request: Request, current_user: dict = Depends(get_current_user)):
                 logger.warning("Logout database connection close failed")
 
 
+@router.post("/auth/ws-ticket")
+def issue_ws_ticket(current_user: dict = Depends(get_current_user)):
+    """Issue a 30-second single-use ticket for authenticating WebSockets without bearer token in query."""
+    ticket = create_ws_ticket(current_user)
+    return {"ticket": ticket, "expires_in": WS_TICKET_TTL_SECONDS}
+
+
+@router.post("/auth/refresh")
+def refresh_access_token(request: Request, current_user: dict = Depends(get_current_user)):
+    """Refreshes active access token under current session version."""
+    token = create_access_token(
+        current_user["id"],
+        current_user["username"],
+        current_user["role"],
+        session_version=int(current_user.get("session_version", 0)),
+    )
+    return {
+        "token": token,
+        "expires_in": TOKEN_EXPIRY_SECONDS,
+        "user": {
+            "id": current_user["id"],
+            "username": current_user["username"],
+            "email": current_user["email"],
+            "role": current_user["role"],
+            "must_change_password": bool(current_user.get("must_change_password", 0)),
+            "terms_accepted_at": str(current_user.get("terms_accepted_at")) if current_user.get("terms_accepted_at") else None,
+        },
+    }
+
+
+@router.post("/auth/accept-terms")
+def accept_terms(request: Request, current_user: dict = Depends(get_current_user)):
+    """Acknowledge financial risk disclaimer and compliance terms."""
+    client_ip = request.client.host if request.client else "unknown"
+    conn = _get_required_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE users SET terms_accepted_at = UTC_TIMESTAMP() WHERE id = %s",
+            (current_user["id"],),
+        )
+        _commit_with_audit(
+            conn, cur, "TERMS_ACCEPTED", current_user["username"], current_user["id"], None, client_ip
+        )
+        return {"status": "success", "message": "Terms and conditions acknowledged"}
+    finally:
+        conn.close()
+
+
 @router.get("/auth/me")
 def get_current_user_profile(current_user: dict = Depends(get_current_user)):
     return {
@@ -324,6 +380,7 @@ def get_current_user_profile(current_user: dict = Depends(get_current_user)):
         "email": current_user["email"],
         "role": current_user["role"],
         "must_change_password": bool(current_user.get("must_change_password", 0)),
+        "terms_accepted_at": str(current_user.get("terms_accepted_at")) if current_user.get("terms_accepted_at") else None,
     }
 
 

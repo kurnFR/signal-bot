@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any, List
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException, status
 from db.db import get_pool, _owned_cursor
-from web.auth import verify_access_token
+from web.auth import verify_access_token, consume_ws_ticket
 from paper.engine import get_active_positions
 from paper.circuit_breaker import get_circuit_breaker_status
 from web.routes.system_status import get_public_system_status
@@ -16,17 +16,25 @@ logger = logging.getLogger("web.ws")
 router = APIRouter(tags=["streaming"])
 
 
-async def _authenticate_ws(websocket: WebSocket, query_token: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    token = query_token
-    if not token:
-        auth_header = websocket.headers.get("authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header[7:].strip()
-    if token:
-        user = verify_access_token(token)
-        if user:
-            await websocket.accept()
-            return user
+async def _authenticate_ws(
+    websocket: WebSocket,
+    ticket: Optional[str] = None,
+    token: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    user = None
+    if ticket:
+        user = consume_ws_ticket(ticket)
+    if not user:
+        candidate_token = token
+        if not candidate_token:
+            auth_header = websocket.headers.get("authorization")
+            if auth_header and auth_header.startswith("Bearer "):
+                candidate_token = auth_header[7:].strip()
+        if candidate_token:
+            user = verify_access_token(candidate_token)
+    if user:
+        await websocket.accept()
+        return user
 
     await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
     return None
@@ -107,8 +115,12 @@ def get_market_candles(
 
 
 @router.websocket("/ws/market")
-async def ws_market(websocket: WebSocket, token: Optional[str] = Query(None)):
-    user = await _authenticate_ws(websocket, query_token=token)
+async def ws_market(
+    websocket: WebSocket,
+    ticket: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
+):
+    user = await _authenticate_ws(websocket, ticket=ticket, token=token)
     if not user:
         return
 
@@ -167,8 +179,12 @@ async def ws_market(websocket: WebSocket, token: Optional[str] = Query(None)):
 
 
 @router.websocket("/ws/paper")
-async def ws_paper(websocket: WebSocket, token: Optional[str] = Query(None)):
-    user = await _authenticate_ws(websocket, query_token=token)
+async def ws_paper(
+    websocket: WebSocket,
+    ticket: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
+):
+    user = await _authenticate_ws(websocket, ticket=ticket, token=token)
     if not user:
         return
 
@@ -211,8 +227,12 @@ async def ws_paper(websocket: WebSocket, token: Optional[str] = Query(None)):
 
 
 @router.websocket("/ws/system")
-async def ws_system(websocket: WebSocket, token: Optional[str] = Query(None)):
-    user = await _authenticate_ws(websocket, query_token=token)
+async def ws_system(
+    websocket: WebSocket,
+    ticket: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
+):
+    user = await _authenticate_ws(websocket, ticket=ticket, token=token)
     if not user:
         return
 

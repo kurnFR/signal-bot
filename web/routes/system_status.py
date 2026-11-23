@@ -3,9 +3,13 @@
 The admin-only /api/settings/status carries connection details (host, port, database
 name, raw error text). This endpoint returns the same health signals without them.
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Query
+from typing import Optional, List, Dict, Any
+import json
 
 from web.routes.settings import collect_system_status
+from db.db import get_pool, _owned_cursor
+from web.auth import require_admin
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 

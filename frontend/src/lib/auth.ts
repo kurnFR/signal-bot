@@ -1,12 +1,23 @@
-import { getJson } from "./api";
+import { getJson, apiRequest } from "./api";
 
-export interface AuthUser { id: number; username: string; email: string | null; role: "admin" | "trader" | "viewer"; must_change_password: boolean }
+export interface AuthUser {
+  id: number;
+  username: string;
+  email: string | null;
+  role: "admin" | "trader" | "viewer";
+  must_change_password: boolean;
+  terms_accepted_at?: string | null;
+}
 export interface LoginResult { token: string; user: AuthUser }
 export class AuthRequestError extends Error {
   constructor(readonly status: number, message: string) { super(message); this.name = "AuthRequestError"; }
 }
 
-const AUTH_PATHS = new Set(["/api/auth/login", "/api/auth/logout", "/api/auth/change-password"]);
+const AUTH_PATHS = new Set(["/api/auth/login", "/api/auth/logout", "/api/auth/change-password", "/api/auth/accept-terms"]);
+
+export async function acceptTerms(): Promise<void> {
+  await apiRequest("/api/auth/accept-terms", { method: "POST" });
+}
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }

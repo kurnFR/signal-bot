@@ -89,8 +89,75 @@ def _load_or_create_secret(path: str) -> str:
 
 SECRET_KEY = _load_or_create_secret(SECRET_FILE)
 
-TOKEN_EXPIRY_SECONDS = 86400
+DEFAULT_TOKEN_EXPIRY = 3600 if os.getenv("SIGNAL_BOT_ENV", "").lower() == "production" else 86400
+TOKEN_EXPIRY_SECONDS = int(os.getenv("ACCESS_TOKEN_EXPIRE_SECONDS", str(DEFAULT_TOKEN_EXPIRY)))
 security_bearer = HTTPBearer(auto_error=False)
+
+
+# ============================================================================
+# Single-Use WebSocket Authentication Tickets
+# ============================================================================
+_ws_tickets: Dict[str, Dict[str, Any]] = {}
+_ws_tickets_lock = threading.Lock()
+WS_TICKET_TTL_SECONDS = 30
+
+
+def create_ws_ticket(user: Dict[str, Any]) -> str:
+    """Generate a short-lived (30s), single-use opaque ticket for WS connection."""
+    ticket = secrets.token_urlsafe(32)
+    now = time.time()
+    with _ws_tickets_lock:
+        expired = [t for t, data in _ws_tickets.items() if data.get("expires_at", 0) <= now]
+        for t in expired:
+            _ws_tickets.pop(t, None)
+        _ws_tickets[ticket] = {
+            "user": user,
+            "expires_at": now + WS_TICKET_TTL_SECONDS,
+        }
+    return ticket
+
+
+def consume_ws_ticket(ticket: str) -> Optional[Dict[str, Any]]:
+    """Validate and immediately consume a single-use WS ticket."""
+    if not ticket:
+        return None
+    now = time.time()
+    with _ws_tickets_lock:
+        data = _ws_tickets.pop(ticket, None)
+        if not data:
+            return None
+        if data.get("expires_at", 0) < now:
+            return None
+        return data.get("user")
+
+
+# ============================================================================
+# Compute-Heavy Endpoint Rate Limiting
+# ============================================================================
+_compute_rate_limit_history: Dict[str, list[float]] = {}
+_compute_rate_limit_lock = threading.Lock()
+COMPUTE_RATE_LIMIT_MAX = int(os.getenv("COMPUTE_RATE_LIMIT_MAX", "30"))
+COMPUTE_RATE_LIMIT_WINDOW = int(os.getenv("COMPUTE_RATE_LIMIT_WINDOW", "60"))
+
+
+def check_compute_rate_limit(key: str, max_requests: int = COMPUTE_RATE_LIMIT_MAX, window_seconds: int = COMPUTE_RATE_LIMIT_WINDOW) -> tuple[bool, int]:
+    """In-memory sliding window rate limiter for expensive compute endpoints.
+    
+    Returns (allowed: bool, retry_after: int).
+    """
+    now = time.time()
+    cutoff = now - window_seconds
+    with _compute_rate_limit_lock:
+        timestamps = _compute_rate_limit_history.get(key, [])
+        valid_timestamps = [ts for ts in timestamps if ts > cutoff]
+        if len(valid_timestamps) >= max_requests:
+            earliest = valid_timestamps[0]
+            retry_after = max(1, int(earliest + window_seconds - now))
+            _compute_rate_limit_history[key] = valid_timestamps
+            return False, retry_after
+        valid_timestamps.append(now)
+        _compute_rate_limit_history[key] = valid_timestamps
+        return True, 0
 
 
 def hash_password(password: str) -> str:
@@ -788,7 +855,7 @@ def authenticate_request(request: Request) -> Dict[str, Any]:
     try:
         cur = conn.cursor(dictionary=True)
         cur.execute(
-            "SELECT id, username, email, role, is_active, must_change_password, session_version FROM users WHERE id = %s AND is_active = 1",
+            "SELECT id, username, email, role, is_active, must_change_password, session_version, terms_accepted_at FROM users WHERE id = %s AND is_active = 1",
             (user_id,)
         )
         user = cur.fetchone()

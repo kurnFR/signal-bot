@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity, AlertTriangle, CheckCircle, Plus, RefreshCw, ShieldCheck, WalletCards, X } from "lucide-react";
 import { TradingChart } from "./components/TradingChart";
+import { PortfolioRiskDesk } from "./components/PortfolioRiskDesk";
+import { ExecutionBlotter } from "./components/ExecutionBlotter";
 import { useAuth } from "./AuthGate";
 import { fetchBacktestStrategies } from "./lib/backtestStudio";
 import { fetchBackfilledSymbols } from "./lib/masterData";
@@ -989,6 +991,13 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
         <button className="button button-primary" type="button" disabled={togglingConfigId !== null} onClick={() => void archiveDeployment(pendingArchive)}>Confirm archive</button>
       </section>}
 
+      {/* Portfolio Risk & Exposure Desk */}
+      <PortfolioRiskDesk
+        positions={data?.positions ?? []}
+        trades={data?.trades ?? []}
+        circuitBreakerTripped={data?.breaker?.emergency_stop_active ?? false}
+      />
+
       {/* PT-07: Recent orders with cancel order action */}
       <section className="panel" aria-labelledby="paper-orders-title">
         <div className="panel-heading">
@@ -996,39 +1005,14 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
           <span className="panel-counter">{data?.orders.length ?? "—"} ORDERS</span>
         </div>
         {data?.orders.length ? (
-          <div className="status-table-wrap">
-            <table className="status-table">
-              <thead><tr><th>Symbol</th><th>Direction</th><th>Status</th><th>Fill / requested</th><th>Created</th><th>Reason</th><th>Action</th></tr></thead>
-              <tbody>
-                {data.orders.map((o) => (
-                  <tr key={o.id}>
-                    <td><strong>{o.symbol}</strong><small>{o.market} · {o.timeframe}</small></td>
-                    <td>{o.direction}</td>
-                    <td><span className={"status-pill " + (o.status === "FILLED" ? "status-positive" : o.status === "PENDING" ? "status-warning" : "status-neutral")}>{o.status}</span></td>
-                    <td>{o.fill_price != null ? number.format(o.fill_price) : o.requested_entry_price == null ? "Unset" : number.format(o.requested_entry_price)}</td>
-                    <td>{dateLabel(o.created_at)}</td>
-                    <td>{o.state_reason || "—"}</td>
-                    <td>
-                      {canTrade && o.status === "PENDING" ? (
-                        <button
-                          type="button"
-                          className="button button-danger-subtle button-xs"
-                          aria-label={`Cancel pending order #${o.id} for ${o.symbol}`}
-                          onClick={(e) => {
-                            cancelOrderTriggerRef.current = e.currentTarget;
-                            setSelectedOrderForCancel(o);
-                          }}
-                          disabled={cancellingOrderId === o.id}
-                        >
-                          {cancellingOrderId === o.id ? "Cancelling…" : "Cancel"}
-                        </button>
-                      ) : <span className="text-muted">—</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ExecutionBlotter
+            orders={data.orders}
+            canTrade={canTrade}
+            onCancelOrder={(o) => {
+              setSelectedOrderForCancel(o);
+            }}
+            cancellingOrderId={cancellingOrderId}
+          />
         ) : <p className="empty-state">{loading ? "Loading recent orders…" : "No recent orders."}</p>}
       </section>
 
