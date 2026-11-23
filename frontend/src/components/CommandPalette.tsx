@@ -307,6 +307,26 @@ export function CommandPalette({
                   ))}
                 </Command.Group>
 
+                <Command.Group heading="Help & Setup" style={{ padding: "4px 8px", fontSize: "11px", color: "var(--color-muted)" }}>
+                  <Command.Item
+                    onSelect={() => {
+                      setOpen(false);
+                      window.dispatchEvent(new CustomEvent("signal-bot:open-onboarding"));
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      padding: "8px 10px",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                    }}
+                  >
+                    <Settings size={15} /> First-Run Setup & Onboarding Wizard
+                  </Command.Item>
+                </Command.Group>
+
                 {onEmergencyStop && (
                   <Command.Group heading="Safety & Circuit Breaker" style={{ padding: "4px 8px", fontSize: "11px", color: "var(--color-muted)" }}>
                     <Command.Item
