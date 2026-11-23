@@ -6,6 +6,7 @@ const user = {
   email: null,
   role: "trader",
   must_change_password: false,
+  terms_accepted_at: "2026-11-23 00:00:00",
 };
 
 async function mockApi(page: Page, options: { expiredScreener?: boolean; expiredSettings?: boolean; forcePasswordChange?: boolean; sessionValidationUnavailable?: boolean; deniedPath?: string; loginRejected?: boolean; role?: string } = {}) {

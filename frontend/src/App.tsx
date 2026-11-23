@@ -116,6 +116,13 @@ export function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  useEffect(() => {
+    const handler = () => setShowOnboarding(true);
+    window.addEventListener("signal-bot:open-onboarding", handler);
+    return () => window.removeEventListener("signal-bot:open-onboarding", handler);
+  }, []);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarCloseButtonRef = useRef<HTMLButtonElement>(null);
@@ -335,12 +342,13 @@ export function App() {
     />
 
     <TermsModal
-      isOpen={Boolean(auth?.user && !auth.user.terms_accepted_at && !termsAccepted)}
+      isOpen={Boolean(auth?.user && auth.user.terms_accepted_at === null && !termsAccepted)}
       onAccepted={() => setTermsAccepted(true)}
     />
 
     <OnboardingWizard
-      isOpen={Boolean(auth?.user?.must_change_password && !onboardingDismissed)}
+      isOpen={Boolean(showOnboarding && !onboardingDismissed)}
+      onClose={() => setOnboardingDismissed(true)}
       onComplete={() => setOnboardingDismissed(true)}
     />
   </div>;
