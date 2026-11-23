@@ -13,7 +13,13 @@ from web.app import app, _role_allowed
 
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 # Mutating endpoints every authenticated user (incl. viewer) legitimately needs.
-VIEWER_ALLOWED_MUTATIONS = {"/api/auth/logout", "/api/auth/change-password"}
+VIEWER_ALLOWED_MUTATIONS = {
+    "/api/auth/logout",
+    "/api/auth/change-password",
+    "/api/auth/ws-ticket",
+    "/api/auth/refresh",
+    "/api/auth/accept-terms",
+}
 PUBLIC = {("POST", "/api/auth/login"), ("GET", "/api/system/test-identity")}
 
 

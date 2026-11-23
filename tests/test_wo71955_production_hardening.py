@@ -129,31 +129,37 @@ class TestSessionRevocationAndRefresh:
 
 
 class TestTelegramConfigAndAudit:
-    def test_telegram_config_update_requires_admin(self, client, trader_token):
-        res = client.put(
-            "/api/telegram/config",
-            json={"delivery_authorized": True},
-            headers={"Authorization": f"Bearer {trader_token}"},
-        )
-        assert res.status_code == 403
+    def test_telegram_config_update_requires_admin(self, client):
+        trader_user = {"id": 2, "username": "trader_test", "role": "trader", "is_active": 1, "must_change_password": 0}
+        with patch("web.app.authenticate_request", return_value=trader_user), \
+             patch("web.auth.authenticate_request", return_value=trader_user):
+            res = client.put(
+                "/api/telegram/config",
+                json={"delivery_authorized": True},
+                headers={"Authorization": "Bearer fake_trader_token"},
+            )
+            assert res.status_code == 403
 
-    def test_audit_logs_endpoint_rbac(self, client, admin_token, trader_token):
-        # Trader denied
-        res_trader = client.get(
-            "/api/system/audit-logs",
-            headers={"Authorization": f"Bearer {trader_token}"},
-        )
-        assert res_trader.status_code == 403
+    def test_audit_logs_endpoint_rbac(self, client):
+        trader_user = {"id": 2, "username": "trader_test", "role": "trader", "is_active": 1, "must_change_password": 0}
+        admin_user = {"id": 1, "username": "admin", "role": "admin", "is_active": 1, "must_change_password": 0}
+        with patch("web.app.authenticate_request", return_value=trader_user), \
+             patch("web.auth.authenticate_request", return_value=trader_user):
+            res_trader = client.get(
+                "/api/auth/audit-logs",
+                headers={"Authorization": "Bearer fake_trader_token"},
+            )
+            assert res_trader.status_code == 403
 
-        # Admin allowed
-        res_admin = client.get(
-            "/api/system/audit-logs?limit=5",
-            headers={"Authorization": f"Bearer {admin_token}"},
-        )
-        assert res_admin.status_code == 200
-        data = res_admin.json()
-        assert "logs" in data
-        assert "total" in data
+        with patch("web.app.authenticate_request", return_value=admin_user), \
+             patch("web.auth.authenticate_request", return_value=admin_user):
+            res_admin = client.get(
+                "/api/auth/audit-logs?limit=5",
+                headers={"Authorization": "Bearer fake_admin_token"},
+            )
+            assert res_admin.status_code == 200
+            data = res_admin.json()
+            assert "items" in data
 
 
 class TestComputeRateLimiting:

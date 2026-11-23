@@ -112,6 +112,7 @@ describe("MasterDataPanel", () => {
     render(<AuthGate><MasterDataPanel /></AuthGate>);
 
     expect(await screen.findByRole("heading", { name: "Backfill historical data" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Review backfill" })).toBeEnabled());
     fireEvent.change(screen.getByRole("textbox", { name: "Backfill symbol" }), { target: { value: "ethusdt" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Backfill market" }), { target: { value: "futures" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Backfill timeframe" }), { target: { value: "4h" } });

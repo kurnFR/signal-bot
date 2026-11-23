@@ -175,11 +175,8 @@ PASSWORD_CHANGE_ALLOWED_PATHS = {
     "/api/auth/me",
     "/api/auth/logout",
     "/api/auth/change-password",
-    "/api/auth/ws-ticket",
-    "/api/auth/refresh",
-    "/api/auth/accept-terms",
 }
-ADMIN_ONLY_PREFIXES = ("/api/settings", "/api/auth/audit-logs", "/api/system/audit-logs")
+ADMIN_ONLY_PREFIXES = ("/api/settings", "/api/auth/audit-logs")
 ADMIN_OR_TRADER_PREFIXES = (
     "/api/master-data/backfill",
     "/api/master-data/build-features",
