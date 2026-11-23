@@ -115,7 +115,7 @@ export function ScreenerControlsPanel() {
           if (!confirmed) return;
         }
         setEnabled(nextVal);
-      }} /><span><strong>Smart Money Screener enabled</strong><small>Pausing alerts does not stop signal detection.</small></span></label>
+      }} /><span><strong>Smart Money Screener enabled</strong><small>Pausing the screener halts background scanning and signal generation.</small></span></label>
       <div className="screener-control-grid">
         {NUMBER_FIELDS.map((field) => <label className="screener-control-field" key={field.key}>{field.label}<input type="number" min={field.min} max={field.max} step={field.step} value={numbers[field.key] ?? ""} placeholder="Use server default" onChange={(event) => setNumbers((current) => ({ ...current, [field.key]: event.target.value }))} /><small>{Object.prototype.hasOwnProperty.call(control.overrides, field.key) ? "Saved override · clear to restore server default" : "No override · server default applies"}</small></label>)}
       </div>

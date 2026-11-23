@@ -1,12 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "./AuthGate";
-import { Activity, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, BrainCircuit, RefreshCw, ShieldCheck, Sparkles, TrendingUp, X } from "lucide-react";
 import { ApiError } from "./lib/api";
 import { PromotionStatusPanel } from "./PromotionStatusPanel";
 import { fetchBackfilledSymbols } from "./lib/masterData";
 import { trapFocus } from "./lib/dialog";
 import { deployPaperStrategy, PaperTradingActionError } from "./lib/paperTrading";
-import { BacktestExecutionError, executeBacktest, fetchBacktestHistory, fetchBacktestRunDetails, fetchBacktestStrategies, type BacktestExecutionInput, type BacktestExecutionResult, type BacktestRunDetails, type BacktestRunSummary, type BacktestStrategy, type BacktestStrategyParameter, type PromotionPolicy } from "./lib/backtestStudio";
+import {
+  BacktestExecutionError,
+  executeBacktest,
+  fetchBacktestHistory,
+  fetchBacktestRunDetails,
+  fetchBacktestStrategies,
+  executeWalkForward,
+  runAllStrategies,
+  fetchAiInsight,
+  type BacktestExecutionInput,
+  type BacktestExecutionResult,
+  type BacktestRunDetails,
+  type BacktestRunSummary,
+  type BacktestStrategy,
+  type BacktestStrategyParameter,
+  type PromotionPolicy,
+  type WalkForwardResult,
+  type RunAllResult,
+  type AiInsightResult,
+} from "./lib/backtestStudio";
+import { EquityDrawdownChart } from "./components/EquityDrawdownChart";
 
 const pct = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 const numeric = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 });
@@ -116,6 +136,95 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
   const [deployTelegram, setDeployTelegram] = useState(false);
   const [deployBusy, setDeployBusy] = useState(false);
   const [deployError, setDeployError] = useState<string | null>(null);
+
+  // Walk-Forward Analysis state
+  const [walkForwardOpen, setWalkForwardOpen] = useState(false);
+  const [walkForwardBusy, setWalkForwardBusy] = useState(false);
+  const [walkForwardFolds, setWalkForwardFolds] = useState(4);
+  const [walkForwardRolling, setWalkForwardRolling] = useState(false);
+  const [walkForwardResult, setWalkForwardResult] = useState<WalkForwardResult | null>(null);
+  const [walkForwardError, setWalkForwardError] = useState<string | null>(null);
+
+  // Run All Strategies state
+  const [runAllOpen, setRunAllOpen] = useState(false);
+  const [runAllBusy, setRunAllBusy] = useState(false);
+  const [runAllResult, setRunAllResult] = useState<RunAllResult | null>(null);
+  const [runAllError, setRunAllError] = useState<string | null>(null);
+
+  // AI Insight state
+  const [aiInsightOpen, setAiInsightOpen] = useState(false);
+  const [aiInsightBusy, setAiInsightBusy] = useState(false);
+  const [aiInsightResult, setAiInsightResult] = useState<AiInsightResult | null>(null);
+  const [aiInsightError, setAiInsightError] = useState<string | null>(null);
+
+  const handleOpenWalkForward = () => {
+    setWalkForwardResult(null);
+    setWalkForwardError(null);
+    setWalkForwardOpen(true);
+  };
+
+  const handleExecuteWalkForward = async () => {
+    if (!activeStrategy) return;
+    setWalkForwardBusy(true);
+    setWalkForwardError(null);
+    try {
+      const res = await executeWalkForward({
+        symbol,
+        market,
+        timeframe,
+        strategy: strategyId,
+        folds: walkForwardFolds,
+        rolling: walkForwardRolling,
+        params: parameterValues,
+      });
+      setWalkForwardResult(res);
+    } catch (err: any) {
+      setWalkForwardError(err instanceof Error ? err.message : "Walk-forward analysis failed.");
+    } finally {
+      setWalkForwardBusy(false);
+    }
+  };
+
+  const handleOpenRunAll = () => {
+    setRunAllResult(null);
+    setRunAllError(null);
+    setRunAllOpen(true);
+  };
+
+  const handleExecuteRunAll = async () => {
+    setRunAllBusy(true);
+    setRunAllError(null);
+    try {
+      const res = await runAllStrategies({
+        symbol,
+        market,
+        timeframe,
+        data_segment: dataSegment,
+        initial_capital: Number(initialCapital) || 5000,
+        risk_per_trade_pct: Number(riskPerTrade) || 1.0,
+      });
+      setRunAllResult(res);
+    } catch (err: any) {
+      setRunAllError(err instanceof Error ? err.message : "Failed to benchmark all strategies.");
+    } finally {
+      setRunAllBusy(false);
+    }
+  };
+
+  const handleOpenAiInsight = async (runDetails: BacktestRunDetails) => {
+    setAiInsightOpen(true);
+    setAiInsightBusy(true);
+    setAiInsightError(null);
+    setAiInsightResult(null);
+    try {
+      const res = await fetchAiInsight(runDetails.symbol, runDetails.market, runDetails.timeframe, runDetails.strategy);
+      setAiInsightResult(res);
+    } catch (err: any) {
+      setAiInsightError(err instanceof Error ? err.message : "Failed to generate AI quantitative insight.");
+    } finally {
+      setAiInsightBusy(false);
+    }
+  };
   const deployDialogRef = useRef<HTMLDialogElement | null>(null);
   const deployTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -448,7 +557,27 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
           return <label className="screener-control-field" key={parameter.key}>{parameter.label}<input aria-label={parameter.label} type="number" min={parameter.min} max={parameter.max} step={parameter.step ?? 1} value={String(value)} onChange={(event) => setParameterValues((current) => ({ ...current, [parameter.key]: event.target.value }))} /></label>;
         })}</div> : <p className="empty-state">No adjustable parameters for this strategy.</p>}
       </div>}
-      <div className="screener-control-footer"><button className="button button-primary" type="button" disabled={loading || runBusy || !strategies.length || !activeStrategy || !promotionPolicy} onClick={reviewRun}>Review backtest run</button></div>
+      <div className="screener-control-footer" style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <button
+          className="button button-secondary"
+          type="button"
+          disabled={loading || runBusy || !strategies.length || !activeStrategy}
+          onClick={handleOpenWalkForward}
+        >
+          <TrendingUp size={14} /> Walk-Forward Analysis
+        </button>
+        <button
+          className="button button-secondary"
+          type="button"
+          disabled={loading || runBusy || !strategies.length}
+          onClick={handleOpenRunAll}
+        >
+          <Sparkles size={14} /> Benchmark All Strategies
+        </button>
+        <button className="button button-primary" type="button" disabled={loading || runBusy || !strategies.length || !activeStrategy || !promotionPolicy} onClick={reviewRun}>
+          Review backtest run
+        </button>
+      </div>
     </section> : <p className="empty-state">Backtest execution is restricted to admin and trader roles. This session can review saved results only.</p>}
     {executionResult && <section className="panel" aria-labelledby="backtest-latest-result-title">
       <div className="panel-heading"><div><h2 id="backtest-latest-result-title">Latest execution result</h2><p>{executionResult.symbol} · {executionResult.market} · {executionResult.timeframe} · {executionResult.dataSegment}</p></div><span className="panel-counter">{executionResult.runId == null ? "NOT CONFIRMED SAVED" : `RUN #${executionResult.runId}`}</span></div>
@@ -491,6 +620,16 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
         </div>
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
           <span className="panel-counter">{trades.length} TRADES</span>
+          {details && (
+            <button
+              className="button button-secondary button-sm"
+              type="button"
+              disabled={aiInsightBusy}
+              onClick={() => void handleOpenAiInsight(details)}
+            >
+              <BrainCircuit size={14} /> AI Insight
+            </button>
+          )}
           {canRunBacktest && details && (
             <button
               className="button button-primary button-sm"
@@ -505,6 +644,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       {detailError && <p role="alert" className="error-banner">{detailError}</p>}
       {detailLoading ? <p className="empty-state" role="status">Loading selected run details…</p> : details ? <>
         <div className="paper-risk-grid"><div><span>Run</span><strong>#{details.id} · {details.symbol}</strong></div><div><span>Strategy</span><strong>{strategyNames.get(details.strategy) ?? details.strategy}</strong></div><div><span>Market / timeframe</span><strong>{details.market} · {details.timeframe}</strong></div><div><span>Data segment</span><strong>{details.dataSegment}</strong></div><div><span>Win rate</span><strong>{details.winRatePct == null ? "—" : `${pct.format(details.winRatePct)}%`}</strong></div><div><span>Profit factor</span><strong>{moneyish(details.profitFactor)}</strong></div><div><span>Expectancy</span><strong>{details.expectancyR == null ? "—" : `${numeric.format(details.expectancyR)} R`}</strong></div><div><span>Max drawdown</span><strong>{details.maxDrawdownR == null ? "—" : `${numeric.format(details.maxDrawdownR)} R`}</strong></div></div>
+        {sortedTrades.length > 0 && <EquityDrawdownChart trades={sortedTrades} />}
         {details.params && <details className="backtest-params"><summary>Stored run parameters</summary><pre>{JSON.stringify(details.params, null, 2)}</pre></details>}
         {sortedTrades.length ? <div className="table-scroll"><table><thead><tr>
           <TableSortHeader field="direction" currentField={tradeSortField} direction={tradeSortDirection} label="Direction" onSort={handleTradeSort} />
@@ -657,6 +797,218 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
             </button>
           </div>
         </form>
+      </dialog>
+    )}
+    {walkForwardOpen && (
+      <dialog className="modal-dialog" open style={{ maxWidth: "680px", width: "95%" }}>
+        <div className="panel-heading">
+          <div>
+            <h2>Walk-Forward Analysis</h2>
+            <p>{symbol} · {market} · {timeframe} · {strategyId}</p>
+          </div>
+          <button type="button" className="icon-button" onClick={() => setWalkForwardOpen(false)} aria-label="Close dialog">
+            <X size={16} />
+          </button>
+        </div>
+        <div style={{ padding: "16px 0" }}>
+          <div className="screener-control-grid">
+            <label className="screener-control-field">
+              Folds (K-fold)
+              <input
+                type="number"
+                min={2}
+                max={10}
+                value={walkForwardFolds}
+                disabled={walkForwardBusy}
+                onChange={(e) => setWalkForwardFolds(Math.max(2, Math.min(10, Number(e.target.value))))}
+              />
+            </label>
+            <label className="screener-alert-toggle" style={{ marginTop: "18px" }}>
+              <input
+                type="checkbox"
+                checked={walkForwardRolling}
+                disabled={walkForwardBusy}
+                onChange={(e) => setWalkForwardRolling(e.target.checked)}
+              />
+              <span><strong>Rolling window mode</strong><small>Evaluates walk-forward efficiency over sequential rolling test windows.</small></span>
+            </label>
+          </div>
+
+          <div style={{ margin: "16px 0", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={walkForwardBusy}
+              onClick={handleExecuteWalkForward}
+            >
+              {walkForwardBusy ? "Running analysis…" : "Execute Walk-Forward Test"}
+            </button>
+          </div>
+
+          {walkForwardError && <p className="control-feedback control-error" role="alert">{walkForwardError}</p>}
+
+          {walkForwardResult && (
+            <div className="panel-subsection" style={{ marginTop: "16px" }}>
+              <div className="panel-heading">
+                <div>
+                  <h3>Analysis Outcome</h3>
+                  <p>Walk-Forward Efficiency (WFE) evaluates robustness across out-of-sample folds.</p>
+                </div>
+                {walkForwardResult.walk_forward_efficiency != null && (
+                  <span className={`status-pill ${walkForwardResult.walk_forward_efficiency >= 0.5 ? "status-positive" : "status-warning"}`}>
+                    WFE: {(walkForwardResult.walk_forward_efficiency * 100).toFixed(1)}%
+                  </span>
+                )}
+              </div>
+              {Array.isArray(walkForwardResult.folds) && walkForwardResult.folds.length > 0 ? (
+                <div className="table-scroll" style={{ maxHeight: "240px", overflowY: "auto" }}>
+                  <table className="status-table">
+                    <thead>
+                      <tr><th>Fold</th><th>Train Trades</th><th>Train PF</th><th>Test Trades</th><th>Test PF</th><th>Test Expectancy</th></tr>
+                    </thead>
+                    <tbody>
+                      {walkForwardResult.folds.map((f: any, idx: number) => (
+                        <tr key={idx}>
+                          <td>#{f.fold ?? idx + 1}</td>
+                          <td>{f.train_metrics?.total_trades ?? f.train_trades ?? "—"}</td>
+                          <td>{moneyish(f.train_metrics?.profit_factor ?? f.train_pf)}</td>
+                          <td>{f.test_metrics?.total_trades ?? f.test_trades ?? "—"}</td>
+                          <td className={(f.test_metrics?.profit_factor ?? f.test_pf ?? 0) >= 1 ? "paper-positive" : "paper-negative"}>
+                            {moneyish(f.test_metrics?.profit_factor ?? f.test_pf)}
+                          </td>
+                          <td>{numeric.format(f.test_metrics?.expectancy_r ?? f.test_expectancy ?? 0)} R</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="empty-state">No fold details returned.</p>
+              )}
+            </div>
+          )}
+        </div>
+      </dialog>
+    )}
+    {runAllOpen && (
+      <dialog className="modal-dialog" open style={{ maxWidth: "780px", width: "95%" }}>
+        <div className="panel-heading">
+          <div>
+            <h2>Benchmark All Strategies</h2>
+            <p>Runs all registered strategies on {symbol} ({market} · {timeframe}) ranked by quantitative performance.</p>
+          </div>
+          <button type="button" className="icon-button" onClick={() => setRunAllOpen(false)} aria-label="Close dialog">
+            <X size={16} />
+          </button>
+        </div>
+        <div style={{ padding: "16px 0" }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "12px" }}>
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={runAllBusy}
+              onClick={handleExecuteRunAll}
+            >
+              {runAllBusy ? "Simulating all strategies…" : "Start Multi-Strategy Benchmark"}
+            </button>
+          </div>
+
+          {runAllError && <p className="control-feedback control-error" role="alert">{runAllError}</p>}
+
+          {runAllResult && (
+            <div>
+              <div className="table-scroll" style={{ maxHeight: "320px", overflowY: "auto" }}>
+                <table className="status-table">
+                  <thead>
+                    <tr><th>Rank</th><th>Strategy</th><th>Category</th><th>Trades</th><th>Win Rate</th><th>Profit Factor</th><th>Expectancy</th></tr>
+                  </thead>
+                  <tbody>
+                    {runAllResult.allResults.map((item, idx) => (
+                      <tr key={item.strategy} style={idx === 0 ? { backgroundColor: "rgba(16, 185, 129, 0.08)" } : undefined}>
+                        <td><strong>#{idx + 1}</strong></td>
+                        <td>
+                          <strong>{item.displayName || item.strategy}</strong>
+                          <div><code>{item.strategy}</code></div>
+                        </td>
+                        <td>{item.category}</td>
+                        <td>{item.metrics?.total_trades ?? 0}</td>
+                        <td>{item.metrics?.win_rate_pct != null ? `${pct.format(item.metrics.win_rate_pct)}%` : "—"}</td>
+                        <td className={(item.metrics?.profit_factor ?? 0) >= 1 ? "paper-positive" : "paper-negative"}>
+                          {moneyish(item.metrics?.profit_factor)}
+                        </td>
+                        <td>{item.metrics?.expectancy_r != null ? `${numeric.format(item.metrics.expectancy_r)} R` : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </dialog>
+    )}
+    {aiInsightOpen && (
+      <dialog className="modal-dialog" open style={{ maxWidth: "650px", width: "95%" }}>
+        <div className="panel-heading">
+          <div>
+            <h2>AI Quantitative Insight</h2>
+            <p>Institutional diagnosis &amp; regime assessment</p>
+          </div>
+          <button type="button" className="icon-button" onClick={() => setAiInsightOpen(false)} aria-label="Close dialog">
+            <X size={16} />
+          </button>
+        </div>
+        <div style={{ padding: "16px 0" }}>
+          {aiInsightBusy ? (
+            <p className="empty-state">Synthesizing institutional quantitative diagnosis…</p>
+          ) : aiInsightError ? (
+            <p className="control-feedback control-error" role="alert">{aiInsightError}</p>
+          ) : aiInsightResult?.insight ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {aiInsightResult.insight.regime_diagnosis && (
+                <div className="migration-notice">
+                  <div className="notice-icon"><BrainCircuit size={18} /></div>
+                  <div>
+                    <h2>Market Regime Diagnosis</h2>
+                    <p>{aiInsightResult.insight.regime_diagnosis}</p>
+                  </div>
+                </div>
+              )}
+              {aiInsightResult.insight.summary && (
+                <div>
+                  <strong>Strategy Evaluation:</strong>
+                  <p className="page-description" style={{ margin: "4px 0" }}>{aiInsightResult.insight.summary}</p>
+                </div>
+              )}
+              {aiInsightResult.insight.actionable_takeaway && (
+                <div>
+                  <strong>Actionable Quantitative Takeaway:</strong>
+                  <p className="page-description" style={{ margin: "4px 0", color: "var(--color-accent)" }}>
+                    {aiInsightResult.insight.actionable_takeaway}
+                  </p>
+                </div>
+              )}
+              {Array.isArray(aiInsightResult.insight.strengths) && aiInsightResult.insight.strengths.length > 0 && (
+                <div>
+                  <strong style={{ color: "var(--color-positive)" }}>Observed Strengths:</strong>
+                  <ul style={{ margin: "4px 0", paddingLeft: "20px", fontSize: "12px" }}>
+                    {aiInsightResult.insight.strengths.map((s, idx) => <li key={idx}>{s}</li>)}
+                  </ul>
+                </div>
+              )}
+              {Array.isArray(aiInsightResult.insight.risks) && aiInsightResult.insight.risks.length > 0 && (
+                <div>
+                  <strong style={{ color: "var(--color-negative)" }}>Identified Risks:</strong>
+                  <ul style={{ margin: "4px 0", paddingLeft: "20px", fontSize: "12px" }}>
+                    {aiInsightResult.insight.risks.map((r, idx) => <li key={idx}>{r}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="empty-state">No insight available.</p>
+          )}
+        </div>
       </dialog>
     )}
     <PromotionStatusPanel onPolicyLoaded={setPromotionPolicy} />

@@ -12,6 +12,11 @@ export default defineConfig({
         target: "http://127.0.0.1:8050",
         changeOrigin: true,
       },
+      "/ws": {
+        target: "http://127.0.0.1:8050",
+        ws: true,
+        changeOrigin: true,
+      },
     },
   },
   build: { outDir: "dist", emptyOutDir: true, sourcemap: true },

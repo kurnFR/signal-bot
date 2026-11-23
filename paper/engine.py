@@ -500,16 +500,26 @@ def set_paper_config(
         # can link to the actual paper config, including on duplicate-key updates.
         cur.execute(
             """
-            SELECT id FROM paper_configs
+            SELECT id, strategy_params FROM paper_configs
             WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
               AND ml_model_id <=> %s AND ml_generator_model_id <=> %s
             """,
             (symbol, market, timeframe, strategy_name, ml_model_id, ml_generator_model_id),
         )
         config_row = cur.fetchone()
-        config_id = config_row.get("id") if isinstance(config_row, dict) else None
+        config_id = None
+        persisted_params = None
+        if isinstance(config_row, dict):
+            config_id = config_row.get("id")
+            persisted_raw = config_row.get("strategy_params")
+            if isinstance(persisted_raw, str):
+                try:
+                    persisted_params = json.loads(persisted_raw)
+                except Exception:
+                    persisted_params = None
+            elif isinstance(persisted_raw, dict):
+                persisted_params = persisted_raw
         conn.commit()
-        ret_params = strategy_params if (strategy_params is not _UNSET and isinstance(strategy_params, dict) and strategy_params) else None
         return {
             "status": "success",
             "id": config_id,
@@ -518,7 +528,7 @@ def set_paper_config(
             "is_active": is_active,
             "ml_model_id": ml_model_id,
             "ml_generator_model_id": ml_generator_model_id,
-            "strategy_params": ret_params,
+            "strategy_params": persisted_params,
         }
     finally:
         try:
@@ -530,9 +540,20 @@ def set_paper_config(
 
 def update_paper_deployment(config_id: int, **settings: Any) -> bool:
     """Patch one deployment by ID without overwriting unrelated preferences."""
-    columns = {"is_active", "allocated_capital", "risk_per_trade_pct", "telegram_enabled", "report_enabled"}
+    columns = {"is_active", "allocated_capital", "risk_per_trade_pct", "telegram_enabled", "report_enabled", "strategy_params"}
     if not settings or not settings.keys() <= columns:
         raise ValueError("No valid deployment settings provided")
+    normalized_settings = dict(settings)
+    if "strategy_params" in normalized_settings:
+        raw_val = normalized_settings["strategy_params"]
+        if raw_val is None or raw_val == {}:
+            normalized_settings["strategy_params"] = None
+        elif isinstance(raw_val, dict):
+            normalized_settings["strategy_params"] = json.dumps(raw_val)
+        elif isinstance(raw_val, str):
+            normalized_settings["strategy_params"] = raw_val
+        else:
+            raise ValueError("strategy_params must be a dictionary or None")
     lock = PaperEngineAdvisoryLock(timeout=2)
     if not lock.acquire():
         raise ValueError("Paper engine is processing deployments. Retry in a moment.")
@@ -544,12 +565,12 @@ def update_paper_deployment(config_id: int, **settings: Any) -> bool:
                 if cur.fetchone() is None:
                     conn.rollback()
                     return False
-                updates = [f"{column} = %s" for column in settings]
-                if settings.get("is_active") is True:
+                updates = [f"{column} = %s" for column in normalized_settings]
+                if normalized_settings.get("is_active") is True:
                     updates.append("archived_at = NULL")
                 cur.execute(
                     f"UPDATE paper_configs SET {', '.join(updates)} WHERE id = %s",
-                    (*settings.values(), config_id),
+                    (*normalized_settings.values(), config_id),
                 )
                 if settings.get("is_active") is False:
                     _cancel_deployment_orders(cur, config_id, "Deployment paused")

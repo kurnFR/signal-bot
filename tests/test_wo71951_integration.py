@@ -245,6 +245,33 @@ class TestWorkOrder71951Integration(unittest.TestCase):
         self.assertIsNotNone(target_preserved)
         self.assertEqual(target_preserved.get("strategy_params"), overrides)
 
+    def test_patch_paper_config_params_persistence_and_clearing(self):
+        overrides = {"CONFLUENCE_RISK_REWARD_RATIO": 3.2}
+        res_init = set_paper_config(
+            symbol="AVAXUSDT",
+            market="spot",
+            timeframe="1d",
+            strategy_name="confluence_ensemble_v1",
+            is_active=True,
+            strategy_params=overrides,
+        )
+        config_id = res_init["id"]
+
+        # 1. PATCH omitting params preserves strategy_params in response and DB
+        patch_req = paper_routes.PaperDeploymentPatch(allocated_capital=7500.0)
+        patch_res = paper_routes.edit_deployment(patch_req, config_id)
+        self.assertEqual(patch_res["status"], "success")
+        self.assertEqual(patch_res["strategy_params"], overrides)
+
+        # 2. PATCH explicitly passing params: null or {} clears DB storage and returns None
+        patch_clear = paper_routes.PaperDeploymentPatch(params={})
+        clear_res = paper_routes.edit_deployment(patch_clear, config_id)
+        self.assertEqual(clear_res["status"], "success")
+        self.assertIsNone(clear_res["strategy_params"])
+        cfg = next((c for c in get_paper_configs() if c["id"] == config_id), None)
+        self.assertIsNotNone(cfg)
+        self.assertIsNone(cfg.get("strategy_params"))
+
     def test_paper_routes_reject_pairs_strategy_on_btcusdt(self):
         for strategy in ("pairs_ratio_v1", "inverse_pairs_ratio_v1"):
             req_deploy = paper_routes.DeployStrategyRequest(

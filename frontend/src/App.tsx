@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { fetchSystemStatus } from "./lib/systemStatus";
 import { SystemStatusPanel } from "./SystemStatusPanel";
 import { ScreenerPanel } from "./ScreenerPanel";
 import { ScreenerControlsPanel } from "./ScreenerControlsPanel";
@@ -108,6 +109,51 @@ export function App() {
   const sidebarCloseButtonRef = useRef<HTMLButtonElement>(null);
   const wasSidebarOpen = useRef(false);
   const auth = useAuth();
+  const [systemHealth, setSystemHealth] = useState<{
+    status: "connected" | "degraded" | "disconnected";
+    tooltip: string;
+  }>({
+    status: "connected",
+    tooltip: "Connected to FastAPI backend and MariaDB database",
+  });
+
+  useEffect(() => {
+    let mounted = true;
+    const checkStatus = async () => {
+      try {
+        const res = await fetchSystemStatus();
+        if (!mounted) return;
+        const dbOk = res.database.status === "ok";
+        const heartbeatsOk = res.heartbeats.every((h) => h.status === "ok");
+        if (!dbOk || !heartbeatsOk) {
+          setSystemHealth({
+            status: "degraded",
+            tooltip: `Degraded · Database: ${res.database.status} · Heartbeats: ${res.heartbeats.filter((h) => h.status === "ok").length}/${res.heartbeats.length} active`,
+          });
+        } else {
+          setSystemHealth({
+            status: "connected",
+            tooltip: `Connected to FastAPI backend and MariaDB database (${Object.keys(res.database.tables).length} tables tracked)`,
+          });
+        }
+      } catch {
+        if (!mounted) return;
+        setSystemHealth({
+          status: "disconnected",
+          tooltip: "Cannot connect to FastAPI backend or database",
+        });
+      }
+    };
+
+    void checkStatus();
+    const interval = window.setInterval(() => {
+      void checkStatus();
+    }, 30000);
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -184,9 +230,26 @@ export function App() {
           <div className="breadcrumb"><span>Workspace</span><span className="breadcrumb-separator">/</span><strong>{activeView}</strong></div>
         </div>
         <div className="topbar-actions">
-          <div className="system-live-pill" title="Connected to FastAPI backend and MariaDB database">
-            <span className="status-dot-live" />
-            <span>Connected</span>
+          <div
+            className={`system-live-pill ${systemHealth.status !== "connected" ? systemHealth.status : ""}`}
+            title={systemHealth.tooltip}
+          >
+            <span
+              className={
+                systemHealth.status === "connected"
+                  ? "status-dot-live"
+                  : systemHealth.status === "degraded"
+                  ? "status-dot-warning"
+                  : "status-dot-disconnected"
+              }
+            />
+            <span>
+              {systemHealth.status === "connected"
+                ? "Connected"
+                : systemHealth.status === "degraded"
+                ? "Degraded"
+                : "Disconnected"}
+            </span>
           </div>
           <span className="topbar-divider" />
           <button className="icon-button theme-toggle" onClick={toggleTheme} aria-label={"Switch to " + (theme === "dark" ? "light" : "dark") + " theme"} title="Switch theme">

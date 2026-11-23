@@ -1,4 +1,4 @@
-import { assertApiPath, getJson, postJson } from "./api";
+import { getJson, postJson, apiRequest, ApiError, type ApiRequestOptions } from "./api";
 import { parseTelegramDeliveryStatus, type TelegramDeliveryOutcome } from "./telegram";
 export { parseTelegramDeliveryStatus, type TelegramDeliveryOutcome };
 
@@ -11,62 +11,37 @@ export class MLStudioActionError extends Error {
   }
 }
 
-function tokenFromStorage(): string | null {
-  try {
-    const token = window.localStorage.getItem("token");
-    if (!token) return null;
-    const trimmed = token.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  } catch {
-    return null;
-  }
-}
-
 async function mlMutationRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  assertApiPath(path);
-  const token = tokenFromStorage();
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    ...(options.headers as Record<string, string> | undefined),
-  };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  if (options.body !== undefined && !headers["Content-Type"]) {
-    headers["Content-Type"] = "application/json";
-  }
-
-  const response = await fetch(path, {
-    ...options,
-    credentials: "same-origin",
-    headers,
-  });
-
-  let payload: unknown;
   try {
-    payload = await response.json();
-  } catch {
-    payload = null;
-  }
-
-  if (response.status === 401) {
-    try { window.localStorage.removeItem("token"); } catch { /* Session expired reset */ }
-    window.dispatchEvent(new Event("signal-bot:session-expired"));
-    throw new MLStudioActionError(401, "Your session has expired. Sign in again.");
-  }
-
-  if (!response.ok) {
-    let message = `Request failed (HTTP ${response.status})`;
-    if (isRecord(payload) && typeof payload.detail === "string" && payload.detail.trim().length > 0) {
-      message = payload.detail.trim();
+    const opts: ApiRequestOptions = {
+      method: (options.method as any) ?? "GET",
+      headers: options.headers as Record<string, string> | undefined,
+      signal: options.signal ?? undefined,
+    };
+    if (options.body !== undefined) {
+      if (typeof options.body === "string") {
+        try {
+          opts.json = JSON.parse(options.body);
+        } catch {
+          opts.body = options.body;
+        }
+      } else {
+        opts.body = options.body;
+      }
     }
-    throw new MLStudioActionError(response.status, message);
+    return await apiRequest<T>(path, opts);
+  } catch (err) {
+    if (err instanceof ApiError) {
+      if (err.status === 401) {
+        throw new MLStudioActionError(401, "Your session has expired. Sign in again.");
+      }
+      if (err.code === "invalid-content-type") {
+        throw new MLStudioActionError(502, "Server returned a non-JSON response");
+      }
+      throw new MLStudioActionError(err.status, err.message);
+    }
+    throw err;
   }
-
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.toLowerCase().includes("application/json")) {
-    throw new MLStudioActionError(502, "Server returned a non-JSON response");
-  }
-
-  return payload as T;
 }
 
 export interface MLExperimentSummary {

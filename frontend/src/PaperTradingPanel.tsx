@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity, AlertTriangle, CheckCircle, Plus, RefreshCw, ShieldCheck, WalletCards, X } from "lucide-react";
+import { TradingChart } from "./components/TradingChart";
 import { useAuth } from "./AuthGate";
 import { fetchBacktestStrategies } from "./lib/backtestStudio";
 import { fetchBackfilledSymbols } from "./lib/masterData";
@@ -68,6 +69,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
   // PT-08: Manually close position
   const [selectedPositionForClose, setSelectedPositionForClose] = useState<PaperPosition | null>(null);
   const [closingPositionId, setClosingPositionId] = useState<number | null>(null);
+  const [chartPosition, setChartPosition] = useState<PaperPosition | null>(null);
   const closePositionDialogRef = useRef<HTMLDialogElement | null>(null);
   const closePositionConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const closePositionTriggerRef = useRef<HTMLElement | null>(null);
@@ -827,20 +829,30 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
                     <td className={pnlClass(p.unrealized_r)}>{p.unrealized_r == null ? "—" : `${number.format(p.unrealized_r)} R`}</td>
                     <td>{dateLabel(p.last_update_time)}</td>
                     <td>
-                      {canTrade ? (
+                      <div style={{ display: "flex", gap: "6px" }}>
                         <button
                           type="button"
-                          className="button button-danger-subtle button-xs"
-                          aria-label={`Close position #${p.id} for ${p.symbol}`}
-                          onClick={(e) => {
-                            closePositionTriggerRef.current = e.currentTarget;
-                            setSelectedPositionForClose(p);
-                          }}
-                          disabled={closingPositionId === p.id}
+                          className="button button-secondary button-xs"
+                          aria-label={`View chart for position #${p.id}`}
+                          onClick={() => setChartPosition(p)}
                         >
-                          {closingPositionId === p.id ? "Closing…" : "Close"}
+                          Chart
                         </button>
-                      ) : <span className="text-muted">—</span>}
+                        {canTrade ? (
+                          <button
+                            type="button"
+                            className="button button-danger-subtle button-xs"
+                            aria-label={`Close position #${p.id} for ${p.symbol}`}
+                            onClick={(e) => {
+                              closePositionTriggerRef.current = e.currentTarget;
+                              setSelectedPositionForClose(p);
+                            }}
+                            disabled={closingPositionId === p.id}
+                          >
+                            {closingPositionId === p.id ? "Closing…" : "Close"}
+                          </button>
+                        ) : <span className="text-muted">—</span>}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -848,6 +860,31 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
             </table>
           </div>
         ) : <p className="empty-state">No open paper positions.</p>}
+        {chartPosition && (
+          <dialog className="modal-dialog" open style={{ maxWidth: "800px", width: "95%" }}>
+            <div className="panel-heading">
+              <div>
+                <h2>{chartPosition.symbol} Position Chart</h2>
+                <p>{chartPosition.strategy_name} · {chartPosition.market} · {chartPosition.timeframe} · Entry: {number.format(chartPosition.entry_price)}</p>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setChartPosition(null)} aria-label="Close chart">
+                <X size={16} />
+              </button>
+            </div>
+            <div style={{ padding: "16px 0" }}>
+              <TradingChart
+                symbol={chartPosition.symbol}
+                market={chartPosition.market as any}
+                timeframe={chartPosition.timeframe}
+                entryPrice={chartPosition.entry_price}
+                stopLoss={chartPosition.stop_loss}
+                takeProfit={chartPosition.take_profit}
+                markPrice={chartPosition.current_price}
+                fundingRate={chartPosition.funding_pnl}
+              />
+            </div>
+          </dialog>
+        )}
       </section>
 
       {/* PT-09: Strategy configurations with deploy strategy action */}

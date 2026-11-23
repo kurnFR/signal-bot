@@ -6,7 +6,14 @@ const { getJson, assertApiPath } = vi.hoisted(() => ({
     if (!path.startsWith("/api/")) throw new TypeError("bad path");
   }),
 }));
-vi.mock("./api", () => ({ getJson, assertApiPath }));
+vi.mock("./api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./api")>();
+  return {
+    ...actual,
+    getJson,
+    assertApiPath,
+  };
+});
 
 import {
   cancelPaperOrder,

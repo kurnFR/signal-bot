@@ -230,6 +230,7 @@ class PaperDeploymentPatch(BaseModel):
     risk_per_trade_pct: Optional[float] = Field(None, ge=0.1, le=10, allow_inf_nan=False)
     telegram_enabled: Optional[bool] = None
     report_enabled: Optional[bool] = None
+    params: Optional[Dict[str, Any]] = None
 
 
 @router.patch("/configs/{config_id}")
@@ -245,12 +246,21 @@ def edit_deployment(req: PaperDeploymentPatch, config_id: int = Path(..., gt=0))
             config["symbol"], config["market"], config["timeframe"], strategy,
             config.get("ml_generator_model_id"), config.get("ml_model_id"), True,
         )
+    patch_data = req.model_dump(exclude_none=True)
+    if "params" in req.model_fields_set:
+        patch_data["strategy_params"] = req.params if req.params else None
+    patch_data.pop("params", None)
     try:
-        if not update_paper_deployment(config_id, **req.model_dump(exclude_none=True)):
+        if not update_paper_deployment(config_id, **patch_data):
             raise HTTPException(status_code=404, detail="Paper deployment not found")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return {"status": "success", "id": config_id}
+    updated_config = next((row for row in get_paper_configs() if row["id"] == config_id), None)
+    return {
+        "status": "success",
+        "id": config_id,
+        "strategy_params": updated_config.get("strategy_params") if updated_config else None,
+    }
 
 
 @router.delete("/configs/{config_id}")

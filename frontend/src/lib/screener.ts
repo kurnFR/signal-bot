@@ -1,4 +1,4 @@
-import { getJson } from "./api";
+import { getJson, apiRequest, ApiError } from "./api";
 
 export interface ScreenerStatus {
   running: boolean;
@@ -118,21 +118,20 @@ export async function fetchScreenerControl(signal?: AbortSignal): Promise<Screen
 
 /** The only non-read-only request in the screener feature; its path is fixed and server-authorized. */
 export async function saveScreenerControl(enabled: boolean, overrides: Record<string, number | boolean>): Promise<ScreenerControlSaveResult> {
-  const headers: Record<string, string> = { Accept: "application/json", "Content-Type": "application/json" };
-  try { const token = window.localStorage.getItem("token"); if (token) headers.Authorization = `Bearer ${token}`; } catch { /* The server will return an auth error if no token is available. */ }
-  const response = await fetch("/api/research/screener/control", { method: "POST", credentials: "same-origin", headers, body: JSON.stringify({ enabled, overrides }) });
-  let payload: unknown;
-  try { payload = await response.json(); } catch { payload = null; }
-  if (response.status === 401) {
-    try { window.localStorage.removeItem("token"); } catch { /* Session state still resets via the event. */ }
-    window.dispatchEvent(new Event("signal-bot:session-expired"));
+  try {
+    const payload = await apiRequest<unknown>("/api/research/screener/control", {
+      method: "POST",
+      json: { enabled, overrides },
+    });
+    if (!isRecord(payload) || payload.status !== "ok" || !isNonEmptyString(payload.note)) {
+      throw new ScreenerControlError(200, "Screener returned an invalid save response");
+    }
+    return payload as unknown as ScreenerControlSaveResult;
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const detail = err.detail?.slice(0, 300) || err.message;
+      throw new ScreenerControlError(err.status, detail);
+    }
+    throw err;
   }
-  if (!response.ok) {
-    const detail = payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string" ? payload.detail.slice(0, 300) : `Screener settings could not be saved (${response.status})`;
-    throw new ScreenerControlError(response.status, detail);
-  }
-  if (!isRecord(payload) || payload.status !== "ok" || !isNonEmptyString(payload.note)) {
-    throw new ScreenerControlError(response.status, "Screener returned an invalid save response");
-  }
-  return payload as unknown as ScreenerControlSaveResult;
 }

@@ -1,20 +1,18 @@
 /**
  * Same-origin JSON transport for verified API endpoints.
- * JSON mutations are restricted to a reviewed endpoint allowlist.
  */
-// Keep mutation scope explicit: this UI currently needs only generator training.
-// Add a path here only after reviewing the endpoint's authorization and side effects.
-const ALLOWED_POST_ENDPOINTS = new Set(["/api/ml/generator/run-experiment"]);
 
 export class ApiError extends Error {
   readonly status: number;
   readonly code: "http" | "invalid-json" | "invalid-content-type";
+  readonly detail?: string;
 
-  constructor(message: string, status: number, code: ApiError["code"]) {
+  constructor(message: string, status: number, code: ApiError["code"], detail?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.detail = detail;
   }
 }
 
@@ -40,7 +38,8 @@ export function assertApiPath(path: string): void {
     }
   }
 }
-function readAuthToken(): string | null {
+
+export function readAuthToken(): string | null {
   try {
     const token = window.localStorage.getItem("token");
     if (!token) return null;
@@ -51,28 +50,71 @@ function readAuthToken(): string | null {
   }
 }
 
-/** Request a JSON API resource without permitting mutation methods or external origins. */
-export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+export interface ApiRequestOptions {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  json?: unknown;
+  body?: BodyInit | null;
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+}
+
+export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   assertApiPath(path);
-  const headers: Record<string, string> = { Accept: "application/json" };
+  const method = options.method ?? "GET";
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    ...(options.headers ?? {}),
+  };
   const token = readAuthToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  if (token && !headers.Authorization) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  let body = options.body;
+  if (options.json !== undefined) {
+    if (!headers["Content-Type"]) {
+      headers["Content-Type"] = "application/json";
+    }
+    body = JSON.stringify(options.json);
+  }
 
   const response = await fetch(path, {
-    method: "GET",
+    method,
     credentials: "same-origin",
     headers,
-    signal,
+    body,
+    signal: options.signal,
   });
 
   if (!response.ok) {
     if (response.status === 401 && path !== "/api/auth/me") {
-      // An authenticated page can outlive its server session. Clear the stale
-      // token and notify the auth gate so the user can sign in again.
       try { window.localStorage.removeItem("token"); } catch { /* Auth state still resets via the event. */ }
       window.dispatchEvent(new Event("signal-bot:session-expired"));
     }
-    throw new ApiError(`API request failed with status ${response.status}`, response.status, "http");
+
+    let parsedDetail: string | undefined;
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.toLowerCase().includes("application/json")) {
+      try {
+        const errPayload = await response.json();
+        if (errPayload && typeof errPayload === "object") {
+          if (typeof errPayload.detail === "string" && errPayload.detail.trim().length > 0) {
+            parsedDetail = errPayload.detail.trim();
+          } else if (Array.isArray(errPayload.detail)) {
+            parsedDetail = errPayload.detail
+              .map((item: any) => (item && typeof item === "object" && item.msg ? String(item.msg) : JSON.stringify(item)))
+              .join("; ");
+          } else if (typeof errPayload.message === "string" && errPayload.message.trim().length > 0) {
+            parsedDetail = errPayload.message.trim();
+          }
+        }
+      } catch {
+        // Fallback to generic status message
+      }
+    }
+
+    const message = parsedDetail || `API request failed with status ${response.status}`;
+    throw new ApiError(message, response.status, "http", parsedDetail);
   }
 
   const contentType = response.headers.get("content-type") ?? "";
@@ -87,47 +129,16 @@ export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T>
   }
 }
 
-/** Submit a same-origin JSON request to a verified mutation endpoint. */
-export async function postJson<TResponse, TBody extends object>(
+/** Request a JSON API resource without permitting mutation methods or external origins. */
+export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return apiRequest<T>(path, { method: "GET", signal });
+}
+
+/** Submit a same-origin JSON request to a verified API endpoint. */
+export async function postJson<TResponse, TBody = unknown>(
   path: string,
-  body: TBody,
+  body?: TBody,
   signal?: AbortSignal,
 ): Promise<TResponse> {
-  assertApiPath(path);
-  if (!ALLOWED_POST_ENDPOINTS.has(path)) {
-    throw new TypeError("POST endpoint is not allowlisted");
-  }
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-  };
-  const token = readAuthToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  const response = await fetch(path, {
-    method: "POST",
-    credentials: "same-origin",
-    headers,
-    body: JSON.stringify(body),
-    signal,
-  });
-
-  if (!response.ok) {
-    if (response.status === 401 && path !== "/api/auth/me") {
-      try { window.localStorage.removeItem("token"); } catch { /* Auth state still resets via the event. */ }
-      window.dispatchEvent(new Event("signal-bot:session-expired"));
-    }
-    throw new ApiError(`API request failed with status ${response.status}`, response.status, "http");
-  }
-
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.toLowerCase().includes("application/json")) {
-    throw new ApiError("API response was not JSON", response.status, "invalid-content-type");
-  }
-
-  try {
-    return await response.json() as TResponse;
-  } catch {
-    throw new ApiError("API returned invalid JSON", response.status, "invalid-json");
-  }
+  return apiRequest<TResponse>(path, { method: "POST", json: body, signal });
 }
