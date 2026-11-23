@@ -32,3 +32,53 @@ if (typeof HTMLDialogElement !== "undefined") {
     this.dispatchEvent(new Event("close"));
   };
 }
+
+// Polyfill HTMLCanvasElement.prototype.getContext for JSDOM
+if (typeof HTMLCanvasElement !== "undefined") {
+  HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, contextType: string) {
+    if (contextType === "2d") {
+      const baseCtx: any = {
+        canvas: this,
+        measureText: () => ({ width: 10, height: 10 }),
+        getImageData: () => ({ data: new Uint8ClampedArray(4) }),
+        createImageData: () => ({ data: new Uint8ClampedArray(4) }),
+        createLinearGradient: () => ({ addColorStop: () => {} }),
+        createRadialGradient: () => ({ addColorStop: () => {} }),
+      };
+      return new Proxy(baseCtx, {
+        get(target, prop) {
+          if (prop in target) return target[prop];
+          return () => {};
+        },
+        set(target, prop, value) {
+          target[prop] = value;
+          return true;
+        },
+      });
+    }
+    return null;
+  } as any;
+}
+
+// Polyfill window.matchMedia and ResizeObserver for JSDOM (required by lightweight-charts)
+if (typeof window !== "undefined") {
+  if (!window.matchMedia) {
+    window.matchMedia = (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    } as any);
+  }
+  if (!window.ResizeObserver) {
+    window.ResizeObserver = class ResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+  }
+}

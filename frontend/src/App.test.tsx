@@ -32,6 +32,11 @@ describe("frontend foundation shell", () => {
     expect(screen.getByText("Signal Bot Quantitative Platform")).toBeInTheDocument();
     expect(screen.getByText("Connected")).toBeInTheDocument();
   });
+  it("transitions the live status indicator to Disconnected when system status check fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network connection lost")));
+    render(<App />);
+    expect(await screen.findByText("Disconnected")).toBeInTheDocument();
+  });
   it("renders topbar actions including theme toggle and navigation breadcrumbs", () => {
     render(<App />);
     expect(screen.getByRole("button", { name: "Switch to light theme" })).toBeInTheDocument();

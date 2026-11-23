@@ -27,7 +27,7 @@ def test_set_paper_config_returns_persisted_config_id():
     assert result["id"] == 42
     select_call = next(
         call for call in cursor.execute.call_args_list
-        if "SELECT id FROM paper_configs" in call.args[0]
+        if "SELECT id" in call.args[0] and "FROM paper_configs" in call.args[0]
     )
     assert select_call.args[1] == ("BTCUSDT", "spot", "1d", "trend_ema_v1", None, None)
     connection.commit.assert_called_once()
@@ -56,7 +56,7 @@ def test_set_paper_config_resolves_generator_config_by_both_model_ids():
     assert result["id"] == 84
     select_call = next(
         call for call in cursor.execute.call_args_list
-        if "SELECT id FROM paper_configs" in call.args[0]
+        if "SELECT id" in call.args[0] and "FROM paper_configs" in call.args[0]
     )
     assert select_call.args[1] == (
         "BTCUSDT", "spot", "1h", "ml_signal_generator_v1", None, "generator-model-1"

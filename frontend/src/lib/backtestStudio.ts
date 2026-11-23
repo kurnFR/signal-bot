@@ -1,4 +1,4 @@
-import { assertApiPath, getJson } from "./api";
+import { getJson, apiRequest, ApiError } from "./api";
 
 export interface BacktestStrategyParameter {
   key: string;
@@ -171,36 +171,22 @@ function isBacktestExecutionResult(value: unknown): value is BacktestExecutionRe
 /** Execute one explicitly confirmed, persisted backtest for an admin/trader session. */
 export async function executeBacktest(input: BacktestExecutionInput): Promise<BacktestExecutionResult> {
   const path = "/api/backtest/run";
-  assertApiPath(path);
-  const headers: Record<string, string> = { Accept: "application/json", "Content-Type": "application/json" };
   try {
-    const token = window.localStorage.getItem("token");
-    if (token) headers.Authorization = `Bearer ${token}`;
-  } catch {
-    // The server rejects the request if the browser cannot provide a session token.
+    const payload = await apiRequest<unknown>(path, {
+      method: "POST",
+      json: input,
+    });
+    if (!isBacktestExecutionResult(payload)) {
+      throw new BacktestExecutionError(200, "Backtest returned an invalid result payload");
+    }
+    return payload;
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const detail = err.detail?.slice(0, 400) || err.message;
+      throw new BacktestExecutionError(err.status, detail);
+    }
+    throw err;
   }
-  const response = await fetch(path, {
-    method: "POST",
-    credentials: "same-origin",
-    headers,
-    body: JSON.stringify(input),
-  });
-  let payload: unknown;
-  try { payload = await response.json(); } catch { payload = null; }
-  if (response.status === 401) {
-    try { window.localStorage.removeItem("token"); } catch { /* Auth state still resets via the event. */ }
-    window.dispatchEvent(new Event("signal-bot:session-expired"));
-  }
-  if (!response.ok) {
-    const detail = payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string"
-      ? payload.detail.slice(0, 400)
-      : `Backtest failed (${response.status})`;
-    throw new BacktestExecutionError(response.status, detail);
-  }
-  if (!isBacktestExecutionResult(payload)) {
-    throw new BacktestExecutionError(response.status, "Backtest returned an invalid result payload");
-  }
-  return payload;
 }
 
 
@@ -289,40 +275,134 @@ function isPromotionAuditEvent(value: unknown): value is PromotionAuditEvent {
 /** Save only the policy configuration. This does not execute a backtest or send Telegram. */
 export async function savePromotionPolicy(policy: PromotionPolicy): Promise<PromotionPolicySaveResult> {
   const path = "/api/backtest/promotion-policy";
-  assertApiPath(path);
-  const headers: Record<string, string> = { Accept: "application/json", "Content-Type": "application/json" };
   try {
-    const token = window.localStorage.getItem("token");
-    if (token) headers.Authorization = `Bearer ${token}`;
-  } catch {
-    // The server rejects the request if the browser cannot provide a session token.
+    const payload = await apiRequest<unknown>(path, {
+      method: "PUT",
+      json: policy,
+    });
+    if (!payload || typeof payload !== "object" ||
+        !("status" in payload) || (payload.status !== "ok" && payload.status !== "saved_readback_unavailable") ||
+        !("policy" in payload) || !isPromotionPolicy(payload.policy)) {
+      throw new PromotionPolicySaveError(200, "Promotion policy save returned an invalid response");
+    }
+    const result = payload as PromotionPolicySaveResult;
+    if (result.status === "saved_readback_unavailable" && typeof result.warning !== "string") {
+      throw new PromotionPolicySaveError(200, "Promotion policy was saved but the server did not return a readback warning");
+    }
+    return result;
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const detail = err.detail?.slice(0, 400) || err.message;
+      throw new PromotionPolicySaveError(err.status, detail);
+    }
+    throw err;
   }
-  const response = await fetch(path, {
-    method: "PUT",
-    credentials: "same-origin",
-    headers,
-    body: JSON.stringify(policy),
-  });
-  let payload: unknown;
-  try { payload = await response.json(); } catch { payload = null; }
-  if (response.status === 401) {
-    try { window.localStorage.removeItem("token"); } catch { /* Auth state still resets via the event. */ }
-    window.dispatchEvent(new Event("signal-bot:session-expired"));
+}
+
+export interface WalkForwardRequest {
+  symbol: string;
+  market: string;
+  timeframe: string;
+  strategy: string;
+  rolling?: boolean;
+  folds?: number;
+  train_window_bars?: number;
+  test_window_bars?: number;
+  step_bars?: number;
+  params?: Record<string, unknown>;
+}
+
+export interface WalkForwardResult {
+  symbol: string;
+  market: string;
+  timeframe: string;
+  strategy: string;
+  rolling: boolean;
+  folds: Array<any>;
+  walk_forward_efficiency?: number;
+  overall_metrics?: Record<string, any>;
+  summary?: string;
+  [key: string]: unknown;
+}
+
+export interface RunAllRequest {
+  symbol?: string;
+  market?: string;
+  timeframe?: string;
+  data_segment?: string;
+  initial_capital?: number;
+  risk_per_trade_pct?: number;
+}
+
+export interface RunAllResult {
+  symbol: string;
+  market: string;
+  timeframe: string;
+  allResults: Array<{
+    strategy: string;
+    displayName: string;
+    category: string;
+    metrics: Record<string, any>;
+    rankScore: number;
+    recommended?: boolean;
+  }>;
+  aiInsight?: Record<string, any>;
+  autoPromotion?: Record<string, any>;
+}
+
+export interface AiInsightResult {
+  symbol: string;
+  strategy: string;
+  metrics: Record<string, any>;
+  insight: {
+    summary?: string;
+    actionable_takeaway?: string;
+    regime_diagnosis?: string;
+    strengths?: string[];
+    risks?: string[];
+    risk_level?: string;
+    [key: string]: unknown;
+  };
+}
+
+export async function executeWalkForward(req: WalkForwardRequest): Promise<WalkForwardResult> {
+  try {
+    return await apiRequest<WalkForwardResult>("/api/backtest/walk-forward", {
+      method: "POST",
+      json: req,
+    });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      throw new BacktestExecutionError(err.status, err.detail || err.message);
+    }
+    throw err;
   }
-  if (!response.ok) {
-    const detail = payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string"
-      ? payload.detail.slice(0, 400)
-      : `Promotion policy save failed (${response.status})`;
-    throw new PromotionPolicySaveError(response.status, detail);
+}
+
+export async function runAllStrategies(req: RunAllRequest = {}): Promise<RunAllResult> {
+  try {
+    return await apiRequest<RunAllResult>("/api/backtest/run-all", {
+      method: "POST",
+      json: req,
+    });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      throw new BacktestExecutionError(err.status, err.detail || err.message);
+    }
+    throw err;
   }
-  if (!payload || typeof payload !== "object" ||
-      !("status" in payload) || (payload.status !== "ok" && payload.status !== "saved_readback_unavailable") ||
-      !("policy" in payload) || !isPromotionPolicy(payload.policy)) {
-    throw new PromotionPolicySaveError(response.status, "Promotion policy save returned an invalid response");
+}
+
+export async function fetchAiInsight(symbol: string, market: string, timeframe: string, strategy: string): Promise<AiInsightResult> {
+  try {
+    const query = new URLSearchParams({ symbol, market, timeframe, strategy });
+    return await apiRequest<AiInsightResult>(`/api/backtest/ai-insight?${query.toString()}`, {
+      method: "POST",
+    });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      throw new BacktestExecutionError(err.status, err.detail || err.message);
+    }
+    throw err;
   }
-  const result = payload as PromotionPolicySaveResult;
-  if (result.status === "saved_readback_unavailable" && typeof result.warning !== "string") {
-    throw new PromotionPolicySaveError(response.status, "Promotion policy was saved but the server did not return a readback warning");
-  }
-  return result;
 }

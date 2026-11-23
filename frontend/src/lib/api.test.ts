@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assertApiPath, getJson, postJson } from "./api";
+import { assertApiPath, getJson, postJson, apiRequest } from "./api";
 
 describe("read-only same-origin API transport", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -27,13 +27,31 @@ describe("read-only same-origin API transport", () => {
     }));
   });
 
-  it("surfaces HTTP failures without leaking response bodies", async () => {
+  it("surfaces HTTP failures without leaking non-json response bodies", async () => {
     window.localStorage.removeItem("token");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("secret server detail", { status: 403 })));
     await expect(getJson("/api/health")).rejects.toMatchObject({
       name: "ApiError", status: 403, code: "http",
     });
     await expect(getJson("/api/health")).rejects.not.toThrow("secret server detail");
+  });
+
+  it("surfaces FastAPI detail errors when formatted as JSON", async () => {
+    window.localStorage.removeItem("token");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: "Specific domain failure" }),
+      { status: 400, headers: { "content-type": "application/json" } }
+    )));
+    await expect(getJson("/api/health")).rejects.toThrow("Specific domain failure");
+  });
+
+  it("surfaces FastAPI validation array errors when formatted as JSON", async () => {
+    window.localStorage.removeItem("token");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: [{ msg: "field required" }, { msg: "must be positive" }] }),
+      { status: 422, headers: { "content-type": "application/json" } }
+    )));
+    await expect(getJson("/api/health")).rejects.toThrow("field required; must be positive");
   });
 
   it("clears expired tokens and dispatches a session-expired event for protected API reads", async () => {
@@ -57,9 +75,8 @@ describe("read-only same-origin API transport", () => {
     await expect(getJson("/api/health")).rejects.toMatchObject({ code: "invalid-json" });
   });
 
-
-  it("posts typed JSON only to validated same-origin API paths", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{"status":"saved"}', {
+  it("posts typed JSON across validated same-origin API paths", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => new Response('{"status":"saved"}', {
       status: 200,
       headers: { "content-type": "application/json" },
     }));
@@ -80,9 +97,27 @@ describe("read-only same-origin API transport", () => {
       body: JSON.stringify({ symbol: "BTCUSDT" }),
     }));
     await expect(postJson("/api/../static/app.js", {})).rejects.toThrow(TypeError);
-    await expect(postJson("/api/paper/config", {})).rejects.toThrow("POST endpoint is not allowlisted");
-    await expect(postJson("/api/ml/generator/run-experiment?redirect=/api/paper/config", {})).rejects.toThrow("POST endpoint is not allowlisted");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(postJson<{ status: string }>("/api/paper/deploy", { symbol: "ETHUSDT" })).resolves.toEqual({ status: "saved" });
+  });
+
+  it("supports apiRequest with PUT, PATCH, and DELETE methods", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => new Response('{"result":"ok"}', {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    window.localStorage.setItem("token", "test-session-token");
+    vi.stubGlobal("fetch", fetchMock);
+
+    await apiRequest("/api/paper/configs/1", { method: "PATCH", json: { allocated_capital: 5000 } });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/paper/configs/1", expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ allocated_capital: 5000 }),
+    }));
+
+    await apiRequest("/api/paper/configs/1", { method: "DELETE" });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/paper/configs/1", expect.objectContaining({
+      method: "DELETE",
+    }));
   });
 
   it("clears an expired session on a protected JSON POST", async () => {
@@ -92,7 +127,6 @@ describe("read-only same-origin API transport", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ detail: "Not authenticated" }), { status: 401 },
     )));
-    const { postJson } = await import("./api");
 
     await expect(postJson<{ status: string }, Record<string, never>>("/api/ml/generator/run-experiment", {})).rejects.toMatchObject({
       status: 401,
@@ -102,5 +136,4 @@ describe("read-only same-origin API transport", () => {
     expect(listener).toHaveBeenCalledTimes(1);
     window.removeEventListener("signal-bot:session-expired", listener);
   });
-
 });
