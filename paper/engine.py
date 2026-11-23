@@ -348,6 +348,9 @@ def get_paper_configs(*, include_equity: bool = False) -> List[Dict[str, Any]]:
         conn.close()
 
 
+_UNSET = object()
+
+
 def set_paper_config(
     symbol: str,
     market: str,
@@ -360,13 +363,13 @@ def set_paper_config(
     telegram_enabled: Optional[bool] = None,
     report_enabled: Optional[bool] = None,
     ml_generator_model_id: Optional[str] = None,
-    strategy_params: Optional[dict] = None,
+    strategy_params: Any = _UNSET,
 ) -> Dict[str, Any]:
     if allocated_capital <= 0:
         raise ValueError("allocated_capital must be positive")
     if risk_per_trade_pct <= 0:
         raise ValueError("risk_per_trade_pct must be positive")
-    if strategy_params is not None and not isinstance(strategy_params, dict):
+    if strategy_params is not _UNSET and strategy_params is not None and not isinstance(strategy_params, dict):
         raise ValueError("strategy_params must be an object")
 
     # Keep every persisted identifier within the paper_configs column widths.
@@ -395,7 +398,15 @@ def set_paper_config(
     if strategy_name != "ml_signal_generator_v1" and ml_generator_model_id:
         raise ValueError("ml_generator_model_id is only valid for ml_signal_generator_v1")
 
-    params_json = json.dumps(strategy_params) if strategy_params is not None else None
+    if strategy_params is _UNSET:
+        params_json = None
+        strategy_params_sql = "strategy_params = strategy_params"
+    elif strategy_params is None or strategy_params == {}:
+        params_json = None
+        strategy_params_sql = "strategy_params = NULL"
+    else:
+        params_json = json.dumps(strategy_params)
+        strategy_params_sql = "strategy_params = VALUES(strategy_params)"
 
     conn = get_pool().get_connection()
     cur = None
@@ -405,7 +416,7 @@ def set_paper_config(
             # Legacy callers may update activation/capital without changing the
             # separately configured alert or report visibility preferences.
             cur.execute(
-                """
+                f"""
                 INSERT INTO paper_configs
                     (symbol, market, timeframe, strategy_name, is_active,
                      allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id, strategy_params)
@@ -417,14 +428,14 @@ def set_paper_config(
                     risk_per_trade_pct = VALUES(risk_per_trade_pct),
                     ml_model_id = VALUES(ml_model_id),
                     ml_generator_model_id = VALUES(ml_generator_model_id),
-                    strategy_params = COALESCE(VALUES(strategy_params), strategy_params)
+                    {strategy_params_sql}
                 """,
                 (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
                  allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id, params_json),
             )
         elif report_enabled is None:
             cur.execute(
-                """
+                f"""
                 INSERT INTO paper_configs
                     (symbol, market, timeframe, strategy_name, is_active,
                      allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id, telegram_enabled, strategy_params)
@@ -437,14 +448,14 @@ def set_paper_config(
                     ml_model_id = VALUES(ml_model_id),
                     ml_generator_model_id = VALUES(ml_generator_model_id),
                     telegram_enabled = VALUES(telegram_enabled),
-                    strategy_params = COALESCE(VALUES(strategy_params), strategy_params)
+                    {strategy_params_sql}
                 """,
                 (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
                  allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id, bool(telegram_enabled), params_json),
             )
         elif telegram_enabled is None:
             cur.execute(
-                """
+                f"""
                 INSERT INTO paper_configs
                     (symbol, market, timeframe, strategy_name, is_active,
                      allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id, report_enabled, strategy_params)
@@ -457,14 +468,14 @@ def set_paper_config(
                     ml_model_id = VALUES(ml_model_id),
                     ml_generator_model_id = VALUES(ml_generator_model_id),
                     report_enabled = VALUES(report_enabled),
-                    strategy_params = COALESCE(VALUES(strategy_params), strategy_params)
+                    {strategy_params_sql}
                 """,
                 (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
                  allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id, bool(report_enabled), params_json),
             )
         else:
             cur.execute(
-                """
+                f"""
                 INSERT INTO paper_configs
                     (symbol, market, timeframe, strategy_name, is_active,
                      allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id,
@@ -479,7 +490,7 @@ def set_paper_config(
                     ml_generator_model_id = VALUES(ml_generator_model_id),
                     telegram_enabled = VALUES(telegram_enabled),
                     report_enabled = VALUES(report_enabled),
-                    strategy_params = COALESCE(VALUES(strategy_params), strategy_params)
+                    {strategy_params_sql}
                 """,
                 (symbol, market, timeframe, strategy_name, 1 if is_active else 0,
                  allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id,
@@ -489,7 +500,7 @@ def set_paper_config(
         # can link to the actual paper config, including on duplicate-key updates.
         cur.execute(
             """
-            SELECT id FROM paper_configs
+            SELECT id, strategy_params FROM paper_configs
             WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
               AND ml_model_id <=> %s AND ml_generator_model_id <=> %s
             """,
@@ -497,6 +508,17 @@ def set_paper_config(
         )
         config_row = cur.fetchone()
         config_id = config_row.get("id") if isinstance(config_row, dict) else None
+        persisted_raw = config_row.get("strategy_params") if isinstance(config_row, dict) else None
+        if isinstance(persisted_raw, str):
+            try:
+                persisted_params = json.loads(persisted_raw)
+            except Exception:
+                persisted_params = None
+        elif isinstance(persisted_raw, dict):
+            persisted_params = persisted_raw
+        else:
+            persisted_params = None
+
         conn.commit()
         return {
             "status": "success",
@@ -506,7 +528,7 @@ def set_paper_config(
             "is_active": is_active,
             "ml_model_id": ml_model_id,
             "ml_generator_model_id": ml_generator_model_id,
-            "strategy_params": strategy_params,
+            "strategy_params": persisted_params,
         }
     finally:
         try:

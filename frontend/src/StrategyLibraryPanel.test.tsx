@@ -7,6 +7,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const payloads: Record<string, unknown> = {
   "/api/custom-strategy/list": { strategies: [{ name: "rsi_volume_v1", displayName: "RSI + Volume", description: "Mean reversion", rationale: "Confirm with volume", longConditions: [{ indicator: "rsi", operator: "<", value: 30 }], shortConditions: [{ indicator: "rsi", operator: ">", value: 70 }], slAtrMult: 1.5, riskRewardRatio: 2.5, useTrailingStop: true }] },
   "/api/custom-strategy/indicators": { indicators: [{ name: "rsi", label: "RSI (14)", category: "Momentum", description: "Relative Strength Index", default: 30, type: "numeric" }], operators: ["<", "<=", ">", ">=", "=="] },
+  "/api/backtest/strategies": { strategies: [] },
 };
 describe("read-only strategy library", () => {
   it("renders saved strategy rules and backend indicator metadata using GET only", async () => {
@@ -18,13 +19,15 @@ describe("read-only strategy library", () => {
     expect(screen.getByText("rsi < 30")).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Indicator catalog" })).toBeInTheDocument();
     expect(screen.getByText("RSI (14)")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole("heading", { name: "Strategy catalog" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
   });
   it("offers recoverable access errors", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Forbidden" }), { status: 403, headers: { "content-type": "application/json" } })));
     render(<StrategyLibraryPanel />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Your account cannot access the strategy library.");
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts.some((el) => el.textContent?.includes("Your account cannot access the strategy library."))).toBe(true);
   });
 
   it("searches and filters the backtest strategy catalog and navigates without running a simulation", async () => {
@@ -76,6 +79,7 @@ describe("read-only strategy library", () => {
       if (path === "/api/auth/me") return json(profile);
       if (path === "/api/custom-strategy/list") return json(payloads["/api/custom-strategy/list"]);
       if (path === "/api/custom-strategy/indicators") return json(payloads["/api/custom-strategy/indicators"]);
+      if (path === "/api/backtest/strategies") return json({ strategies: [] });
       if (path === "/api/custom-strategy/quick-test" && method === "POST") return json(quickResult);
       throw new Error("Unexpected endpoint: " + method + " " + path);
     });
@@ -106,6 +110,7 @@ describe("read-only strategy library", () => {
       if (path === "/api/auth/me") return json(profile);
       if (path === "/api/custom-strategy/list") return json(payloads["/api/custom-strategy/list"]);
       if (path === "/api/custom-strategy/indicators") return json(payloads["/api/custom-strategy/indicators"]);
+      if (path === "/api/backtest/strategies") return json({ strategies: [] });
       if (path === "/api/custom-strategy/create" && method === "POST") return json({ status: "success", name: "rsi_volume_v1", displayName: "RSI + Volume", message: "Strategy rsi_volume_v1 updated." });
       throw new Error("Unexpected endpoint: " + method + " " + path);
     });
@@ -153,6 +158,7 @@ describe("read-only strategy library", () => {
       if (path === "/api/auth/me") return json(profile);
       if (path === "/api/custom-strategy/list") return json(payloads["/api/custom-strategy/list"]);
       if (path === "/api/custom-strategy/indicators") return json(payloads["/api/custom-strategy/indicators"]);
+      if (path === "/api/backtest/strategies") return json({ strategies: [] });
       if (path === "/api/custom-strategy/generate-ai" && method === "POST") return json(draft);
       throw new Error("Unexpected endpoint: " + method + " " + path);
     });
@@ -202,6 +208,7 @@ describe("read-only strategy library", () => {
       if (path === "/api/auth/me") return json(profile);
       if (path === "/api/custom-strategy/list") return json(payloads["/api/custom-strategy/list"]);
       if (path === "/api/custom-strategy/indicators") return json(payloads["/api/custom-strategy/indicators"]);
+      if (path === "/api/backtest/strategies") return json({ strategies: [] });
       if (path === "/api/custom-strategy/generate-ai" && method === "POST") return json(generationCount++ === 0 ? firstDraft : secondDraft);
       throw new Error("Unexpected endpoint: " + method + " " + path);
     });
@@ -245,6 +252,7 @@ describe("read-only strategy library", () => {
       if (path === "/api/auth/me") return json(profile);
       if (path === "/api/custom-strategy/list") return json(payloads["/api/custom-strategy/list"]);
       if (path === "/api/custom-strategy/indicators") return json(payloads["/api/custom-strategy/indicators"]);
+      if (path === "/api/backtest/strategies") return json({ strategies: [] });
       if (path === "/api/custom-strategy/create" && method === "POST") return json({ status: "success", name: "new_test_v1", displayName: "New Test", message: "Strategy new_test_v1 saved." });
       throw new Error("Unexpected endpoint: " + method + " " + path);
     });
@@ -281,6 +289,7 @@ describe("read-only strategy library", () => {
       if (path === "/api/auth/me") return json(profile);
       if (path === "/api/custom-strategy/list") return json(payloads["/api/custom-strategy/list"]);
       if (path === "/api/custom-strategy/indicators") return json(payloads["/api/custom-strategy/indicators"]);
+      if (path === "/api/backtest/strategies") return json({ strategies: [] });
       if (path === "/api/custom-strategy/rsi_volume_v1" && method === "DELETE") return json({ status: "success", message: "Strategy deleted." });
       throw new Error("Unexpected endpoint: " + method + " " + path);
     });
@@ -405,5 +414,30 @@ describe("read-only strategy library", () => {
     render(<StrategyLibraryPanel />);
     expect(await screen.findByRole("alert")).toHaveTextContent(/could not be loaded/i);
     expect(screen.queryByText("Must not render")).not.toBeInTheDocument();
+  });
+
+  it("renders catalog even when mounted without callback props", async () => {
+    window.localStorage.setItem("token", "viewer-session");
+    const profile = { id: 9, username: "viewer01", email: null, role: "viewer", must_change_password: false };
+    const catalog = { strategies: [
+      { id: "trend_ema_v1", baseName: "trend_ema_v1", isInverse: false, displayName: "Trend EMA Crossover", category: "Trend Following", validated: true, description: "Trend-following EMA cross", params: [{ key: "fast" }], sharedParams: [] },
+    ] };
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/auth/me") return Promise.resolve(new Response(JSON.stringify(profile), { status: 200, headers: { "content-type": "application/json" } }));
+      if (path === "/api/backtest/strategies") return Promise.resolve(new Response(JSON.stringify(catalog), { status: 200, headers: { "content-type": "application/json" } }));
+      const payload = payloads[path];
+      if (!payload) throw new Error("Unexpected endpoint: " + path);
+      return Promise.resolve(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <AuthGate>
+        <StrategyLibraryPanel />
+      </AuthGate>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Strategy catalog" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Trend EMA Crossover" })).toBeInTheDocument();
   });
 });

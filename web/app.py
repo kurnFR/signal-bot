@@ -145,6 +145,7 @@ AUTHENTICATED_READ_PATHS = (
     "/api/ml/experiments",
     "/api/ml/experiments/{experiment_id}",
     "/api/ml/models",
+    "/api/ml/models/{model_id}",
     "/api/ml/generator-models",
     "/api/ml/retraining/status",
     "/api/ml/rl/models",

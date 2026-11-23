@@ -163,7 +163,8 @@ class TestWorkOrder71951Integration(unittest.TestCase):
             self.assertTrue(paper_routes._is_known_paper_strategy("custom_strat_alpha"))
 
             # Deploying this strategy is accepted by the validation gate
-            with patch("web.routes.paper_routes.set_paper_config") as mock_set:
+            with patch("web.routes.paper_routes.set_paper_config") as mock_set, \
+                 patch("web.routes.paper_routes.sync_and_evaluate_paper_trading", return_value={"status": "success", "results": []}):
                 mock_set.return_value = {"status": "success", "id": 101}
                 req = paper_routes.DeployStrategyRequest(
                     symbol="ETHUSDT",
@@ -202,6 +203,43 @@ class TestWorkOrder71951Integration(unittest.TestCase):
         self.assertIsNotNone(target)
         self.assertEqual(target.get("strategy_params"), overrides)
 
+        # Redeploy with strategy_params=None to verify clearing back to NULL
+        res_cleared = set_paper_config(
+            symbol="ETHUSDT",
+            market="spot",
+            timeframe="1d",
+            strategy_name="confluence_ensemble_v1",
+            is_active=True,
+            allocated_capital=5000.0,
+            risk_per_trade_pct=1.0,
+            strategy_params=None,
+        )
+        self.assertEqual(res_cleared["status"], "success")
+        self.assertIsNone(res_cleared["strategy_params"])
+        configs = get_paper_configs()
+        target_cleared = next((c for c in configs if c["symbol"] == "ETHUSDT" and c["strategy_name"] == "confluence_ensemble_v1"), None)
+        self.assertIsNotNone(target_cleared)
+        self.assertIsNone(target_cleared.get("strategy_params"))
+
+    def test_paper_routes_reject_pairs_strategy_on_btcusdt(self):
+        req_deploy = paper_routes.DeployStrategyRequest(
+            symbol="BTCUSDT",
+            strategy_name="pairs_ratio_v1",
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            paper_routes.deploy_strategy(req_deploy)
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("Invalid pair comparison", ctx.exception.detail)
+
+        req_config = paper_routes.PaperConfigRequest(
+            symbol="BTCUSDT",
+            strategy_name="pairs_ratio_v1",
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            paper_routes.update_config(req_config)
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("Invalid pair comparison", ctx.exception.detail)
+
     # -------------------------------------------------------------------------
     # PR 2: ML Generator Artifact Boundaries Exposure
     # -------------------------------------------------------------------------
@@ -233,6 +271,46 @@ class TestWorkOrder71951Integration(unittest.TestCase):
         self.assertEqual(artifacts[0]["symbol"], "BTCUSDT")
         self.assertEqual(artifacts[0]["market"], "spot")
         self.assertEqual(artifacts[0]["timeframe"], "1d")
+
+    def test_get_saved_model_endpoint_route_and_retrieval(self):
+        from web.app import app
+        from fastapi.testclient import TestClient
+        client = TestClient(app, raise_server_exceptions=False)
+        fake_user = {"id": 1, "username": "trader01", "role": "trader", "is_active": 1, "must_change_password": 0}
+        with patch("web.app.authenticate_request", return_value=fake_user), \
+             patch("web.auth.authenticate_request", return_value=fake_user), \
+             patch("web.routes.ml_routes.read_model_manifest_file", return_value={"model_id": "test-model-1", "test_metrics": {}}), \
+             patch("pathlib.Path.is_file", return_value=True):
+            res = client.get("/api/ml/models/test-model-1")
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.json()["model"]["model_id"], "test-model-1")
+
+    def test_wallet_poll_endpoint_triggers_recompute(self):
+        from web.app import app
+        from fastapi.testclient import TestClient
+        client = TestClient(app, raise_server_exceptions=False)
+        fake_user = {"id": 1, "username": "trader01", "role": "trader", "is_active": 1, "must_change_password": 0}
+        with patch("web.app.authenticate_request", return_value=fake_user), \
+             patch("web.auth.authenticate_request", return_value=fake_user), \
+             patch("wallet_tracker.worker.recompute", return_value=True):
+            res = client.post("/api/wallets/poll")
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.json()["status"], "success")
+
+    def test_delete_custom_strategy_pauses_active_deployments(self):
+        from web.routes import custom_strategy
+        with patch("web.routes.custom_strategy._read_saved_strategies", return_value=[{"name": "test_strat"}]), \
+             patch("web.routes.custom_strategy._write_saved_strategies"), \
+             patch("db.db.get_pool") as mock_pool:
+            mock_conn = MagicMock()
+            mock_cur = MagicMock()
+            mock_cur.rowcount = 2
+            mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+            mock_pool.return_value.get_connection.return_value.__enter__.return_value = mock_conn
+
+            res = custom_strategy.delete_custom_strategy("test_strat")
+            self.assertEqual(res["status"], "success")
+            self.assertEqual(res["paused_deployments"], 2)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 Telegram API Routes for status, testing, and alerting diagnostics.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 import logging
 from db.db import get_retailbot2_outbox_counts
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 
 
 class TelegramTestRequest(BaseModel):
-    custom_message: Optional[str] = None
+    custom_message: Optional[str] = Field(None, max_length=1000)
 
 
 @router.get("/status")

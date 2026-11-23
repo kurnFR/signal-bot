@@ -23,6 +23,7 @@ const NUMBER_FIELDS = [
   { key: "expired_signal_cleanup_interval_days", label: "Expired signal cleanup interval (days)", min: 1, max: 365, step: 1 },
 ] as const;
 const BOOLEAN_FIELDS = [
+  { key: "telegram_enabled", label: "Telegram alerts enabled" },
   { key: "enable_divergence_detection", label: "Enable divergence detection" },
   { key: "enable_velocity_detection", label: "Enable velocity detection" },
   { key: "require_confluence", label: "Require signal confluence" },
@@ -84,6 +85,15 @@ export function ScreenerControlsPanel() {
     try {
       const result = await saveScreenerControl(enabled, nextOverrides);
       setControl({ ...control, enabled, overrides: nextOverrides });
+      const nextNumbers: Record<string, string> = {};
+      for (const field of NUMBER_FIELDS) nextNumbers[field.key] = Object.prototype.hasOwnProperty.call(nextOverrides, field.key) ? String(nextOverrides[field.key]) : "";
+      const nextBooleans: BooleanDraft = {};
+      for (const field of BOOLEAN_FIELDS) {
+        const hasOverride = Object.prototype.hasOwnProperty.call(nextOverrides, field.key);
+        nextBooleans[field.key] = { override: hasOverride, value: hasOverride ? Boolean(nextOverrides[field.key]) : true };
+      }
+      setNumbers(nextNumbers);
+      setBooleans(nextBooleans);
       setMessage(result.note || "Screener settings saved.");
     } catch (cause) {
       if (cause instanceof ScreenerControlError && cause.status === 403) setError("Your account cannot change screener settings. Only admin or trader roles can save these controls.");
@@ -98,7 +108,14 @@ export function ScreenerControlsPanel() {
     {error && <p className="control-feedback control-error" role="alert">{error}</p>}
     {message && <p className="control-feedback control-success" role="status">{message}</p>}
     {loading && !control ? <p className="empty-state" role="status">Loading saved control settings…</p> : control ? <>
-      <label className="screener-alert-toggle"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /><span><strong>Telegram alerting enabled</strong><small>Pausing alerts does not stop signal detection.</small></span></label>
+      <label className="screener-alert-toggle"><input type="checkbox" checked={enabled} onChange={(event) => {
+        const nextVal = event.target.checked;
+        if (!nextVal) {
+          const confirmed = typeof window !== "undefined" && window.confirm ? window.confirm("Are you sure you want to pause the Smart Money Screener?") : true;
+          if (!confirmed) return;
+        }
+        setEnabled(nextVal);
+      }} /><span><strong>Telegram alerting enabled</strong><small>Pausing alerts does not stop signal detection.</small></span></label>
       <div className="screener-control-grid">
         {NUMBER_FIELDS.map((field) => <label className="screener-control-field" key={field.key}>{field.label}<input type="number" min={field.min} max={field.max} step={field.step} value={numbers[field.key] ?? ""} placeholder="Use server default" onChange={(event) => setNumbers((current) => ({ ...current, [field.key]: event.target.value }))} /><small>{Object.prototype.hasOwnProperty.call(control.overrides, field.key) ? "Saved override · clear to restore server default" : "No override · server default applies"}</small></label>)}
       </div>

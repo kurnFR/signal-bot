@@ -14,7 +14,8 @@ from paper.engine import (
     manual_close_position, sync_and_evaluate_paper_trading,
     get_paper_metrics, update_paper_deployment, OVERLAY_STRATEGIES,
 )
-from backtest.strategies import STRATEGIES
+from backtest.strategies import STRATEGIES, PAIRS_STRATEGIES
+from config import PAIRS_BASE_SYMBOL
 from backtest.custom_strategy import paper_strategy_registry
 from paper.orders import (
     OrderTransitionConflict, OrderValidationError, cancel_pending_order, list_orders,
@@ -39,7 +40,6 @@ class PaperConfigRequest(BaseModel):
     ml_model_id: Optional[str] = Field(None, max_length=100, json_schema_extra={"example": "real-btcusdt-spot-1h-trend_ema_v1-logistic_regression-binary_positive_r"})
     ml_generator_model_id: Optional[str] = Field(None, max_length=100, description="Typed independent ML signal-generator artifact; separate from the legacy filter model")
     telegram_enabled: Optional[bool] = Field(None, description="Whether paper entry alerts should be sent to Telegram; omitted updates preserve the current preference")
-    report_enabled: Optional[bool] = Field(None)
     params: Optional[Dict[str, Any]] = None
     report_enabled: Optional[bool] = Field(None, description="Whether this strategy appears in per-strategy performance summaries; omitted updates preserve the current preference")
 
@@ -141,6 +141,11 @@ def update_config(req: PaperConfigRequest):
         raise HTTPException(status_code=400, detail="allocated_capital and risk_per_trade_pct must be finite")
     if not req.symbol.strip() or not req.strategy_name.strip():
         raise HTTPException(status_code=400, detail="symbol and strategy_name must not be blank")
+    if req.strategy_name.strip() in PAIRS_STRATEGIES and req.symbol.strip().upper() == PAIRS_BASE_SYMBOL:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid pair comparison: target symbol cannot be the same as comparator (BTCUSDT). Choose an altcoin pair.",
+        )
     if not _is_known_paper_strategy(req.strategy_name):
         raise HTTPException(
             status_code=400,
@@ -317,6 +322,11 @@ def deploy_strategy(req: DeployStrategyRequest):
         )
     market = req.market.strip().lower()
     timeframe = req.timeframe.strip()
+    if strategy_name in PAIRS_STRATEGIES and req.symbol.strip().upper() == PAIRS_BASE_SYMBOL:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid pair comparison: target symbol cannot be the same as comparator (BTCUSDT). Choose an altcoin pair.",
+        )
     if not _is_known_paper_strategy(strategy_name):
         raise HTTPException(
             status_code=400,

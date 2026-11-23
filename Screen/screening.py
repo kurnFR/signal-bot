@@ -68,6 +68,7 @@ CONFIG = {
     "max_delivery_attempts": int(os.getenv("MAX_DELIVERY_ATTEMPTS", "5")),
     "delivery_poll_interval_sec": float(os.getenv("DELIVERY_POLL_INTERVAL_SEC", "1.0")),
     "daily_reset_utc_hour": int(os.getenv("DAILY_RESET_UTC_HOUR", "0")),
+    "telegram_enabled": os.getenv("SCREENER_TELEGRAM_ENABLED", "1").strip().lower() in {"1", "true", "yes"},
     "telegram_bot_token": (os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN") or "").strip(),
     "telegram_chat_id": (os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_TARGET_CHAT_ID") or "").strip(),
     "ws_ping_interval": 20,
@@ -744,7 +745,7 @@ def verify_signal_schema():
         finally:
             conn.close()
 
-_TUNABLE_CONFIG_KEYS={"rvol_multiplier","divergence_max_price_change","velocity_threshold","enable_divergence_detection","enable_velocity_detection","max_alerts_per_hour","max_alerts_per_symbol_per_hour","alert_cooldown_sec","require_confluence","min_signal_rvol","min_signal_velocity","min_quote_volume_24h","min_market_cap_usd","min_quality_score","min_alert_quality_score","min_alert_quote_volume","max_signal_age_sec","expired_signal_retention_days","expired_signal_cleanup_interval_days"}
+_TUNABLE_CONFIG_KEYS={"rvol_multiplier","divergence_max_price_change","velocity_threshold","enable_divergence_detection","enable_velocity_detection","max_alerts_per_hour","max_alerts_per_symbol_per_hour","alert_cooldown_sec","require_confluence","min_signal_rvol","min_signal_velocity","min_quote_volume_24h","min_market_cap_usd","min_quality_score","min_alert_quality_score","min_alert_quote_volume","max_signal_age_sec","expired_signal_retention_days","expired_signal_cleanup_interval_days","telegram_enabled"}
 
 def reload_control():
     conn=get_pool().get_connection()
@@ -1284,7 +1285,7 @@ def queue_watch_confirmations(now_ms):
 def confirmation_loop():
     while not state.shutdown_flag:
         try:
-            if CONFIG.get("enabled") and telegram.delivery_authorized and CONFIG["timeframe"] == "1m":
+            if CONFIG.get("enabled") and CONFIG.get("telegram_enabled", True) and telegram.delivery_authorized and CONFIG["timeframe"] == "1m":
                 queue_watch_confirmations(int(time.time() * 1000))
         except requests.HTTPError as exc:
             logger.warning("Confirmation market data unavailable: HTTP %s", exc.response.status_code)
@@ -1301,6 +1302,9 @@ def dispatch_alerts():
     while not state.shutdown_flag:
         if not CONFIG.get("enabled", True):
             time.sleep(max(0.25, CONFIG.get("delivery_poll_interval_sec", 1.0)))
+            continue
+        if not CONFIG.get("telegram_enabled", True):
+            time.sleep(max(0.5, CONFIG.get("delivery_poll_interval_sec", 1.0)))
             continue
         if not telegram.delivery_authorized:
             # Preserve pending signals in MySQL rather than claiming and burning retry attempts

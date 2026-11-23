@@ -292,3 +292,15 @@ def wallets_set_telegram(tracked_id: int, req: WalletTelegramPreference):
     if not store.set_wallet_telegram(tracked_id, req.enabled):
         raise HTTPException(status_code=404, detail="Active tracked wallet not found")
     return {"enabled": req.enabled}
+
+
+@router.post("/poll")
+def trigger_wallet_poll():
+    """Trigger an on-demand wallet tracker cycle/recompute."""
+    try:
+        from wallet_tracker import worker
+        result = worker.recompute()
+        return {"status": "success", "message": "Wallet tracker poll completed", "result": result}
+    except Exception as e:
+        logger.exception("wallets_poll failed")
+        raise HTTPException(status_code=500, detail="Failed to run wallet poll cycle")

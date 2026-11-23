@@ -105,7 +105,7 @@ export function MasterDataPanel() {
     const symbol = backfillSymbol.trim().toUpperCase();
     if (!/^[A-Z0-9._-]{1,30}$/.test(symbol)) { setActionError("Enter a valid symbol using letters, numbers, dot, underscore, or hyphen."); return; }
     const years = Number(backfillYears);
-    if (!Number.isFinite(years) || years < 0.01 || years > 10) { setActionError("Backfill years must be between 0.01 and 10."); return; }
+    if (!Number.isFinite(years) || years < 0.05 || years > 10) { setActionError("Backfill years must be between 0.05 and 10."); return; }
     setActionError(null); setActionMessage(null);
     setPendingAction({ kind: "backfill", symbol, market: backfillMarket, timeframe: backfillTimeframe, years, auto_compute_features: autoComputeFeatures });
   };
@@ -158,7 +158,7 @@ export function MasterDataPanel() {
         <label className="screener-control-field">Symbol<input aria-label="Backfill symbol" value={backfillSymbol} maxLength={30} required onChange={(event) => setBackfillSymbol(event.target.value)} /></label>
         <label className="screener-control-field">Market<select aria-label="Backfill market" value={backfillMarket} onChange={(event) => setBackfillMarket(event.target.value as "spot" | "futures")}><option value="spot">Spot</option><option value="futures">Futures</option></select></label>
         <label className="screener-control-field">Timeframe<select aria-label="Backfill timeframe" value={backfillTimeframe} onChange={(event) => setBackfillTimeframe(event.target.value)}>{["1m", "5m", "15m", "1h", "4h", "1d"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-        <label className="screener-control-field">Years (0.01–10)<input aria-label="Backfill years" type="number" min="0.01" max="10" step="0.01" value={backfillYears} required onChange={(event) => setBackfillYears(event.target.value)} /></label>
+        <label className="screener-control-field">Years (0.05–10)<input aria-label="Backfill years" type="number" min="0.05" max="10" step="0.01" value={backfillYears} required onChange={(event) => setBackfillYears(event.target.value)} /></label>
         <label className="screener-alert-toggle"><input type="checkbox" checked={autoComputeFeatures} onChange={(event) => setAutoComputeFeatures(event.target.checked)} /><span><strong>Compute features after backfill</strong><small>Feature calculation may take additional time.</small></span></label>
         <div><button className="button button-primary" type="submit" disabled={actionBusy || loading}>Review backfill</button></div>
       </form>

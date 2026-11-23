@@ -362,6 +362,39 @@ def list_saved_models() -> Dict[str, Any]:
     return {"models": models}
 
 
+@router.get("/models/{model_id}")
+def get_saved_model(model_id: str) -> Dict[str, Any]:
+    """Retrieve detailed metadata and eligibility report for a single model artifact."""
+    if not _MODEL_ID_RE.match(model_id) or ".." in model_id:
+        raise HTTPException(status_code=422, detail="Invalid model_id")
+    models_root = ML_MODELS_DIR.resolve()
+    manifest_path = (models_root / f"{model_id}.json").resolve()
+    if manifest_path.parent != models_root:
+        raise HTTPException(status_code=409, detail="Model manifest must resolve inside ml_models/")
+    if not manifest_path.is_file():
+        raise HTTPException(status_code=404, detail=f"ML model manifest '{model_id}' not found in ml_models/")
+    try:
+        data = read_model_manifest_file(manifest_path)
+    except Exception as exc:
+        logger.warning("Failed to parse model manifest %s (%s)", manifest_path.name, type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Failed to parse model manifest")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=500, detail="Corrupted model manifest payload")
+
+    joblib_file = (models_root / f"{model_id}.joblib").resolve()
+    data["has_weights"] = joblib_file.parent == models_root and joblib_file.is_file()
+    report = paper_eligibility_report(test_metrics=data.get("test_metrics") or {})
+    reasons = list(report["reasons"])
+    if not data.get("eligible_for_paper"):
+        reasons.append("manifest is not flagged eligible_for_paper")
+    if data.get("evaluation_protocol_version") != CURRENT_EVALUATION_PROTOCOL_VERSION:
+        reasons.append("model was not evaluated with the current purged exit-time protocol")
+    if not data["has_weights"]:
+        reasons.append("model weights (.joblib) are missing")
+    data["eligibility"] = {"eligible": not reasons, "reasons": reasons}
+    return {"model": _finite_response(data)}
+
+
 @router.get("/generator-models")
 def list_saved_generator_models() -> Dict[str, Any]:
     """List only typed independent generator artifacts for the paper selector."""
