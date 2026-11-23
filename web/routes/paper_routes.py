@@ -13,6 +13,7 @@ from paper.engine import (
     set_paper_config, delete_paper_config, batch_update_paper_configs,
     manual_close_position, sync_and_evaluate_paper_trading,
     get_paper_metrics, update_paper_deployment, OVERLAY_STRATEGIES,
+    _UNSET,
 )
 from backtest.strategies import STRATEGIES, PAIRS_STRATEGIES
 from config import PAIRS_BASE_SYMBOL
@@ -141,12 +142,14 @@ def update_config(req: PaperConfigRequest):
         raise HTTPException(status_code=400, detail="allocated_capital and risk_per_trade_pct must be finite")
     if not req.symbol.strip() or not req.strategy_name.strip():
         raise HTTPException(status_code=400, detail="symbol and strategy_name must not be blank")
-    if req.strategy_name.strip() in PAIRS_STRATEGIES and req.symbol.strip().upper() == PAIRS_BASE_SYMBOL:
+    strategy_name = req.strategy_name.strip()
+    norm_strategy = strategy_name[8:] if strategy_name.startswith("inverse_") else strategy_name
+    if norm_strategy in PAIRS_STRATEGIES and req.symbol.strip().upper() == PAIRS_BASE_SYMBOL:
         raise HTTPException(
             status_code=400,
-            detail="Invalid pair comparison: target symbol cannot be the same as comparator (BTCUSDT). Choose an altcoin pair.",
+            detail=f"Invalid pair comparison: target symbol cannot be the same as comparator ({PAIRS_BASE_SYMBOL}). Choose an altcoin pair.",
         )
-    if not _is_known_paper_strategy(req.strategy_name):
+    if not _is_known_paper_strategy(strategy_name):
         raise HTTPException(
             status_code=400,
             detail="Unknown executable paper strategy. Refresh the Strategy Library and select a registered strategy.",
@@ -157,13 +160,14 @@ def update_config(req: PaperConfigRequest):
         raise HTTPException(status_code=400, detail="timeframe must be one of: 15m, 1h, 4h, 1d")
     _validate_generator_config(
         req.symbol.strip().upper(), req.market.strip().lower(), req.timeframe.strip(),
-        req.strategy_name.strip(), req.ml_generator_model_id, req.ml_model_id, req.is_active
+        strategy_name, req.ml_generator_model_id, req.ml_model_id, req.is_active
     )
+    strategy_params = req.params if "params" in req.model_fields_set else _UNSET
     res = set_paper_config(
         req.symbol.strip().upper(),
         req.market.strip().lower(),
         req.timeframe.strip(),
-        req.strategy_name.strip(),
+        strategy_name,
         req.is_active,
         req.allocated_capital,
         req.risk_per_trade_pct,
@@ -171,7 +175,7 @@ def update_config(req: PaperConfigRequest):
         telegram_enabled=req.telegram_enabled,
         report_enabled=req.report_enabled,
         ml_generator_model_id=req.ml_generator_model_id.strip() if req.ml_generator_model_id else None,
-        strategy_params=req.params,
+        strategy_params=strategy_params,
     )
     return res
 
@@ -315,6 +319,7 @@ def deploy_strategy(req: DeployStrategyRequest):
     if not req.symbol.strip() or not req.strategy_name.strip():
         raise HTTPException(status_code=400, detail="symbol and strategy_name must not be blank")
     strategy_name = req.strategy_name.strip()
+    norm_strategy = strategy_name[8:] if strategy_name.startswith("inverse_") else strategy_name
     if strategy_name == "ml_signal_generator_v1":
         raise HTTPException(
             status_code=400,
@@ -322,10 +327,10 @@ def deploy_strategy(req: DeployStrategyRequest):
         )
     market = req.market.strip().lower()
     timeframe = req.timeframe.strip()
-    if strategy_name in PAIRS_STRATEGIES and req.symbol.strip().upper() == PAIRS_BASE_SYMBOL:
+    if norm_strategy in PAIRS_STRATEGIES and req.symbol.strip().upper() == PAIRS_BASE_SYMBOL:
         raise HTTPException(
             status_code=400,
-            detail="Invalid pair comparison: target symbol cannot be the same as comparator (BTCUSDT). Choose an altcoin pair.",
+            detail=f"Invalid pair comparison: target symbol cannot be the same as comparator ({PAIRS_BASE_SYMBOL}). Choose an altcoin pair.",
         )
     if not _is_known_paper_strategy(strategy_name):
         raise HTTPException(

@@ -221,24 +221,49 @@ class TestWorkOrder71951Integration(unittest.TestCase):
         self.assertIsNotNone(target_cleared)
         self.assertIsNone(target_cleared.get("strategy_params"))
 
-    def test_paper_routes_reject_pairs_strategy_on_btcusdt(self):
-        req_deploy = paper_routes.DeployStrategyRequest(
-            symbol="BTCUSDT",
-            strategy_name="pairs_ratio_v1",
+        # Calling update_config with omitted params preserves existing overrides
+        set_paper_config(
+            symbol="ETHUSDT",
+            market="spot",
+            timeframe="1d",
+            strategy_name="confluence_ensemble_v1",
+            is_active=True,
+            strategy_params=overrides,
         )
-        with self.assertRaises(HTTPException) as ctx:
-            paper_routes.deploy_strategy(req_deploy)
-        self.assertEqual(ctx.exception.status_code, 400)
-        self.assertIn("Invalid pair comparison", ctx.exception.detail)
+        req_omit_params = paper_routes.PaperConfigRequest(
+            symbol="ETHUSDT",
+            market="spot",
+            timeframe="1d",
+            strategy_name="confluence_ensemble_v1",
+            is_active=True,
+            allocated_capital=6000.0,
+            risk_per_trade_pct=1.5,
+        )
+        paper_routes.update_config(req_omit_params)
+        configs_preserved = get_paper_configs()
+        target_preserved = next((c for c in configs_preserved if c["symbol"] == "ETHUSDT" and c["strategy_name"] == "confluence_ensemble_v1"), None)
+        self.assertIsNotNone(target_preserved)
+        self.assertEqual(target_preserved.get("strategy_params"), overrides)
 
-        req_config = paper_routes.PaperConfigRequest(
-            symbol="BTCUSDT",
-            strategy_name="pairs_ratio_v1",
-        )
-        with self.assertRaises(HTTPException) as ctx:
-            paper_routes.update_config(req_config)
-        self.assertEqual(ctx.exception.status_code, 400)
-        self.assertIn("Invalid pair comparison", ctx.exception.detail)
+    def test_paper_routes_reject_pairs_strategy_on_btcusdt(self):
+        for strategy in ("pairs_ratio_v1", "inverse_pairs_ratio_v1"):
+            req_deploy = paper_routes.DeployStrategyRequest(
+                symbol="BTCUSDT",
+                strategy_name=strategy,
+            )
+            with self.assertRaises(HTTPException) as ctx:
+                paper_routes.deploy_strategy(req_deploy)
+            self.assertEqual(ctx.exception.status_code, 400)
+            self.assertIn("Invalid pair comparison", ctx.exception.detail)
+
+            req_config = paper_routes.PaperConfigRequest(
+                symbol="BTCUSDT",
+                strategy_name=strategy,
+            )
+            with self.assertRaises(HTTPException) as ctx:
+                paper_routes.update_config(req_config)
+            self.assertEqual(ctx.exception.status_code, 400)
+            self.assertIn("Invalid pair comparison", ctx.exception.detail)
 
     # -------------------------------------------------------------------------
     # PR 2: ML Generator Artifact Boundaries Exposure

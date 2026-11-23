@@ -500,7 +500,7 @@ def set_paper_config(
         # can link to the actual paper config, including on duplicate-key updates.
         cur.execute(
             """
-            SELECT id, strategy_params FROM paper_configs
+            SELECT id FROM paper_configs
             WHERE symbol=%s AND market=%s AND timeframe=%s AND strategy_name=%s
               AND ml_model_id <=> %s AND ml_generator_model_id <=> %s
             """,
@@ -508,18 +508,8 @@ def set_paper_config(
         )
         config_row = cur.fetchone()
         config_id = config_row.get("id") if isinstance(config_row, dict) else None
-        persisted_raw = config_row.get("strategy_params") if isinstance(config_row, dict) else None
-        if isinstance(persisted_raw, str):
-            try:
-                persisted_params = json.loads(persisted_raw)
-            except Exception:
-                persisted_params = None
-        elif isinstance(persisted_raw, dict):
-            persisted_params = persisted_raw
-        else:
-            persisted_params = None
-
         conn.commit()
+        ret_params = strategy_params if (strategy_params is not _UNSET and isinstance(strategy_params, dict) and strategy_params) else None
         return {
             "status": "success",
             "id": config_id,
@@ -528,7 +518,7 @@ def set_paper_config(
             "is_active": is_active,
             "ml_model_id": ml_model_id,
             "ml_generator_model_id": ml_generator_model_id,
-            "strategy_params": persisted_params,
+            "strategy_params": ret_params,
         }
     finally:
         try:
