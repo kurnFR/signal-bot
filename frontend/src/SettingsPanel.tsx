@@ -1134,7 +1134,10 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
           {adminDiagnostics.heartbeats.length ? <div className="status-table-wrap"><table className="status-table"><thead><tr><th scope="col">Collector</th><th scope="col">Status</th><th scope="col">Last heartbeat</th></tr></thead><tbody>{adminDiagnostics.heartbeats.map((heartbeat, index) => <tr key={heartbeat.collector + "-" + index}><td>{heartbeat.collector}</td><td>{heartbeat.status}</td><td>{heartbeat.lastBeat || "Unavailable"}</td></tr>)}</tbody></table></div> : <p className="empty-state">No collector heartbeat records were returned.</p>}
         </div>
       </>}
-      <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={diagnosticsLoading} onClick={() => setDiagnosticsAttempt((value) => value + 1)}><RefreshCw size={15} /> Refresh diagnostics</button></div>
+      <div className="screener-control-footer" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <button className="button button-secondary" type="button" disabled={diagnosticsLoading} onClick={() => setDiagnosticsAttempt((value) => value + 1)}><RefreshCw size={15} /> Refresh diagnostics</button>
+        <button className="button button-secondary" type="button" onClick={() => window.dispatchEvent(new CustomEvent("signal-bot:open-onboarding"))}>Launch Setup Wizard</button>
+      </div>
     </section>}
   </div>;
 }
