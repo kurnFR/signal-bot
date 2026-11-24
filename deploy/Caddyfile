@@ -1,0 +1,12 @@
+# Production TLS reverse proxy for Signal Bot (automatic Let's Encrypt HTTPS + WebSockets)
+# Set SIGNAL_BOT_DOMAIN in .env (e.g. desk.yourdomain.com) before launching:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+{$SIGNAL_BOT_DOMAIN:localhost} {
+    encode gzip zstd
+
+    reverse_proxy web:8050 {
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Real-IP {remote_host}
+    }
+}

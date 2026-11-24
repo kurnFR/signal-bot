@@ -14,6 +14,25 @@ jobs:
   verify:
     name: Verify Release Gate
     runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: signal_bot_test_root
+          MARIADB_DATABASE: signal_bot_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+    env:
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: signal_bot_test_root
+      MYSQL_DATABASE: signal_bot_test
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,15 +40,49 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
+          cache: pip
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest httpx
 
-      - name: Run WO71955 & WO71956 release tests
-        run: pytest tests/test_wo71955_production_hardening.py tests/test_wo71956_commercial_launch.py
+      - name: Apply database migrations
+        run: python -m db.migrate
+
+      - name: Seed isolated release test admin user
+        run: |
+          python - <<'PY'
+          import secrets
+          from db.db import get_pool
+          from web.auth import hash_password
+
+          conn = get_pool().get_connection()
+          try:
+              cur = conn.cursor()
+              cur.execute(
+                  """
+                  INSERT INTO users
+                      (id, username, email, password_hash, role, is_active, must_change_password)
+                  VALUES
+                      (1, 'admin', 'admin@example.test', %s, 'admin', 1, 0)
+                  ON DUPLICATE KEY UPDATE
+                      username = VALUES(username),
+                      role = VALUES(role),
+                      is_active = VALUES(is_active),
+                      must_change_password = VALUES(must_change_password)
+                  """,
+                  (hash_password(secrets.token_urlsafe(32)),),
+              )
+              conn.commit()
+              cur.close()
+          finally:
+              conn.close()
+          PY
+
+      - name: Run WO71955–WO71957 release tests
+        run: pytest -vv tests/test_wo71955_production_hardening.py tests/test_wo71956_commercial_launch.py tests/test_wo71957_release_polish.py
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -86,5 +139,7 @@ jobs:
           generate_release_notes: true
           files: |
             docker-compose.yml
+            docker-compose.prod.yml
+            deploy/Caddyfile
             .env.example
             deploy/PRODUCTION_RUNBOOK.md
