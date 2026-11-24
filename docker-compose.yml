@@ -1,5 +1,12 @@
 services:
+  # Bundled database, opt-in via the 'bundled-db' profile. Skip this
+  # service entirely when MySQL/MariaDB runs outside Docker (e.g. on the
+  # host server): remove 'bundled-db' from COMPOSE_PROFILES in .env and
+  # point MYSQL_HOST at the external server (see README quick start).
+  # .env.example sets COMPOSE_PROFILES=bundled-db so the default
+  # quick-start behaviour (bundled DB) is unchanged.
   mariadb:
+    profiles: ["bundled-db"]
     image: mariadb:10.11
     container_name: signal-bot-mariadb
     restart: unless-stopped
@@ -28,13 +35,21 @@ services:
     depends_on:
       mariadb:
         condition: service_healthy
+        # Optional: with the bundled-db profile off (external MySQL),
+        # Compose must start this service without the bundled database.
+        # Requires Docker Compose v2.20.2+.
+        required: false
+    extra_hosts:
+      # Reach a MySQL/MariaDB running on the host itself via
+      # MYSQL_HOST=host.docker.internal (external-DB mode).
+      - "host.docker.internal:host-gateway"
     environment:
       SIGNAL_BOT_ENV: production
       SIGNAL_BOT_HOST: 0.0.0.0
       WEB_PORT: 8050
       SIGNAL_BOT_USE_MODERN_UI: 1
-      MYSQL_HOST: mariadb
-      MYSQL_PORT: 3306
+      MYSQL_HOST: ${MYSQL_HOST:-mariadb}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
       MYSQL_USER: ${MYSQL_USER:-signal_bot}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
@@ -67,9 +82,17 @@ services:
     depends_on:
       mariadb:
         condition: service_healthy
+        # Optional: with the bundled-db profile off (external MySQL),
+        # Compose must start this service without the bundled database.
+        # Requires Docker Compose v2.20.2+.
+        required: false
+    extra_hosts:
+      # Reach a MySQL/MariaDB running on the host itself via
+      # MYSQL_HOST=host.docker.internal (external-DB mode).
+      - "host.docker.internal:host-gateway"
     environment:
-      MYSQL_HOST: mariadb
-      MYSQL_PORT: 3306
+      MYSQL_HOST: ${MYSQL_HOST:-mariadb}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
       MYSQL_USER: ${MYSQL_USER:-signal_bot}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
@@ -85,28 +108,37 @@ services:
     depends_on:
       mariadb:
         condition: service_healthy
+        # Optional: with the bundled-db profile off (external MySQL),
+        # Compose must start this service without the bundled database.
+        # Requires Docker Compose v2.20.2+.
+        required: false
+    extra_hosts:
+      # Reach a MySQL/MariaDB running on the host itself via
+      # MYSQL_HOST=host.docker.internal (external-DB mode).
+      - "host.docker.internal:host-gateway"
     environment:
       # The funding poller is fail-closed by design (config.py):
       # it requires dedicated FUNDING_DB_* credentials and refuses to
       # fall back to MYSQL_* or to the users 'cms'/'root'. Provision a
       # dedicated MariaDB user for it and set these in .env (see
       # .env.example); without them this service cannot start.
-      FUNDING_DB_HOST: mariadb
-      FUNDING_DB_PORT: 3306
+      FUNDING_DB_HOST: ${FUNDING_DB_HOST:-mariadb}
+      FUNDING_DB_PORT: ${FUNDING_DB_PORT:-3306}
       FUNDING_DB_NAME: ${MYSQL_DATABASE:-crypto_signals}
       FUNDING_DB_USER: ${FUNDING_DB_USER:?FUNDING_DB_USER must be set in .env (dedicated funding-collector DB user, not cms/root)}
       FUNDING_DB_PASSWORD: ${FUNDING_DB_PASSWORD:?FUNDING_DB_PASSWORD must be set in .env}
-      MYSQL_HOST: mariadb
-      MYSQL_PORT: 3306
+      MYSQL_HOST: ${MYSQL_HOST:-mariadb}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
       MYSQL_USER: ${MYSQL_USER:-signal_bot}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
 
   outbox-worker:
     # Opt-in only, matching run_all.py: Telegram delivery is never part
-    # of the default stack. Start it explicitly with:
-    #   docker compose --profile outbox up -d outbox-worker
-    # and RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 in .env.
+    # of the default stack. Add 'outbox' to COMPOSE_PROFILES in .env
+    # (keeping 'bundled-db' if you use the bundled database -- a CLI
+    # --profile flag REPLACES COMPOSE_PROFILES instead of adding to it)
+    # and set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 in .env.
     profiles: ["outbox"]
     build:
       context: .
@@ -120,9 +152,17 @@ services:
     depends_on:
       mariadb:
         condition: service_healthy
+        # Optional: with the bundled-db profile off (external MySQL),
+        # Compose must start this service without the bundled database.
+        # Requires Docker Compose v2.20.2+.
+        required: false
+    extra_hosts:
+      # Reach a MySQL/MariaDB running on the host itself via
+      # MYSQL_HOST=host.docker.internal (external-DB mode).
+      - "host.docker.internal:host-gateway"
     environment:
-      MYSQL_HOST: mariadb
-      MYSQL_PORT: 3306
+      MYSQL_HOST: ${MYSQL_HOST:-mariadb}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
       MYSQL_USER: ${MYSQL_USER:-signal_bot}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}

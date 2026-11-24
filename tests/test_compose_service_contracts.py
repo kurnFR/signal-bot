@@ -110,6 +110,41 @@ class TestRuntimeDataNotShipped:
         assert "Screen/signals.jsonl" in dockerignore
 
 
+class TestExternalMysqlSupport:
+    """Compose must also work when MySQL/MariaDB runs OUTSIDE Docker
+    (e.g. on the host server): the bundled database is an opt-in profile,
+    app services must not hard-require it, DB hosts are configurable,
+    and containers can reach a host database via host.docker.internal."""
+
+    def test_bundled_mariadb_is_profile_gated(self):
+        block = _service_block(_compose(), "mariadb")
+        assert 'profiles: ["bundled-db"]' in block
+
+    def test_app_services_do_not_require_bundled_db(self):
+        compose = _compose()
+        for service in ("web", "collectors", "funding-collector", "outbox-worker"):
+            block = _service_block(compose, service)
+            assert "required: false" in block, service
+            assert "host.docker.internal:host-gateway" in block, service
+
+    def test_db_hosts_are_configurable(self):
+        compose = _compose()
+        assert "${MYSQL_HOST:-mariadb}" in compose
+        assert "${MYSQL_PORT:-3306}" in compose
+        funding = _service_block(compose, "funding-collector")
+        assert "${FUNDING_DB_HOST:-mariadb}" in funding
+
+    def test_env_example_defaults_to_bundled_db_and_documents_external(self):
+        env_example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+        assert "COMPOSE_PROFILES=bundled-db" in env_example
+        assert "host.docker.internal" in env_example
+
+    def test_readme_documents_external_mysql_mode(self):
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        assert "External MySQL" in readme
+        assert "host.docker.internal" in readme
+
+
 class TestReadyzRedaction:
     def test_readyz_does_not_return_raw_exception_text(self):
         app_source = (REPO_ROOT / "web" / "app.py").read_text(encoding="utf-8")
