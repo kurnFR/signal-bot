@@ -406,7 +406,7 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 FRONTEND_DIST_DIR = os.path.join(BASE_DIR, "frontend", "dist")
-MODERN_VIEWS = {"overview", "market-screener", "paper-trading", "strategy-library", "wallet-tracking",
+MODERN_VIEWS = {"overview", "trading-desk", "market-screener", "paper-trading", "strategy-library", "wallet-tracking",
                 "backtest-studio", "ml-studio", "research", "news-ai", "master-data", "settings"}
 modern_index_path = os.path.join(FRONTEND_DIST_DIR, "index.html")
 if os.path.isfile(modern_index_path):

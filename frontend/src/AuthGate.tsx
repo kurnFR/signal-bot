@@ -113,7 +113,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   return <main className="auth-page">
     <section className="auth-card" aria-labelledby="auth-title">
       <div className="auth-brand"><span className="auth-brand-icon"><Activity size={22} /></span><span><strong>Signal Bot</strong><small>QUANTITATIVE PLATFORM</small></span></div>
-      <div className="auth-intro"><span className="auth-eyebrow">SECURE WORKSPACE</span><h1 id="auth-title">{screen === "password-change" ? "Change your password" : "Sign in"}</h1><p>{screen === "password-change" ? "Your account must set a new password before continuing." : "Sign in with your existing Signal Bot account to access the migration preview. Some role-gated controls can persist configuration or start background jobs when explicitly used."}</p></div>
+      <div className="auth-intro"><span className="auth-eyebrow">SECURE WORKSPACE</span><h1 id="auth-title">{screen === "password-change" ? "Change your password" : "Sign in"}</h1><p>{screen === "password-change" ? "Your account must set a new password before continuing." : "Sign in with your account to access the quantitative trading workstation, backtest studio, and paper execution desk."}</p></div>
       {error && <div className="auth-error" role="alert">{error}</div>}
       {logoutError && <div className="auth-error" role="alert">
         <p>{logoutError}</p>

@@ -94,4 +94,30 @@ gunzip < backup_signal_bot_YYYYMMDD_HHMMSS.sql.gz | docker compose exec -T maria
 - **Liveness Probe**: `GET /healthz` (200 OK)
 - **Readiness Probe**: `GET /readyz` (200 Ready / 503 Not Ready)
 - **Status API**: `GET /api/system/status`
-- **Operator Audit Log**: `GET /api/system/audit-logs` (Admin only)
+- **Operator Audit Log**: `GET /api/auth/audit-logs` (Admin only)
+
+---
+
+## 6. Commercial Licensing & Tagged Releases
+
+### Minting a Customer License Key
+Generate a signed `SB1` license key bound to a customer name, tier (`starter`, `pro`, `desk`, `enterprise`), seat limit, and expiration window:
+```bash
+python scripts/generate_license.py \
+  --customer "Acme Quant Desk" \
+  --tier pro \
+  --max-users 10 \
+  --days 365 \
+  --signing-key "${SIGNAL_BOT_LICENSE_SIGNING_KEY}"
+```
+Verify any issued key:
+```bash
+python scripts/generate_license.py --verify "SB1...." --signing-key "${SIGNAL_BOT_LICENSE_SIGNING_KEY}"
+```
+
+### Publishing a Versioned Release (`v1.0.0`)
+Pushing a semantic version tag automatically runs the release test gate, publishes the hardened Docker image to GitHub Container Registry (`ghcr.io/kurnfr/signal-bot:<tag>`), and attaches `docker-compose.yml`, `.env.example`, and this runbook to the GitHub Release:
+```bash
+git tag -a v1.0.0 -m "Release v1.0.0 — Commercial Quantitative Trading Workstation"
+git push origin v1.0.0
+```
