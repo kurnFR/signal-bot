@@ -11,13 +11,14 @@ Checks:
   4. Funding, OI, liquidations tables have recent rows.
 
 Usage:
-    python validate_step1.py
+    python tools/validate_step1.py
 """
 import sys
 import os
 from datetime import datetime, timedelta, timezone
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Moved to tools/: the project root is the parent directory.
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import SYMBOLS, TIMEFRAMES, MARKETS
 from db.db import get_pool
 

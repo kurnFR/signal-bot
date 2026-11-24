@@ -1158,7 +1158,7 @@ def resolve_worker_db_credentials(database: str, observation: bool = False) -> D
         return {"user": user, "password": password}
 
     return {
-        "user": os.getenv("MYSQL_USER", "cms"),
+        "user": os.getenv("MYSQL_USER", "signal_bot"),
         "password": os.getenv("MYSQL_PASSWORD", ""),
     }
 

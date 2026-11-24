@@ -43,3 +43,6 @@ work_order_*.md
 *.bat
 .DS_Store
 Thumbs.db
+
+# Tests are not needed inside the runtime image
+tests/

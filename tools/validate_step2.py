@@ -13,12 +13,13 @@ Checks:
      against what you'd expect from the raw candles.
 
 Usage:
-    python3 validate_step2.py
+    python3 tools/validate_step2.py
 """
 import sys
 import os
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Moved to tools/: the project root is the parent directory.
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import SYMBOLS, TIMEFRAMES, MARKETS
 from db.db import get_pool
 

@@ -151,3 +151,84 @@ class TestReadyzRedaction:
         readyz_section = app_source.split("def readyz", 1)[1].split("PUBLIC_API_PATHS", 1)[0]
         assert '"reason": str(exc)' not in readyz_section
         assert "database unavailable" in readyz_section
+
+
+ROOT = REPO_ROOT
+
+
+def _read(relpath):
+    return (REPO_ROOT / relpath).read_text(encoding="utf-8")
+
+
+class TestAuditCleanupContracts:
+    """Contracts for the remaining first-audit findings: unified defaults,
+    no legacy personal defaults, repo hygiene, toolchain alignment."""
+
+    def test_enable_futures_default_is_false_everywhere(self):
+        compose = _read("docker-compose.yml")
+        assert compose.count("ENABLE_FUTURES: ${ENABLE_FUTURES:-False}") == 2
+        env = _read(".env.example")
+        assert "\nENABLE_FUTURES=False" in env
+        config = _read("config.py")
+        assert 'os.getenv("ENABLE_FUTURES", "false")' in config
+
+    def test_no_legacy_cms_user_defaults(self):
+        assert 'DB_USER", "cms"' not in _read("config.py")
+        assert 'MYSQL_USER", "cms"' not in _read("paper/outbox_worker.py")
+        assert "DB_USER', 'cms'" not in _read("paper/retailbot2.py")
+        assert '"signal_bot"' in _read("config.py")
+
+    def test_systemd_units_are_templates_without_personal_account(self):
+        for unit in (
+            "signal-funding-collector.service",
+            "deploy/systemd/signal-bot.service",
+            "deploy/systemd/signal-web.service",
+        ):
+            text = _read(unit)
+            assert "BIS" not in text, unit
+            assert "/home/" not in text, unit
+        assert "SIGNAL_BOT_USE_MODERN_UI=1" in _read(
+            "deploy/systemd/signal-bot.service"
+        )
+
+    def test_env_example_has_no_dead_binance_key(self):
+        assert "BINANCE_API_KEY" not in _read(".env.example")
+
+    def test_pytest_available_via_requirements_dev(self):
+        # Full split (pytest out of requirements.txt) lands together with
+        # the .github/workflows install-step changes; see the note in
+        # requirements-dev.txt.
+        dev = _read("requirements-dev.txt")
+        assert "-r requirements.txt" in dev
+        assert "pytest==8.3.5" in dev
+
+    def test_toolchain_versions_aligned(self):
+        # Dockerfile is the alignment target (Python 3.12 / Node 22). The
+        # matching CI workflow bumps (3.11 -> 3.12, Node 20 -> 22) are
+        # listed in PR #787's description: .github/workflows/ files cannot
+        # be modified by this repo's GitHub App (no workflows permission).
+        dockerfile = _read("Dockerfile")
+        assert "python:3.12" in dockerfile and "node:22" in dockerfile
+
+    def test_root_clutter_moved(self):
+        for name in (
+            "validate_step1.py",
+            "validate_step2.py",
+            "check_funding_range.py",
+            "check_futures_access.py",
+        ):
+            assert not (ROOT / name).exists(), name
+            assert (ROOT / "tools" / name).exists(), name
+        assert not (ROOT / "work_order_71937_production_readiness_remediation.md").exists()
+        assert (ROOT / "docs/work-orders/work_order_71937_production_readiness_remediation.md").exists()
+
+    def test_product_versions_aligned(self):
+        import json
+
+        pkg = json.loads(_read("frontend/package.json"))
+        app = _read("web/app.py")
+        assert f'version="{pkg["version"]}"' in app
+
+    def test_architecture_doc_marks_liquidations_deprecated(self):
+        arch = _read("docs/ARCHITECTURE.md")
+        assert "liquidations collector is deprecated and not started" in arch

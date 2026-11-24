@@ -59,7 +59,7 @@ services:
       SIGNAL_BOT_BRAND_NAME: ${SIGNAL_BOT_BRAND_NAME:-Signal Bot}
       SIGNAL_BOT_LOGO_URL: ${SIGNAL_BOT_LOGO_URL:-}
       SIGNAL_BOT_ALLOWED_ORIGINS: ${SIGNAL_BOT_ALLOWED_ORIGINS:-http://localhost:8050,http://127.0.0.1:8050}
-      ENABLE_FUTURES: ${ENABLE_FUTURES:-True}
+      ENABLE_FUTURES: ${ENABLE_FUTURES:-False}
       RETAILBOT2_ALLOW_TRADING: "0"
     ports:
       # Loopback only, like MariaDB below: the dashboard has no TLS of its
@@ -96,7 +96,7 @@ services:
       MYSQL_USER: ${MYSQL_USER:-signal_bot}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
-      ENABLE_FUTURES: ${ENABLE_FUTURES:-True}
+      ENABLE_FUTURES: ${ENABLE_FUTURES:-False}
 
   funding-collector:
     build:

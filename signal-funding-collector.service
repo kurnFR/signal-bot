@@ -1,3 +1,5 @@
+# Template unit: adjust User/Group, WorkingDirectory and the Python
+# interpreter path to your deployment before installing.
 [Unit]
 Description=Signal Bot Binance Futures Funding Rate REST Collector (Dedicated Standalone Service)
 Documentation=https://github.com/kurnFR/signal-bot
@@ -6,11 +8,11 @@ Wants=network-online.target mariadb.service
 
 [Service]
 Type=simple
-User=BIS
-Group=BIS
-WorkingDirectory=/home/BIS/signal-bot
+User=signalbot
+Group=signalbot
+WorkingDirectory=/opt/signal-bot
 
-# Dedicated least-privilege configuration file (0600 BIS:BIS)
+# Dedicated least-privilege configuration file (0600 signalbot:signalbot)
 # Strictly avoids loading main application .env to prevent cms credential exposure
 EnvironmentFile=/etc/signal-bot/funding-collector.env
 Environment=PYTHONUNBUFFERED=1
@@ -22,7 +24,7 @@ Environment=RETAILBOT2_ALLOW_DIRECT_TELEGRAM=0
 Environment=RETAILBOT2_OUTBOX_WORKER_ENABLED=0
 
 # Standalone entry point using dedicated polling loop
-ExecStart=/home/BIS/.pyenv/versions/3.12.14/bin/python3 -m collectors.funding_poller
+ExecStart=/usr/bin/python3 -m collectors.funding_poller
 
 # Process lifecycle and recovery
 Restart=always

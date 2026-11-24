@@ -6,12 +6,14 @@ whether something is broken (e.g. no funding data landed in that window
 at all).
 
 Usage:
-    python3 check_funding_range.py --symbol ETHUSDT --timeframe 4h
+    python3 tools/check_funding_range.py --symbol ETHUSDT --timeframe 4h
 """
 import argparse
+import os
 import sys
 
-sys.path.insert(0, ".")
+# Moved to tools/: imports resolve against the project root (parent dir).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import HOLDOUT_FRACTION
 from db.db import fetch_ohlcv_with_features_df
 from backtest.holdout import compute_holdout_cutoff, split_by_cutoff

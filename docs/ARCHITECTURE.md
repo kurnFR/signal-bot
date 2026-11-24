@@ -11,7 +11,7 @@ The RetailBot2 Telegram outbox consumer is separate from the trading process. It
 | Process / Service | Entry point | Role |
 |---|---|---|
 | `web` / `web_server` | `uvicorn web.app:app` / `run_web.py` (port 8050) | FastAPI REST + WebSocket API, security middleware, and React Modern UI (`frontend/dist`) |
-| `collectors` | `run_collectors.py` | Supervised async spot/futures klines, open interest, and liquidations collectors |
+| `collectors` | `run_collectors.py` | Supervised async spot/futures klines and open interest collectors (the liquidations collector is deprecated and not started) |
 | `funding-collector` | `collectors/funding_poller.py` | Advisory-locked Binance Futures 8-hour funding rate REST poller with HTTP 418/429 cooldown defense |
 | `paper_engine` | `run_paper_engine.py` | Evaluates deployed strategies on new closed candles, manages paper positions/orders, and accrues funding |
 | `news_ai` | `run_news_ai.py` | News + macro-calendar pollers, LLM reasoning, guarded paper execution |

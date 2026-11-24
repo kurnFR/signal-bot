@@ -7,7 +7,7 @@ be properly backtested across the same time range as OHLCV.
 
 Only needs REST access to fapi.binance.com -- does NOT require futures
 WebSocket access (which was found to be geo-restricted earlier) or
-ENABLE_FUTURES=true. Run check_futures_access.py first to confirm REST
+ENABLE_FUTURES=true. Run tools/check_futures_access.py first to confirm REST
 access works before running this.
 
 Usage:

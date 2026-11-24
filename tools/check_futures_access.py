@@ -11,7 +11,7 @@ REST and WS are separate Binance subdomains/services and can have
 different access outcomes.
 
 Usage:
-    python3 check_futures_access.py
+    python3 tools/check_futures_access.py
 """
 import requests
 

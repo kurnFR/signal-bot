@@ -18,7 +18,7 @@ except ModuleNotFoundError:
 load_dotenv()
 
 # ---------------------------------------------------------------------------
-# Symbols — top 10 by liquidity on Binance USDT-M Futures.
+# Symbols — 3 large-cap USDT pairs (BTC/ETH/BNB) by liquidity on Binance.
 # Edit this list any time; nothing else needs to change.
 # ---------------------------------------------------------------------------
 SYMBOLS = [
@@ -364,7 +364,7 @@ VOL_BREAKOUT_RISK_REWARD_RATIO = 3
 MYSQL_CONFIG = {
     "host": os.getenv("MYSQL_HOST", os.getenv("DB_HOST", "127.0.0.1")),
     "port": int(os.getenv("MYSQL_PORT", os.getenv("DB_PORT", "3306"))),
-    "user": os.getenv("MYSQL_USER", os.getenv("DB_USER", "cms")),
+    "user": os.getenv("MYSQL_USER", os.getenv("DB_USER", "signal_bot")),
     "password": os.getenv("MYSQL_PASSWORD", os.getenv("DB_PASS", "")),
     "database": os.getenv("MYSQL_DATABASE", "crypto_signals"),
 }

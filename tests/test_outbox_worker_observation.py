@@ -113,10 +113,11 @@ def test_resolve_prod_credentials_preserves_existing_behavior(monkeypatch):
     creds = resolve_worker_db_credentials("crypto_signals", observation=False)
     assert creds == {"user": "prod_user", "password": "prod_secret"}
 
-    # Default fallback for prod user is 'cms' if unset
+    # Default fallback for prod user is the documented generic
+    # 'signal_bot' user if unset (never the legacy personal 'cms')
     monkeypatch.delenv("MYSQL_USER", raising=False)
     creds_default = resolve_worker_db_credentials("crypto_signals", observation=False)
-    assert creds_default["user"] == "cms"
+    assert creds_default["user"] == "signal_bot"
 
 
 def test_resolve_prod_observation_credentials_success(monkeypatch):

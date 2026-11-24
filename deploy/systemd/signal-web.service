@@ -1,3 +1,5 @@
+# Template unit: adjust User/Group, WorkingDirectory and the Python
+# interpreter path to your deployment before installing.
 [Unit]
 Description=Signal Bot Web Dashboard & REST API
 Documentation=https://github.com/kurnFR/signal-bot
@@ -6,16 +8,16 @@ Wants=network-online.target mariadb.service
 
 [Service]
 Type=simple
-User=BIS
-Group=BIS
-WorkingDirectory=/home/BIS/signal-bot
+User=signalbot
+Group=signalbot
+WorkingDirectory=/opt/signal-bot
 
 # Load production parameters from environment file
-EnvironmentFile=-/home/BIS/signal-bot/.env
+EnvironmentFile=-/opt/signal-bot/.env
 Environment=PYTHONUNBUFFERED=1
 
 # Web server entry point (FastAPI / Uvicorn)
-ExecStart=/home/BIS/.pyenv/versions/3.12.14/bin/python3 run_web.py --host 0.0.0.0 --port 8050
+ExecStart=/usr/bin/python3 run_web.py --host 0.0.0.0 --port 8050
 
 # Process lifecycle and recovery
 Restart=always

@@ -171,7 +171,7 @@ See `.env.example` for every supported key. Key production settings:
 | Commercial licensing & branding | `SIGNAL_BOT_LICENSE_KEY`, `SIGNAL_BOT_LICENSE_SIGNING_KEY`, `SIGNAL_BOT_BRAND_NAME`, `SIGNAL_BOT_LOGO_URL` |
 | HTTPS / TLS overlay | `SIGNAL_BOT_DOMAIN` (used by `docker-compose.prod.yml` + `deploy/Caddyfile`) |
 | Telegram alerts | Configurable in **Settings** (encrypted DB `app_telegram_settings`) or env fallback (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`) |
-| Futures & paper risk | `ENABLE_FUTURES=True`, `PAPER_ENTRY_MAX_DELAY_SECONDS=120`, `PAPER_MAX_CONCURRENT_POSITIONS=5`, `PAPER_MAX_DAILY_LOSS_USD=500`, `PAPER_MAX_TOTAL_NOTIONAL_USD=25000` |
+| Futures & paper risk | `ENABLE_FUTURES=False` (default; enable only after confirming futures WS is reachable from your network), `PAPER_ENTRY_MAX_DELAY_SECONDS=120`, `PAPER_MAX_CONCURRENT_POSITIONS=5`, `PAPER_MAX_DAILY_LOSS_USD=500`, `PAPER_MAX_TOTAL_NOTIONAL_USD=25000` |
 | News AI | `CRYPTOPANIC_API_KEY`, `FINNHUB_API_KEY`, `ANTHROPIC_API_KEY` / `LLM_PROVIDER` |
 
 ## Documentation
