@@ -17,7 +17,7 @@ from backtest.strategies import (
     STRATEGIES, FUNDING_STRATEGIES, TREND_ALIGNMENT_STRATEGIES, PAIRS_STRATEGIES
 )
 from backtest.strategies.trend_alignment import HTF_TIMEFRAME
-from backtest.params import BASE_PARAMS
+from backtest.params import BASE_PARAMS, validate_param_overrides
 from backtest.metrics import compute_metrics
 from backtest.equity import simulate_equity_curve
 from backtest.holdout import compute_holdout_cutoff, split_by_cutoff
@@ -427,6 +427,7 @@ class BacktestRunRequest(BaseModel):
     risk_per_trade_pct: float = Field(1.0, ge=0.1, le=10.0)
     save_to_db: bool = Field(True)
     params: Dict[str, Any] = Field(default_factory=dict)
+    ml_generator_model_id: Optional[str] = Field(None, max_length=100)
 
 
 def _auto_promote_top_candidate(
@@ -800,12 +801,45 @@ def execute_backtest(req: BacktestRunRequest):
     if len(segment_df) < 30:
         raise HTTPException(status_code=400, detail=f"Segment {data_segment} has only {len(segment_df)} candles; cannot simulate.")
 
-    # Merge user parameters on top of BASE_PARAMS
+    # Merge user parameters on top of BASE_PARAMS. Overrides are validated
+    # against BASE_PARAMS (known keys, matching types) exactly like paper
+    # config writes, so a typo'd knob fails fast instead of being ignored.
+    try:
+        validated_params = validate_param_overrides(req.params)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     run_params = dict(BASE_PARAMS)
-    run_params.update(req.params)
+    run_params.update(validated_params)
     run_params["symbol"] = req.symbol
     run_params["market"] = req.market
     run_params["timeframe"] = req.timeframe
+
+    # Generator-aware run path (parity with paper deployments): the
+    # standalone ML generator strategy needs an explicit, eligible model.
+    # Without one it would silently emit zero trades.
+    if strategy_name == "ml_signal_generator_v1":
+        if not req.ml_generator_model_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Select an independent ML generator model for this strategy.",
+            )
+        try:
+            from ml.generator_artifacts import load_generator_artifact
+
+            load_generator_artifact(req.ml_generator_model_id, require_eligible=True)
+        except Exception:
+            logger.warning("Generator model validation failed for backtest run")
+            raise HTTPException(
+                status_code=409,
+                detail="Generator model must pass the current paper-eligibility gate before it can be backtested.",
+            )
+        run_params["ml_generator_model_id"] = req.ml_generator_model_id
+        run_params["_require_generator_eligible"] = True
+    elif req.ml_generator_model_id:
+        raise HTTPException(
+            status_code=400,
+            detail="ml_generator_model_id is only valid for ml_signal_generator_v1.",
+        )
 
     # Higher timeframe handling for trend_alignment
     if strategy_name in TREND_ALIGNMENT_STRATEGIES and req.timeframe != HTF_TIMEFRAME:

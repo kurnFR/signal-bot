@@ -122,6 +122,7 @@ export interface BacktestExecutionInput {
   risk_per_trade_pct: number;
   save_to_db: true;
   params: Record<string, string | number | boolean>;
+  ml_generator_model_id?: string | null;
 }
 
 export interface BacktestExecutionResult {
