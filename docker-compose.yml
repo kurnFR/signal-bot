@@ -47,7 +47,9 @@ services:
       ENABLE_FUTURES: ${ENABLE_FUTURES:-True}
       RETAILBOT2_ALLOW_TRADING: "0"
     ports:
-      - "8050:8050"
+      # Loopback only, like MariaDB below: the dashboard has no TLS of its
+      # own. Use the docker-compose.prod.yml Caddy overlay to expose it.
+      - "127.0.0.1:8050:8050"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8050/healthz"]
       interval: 15s
@@ -84,6 +86,16 @@ services:
       mariadb:
         condition: service_healthy
     environment:
+      # The funding poller is fail-closed by design (config.py):
+      # it requires dedicated FUNDING_DB_* credentials and refuses to
+      # fall back to MYSQL_* or to the users 'cms'/'root'. Provision a
+      # dedicated MariaDB user for it and set these in .env (see
+      # .env.example); without them this service cannot start.
+      FUNDING_DB_HOST: mariadb
+      FUNDING_DB_PORT: 3306
+      FUNDING_DB_NAME: ${MYSQL_DATABASE:-crypto_signals}
+      FUNDING_DB_USER: ${FUNDING_DB_USER:?FUNDING_DB_USER must be set in .env (dedicated funding-collector DB user, not cms/root)}
+      FUNDING_DB_PASSWORD: ${FUNDING_DB_PASSWORD:?FUNDING_DB_PASSWORD must be set in .env}
       MYSQL_HOST: mariadb
       MYSQL_PORT: 3306
       MYSQL_USER: ${MYSQL_USER:-signal_bot}
@@ -91,12 +103,20 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
 
   outbox-worker:
+    # Opt-in only, matching run_all.py: Telegram delivery is never part
+    # of the default stack. Start it explicitly with:
+    #   docker compose --profile outbox up -d outbox-worker
+    # and RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 in .env.
+    profiles: ["outbox"]
     build:
       context: .
       dockerfile: Dockerfile
     container_name: signal-bot-outbox-worker
     restart: unless-stopped
-    command: ["python", "paper/outbox_worker.py"]
+    # The worker's --database default is the TEST database
+    # (signal_bot_test); production delivery must name crypto_signals
+    # explicitly, exactly as run_all.py invokes it.
+    command: ["python", "-m", "paper.outbox_worker", "--database", "crypto_signals"]
     depends_on:
       mariadb:
         condition: service_healthy
@@ -107,6 +127,9 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
       RETAILBOT2_OUTBOX_WORKER_ENABLED: 1
+      RETAILBOT2_ALLOW_TELEGRAM_DELIVERY: ${RETAILBOT2_ALLOW_TELEGRAM_DELIVERY:-0}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       RETAILBOT2_ALLOW_TRADING: "0"
 
 volumes:
