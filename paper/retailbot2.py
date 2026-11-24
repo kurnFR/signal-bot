@@ -399,7 +399,7 @@ class BotConfig:
     db_host: str = field(default_factory=lambda: os.getenv('MYSQL_HOST', os.getenv('DB_HOST', '192.168.1.30')))
     db_port: int = int(os.getenv('MYSQL_PORT', os.getenv('DB_PORT', '3306')))
     db_name: str = field(default_factory=lambda: os.getenv('MYSQL_DATABASE', 'crypto_signals'))
-    db_user: str = field(default_factory=lambda: os.getenv('MYSQL_USER', os.getenv('DB_USER', 'cms')))
+    db_user: str = field(default_factory=lambda: os.getenv('MYSQL_USER', os.getenv('DB_USER', 'signal_bot')))
     db_password: str = field(default_factory=lambda: os.getenv('MYSQL_PASSWORD', os.getenv('DB_PASS', '')))
     telegram_token: str = field(default_factory=lambda: (os.getenv('TELEGRAM_BOT_TOKEN') or os.getenv('TELEGRAM_TOKEN') or '').strip())
     telegram_chat_id: str = field(default_factory=lambda: (os.getenv('TELEGRAM_CHAT_ID') or os.getenv('TELEGRAM_TARGET_CHAT_ID') or '').strip())
@@ -3588,7 +3588,7 @@ def main():
         # ── Infrastructure ──
         db_host=os.getenv('MYSQL_HOST', os.getenv('DB_HOST', '192.168.1.30')),
         db_port=int(os.getenv('MYSQL_PORT', os.getenv('DB_PORT', '3306'))),
-        db_user=os.getenv('MYSQL_USER', os.getenv('DB_USER', 'cms')),
+        db_user=os.getenv('MYSQL_USER', os.getenv('DB_USER', 'signal_bot')),
         db_password=os.getenv('MYSQL_PASSWORD', os.getenv('DB_PASS', '')),
         db_name=os.getenv('MYSQL_DATABASE', 'crypto_signals'),
 

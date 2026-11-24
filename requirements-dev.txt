@@ -1,0 +1,9 @@
+# Development/test dependencies.
+# NOTE: pytest is still also listed in requirements.txt because the CI
+# workflows that install requirements-dev.txt live under .github/workflows/,
+# which this repo's automation cannot modify. Once the workflows install
+# requirements-dev.txt (tests.yml, retailbot-accounting.yml), drop the
+# pytest line from requirements.txt so production images stop shipping it.
+-r requirements.txt
+pytest==8.3.5
+pytest-timeout==2.3.1

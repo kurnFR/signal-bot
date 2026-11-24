@@ -83,7 +83,7 @@ app = FastAPI(
     lifespan=lifespan,
     title="Crypto Signal Bot — Quantitative Trading Platform",
     description="Institutional trading dashboard: Real-time search, historical backfill, strategy simulation, and Phase B paper trading.",
-    version="2.0.0",
+    version="1.0.1",
 )
 
 DEFAULT_ALLOWED_ORIGINS = "http://localhost:8050,http://127.0.0.1:8050,http://localhost:5173,http://127.0.0.1:5173"
@@ -463,4 +463,9 @@ def serve_index():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("web.app:app", host=os.getenv("SIGNAL_BOT_HOST", "127.0.0.1"), port=8050, reload=True)
+
+    try:
+        _port = int(os.getenv("WEB_PORT", "8050"))
+    except ValueError:
+        _port = 8050
+    uvicorn.run("web.app:app", host=os.getenv("SIGNAL_BOT_HOST", "127.0.0.1"), port=_port, reload=False)
