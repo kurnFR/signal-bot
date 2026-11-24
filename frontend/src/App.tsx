@@ -1,19 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { fetchSystemStatus, type BrandingConfig, type LicenseStatus } from "./lib/systemStatus";
 import { getTokenExpiryMs, refreshSessionToken } from "./lib/auth";
 import { SystemStatusPanel } from "./SystemStatusPanel";
-import { ScreenerPanel } from "./ScreenerPanel";
-import { ScreenerControlsPanel } from "./ScreenerControlsPanel";
-import { PaperTradingPanel } from "./PaperTradingPanel";
-import { StrategyLibraryPanel } from "./StrategyLibraryPanel";
-import { WalletTrackingPanel } from "./WalletTrackingPanel";
-import { BacktestStudioPanel } from "./BacktestStudioPanel";
-import { MLStudioPanel } from "./MLStudioPanel";
-import { ResearchPanel } from "./ResearchPanel";
-import { NewsAIPanel } from "./NewsAIPanel";
-import { MasterDataPanel } from "./MasterDataPanel";
-import { SettingsPanel } from "./SettingsPanel";
-import { TradingDeskPanel } from "./TradingDeskPanel";
+
+const ScreenerPanel = lazy(() => import("./ScreenerPanel").then((m) => ({ default: m.ScreenerPanel })));
+const ScreenerControlsPanel = lazy(() => import("./ScreenerControlsPanel").then((m) => ({ default: m.ScreenerControlsPanel })));
+const PaperTradingPanel = lazy(() => import("./PaperTradingPanel").then((m) => ({ default: m.PaperTradingPanel })));
+const StrategyLibraryPanel = lazy(() => import("./StrategyLibraryPanel").then((m) => ({ default: m.StrategyLibraryPanel })));
+const WalletTrackingPanel = lazy(() => import("./WalletTrackingPanel").then((m) => ({ default: m.WalletTrackingPanel })));
+const BacktestStudioPanel = lazy(() => import("./BacktestStudioPanel").then((m) => ({ default: m.BacktestStudioPanel })));
+const MLStudioPanel = lazy(() => import("./MLStudioPanel").then((m) => ({ default: m.MLStudioPanel })));
+const ResearchPanel = lazy(() => import("./ResearchPanel").then((m) => ({ default: m.ResearchPanel })));
+const NewsAIPanel = lazy(() => import("./NewsAIPanel").then((m) => ({ default: m.NewsAIPanel })));
+const MasterDataPanel = lazy(() => import("./MasterDataPanel").then((m) => ({ default: m.MasterDataPanel })));
+const SettingsPanel = lazy(() => import("./SettingsPanel").then((m) => ({ default: m.SettingsPanel })));
+const TradingDeskPanel = lazy(() => import("./TradingDeskPanel").then((m) => ({ default: m.TradingDeskPanel })));
 import { CommandPalette } from "./components/CommandPalette";
 import { TermsModal } from "./components/TermsModal";
 import { OnboardingWizard } from "./components/OnboardingWizard";
@@ -319,6 +320,7 @@ export function App() {
           </div>
         </div>
 
+        <Suspense fallback={<p className="empty-state" role="status">Loading workspace module…</p>}>
         {activeView === "Overview" ? (
           <SystemStatusPanel />
         ) : activeView === "Trading Desk" ? (
@@ -344,6 +346,7 @@ export function App() {
         ) : activeView === "Settings" ? (
           <SettingsPanel theme={theme} onToggleTheme={toggleTheme} username={auth?.user.username} role={auth?.user.role} license={licenseStatus} />
         ) : null}
+        </Suspense>
 
         <footer className="page-footer" style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "center" }}>
           <div style={{ display: "flex", justifyContent: "space-between", width: "100%", flexWrap: "wrap", gap: "8px" }}>
