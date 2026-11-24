@@ -445,3 +445,60 @@ describe("BacktestStudioPanel", () => {
     });
   });
 });
+
+describe("BacktestStudioPanel generator runs", () => {
+  beforeEach(() => {
+    cleanup();
+    window.localStorage.clear();
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("offers an eligible generator model and sends it with the run", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const genStrategies = { strategies: [...strategies.strategies, { id: "ml_signal_generator_v1", baseName: "ml_signal_generator_v1", isInverse: false, displayName: "ML Signal Generator", category: "ML", validated: false, description: "Standalone generator", params: [], sharedParams: [] }] };
+    const generatorModels = { models: [{ model_id: "gen-btc-1d", experiment_id: "exp-1", model_type: "random_forest", symbol: "BTCUSDT", market: "spot", timeframe: "1d", eligible_for_paper: true, eligibility: { eligible: true, reasons: [] } }] };
+    const execution = {
+      runId: 44, symbol: "BTCUSDT", market: "spot", timeframe: "1d", strategy: "ml_signal_generator_v1",
+      dataSegment: "holdout", totalCandles: 120,
+      metrics: { total_trades: 5, win_rate_pct: 60, expectancy_r: 0.3, profit_factor: 1.6, max_drawdown_r: 1.1 },
+      trades: Array.from({ length: 5 }, () => ({})),
+    };
+    const calls: Array<{ path: string; method: string; body?: unknown }> = [];
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+      if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/backtest/promotion-policy") return json({ policy: promotionPolicy });
+      if (path === "/api/backtest/promotion-audit?limit=5") return json({ events: [] });
+      if (path === "/api/backtest/strategies") return json(genStrategies);
+      if (path === "/api/backtest/history?limit=100") return json(history);
+      if (path === "/api/backtest/runs/42") return json(details);
+      if (path === "/api/ml/generator-models") return json(generatorModels);
+      if (path === "/api/backtest/run" && method === "POST") return json(execution);
+      throw new Error("Unexpected endpoint: " + method + " " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><BacktestStudioPanel /></AuthGate>);
+
+    expect(await screen.findByRole("heading", { name: "Run a backtest" })).toBeInTheDocument();
+    const strategySelect = screen.getByRole("combobox", { name: "Backtest strategy" });
+    await waitFor(() => expect(strategySelect).toHaveValue("trend_ema_v1"));
+    fireEvent.change(strategySelect, { target: { value: "ml_signal_generator_v1" } });
+
+    const modelSelect = await screen.findByRole("combobox", { name: "ML generator model" });
+    await waitFor(() => expect(modelSelect).toHaveValue("gen-btc-1d"));
+    fireEvent.click(screen.getByRole("button", { name: "Review backtest run" }));
+
+    expect(await screen.findByRole("heading", { name: "Confirm backtest run" })).toBeInTheDocument();
+    expect(screen.getByText("gen-btc-1d")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Run backtest" }));
+    await waitFor(() => expect(calls.find((call) => call.path === "/api/backtest/run" && call.method === "POST")?.body).toEqual({
+      symbol: "BTCUSDT", market: "spot", timeframe: "1d", strategy: "ml_signal_generator_v1",
+      data_segment: "holdout", initial_capital: 5000, risk_per_trade_pct: 1, save_to_db: true, params: {},
+      ml_generator_model_id: "gen-btc-1d",
+    }));
+  });
+});

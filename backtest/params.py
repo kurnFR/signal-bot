@@ -116,3 +116,58 @@ def parse_overrides(override_strings):
                     value = raw_value.lower() == "true" if raw_value.lower() in ("true", "false") else raw_value
         overrides[key] = value
     return overrides
+
+
+def validate_param_overrides(params):
+    """Validate user-supplied strategy parameter overrides against BASE_PARAMS.
+
+    Returns a normalized copy. Raises ValueError on:
+    - a non-dict payload, or non-string keys;
+    - unknown keys (anything not in BASE_PARAMS — engine-injected keys such
+      as ``symbol``/``htf_df``/``ml_generator_model_id`` are not user input);
+    - type mismatches against the BASE_PARAMS default for that key
+      (bool only for bool knobs, int for int knobs — integral floats are
+      coerced — finite int/float for float knobs, str for str knobs);
+    - non-finite numbers (NaN / infinity).
+
+    This is the single gate used by the paper-config write paths and the
+    Backtest Studio run endpoint, so an override that a strategy cannot
+    consume is rejected at write time instead of being silently stored.
+    """
+    import math
+
+    if not isinstance(params, dict):
+        raise ValueError("strategy params must be an object")
+    unknown = [k for k in params if k not in BASE_PARAMS]
+    if unknown:
+        raise ValueError(
+            "Unknown strategy parameter(s): " + ", ".join(sorted(map(str, unknown)))
+        )
+    normalized = {}
+    for key, value in params.items():
+        default = BASE_PARAMS[key]
+        if isinstance(default, bool):
+            if not isinstance(value, bool):
+                raise ValueError(f"{key} must be a boolean")
+            normalized[key] = value
+        elif isinstance(default, int):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{key} must be an integer")
+            if isinstance(value, float):
+                if not math.isfinite(value) or not value.is_integer():
+                    raise ValueError(f"{key} must be an integer")
+                value = int(value)
+            normalized[key] = value
+        elif isinstance(default, float):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{key} must be a number")
+            if not math.isfinite(float(value)):
+                raise ValueError(f"{key} must be a finite number")
+            normalized[key] = value
+        elif isinstance(default, str):
+            if not isinstance(value, str):
+                raise ValueError(f"{key} must be a string")
+            normalized[key] = value
+        else:  # pragma: no cover - BASE_PARAMS holds only bool/int/float/str
+            normalized[key] = value
+    return normalized

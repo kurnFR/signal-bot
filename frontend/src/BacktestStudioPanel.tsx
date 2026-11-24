@@ -5,7 +5,7 @@ import { ApiError } from "./lib/api";
 import { PromotionStatusPanel } from "./PromotionStatusPanel";
 import { fetchBackfilledSymbols } from "./lib/masterData";
 import { trapFocus } from "./lib/dialog";
-import { deployPaperStrategy, PaperTradingActionError } from "./lib/paperTrading";
+import { deployPaperStrategy, fetchGeneratorModels, PaperTradingActionError, type GeneratorModelSummary } from "./lib/paperTrading";
 import {
   BacktestExecutionError,
   executeBacktest,
@@ -121,6 +121,8 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
   const [riskPerTrade, setRiskPerTrade] = useState("1");
   const [parameterValues, setParameterValues] = useState<Record<string, string | number | boolean>>({});
   const [pendingRun, setPendingRun] = useState<BacktestExecutionInput | null>(null);
+  const [generatorModels, setGeneratorModels] = useState<GeneratorModelSummary[]>([]);
+  const [selectedGeneratorModelId, setSelectedGeneratorModelId] = useState("");
   const [runBusy, setRunBusy] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [runNotice, setRunNotice] = useState<string | null>(null);
@@ -342,6 +344,10 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       if (controller.signal.aborted) return;
       setAvailableSymbols(symbols);
     }).catch(() => {});
+    fetchGeneratorModels(controller.signal).then((models) => {
+      if (controller.signal.aborted) return;
+      setGeneratorModels(models);
+    }).catch(() => {});
     return () => controller.abort();
   }, []);
 
@@ -366,6 +372,22 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
     setStrategyId(initialStrategyId);
     onInitialStrategyApplied?.();
   }, [initialStrategyId, strategies, onInitialStrategyApplied]);
+
+  const matchingGeneratorModels = generatorModels.filter(
+    (m) =>
+      m.eligible_for_paper &&
+      (!m.symbol || m.symbol === symbol.trim().toUpperCase()) &&
+      (!m.market || m.market === market) &&
+      (!m.timeframe || m.timeframe === timeframe)
+  );
+
+  useEffect(() => {
+    if (strategyId === "ml_signal_generator_v1" && matchingGeneratorModels.length > 0) {
+      if (!selectedGeneratorModelId || !matchingGeneratorModels.some((m) => m.model_id === selectedGeneratorModelId)) {
+        setSelectedGeneratorModelId(matchingGeneratorModels[0].model_id);
+      }
+    }
+  }, [strategyId, symbol, market, timeframe, matchingGeneratorModels, selectedGeneratorModelId]);
 
   const activeStrategy = strategies.find((strategy) => strategy.id === strategyId) ?? null;
   const editableParams = useMemo(() => activeStrategy ? [...activeStrategy.params, ...activeStrategy.sharedParams] : [], [activeStrategy]);
@@ -471,6 +493,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
     const risk = Number(riskPerTrade);
     if (!Number.isFinite(risk) || risk < 0.1 || risk > 10) { setRunError("Risk per trade must be between 0.1% and 10%."); return; }
     if (!activeStrategy) { setRunError("Select a strategy before running a backtest."); return; }
+    if (strategyId === "ml_signal_generator_v1" && !selectedGeneratorModelId) { setRunError("Select an eligible ML generator model before running this strategy."); return; }
     const params: Record<string, string | number | boolean> = {};
     for (const parameter of editableParams) {
       const raw = parameterValues[parameter.key] ?? parameter.default ?? (parameter.type === "bool" ? false : "");
@@ -493,6 +516,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       symbol: normalizedSymbol, market, timeframe, strategy: strategyId,
       data_segment: dataSegment, initial_capital: capital, risk_per_trade_pct: risk,
       save_to_db: true, params,
+      ...(strategyId === "ml_signal_generator_v1" ? { ml_generator_model_id: selectedGeneratorModelId } : {}),
     });
   };
 
@@ -545,6 +569,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
         <label className="screener-control-field">Market<select aria-label="Backtest market" value={market} onChange={(event) => setMarket(event.target.value as "spot" | "futures")}><option value="spot">Spot</option><option value="futures">Futures</option></select></label>
         <label className="screener-control-field">Timeframe<select aria-label="Backtest timeframe" value={timeframe} onChange={(event) => setTimeframe(event.target.value)}>{["1m", "5m", "15m", "1h", "4h", "1d"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
         <label className="screener-control-field">Strategy<select aria-label="Backtest strategy" value={strategyId} onChange={(event) => setStrategyId(event.target.value)} required>{strategies.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.displayName}</option>)}</select></label>
+        {strategyId === "ml_signal_generator_v1" && <label className="screener-control-field">ML generator model<select aria-label="ML generator model" value={selectedGeneratorModelId} onChange={(event) => setSelectedGeneratorModelId(event.target.value)} required><option value="">Select an eligible generator model</option>{matchingGeneratorModels.map((m) => <option key={m.model_id} value={m.model_id}>{m.model_id} ({m.model_type})</option>)}</select>{matchingGeneratorModels.length === 0 && <span role="alert" style={{ fontSize: "0.8rem", color: "#e53e3e" }}>No eligible generator models available for {symbol || "symbol"} {market} {timeframe}.</span>}</label>}
         <label className="screener-control-field">Data segment<select aria-label="Backtest data segment" value={dataSegment} onChange={(event) => setDataSegment(event.target.value as "full" | "train" | "holdout")}><option value="holdout">Holdout</option><option value="train">Train</option><option value="full">Full dataset</option></select></label>
         <label className="screener-control-field">Initial capital<input aria-label="Initial capital" type="number" min="100" step="100" value={initialCapital} required onChange={(event) => setInitialCapital(event.target.value)} /></label>
         <label className="screener-control-field">Risk per trade (%)<input aria-label="Risk per trade" type="number" min="0.1" max="10" step="0.1" value={riskPerTrade} required onChange={(event) => setRiskPerTrade(event.target.value)} /></label>
@@ -664,6 +689,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       {promotionPolicy?.enabled ? <div className="api-error" role="note"><div><strong>Auto-promotion is enabled</strong><p>This run may activate a paper strategy. Telegram alerts are {promotionPolicy.send_telegram ? "enabled and may send an external message" : "disabled"} in the saved policy. Acknowledge these possible side effects before running.</p></div></div> : <p className="empty-state">The saved policy currently reports auto-promotion disabled. Verify this policy remains unchanged before running; the backend is authoritative.</p>}
       <p><strong>Configuration:</strong> {[pendingRun.symbol, pendingRun.market, pendingRun.timeframe, pendingRun.strategy, pendingRun.data_segment].join(" · ")}</p>
       <p><strong>Capital / risk:</strong> {numeric.format(pendingRun.initial_capital)} / {pendingRun.risk_per_trade_pct}% per trade</p>
+      {pendingRun.ml_generator_model_id && <p><strong>Generator model:</strong> {pendingRun.ml_generator_model_id}</p>}
       {promotionPolicy?.enabled && <label className="screener-alert-toggle"><input aria-label="Acknowledge auto-promotion side effects" type="checkbox" checked={promotionSideEffectAcknowledged} onChange={(event) => setPromotionSideEffectAcknowledged(event.target.checked)} /><span><strong>I understand this backtest may activate a paper strategy and, if enabled, send a Telegram alert.</strong></span></label>}
       <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={runBusy} onClick={() => { setPendingRun(null); setPromotionSideEffectAcknowledged(false); }}>Cancel</button><button className="button button-primary" type="button" disabled={runBusy || !promotionPolicy || (promotionPolicy.enabled && !promotionSideEffectAcknowledged)} onClick={() => void confirmRun()}>{runBusy ? "Running simulation…" : "Run backtest"}</button></div>
     </section>}

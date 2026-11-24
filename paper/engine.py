@@ -29,7 +29,7 @@ from backtest.strategies import (
 from backtest.strategies.trend_alignment import HTF_TIMEFRAME
 from backtest.custom_strategy import paper_strategy_registry
 from backtest.simulate import trailing_bar
-from backtest.params import BASE_PARAMS
+from backtest.params import BASE_PARAMS, validate_param_overrides
 from backtest.accounting import calculate_position_size, calculate_trade_accounting, resolve_stop_target_exit
 from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT, PAIRS_BASE_SYMBOL
 from paper.orders import create_pending_order, fill_pending_order, list_orders, transition_order
@@ -405,6 +405,7 @@ def set_paper_config(
         params_json = None
         strategy_params_sql = "strategy_params = NULL"
     else:
+        strategy_params = validate_param_overrides(strategy_params)
         params_json = json.dumps(strategy_params)
         strategy_params_sql = "strategy_params = VALUES(strategy_params)"
 
@@ -549,7 +550,9 @@ def update_paper_deployment(config_id: int, **settings: Any) -> bool:
         if raw_val is None or raw_val == {}:
             normalized_settings["strategy_params"] = None
         elif isinstance(raw_val, dict):
-            normalized_settings["strategy_params"] = json.dumps(raw_val)
+            normalized_settings["strategy_params"] = json.dumps(
+                validate_param_overrides(raw_val)
+            )
         elif isinstance(raw_val, str):
             normalized_settings["strategy_params"] = raw_val
         else:
