@@ -43,14 +43,16 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start (Docker — Recommended for Production)
 
-Requirements: Docker Engine 24+ and Docker Compose v2+.
+Requirements: Docker Engine 24+ and Docker Compose v2.20.2+ (the optional bundled-database dependency uses `depends_on.required: false`).
 
 ```bash
 cp .env.example .env
 # Generate a 32+ char APP_SECRET_KEY and set MYSQL_ROOT_PASSWORD / MYSQL_PASSWORD in .env:
 python3 -c "import secrets; print(secrets.token_hex(32))"
 
-# Build and start MariaDB, FastAPI + Modern UI, collectors, funding poller, and outbox worker:
+# Build and start MariaDB, FastAPI + Modern UI, collectors, and the funding poller
+# (the bundled MariaDB runs because .env sets COMPOSE_PROFILES=bundled-db;
+# the Telegram outbox worker is a separate opt-in, see Settings/docs):
 docker compose up -d --build
 
 # Apply all versioned database migrations (000–035):
@@ -59,6 +61,25 @@ docker compose exec web python -m db.migrate
 # Verify liveness and readiness probes:
 curl -s http://127.0.0.1:8050/healthz
 curl -s http://127.0.0.1:8050/readyz
+```
+
+**External MySQL / MariaDB (database already running outside Docker):**
+
+If MySQL/MariaDB already runs on the host server (or another server), skip the bundled database:
+
+```bash
+# In .env:
+#   1. Remove bundled-db from COMPOSE_PROFILES (leave it empty or drop the line)
+#   2. Point the app at the external database:
+#        MYSQL_HOST=host.docker.internal   # host server; or the server's hostname/IP
+#        MYSQL_PORT=3306
+#        FUNDING_DB_HOST=host.docker.internal
+#   3. Make sure the DB users (MYSQL_USER and the dedicated FUNDING_DB_USER)
+#      may connect from the Docker network -- a grant for 'localhost' only
+#      is not enough; the server must also listen beyond localhost if the
+#      app containers should reach it via the host address.
+docker compose up -d --build
+docker compose exec web python -m db.migrate
 ```
 
 **Production HTTPS / TLS (Automatic Let's Encrypt via Caddy):**
