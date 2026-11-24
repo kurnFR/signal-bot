@@ -95,11 +95,22 @@ def _safe_http_status(status: Any) -> str:
 
 
 def is_telegram_delivery_authorized() -> bool:
-    """Returns True if global Telegram delivery is explicitly enabled."""
+    """Returns True only when Telegram delivery is authorized on BOTH layers.
+
+    The environment flag RETAILBOT2_ALLOW_TELEGRAM_DELIVERY is a hard
+    ceiling: when it is not "1", delivery is suppressed no matter what the
+    database setting says. When the ceiling is open, the database setting
+    (Settings UI, app_telegram_settings.delivery_authorized) decides if a
+    row exists; with no DB row the env flag alone decides. Every delivery
+    consumer (notifier, wallet tracker, report scheduler, outbox worker,
+    Screener) must gate on this helper so the layers can never diverge.
+    """
+    if os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() != "1":
+        return False
     db_settings = _get_db_telegram_settings()
     if db_settings and db_settings.get("delivery_authorized") is not None:
         return bool(db_settings["delivery_authorized"])
-    return os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
+    return True
 
 
 def get_telegram_config() -> Dict[str, Any]:
@@ -123,7 +134,7 @@ def get_telegram_config() -> Dict[str, Any]:
                 "token": token,
                 "chat_id": chat_id,
                 "is_configured": bool(token and chat_id),
-                "delivery_authorized": bool(db_settings.get("delivery_authorized", 0)),
+                "delivery_authorized": is_telegram_delivery_authorized(),
                 "source": "database",
             }
 
@@ -134,7 +145,7 @@ def get_telegram_config() -> Dict[str, Any]:
         "token": token,
         "chat_id": chat_id,
         "is_configured": bool(token and chat_id),
-        "delivery_authorized": os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1",
+        "delivery_authorized": is_telegram_delivery_authorized(),
         "source": "environment",
     }
 

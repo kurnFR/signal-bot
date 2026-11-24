@@ -22,6 +22,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from dotenv import load_dotenv
 
+from notifications.telegram_notifier import is_telegram_delivery_authorized
+
 load_dotenv()
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from Screen import momentum
@@ -588,7 +590,7 @@ class SmartMoneyTelegram:
 
     @property
     def delivery_authorized(self) -> bool:
-        return os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
+        return is_telegram_delivery_authorized()
 
     @staticmethod
     def _safe_http_status(exc: Exception) -> str:
