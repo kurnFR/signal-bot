@@ -5,6 +5,8 @@ import { changePassword, AuthRequestError } from "./lib/auth";
 import { fetchTelegramStatus, sendTelegramTestPing, TelegramActionError, type TelegramStatus } from "./lib/telegram";
 import { fetchAdminSystemStatus, type AdminSystemStatusResponse } from "./lib/systemStatus";
 import { AuditLogsSection } from "./components/AuditLogsSection";
+import { LicenseStatusCard } from "./components/LicenseStatusCard";
+import type { LicenseStatus } from "./lib/systemStatus";
 import {
   createUser,
   deleteUser,
@@ -22,6 +24,7 @@ interface SettingsPanelProps {
   onToggleTheme: () => void;
   username?: string;
   role?: string;
+  license?: LicenseStatus | null;
 }
 
 function trapFocus(e: React.KeyboardEvent<HTMLDialogElement>) {
@@ -51,7 +54,7 @@ function PreferenceRow({ icon, title, description, children }: { icon: ReactNode
 }
 
 /** Settings & Users panel supporting appearance, profile, password change, and full admin user management. */
-export function SettingsPanel({ theme, onToggleTheme, username, role }: SettingsPanelProps) {
+export function SettingsPanel({ theme, onToggleTheme, username, role, license }: SettingsPanelProps) {
   const isAdmin = (role ?? "").toLowerCase() === "admin";
 
   // Appearance & Session
@@ -1140,6 +1143,9 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
         <button className="button button-secondary" type="button" onClick={() => window.dispatchEvent(new CustomEvent("signal-bot:open-onboarding"))}>Launch Setup Wizard</button>
       </div>
     </section>}
+
+    {/* Commercial License & Plan (Admin Only) */}
+    {isAdmin && license && <LicenseStatusCard license={license} activeUserCount={users.filter((u) => u.is_active).length} />}
 
     {/* Admin-Only Operator Audit Logs */}
     {isAdmin && <AuditLogsSection />}

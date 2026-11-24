@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchSystemStatus, type BrandingConfig } from "./lib/systemStatus";
+import { fetchSystemStatus, type BrandingConfig, type LicenseStatus } from "./lib/systemStatus";
 import { getTokenExpiryMs, refreshSessionToken } from "./lib/auth";
 import { SystemStatusPanel } from "./SystemStatusPanel";
 import { ScreenerPanel } from "./ScreenerPanel";
@@ -130,6 +130,7 @@ export function App() {
   const wasSidebarOpen = useRef(false);
   const auth = useAuth();
   const [branding, setBranding] = useState<BrandingConfig>({ brandName: "Signal Bot", logoUrl: null });
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
   const [systemHealth, setSystemHealth] = useState<{
     status: "connected" | "degraded" | "disconnected";
     tooltip: string;
@@ -145,6 +146,7 @@ export function App() {
         const res = await fetchSystemStatus();
         if (!mounted) return;
         if (res.branding?.brandName) setBranding(res.branding);
+        if (res.license) setLicenseStatus(res.license);
         const dbOk = res.database.status === "ok";
         const heartbeatsOk = res.heartbeats.every((h) => h.status === "ok");
         if (!dbOk || !heartbeatsOk) {
@@ -340,7 +342,7 @@ export function App() {
         ) : activeView === "Master Data" ? (
           <MasterDataPanel />
         ) : activeView === "Settings" ? (
-          <SettingsPanel theme={theme} onToggleTheme={toggleTheme} username={auth?.user.username} role={auth?.user.role} />
+          <SettingsPanel theme={theme} onToggleTheme={toggleTheme} username={auth?.user.username} role={auth?.user.role} license={licenseStatus} />
         ) : null}
 
         <footer className="page-footer" style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "center" }}>
