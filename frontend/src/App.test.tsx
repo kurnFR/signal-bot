@@ -100,12 +100,12 @@ describe("frontend foundation shell", () => {
     expect(menuButton).toHaveFocus();
     expect(document.querySelector(".mobile-scrim")).not.toBeInTheDocument();
   });
-  it("changes the active navigation item to Market Screener", () => {
+  it("changes the active navigation item to Market Screener", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Market Screener/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Market Screener" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Market Screener/ })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("heading", { name: "Screener configuration" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Screener configuration" })).toBeInTheDocument();
     expect(screen.getByText(/configuration editing is restricted to admin and trader roles/i)).toBeInTheDocument();
   });
   it("describes Strategy Library management accurately", () => {
@@ -150,11 +150,11 @@ describe("frontend foundation shell", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Master Data" })).toBeInTheDocument();
     expect(screen.getByText(/DATA PIPELINE \/ CANDLES/i)).toBeInTheDocument();
   });
-  it("routes Settings to safe workspace preferences without server mutations", () => {
+  it("routes Settings to safe workspace preferences without server mutations", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Appearance" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Current session" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Change My Password" })).toBeInTheDocument();
   });
