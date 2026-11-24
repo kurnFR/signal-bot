@@ -165,9 +165,13 @@ def readyz():
                 )
         return {"status": "ready"}
     except Exception as exc:
+        # Unauthenticated probe: do not leak raw DB error text (host, port,
+        # user, access-denied details) to callers. Log it server-side and
+        # return a generic reason, matching the project's redaction pattern.
+        logger.exception("Readiness probe failed: %s", exc)
         return JSONResponse(
             status_code=503,
-            content={"status": "not_ready", "reason": str(exc)},
+            content={"status": "not_ready", "reason": "database unavailable"},
         )
 
 

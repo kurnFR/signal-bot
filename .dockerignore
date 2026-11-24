@@ -28,6 +28,11 @@ frontend/.vite/
 frontend/playwright-report/
 frontend/test-results/
 
+# Runtime-generated data (see README "Runtime data"): never ship the
+# operator's saved strategies or screener output in a fresh image
+custom_strategies.json
+Screen/signals.jsonl
+
 # Local docs, screenshots, logs & work orders
 docs/screenshots/
 *.log

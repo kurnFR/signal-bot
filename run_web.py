@@ -31,7 +31,15 @@ if __name__ == "__main__":
     from pathlib import Path
 
     db_host = os.getenv("MYSQL_HOST", "127.0.0.1")
-    db_port = int(os.getenv("MYSQL_PORT", 3306))
+    # Guarded like run_all.py's WEB_PORT parsing: a malformed MYSQL_PORT
+    # must warn and fall back, not crash the launcher with ValueError.
+    _raw_db_port = (os.getenv("MYSQL_PORT") or "").strip()
+    try:
+        _parsed_db_port = int(_raw_db_port) if _raw_db_port else 3306
+        db_port = _parsed_db_port if 1 <= _parsed_db_port <= 65535 else 3306
+    except ValueError:
+        print(f"  WARNING: Malformed MYSQL_PORT {_raw_db_port!r}; falling back to 3306")
+        db_port = 3306
     def is_port_open():
         try:
             with socket.create_connection((db_host, db_port), timeout=1):
