@@ -1,5 +1,16 @@
 # Project Progress, Completion Status, and Roadmap
 
+### Release `v1.0.1` — Production Hardening, Pro Trader Workstation & Commercial Launch — 2026-11-24
+
+**Release Tag:** [`v1.0.1`](https://github.com/kurnFR/signal-bot/releases/tag/v1.0.1) (`a498c0b`, PRs #754–#782)  
+**Runbook:** [deploy/PRODUCTION_RUNBOOK.md](../deploy/PRODUCTION_RUNBOOK.md)
+
+- **Accounting, Backtest & Funding Parity (PRs #754–#758):** Added Binance Futures 8h funding rate REST collector with HTTP 418/429 cooldown defense and typed advisory lock errors; fixed backtest negative-equity ruin floor, `TIMEOUT`/`END_OF_DATA` funding boundaries, rolling WFA fold deduplication, and `paper_positions`/`paper_trades` execution price parity.
+- **Full UI CRUD, Strategy→Paper & Telegram Hardening (PRs #767–#776):** Unified strategy-first paper controls, added `strategy_params` persistence (migration 033), unblocked `ml_signal_generator_v1` paper deployment, added `GET /api/ml/models/{model_id}` and `POST /api/wallets/poll`, unified Telegram credentials and `deliveryAuthorized` status across all 4 dispatchers, and added independent screener `telegram_enabled` control.
+- **Pro Trader Workstation & Production Packaging (PRs #777–#782):** Shipped real-time FastAPI WebSockets (`/ws/market`, `/ws/paper`, `/ws/system`), `lightweight-charts` v5 candlestick and equity/drawdown charts, multi-pane `TradingDeskPanel`, `CommandPalette` (`Cmd+K`), `OnboardingWizard`, `TermsModal`, `AuditLogsSection`, `LicenseStatusCard`, security headers, MariaDB-backed single-use WS tickets & compute rate limits (migration 035), encrypted DB-backed Telegram settings (migration 034), hardened non-root `Dockerfile` + `.dockerignore`, Caddy HTTPS/TLS overlay (`docker-compose.prod.yml`), signed `SB1` commercial licensing (`web/licensing.py` + `scripts/generate_license.py`), and live GHCR + GitHub Release automation (`v1.0.1`).
+
+---
+
 ### Production Roadmap Phase 1 & Phase 2 Verification — 2026-11-12
 
 **Master Commits:** `b89d3f1` (Phase 1), `5b24ed3` (Phase 2)  

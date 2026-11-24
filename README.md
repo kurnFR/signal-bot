@@ -1,50 +1,79 @@
 # Crypto Signal Bot
 
-A research and paper-trading platform for crypto strategies on Binance data. It collects market data, computes features, backtests 24 strategy variants with strict train/holdout discipline, runs selected strategies as paper trades with risk guards and Telegram alerts, and adds three optional signal sources: ML signal filters, a news/macro AI overlay, and on-chain wallet tracking. Everything is operated from one web dashboard.
+A production-ready quantitative research, backtesting, and paper-trading platform for crypto strategies on Binance data. It collects spot/futures market data and 8-hour funding rates, computes shared indicators, backtests 24+ strategy variants with strict train/holdout discipline, runs deployed strategies as paper trades with fail-closed circuit breakers and Telegram alerts, and integrates ML signal filters, a News/Macro AI overlay, and on-chain wallet tracking — all operated from a real-time React/TypeScript Modern UI workstation.
 
-> **Not a live-trading system.** Execution is simulated (paper). Nothing here places real orders.
+> **Not a live-trading system.** Execution is simulated (paper). Nothing here places real exchange orders (`RETAILBOT2_ALLOW_TRADING=0` by default).
 
 ## What is in the dashboard
 
-| Tab | What it does |
-|---|---|
-| Home & Overview | System summary |
-| Master Data | Symbol coverage, on-demand backfill and feature build |
-| Backtest Studio | Run one strategy or **all 24 variants** (ranked "Battle Royale"), charts, equity curve, AI insight |
-| Paper Trading | Deploy a strategy to the shadow engine, positions/trades/metrics, circuit breakers |
-| ML Forecast Studio | Train and evaluate ML signal filters, deploy a model to paper trading |
-| Strategy Library | Built-in and custom (JSON) strategies |
-| News AI Signals | LLM reading of crypto news and the macro calendar, with guarded paper execution |
-| Research Bots | `retailbot2` experimental paper bot: positions, trades, stats, start/stop |
-| Market Screener | Smart-money volume screener (`Screen/`): signals, stats, status, start/stop |
-| Wallet Tracking | Large on-chain wallet flows and a monitored-wallet activity feed |
-| Settings & Users | System status, user management (admin) |
+The **Modern React/TypeScript UI** (`frontend/`) is served by default at `/` (and `/modern/*`) whenever `frontend/dist` is built (set `SIGNAL_BOT_USE_MODERN_UI=0` to revert to the legacy static dashboard). Press **`Cmd+K` / `Ctrl+K`** anywhere to open the **Command Palette**.
+
+| View | URL | What it does |
+|---|---|---|
+| Overview | `/modern/overview` | Live system health, MariaDB status, and collector heartbeats |
+| Trading Desk | `/modern/trading-desk` | Multi-pane Pro Trader workstation with interactive `lightweight-charts`, live WebSocket tickers/PnL, funding/OI microstructure strip, execution blotter, and portfolio risk desk |
+| Market Screener | `/modern/market-screener` | Smart-money volume screener (`Screen/`): live signals, chart inspection, independent Telegram alert toggle, and role-gated detection overrides |
+| Paper Trading | `/modern/paper-trading` | Deploy strategies (built-in, custom/AI, ML generator), manage active positions/orders/blotter, funding PnL accounting, portfolio risk desk, and fail-closed circuit breakers |
+| Strategy Library | `/modern/strategy-library` | Built-in, RetailBot2, and custom JSON/AI strategies with quick-test and one-click send to Backtest or Paper Trading |
+| Wallet Tracking | `/modern/wallet-tracking` | On-chain whale wallet tracking, token flow monitor, manual poll trigger, and per-wallet Telegram alerts |
+| Backtest Studio | `/modern/backtest-studio` | Single-strategy runs, **Run All** benchmark, **Walk-Forward Analysis**, synchronized Equity & Underwater Drawdown charts, AI quantitative insights, and Deploy to Paper |
+| ML Studio | `/modern/ml-studio` | Purged-split ML signal filter tournaments, saved model inspection, drift/retraining status, and eligible deploy-to-paper |
+| Research | `/modern/research` | Historical RetailBot2 Shadow and Inverse results |
+| News AI | `/modern/news-ai` | Crypto news sentiment scoring, macroeconomic calendar events, and guarded paper execution |
+| Master Data | `/modern/master-data` | Historical OHLCV candle and feature coverage, on-demand backfill, and feature pipeline jobs |
+| Settings | `/modern/settings` | Appearance, password & session security, Admin User/Role management, **Encrypted DB-backed Telegram Config & Test Ping**, **Commercial License & Plan status**, **Operator Audit Logs (CSV export)**, and **Onboarding Setup Wizard** |
 
 ### Strategy workflow
 
-In the Modern UI, select a built-in, RetailBot2 variant, or saved custom/AI strategy in **Strategy Library**. Use **Backtest Studio** for historical evaluation, then **Deploy to Paper** to choose a pair, market, timeframe, capital and risk. Paper deployments have separate controls for new entries, telegram trade alerts and reporting. Archiving stops new entries and cancels pending orders. Open positions can still reach their normal exits.
-
-**Paper Trading → Performance report filters** compares realized results by pair, strategy, market, timeframe, and period. Realized equity uses the deployment’s current capital allocation plus its all-time net closed P&L. Period filters affect P&L and trade statistics. Execution on an exchange is manual.
-
-For CMS, apply migration **032** using the configured migration account before restarting services. Configure the supervisor with `PAPER_REPORT_ENABLED=1` for the independent hourly paper report and the existing authorized Telegram outbox (delivery, worker, and enqueue settings). If the supervisor uses `--only`, include `paper_report` alongside the supervised services already selected. Keep real-money trading disabled and use `RETAILBOT2_ENABLED=0` when moving exclusively to Paper Trading. Review remaining legacy open research positions before stopping that worker. Historic Shadow/Inverse results remain available in **Research**.
+Select a built-in, RetailBot2 variant, ML generator, or saved custom/AI strategy in **Strategy Library**. Evaluate it in **Backtest Studio** (train/holdout split, walk-forward, equity/drawdown charts), then click **Deploy to Paper** to configure symbol, market, timeframe (`15m`, `1h`, `4h`, `1d`), capital, risk %, and strategy parameter overrides (`strategy_params`). Paper deployments have independent controls for active entries, Telegram trade alerts (entry + close), and reporting. Archiving stops new entries and cancels pending orders while allowing open positions to reach normal exits.
 
 ## How it fits together
 
 ```
-Binance REST/WS ─▶ collectors ─▶ MySQL/MariaDB ─▶ features ─▶ backtest engine ─┐
-                                                                  │            │
-                       news / calendar / on-chain APIs            ▼            ▼
-                                  │                       paper engine ◀─ ML filters
-                                  ▼                              │
-                        News AI · Wallet Tracker                 ▼
-                                  └────────────▶ FastAPI + web UI ──▶ Telegram
+Binance REST/WS ─▶ collectors & funding_poller ─▶ MariaDB 10.11 ─▶ features ─▶ backtest engine ─┐
+                                                                                    │            │
+                         news / calendar / on-chain APIs                            ▼            ▼
+                                    │                                       paper engine ◀─ ML filters
+                                    ▼                                              │
+                          News AI · Wallet Tracker                                 ▼
+                                    └──────────────────▶ FastAPI (REST + /ws/*) ──▶ React Modern UI & Telegram
 ```
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Quick start
+## Quick start (Docker — Recommended for Production)
 
-Requirements: Python 3.11 (what CI uses) and MySQL or MariaDB.
+Requirements: Docker Engine 24+ and Docker Compose v2+.
+
+```bash
+cp .env.example .env
+# Generate a 32+ char APP_SECRET_KEY and set MYSQL_ROOT_PASSWORD / MYSQL_PASSWORD in .env:
+python3 -c "import secrets; print(secrets.token_hex(32))"
+
+# Build and start MariaDB, FastAPI + Modern UI, collectors, funding poller, and outbox worker:
+docker compose up -d --build
+
+# Apply all versioned database migrations (000–035):
+docker compose exec web python -m db.migrate
+
+# Verify liveness and readiness probes:
+curl -s http://127.0.0.1:8050/healthz
+curl -s http://127.0.0.1:8050/readyz
+```
+
+**Production HTTPS / TLS (Automatic Let's Encrypt via Caddy):**
+
+```bash
+SIGNAL_BOT_DOMAIN=desk.yourdomain.com \
+SIGNAL_BOT_ALLOWED_ORIGINS=https://desk.yourdomain.com \
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+See [deploy/PRODUCTION_RUNBOOK.md](deploy/PRODUCTION_RUNBOOK.md) for backup/restore, commercial license key minting (`scripts/generate_license.py`), and tagged GHCR releases (`v*.*.*`).
+
+## Quick start (Local Development)
+
+Requirements: Python 3.11+, Node.js 20+, and MariaDB 10.11 / MySQL.
 
 ```bash
 python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
@@ -52,129 +81,105 @@ pip install -r requirements.txt
 cp .env.example .env        # set MYSQL_* credentials; the rest is optional
 ```
 
-**1. Create / upgrade the database.** One command does it, for fresh installs and upgrades alike. It creates the database if missing, applies `schema.sql` plus every migration in order, records each in `schema_migrations`, and is safe to re-run:
+**1. Create / upgrade the database:**
 
 ```bash
-python -m db.migrate            # apply everything pending
-python -m db.migrate --status   # applied / pending / changed
-python -m db.migrate --dry-run  # show what would run
+python -m db.migrate            # apply all pending migrations (000–035)
+python -m db.migrate --status   # inspect applied / pending / changed
+python -m db.migrate --dry-run  # preview without mutating schema
 ```
 
-`run_all.py` does **not** apply migrations automatically by default. Keep schema changes in a separately authorized deployment step. To explicitly opt in to automatic supervisor-startup migrations, set `SIGNAL_BOT_AUTO_MIGRATE=1`; `SKIP_DB_MIGRATE=1` remains a supported override. An existing hand-migrated database is adopted: already-present columns are tolerated and recorded as `applied-idempotent`.
+`run_all.py` does **not** apply migrations automatically by default (`SIGNAL_BOT_AUTO_MIGRATE=1` to opt in; `SKIP_DB_MIGRATE=1` to force skip).
 
-**2. Load history** (default 5 years for BTC/ETH/BNB on 15m, 1h, 4h, 1d; safe to re-run, it upserts):
+**2. Build the Modern UI (or run Vite dev server):**
+
+```bash
+cd frontend && npm ci && npm run build && cd ..
+# Or for hot-reload dev at http://127.0.0.1:5173 (proxies /api and /ws to :8050):
+# cd frontend && npm run dev
+```
+
+**3. Load history & build features:**
 
 ```bash
 python -m collectors.backfill_klines                 # add --symbol/--timeframe/--years to test small
-python -m features.build_features                    # indicators used by backtest and paper
+python -m features.build_features                    # indicators shared by backtest and paper
 ```
 
-**3. Start the safe Phase 2A default process set:**
+**4. Start the safe Phase 2A default process set:**
 
 ```bash
 python3 run_all.py                 # starts web_server, collectors, screener, wallet_tracker
 python3 run_all.py --skip screener # omit the screener
 ```
 
-The paper engine and News AI are held back by default. Enable each only when explicitly intended:
+Optional execution workers require explicit opt-in flags:
 
 ```bash
 PAPER_ENGINE_ENABLED=1 python3 run_all.py --only paper_engine
 NEWS_AI_ENABLED=1 python3 run_all.py --only news_ai
+RETAILBOT2_ENABLED=1 python3 run_all.py --only retailbot2  # requires RETAILBOT2_ALLOW_TRADING=1 to trade
 ```
 
-RetailBot2 is also excluded by default because it can create or update paper trades. Enable it only when explicitly intended:
+Standalone funding collector: `python collectors/funding_poller.py`.  
+Outbox worker: requires `RETAILBOT2_OUTBOX_WORKER_ENABLED=1` and `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1` (or DB-backed Telegram authorization via **Settings**).
 
-```bash
-RETAILBOT2_ENABLED=1 python3 run_all.py --only retailbot2
-```
+**5. Log in.** On first start, an admin account is seeded (`ADMIN_DEFAULT_PASSWORD` or a random one-time password written to `.initial_admin_credential`, mode `0600`). First login enforces password rotation and Terms & Risk Disclaimer acceptance, with an optional **Onboarding Setup Wizard**. See [docs/SECURITY.md](docs/SECURITY.md).
 
-Enabling RetailBot2 starts the process with trading disabled by default. Trade execution requires independent, explicit authorization:
-
-```bash
-RETAILBOT2_ALLOW_TRADING=1
-```
-
-The outbox worker is a separate opt-in. It requires both `RETAILBOT2_OUTBOX_WORKER_ENABLED=1` and `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`; enabling RetailBot2 alone does not enable trading, Telegram delivery, or the worker. The Telegram delivery flag is a shared authorization gate for multiple Telegram sender components, not an outbox-only switch. Do not set it until delivery from the relevant components has been separately reviewed and authorized.
-
-Open `http://localhost:8050`. `run_all.py --help` lists the currently available `--skip` / `--only` choices. Paper Engine, News AI, and RetailBot2 are available as supervisor choices only when their respective `PAPER_ENGINE_ENABLED=1`, `NEWS_AI_ENABLED=1`, and `RETAILBOT2_ENABLED=1` flags are set. To run one piece by hand: `run_web.py`, `run_collectors.py`, `run_paper_engine.py`, `run_news_ai.py`, `run_wallet_tracker.py`. For production deployment, process supervision details, failure recovery, and rollback procedures, see [docs/DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md](docs/DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md).
-
-**4. Log in.** On first start an admin account is created. Use `ADMIN_DEFAULT_PASSWORD` if you set it; otherwise a random one-time password is written to `.initial_admin_credential` (mode 0600). Accounts flagged `must_change_password` are blocked from other API actions until the password is changed, and the dashboard shows a blocking dialog. See [docs/SECURITY.md](docs/SECURITY.md).
-
-### Verify an existing server after a pull
-
-From the repository root with the server's virtual environment active, record the deployed revision, then update the checkout and inspect the migration plan:
-
-```bash
-git rev-parse HEAD
-git pull --ff-only
-git rev-parse HEAD
-python -m pip install -r requirements.txt
-python -m db.migrate --status
-python -m db.migrate --dry-run
-```
-
-If you serve the modern dashboard, run `(cd frontend && npm ci && npm run build)` before restarting the web service. The default listener is `127.0.0.1:8050`. Set `SIGNAL_BOT_HOST` explicitly if a reverse proxy on another host needs to reach it. Review any pending migrations against a restored copy of your database before applying them. Use the deployment runbook for restart and rollback.
-
-After restart, a credential-free request to `/api/system/status` should return 401. Sign in and verify database status, collector heartbeats, and the latest candle timestamps for the markets and timeframes you use. Run the full test suite against a disposable database because its integration tests create and remove fixture data.
-
-### Command-line research tools
+### Command-line research & licensing tools
 
 ```bash
 python -m backtest.run_backtest --symbol BTCUSDT --timeframe 1d --market spot
 python -m backtest.report --symbol ETHUSDT --timeframe 1d --strategy confluence_ensemble_v1
 python -m backtest.walk_forward --symbol ETHUSDT --timeframe 1d --strategy confluence_ensemble_v1 --folds 4
 python -m backtest.run_holdout_check --symbol ETHUSDT --timeframe 1d --strategy confluence_ensemble_v1 --confirm
-```
 
-See [docs/STRATEGIES.md](docs/STRATEGIES.md) for the validation workflow (the holdout check is single-use by design).
+# Mint or verify a commercial SB1 license key:
+python scripts/generate_license.py --customer "Acme Quant Desk" --tier pro --max-users 10 --days 365
+python scripts/generate_license.py --verify "SB1...."
+```
 
 ## Configuration
 
-`.env` (see `.env.example` for every key). The ones you will most likely set:
+See `.env.example` for every supported key. Key production settings:
 
 | Need | Keys |
 |---|---|
-| Database | `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE` |
-| Telegram alerts | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
-| Futures data | `ENABLE_FUTURES=true` (default `false`; Binance futures WebSockets are geo-restricted in some countries) |
-| News AI | `CRYPTOPANIC_API_KEY`, `FINNHUB_API_KEY`, and one LLM provider (`LLM_PROVIDER`, plus its key) |
-| Web origins | `SIGNAL_BOT_ALLOWED_ORIGINS` (defaults to localhost:8050) |
-| Paper entry timing | `PAPER_ENTRY_MAX_DELAY_SECONDS` (default 120; late/missed candle opens are skipped) |
+| Database | `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE` |
+| Production security | `SIGNAL_BOT_ENV=production`, `APP_SECRET_KEY` (required, ≥32 chars), `SIGNAL_BOT_ALLOWED_ORIGINS`, `ACCESS_TOKEN_EXPIRE_SECONDS` (default `3600` in prod) |
+| Commercial licensing & branding | `SIGNAL_BOT_LICENSE_KEY`, `SIGNAL_BOT_LICENSE_SIGNING_KEY`, `SIGNAL_BOT_BRAND_NAME`, `SIGNAL_BOT_LOGO_URL` |
+| HTTPS / TLS overlay | `SIGNAL_BOT_DOMAIN` (used by `docker-compose.prod.yml` + `deploy/Caddyfile`) |
+| Telegram alerts | Configurable in **Settings** (encrypted DB `app_telegram_settings`) or env fallback (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`) |
+| Futures & paper risk | `ENABLE_FUTURES=True`, `PAPER_ENTRY_MAX_DELAY_SECONDS=120`, `PAPER_MAX_CONCURRENT_POSITIONS=5`, `PAPER_MAX_DAILY_LOSS_USD=500`, `PAPER_MAX_TOTAL_NOTIONAL_USD=25000` |
+| News AI | `CRYPTOPANIC_API_KEY`, `FINNHUB_API_KEY`, `ANTHROPIC_API_KEY` / `LLM_PROVIDER` |
 
 ## Documentation
 
 | Doc | Read it for |
 |---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data model, engineering rules, API map |
-| [docs/STRATEGIES.md](docs/STRATEGIES.md) | The 12 strategies, validation workflow, validated results, adding a strategy |
-| [docs/ML.md](docs/ML.md) | ML signal-filter pipeline and how to run an experiment |
+| [deploy/PRODUCTION_RUNBOOK.md](deploy/PRODUCTION_RUNBOOK.md) | Production Docker & Caddy TLS quickstart, backup/restore, licensing CLI, and `v*.*.*` GHCR releases |
+| [frontend/README.md](frontend/README.md) | React/TypeScript Modern UI architecture, dev server, testing, and production build |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Processes, data flow, MariaDB schema (000–035), REST + WebSocket API map, engineering rules |
+| [docs/SECURITY.md](docs/SECURITY.md) | Authentication, RBAC, security headers, durable WS tickets, rate limits, Telegram boundaries, licensing |
+| [docs/STRATEGIES.md](docs/STRATEGIES.md) | Strategy library, validation workflow, validated holdout results, adding a strategy |
+| [docs/ML.md](docs/ML.md) | ML signal-filter pipeline, purged splits, and tournament workflow |
 | [docs/NEWS_AI.md](docs/NEWS_AI.md) | News and macro-calendar AI overlay |
-| [docs/WALLET_TRACKER.md](docs/WALLET_TRACKER.md) | On-chain wallet tracking: how it works, settings, limits |
-| [docs/SECURITY.md](docs/SECURITY.md) | Authentication, roles, hardening notes |
-| [docs/STATUS.md](docs/STATUS.md) | What is implemented, and the verified open gaps |
-| [docs/PROJECT_PROGRESS.md](docs/PROJECT_PROGRESS.md) | Progress summary, completion status, and prioritized roadmap |
-| [docs/DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md](docs/DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md) | Production operations, startup, verification, and rollback runbook |
-| [docs/PHASE_1_AND_PHASE_2_EXECUTION_AND_REVIEW_REPORT.md](docs/PHASE_1_AND_PHASE_2_EXECUTION_AND_REVIEW_REPORT.md) | Production readiness roadmap: Phase 1 & 2 execution, hardening, and QA review report |
+| [docs/WALLET_TRACKER.md](docs/WALLET_TRACKER.md) | On-chain wallet tracking, settings, and limits |
+| [docs/STATUS.md](docs/STATUS.md) | Implemented production capabilities and remaining research/cost-realism notes |
+| [docs/DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md](docs/DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md) | Bare-metal supervisor startup, verification, and rollback procedures |
 
 ## Tests
 
 ```bash
-python -m pytest -q        # CI runs this on Python 3.11
+# Backend suite
+python -m pytest -q
+
+# Frontend typecheck, unit tests, and production build
+cd frontend && npm run typecheck && npm test && npm run build
 ```
 
 MariaDB integration tests are opt-in: `WALLET_TRACKER_MARIADB_TESTS=1` with a disposable database.
 
 ## Runtime data
 
-`custom_strategies.json` (saved custom strategies) and `Screen/signals.jsonl` (screener output) are runtime data, not source. Ignore rules are now present, but these paths remain tracked in Git until a separate untracking change is made.
-
-**Do not pull or merge a commit that removes these tracked paths on a machine with valuable local data until you have backed up both files.** The safest local procedure is to stop the application, make and verify a backup outside the repository, then run:
-
-```bash
-git rm --cached custom_strategies.json Screen/signals.jsonl
-git add .gitignore
-git commit -m "Stop tracking runtime data"
-```
-
-`git rm --cached` removes the index entries while keeping the working files in place. The ignore rules prevent them from being re-added accidentally. Verify both files still exist and contain the expected data before restarting the application. This repository change only adds ignore rules and documentation; it does not delete or untrack either file.
+`custom_strategies.json` (saved custom strategies) and `Screen/signals.jsonl` (screener output) are runtime data, not source. Always back up both files outside the repository before running `git rm --cached custom_strategies.json Screen/signals.jsonl` on an existing server.
