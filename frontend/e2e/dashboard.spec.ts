@@ -56,6 +56,9 @@ async function mockApi(page: Page, options: { expiredScreener?: boolean; expired
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ configured: true, chatId: "-100123456789", hasToken: true }) });
       return;
     }
+    if (path === "/api/auth/audit-logs") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
+    }
     if (path === "/api/users") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ users: [] }) });
       return;

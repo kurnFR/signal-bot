@@ -13,7 +13,7 @@ export class AuthRequestError extends Error {
   constructor(readonly status: number, message: string) { super(message); this.name = "AuthRequestError"; }
 }
 
-const AUTH_PATHS = new Set(["/api/auth/login", "/api/auth/logout", "/api/auth/change-password", "/api/auth/accept-terms"]);
+const AUTH_PATHS = new Set(["/api/auth/login", "/api/auth/logout", "/api/auth/change-password", "/api/auth/accept-terms", "/api/auth/refresh"]);
 
 export async function acceptTerms(): Promise<void> {
   await apiRequest("/api/auth/accept-terms", { method: "POST" });
@@ -106,5 +106,34 @@ export async function changePassword(oldPassword: string, newPassword: string): 
     try { window.localStorage.removeItem("token"); } catch { /* Continue to reset in-memory auth state. */ }
     window.dispatchEvent(new Event("signal-bot:session-expired"));
     throw new AuthRequestError(500, "Password changed, but the renewed session could not be stored. Sign in again.");
+  }
+}
+
+
+export function getTokenExpiryMs(token: string | null): number | null {
+  if (!token || !token.includes(".")) return null;
+  try {
+    const payloadB64 = token.split(".", 1)[0].replaceAll("-", "+").replaceAll("_", "/");
+    const pad = "=".repeat((4 - (payloadB64.length % 4)) % 4);
+    const decoded = JSON.parse(window.atob(payloadB64 + pad)) as { exp?: unknown };
+    return typeof decoded.exp === "number" && Number.isFinite(decoded.exp) ? decoded.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function refreshSessionToken(): Promise<string | null> {
+  const token = tokenFromStorage();
+  if (!token) return null;
+  try {
+    const payload = await authPost<{ token?: unknown }>("/api/auth/refresh");
+    if (typeof payload.token === "string" && payload.token.trim()) {
+      const nextToken = payload.token.trim();
+      window.localStorage.setItem("token", nextToken);
+      return nextToken;
+    }
+    return null;
+  } catch {
+    return null;
   }
 }

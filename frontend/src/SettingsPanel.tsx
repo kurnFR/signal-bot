@@ -4,6 +4,7 @@ import { ApiError, apiRequest } from "./lib/api";
 import { changePassword, AuthRequestError } from "./lib/auth";
 import { fetchTelegramStatus, sendTelegramTestPing, TelegramActionError, type TelegramStatus } from "./lib/telegram";
 import { fetchAdminSystemStatus, type AdminSystemStatusResponse } from "./lib/systemStatus";
+import { AuditLogsSection } from "./components/AuditLogsSection";
 import {
   createUser,
   deleteUser,
@@ -1139,5 +1140,8 @@ export function SettingsPanel({ theme, onToggleTheme, username, role }: Settings
         <button className="button button-secondary" type="button" onClick={() => window.dispatchEvent(new CustomEvent("signal-bot:open-onboarding"))}>Launch Setup Wizard</button>
       </div>
     </section>}
+
+    {/* Admin-Only Operator Audit Logs */}
+    {isAdmin && <AuditLogsSection />}
   </div>;
 }

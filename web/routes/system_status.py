@@ -10,6 +10,7 @@ import json
 from web.routes.settings import collect_system_status
 from db.db import get_pool, _owned_cursor
 from web.auth import require_admin
+from web.licensing import get_branding_config, verify_license_key
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -39,4 +40,6 @@ def get_public_system_status():
             "mode": limiter.get("mode", "unknown"),
             "degraded": bool(limiter.get("degraded", True)),
         },
+        "branding": get_branding_config(),
+        "license": verify_license_key(),
     }
