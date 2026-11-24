@@ -4,6 +4,7 @@ import logging
 import os
 import time
 
+from notifications.telegram_notifier import is_telegram_delivery_authorized
 from paper.retailbot2 import BotConfig, DatabaseManager, TelegramAlert
 
 logger = logging.getLogger(__name__)
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 def queue_current_hour(database: DatabaseManager, now: float) -> bool:
     """Use a durable hourly key so supervisor restarts cannot duplicate reports."""
-    if os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() != "1":
+    if not is_telegram_delivery_authorized():
         return False
     hour = int(now) // 3600
     return database.enqueue_telegram_outbox_event(

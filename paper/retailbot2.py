@@ -38,6 +38,8 @@ from enum import Enum
 import warnings
 import ccxt
 import mysql.connector
+
+from notifications.telegram_notifier import is_telegram_delivery_authorized
 from mysql.connector import pooling
 import logging
 import time
@@ -669,9 +671,7 @@ class TelegramAlert:
         if allow_global is not None:
             self.global_authorized = bool(allow_global)
         else:
-            self.global_authorized = (
-                os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
-            )
+            self.global_authorized = is_telegram_delivery_authorized()
 
         # Direct delivery authorization (prohibited by default; requires BOTH flags)
         direct_flag = (

@@ -38,6 +38,7 @@ from paper.retailbot2 import (
     format_entry_message,
     format_exit_message,
 )
+from notifications.telegram_notifier import is_telegram_delivery_authorized
 from paper.outbox_transport import (
     DELIVERY_UNKNOWN_MARKER,
     DELIVERY_UNKNOWN_PREFIX,
@@ -1230,7 +1231,7 @@ def main():
     # 2. Worker daemon execution branch
     allowed = ALLOWED_PROD_DATABASES if args.database == "crypto_signals" else ALLOWED_TEST_DATABASES
     if args.database == "crypto_signals" and not args.observation:
-        if os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY") != "1":
+        if not is_telegram_delivery_authorized():
             logger.error("Production outbox requires RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1")
             sys.exit(1)
 
