@@ -38,6 +38,13 @@ Crypto Signal Bot is an institutional quantitative trading, backtesting, paper e
    curl -s http://127.0.0.1:8050/healthz
    curl -s http://127.0.0.1:8050/readyz
    ```
+5. **Production HTTPS / TLS (Automatic Let's Encrypt via Caddy):**
+   ```bash
+   SIGNAL_BOT_DOMAIN=desk.yourdomain.com \
+   SIGNAL_BOT_ALLOWED_ORIGINS=https://desk.yourdomain.com \
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+   ```
+   This binds port `8050` to loopback only and terminates HTTPS + WebSocket upgrades via `deploy/Caddyfile`.
 
 ---
 

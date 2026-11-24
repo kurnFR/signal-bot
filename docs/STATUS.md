@@ -1,24 +1,22 @@
 # Status
 
-What exists and works today, and the known gaps. Reconciled against current `master` on 2026-11-03; historical verification claims should still be checked against the latest CI and runtime evidence. Keep this file short: when a gap is fixed, delete the line; when you add a capability, add one row. Do not add dated reviews or history here (use pull-request descriptions).
+What exists and works today, and the known caveats. Reconciled against `master` at **Release `v1.0.1`** (`a498c0b`, PRs #754–#782) on **2026-11-24**.
 
-## 1. Implemented
+## 1. Implemented (Production-Ready `v1.0.1`)
 
 | Area | What exists | Where |
 |---|---|---|
-| Data pipeline | Historical backfill and live collectors for klines, funding, open interest, liquidations (BTC/ETH/BNB; 15m, 1h, 4h, 1d); shared feature builder | `collectors/`, `features/` |
-| Backtesting | One execution engine, shared accounting with configurable per-side fee/slippage assumptions, funding and position sizing; 24 strategy variants; metrics, equity, PnL report; read-only training-segment cost sensitivity report | `backtest/`, [cost sensitivity](BACKTEST_COST_SENSITIVITY.md) |
-| Validation | Train/holdout split, single-use holdout check, walk-forward, optimizer, ranked "run all" screening | [STRATEGIES.md](STRATEGIES.md) |
-| Paper trading | Shadow engine, shared accounting, idempotent syncs, circuit breakers that fail closed, Telegram alerts, backtest/paper parity tests | `paper/`, `notifications/` |
-| ML filters | Purged chronological and walk-forward evaluation, execution-aware tournament, versioned artifacts, verified paper inference, online retraining gates, deploy-to-paper | [ML.md](ML.md) |
-| News AI | News and calendar ingest, structured LLM reasoning, guarded paper execution | [NEWS_AI.md](NEWS_AI.md) |
-| Wallet tracking | Swap scanner, candidates, token flow, quality-gated follow with expiry, live feed, Telegram alerts, single-instance lock | [WALLET_TRACKER.md](WALLET_TRACKER.md) |
-| Research bots | `retailbot2` and the smart-money volume screener (experimental, own tables); RetailBot2 has DB-backed per-strategy evaluation/paper/Telegram/report controls, fail-closed restored exit alerts, lifecycle DB-outage fail-closed behavior, dual-gate trading authorization, safe migration 028 control defaults, observation-only dominance, and regression coverage | `paper/retailbot2.py`, `web/routes/research_routes.py`, `Screen/`, [lifecycle spec](UI_MANAGED_STRATEGY_PROMOTION.md), [Phase 1-2 Report](PHASE_1_AND_PHASE_2_EXECUTION_AND_REVIEW_REPORT.md) |
-| Main paper strategy management | Dashboard can add/update any registered executable Strategy Library strategy; deployment validates strategy, market, and timeframe before side effects. Telegram alerts are separately controlled and default off. | `web/routes/paper_routes.py`, dashboard paper view |
-| Web and security | FastAPI app, central fail-closed authentication, three roles, token revocation, audit log, login rate limiting, random first-admin password, ML experiment path containment | [SECURITY.md](SECURITY.md) |
-| Operations | `run_all.py` supervisor with restart backoff; strict Phase 2A default process set; fail-closed migration execution; CI on Python 3.11 including MariaDB integration; deployment and rollback procedures | `.github/workflows/`, [DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md](DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md), [Phase 1-2 Report](PHASE_1_AND_PHASE_2_EXECUTION_AND_REVIEW_REPORT.md) |
+| Data pipeline & funding | Historical backfill, supervised live collectors (`run_collectors.py`), advisory-locked Binance Futures 8h funding rate poller (`funding_poller.py`) with HTTP 418/429 cooldown defense; shared feature builder | `collectors/`, `features/` |
+| Backtesting & math | Single execution engine (`simulate.py`), shared accounting (`accounting.py`), bankruptcy ruin floor (`equity.py`), fold-deduplicated walk-forward (`walk_forward.py`), accurate funding exit boundaries, holdout validation, cost sensitivity | `backtest/`, [cost sensitivity](BACKTEST_COST_SENSITIVITY.md) |
+| Paper trading | Shadow engine with persisted `strategy_params` overrides (migration 033), settled futures funding accrual, entry + position-close Telegram alerts, fail-closed circuit breakers, and backtest/paper parity tests | `paper/`, `notifications/` |
+| Pro Trader Modern UI | React 19 + TypeScript SPA served by default at `/` & `/modern/*` across 12 views (including `/modern/trading-desk`), `lightweight-charts` v5, WebSocket live streams (`/ws/market`, `/ws/paper`, `/ws/system`), Command Palette (`Cmd+K`), Onboarding Wizard, Audit Logs viewer, and Commercial License card | `frontend/`, [frontend/README.md](../frontend/README.md) |
+| ML filters | Purged chronological and walk-forward evaluation, execution-aware tournament, versioned artifacts, `GET /api/ml/models/{model_id}`, verified paper inference, `ml_signal_generator_v1` paper deploy | [ML.md](ML.md) |
+| News AI & Wallet tracking | News/macro LLM overlay with guarded paper execution; on-chain swap scanner, rankings, `POST /api/wallets/poll`, and per-wallet Telegram alerts | [NEWS_AI.md](NEWS_AI.md), [WALLET_TRACKER.md](WALLET_TRACKER.md) |
+| Smart Money Screener | Volume/momentum detector with independent `telegram_enabled` override and pause confirmation | `Screen/`, `web/routes/research_routes.py` |
+| Security & compliance | Fail-closed RBAC, HTTP security headers (CSP/HSTS/`X-Frame-Options`), CORS `PATCH`, 1h prod token TTL + silent refresh, MariaDB-backed single-use WS tickets & compute rate limits (migration 035), Fernet-encrypted DB Telegram settings (migration 034), Terms acceptance, and immutable Operator Audit Logs | [SECURITY.md](SECURITY.md) |
+| Commercial packaging & CI/CD | Hardened multi-stage non-root `Dockerfile` + `.dockerignore`, `docker-compose.yml`, Caddy HTTPS/TLS overlay (`docker-compose.prod.yml`), signed `SB1` license keys + `scripts/generate_license.py`, white-label branding, and automated GHCR + GitHub Release pipeline (`release.yml`) | `deploy/PRODUCTION_RUNBOOK.md`, `web/licensing.py`, `.github/workflows/` |
 
-Verified by current route-policy tests: all registered API operations require authentication except login; the viewer role is denied registered mutations; unknown/unclassified GET routes fail closed while unregistered URLs retain FastAPI's normal 404. The current master snapshot `93699dfd` passed all five required PR-head checks for PR #669 and all four post-merge checks. PRs #659–#669 hardened verified model loading, purged time splits, retraining result/artifact contracts, experiment dashboard fields, and no-follow manifest reads. This does not establish live-server acceptance or deployment readiness.
+**Release Evidence:** Release [`v1.0.1`](https://github.com/kurnFR/signal-bot/releases/tag/v1.0.1) (`a498c0b`) passed all backend (`Test`, `tests`, `RetailBot accounting regression`), frontend (`Frontend foundation`), and `Release & Container Publish` workflows and published the GHCR Docker image with deployment assets.
 
 ## 2. Known gaps
 
