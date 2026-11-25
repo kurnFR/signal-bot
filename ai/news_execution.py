@@ -41,6 +41,7 @@ import sys
 import os
 import time
 from db.service_control import pause_gate
+from db.news_ai_control import get_effective_settings
 import argparse
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -172,8 +173,9 @@ def process_signal(signal):
         return False
 
     opened_today = count_news_trades_opened_today(STRATEGY_NAME)
-    if opened_today >= NEWS_AI_MAX_TRADES_PER_DAY:
-        logger.info(f"{symbol}: signal #{signal['id']} skipped -- daily cap reached ({opened_today}/{NEWS_AI_MAX_TRADES_PER_DAY})")
+    max_trades_per_day = get_effective_settings()["max_trades_per_day"]
+    if opened_today >= max_trades_per_day:
+        logger.info(f"{symbol}: signal #{signal['id']} skipped -- daily cap reached ({opened_today}/{max_trades_per_day})")
         mark_news_signal_acted(signal["id"], skip_reason="daily_cap_reached")
         return False
 
