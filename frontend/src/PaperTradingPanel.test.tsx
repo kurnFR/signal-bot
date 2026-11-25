@@ -814,4 +814,46 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
       is_active: false,
     });
   });
+
+  it("supports per-strategy batch pause/resume and manual market tick sync", async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, username: "trader_alice", role: "trader", is_active: true },
+      logout: vi.fn(),
+      logoutError: null,
+    });
+    let batchBody: unknown = null;
+    let syncCalled = false;
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      if (path === "/api/paper/configs/batch" && method === "POST") {
+        batchBody = JSON.parse(String(init?.body));
+        return Promise.resolve(json({ status: "success", strategy: "demo_strategy", action: "pause_all", updated: 1 }));
+      }
+      if (path === "/api/paper/sync" && method === "POST") {
+        syncCalled = true;
+        return Promise.resolve(json({ status: "success", results: { evaluated: 1 } }));
+      }
+      const payload = baseFixture[path as keyof typeof baseFixture];
+      return Promise.resolve(payload ? json(payload) : json({ detail: "Unexpected route" }, 404));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PaperTradingPanel />);
+    expect(await screen.findByRole("heading", { name: "Strategy configurations" })).toBeInTheDocument();
+
+    const pauseAllBtn = screen.getByRole("button", { name: "Pause all demo_strategy pairs" });
+    const resumeAllBtn = screen.getByRole("button", { name: "Resume all demo_strategy pairs" });
+    expect(pauseAllBtn).not.toBeDisabled();
+    expect(resumeAllBtn).toBeDisabled();
+
+    fireEvent.click(pauseAllBtn);
+    await waitFor(() => expect(batchBody).toEqual({ strategy_name: "demo_strategy", action: "pause_all" }));
+    expect(await screen.findByText(/Paused 1 pair\(s\) for strategy demo_strategy\./i)).toBeInTheDocument();
+
+    const syncBtn = screen.getByRole("button", { name: /Sync now/i });
+    fireEvent.click(syncBtn);
+    await waitFor(() => expect(syncCalled).toBe(true));
+    expect(await screen.findByText(/Paper trading market tick synced and evaluated\./i)).toBeInTheDocument();
+  });
 });
