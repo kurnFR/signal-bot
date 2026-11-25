@@ -14,6 +14,7 @@ import aiohttp
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import SYMBOLS, FUTURES_OI_URL, OI_POLL_INTERVAL_SECONDS
 from db.db import upsert_open_interest, heartbeat
+from db.service_control import is_service_paused
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("oi_poller")
@@ -41,6 +42,9 @@ async def poll_once(session):
 async def run():
     async with aiohttp.ClientSession() as session:
         while True:
+            if is_service_paused("collectors"):
+                await asyncio.sleep(max(1, OI_POLL_INTERVAL_SECONDS))
+                continue
             start = time.time()
             await poll_once(session)
             elapsed = time.time() - start

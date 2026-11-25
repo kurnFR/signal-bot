@@ -48,6 +48,7 @@ describe("SettingsPanel", () => {
       if (path === "/api/telegram/status" && method === "GET") return json({ configured: true, deliveryAuthorized: false, chatId: "-100123456789", hasToken: true });
       if (path === "/api/telegram/test" && method === "POST") return json({ success: true, bot: { username: "signal_test_bot" }, chat_id: "-100123456789" });
       if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+      if (path === "/api/settings/services" && method === "GET") return json({ services: [] });
       if (path === "/api/users" && method === "GET") return json({ users: [] });
       throw new Error("Unexpected endpoint: " + method + " " + path);
     });
@@ -123,6 +124,7 @@ describe("SettingsPanel", () => {
         Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
       if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+      if (path === "/api/settings/services" && method === "GET") return json({ services: [] });
       if (path === "/api/users" && method === "GET") return json({ users: currentUsers });
       if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
       if (path === "/api/settings/status") return json({ database: { status: "ok", host: "127.0.0.1", port: 3306, database: "test", tables: {} }, heartbeats: [], binance: { spotApi: "online", futuresApi: "online" } });
@@ -184,6 +186,7 @@ describe("SettingsPanel", () => {
         Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
       if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+      if (path === "/api/settings/services" && method === "GET") return json({ services: [] });
       if (path === "/api/users" && method === "GET") return json({ users: currentUsers });
       if (path === "/api/settings/status") return json(validAdminStatus);
       if (path === "/api/telegram/status") return json({ configured: true, deliveryAuthorized: true, chatId: "-100", hasToken: true });
@@ -293,6 +296,7 @@ describe("SettingsPanel", () => {
           Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
         if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+        if (path === "/api/settings/services" && method === "GET") return json({ services: [] });
       if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
         if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
         if (path === "/api/settings/status") return json(validAdminStatus);
@@ -369,6 +373,7 @@ describe("SettingsPanel", () => {
           Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
         if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+        if (path === "/api/settings/services" && method === "GET") return json({ services: [] });
       if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
         if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
         if (path === "/api/settings/status") return json(validAdminStatus);
@@ -411,6 +416,7 @@ describe("SettingsPanel", () => {
           Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
         if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+        if (path === "/api/settings/services" && method === "GET") return json({ services: [] });
       if (path === "/api/users" && method === "GET") {
           return json({
             users: [
@@ -471,6 +477,7 @@ describe("SettingsPanel", () => {
           Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
         if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+        if (path === "/api/settings/services" && method === "GET") return json({ services: [] });
       if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
         if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
         if (path === "/api/settings/status") return json(validAdminStatus);
@@ -530,6 +537,7 @@ describe("SettingsPanel", () => {
           Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
         if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+        if (path === "/api/settings/services" && method === "GET") return json({ services: [] });
       if (path === "/api/users" && method === "GET") return json({ users: usersList });
         if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
         if (path === "/api/settings/status") return json(validAdminStatus);
@@ -566,6 +574,7 @@ describe("SettingsPanel", () => {
           Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
         if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+        if (path === "/api/settings/services" && method === "GET") return json({ services: [] });
       if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
         if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
         if (path === "/api/settings/status") return json(validAdminStatus);
@@ -655,6 +664,7 @@ describe("SettingsPanel", () => {
           Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
 
         if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
+        if (path === "/api/settings/services" && method === "GET") return json({ services: [] });
       if (path === "/api/users" && method === "GET") return json({ users: baseUsers });
         if (path === "/api/telegram/status") return json({ configured: false, chatId: "", hasToken: false });
         if (path === "/api/settings/status") return json(validAdminStatus);

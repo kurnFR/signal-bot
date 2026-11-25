@@ -28,6 +28,7 @@ from config import (
     ECON_CALENDAR_POLL_INTERVAL_SECONDS, ECON_CALENDAR_MIN_IMPACT,
 )
 from db.db import upsert_news_events, heartbeat
+from db.service_control import pause_gate
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("econ_calendar_poller")
@@ -182,6 +183,8 @@ def run():
         logger.info("Starting econ_calendar_poller using Finnhub API.")
 
     while True:
+        if pause_gate("news_ai", "econ_calendar_poller", ECON_CALENDAR_POLL_INTERVAL_SECONDS):
+            continue
         start = time.time()
         try:
             poll_once()
