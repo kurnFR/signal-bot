@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import config
 from wallet_tracker import analyzer, store
+from db.service_control import is_service_paused
 from wallet_tracker.chains import is_supported_chain
 from wallet_tracker.providers import (BirdeyeProvider, DexScreenerProvider,
                                       GeckoTerminalProvider)
@@ -348,6 +349,13 @@ def run(stop_event=None):
         logger.info("Birdeye fallback disabled; set BIRDEYE_API_KEY in settings to enable it.")
     logger.info("Wallet tracker started; settings are loaded from the dashboard.")
     while stop_event is None or not stop_event.is_set():
+        if is_service_paused("wallet_tracker"):
+            if stop_event is not None:
+                if stop_event.wait(30):
+                    break
+            else:
+                time.sleep(30)
+            continue
         try:
             run_cycle(provider, fallback_provider=fallback_provider, dexscreener_provider=dexscreener_provider)
             settings = store.get_settings()

@@ -31,6 +31,7 @@ from config import (
 # once the keyword filter is enabled -- not imported yet since it's unused
 # while that filter is a no-op.
 from db.db import upsert_news_events, heartbeat
+from db.service_control import pause_gate
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("news_poller")
@@ -207,6 +208,8 @@ def run():
         logger.info("Starting news_poller using CryptoPanic API.")
 
     while True:
+        if pause_gate("news_ai", "news_poller", NEWS_POLL_INTERVAL_SECONDS):
+            continue
         start = time.time()
         try:
             poll_once()
