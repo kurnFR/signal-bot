@@ -124,6 +124,17 @@ describe("ResearchPanel (Read-only baseline)", () => {
     expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
     expect(vi.mocked(fetch).mock.calls.map(([path]) => String(path))).toEqual(expect.arrayContaining(Object.keys(snapshot)));
   });
+
+  it("hides RetailBot2 lifecycle controls and skips strategies fetch in historyOnly mode", async () => {
+    render(<ResearchPanel historyOnly />);
+    expect(await screen.findByText("BTCUSDT")).toBeInTheDocument();
+    expect(screen.getByText("RetailBot2 Historical Archive (Read-Only)")).toBeInTheDocument();
+    expect(screen.getByText("Shadow realized PnL")).toBeInTheDocument();
+    expect(screen.getByText("Inverse realized PnL")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Strategy lifecycle snapshot" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Filter strategies")).not.toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.map(([path]) => String(path))).not.toContain("/api/research/retailbot2/strategies");
+  });
 });
 
 describe("Research Strategy Lifecycle Workflows (RB-03 & RB-04) with RBAC", () => {
