@@ -29,7 +29,7 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Custom Style -->
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v=20261126-1">
     <link rel="stylesheet" href="/static/css/dashboard_enhancements.css?v=20261104-1">
     <style>
         /* Keep keyboard navigation visible against the dashboard's dark surfaces. */
@@ -1523,10 +1523,24 @@
                             <i data-lucide="rss" class="w-4 h-4 text-sky-400"></i>
                             Recent News & Calendar Feed
                         </h3>
-                        <p class="text-xs text-slate-400 mt-0.5">Raw collected events, independent of whether the AI judged them worth a signal</p>
+                        <p class="text-xs text-slate-400 mt-0.5">Economic releases and crypto headlines. Times in WIB.</p>
                     </div>
-                    <div id="news-events-feed" class="space-y-2 max-h-[480px] overflow-y-auto pr-1">
-                        <!-- Rendered by JS -->
+                    <div class="max-h-[480px] overflow-auto rounded-lg border border-slate-700/70" tabindex="0" role="region" aria-label="News and calendar events table">
+                        <table class="custom-table news-events-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col" class="px-3 py-2.5">Headline</th>
+                                    <th scope="col" class="px-3 py-2.5">Category</th>
+                                    <th scope="col" class="px-3 py-2.5">Impact</th>
+                                    <th scope="col" class="px-3 py-2.5">Symbols</th>
+                                    <th scope="col" class="px-3 py-2.5">Event time</th>
+                                    <th scope="col" class="px-3 py-2.5">Fetched</th>
+                                </tr>
+                            </thead>
+                            <tbody id="news-events-feed" class="divide-y divide-slate-700/80">
+                                <tr><td colspan="6" class="px-3 py-4 text-slate-400">Loading events…</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </section>
@@ -2495,8 +2509,8 @@
          browsers can keep serving a stale cached copy indefinitely since
          this file has no explicit Cache-Control header. See the
          "still seeing the old bug after a fix was pushed" class of report. -->
-    <script src="/static/js/app.js?v=20261119-1"></script>
     <script src="/static/js/dashboard_enhancements.js?v=20261104-1"></script>
+    <script src="/static/js/app.js?v=20261126-1"></script>
     <script>
         if (window.lucide) window.lucide.createIcons();
     </script>

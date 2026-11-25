@@ -321,7 +321,7 @@ const App = {
             }
             this.showToast(`Failed to load News AI data: ${message}`, "error");
             if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-rose-300 text-xs">Unable to refresh News AI signals. Check your connection or sign-in, then retry. ${safeMessage}</td></tr>`;
-            if (feed) feed.innerHTML = `<div class="text-center py-6 text-rose-300 text-xs">News AI event feed unavailable. ${safeMessage}</div>`;
+            if (feed) feed.innerHTML = `<tr><td colspan="6" class="px-3 py-4 text-rose-300">News AI event feed unavailable. ${safeMessage}</td></tr>`;
             if (grid) grid.innerHTML = `<div class="text-center py-6 text-rose-300 text-xs">News AI service status unavailable. ${safeMessage}</div>`;
         } finally {
             if (window.lucide) window.lucide.createIcons();
@@ -448,42 +448,41 @@ const App = {
         const feed = document.getElementById("news-events-feed");
         if (!feed) return;
         if (!events || events.length === 0) {
-            feed.innerHTML = `<div class="text-center py-8 text-slate-500 text-xs">No news collected yet.</div>`;
+            feed.innerHTML = `<tr><td colspan="6" class="px-3 py-4 text-slate-400">No news collected yet.</td></tr>`;
             return;
         }
-        feed.innerHTML = events.map(e => {
-            const isCalendar = e.category === "macro_calendar";
-            const icon = isCalendar ? "calendar-clock" : "newspaper";
-            const badgeColor = isCalendar ? "text-purple-300 bg-purple-950 border-purple-800" : "text-sky-300 bg-sky-950 border-sky-800";
-            const badgeText = isCalendar ? (e.impact || "macro").toUpperCase() : (e.source || "news").toUpperCase();
-            const when = e.published_at || e.scheduled_at || e.fetched_at;
-            let metaLine = "";
-            if (isCalendar) {
-                metaLine = `Forecast: ${this._escapeHtml(e.forecast_value ?? "--")} &middot; Actual: ${this._escapeHtml(e.actual_value ?? "pending")} &middot; Previous: ${this._escapeHtml(e.previous_value ?? "--")}`;
-            } else if (e.symbols) {
-                metaLine = `Tagged: ${this._escapeHtml(e.symbols)}`;
-            }
-            const safeUrl = this._safeHttpUrl(e.url);
+        feed.innerHTML = events.map(event => {
+            const isCalendar = event.category === "macro_calendar" || event.category === "macro";
+            const category = isCalendar ? "Economic calendar"
+                : ["crypto", "crypto_news"].includes(event.category) ? "Crypto news"
+                : (event.category || "—").replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase());
+            const source = (event.source || "").toLowerCase() === "forexfactory"
+                ? "Forex Factory" : (event.source || "").replaceAll("_", " ");
+            const impact = (event.impact || "—").replace(/^./, letter => letter.toUpperCase());
+            const when = event.scheduled_at || event.published_at;
+            const safeUrl = this._safeHttpUrl(event.url);
+            const title = this._escapeHtml(event.headline || "—");
             const headline = safeUrl
-                ? `<a href="${this._escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" class="hover:text-sky-400">${this._escapeHtml(e.headline)}</a>`
-                : this._escapeHtml(e.headline);
+                ? `<a href="${this._escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" class="text-sky-300 underline underline-offset-2">${title}</a>`
+                : title;
+            const figures = isCalendar
+                ? `<small class="block mt-1 text-[12px] text-slate-400">Forecast ${this._escapeHtml(event.forecast_value ?? "—")} · Actual ${this._escapeHtml(event.actual_value ?? "Pending")} · Previous ${this._escapeHtml(event.previous_value ?? "—")}</small>`
+                : "";
             return `
-                <div class="flex items-start gap-3 p-2.5 rounded-lg hover:bg-slate-800/40 transition-all">
-                    <i data-lucide="${icon}" class="w-3.5 h-3.5 text-slate-500 flex-shrink-0 mt-0.5"></i>
-                    <div class="min-w-0 flex-1">
-                        <div class="flex items-center gap-2">
-                            <span class="px-1.5 py-0.2 text-[9px] font-bold rounded border ${badgeColor}">${this._escapeHtml(badgeText)}</span>
-                            <span class="text-[11px] text-slate-500">${this._formatDateTime(when)}</span>
-                            ${!e.processed_at ? `<span class="text-[9px] text-amber-500">not yet evaluated</span>` : ""}
-                        </div>
-                        <div class="text-xs text-slate-200 mt-0.5">${headline}</div>
-                        ${metaLine ? `<div class="text-[10px] text-slate-500 mt-0.5">${metaLine}</div>` : ""}
-                    </div>
-                </div>`;
+                <tr class="align-top even:bg-slate-800/25 hover:bg-slate-800/60">
+                    <td class="min-w-[220px] px-3 py-2.5"><strong class="font-semibold text-slate-100 break-words">${headline}</strong>${figures}
+                        ${!event.processed_at ? '<small class="block mt-1 text-[12px] text-slate-400">Awaiting evaluation</small>' : ""}</td>
+                    <td class="px-3 py-2.5 text-slate-200">${this._escapeHtml(category)}${source ? `<small class="block mt-1 text-[12px] text-slate-400">${this._escapeHtml(source)}</small>` : ""}</td>
+                    <td class="px-3 py-2.5 ${impact === "High" ? "font-semibold text-amber-300" : "text-slate-300"}">${this._escapeHtml(impact)}</td>
+                    <td class="px-3 py-2.5 text-slate-300">${this._escapeHtml(event.symbols || "—")}</td>
+                    <td class="px-3 py-2.5 whitespace-nowrap tabular-nums text-slate-300">${when ? this._formatDateTime(when, "Asia/Jakarta") : "—"}
+                        ${when ? `<small class="block mt-1 text-[12px] text-slate-400">${event.scheduled_at ? "Scheduled" : "Published"}</small>` : ""}</td>
+                    <td class="px-3 py-2.5 whitespace-nowrap tabular-nums text-slate-300">${event.fetched_at ? this._formatDateTime(event.fetched_at, "Asia/Jakarta") : "—"}</td>
+                </tr>`;
         }).join("");
     },
 
-    _formatDateTime(isoString) {
+    _formatDateTime(isoString, timeZone) {
         if (typeof isoString !== "string" || !isoString.trim()) return "--";
         const value = isoString.trim();
         // Preserve explicit UTC offsets (including negative offsets); DB timestamps without
@@ -492,7 +491,8 @@ const App = {
         const parsedMs = new Date(timestamp).getTime();
         if (!Number.isFinite(parsedMs)) return "--";
         return new Date(parsedMs).toLocaleString("en-GB", {
-            day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
+            day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+            ...(timeZone ? { timeZone, year: "numeric", hourCycle: "h23" } : {})
         });
     },
 

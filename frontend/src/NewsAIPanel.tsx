@@ -7,11 +7,34 @@ const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3
 function num(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? numberFormat.format(value) : "—";
 }
-function dateLabel(value: string | null | undefined) {
-  if (!value) return "—";
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : value;
+const newsDateFormat = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Jakarta", day: "2-digit", month: "short", year: "numeric",
+  hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
+function NewsTime({ value, kind }: { value: string | null | undefined; kind?: string }) {
+  const raw = value?.trim();
+  if (!raw) return <>—</>;
+  const iso = raw.replace(" ", "T");
+  const timestamp = Date.parse(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(iso) ? iso : iso + "Z");
+  if (!Number.isFinite(timestamp)) return <>{raw}</>;
+  return <><time dateTime={new Date(timestamp).toISOString()}>{newsDateFormat.format(timestamp)}</time>{kind && <small>{kind}</small>}</>;
 }
+
+function categoryLabel(value: string | null) {
+  if (value === "macro_calendar" || value === "macro") return "Economic calendar";
+  if (value === "crypto" || value === "crypto_news") return "Crypto news";
+  return value ? value.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase()) : "—";
+}
+
+function sourceLabel(value: string | null) {
+  if (value?.toLowerCase() === "forexfactory") return "Forex Factory";
+  return value?.replaceAll("_", " ") ?? "—";
+}
+
+function Headline({ url, text }: { url: string | null; text: string | null }) {
+  return url && /^https?:\/\//i.test(url) ? <a href={url} target="_blank" rel="noreferrer">{text ?? "Open source"}</a> : <strong>{text ?? "—"}</strong>;
+}
+
 function errorMessage(cause: unknown) {
   if (cause instanceof ApiError && cause.status === 401) return "Your session has expired. Sign in again to view News AI data.";
   if (cause instanceof ApiError && cause.status === 403) return "Your account cannot view News AI data.";
@@ -58,13 +81,58 @@ export function NewsAIPanel() {
       <article className="metric-card"><div className="metric-top"><span>Profit factor</span></div><div className="metric-value">{num(data.stats.performance.profit_factor)}</div></article>
       <article className="metric-card"><div className="metric-top"><span>Total R</span></div><div className="metric-value">{num(data.stats.performance.total_r)}</div></article>
     </div></section>}
-    <section className="panel" aria-labelledby="news-signals-title"><div className="panel-heading"><div><h2 id="news-signals-title">News AI signals</h2><p>Stored AI decisions joined with the event context where available.</p></div><span className="panel-counter">{signals.length} ROWS</span></div>
+    <section className="panel" aria-labelledby="news-signals-title">
+      <div className="panel-heading">
+        <div><h2 id="news-signals-title">News AI signals</h2><p>Saved AI decisions and their source events. Times in WIB.</p></div>
+        <span className="panel-counter">{signals.length} signals</span>
+      </div>
       <label className="filter-field">Filter signals <input aria-label="Filter News AI signals" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Symbol, headline, bias, source…" /></label>
-      {signals.length ? <div className="table-scroll"><table><thead><tr><th scope="col">Symbol</th><th scope="col">Headline</th><th scope="col">Bias</th><th scope="col">Confidence</th><th scope="col">Horizon</th><th scope="col">Decision</th><th scope="col">Created</th></tr></thead><tbody>{signals.map((row) => <tr key={row.id}><td>{row.symbol}<div>{[row.market, row.timeframe].filter(Boolean).join(" · ")}</div></td><td>{row.url ? <a href={row.url} target="_blank" rel="noreferrer">{row.headline ?? "Open source"}</a> : row.headline ?? "—"}<div>{row.source ?? "—"}</div></td><td>{row.bias ?? "—"}</td><td>{num(row.confidence)}</td><td>{row.time_horizon ?? "—"}</td><td>{row.acted_on ? "Acted on" : row.skip_reason ? `Skipped: ${row.skip_reason}` : "Pending"} </td><td>{dateLabel(row.created_at)}</td></tr>)}</tbody></table></div> : <p className="empty-state">{loading ? "Loading signals…" : "No signals match this filter."}</p>}
+      {signals.length ? <div className="table-scroll" tabIndex={0} role="region" aria-label="News AI signals table">
+        <table className="news-table" aria-labelledby="news-signals-title">
+          <thead><tr><th scope="col">Symbol</th><th scope="col">Headline</th><th scope="col">Bias</th><th scope="col">Confidence</th><th scope="col">Horizon</th><th scope="col">Decision</th><th scope="col">Created</th></tr></thead>
+          <tbody>{signals.map((row) => <tr key={row.id}>
+            <td><strong>{row.symbol}</strong>{(row.market || row.timeframe) && <small>{[row.market, row.timeframe].filter(Boolean).join(" · ")}</small>}</td>
+            <td className="news-headline"><Headline url={row.url} text={row.headline} />{row.source && <small>{sourceLabel(row.source)}</small>}</td>
+            <td>{row.bias ?? "—"}</td>
+            <td>{num(row.confidence)}</td>
+            <td>{row.time_horizon ?? "—"}</td>
+            <td className="news-detail">{row.acted_on ? "Acted on" : row.skip_reason ? <><strong>Skipped</strong><small>{row.skip_reason}</small></> : "Pending"}</td>
+            <td className="news-date"><NewsTime value={row.created_at} /></td>
+          </tr>)}</tbody>
+        </table>
+      </div> : <p className="empty-state">{loading ? "Loading signals…" : "No signals match this filter."}</p>}
     </section>
-    <section className="panel" aria-labelledby="news-events-title"><div className="panel-heading"><div><h2 id="news-events-title">Macro & crypto events</h2><p>Collected event feed; this view does not start collectors or fetch new articles.</p></div><span className="panel-counter">{data?.events.length ?? 0} ROWS</span></div>
-      {data?.events.length ? <div className="table-scroll"><table><thead><tr><th scope="col">Category</th><th scope="col">Headline</th><th scope="col">Impact</th><th scope="col">Symbols</th><th scope="col">Published</th><th scope="col">Fetched</th></tr></thead><tbody>{data.events.map((row) => <tr key={row.id}><td>{row.category ?? "—"}<div>{row.source ?? "—"}</div></td><td>{row.url ? <a href={row.url} target="_blank" rel="noreferrer">{row.headline ?? "Open source"}</a> : row.headline ?? "—"}</td><td>{row.impact ?? "—"}</td><td>{row.symbols ?? "—"}</td><td>{dateLabel(row.published_at)}</td><td>{dateLabel(row.fetched_at)}</td></tr>)}</tbody></table></div> : <p className="empty-state">{loading ? "Loading events…" : "No recent events returned."}</p>}
+    <section className="panel" aria-labelledby="news-events-title">
+      <div className="panel-heading">
+        <div><h2 id="news-events-title">Macro &amp; crypto events</h2><p>Economic releases and crypto headlines. Times in WIB.</p></div>
+        <span className="panel-counter">{data?.events.length ?? 0} events</span>
+      </div>
+      {data?.events.length ? <div className="table-scroll" tabIndex={0} role="region" aria-label="Macro and crypto events table">
+        <table className="news-table" aria-labelledby="news-events-title">
+          <thead><tr><th scope="col">Headline</th><th scope="col">Category</th><th scope="col">Impact</th><th scope="col">Symbols</th><th scope="col">Event time</th><th scope="col">Fetched</th></tr></thead>
+          <tbody>{data.events.map((row) => <tr key={row.id}>
+            <td className="news-headline"><Headline url={row.url} text={row.headline} /></td>
+            <td>{categoryLabel(row.category)}{row.source && <small>{sourceLabel(row.source)}</small>}</td>
+            <td>{row.impact ? <span className={`status-pill ${row.impact.toLowerCase() === "high" ? "status-warning" : "status-neutral"}`}>{row.impact.replace(/^./, (letter) => letter.toUpperCase())}</span> : "—"}</td>
+            <td>{row.symbols ?? "—"}</td>
+            <td className="news-date"><NewsTime value={row.scheduled_at ?? row.published_at} kind={row.scheduled_at ? "Scheduled" : "Published"} /></td>
+            <td className="news-date"><NewsTime value={row.fetched_at} /></td>
+          </tr>)}</tbody>
+        </table>
+      </div> : <p className="empty-state">{loading ? "Loading events…" : "No recent events returned."}</p>}
     </section>
-    {data && <section className="panel" aria-labelledby="news-heartbeats-title"><div className="panel-heading"><div><h2 id="news-heartbeats-title">Collector health</h2><p>Last recorded heartbeat for each News AI process.</p></div></div>{data.stats.heartbeats.length ? <div className="table-scroll"><table><thead><tr><th scope="col">Collector</th><th scope="col">Status</th><th scope="col">Detail</th><th scope="col">Last heartbeat</th></tr></thead><tbody>{data.stats.heartbeats.map((item) => <tr key={item.collector_name}><td>{item.collector_name}</td><td>{item.status}</td><td>{item.detail ?? "—"}</td><td>{dateLabel(item.last_beat_time)}</td></tr>)}</tbody></table></div> : <p className="empty-state">No collector heartbeat records returned.</p>}</section>}
+    {data && <section className="panel" aria-labelledby="news-heartbeats-title">
+      <div className="panel-heading"><div><h2 id="news-heartbeats-title">Collector health</h2><p>Last recorded heartbeat for each News AI process. Times in WIB.</p></div></div>
+      {data.stats.heartbeats.length ? <div className="table-scroll" tabIndex={0} role="region" aria-label="News collector health table">
+        <table className="news-table" aria-labelledby="news-heartbeats-title">
+          <thead><tr><th scope="col">Collector</th><th scope="col">Status</th><th scope="col">Detail</th><th scope="col">Last heartbeat</th></tr></thead>
+          <tbody>{data.stats.heartbeats.map((item) => <tr key={item.collector_name}>
+            <td><strong>{item.collector_name}</strong></td><td>{item.status}</td>
+            <td className="news-detail">{item.detail ?? "—"}</td>
+            <td className="news-date"><NewsTime value={item.last_beat_time} /></td>
+          </tr>)}</tbody>
+        </table>
+      </div> : <p className="empty-state">No collector heartbeat records returned.</p>}
+    </section>}
   </div>;
 }

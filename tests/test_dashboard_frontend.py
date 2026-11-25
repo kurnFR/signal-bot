@@ -108,7 +108,7 @@ class TestDashboardFrontendRegressions(unittest.TestCase):
         self.assertIn('url.protocol === "http:" || url.protocol === "https:" ? url.href : ""', helper)
 
     def test_dashboard_datetime_preserves_explicit_offsets_and_rejects_invalid_values(self):
-        formatter_start = self.app_js.index("_formatDateTime(isoString)")
+        formatter_start = self.app_js.index("_formatDateTime(isoString, timeZone)")
         formatter_end = self.app_js.index("\n    },", formatter_start)
         formatter = self.app_js[formatter_start:formatter_end]
         self.assertIn(r"(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)", formatter)
@@ -1400,7 +1400,7 @@ class TestDashboardTableColumnHeaderScopes(unittest.TestCase):
     def test_every_static_table_header_declares_column_scope(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
         headers = re.findall(r'<th\b([^>]*)>', html, flags=re.IGNORECASE)
-        self.assertEqual(len(headers), 154)
+        self.assertEqual(len(headers), 160)
         for index, attrs in enumerate(headers):
             with self.subTest(header_index=index):
                 self.assertRegex(attrs, r'\bscope="col"')

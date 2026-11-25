@@ -40,24 +40,47 @@ body {
     box-shadow: 0 0 12px rgba(59, 130, 246, 0.25);
 }
 
-/* Table styling */
-.custom-table th {
-    background-color: #0f172a;
-    color: #94a3b8;
-    font-weight: 600;
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--border-color);
+/* Dashboard data tables */
+.custom-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    font-variant-numeric: tabular-nums;
 }
+.custom-table th,
 .custom-table td {
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid rgba(31, 41, 61, 0.5);
-    font-size: 0.85rem;
+    padding: 0.625rem 0.75rem;
+    border-bottom: 1px solid var(--dashboard-border, #334155);
+    vertical-align: top;
 }
-.custom-table tr:hover {
-    background-color: rgba(31, 41, 61, 0.3);
+.custom-table th {
+    background-color: #1e293b;
+    color: #e2e8f0;
+    font-weight: 650;
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+.custom-table tbody tr:nth-child(even) {
+    background: color-mix(in srgb, var(--dashboard-border, #334155) 14%, transparent);
+}
+.custom-table tbody tr:hover {
+    background: color-mix(in srgb, var(--dashboard-border, #334155) 24%, transparent);
+}
+.view-section .custom-table.news-events-table {
+    min-width: 48rem;
+}
+.news-events-table td:first-child {
+    min-width: 14rem;
+    max-width: 32rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.news-events-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
 }
 
 /* Navigation active states */

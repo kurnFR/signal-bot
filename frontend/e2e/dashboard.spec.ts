@@ -837,3 +837,34 @@ test("liquidation heatmap compares both sides and supports keyboard inspection",
   await page.getByRole("combobox", { name: "Asset", exact: true }).selectOption("ETH");
   await expect(page.getByText("No modeled clusters are available for ETH in this window.")).toBeVisible();
 });
+
+test("news events have readable rows, labelled WIB dates, and local mobile overflow", async ({ page }) => {
+  await mockApi(page);
+  await page.route("**/api/news/events?*", (route) => route.fulfill({ json: { events: [
+    { id: 1, category: "macro_calendar", source: "forexfactory", headline: "USD Core PPI m/m", url: null, impact: "high", symbols: null,
+      country: "US", published_at: null, scheduled_at: "2026-11-08 14:30:00", fetched_at: "2026-11-08T05:58:47Z",
+      actual_value: null, forecast_value: null, previous_value: null, processed_at: null },
+    { id: 2, category: "crypto", source: "Market Wire", headline: "Bitcoin market update", url: null, impact: "medium", symbols: "BTCUSDT",
+      country: null, published_at: "2026-11-08T12:00:00Z", scheduled_at: null, fetched_at: "2026-11-08T12:03:00Z",
+      actual_value: null, forecast_value: null, previous_value: null, processed_at: null },
+  ] } }));
+  await signIn(page);
+  await page.getByRole("button", { name: "News AI", exact: true }).click();
+  const table = page.getByRole("table", { name: "Macro & crypto events" });
+  const release = table.getByRole("row").filter({ hasText: "USD Core PPI" });
+  await expect(release).toContainText("Economic calendar");
+  await expect(release).toContainText("Forex Factory");
+  await expect(release).toContainText("21:30");
+  await expect(release).toContainText("Scheduled");
+  await expect(table.getByRole("cell", { name: "USD Core PPI m/m" })).toHaveCSS("border-bottom-width", "1px");
+  await expect(table.getByRole("cell", { name: "USD Core PPI m/m" })).toHaveCSS("font-size", "13px");
+  await page.setViewportSize({ width: 375, height: 844 });
+  const scroller = page.getByRole("region", { name: "Macro and crypto events table" });
+  await scroller.focus();
+  await expect(scroller).toBeFocused();
+  const scroll = await scroller.evaluate((element) => ({
+    tableWidth: element.scrollWidth, visibleWidth: element.clientWidth, pageWidth: document.documentElement.scrollWidth,
+  }));
+  expect(scroll.tableWidth).toBeGreaterThan(scroll.visibleWidth);
+  expect(scroll.pageWidth).toBeLessThanOrEqual(375);
+});
