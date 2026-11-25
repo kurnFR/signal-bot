@@ -2,15 +2,11 @@ import { useEffect, useState } from "react";
 import { Command } from "cmdk";
 import {
   Activity,
-  BarChart2,
-  DollarSign,
-  LayoutDashboard,
-  Radio,
   Search,
   Settings,
   ShieldAlert,
-  Wallet,
 } from "lucide-react";
+import { WORKSPACE_GROUPS } from "../lib/workspaceNavigation";
 import { useProTraderStore } from "../lib/store";
 
 interface CommandPaletteProps {
@@ -75,7 +71,7 @@ export function CommandPalette({
 
   return (
     <>
-      <button
+      {controlledOpen === undefined && <button
         type="button"
         className="button button-secondary button-sm"
         onClick={() => setOpen(true)}
@@ -102,7 +98,7 @@ export function CommandPalette({
         >
           ⌘K
         </kbd>
-      </button>
+      </button>}
 
       {isOpen && (
         <div
@@ -195,92 +191,16 @@ export function CommandPalette({
                   No matching symbol or action found.
                 </Command.Empty>
 
-                <Command.Group heading="Navigation" style={{ padding: "4px 8px", fontSize: "11px", color: "var(--color-muted)" }}>
-                  <Command.Item
-                    onSelect={() => handleNavigate("Trading Desk")}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                      padding: "8px 10px",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      fontSize: "13px",
-                    }}
-                  >
-                    <LayoutDashboard size={15} /> Trading Desk (Multi-Pane)
-                  </Command.Item>
-                  <Command.Item
-                    onSelect={() => handleNavigate("Paper Trading")}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                      padding: "8px 10px",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      fontSize: "13px",
-                    }}
-                  >
-                    <DollarSign size={15} /> Paper Trading Engine & Blotter
-                  </Command.Item>
-                  <Command.Item
-                    onSelect={() => handleNavigate("Market Screener")}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                      padding: "8px 10px",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      fontSize: "13px",
-                    }}
-                  >
-                    <Radio size={15} /> Market Screener V2
-                  </Command.Item>
-                  <Command.Item
-                    onSelect={() => handleNavigate("Backtest Studio")}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                      padding: "8px 10px",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      fontSize: "13px",
-                    }}
-                  >
-                    <BarChart2 size={15} /> Backtest Studio & Quant Lab
-                  </Command.Item>
-                  <Command.Item
-                    onSelect={() => handleNavigate("Wallet Tracking")}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                      padding: "8px 10px",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      fontSize: "13px",
-                    }}
-                  >
-                    <Wallet size={15} /> Whale Wallet Tracking
-                  </Command.Item>
-                  <Command.Item
-                    onSelect={() => handleNavigate("Settings")}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                      padding: "8px 10px",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      fontSize: "13px",
-                    }}
-                  >
-                    <Settings size={15} /> Workspace Settings & Telegram
-                  </Command.Item>
-                </Command.Group>
+                {WORKSPACE_GROUPS.map(({ label: group, items }) => (
+                  <Command.Group key={group} heading={group} style={{ padding: "4px 8px", fontSize: "11px", color: "var(--color-muted)" }}>
+                    {items.map(({ label, icon: Icon, keywords }) => (
+                      <Command.Item key={label} value={label} keywords={keywords} onSelect={() => handleNavigate(label)}
+                        style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 10px", borderRadius: "6px", cursor: "pointer", fontSize: "13px" }}>
+                        <Icon size={15} aria-hidden="true" /> {label}
+                      </Command.Item>
+                    ))}
+                  </Command.Group>
+                ))}
 
                 <Command.Group heading="Active Symbols" style={{ padding: "4px 8px", fontSize: "11px", color: "var(--color-muted)" }}>
                   {COMMON_SYMBOLS.map((sym) => (

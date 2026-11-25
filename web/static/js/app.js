@@ -4828,6 +4828,7 @@ const App = {
 
         const modal = document.getElementById("deploy-modal");
         if (!modal) return;
+        document.getElementById("deploy-modal-telegram").checked = false;
 
         const sym = document.getElementById("bt-symbol-select")?.value || "BTCUSDT";
         const tf = document.getElementById("bt-timeframe-select")?.value || "1d";
@@ -5318,6 +5319,7 @@ const App = {
     },
 
     openDeployMLModal(modelId, modelType, threshold) {
+        document.getElementById("deploy-ml-telegram").checked = false;
         document.getElementById("deploy-ml-model-id").value = modelId;
         document.getElementById("deploy-ml-label-id").innerText = modelId;
         document.getElementById("deploy-ml-label-model").innerText = modelType;

@@ -167,3 +167,43 @@ dialog.settings-dialog::backdrop {
 .ml-generator-result code{font-size:11px}
 @media(max-width:900px){.ml-generator-form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.ml-generator-form-grid{grid-template-columns:1fr}.ml-generator-actions{align-items:stretch;flex-direction:column}.ml-generator-actions .button{width:100%}.ml-generator-result dl{grid-template-columns:1fr}}
+
+.nav-group{flex:0 0 auto;display:grid;gap:2px;padding:5px 2px 8px}
+.nav-group+.nav-group{border-top:1px solid var(--color-border)}
+.nav-group .workspace-label{margin:0;padding:7px 12px 4px;text-transform:uppercase;font-weight:600}
+.nav-group .nav-item svg{flex:none}
+.paper-readiness{margin:0 0 18px}
+.paper-readiness h2{display:flex;align-items:center;gap:8px}
+.paper-readiness h2 svg{color:var(--color-accent);flex:none}
+.paper-readiness .status-pill{flex:none}
+.paper-readiness > button{margin-top:12px}
+.readiness-links{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+@media(max-width:760px){.paper-readiness .roadmap-list li > .button{grid-column:2;justify-self:start}}
+
+.nav-group:last-child{margin-top:auto}
+.system-live-pill{cursor:pointer}
+.topbar-search-shortcut{font-size:inherit;color:var(--color-muted);margin-left:3px}
+@media(max-width:760px){.topbar-search-shortcut{display:none}}
+
+.liquidation-panel{margin-top:0}
+.liquidation-heading{flex-wrap:wrap}
+.liquidation-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
+.liquidation-controls select{min-width:70px}
+.liquidation-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:16px 0}
+.liquidation-summary>div{padding:10px;border:1px solid var(--color-border);border-radius:8px}
+.liquidation-summary dt,.liquidation-summary dd+dd{font-size:11px;color:var(--color-muted)}
+.liquidation-summary dd{margin:4px 0 0;font-size:clamp(13px,2vw,20px);font-weight:650;overflow-wrap:anywhere}
+.liquidation-figure{margin:0}
+.liquidation-plot{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:8px}
+.liquidation-grid{position:relative;overflow:hidden;cursor:crosshair;background:#101625;border-radius:6px;min-width:0}
+.liquidation-grid:focus-visible{outline:2px solid var(--color-focus);outline-offset:3px}
+.liquidation-grid canvas{display:block;width:100%;height:clamp(240px,40vw,460px)}
+.liquidation-prices,.liquidation-times{display:flex;justify-content:space-between;gap:6px;color:var(--color-muted);font-size:10px;font-variant-numeric:tabular-nums}
+.liquidation-prices{flex-direction:column;text-align:right}
+.liquidation-times{padding-top:6px}
+.liquidation-crosshair{position:absolute;pointer-events:none;width:9px;height:9px;border:1px solid #fff;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 1px #101625}
+.liquidation-caption{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;margin-top:12px;color:var(--color-muted);font-size:11px}
+.liquidation-caption>div{display:flex;align-items:center;gap:6px}
+.liquidation-scale{width:52px;height:8px;border-radius:2px;background:linear-gradient(90deg,#172349,#3665b4,#e6dc69)}
+.liquidation-close-mark{width:14px;height:2px;margin-left:6px;background:var(--color-text)}
+.liquidation-panel a{color:var(--color-accent);text-decoration:underline}

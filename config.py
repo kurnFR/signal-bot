@@ -158,7 +158,7 @@ FUTURES_WS_BASE = "wss://fstream.binance.com"
 # Combined-stream base (lets us subscribe to many symbols/timeframes on ONE
 # connection instead of opening one socket per symbol — Binance limits
 # connections and this is far more efficient).
-FUTURES_WS_COMBINED = f"{FUTURES_WS_BASE}/stream?streams="
+FUTURES_WS_COMBINED = f"{FUTURES_WS_BASE}/market/stream?streams="
 SPOT_WS_COMBINED = f"{SPOT_WS_BASE}/stream?streams="
 
 FUTURES_MARKPRICE_ARR_STREAM = "!markPrice@arr"   # funding + mark price, all symbols

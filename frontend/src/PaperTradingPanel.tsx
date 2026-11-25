@@ -47,11 +47,13 @@ function pnlClass(value: number | null | undefined) {
 }
 
 interface PaperTradingPanelProps {
+  paperReady?: boolean;
+  onDeployPreparedStrategy?: () => void;
   initialStrategyId?: string | null;
   onInitialStrategyApplied?: () => void;
 }
 
-export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied }: PaperTradingPanelProps = {}) {
+export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied, paperReady = true, onDeployPreparedStrategy }: PaperTradingPanelProps = {}) {
   const auth = useAuth();
   const canTrade = ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
 
@@ -161,12 +163,12 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
   }, [attempt]);
 
   useEffect(() => {
-    if (canTrade && initialStrategyId) {
+    if (canTrade && paperReady && initialStrategyId) {
       setDeployStrategy(initialStrategyId);
       setShowDeployModal(true);
       onInitialStrategyApplied?.();
     }
-  }, [canTrade, initialStrategyId, onInitialStrategyApplied]);
+  }, [canTrade, paperReady, initialStrategyId, onInitialStrategyApplied]);
 
   useEffect(() => {
     if (!showDeployModal) return;
@@ -338,7 +340,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
   // PT-09: Deploy strategy handler
   const handleExecuteDeploy = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (deployBusy || !catalog.includes(deployStrategy)) return;
+    if (!paperReady || deployBusy || !catalog.includes(deployStrategy)) return;
     setDeployError(null);
     setActionError(null);
     setActionSuccess(null);
@@ -465,7 +467,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
     settings: PaperDeploymentSettings,
     message: string,
   ) => {
-    if (!canTrade || savingPreference || togglingConfigId !== null) return false;
+    if (!canTrade || savingPreference || togglingConfigId !== null || (settings.is_active === true && !paperReady)) return false;
     setTogglingConfigId(config.id);
     setActionError(null);
     setActionSuccess(null);
@@ -653,7 +655,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
   };
 
   const handleBatchStrategyAction = async (strategyName: string, action: "activate_all" | "pause_all") => {
-    if (!canTrade || batchingStrategy !== null || togglingConfigId !== null || savingPreference) return;
+    if ((action === "activate_all" && !paperReady) || !canTrade || batchingStrategy !== null || togglingConfigId !== null || savingPreference) return;
     setBatchingStrategy(strategyName);
     setActionError(null);
     setActionSuccess(null);
@@ -979,7 +981,12 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
                 <button
                   type="button"
                   className="button button-primary button-sm"
+                  disabled={!paperReady}
                   onClick={(e) => {
+                    if (onDeployPreparedStrategy) {
+                      onDeployPreparedStrategy();
+                      return;
+                    }
                     deployTriggerRef.current = e.currentTarget;
                     setShowDeployModal(true);
                   }}
@@ -1014,7 +1021,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
                     type="button"
                     className="button button-secondary button-xs"
                     aria-label={`Resume all ${group.strategy} pairs`}
-                    disabled={busy || batchingStrategy !== null || togglingConfigId !== null || savingPreference || loading || group.paused === 0}
+                    disabled={busy || batchingStrategy !== null || togglingConfigId !== null || savingPreference || loading || group.paused === 0 || !paperReady}
                     onClick={() => void handleBatchStrategyAction(group.strategy, "activate_all")}
                   >
                     Resume all
@@ -1045,7 +1052,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
                           <button
                             type="button"
                             className={`button ${c.is_active ? "button-secondary" : "button-primary"} button-sm`}
-                            disabled={savingPreference || togglingConfigId !== null || loading}
+                            disabled={savingPreference || togglingConfigId !== null || loading || (!c.is_active && !paperReady)}
                             onClick={() => void saveDeploymentSettings(c, { is_active: !c.is_active }, c.is_active ? "Deployment paused." : "Deployment activated.")}
                             title={c.is_active ? "Pause paper trading for this strategy" : "Activate paper trading for this strategy"}
                           >

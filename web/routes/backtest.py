@@ -895,6 +895,7 @@ def execute_backtest(req: BacktestRunRequest):
             )
             insert_backtest_trades(run_id, trades)
         except Exception as db_err:
+            run_id = None
             logger.error("Failed to save backtest to DB (%s)", type(db_err).__name__)
 
     # Format trades with human-readable timestamps
@@ -1008,6 +1009,7 @@ def execute_walk_forward_backtest(req: WalkForwardBacktestRequest):
 
 
 class RunAllStrategiesRequest(BaseModel):
+    allow_auto_promotion: bool = True
     symbol: str = Field("BTCUSDT", max_length=20)
     market: str = Field("spot", max_length=7)
     timeframe: str = Field("1d", max_length=10)
@@ -1233,12 +1235,13 @@ def run_all_strategies(
 
     top3 = eligible_for_top[:3]
 
-    # Promotion is opt-in. When candidates are ranked on train, evaluate the
+    allow_auto_promotion = req is None or req.allow_auto_promotion
+    # When candidates are ranked on train, evaluate the
     # selected winner on the separate chronological holdout before applying
     # profitability gates. Never promote a winner selected on holdout/full.
     promotion_validation_metrics = None
     promotion_validation_segment = None
-    if top3 and data_segment == "train" and cutoff is not None:
+    if allow_auto_promotion and top3 and data_segment == "train" and cutoff is not None:
         winner_name = top3[0]["strategy"]
         try:
             validation_df = holdout_df
@@ -1270,15 +1273,25 @@ def run_all_strategies(
                 winner_name, validation_error,
             )
 
-    # The helper fails closed if the independent validation result is unavailable.
-    auto_promotion = _auto_promote_top_candidate(
-        top3[0] if top3 else None,
-        symbol=symbol, market=market, timeframe=timeframe,
-        data_segment=data_segment, allocated_capital=initial_capital,
-        risk_per_trade_pct=risk_per_trade_pct,
-        validation_metrics=promotion_validation_metrics,
-        validation_segment=promotion_validation_segment,
-    )
+    if not allow_auto_promotion:
+        auto_promotion = {"status": "skipped", "reason": "This benchmark was requested for research only."}
+    else:
+        # The helper fails closed if the independent validation result is unavailable.
+        auto_promotion = _auto_promote_top_candidate(
+            top3[0] if top3 else None,
+            symbol=symbol, market=market, timeframe=timeframe,
+            data_segment=data_segment, allocated_capital=initial_capital,
+            risk_per_trade_pct=risk_per_trade_pct,
+            validation_metrics=promotion_validation_metrics,
+            validation_segment=promotion_validation_segment,
+        )
+
+    # An all-win run has an infinite profit factor. Keep that value during
+    # ranking, and serialize the displayed ratio the same way as single runs.
+    for candidate in all_with_info:
+        profit_factor = candidate["metrics"].get("profit_factor")
+        if profit_factor is not None and not math.isfinite(profit_factor):
+            candidate["metrics"] = dict(candidate["metrics"], profit_factor=None)
 
     # Generate Institutional AI Insight & Recommendations
     ai_insight = generate_ai_insight(

@@ -327,6 +327,7 @@ export interface WalkForwardResult {
 }
 
 export interface RunAllRequest {
+  allow_auto_promotion?: boolean;
   symbol?: string;
   market?: string;
   timeframe?: string;
@@ -348,7 +349,7 @@ export interface RunAllResult {
     recommended?: boolean;
   }>;
   aiInsight?: Record<string, any>;
-  autoPromotion?: Record<string, any>;
+  autoPromotion?: { status: string; strategy?: string };
 }
 
 export interface AiInsightResult {
