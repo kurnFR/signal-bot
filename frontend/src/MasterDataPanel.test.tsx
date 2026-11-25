@@ -157,6 +157,53 @@ describe("MasterDataPanel", () => {
     }));
   });
 
+  const harness = (role: string, onDelete?: (path: string) => Response) => {
+    window.localStorage.setItem("token", role + "-session");
+    const profile = { id: 4, username: role + "01", email: null, role, must_change_password: false };
+    const calls: Array<{ path: string; method: string }> = [];
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ path, method });
+      const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+      if (path === "/api/auth/me") return json(profile);
+      const base = new URL(path, "http://localhost").pathname;
+      if (method === "DELETE" && base === "/api/master-data/dataset") return Promise.resolve(onDelete ? onDelete(path) : new Response("{}", { status: 200, headers: { "content-type": "application/json" } }));
+      const body = responses[base as keyof typeof responses];
+      if (!body) throw new Error("Unexpected endpoint: " + method + " " + path);
+      return json(body);
+    }));
+    return calls;
+  };
+
+  it("lets an admin delete a dataset only after explicit confirmation", async () => {
+    const calls = harness("admin", () => new Response(JSON.stringify({ features_deleted: 950, candles_deleted: 1000 }), { status: 200, headers: { "content-type": "application/json" } }));
+    render(<AuthGate><MasterDataPanel /></AuthGate>);
+    fireEvent.click(await screen.findByRole("button", { name: /Delete dataset BTCUSDT spot 1h/ }));
+    expect(await screen.findByRole("heading", { name: /Confirm delete \(candles \+ features\)/ })).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(/Deleted 950 feature row\(s\) and 1,000 candle\(s\)/);
+    const del = calls.find((c) => c.method === "DELETE")!;
+    expect(del.path).toBe("/api/master-data/dataset?symbol=BTCUSDT&market=spot&timeframe=1h&scope=all");
+  });
+
+  it("surfaces the server refusal when an active deployment uses the dataset", async () => {
+    harness("admin", () => new Response(JSON.stringify({ detail: "1 active paper deployment(s) use this dataset. Archive them first." }), { status: 409, headers: { "content-type": "application/json" } }));
+    render(<AuthGate><MasterDataPanel /></AuthGate>);
+    fireEvent.click(await screen.findByRole("button", { name: /Delete features BTCUSDT spot 1h/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm delete" }));
+    expect(await screen.findByText(/Archive them first/)).toBeInTheDocument();
+  });
+
+  it("hides delete controls from traders (admin-only)", async () => {
+    harness("trader");
+    render(<AuthGate><MasterDataPanel /></AuthGate>);
+    expect(await screen.findByRole("button", { name: "Build features" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Delete dataset/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Delete features/ })).not.toBeInTheDocument();
+  });
+
   it("keeps job-launch controls hidden for viewers", async () => {
     window.localStorage.setItem("token", "viewer-session");
     const profile = { id: 9, username: "viewer01", email: null, role: "viewer", must_change_password: false };

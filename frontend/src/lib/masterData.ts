@@ -207,3 +207,28 @@ export async function fetchBackfilledSymbols(signal?: AbortSignal): Promise<stri
     return ["BTCUSDT"];
   }
 }
+
+export interface DeleteDatasetInput {
+  symbol: string;
+  market: "spot" | "futures";
+  timeframe: string;
+  /** "features" removes rebuildable computed features only; "all" also removes candles. */
+  scope: "features" | "all";
+}
+
+export interface DeleteDatasetResult {
+  features_deleted: number;
+  candles_deleted: number;
+}
+
+/** Admin-only. The server refuses (409) while an active deployment or running job uses the dataset. */
+export async function deleteMasterDataset(input: DeleteDatasetInput): Promise<DeleteDatasetResult> {
+  const qs = new URLSearchParams({ symbol: input.symbol, market: input.market, timeframe: input.timeframe, scope: input.scope });
+  try {
+    const payload = await apiRequest<Partial<DeleteDatasetResult>>(`/api/master-data/dataset?${qs.toString()}`, { method: "DELETE" });
+    return { features_deleted: Number(payload?.features_deleted ?? 0), candles_deleted: Number(payload?.candles_deleted ?? 0) };
+  } catch (err) {
+    if (err instanceof ApiError) throw new MasterDataActionError(err.status, err.detail?.slice(0, 300) || err.message);
+    throw err;
+  }
+}
