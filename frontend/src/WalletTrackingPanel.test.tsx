@@ -398,8 +398,44 @@ describe("Wallet Tracking Workflows (WT-04 & WT-05) with RBAC", () => {
     expect(screen.queryByRole("button", { name: /Track wallet/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Edit settings/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Untrack" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Disable tracking|Enable tracking/i })).not.toBeInTheDocument();
 
     // View only label present
     expect(await screen.findByText("View only")).toBeInTheDocument();
+  });
+
+  it("toggles tracked wallet status non-destructively via /api/wallets/tracked/toggle", async () => {
+    let togglePayload: unknown = null;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const path = new URL(url, "http://localhost").pathname;
+      const method = init?.method ?? "GET";
+      if (path === "/api/wallets/tracked/toggle" && method === "POST") {
+        togglePayload = JSON.parse(String(init?.body));
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              status: "ok",
+              tracked: false,
+              chain: "eth",
+              wallet: "0x1234567890123456789012345678901234567890",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.resolve(responseFor(url));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WalletTrackingPanel />);
+    const toggleBtn = await screen.findByRole("button", { name: "Disable tracking" });
+    fireEvent.click(toggleBtn);
+
+    await waitFor(() => expect(togglePayload).toEqual({
+      chain: "eth",
+      wallet: "0x1234567890123456789012345678901234567890",
+      label: "Test wallet",
+    }));
+    expect(await screen.findByText(/Tracking disabled for/i)).toBeInTheDocument();
   });
 });

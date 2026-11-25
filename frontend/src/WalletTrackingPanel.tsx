@@ -7,6 +7,7 @@ import {
   fetchWalletTrackingSnapshot,
   fetchWalletPerformance,
   setWalletTelegram,
+  toggleWalletTracking,
   type WalletPerformance,
   saveWalletSettings,
   trackWallet,
@@ -47,6 +48,7 @@ export function WalletTrackingPanel() {
   const [rankingError, setRankingError] = useState(false);
   const [rankingBusy, setRankingBusy] = useState(true);
   const [changingAlert, setChangingAlert] = useState(false);
+  const [togglingWalletId, setTogglingWalletId] = useState<number | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     setRankingBusy(true);
@@ -508,13 +510,44 @@ export function WalletTrackingPanel() {
                       wallet.telegram_after_id == null ? "Off" : "Selected"}</td>
                     <td>
                       {canTrade ? (
-                        <button
-                          type="button"
-                          className="button button-danger button-small"
-                          onClick={(e) => openUntrackModal(wallet, e.currentTarget)}
-                        >
-                          Untrack
-                        </button>
+                        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                          <button
+                            type="button"
+                            className="button button-secondary button-small"
+                            disabled={togglingWalletId !== null || loading}
+                            onClick={async () => {
+                              setTogglingWalletId(wallet.id);
+                              setActionError(null);
+                              setActionSuccess(null);
+                              try {
+                                const res = await toggleWalletTracking(wallet.chain, wallet.wallet, wallet.label ?? null);
+                                setActionSuccess(
+                                  `Tracking ${res.tracked ? "enabled" : "disabled"} for ${shorten(wallet.wallet)}.`,
+                                );
+                                setAttempt((n) => n + 1);
+                              } catch (cause) {
+                                setActionError(
+                                  cause instanceof WalletActionError ? cause.message : "Could not toggle wallet tracking.",
+                                );
+                              } finally {
+                                setTogglingWalletId(null);
+                              }
+                            }}
+                          >
+                            {togglingWalletId === wallet.id
+                              ? "Updating…"
+                              : wallet.status.toUpperCase() === "ACTIVE"
+                              ? "Disable tracking"
+                              : "Enable tracking"}
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-danger button-small"
+                            onClick={(e) => openUntrackModal(wallet, e.currentTarget)}
+                          >
+                            Untrack
+                          </button>
+                        </div>
                       ) : (
                         <span className="text-muted text-sm">View only</span>
                       )}
