@@ -101,6 +101,14 @@ function viewFromLocation() {
   return Object.keys(VIEW_METADATA).find(label => viewPath(label) === window.location.pathname) ?? "Overview";
 }
 
+function formatWibClock(now: Date = new Date()): string {
+  const wib = new Date(now.getTime() + 7 * 3600 * 1000);
+  const hours = String(wib.getUTCHours()).padStart(2, "0");
+  const minutes = String(wib.getUTCMinutes()).padStart(2, "0");
+  const seconds = String(wib.getUTCSeconds()).padStart(2, "0");
+  return `${hours}:${minutes}:${seconds} WIB`;
+}
+
 export function App() {
   const [theme, setTheme] = useState<Theme>(readInitialTheme);
   const [activeView, setActiveView] = useState<string>(viewFromLocation);
@@ -132,6 +140,7 @@ export function App() {
   const auth = useAuth();
   const [branding, setBranding] = useState<BrandingConfig>({ brandName: "Signal Bot", logoUrl: null });
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
+  const [clockText, setClockText] = useState<string>(() => formatWibClock());
   const [systemHealth, setSystemHealth] = useState<{
     status: "connected" | "degraded" | "disconnected";
     tooltip: string;
@@ -139,6 +148,11 @@ export function App() {
     status: "connected",
     tooltip: "Connected to FastAPI backend and MariaDB database",
   });
+
+  useEffect(() => {
+    const id = window.setInterval(() => setClockText(formatWibClock()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -293,6 +307,7 @@ export function App() {
                 : "Disconnected"}
             </span>
           </div>
+          <span className="wib-clock" aria-label="Live clock (UTC+7)" title="UTC+7 (WIB)">{clockText}</span>
           <span className="topbar-divider" />
           <button
             className="button button-secondary button-sm"
@@ -351,7 +366,7 @@ export function App() {
         <footer className="page-footer" style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "center" }}>
           <div style={{ display: "flex", justifyContent: "space-between", width: "100%", flexWrap: "wrap", gap: "8px" }}>
             <span><Activity size={14} /> {branding.brandName} Quantitative Platform</span>
-            <span>FastAPI Engine · Binance Market Data · MariaDB</span>
+            <span>v2.0.0 · FastAPI Engine · Binance Market Data · MariaDB</span>
           </div>
           <div className="footer-disclaimer" style={{ fontSize: "11px", color: "var(--color-muted)", textAlign: "center" }}>
             ⚠️ For informational, research, and simulated/paper trading purposes only; not financial advice. Real money execution disabled.

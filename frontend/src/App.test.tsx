@@ -31,6 +31,8 @@ describe("frontend foundation shell", () => {
     render(<App />);
     expect(screen.getByText("Signal Bot Quantitative Platform")).toBeInTheDocument();
     expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByLabelText("Live clock (UTC+7)")).toHaveTextContent(/^\d{2}:\d{2}:\d{2} WIB$/);
+    expect(screen.getByText(/v2\.0\.0 .*MariaDB/i)).toBeInTheDocument();
   });
   it("transitions the live status indicator to Disconnected when system status check fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network connection lost")));
