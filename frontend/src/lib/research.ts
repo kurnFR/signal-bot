@@ -209,7 +209,7 @@ function validStrategy(value: unknown): value is ResearchStrategy {
 }
 
 /** Read-only Research snapshot. Validate the real FastAPI/DB serializer contracts before rendering. */
-export async function fetchResearchSnapshot(signal?: AbortSignal): Promise<ResearchSnapshot> {
+export async function fetchResearchSnapshot(signal?: AbortSignal, includeStrategies = true): Promise<ResearchSnapshot> {
   // Batch requests in 2 concurrent pairs to stay well within retailbot2_pool size (pool_size=3)
   const [positions, stats] = await Promise.all([
     getJson<unknown>("/api/research/retailbot2/positions?limit=100", signal),
@@ -217,7 +217,7 @@ export async function fetchResearchSnapshot(signal?: AbortSignal): Promise<Resea
   ]);
   const [trades, strategies] = await Promise.all([
     getJson<unknown>("/api/research/retailbot2/trades?limit=50", signal),
-    getJson<unknown>("/api/research/retailbot2/strategies", signal),
+    includeStrategies ? getJson<unknown>("/api/research/retailbot2/strategies", signal) : Promise.resolve({ strategies: [] }),
   ]);
   if (!isRecord(positions) || !Array.isArray(positions.positions) || !positions.positions.every(validPosition)) {
     throw new Error("Research positions returned an invalid response");
