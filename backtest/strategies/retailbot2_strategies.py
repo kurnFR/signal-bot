@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Any, List
 from backtest.simulate import simulate
-from paper.retailbot2 import Indicators
+from paper.indicators import Indicators
 
 
 def _prepare_df(df: pd.DataFrame, params: dict) -> pd.DataFrame:
