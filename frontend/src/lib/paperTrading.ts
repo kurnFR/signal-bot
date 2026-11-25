@@ -382,3 +382,55 @@ export async function fetchPaperReportForPeriod(days: number, signal: AbortSigna
   if (!isRecord(payload) || !validMetrics(payload.metrics)) throw new Error("Invalid paper performance response");
   return payload.metrics;
 }
+
+export type BatchPaperConfigAction =
+  | "activate_all"
+  | "pause_all"
+  | "telegram_all_on"
+  | "telegram_all_off"
+  | "report_all_on"
+  | "report_all_off";
+
+export interface BatchPaperConfigResponse {
+  status: string;
+  strategy: string;
+  action: string;
+  updated: number;
+}
+
+/** Batch-update all pair configurations belonging to a single strategy. */
+export async function batchUpdatePaperStrategy(
+  strategyName: string,
+  action: BatchPaperConfigAction,
+  signal?: AbortSignal,
+): Promise<BatchPaperConfigResponse> {
+  if (!requiredText(strategyName)) {
+    throw new PaperTradingActionError(400, "Strategy name is required");
+  }
+  const payload = await paperMutationRequest<unknown>("/api/paper/configs/batch", {
+    method: "POST",
+    body: JSON.stringify({ strategy_name: strategyName.trim(), action }),
+    signal,
+  });
+  if (!isRecord(payload) || payload.status !== "success" || !finite(payload.updated)) {
+    throw new PaperTradingActionError(502, "Server returned an invalid batch update response");
+  }
+  return {
+    status: "success",
+    strategy: typeof payload.strategy === "string" ? payload.strategy : strategyName.trim(),
+    action: typeof payload.action === "string" ? payload.action : action,
+    updated: payload.updated,
+  };
+}
+
+/** Manually trigger a paper trading market tick sync and strategy evaluation. */
+export async function syncPaperMarketTick(signal?: AbortSignal): Promise<{ status: string; results: unknown }> {
+  const payload = await paperMutationRequest<unknown>("/api/paper/sync", {
+    method: "POST",
+    signal,
+  });
+  if (!isRecord(payload) || payload.status !== "success") {
+    throw new PaperTradingActionError(502, "Server returned an invalid sync response");
+  }
+  return { status: "success", results: payload.results };
+}

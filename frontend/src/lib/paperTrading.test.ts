@@ -16,12 +16,14 @@ vi.mock("./api", async (importOriginal) => {
 });
 
 import {
+  batchUpdatePaperStrategy,
   cancelPaperOrder,
   closePaperPosition,
   deployPaperStrategy,
   fetchPaperTradingSnapshot,
   PaperTradingActionError,
   resetPaperCircuitBreaker,
+  syncPaperMarketTick,
   tripPaperCircuitBreaker,
   updatePaperConfig,
 } from "./paperTrading";
@@ -406,6 +408,35 @@ describe("Paper Trading mutation contracts", () => {
         telegram_enabled: false,
         report_enabled: true,
       })).rejects.toThrow("Allocated capital must be positive");
+    });
+  });
+
+  describe("batchUpdatePaperStrategy & syncPaperMarketTick", () => {
+    it("posts batch strategy action and validates updated count", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ status: "success", strategy: "trend_ema_v1", action: "pause_all", updated: 3 }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await batchUpdatePaperStrategy("trend_ema_v1", "pause_all");
+      expect(res).toEqual({ status: "success", strategy: "trend_ema_v1", action: "pause_all", updated: 3 });
+      expect(fetchMock).toHaveBeenCalledWith("/api/paper/configs/batch", expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ strategy_name: "trend_ema_v1", action: "pause_all" }),
+      }));
+    });
+
+    it("triggers manual market tick sync", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ status: "success", results: { evaluated: 2 } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await syncPaperMarketTick();
+      expect(res.status).toBe("success");
+      expect(fetchMock).toHaveBeenCalledWith("/api/paper/sync", expect.objectContaining({ method: "POST" }));
     });
   });
 });
