@@ -58,7 +58,7 @@ export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean }
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetchResearchSnapshot(controller.signal)
+    fetchResearchSnapshot(controller.signal, !historyOnly)
       .then((result) => {
         if (!controller.signal.aborted) {
           setData(result);
@@ -72,7 +72,7 @@ export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean }
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [attempt]);
+  }, [attempt, historyOnly]);
 
   // Modal lifecycle: stop & hide
   useEffect(() => {
@@ -184,13 +184,14 @@ export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean }
       <section className="panel paper-safety-banner">
         <ShieldCheck size={19} />
         <div>
-          <strong>RetailBot2 Research & Strategy Lifecycle</strong>
+          <strong>{historyOnly ? "RetailBot2 Historical Archive (Read-Only)" : "RetailBot2 Research & Strategy Lifecycle"}</strong>
           <p>
-            Review RetailBot2 positions, closed trades, strategy lifecycle flags, and saved performance summaries.
-            Authorized operators can configure evaluation, paper tracking, Telegram alerts, and report visibility below.
+            {historyOnly
+              ? "Review historical RetailBot2 positions, closed trades, and saved mode/strategy performance summaries. RetailBot2 is retired — use Strategy Library and Paper Trading for active simulations."
+              : "Review RetailBot2 positions, closed trades, strategy lifecycle flags, and saved performance summaries. Authorized operators can configure evaluation, paper tracking, Telegram alerts, and report visibility below."}
           </p>
         </div>
-        <span className="panel-counter">RESEARCH</span>
+        <span className="panel-counter">{historyOnly ? "ARCHIVE" : "RESEARCH"}</span>
       </section>
 
       {actionSuccess && (
@@ -230,10 +231,19 @@ export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean }
       )}
 
       <section className="metrics-grid" aria-label="Research summary">
-        <article className="metric-card"><div className="metric-top"><span>Open positions</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : data?.positions.length ?? "—"}</div><div className="metric-foot"><span>Active RetailBot2 trades</span></div></article>
+        <article className="metric-card"><div className="metric-top"><span>Open positions</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : data?.positions.length ?? "—"}</div><div className="metric-foot"><span>{historyOnly ? "Historical RetailBot2 open rows" : "Active RetailBot2 trades"}</span></div></article>
         <article className="metric-card"><div className="metric-top"><span>Recent closed trades</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : data?.trades.length ?? "—"}</div><div className="metric-foot"><span>Latest 50 returned by API</span></div></article>
-        <article className="metric-card"><div className="metric-top"><span>Registered strategy rows</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : data?.strategies.length ?? "—"}</div><div className="metric-foot"><span>Shadow and inverse modes</span></div></article>
-        <article className="metric-card"><div className="metric-top"><span>Telegram-enabled rows</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : strategies.filter((row) => row.telegram_enabled).length}</div><div className="metric-foot"><span>Persisted lifecycle readback</span></div></article>
+        {historyOnly ? (
+          <>
+            <article className="metric-card"><div className="metric-top"><span>Shadow realized PnL</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : value(data?.stats.by_mode.shadow?.realized_pnl)}</div><div className="metric-foot"><span>{data?.stats.by_mode.shadow ? `${value(data.stats.by_mode.shadow.closed_count)} closed trades` : "Historical shadow ledger"}</span></div></article>
+            <article className="metric-card"><div className="metric-top"><span>Inverse realized PnL</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : value(data?.stats.by_mode.inverse?.realized_pnl)}</div><div className="metric-foot"><span>{data?.stats.by_mode.inverse ? `${value(data.stats.by_mode.inverse.closed_count)} closed trades` : "Historical inverse ledger"}</span></div></article>
+          </>
+        ) : (
+          <>
+            <article className="metric-card"><div className="metric-top"><span>Registered strategy rows</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : data?.strategies.length ?? "—"}</div><div className="metric-foot"><span>Shadow and inverse modes</span></div></article>
+            <article className="metric-card"><div className="metric-top"><span>Telegram-enabled rows</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : strategies.filter((row) => row.telegram_enabled).length}</div><div className="metric-foot"><span>Persisted lifecycle readback</span></div></article>
+          </>
+        )}
       </section>
 
       <section className="panel" aria-labelledby="research-performance-title">
@@ -413,7 +423,8 @@ export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean }
         )}
       </section>
 
-      {/* RB-03 & RB-04: Strategy Lifecycle Snapshot & Management */}
+      {/* RB-03 & RB-04: Strategy Lifecycle Snapshot & Management (hidden in retired historyOnly mode) */}
+      {!historyOnly && (
       <section className="panel" aria-labelledby="research-strategies-title">
         <div className="panel-heading">
           <div>
@@ -569,9 +580,10 @@ export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean }
           <p className="empty-state">{loading ? "Loading strategies…" : "No strategies match this filter."}</p>
         )}
       </section>
+      )}
 
       {/* RB-04 Modal: Stop & Hide Confirmation */}
-      {stopTargetRow && (
+      {!historyOnly && stopTargetRow && (
         <dialog
           ref={stopDialogRef}
           className="app-dialog"

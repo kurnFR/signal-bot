@@ -18,7 +18,7 @@ const TradingDeskPanel = lazy(() => import("./TradingDeskPanel").then((m) => ({ 
 import { CommandPalette } from "./components/CommandPalette";
 import { TermsModal } from "./components/TermsModal";
 import { OnboardingWizard } from "./components/OnboardingWizard";
-import { Activity, BarChart3, BookOpen, BrainCircuit, Command as CommandIcon, Database, ChevronDown, LayoutDashboard, LogOut, Menu, Moon, Settings2, ShieldCheck, Sun, WalletCards, X, Zap } from "lucide-react";
+import { Activity, BarChart3, BookOpen, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, Command as CommandIcon, Database, LayoutDashboard, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Settings2, ShieldCheck, Sun, WalletCards, X, Zap } from "lucide-react";
 import { useAuth } from "./AuthGate";
 
 type Theme = "dark" | "light";
@@ -96,6 +96,15 @@ function readInitialTheme(): Theme {
   return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
+function readInitialSidebarCollapsed(): boolean {
+  try {
+    const stored = window.localStorage.getItem("sidebar_collapsed");
+    return stored === "1" || stored === "true";
+  } catch {
+    return false;
+  }
+}
+
 const viewPath = (label: string) => "/modern/" + label.toLowerCase().replaceAll(" ", "-");
 function viewFromLocation() {
   return Object.keys(VIEW_METADATA).find(label => viewPath(label) === window.location.pathname) ?? "Overview";
@@ -134,6 +143,7 @@ export function App() {
     return () => window.removeEventListener("signal-bot:open-onboarding", handler);
   }, []);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(readInitialSidebarCollapsed);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarCloseButtonRef = useRef<HTMLButtonElement>(null);
   const wasSidebarOpen = useRef(false);
@@ -218,6 +228,25 @@ export function App() {
   }, [theme]);
 
   useEffect(() => {
+    try { window.localStorage.setItem("sidebar_collapsed", sidebarCollapsed ? "1" : "0"); } catch { /* Current-session layout still applies. */ }
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "b") {
+        const target = event.target as HTMLElement | null;
+        if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) {
+          return;
+        }
+        event.preventDefault();
+        setSidebarCollapsed((current) => !current);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
     if (!sidebarOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setSidebarOpen(false);
@@ -239,6 +268,7 @@ export function App() {
   }, [sidebarOpen]);
 
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
+  const toggleSidebarCollapsed = () => setSidebarCollapsed((current) => !current);
   const handleSelectStrategyForBacktest = (strategyId: string) => { setPendingBacktestStrategyId(strategyId); selectView("Backtest Studio"); setSidebarOpen(false); };
   const handleSelectStrategyForPaper = (strategyId: string) => {
     setPendingPaperStrategyId(strategyId);
@@ -252,22 +282,33 @@ export function App() {
     description: "Quantitative trading platform operations and intelligence.",
   };
 
-  return <div className="app-frame">
+  return <div className={"app-frame" + (sidebarCollapsed ? " sidebar-is-collapsed" : "")}>
     <a className="skip-link" href="#main-content">Skip to main content</a>
     {sidebarOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
-    <aside id="dashboard-sidebar" className={"sidebar " + (sidebarOpen ? "sidebar-open" : "")} aria-label="Dashboard sidebar">
+    <aside id="dashboard-sidebar" className={"sidebar" + (sidebarOpen ? " sidebar-open" : "") + (sidebarCollapsed ? " sidebar-collapsed" : "")} aria-label="Dashboard sidebar">
       <div className="brand">
         <div className="brand-mark" aria-hidden="true">{branding.logoUrl ? <img src={branding.logoUrl} alt="" style={{ width: 20, height: 20, objectFit: "contain" }} /> : <Activity size={20} strokeWidth={2.5} />}</div>
         <div className="brand-copy"><strong>{branding.brandName}</strong><span>QUANTITATIVE PLATFORM</span></div>
+        <button
+          type="button"
+          className="icon-button sidebar-collapse-btn"
+          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!sidebarCollapsed}
+          aria-controls="dashboard-sidebar"
+          title={(sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar") + " (⌘B)"}
+          onClick={toggleSidebarCollapsed}
+        >
+          {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+        </button>
         <button ref={sidebarCloseButtonRef} className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
       </div>
       <div className="workspace-label">WORKSPACE</div>
       <nav className="nav-list" aria-label="Primary navigation">
         {NAV_ITEMS.map(({ label, description, icon: Icon }) => <button key={label}
           className={"nav-item " + (activeView === label ? "nav-item-active" : "")}
-          aria-current={activeView === label ? "page" : undefined} title={description}
+          aria-current={activeView === label ? "page" : undefined} title={sidebarCollapsed ? `${label} — ${description}` : description}
           onClick={() => { selectView(label); setSidebarOpen(false); }}>
-          <Icon size={18} aria-hidden="true" /><span>{label}</span>
+          <Icon size={18} aria-hidden="true" /><span className="nav-label">{label}</span>
           {label === "Market Screener" && <span className="nav-count">V2</span>}
         </button>)}
       </nav>
@@ -283,6 +324,17 @@ export function App() {
       <header className="topbar">
         <div className="topbar-left">
           <button ref={menuButtonRef} className="icon-button mobile-menu" aria-label="Open navigation" aria-controls="dashboard-sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
+          <button
+            type="button"
+            className="icon-button desktop-sidebar-toggle"
+            aria-label={sidebarCollapsed ? "Expand navigation sidebar" : "Collapse navigation sidebar"}
+            aria-expanded={!sidebarCollapsed}
+            aria-controls="dashboard-sidebar"
+            title={(sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar") + " (⌘B)"}
+            onClick={toggleSidebarCollapsed}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </button>
           <div className="breadcrumb"><span>Workspace</span><span className="breadcrumb-separator">/</span><strong>{activeView}</strong></div>
         </div>
         <div className="topbar-actions">

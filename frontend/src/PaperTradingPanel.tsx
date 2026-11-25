@@ -9,6 +9,7 @@ import { fetchBackfilledSymbols } from "./lib/masterData";
 import { ApiError } from "./lib/api";
 import { trapFocus } from "./lib/dialog";
 import {
+  batchUpdatePaperStrategy,
   cancelPaperOrder,
   closePaperPosition,
   deployPaperStrategy,
@@ -16,6 +17,7 @@ import {
   PaperTradingActionError,
   parseTelegramDeliveryStatus,
   resetPaperCircuitBreaker,
+  syncPaperMarketTick,
   tripPaperCircuitBreaker,
   patchPaperDeployment,
   fetchPaperReportForPeriod,
@@ -93,6 +95,8 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
   const [reportStrategy, setReportStrategy] = useState("");
   const [savingPreference, setSavingPreference] = useState(false);
   const [togglingConfigId, setTogglingConfigId] = useState<number | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [batchingStrategy, setBatchingStrategy] = useState<string | null>(null);
 
   const [availableSymbols, setAvailableSymbols] = useState<string[]>(["BTCUSDT"]);
   const [deploySymbol, setDeploySymbol] = useState("BTCUSDT");
@@ -611,6 +615,54 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
       setSavingPreference(false);
     }
   };
+
+  const handleSyncMarketTick = async () => {
+    if (!canTrade || syncing) return;
+    setSyncing(true);
+    setActionError(null);
+    setActionSuccess(null);
+    setActionWarning(null);
+    try {
+      await syncPaperMarketTick();
+      setActionSuccess("Paper trading market tick synced and evaluated.");
+      setAttempt((v) => v + 1);
+    } catch (cause) {
+      setActionError(cause instanceof PaperTradingActionError ? cause.message : "Failed to sync paper market tick.");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleBatchStrategyAction = async (strategyName: string, action: "activate_all" | "pause_all") => {
+    if (!canTrade || batchingStrategy !== null || togglingConfigId !== null || savingPreference) return;
+    setBatchingStrategy(strategyName);
+    setActionError(null);
+    setActionSuccess(null);
+    setActionWarning(null);
+    try {
+      const res = await batchUpdatePaperStrategy(strategyName, action);
+      setActionSuccess(
+        `${action === "pause_all" ? "Paused" : "Resumed"} ${res.updated} pair(s) for strategy ${strategyName}.`,
+      );
+      setAttempt((v) => v + 1);
+    } catch (cause) {
+      setActionError(cause instanceof PaperTradingActionError ? cause.message : "Batch strategy update failed.");
+    } finally {
+      setBatchingStrategy(null);
+    }
+  };
+
+  const strategyBatchGroups = Object.values(
+    configs.reduce<Record<string, { strategy: string; total: number; active: number; paused: number }>>((acc, config) => {
+      if (config.archived_at) return acc;
+      const entry = acc[config.strategy_name] ?? { strategy: config.strategy_name, total: 0, active: 0, paused: 0 };
+      entry.total += 1;
+      if (config.is_active) entry.active += 1;
+      else entry.paused += 1;
+      acc[config.strategy_name] = entry;
+      return acc;
+    }, {}),
+  ).sort((a, b) => a.strategy.localeCompare(b.strategy));
   const breaker = data?.breaker;
   const metric = (label: string, value: string, note: string, icon: ReactNode, className = "") => (
     <article className="metric-card" key={label}>
@@ -893,22 +945,66 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
       <section className="panel" aria-labelledby="paper-config-title">
         <div className="panel-heading">
           <div><h2 id="paper-config-title">Strategy configurations</h2><p>Existing activation, capital, Telegram, and reporting preferences.</p></div>
-          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
             <span className="panel-counter">{data?.configs.length ?? "—"} CONFIGS</span>
             {canTrade && (
-              <button
-                type="button"
-                className="button button-primary button-sm"
-                onClick={(e) => {
-                  deployTriggerRef.current = e.currentTarget;
-                  setShowDeployModal(true);
-                }}
-              >
-                <Plus size={14} /> Deploy Strategy
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="button button-secondary button-sm"
+                  onClick={() => void handleSyncMarketTick()}
+                  disabled={syncing || loading}
+                >
+                  <RefreshCw size={14} /> {syncing ? "Syncing…" : "Sync now"}
+                </button>
+                <button
+                  type="button"
+                  className="button button-primary button-sm"
+                  onClick={(e) => {
+                    deployTriggerRef.current = e.currentTarget;
+                    setShowDeployModal(true);
+                  }}
+                >
+                  <Plus size={14} /> Deploy Strategy
+                </button>
+              </>
             )}
           </div>
         </div>
+        {canTrade && strategyBatchGroups.length > 0 && (
+          <div className="paper-strategy-batch-bar" style={{ display: "flex", flexWrap: "wrap", gap: "8px", padding: "10px 0 12px", borderBottom: "1px solid var(--color-border)", marginBottom: "12px" }}>
+            {strategyBatchGroups.map((group) => {
+              const busy = batchingStrategy === group.strategy;
+              return (
+                <div
+                  key={group.strategy}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "6px 10px", border: "1px solid var(--color-border)", borderRadius: "8px", background: "var(--color-elevated)", fontSize: "12px" }}
+                >
+                  <strong>{group.strategy}</strong>
+                  <span className="text-muted">{group.active} active · {group.paused} paused</span>
+                  <button
+                    type="button"
+                    className="button button-secondary button-xs"
+                    aria-label={`Pause all ${group.strategy} pairs`}
+                    disabled={busy || batchingStrategy !== null || togglingConfigId !== null || savingPreference || loading || group.active === 0}
+                    onClick={() => void handleBatchStrategyAction(group.strategy, "pause_all")}
+                  >
+                    {busy ? "Updating…" : "Pause all"}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary button-xs"
+                    aria-label={`Resume all ${group.strategy} pairs`}
+                    disabled={busy || batchingStrategy !== null || togglingConfigId !== null || savingPreference || loading || group.paused === 0}
+                    onClick={() => void handleBatchStrategyAction(group.strategy, "activate_all")}
+                  >
+                    Resume all
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
         {data?.configs.length ? (
           <div className="status-table-wrap">
             <table className="status-table">

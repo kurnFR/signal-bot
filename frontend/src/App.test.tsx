@@ -160,4 +160,53 @@ describe("frontend foundation shell", () => {
     expect(screen.getByRole("heading", { name: "Current session" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Change My Password" })).toBeInTheDocument();
   });
+  it("toggles desktop sidebar collapse from brand and topbar buttons and persists state", () => {
+    render(<App />);
+    const frame = document.querySelector(".app-frame");
+    const sidebar = screen.getByLabelText("Dashboard sidebar");
+    const brandToggle = screen.getByRole("button", { name: "Collapse sidebar" });
+    const topbarToggle = screen.getByRole("button", { name: "Collapse navigation sidebar" });
+
+    expect(frame).not.toHaveClass("sidebar-is-collapsed");
+    expect(sidebar).not.toHaveClass("sidebar-collapsed");
+    expect(brandToggle).toHaveAttribute("aria-controls", "dashboard-sidebar");
+    expect(brandToggle).toHaveAttribute("aria-expanded", "true");
+    expect(topbarToggle).toHaveAttribute("aria-controls", "dashboard-sidebar");
+    expect(topbarToggle).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.click(brandToggle);
+    expect(frame).toHaveClass("sidebar-is-collapsed");
+    expect(sidebar).toHaveClass("sidebar-collapsed");
+    expect(window.localStorage.getItem("sidebar_collapsed")).toBe("1");
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Expand navigation sidebar" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: /Overview/ })).toHaveAttribute("title", "Overview — System overview");
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand navigation sidebar" }));
+    expect(frame).not.toHaveClass("sidebar-is-collapsed");
+    expect(sidebar).not.toHaveClass("sidebar-collapsed");
+    expect(window.localStorage.getItem("sidebar_collapsed")).toBe("0");
+  });
+  it("restores collapsed sidebar state from localStorage and supports Cmd/Ctrl+B shortcut", () => {
+    window.localStorage.setItem("sidebar_collapsed", "1");
+    render(<App />);
+    const sidebar = screen.getByLabelText("Dashboard sidebar");
+    const mobileMenu = screen.getByRole("button", { name: "Open navigation" });
+
+    expect(sidebar).toHaveClass("sidebar-collapsed");
+    expect(mobileMenu).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.keyDown(window, { key: "b", ctrlKey: true });
+    expect(sidebar).not.toHaveClass("sidebar-collapsed");
+    expect(window.localStorage.getItem("sidebar_collapsed")).toBe("0");
+
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    expect(sidebar).toHaveClass("sidebar-collapsed");
+    expect(window.localStorage.getItem("sidebar_collapsed")).toBe("1");
+
+    // Mobile drawer state remains independent of desktop collapse
+    fireEvent.click(mobileMenu);
+    expect(mobileMenu).toHaveAttribute("aria-expanded", "true");
+    expect(sidebar).toHaveClass("sidebar-open");
+  });
 });
