@@ -3,6 +3,7 @@ API Router for Phase B: Live Paper Trading.
 """
 import logging
 from fastapi import APIRouter, HTTPException, Depends, Query, Path, Request
+from web.auth import log_audit
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 import math
@@ -10,7 +11,7 @@ import time
 
 from paper.engine import (
     get_active_positions, get_paper_trades, get_paper_configs,
-    set_paper_config, delete_paper_config, batch_update_paper_configs,
+    set_paper_config, delete_paper_config, purge_paper_config, PaperConfigHasHistory, batch_update_paper_configs,
     manual_close_position, sync_and_evaluate_paper_trading,
     get_paper_metrics, update_paper_deployment, OVERLAY_STRATEGIES,
     _UNSET,
@@ -272,6 +273,23 @@ def delete_config(config_id: int = Path(..., gt=0)):
         return {"status": "success", "id": config_id}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/configs/{config_id}/permanent")
+def purge_config(request: Request, config_id: int = Path(..., gt=0)):
+    """Hard-delete an archived deployment that never traded. Otherwise 409."""
+    try:
+        deleted = purge_paper_config(config_id)
+    except PaperConfigHasHistory as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Paper config not found")
+    user = getattr(request.state, "user", {}) or {}
+    log_audit("PAPER_CONFIG_PURGED", str(user.get("username", "unknown")), user.get("id"),
+              {"config_id": config_id}, request.client.host if request.client else "unknown")
+    return {"status": "success", "id": config_id}
 
 
 @router.post("/positions/{position_id}/close")

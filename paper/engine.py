@@ -626,6 +626,53 @@ def delete_paper_config(config_id: int) -> bool:
         lock.release()
 
 
+class PaperConfigHasHistory(ValueError):
+    """Raised when a permanent delete would destroy ledger history."""
+
+
+def purge_paper_config(config_id: int) -> bool:
+    """Permanently delete an ARCHIVED deployment that has no ledger history.
+
+    Safe by construction: refuses (``PaperConfigHasHistory``) if any position,
+    trade or order references the deployment, so closed-trade history and
+    per-strategy/per-pair reports are never lost. Returns False if not found.
+    """
+    lock = PaperEngineAdvisoryLock(timeout=2)
+    if not lock.acquire():
+        raise ValueError("Paper engine is processing deployments. Retry in a moment.")
+    try:
+        conn = get_pool().get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT archived_at FROM paper_configs WHERE id = %s FOR UPDATE", (config_id,))
+                row = cur.fetchone()
+                if row is None:
+                    conn.rollback()
+                    return False
+                if row[0] is None:
+                    conn.rollback()
+                    raise ValueError("Archive the deployment before deleting it permanently")
+                for table in ("paper_positions", "paper_trades", "paper_orders"):
+                    cur.execute(f"SELECT COUNT(*) FROM {table} WHERE config_id = %s", (config_id,))
+                    if int(cur.fetchone()[0]) > 0:
+                        conn.rollback()
+                        raise PaperConfigHasHistory(
+                            "This deployment has positions, trades or orders. "
+                            "It stays archived so performance history is preserved."
+                        )
+                cur.execute("DELETE FROM paper_configs WHERE id = %s AND archived_at IS NOT NULL", (config_id,))
+                deleted = cur.rowcount > 0
+                conn.commit()
+                return deleted
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    finally:
+        lock.release()
+
+
 def batch_update_paper_configs(strategy_name: Optional[str], action: str, *, symbol: Optional[str] = None) -> int:
     """Set a preference on existing configurations in the requested scope."""
     action = action.strip().lower()

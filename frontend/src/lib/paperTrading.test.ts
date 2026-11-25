@@ -26,6 +26,7 @@ import {
   syncPaperMarketTick,
   tripPaperCircuitBreaker,
   updatePaperConfig,
+  purgePaperConfig,
 } from "./paperTrading";
 
 const metrics = {
@@ -149,6 +150,31 @@ describe("Paper Trading mutation contracts", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     window.localStorage.clear();
+  });
+
+  describe("purgePaperConfig", () => {
+    it("sends an authenticated DELETE to the permanent endpoint", async () => {
+      window.localStorage.setItem("token", "trader-token");
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ status: "success", id: 7 }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ));
+      vi.stubGlobal("fetch", fetchMock);
+      await purgePaperConfig(7);
+      expect(fetchMock).toHaveBeenCalledWith("/api/paper/configs/7/permanent", expect.objectContaining({
+        method: "DELETE",
+        headers: expect.objectContaining({ Authorization: "Bearer trader-token" }),
+      }));
+    });
+
+    it("surfaces the server's 409 (ledger history) message", async () => {
+      window.localStorage.setItem("token", "trader-token");
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ detail: "It stays archived so performance history is preserved." }),
+        { status: 409, headers: { "content-type": "application/json" } },
+      )));
+      await expect(purgePaperConfig(7)).rejects.toThrow(/performance history is preserved/);
+    });
   });
 
   describe("cancelPaperOrder", () => {
