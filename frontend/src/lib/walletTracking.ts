@@ -432,3 +432,30 @@ export function triggerWalletPoll(signal?: AbortSignal) {
     signal,
   });
 }
+
+/** Toggle a wallet's monitoring state (ACTIVE <-> IGNORED) without deleting historical records. */
+export async function toggleWalletTracking(
+  chain: string,
+  wallet: string,
+  label?: string | null,
+  signal?: AbortSignal,
+): Promise<{ status: string; tracked: boolean; chain: string; wallet: string }> {
+  if (!isNonEmptyString(chain) || !isNonEmptyString(wallet)) {
+    throw new WalletActionError(400, "Chain and wallet address are required");
+  }
+  const payload = await walletMutationRequest<unknown>("/api/wallets/tracked/toggle", {
+    method: "POST",
+    body: JSON.stringify({ chain: chain.trim().toLowerCase(), wallet: wallet.trim(), label: label?.trim() || null }),
+    signal,
+  });
+  if (
+    !isRecord(payload) ||
+    payload.status !== "ok" ||
+    typeof payload.tracked !== "boolean" ||
+    typeof payload.chain !== "string" ||
+    typeof payload.wallet !== "string"
+  ) {
+    throw new WalletActionError(502, "Server returned an invalid wallet tracking toggle response");
+  }
+  return { status: "ok", tracked: payload.tracked, chain: payload.chain, wallet: payload.wallet };
+}
