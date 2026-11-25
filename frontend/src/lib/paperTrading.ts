@@ -369,6 +369,11 @@ export async function archivePaperConfig(id: number): Promise<void> {
   await paperMutationRequest(`/api/paper/configs/${id}`, { method: "DELETE" });
 }
 
+/** Hard-delete an archived deployment with no ledger history (server refuses with 409 otherwise). */
+export async function purgePaperConfig(id: number): Promise<void> {
+  await paperMutationRequest(`/api/paper/configs/${id}/permanent`, { method: "DELETE" });
+}
+
 export type PaperDeploymentSettings = Partial<Pick<PaperConfig,
   "is_active" | "allocated_capital" | "risk_per_trade_pct" | "telegram_enabled" | "report_enabled"
 >>;

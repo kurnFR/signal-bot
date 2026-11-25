@@ -652,6 +652,23 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         self.assertTrue(restored["is_active"])
         self.assertIsNone(restored["archived_at"])
 
+    def test_purge_requires_archive_and_refuses_ledger_history(self):
+        """Permanent delete: archived + zero history only; ledger is never destroyed."""
+        pristine = self._create_config(strategy_name="trend_ema_v1")
+        with self.assertRaisesRegex(ValueError, "Archive the deployment"):
+            pe.purge_paper_config(pristine)
+        self.assertTrue(pe.delete_paper_config(pristine))
+        self.assertTrue(pe.purge_paper_config(pristine))
+        self.assertNotIn(pristine, [c["id"] for c in pe.get_paper_configs()])
+        self.assertFalse(pe.purge_paper_config(pristine))  # already gone -> not found
+
+        traded = self._create_config(symbol="ETHUSDT", strategy_name="BB_REV_INV")
+        self._create_position(config_id=traded, symbol="ETHUSDT", strategy_name="BB_REV_INV")
+        self.assertTrue(pe.delete_paper_config(traded))
+        with self.assertRaises(pe.PaperConfigHasHistory):
+            pe.purge_paper_config(traded)
+        self.assertIn(traded, [c["id"] for c in pe.get_paper_configs()])  # still archived, not deleted
+
     def test_15_duplicate_trade_prevention(self):
         """15. Direct call to close_position_in_db is strictly idempotent via CAS update."""
         cfg_id = self._create_config()

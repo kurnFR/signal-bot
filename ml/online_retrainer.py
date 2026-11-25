@@ -188,6 +188,10 @@ def _load_registry() -> dict[str, Any]:
                 logger.error("Online retraining registry contains an invalid retraining timestamp; disabling retraining")
                 return _default_registry(enabled=False)
 
+        if "enabled" in model and not isinstance(model["enabled"], bool):
+            logger.error("Online retraining registry contains an invalid model enabled flag; disabling retraining")
+            return _default_registry(enabled=False)
+
         if "auto_promote" in model and not isinstance(model["auto_promote"], bool):
             logger.error("Online retraining registry contains an invalid promotion flag; disabling retraining")
             return _default_registry(enabled=False)
@@ -279,6 +283,39 @@ def register_model_for_retraining(
         reg["registered_models"][key] = model
         _save_registry(reg)
         return model
+
+
+def set_retraining_enabled(enabled: bool) -> bool:
+    """Globally enable/disable the continuous retraining subsystem."""
+    with _registry_lock():
+        reg = _load_registry()
+        reg["enabled"] = bool(enabled)
+        _save_registry(reg)
+        return reg["enabled"]
+
+
+def set_model_retraining_enabled(key: str, enabled: bool) -> dict[str, Any] | None:
+    """Pause/resume retraining for one registered model. None if the key is unknown."""
+    with _registry_lock():
+        reg = _load_registry()
+        model = reg.get("registered_models", {}).get(key)
+        if model is None:
+            return None
+        model["enabled"] = bool(enabled)
+        model["status"] = "active" if enabled else "paused"
+        _save_registry(reg)
+        return model
+
+
+def unregister_model_for_retraining(key: str) -> bool:
+    """Remove a model from continuous retraining. Saved model artifacts are untouched."""
+    with _registry_lock():
+        reg = _load_registry()
+        if key not in reg.get("registered_models", {}):
+            return False
+        del reg["registered_models"][key]
+        _save_registry(reg)
+        return True
 
 
 def _persist_retraining_updates(updates: Mapping[str, Mapping[str, Any]]) -> bool:
@@ -586,6 +623,8 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
         return results
 
     for key, cfg in models.items():
+        if cfg.get("enabled") is False:
+            continue  # paused by operator
         journaled = False
         symbol = cfg["symbol"]
         market = cfg["market"]

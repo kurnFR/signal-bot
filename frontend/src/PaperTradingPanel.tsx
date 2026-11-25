@@ -28,6 +28,7 @@ import {
   type GeneratorModelSummary,
   updatePaperReportPreference,
   archivePaperConfig,
+  purgePaperConfig,
   type PaperConfig,
   type PaperOrder,
   type PaperPosition,
@@ -87,6 +88,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
   const deployTriggerRef = useRef<HTMLElement | null>(null);
   const [editingConfig, setEditingConfig] = useState<PaperConfig | null>(null);
   const [pendingArchive, setPendingArchive] = useState<PaperConfig | null>(null);
+  const [pendingPurge, setPendingPurge] = useState<PaperConfig | null>(null);
   const [reportDays, setReportDays] = useState(0);
   const [periodResult, setPeriodResult] = useState<{ days: number; metrics?: PaperMetrics; failed?: true } | null>(null);
   const [reportMarket, setReportMarket] = useState("");
@@ -516,6 +518,23 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
       setAttempt((current) => current + 1);
     } catch (cause) {
       setActionError(cause instanceof PaperTradingActionError ? cause.message : "Could not archive the deployment.");
+    } finally {
+      setTogglingConfigId(null);
+    }
+  };
+
+  const purgeDeployment = async (config: PaperConfig) => {
+    setTogglingConfigId(config.id);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      await purgePaperConfig(config.id);
+      setPendingPurge(null);
+      setActionSuccess("Deployment permanently deleted.");
+      setAttempt((current) => current + 1);
+    } catch (cause) {
+      setPendingPurge(null);
+      setActionError(cause instanceof PaperTradingActionError ? cause.message : "Could not delete the deployment.");
     } finally {
       setTogglingConfigId(null);
     }
@@ -1054,6 +1073,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
                             <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={() => setEditingConfig(c)}>Edit</button>
                             <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={() => setPendingArchive(c)}>Archive</button>
                           </>}
+                          {c.archived_at && <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={() => setPendingPurge(c)}>Delete permanently</button>}
                         </div>
                       </td>
                     )}
@@ -1085,6 +1105,13 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied 
         <p>New entries stop and pending orders are cancelled. Open positions continue to be managed and closed trades remain in history.</p>
         <button className="button button-secondary" type="button" disabled={togglingConfigId !== null} onClick={() => setPendingArchive(null)}>Cancel archive</button>
         <button className="button button-primary" type="button" disabled={togglingConfigId !== null} onClick={() => void archiveDeployment(pendingArchive)}>Confirm archive</button>
+      </section>}
+
+      {pendingPurge && <section className="panel" aria-label="Confirm permanent delete">
+        <h2>Permanently delete {pendingPurge.symbol} · {pendingPurge.strategy_name}?</h2>
+        <p>This cannot be undone. It is only allowed for archived deployments that never opened a position, trade or order; otherwise the server keeps it archived so performance history is preserved.</p>
+        <button className="button button-secondary" type="button" disabled={togglingConfigId !== null} onClick={() => setPendingPurge(null)}>Cancel delete</button>
+        <button className="button button-danger" type="button" disabled={togglingConfigId !== null} onClick={() => void purgeDeployment(pendingPurge)}>Confirm permanent delete</button>
       </section>}
 
       {/* Portfolio Risk & Exposure Desk */}

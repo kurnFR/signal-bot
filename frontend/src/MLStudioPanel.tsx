@@ -4,6 +4,7 @@ import { useAuth } from "./AuthGate";
 import { ApiError } from "./lib/api";
 import { trapFocus } from "./lib/dialog";
 import { MLGeneratorTrainingPanel } from "./MLGeneratorTrainingPanel";
+import { RetrainingSection } from "./components/RetrainingSection";
 import {
   deployMLModelToPaper,
   fetchMLExperimentDetails,
@@ -323,6 +324,8 @@ export function MLStudioPanel() {
       )}
 
       <MLGeneratorTrainingPanel onCompleted={() => setAttempt((n) => n + 1)} />
+
+      <RetrainingSection />
 
       {error && (
         <div className="api-error" role="alert">
