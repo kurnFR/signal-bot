@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -17,7 +18,9 @@ def test_static_ml_studio_exposes_generator_training_form():
     assert "await this.fetchPaperGeneratorModels()" in app_js
     assert "/api/ml/generator-models" in app_js
     assert "generatorData.models.length" in app_js
-    assert "/static/js/app.js?v=20261119-1" in html
+    # The version query string is a cache-buster that changes on every UI release,
+    # so assert the script is referenced with one rather than pinning its value.
+    assert re.search(r"/static/js/app\.js\?v=\d{8}-\d+", html)
 
 
 def test_static_paper_config_keeps_generator_and_telegram_controls_separate():
