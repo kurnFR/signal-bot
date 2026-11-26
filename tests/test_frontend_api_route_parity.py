@@ -15,11 +15,13 @@ ROOT = Path(__file__).resolve().parents[1]
 ADMIN_ONLY_FRONTEND_GETS = {
     "/api/settings/status": "frontend/src/SettingsPanel.tsx",
     "/api/settings/services": "frontend/src/components/ServicesSection.tsx",
+    "/api/news/settings": "frontend/src/components/NewsAISettingsCard.tsx",
 }
 # The exact call that must be preceded by an `if (!isAdmin) ... return;` guard.
 ADMIN_ONLY_CALL_MARKERS = {
     "/api/settings/status": "fetchAdminSystemStatus(controller.signal)",
     "/api/settings/services": "void load(controller.signal)",
+    "/api/news/settings": "void load(controller.signal)",
 }
 GET_JSON_CALL = re.compile(
     r"""getJson(?:<[^;]*>)?\s*\(\s*(['"`])([^'"`]+)\1""",
