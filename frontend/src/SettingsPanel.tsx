@@ -5,6 +5,7 @@ import { changePassword, AuthRequestError } from "./lib/auth";
 import { fetchTelegramStatus, sendTelegramTestPing, TelegramActionError, type TelegramStatus } from "./lib/telegram";
 import { fetchAdminSystemStatus, type AdminSystemStatusResponse } from "./lib/systemStatus";
 import { AuditLogsSection } from "./components/AuditLogsSection";
+import { ServicesSection } from "./components/ServicesSection";
 import { LicenseStatusCard } from "./components/LicenseStatusCard";
 import type { LicenseStatus } from "./lib/systemStatus";
 import {
@@ -1148,6 +1149,8 @@ export function SettingsPanel({ theme, onToggleTheme, username, role, license }:
     {isAdmin && license && <LicenseStatusCard license={license} activeUserCount={users.filter((u) => u.is_active).length} />}
 
     {/* Admin-Only Operator Audit Logs */}
+    {isAdmin && <ServicesSection isAdmin={isAdmin} />}
+
     {isAdmin && <AuditLogsSection />}
   </div>;
 }

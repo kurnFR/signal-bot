@@ -4,6 +4,7 @@ import { useAuth } from "./AuthGate";
 import { ApiError } from "./lib/api";
 import { trapFocus } from "./lib/dialog";
 import { MLGeneratorTrainingPanel } from "./MLGeneratorTrainingPanel";
+import { RetrainingSection } from "./components/RetrainingSection";
 import {
   deployMLModelToPaper,
   fetchMLExperimentDetails,
@@ -37,7 +38,13 @@ const SUPPORTED_BASE_STRATEGIES = [
   "atr_breakout_v1",
 ] as const;
 
-export function MLStudioPanel() {
+interface MLStudioPanelProps {
+  paperReady?: boolean;
+  selectedEvidenceModelId?: string;
+  onSelectPaperEvidence?: (modelId: string) => void;
+}
+
+export function MLStudioPanel({ paperReady = true, selectedEvidenceModelId, onSelectPaperEvidence }: MLStudioPanelProps = {}) {
   const auth = useAuth();
   const canTrade = ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
 
@@ -217,7 +224,7 @@ export function MLStudioPanel() {
   // ML-04: Execute deploy handler
   const handleExecuteDeploy = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!deployModel || deployBusy) return;
+    if (!paperReady || !deployModel || deployBusy) return;
     setDeployError(null);
     setActionError(null);
     setActionSuccess(null);
@@ -323,6 +330,8 @@ export function MLStudioPanel() {
       )}
 
       <MLGeneratorTrainingPanel onCompleted={() => setAttempt((n) => n + 1)} />
+
+      <RetrainingSection />
 
       {error && (
         <div className="api-error" role="alert">
@@ -478,11 +487,16 @@ export function MLStudioPanel() {
                         ) : null}
                       </td>
                       <td>
+                        {canTrade && isEligible && onSelectPaperEvidence && (
+                          <button type="button" className="button button-secondary button-small" onClick={() => onSelectPaperEvidence(model.model_id)}>
+                            {selectedEvidenceModelId === model.model_id ? "Open paper readiness" : "Use model for paper readiness"}
+                          </button>
+                        )}
                         {canTrade ? (
                           <button
                             type="button"
                             className="button button-secondary button-small"
-                            disabled={!isEligible}
+                            disabled={!isEligible || !paperReady || (Boolean(onSelectPaperEvidence) && model.model_id !== selectedEvidenceModelId)}
                             title={isEligible ? "Deploy this ML model as a signal filter in Live Paper Trading" : "Model does not meet paper deployment criteria"}
                             onClick={(e) => {
                               deployTriggerRef.current = e.currentTarget;

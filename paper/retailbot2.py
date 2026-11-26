@@ -941,84 +941,14 @@ class TelegramAlert:
 
     @staticmethod
     def _paper_performance_lines() -> list[str]:
-        """Read the same realized paper ledger totals shown on the dashboard."""
-        lines = ["📝 <b>Paper Trading Engine · Realized P&amp;L</b>"]
-        try:
-            try:
-                from paper.engine import get_paper_metrics
-            except ModuleNotFoundError:
-                from engine import get_paper_metrics
-
-            metrics = get_paper_metrics()
-        except Exception as exc:
-            logging.getLogger(__name__).warning("Paper performance report unavailable (%s: %s)", type(exc).__name__, exc)
-            return [*lines, "Paper trade totals unavailable"]
-
-        if not metrics["totalTrades"]:
-            return [*lines, "No closed trades included in reporting yet."]
-
-        def pnl_label(value: float) -> str:
-            if abs(value) < 0.005:
-                return "$0.00"
-            sign = "+" if value > 0 else "−"
-            return f"{sign}${abs(value):,.2f}"
-
-        lines.extend([
-            f"Net P&amp;L: <b>{pnl_label(metrics['netPnl'])}</b>",
-            f"{metrics['totalTrades']} closed · Wins {metrics['wins']} · Losses {metrics['losses']}"
-            f" · {metrics['winRatePct']:g}% win rate",
-        ])
-        by_pair: dict[str, dict[str, list]] = {}
-        for row in metrics["byStrategy"]:
-            if not row["totalTrades"]:
-                continue
-            strategies = by_pair.setdefault(row["symbol"], {})
-            stats = strategies.setdefault(row["strategy"], [0, 0, 0, 0.0])
-            stats[0] += row["totalTrades"]
-            stats[1] += row["wins"]
-            stats[2] += row["losses"]
-            stats[3] += row["netPnl"]
-
-        omitted = 0
-        remaining = 1750
-        for symbol, strategies in sorted(by_pair.items()):
-            pair_trades = sum(row[0] for row in strategies.values())
-            pair_wins = sum(row[1] for row in strategies.values())
-            pair_pnl = sum(row[3] for row in strategies.values())
-            heading = (
-                f"<b>{escape(symbol)}</b> · {pnl_label(pair_pnl)}\n"
-                f"{pair_trades} closed · {pair_wins / pair_trades:.0%} win rate"
-            )
-            pair_lines = []
-            for name, (trades, wins, losses, pnl) in sorted(strategies.items()):
-                pair_lines.append(
-                    f"• <b>{escape(name)}</b> · {pnl_label(pnl)}\n"
-                    f"  {trades} closed · Wins {wins} · Losses {losses} · {wins / trades:.0%} win rate"
-                )
-            # Keep the pair heading and its first strategy together.
-            heading_size = len(heading) + 2
-            if remaining < heading_size + len(pair_lines[0]) + 1:
-                omitted += len(pair_lines)
-                continue
-            lines.extend(["", heading])
-            remaining -= heading_size
-            for line in pair_lines:
-                if remaining < len(line) + 1:
-                    omitted += 1
-                    continue
-                lines.append(line)
-                remaining -= len(line) + 1
-        if omitted:
-            lines.append(f"Total includes {omitted} more pair/strategy rows. View all in Paper Trading.")
-        return lines
+        """Delegates to ``paper.paper_report`` (shared, RetailBot2-independent)."""
+        from paper.paper_report import paper_performance_lines
+        return paper_performance_lines()
 
     @staticmethod
     def format_paper_report() -> str:
-        return "\n".join([
-            "📊 <b>PAPER TRADING PERFORMANCE</b>",
-            "─" * 30,
-            *TelegramAlert._paper_performance_lines(),
-        ])
+        from paper.paper_report import format_paper_report
+        return format_paper_report()
 
     @staticmethod
     def format_stats(stats: Dict, equity_shadow: float, equity_inverse: float) -> str:
@@ -1057,102 +987,8 @@ class TelegramAlert:
 # INDICATORS
 # ═══════════════════════════════════════════════════════════════════
 
-class Indicators:
-    @staticmethod
-    def rsi(series: pd.Series, period: int = 14) -> pd.Series:
-        delta = series.diff()
-        gain = delta.where(delta > 0, 0.0).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0.0)).rolling(window=period).mean()
-        rs = gain / (loss + 1e-10)  # Avoid division by zero
-        return 100.0 - (100.0 / (1.0 + rs))
+from paper.indicators import Indicators  # noqa: F401  (re-exported; shared module)
 
-    @staticmethod
-    def ema(series: pd.Series, span: int) -> pd.Series:
-        return series.ewm(span=span, adjust=False).mean()
-
-    @staticmethod
-    def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
-        hl = df['high'] - df['low']
-        hc = (df['high'] - df['close'].shift()).abs()
-        lc = (df['low'] - df['close'].shift()).abs()
-        tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
-        return tr.rolling(window=period).mean()
-
-    @staticmethod
-    def macd(series: pd.Series, fast: int = 12,
-             slow: int = 26, signal: int = 9) -> Tuple[pd.Series, pd.Series, pd.Series]:
-        ema_f = series.ewm(span=fast, adjust=False).mean()
-        ema_s = series.ewm(span=slow, adjust=False).mean()
-        line = ema_f - ema_s
-        sig = line.ewm(span=signal, adjust=False).mean()
-        hist = line - sig
-        return line, sig, hist
-
-    @staticmethod
-    def bollinger(series: pd.Series,
-                  period: int = 20, std: float = 2.0) -> Tuple[pd.Series, pd.Series, pd.Series]:
-        mid = series.rolling(window=period).mean()
-        s = series.rolling(window=period).std()
-        return mid + std * s, mid, mid - std * s
-
-    @staticmethod
-    def find_sr_levels(df: pd.DataFrame, lookback: int,
-                       threshold: float, min_touches: int) -> Tuple[List[float], List[float]]:
-        """
-        Find S/R by clustering local pivot highs and lows.
-        [F1] More precise — uses actual pivot points not all candle data
-        """
-        if len(df) < lookback + 5:
-            return [], []
-
-        recent = df.iloc[-lookback:].copy()
-        current_price = df['close'].iloc[-2]  # Use completed candle
-
-        # Find local pivot highs and lows (5-bar pivot)
-        pivot_highs = []
-        pivot_lows = []
-        closes = recent['high'].values
-        lows_arr = recent['low'].values
-
-        for i in range(2, len(recent) - 2):
-            # Pivot high: higher than 2 bars each side
-            if (closes[i] > closes[i-1] and closes[i] > closes[i-2] and
-                    closes[i] > closes[i+1] and closes[i] > closes[i+2]):
-                pivot_highs.append(closes[i])
-            # Pivot low
-            if (lows_arr[i] < lows_arr[i-1] and lows_arr[i] < lows_arr[i-2] and
-                    lows_arr[i] < lows_arr[i+1] and lows_arr[i] < lows_arr[i+2]):
-                pivot_lows.append(lows_arr[i])
-
-        def cluster_levels(levels: List[float]) -> List[float]:
-            if not levels:
-                return []
-            levels_sorted = sorted(levels)
-            clusters = []
-            used = set()
-            for i, lv in enumerate(levels_sorted):
-                if i in used:
-                    continue
-                group = [lv]
-                for j in range(i + 1, len(levels_sorted)):
-                    if j in used:
-                        continue
-                    if abs(levels_sorted[j] - lv) / (lv + 1e-10) < threshold:
-                        group.append(levels_sorted[j])
-                        used.add(j)
-                used.add(i)
-                if len(group) >= min_touches:
-                    clusters.append(float(np.mean(group)))
-            return clusters
-
-        all_supports = cluster_levels(
-            [lv for lv in pivot_lows if lv < current_price]
-        )
-        all_resistances = cluster_levels(
-            [lv for lv in pivot_highs if lv > current_price]
-        )
-
-        return sorted(all_supports, reverse=True), sorted(all_resistances)
 
 
 # ═══════════════════════════════════════════════════════════════════

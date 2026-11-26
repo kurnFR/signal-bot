@@ -10,7 +10,8 @@ import math
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Body, HTTPException, BackgroundTasks
+from fastapi import Path as ApiPath
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ml.artifacts import (
@@ -726,6 +727,37 @@ def register_retrain_model(req: RegisterRetrainRequest):
         model_type=req.model_type,
         auto_promote=req.auto_promote,
     )
+
+
+class RetrainingEnabledRequest(BaseModel):
+    enabled: bool
+
+
+@router.put("/retraining/enabled")
+def set_retraining_subsystem_enabled(req: RetrainingEnabledRequest):
+    """Enable/disable the whole continuous retraining subsystem."""
+    from ml.online_retrainer import set_retraining_enabled
+    return {"status": "ok", "enabled": set_retraining_enabled(req.enabled)}
+
+
+@router.patch("/retraining/models/{key}")
+def set_retraining_model_enabled(key: str = ApiPath(..., min_length=1, max_length=200),
+                                 req: RetrainingEnabledRequest = Body(...)):
+    """Pause/resume retraining for one registered model."""
+    from ml.online_retrainer import set_model_retraining_enabled
+    model = set_model_retraining_enabled(key, req.enabled)
+    if model is None:
+        raise HTTPException(status_code=404, detail="Registered model not found")
+    return {"status": "ok", "model": model}
+
+
+@router.delete("/retraining/models/{key}")
+def remove_retraining_model(key: str = ApiPath(..., min_length=1, max_length=200)):
+    """Stop retraining a model and remove it from the registry (artifacts are kept)."""
+    from ml.online_retrainer import unregister_model_for_retraining
+    if not unregister_model_for_retraining(key):
+        raise HTTPException(status_code=404, detail="Registered model not found")
+    return {"status": "ok", "key": key}
 
 
 @router.post("/retraining/trigger")

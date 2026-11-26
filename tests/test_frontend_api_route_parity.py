@@ -14,6 +14,12 @@ from web.app import app, _role_allowed
 ROOT = Path(__file__).resolve().parents[1]
 ADMIN_ONLY_FRONTEND_GETS = {
     "/api/settings/status": "frontend/src/SettingsPanel.tsx",
+    "/api/settings/services": "frontend/src/components/ServicesSection.tsx",
+}
+# The exact call that must be preceded by an `if (!isAdmin) ... return;` guard.
+ADMIN_ONLY_CALL_MARKERS = {
+    "/api/settings/status": "fetchAdminSystemStatus(controller.signal)",
+    "/api/settings/services": "void load(controller.signal)",
 }
 GET_JSON_CALL = re.compile(
     r"""getJson(?:<[^;]*>)?\s*\(\s*(['"`])([^'"`]+)\1""",
@@ -139,7 +145,7 @@ class TestFrontendApiRouteParity(unittest.TestCase):
                 self.assertTrue(_role_allowed("GET", path, "admin"))
                 self.assertFalse(_role_allowed("GET", path, "trader"))
                 source = (ROOT / component_path).read_text(encoding="utf-8")
-                call_position = source.index("fetchAdminSystemStatus(controller.signal)")
+                call_position = source.index(ADMIN_ONLY_CALL_MARKERS[path])
                 guard_position = source.rfind("if (!isAdmin)", 0, call_position)
                 self.assertGreater(call_position, guard_position)
                 self.assertIn("return;", source[guard_position:call_position])

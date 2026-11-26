@@ -79,6 +79,27 @@ class TestBacktestRouteContracts(unittest.TestCase):
         self.assertIn("Failed to save backtest to DB (RuntimeError)", "\n".join(captured.output))
         self.assertNotIn("simulated DB outage", "\n".join(captured.output))
 
+    def test_research_benchmark_keeps_rankings_without_attempting_promotion(self):
+        request = backtest.RunAllStrategiesRequest(
+            symbol="BTCUSDT", data_segment="train", allow_auto_promotion=False
+        )
+        metrics = {
+            "total_trades": 100, "win_rate_pct": 100.0, "expectancy_r": 0.5,
+            "profit_factor": float("inf"), "max_drawdown_r": 0.0,
+        }
+        with patch.object(backtest, "STRATEGIES", {"test_strategy": lambda frame, params: []}), \
+             patch.object(backtest, "fetch_ohlcv_with_features_df", return_value=candle_frame(100)), \
+             patch("backtest.metrics.compute_metrics", return_value=metrics), \
+             patch("backtest.equity.simulate_equity_curve", return_value={"equity": []}), \
+             patch("ai.insight_engine.generate_ai_insight", return_value={}), \
+             patch.object(backtest, "_auto_promote_top_candidate") as auto_promote:
+            result = backtest.run_all_strategies(request)
+
+        auto_promote.assert_not_called()
+        self.assertEqual(result["autoPromotion"]["status"], "skipped")
+        self.assertEqual(result["top3"][0]["strategy"], "test_strategy")
+        self.assertIsNone(result["top3"][0]["metrics"]["profit_factor"])
+
 
 if __name__ == "__main__":
     unittest.main()

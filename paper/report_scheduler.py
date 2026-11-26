@@ -5,7 +5,8 @@ import os
 import time
 
 from notifications.telegram_notifier import is_telegram_delivery_authorized
-from paper.retailbot2 import BotConfig, DatabaseManager, TelegramAlert
+from paper.paper_report import format_paper_report
+from paper.retailbot2 import BotConfig, DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ def queue_current_hour(database: DatabaseManager, now: float) -> bool:
     return database.enqueue_telegram_outbox_event(
         event_key=f"paper-performance:{hour}",
         event_type="operational",
-        payload={"text": TelegramAlert.format_paper_report()},
+        payload={"text": format_paper_report()},
         deduplicate=True,
     )
 

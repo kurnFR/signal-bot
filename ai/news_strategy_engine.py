@@ -22,6 +22,7 @@ import logging
 import sys
 import os
 import time
+from db.service_control import pause_gate
 import json
 import argparse
 from collections import defaultdict
@@ -395,7 +396,8 @@ def run(once=False):
         logger.info(f"Using Anthropic API with model '{ANTHROPIC_MODEL}'")
 
     while True:
-
+        if not once and pause_gate("news_ai", "news_strategy_engine", NEWS_AI_POLL_INTERVAL_SECONDS):
+            continue
         start = time.time()
         try:
             poll_once()

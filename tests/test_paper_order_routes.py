@@ -211,6 +211,27 @@ class TestPaperOrderRoutes(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Cannot delete with open position", response.json()["detail"])
 
+    def test_purge_paper_config_maps_outcomes_and_audits(self):
+        from paper.engine import PaperConfigHasHistory
+        with patch("web.app.authenticate_request", return_value=_user("admin")), \
+             patch("web.routes.paper_routes.purge_paper_config", return_value=True) as purge, \
+             patch("web.routes.paper_routes.log_audit") as audit:
+            ok = self.client.delete("/api/paper/configs/15/permanent")
+        self.assertEqual(ok.status_code, 200)
+        purge.assert_called_once_with(15)
+        self.assertEqual(audit.call_args.args[0], "PAPER_CONFIG_PURGED")
+        for exc, code in ((PaperConfigHasHistory("has trades"), 409), (ValueError("Archive first"), 400)):
+            with patch("web.app.authenticate_request", return_value=_user("admin")), \
+                 patch("web.routes.paper_routes.purge_paper_config", side_effect=exc):
+                self.assertEqual(self.client.delete("/api/paper/configs/15/permanent").status_code, code)
+        with patch("web.app.authenticate_request", return_value=_user("admin")), \
+             patch("web.routes.paper_routes.purge_paper_config", return_value=False):
+            self.assertEqual(self.client.delete("/api/paper/configs/15/permanent").status_code, 404)
+        with patch("web.app.authenticate_request", return_value=_user("viewer")), \
+             patch("web.routes.paper_routes.purge_paper_config") as blocked:
+            self.assertEqual(self.client.delete("/api/paper/configs/15/permanent").status_code, 403)
+        blocked.assert_not_called()
+
     def test_paper_deployment_patch_updates_only_selected_value(self):
         with patch("web.app.authenticate_request", return_value=_user("trader")), \
              patch("web.routes.paper_routes.update_paper_deployment", return_value=True) as update:

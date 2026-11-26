@@ -7,12 +7,22 @@ from fastapi import APIRouter, Depends, Query
 from typing import Optional, List, Dict, Any
 import json
 
+from config import ENABLE_FUTURES
 from web.routes.settings import collect_system_status
 from db.db import get_pool, _owned_cursor
 from web.auth import require_admin
 from web.licensing import get_branding_config, verify_license_key
 
 router = APIRouter(prefix="/api/system", tags=["system"])
+
+
+def _display_collector_status(heartbeat: dict) -> str:
+    name = heartbeat.get("collector")
+    if name in {"ws_funding", "ws_liquidations"}:
+        return "retired"
+    if not ENABLE_FUTURES and name in {"ws_kline_futures", "oi_poller"}:
+        return "disabled"
+    return heartbeat.get("status", "unknown")
 
 
 @router.get("/status")
@@ -29,7 +39,7 @@ def get_public_system_status():
         "heartbeats": [
             {
                 "collector": heartbeat.get("collector"),
-                "status": heartbeat.get("status", "unknown"),
+                "status": _display_collector_status(heartbeat),
                 "lastBeat": heartbeat.get("lastBeat"),
             }
             for heartbeat in full.get("heartbeats", [])

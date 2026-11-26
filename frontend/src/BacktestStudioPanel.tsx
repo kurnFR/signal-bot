@@ -5,7 +5,7 @@ import { ApiError } from "./lib/api";
 import { PromotionStatusPanel } from "./PromotionStatusPanel";
 import { fetchBackfilledSymbols } from "./lib/masterData";
 import { trapFocus } from "./lib/dialog";
-import { deployPaperStrategy, fetchGeneratorModels, PaperTradingActionError, type GeneratorModelSummary } from "./lib/paperTrading";
+import { deployPaperStrategy, fetchGeneratorModels, updatePaperConfig, PaperTradingActionError, type GeneratorModelSummary, parseTelegramDeliveryStatus } from "./lib/paperTrading";
 import {
   BacktestExecutionError,
   executeBacktest,
@@ -92,8 +92,14 @@ function TableSortHeader<T extends string>({
   );
 }
 
-interface BacktestStudioPanelProps { initialStrategyId?: string | null; onInitialStrategyApplied?: () => void; }
-export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrategyApplied }: BacktestStudioPanelProps = {}) {
+interface BacktestStudioPanelProps {
+  initialStrategyId?: string | null;
+  onInitialStrategyApplied?: () => void;
+  paperReady?: boolean;
+  selectedEvidenceRunId?: number;
+  onSelectPaperEvidence?: (run: BacktestRunDetails) => void;
+}
+export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrategyApplied, paperReady = true, selectedEvidenceRunId, onSelectPaperEvidence }: BacktestStudioPanelProps = {}) {
   const [strategies, setStrategies] = useState<BacktestStrategy[]>([]);
   const [runs, setRuns] = useState<BacktestRunSummary[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -126,9 +132,10 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
   const [runBusy, setRunBusy] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [runNotice, setRunNotice] = useState<string | null>(null);
+  const [deployWarning, setDeployWarning] = useState<string | null>(null);
   const [executionResult, setExecutionResult] = useState<BacktestExecutionResult | null>(null);
   const [promotionPolicy, setPromotionPolicy] = useState<PromotionPolicy | null>(null);
-  const [promotionSideEffectAcknowledged, setPromotionSideEffectAcknowledged] = useState(false);
+  const [benchmarkPromotionConsent, setBenchmarkPromotionConsent] = useState(false);
 
   // Deploy to Paper Trading modal state
   const [deployRun, setDeployRun] = useState<BacktestRunDetails | null>(null);
@@ -190,12 +197,16 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
   const handleOpenRunAll = () => {
     setRunAllResult(null);
     setRunAllError(null);
+    setBenchmarkPromotionConsent(false);
     setRunAllOpen(true);
   };
 
   const handleExecuteRunAll = async () => {
+    if (runAllBusy) return;
     setRunAllBusy(true);
     setRunAllError(null);
+    setRunAllResult(null);
+    setBenchmarkPromotionConsent(false);
     try {
       const res = await runAllStrategies({
         symbol,
@@ -204,6 +215,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
         data_segment: dataSegment,
         initial_capital: Number(initialCapital) || 5000,
         risk_per_trade_pct: Number(riskPerTrade) || 1.0,
+        allow_auto_promotion: paperReady && dataSegment === "train" && Boolean(promotionPolicy?.enabled) && benchmarkPromotionConsent,
       });
       setRunAllResult(res);
     } catch (err: any) {
@@ -235,7 +247,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
     const standardKeys = new Set([
       "symbol", "market", "timeframe", "data_segment",
       "initial_capital", "risk_per_trade_pct", "save_to_db",
-      "htf_df", "pair_df", "funding_events",
+      "htf_df", "pair_df", "funding_events", "pair_symbol", "ml_generator_model_id",
     ]);
     const overrides: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(run.params)) {
@@ -249,6 +261,8 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
   const openDeployModal = (run: BacktestRunDetails, trigger?: HTMLButtonElement) => {
     deployTriggerRef.current = trigger ?? null;
     setDeployRun(run);
+    setRunNotice(null);
+    setDeployWarning(null);
     const isSupported = (SUPPORTED_PAPER_TIMEFRAMES as readonly string[]).includes(run.timeframe);
     setDeployTimeframe(isSupported ? (run.timeframe as PaperTimeframe) : "");
     const initialCap = typeof run.params?.initial_capital === "number" && run.params.initial_capital >= 100
@@ -284,10 +298,14 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
 
   const handleExecuteDeploy = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!deployRun || deployBusy) return;
+    if (!paperReady || !deployRun || deployBusy) return;
     setDeployError(null);
     if (!deployTimeframe || !(SUPPORTED_PAPER_TIMEFRAMES as readonly string[]).includes(deployTimeframe)) {
       setDeployError("Please select a supported paper trading timeframe (15m, 1h, 4h, or 1d).");
+      return;
+    }
+    if (onSelectPaperEvidence && deployTimeframe !== deployRun.timeframe) {
+      setDeployError("Run the backtest on the paper timeframe before deploying.");
       return;
     }
     if (deployCapital < 100) {
@@ -302,19 +320,44 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
     try {
       const targetTimeframe = deployTimeframe as PaperTimeframe;
       const strategyOverrides = extractStrategyOverrides(deployRun);
-      const res = await deployPaperStrategy({
+      const config = {
         symbol: deployRun.symbol,
         market: (deployRun.market.toLowerCase() === "futures" ? "futures" : "spot") as "spot" | "futures",
         timeframe: targetTimeframe,
         strategy_name: deployRun.strategy,
         allocated_capital: deployCapital,
         risk_per_trade_pct: deployRisk,
-        send_telegram: deployTelegram,
         params: strategyOverrides,
-      });
-      setRunNotice(
-        res.message || `Strategy '${deployRun.strategy}' deployed to Live Paper Trading on ${deployRun.symbol} (${deployRun.market.toUpperCase()} · ${targetTimeframe}).`
-      );
+      };
+      if (deployRun.strategy === "ml_signal_generator_v1") {
+        const modelId = deployRun.params?.ml_generator_model_id;
+        if (typeof modelId !== "string" || !modelId) {
+          setDeployError("Run the backtest with an eligible generator model before deploying.");
+          return;
+        }
+        await updatePaperConfig({
+          ...config,
+          is_active: true,
+          ml_generator_model_id: modelId,
+          telegram_enabled: deployTelegram,
+          report_enabled: true,
+        });
+        setRunNotice(`Paper Trading configuration saved for generator model ${modelId}.`);
+        closeDeployModal();
+        return;
+      }
+      const res = await deployPaperStrategy({ ...config, send_telegram: deployTelegram });
+      const delivery = deployTelegram ? parseTelegramDeliveryStatus(res.telegramAlert ?? res.telegram) : null;
+      const message = res.message || `Strategy '${deployRun.strategy}' deployed to Paper Trading.`;
+      const evaluation = res.status === "partial" ? " Configuration was saved, but immediate evaluation failed." : "";
+      const notification = delivery?.status === "success" ? " Telegram notification delivered."
+        : delivery?.status === "failed" ? " Telegram notification failed."
+        : delivery ? " Telegram delivery status is unconfirmed." : "";
+      if (evaluation || (delivery && delivery.status !== "success")) {
+        setDeployWarning(message + evaluation + notification);
+      } else {
+        setRunNotice(message + notification);
+      }
       closeDeployModal();
     } catch (cause) {
       setDeployError(cause instanceof PaperTradingActionError ? cause.message : "Failed to deploy strategy to Paper Trading.");
@@ -332,11 +375,14 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
         setStrategies(Array.isArray(strategyResult.strategies) ? strategyResult.strategies : []);
         const nextRuns = Array.isArray(historyResult.runs) ? historyResult.runs : [];
         setRuns(nextRuns);
-        setSelectedId((current) => current != null && nextRuns.some((run) => run.id === current) ? current : nextRuns[0]?.id ?? null);
+        setSelectedId((current) => {
+          const preferred = current ?? selectedEvidenceRunId;
+          return nextRuns.find((run) => run.id === preferred)?.id ?? nextRuns[0]?.id ?? null;
+        });
       }).catch((cause: unknown) => { if (!controller.signal.aborted) setError(errorMessage(cause)); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [attempt]);
+  }, [attempt, selectedEvidenceRunId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -483,6 +529,9 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
     });
   }, [trades, tradeSortField, tradeSortDirection]);
 
+  const supportsPaperEvidence = details != null && details.totalTrades === trades.length &&
+    (SUPPORTED_PAPER_TIMEFRAMES as readonly string[]).includes(details.timeframe) &&
+    (details.strategy !== "ml_signal_generator_v1" || typeof details.params?.ml_generator_model_id === "string");
   const summary = details ?? (selectedId == null ? null : runs.find((run) => run.id === selectedId) ?? null);
 
   const reviewRun = () => {
@@ -511,7 +560,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
         params[parameter.key] = value;
       }
     }
-    setRunError(null); setRunNotice(null); setExecutionResult(null); setPromotionSideEffectAcknowledged(false);
+    setRunError(null); setRunNotice(null); setExecutionResult(null);
     setPendingRun({
       symbol: normalizedSymbol, market, timeframe, strategy: strategyId,
       data_segment: dataSegment, initial_capital: capital, risk_per_trade_pct: risk,
@@ -521,13 +570,12 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
   };
 
   const confirmRun = async () => {
-    if (!pendingRun || !promotionPolicy || (promotionPolicy.enabled && !promotionSideEffectAcknowledged)) return;
+    if (!pendingRun || runBusy) return;
     setRunBusy(true); setRunError(null); setRunNotice(null);
     try {
       const result = await executeBacktest(pendingRun);
       setExecutionResult(result);
       setPendingRun(null);
-      setPromotionSideEffectAcknowledged(false);
       setRunNotice(result.runId == null
         ? "Backtest completed, but persistence was not confirmed (runId is null). The metrics below are from this response and may not appear in saved history."
         : `Backtest completed and saved as run #${result.runId}.`);
@@ -542,10 +590,11 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
   };
 
   return <div className="backtest-studio-view" aria-busy={loading || detailLoading || runBusy}>
-    <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>Backtest Studio</strong><p>Running a backtest performs a simulation and requests persistence of the result. Only admin/trader roles can run one, and every run requires explicit review and confirmation. Promotion policy and recent decisions are visible below in read-only form; policy editing, activation, and Telegram actions remain unavailable.</p></div><span className="panel-counter">CONFIRMED RUNS</span></section>
+    <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>Backtest Studio</strong><p>Run a strategy simulation, then review a saved result to prepare a paper deployment.</p></div><span className="panel-counter">CONFIRMED RUNS</span></section>
     {error && <div className="api-error" role="alert"><div><strong>Unable to load Backtest Studio</strong><p>{error}</p></div><button className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}><RefreshCw size={15} /> Retry</button></div>}
     {runError && <div className="api-error" role="alert"><div><strong>Backtest run failed</strong><p>{runError}</p></div><button className="button button-secondary" onClick={() => setRunError(null)}>Dismiss</button></div>}
     {runNotice && <p className="control-feedback control-success" role="status">{runNotice}</p>}
+    {deployWarning && <p className="control-feedback control-warning" role="status">{deployWarning}</p>}
     {canRunBacktest ? <section className="panel" aria-labelledby="backtest-run-config-title">
       <div className="panel-heading"><div><h2 id="backtest-run-config-title">Run a backtest</h2><p>Configure a simulation using stored market data. Results are submitted for persistence in history.</p></div><span className="panel-counter">ADMIN / TRADER</span></div>
       <form className="screener-control-grid" onSubmit={(event) => { event.preventDefault(); reviewRun(); }}>
@@ -599,7 +648,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
         >
           <Sparkles size={14} /> Benchmark All Strategies
         </button>
-        <button className="button button-primary" type="button" disabled={loading || runBusy || !strategies.length || !activeStrategy || !promotionPolicy} onClick={reviewRun}>
+        <button className="button button-primary" type="button" disabled={loading || runBusy || !strategies.length || !activeStrategy} onClick={reviewRun}>
           Review backtest run
         </button>
       </div>
@@ -655,9 +704,16 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
               <BrainCircuit size={14} /> AI Insight
             </button>
           )}
-          {canRunBacktest && details && (
+          {canRunBacktest && details && onSelectPaperEvidence && supportsPaperEvidence && (
+            <button className="button button-secondary button-sm" type="button" onClick={() => onSelectPaperEvidence(details)}>
+              {details.id === selectedEvidenceRunId ? "Open paper readiness" : "Use run for paper readiness"}
+            </button>
+          )}
+          {canRunBacktest && details && (!onSelectPaperEvidence || supportsPaperEvidence) && (
             <button
               className="button button-primary button-sm"
+              disabled={!paperReady || (Boolean(onSelectPaperEvidence) && selectedEvidenceRunId !== details.id)}
+              title="Select this run and complete paper readiness before deployment"
               type="button"
               onClick={(e) => openDeployModal(details, e.currentTarget)}
             >
@@ -666,6 +722,11 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
           )}
         </div>
       </div>
+      {canRunBacktest && details && onSelectPaperEvidence && !supportsPaperEvidence && (
+        <p className="control-feedback control-warning">{details.totalTrades !== trades.length
+          ? "This run has an incomplete trade ledger. Run the backtest again to produce complete evidence."
+          : "For paper readiness, run a backtest on 15m, 1h, 4h, or 1d and select an eligible model if the strategy uses an ML generator."}</p>
+      )}
       {detailError && <p role="alert" className="error-banner">{detailError}</p>}
       {detailLoading ? <p className="empty-state" role="status">Loading selected run details…</p> : details ? <>
         <div className="paper-risk-grid"><div><span>Run</span><strong>#{details.id} · {details.symbol}</strong></div><div><span>Strategy</span><strong>{strategyNames.get(details.strategy) ?? details.strategy}</strong></div><div><span>Market / timeframe</span><strong>{details.market} · {details.timeframe}</strong></div><div><span>Data segment</span><strong>{details.dataSegment}</strong></div><div><span>Win rate</span><strong>{details.winRatePct == null ? "—" : `${pct.format(details.winRatePct)}%`}</strong></div><div><span>Profit factor</span><strong>{moneyish(details.profitFactor)}</strong></div><div><span>Expectancy</span><strong>{details.expectancyR == null ? "—" : `${numeric.format(details.expectancyR)} R`}</strong></div><div><span>Max drawdown</span><strong>{details.maxDrawdownR == null ? "—" : `${numeric.format(details.maxDrawdownR)} R`}</strong></div></div>
@@ -685,13 +746,11 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       </> : <p className="empty-state">{selectedId == null ? "Select a saved run to inspect its details." : "Run details are not available."}</p>}
     </section>
     {pendingRun && <section className="panel" aria-labelledby="backtest-confirm-title">
-      <div className="panel-heading"><div><h2 id="backtest-confirm-title">Confirm backtest run</h2><p>This simulation requests persistence in backtest history and does not execute live trades. The backend also evaluates its saved auto-promotion policy when a run completes.</p></div></div>
-      {promotionPolicy?.enabled ? <div className="api-error" role="note"><div><strong>Auto-promotion is enabled</strong><p>This run may activate a paper strategy. Telegram alerts are {promotionPolicy.send_telegram ? "enabled and may send an external message" : "disabled"} in the saved policy. Acknowledge these possible side effects before running.</p></div></div> : <p className="empty-state">The saved policy currently reports auto-promotion disabled. Verify this policy remains unchanged before running; the backend is authoritative.</p>}
+      <div className="panel-heading"><div><h2 id="backtest-confirm-title">Confirm backtest run</h2><p>This simulation saves research evidence in Backtest Studio. Paper activation is a separate step.</p></div></div>
       <p><strong>Configuration:</strong> {[pendingRun.symbol, pendingRun.market, pendingRun.timeframe, pendingRun.strategy, pendingRun.data_segment].join(" · ")}</p>
       <p><strong>Capital / risk:</strong> {numeric.format(pendingRun.initial_capital)} / {pendingRun.risk_per_trade_pct}% per trade</p>
       {pendingRun.ml_generator_model_id && <p><strong>Generator model:</strong> {pendingRun.ml_generator_model_id}</p>}
-      {promotionPolicy?.enabled && <label className="screener-alert-toggle"><input aria-label="Acknowledge auto-promotion side effects" type="checkbox" checked={promotionSideEffectAcknowledged} onChange={(event) => setPromotionSideEffectAcknowledged(event.target.checked)} /><span><strong>I understand this backtest may activate a paper strategy and, if enabled, send a Telegram alert.</strong></span></label>}
-      <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={runBusy} onClick={() => { setPendingRun(null); setPromotionSideEffectAcknowledged(false); }}>Cancel</button><button className="button button-primary" type="button" disabled={runBusy || !promotionPolicy || (promotionPolicy.enabled && !promotionSideEffectAcknowledged)} onClick={() => void confirmRun()}>{runBusy ? "Running simulation…" : "Run backtest"}</button></div>
+      <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={runBusy} onClick={() => setPendingRun(null)}>Cancel</button><button className="button button-primary" type="button" disabled={runBusy} onClick={() => void confirmRun()}>{runBusy ? "Running simulation…" : "Run backtest"}</button></div>
     </section>}
     {deployRun && (
       <dialog
@@ -758,7 +817,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
               <select
                 id="bt-deploy-timeframe"
                 value={deployTimeframe}
-                disabled={deployBusy}
+                disabled={deployBusy || Boolean(onSelectPaperEvidence)}
                 required
                 onChange={(e) => setDeployTimeframe(e.target.value as PaperTimeframe | "")}
               >
@@ -805,8 +864,10 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
               onChange={(e) => setDeployTelegram(e.target.checked)}
             />
             <span>
-              <strong>Send deployment alert to Telegram</strong>
-              <small>Sends a one-time deployment notification via configured bot.</small>
+              <strong>Enable Telegram alerts</strong>
+              <small>{deployRun.strategy === "ml_signal_generator_v1"
+                ? "Send entry alerts when the generator opens paper positions."
+                : "Send a deployment notification and subsequent paper entry alerts."}</small>
             </span>
           </label>
 
@@ -928,6 +989,13 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
           </button>
         </div>
         <div style={{ padding: "16px 0" }}>
+          {paperReady && promotionPolicy?.enabled && dataSegment === "train" ? (
+            <label className="screener-alert-toggle">
+              <input type="checkbox" checked={benchmarkPromotionConsent} disabled={runAllBusy}
+                onChange={(event) => setBenchmarkPromotionConsent(event.target.checked)} />
+              <span>Allow auto-promotion for this benchmark under the saved policy. {promotionPolicy.send_telegram ? "The saved policy can send a Telegram deployment alert." : "Telegram alerts are off in the saved policy."}</span>
+            </label>
+          ) : <p className="page-description">This benchmark runs in research mode. Auto-promotion requires paper readiness, an enabled promotion policy, and the Train segment.</p>}
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "12px" }}>
             <button
               type="button"
@@ -943,6 +1011,10 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
 
           {runAllResult && (
             <div>
+              {runAllResult.autoPromotion?.status && <p className="control-feedback" role="status">
+                <strong>Auto-promotion</strong> · {runAllResult.autoPromotion.status.replaceAll("_", " ")}
+                {runAllResult.autoPromotion.strategy ? ` · ${runAllResult.autoPromotion.strategy}` : ""}
+              </p>}
               <div className="table-scroll" style={{ maxHeight: "320px", overflowY: "auto" }}>
                 <table className="status-table">
                   <thead>
@@ -1038,6 +1110,5 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       </dialog>
     )}
     <PromotionStatusPanel onPolicyLoaded={setPromotionPolicy} />
-    <p className="page-description">Backtest execution is an explicit, role-gated POST action. Promotion policy and audit are read-only; editing, activation, and Telegram actions remain unavailable.</p>
   </div>;
 }

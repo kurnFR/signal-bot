@@ -22,6 +22,9 @@ const models = { models: [{
 const detail = { experiment_id: "btc-trend-test", winner: { model_type: "hist_gradient_boosting" }, experiment: { ml_test_metrics: { trade_count: 33 } } };
 function response(url: string) {
   const path = new URL(url, "http://localhost").pathname;
+  if (path === "/api/ml/retraining/status") {
+    return new Response(JSON.stringify({ enabled: true, retrain_interval_hours: 24, min_new_candles: 48, max_drift_psi: 0.25, registered_models_count: 0, models: [], recent_audit: [] }), { status: 200, headers: { "content-type": "application/json" } });
+  }
   const body = path.endsWith("/models") ? models : path.endsWith("/experiments/btc-trend-test") ? detail : experiments;
   return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 }
@@ -58,7 +61,9 @@ describe("MLStudioPanel", () => {
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       expect(init?.method).toBe("GET");
       const path = new URL(url, "http://localhost").pathname;
-      const payload = path.endsWith("/models") ? { models: [] } : { experiments: [] };
+      const payload = path === "/api/ml/retraining/status"
+        ? { enabled: true, models: [] }
+        : path.endsWith("/models") ? { models: [] } : { experiments: [] };
       return Promise.resolve(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }));
     });
     vi.stubGlobal("fetch", fetchMock);

@@ -21,6 +21,7 @@ import websockets
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import SYMBOLS, TIMEFRAMES, MARKETS, SPOT_WS_COMBINED, FUTURES_WS_COMBINED
 from db.db import upsert_ohlcv, heartbeat
+from db.service_control import is_service_paused
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ws_kline")
@@ -55,6 +56,8 @@ async def run_market(market: str, base_url: str):
                 logger.info(f"[{market}] connected, subscribed to {len(SYMBOLS)*len(TIMEFRAMES)} streams")
                 backoff = 1
                 async for raw_msg in ws:
+                    if is_service_paused("collectors"):
+                        continue  # connection stays up; writes are paused by operator
                     msg = json.loads(raw_msg)
                     if "data" not in msg or msg["data"].get("e") != "kline":
                         continue

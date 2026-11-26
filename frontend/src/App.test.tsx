@@ -27,10 +27,10 @@ describe("frontend foundation shell", () => {
     fireEvent.popState(window);
     expect(screen.getByRole("heading", { name: "Paper Trading", level: 1 })).toBeInTheDocument();
   });
-  it("renders the quantitative platform header and footer", () => {
+  it("renders the quantitative platform header and footer", async () => {
     render(<App />);
     expect(screen.getByText("Signal Bot Quantitative Platform")).toBeInTheDocument();
-    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(await screen.findByText("Connected")).toBeInTheDocument();
     expect(screen.getByLabelText("Live clock (UTC+7)")).toHaveTextContent(/^\d{2}:\d{2}:\d{2} WIB$/);
     expect(screen.getByText(/v2\.0\.0 .*MariaDB/i)).toBeInTheDocument();
   });
@@ -38,6 +38,18 @@ describe("frontend foundation shell", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network connection lost")));
     render(<App />);
     expect(await screen.findByText("Disconnected")).toBeInTheDocument();
+  });
+  it("identifies the degraded service and opens the health overview", async () => {
+    window.history.replaceState(null, "", "/modern/settings");
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(Response.json({
+      ...statusResponse,
+      heartbeats: [{ collector: "wallet-worker", status: "stale", lastBeat: null }],
+    }))));
+    render(<App />);
+    const badge = await screen.findByRole("button", { name: /open system health overview.*wallet-worker: stale/i });
+    expect(badge).toHaveTextContent("Degraded");
+    fireEvent.click(badge);
+    expect(screen.getByRole("heading", { name: "Overview", level: 1 })).toBeInTheDocument();
   });
   it("renders topbar actions including theme toggle and navigation breadcrumbs", () => {
     render(<App />);
@@ -180,7 +192,7 @@ describe("frontend foundation shell", () => {
     expect(window.localStorage.getItem("sidebar_collapsed")).toBe("1");
     expect(screen.getByRole("button", { name: "Expand sidebar" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("button", { name: "Expand navigation sidebar" })).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByRole("button", { name: /Overview/ })).toHaveAttribute("title", "Overview — System overview");
+    expect(screen.getByRole("button", { name: /Overview/ })).toHaveAttribute("title", "Overview");
 
     fireEvent.click(screen.getByRole("button", { name: "Expand navigation sidebar" }));
     expect(frame).not.toHaveClass("sidebar-is-collapsed");

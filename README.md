@@ -8,19 +8,22 @@ A production-ready quantitative research, backtesting, and paper-trading platfor
 
 The **Modern React/TypeScript UI** (`frontend/`) is served by default at `/` (and `/modern/*`) whenever `frontend/dist` is built (set `SIGNAL_BOT_USE_MODERN_UI=0` to revert to the legacy static dashboard). Press **`Cmd+K` / `Ctrl+K`** anywhere to open the **Command Palette**.
 
+In the modern workspace, check candle coverage, review market context, select a saved backtest or eligible ML filter, and review Telegram delivery before activating paper trading. Open **Paper Trading** at any point to check readiness or manage existing positions and risk. Readiness resets when you reload the workspace. The legacy dashboard uses the same sidebar order and its existing deployment controls.
+
 | View | URL | What it does |
 |---|---|---|
 | Overview | `/modern/overview` | Live system health, MariaDB status, and collector heartbeats |
+| Master Data | `/modern/master-data` | Historical OHLCV candle and feature coverage, on-demand backfill, and feature pipeline jobs |
 | Trading Desk | `/modern/trading-desk` | Multi-pane Pro Trader workstation with interactive `lightweight-charts`, live WebSocket tickers/PnL, funding/OI microstructure strip, execution blotter, and portfolio risk desk |
 | Market Screener | `/modern/market-screener` | Smart-money volume screener (`Screen/`): live signals, chart inspection, independent Telegram alert toggle, and role-gated detection overrides |
-| Paper Trading | `/modern/paper-trading` | Deploy strategies (built-in, custom/AI, ML generator), manage active positions/orders/blotter, funding PnL accounting, portfolio risk desk, and fail-closed circuit breakers |
-| Strategy Library | `/modern/strategy-library` | Built-in, RetailBot2, and custom JSON/AI strategies with quick-test and one-click send to Backtest or Paper Trading |
+| Liquidation Heatmap | `/modern/liquidation-heatmap` | Multi-exchange estimates of long and short liquidation clusters by time and price, sourced from Swolecharts |
 | Wallet Tracking | `/modern/wallet-tracking` | On-chain whale wallet tracking, token flow monitor, manual poll trigger, and per-wallet Telegram alerts |
+| News AI | `/modern/news-ai` | Crypto news sentiment scoring, macroeconomic calendar events, and guarded paper execution |
+| Research | `/modern/research` | Historical RetailBot2 Shadow and Inverse results |
+| Strategy Library | `/modern/strategy-library` | Built-in, RetailBot2, and custom JSON/AI strategies with quick-test and handoff to Backtest Studio |
 | Backtest Studio | `/modern/backtest-studio` | Single-strategy runs, **Run All** benchmark, **Walk-Forward Analysis**, synchronized Equity & Underwater Drawdown charts, AI quantitative insights, and Deploy to Paper |
 | ML Studio | `/modern/ml-studio` | Purged-split ML signal filter tournaments, saved model inspection, drift/retraining status, and eligible deploy-to-paper |
-| Research | `/modern/research` | Historical RetailBot2 Shadow and Inverse results |
-| News AI | `/modern/news-ai` | Crypto news sentiment scoring, macroeconomic calendar events, and guarded paper execution |
-| Master Data | `/modern/master-data` | Historical OHLCV candle and feature coverage, on-demand backfill, and feature pipeline jobs |
+| Paper Trading | `/modern/paper-trading` | Review readiness and deploy from saved backtest or eligible ML evidence, manage active positions/orders/blotter, funding PnL accounting, portfolio risk desk, and fail-closed circuit breakers |
 | Settings | `/modern/settings` | Appearance, password & session security, Admin User/Role management, **Encrypted DB-backed Telegram Config & Test Ping**, **Commercial License & Plan status**, **Operator Audit Logs (CSV export)**, and **Onboarding Setup Wizard** |
 
 ### Strategy workflow

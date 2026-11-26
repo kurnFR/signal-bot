@@ -7,6 +7,7 @@ const ScreenerPanel = lazy(() => import("./ScreenerPanel").then((m) => ({ defaul
 const ScreenerControlsPanel = lazy(() => import("./ScreenerControlsPanel").then((m) => ({ default: m.ScreenerControlsPanel })));
 const PaperTradingPanel = lazy(() => import("./PaperTradingPanel").then((m) => ({ default: m.PaperTradingPanel })));
 const StrategyLibraryPanel = lazy(() => import("./StrategyLibraryPanel").then((m) => ({ default: m.StrategyLibraryPanel })));
+const LiquidationHeatmapPanel = lazy(() => import("./LiquidationHeatmapPanel").then((m) => ({ default: m.LiquidationHeatmapPanel })));
 const WalletTrackingPanel = lazy(() => import("./WalletTrackingPanel").then((m) => ({ default: m.WalletTrackingPanel })));
 const BacktestStudioPanel = lazy(() => import("./BacktestStudioPanel").then((m) => ({ default: m.BacktestStudioPanel })));
 const MLStudioPanel = lazy(() => import("./MLStudioPanel").then((m) => ({ default: m.MLStudioPanel })));
@@ -18,24 +19,15 @@ const TradingDeskPanel = lazy(() => import("./TradingDeskPanel").then((m) => ({ 
 import { CommandPalette } from "./components/CommandPalette";
 import { TermsModal } from "./components/TermsModal";
 import { OnboardingWizard } from "./components/OnboardingWizard";
-import { Activity, BarChart3, BookOpen, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, Command as CommandIcon, Database, LayoutDashboard, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Settings2, ShieldCheck, Sun, WalletCards, X, Zap } from "lucide-react";
+import { Activity, ChevronDown, ChevronLeft, ChevronRight, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, ShieldCheck, Sun, X } from "lucide-react";
 import { useAuth } from "./AuthGate";
+import { WORKSPACE_GROUPS, viewPath } from "./lib/workspaceNavigation";
+import { PaperReadiness, PAPER_READINESS_STEPS } from "./components/PaperReadiness";
 
 type Theme = "dark" | "light";
-const NAV_ITEMS = [
-  { label: "Overview", description: "System overview", icon: LayoutDashboard },
-  { label: "Trading Desk", description: "Pro trader multi-pane workstation", icon: Zap },
-  { label: "Market Screener", description: "Signals and market coverage", icon: Activity },
-  { label: "Paper Trading", description: "Simulated orders and positions", icon: WalletCards },
-  { label: "Strategy Library", description: "Saved rules and indicator catalog", icon: BookOpen },
-  { label: "Wallet Tracking", description: "On-chain wallet and token flow monitor", icon: WalletCards },
-  { label: "Backtest Studio", description: "Saved backtest results and trade evidence", icon: BarChart3 },
-  { label: "ML Studio", description: "Saved ML experiments and model artifacts", icon: BrainCircuit },
-  { label: "Research", description: "Historical RetailBot2 positions and performance", icon: Activity },
-  { label: "News AI", description: "Sentiment signals and macro events", icon: Activity },
-  { label: "Master Data", description: "Historical candle and feature coverage", icon: Database },
-  { label: "Settings", description: "Preferences and access", icon: Settings2 },
-] as const;
+type PaperEvidence =
+  | { kind: "backtest"; id: number; label: string }
+  | { kind: "model"; id: string; label: string };
 
 const VIEW_METADATA: Record<string, { eyebrow: string; description: string }> = {
   Overview: {
@@ -58,6 +50,10 @@ const VIEW_METADATA: Record<string, { eyebrow: string; description: string }> = 
     eyebrow: "STRATEGIES / QUANT CATALOG",
     description: "Quantitative trading strategies, indicator parameter rules, and AI strategy generation.",
   },
+  "Liquidation Heatmap": {
+    eyebrow: "FUTURES / POSITIONING",
+    description: "Explore estimated long and short liquidation zones across tracked perpetual futures exchanges.",
+  },
   "Wallet Tracking": {
     eyebrow: "ON-CHAIN / SMART MONEY",
     description: "Whale wallet tracking, token flow analysis, and large transaction alert monitor.",
@@ -72,7 +68,7 @@ const VIEW_METADATA: Record<string, { eyebrow: string; description: string }> = 
   },
   Research: {
     eyebrow: "RESEARCH / BOT LAB",
-    description: "Historical RetailBot2 Shadow and Inverse results. Use Strategy Library and Paper Trading for new simulations.",
+    description: "Historical RetailBot2 Shadow and Inverse results for strategy research.",
   },
   "News AI": {
     eyebrow: "SENTIMENT / MACRO AI",
@@ -105,7 +101,6 @@ function readInitialSidebarCollapsed(): boolean {
   }
 }
 
-const viewPath = (label: string) => "/modern/" + label.toLowerCase().replaceAll(" ", "-");
 function viewFromLocation() {
   return Object.keys(VIEW_METADATA).find(label => viewPath(label) === window.location.pathname) ?? "Overview";
 }
@@ -129,12 +124,22 @@ export function App() {
   const selectView = (label: string) => {
     if (activeView !== label) window.history.pushState(null, "", viewPath(label));
     setActiveView(label);
+    setSidebarOpen(false);
   };
   const [pendingBacktestStrategyId, setPendingBacktestStrategyId] = useState<string | null>(null);
-  const [pendingPaperStrategyId, setPendingPaperStrategyId] = useState<string | null>(null);
+  const [completedReviewSteps, setCompletedReviewSteps] = useState(0);
+  const [paperEvidence, setPaperEvidence] = useState<PaperEvidence | null>(null);
+  const paperReady = completedReviewSteps === PAPER_READINESS_STEPS;
+  const evidenceView = paperEvidence?.kind === "model" ? "ML Studio" : "Backtest Studio";
+  const selectPaperEvidence = (evidence: PaperEvidence) => {
+    if (evidence.kind !== paperEvidence?.kind || evidence.id !== paperEvidence.id) {
+      setPaperEvidence(evidence);
+      setCompletedReviewSteps((steps) => Math.min(steps, 2));
+    }
+    selectView("Paper Trading");
+  };
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
-  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
@@ -151,12 +156,13 @@ export function App() {
   const [branding, setBranding] = useState<BrandingConfig>({ brandName: "Signal Bot", logoUrl: null });
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
   const [clockText, setClockText] = useState<string>(() => formatWibClock());
+  const searchShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl+K";
   const [systemHealth, setSystemHealth] = useState<{
-    status: "connected" | "degraded" | "disconnected";
+    status: "checking" | "connected" | "degraded" | "disconnected";
     tooltip: string;
   }>({
-    status: "connected",
-    tooltip: "Connected to FastAPI backend and MariaDB database",
+    status: "checking",
+    tooltip: "Waiting for the system status response",
   });
 
   useEffect(() => {
@@ -173,11 +179,14 @@ export function App() {
         if (res.branding?.brandName) setBranding(res.branding);
         if (res.license) setLicenseStatus(res.license);
         const dbOk = res.database.status === "ok";
-        const heartbeatsOk = res.heartbeats.every((h) => h.status === "ok");
-        if (!dbOk || !heartbeatsOk) {
+        const unhealthy = res.heartbeats.filter((heartbeat) => !["ok", "retired", "disabled"].includes(heartbeat.status));
+        if (!dbOk || unhealthy.length > 0) {
           setSystemHealth({
             status: "degraded",
-            tooltip: `Degraded · Database: ${res.database.status} · Heartbeats: ${res.heartbeats.filter((h) => h.status === "ok").length}/${res.heartbeats.length} active`,
+            tooltip: [
+              ...(!dbOk ? [`Database: ${res.database.status}`] : []),
+              ...unhealthy.map((heartbeat) => `${heartbeat.collector}: ${heartbeat.status}`),
+            ].join(" · "),
           });
         } else {
           setSystemHealth({
@@ -189,7 +198,7 @@ export function App() {
         if (!mounted) return;
         setSystemHealth({
           status: "disconnected",
-          tooltip: "Cannot connect to FastAPI backend or database",
+          tooltip: "The system status request failed",
         });
       }
     };
@@ -269,12 +278,7 @@ export function App() {
 
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
   const toggleSidebarCollapsed = () => setSidebarCollapsed((current) => !current);
-  const handleSelectStrategyForBacktest = (strategyId: string) => { setPendingBacktestStrategyId(strategyId); selectView("Backtest Studio"); setSidebarOpen(false); };
-  const handleSelectStrategyForPaper = (strategyId: string) => {
-    setPendingPaperStrategyId(strategyId);
-    selectView("Paper Trading");
-    setSidebarOpen(false);
-  };
+  const handleSelectStrategyForBacktest = (strategyId: string) => { setPendingBacktestStrategyId(strategyId); selectView("Backtest Studio"); };
   const clearPendingBacktestStrategy = () => setPendingBacktestStrategyId(null);
 
   const viewMeta = VIEW_METADATA[activeView] ?? {
@@ -302,15 +306,16 @@ export function App() {
         </button>
         <button ref={sidebarCloseButtonRef} className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
       </div>
-      <div className="workspace-label">WORKSPACE</div>
       <nav className="nav-list" aria-label="Primary navigation">
-        {NAV_ITEMS.map(({ label, description, icon: Icon }) => <button key={label}
-          className={"nav-item " + (activeView === label ? "nav-item-active" : "")}
-          aria-current={activeView === label ? "page" : undefined} title={sidebarCollapsed ? `${label} — ${description}` : description}
-          onClick={() => { selectView(label); setSidebarOpen(false); }}>
-          <Icon size={18} aria-hidden="true" /><span className="nav-label">{label}</span>
-          {label === "Market Screener" && <span className="nav-count">V2</span>}
-        </button>)}
+        {WORKSPACE_GROUPS.map(({ label: group, items }) => <section className="nav-group" aria-label={group} key={group}>
+          <h2 className="workspace-label">{group}</h2>
+          {items.map(({ label, icon: Icon }) => <button key={label} type="button"
+            className={"nav-item " + (activeView === label ? "nav-item-active" : "")}
+            aria-current={activeView === label ? "page" : undefined} aria-label={label} title={label}
+            onClick={() => selectView(label)}>
+            <Icon size={18} aria-hidden="true" /><span className="nav-label">{label}</span>
+          </button>)}
+        </section>)}
       </nav>
       <div className="sidebar-bottom">
         <div className="security-note"><ShieldCheck size={16} /><span>Server-controlled permissions</span></div>
@@ -338,17 +343,19 @@ export function App() {
           <div className="breadcrumb"><span>Workspace</span><span className="breadcrumb-separator">/</span><strong>{activeView}</strong></div>
         </div>
         <div className="topbar-actions">
-          <div
+          <button type="button"
             className={`system-live-pill ${systemHealth.status !== "connected" ? systemHealth.status : ""}`}
             title={systemHealth.tooltip}
+            aria-label={`Open system health overview. ${systemHealth.tooltip}`}
+            onClick={() => selectView("Overview")}
           >
             <span
               className={
                 systemHealth.status === "connected"
                   ? "status-dot-live"
-                  : systemHealth.status === "degraded"
-                  ? "status-dot-warning"
-                  : "status-dot-disconnected"
+                  : systemHealth.status === "disconnected"
+                  ? "status-dot-disconnected"
+                  : "status-dot-warning"
               }
             />
             <span>
@@ -356,20 +363,20 @@ export function App() {
                 ? "Connected"
                 : systemHealth.status === "degraded"
                 ? "Degraded"
-                : "Disconnected"}
+                : systemHealth.status === "disconnected" ? "Disconnected" : "Checking"}
             </span>
-          </div>
+          </button>
           <span className="wib-clock" aria-label="Live clock (UTC+7)" title="UTC+7 (WIB)">{clockText}</span>
           <span className="topbar-divider" />
           <button
             className="button button-secondary button-sm"
             onClick={() => setCommandPaletteOpen(true)}
-            aria-label="Open command palette (Cmd+K)"
-            title="Open command palette (Cmd+K)"
+            aria-label={`Open workspace search (${searchShortcut})`}
+            title={`Open workspace search (${searchShortcut})`}
             style={{ display: "inline-flex", alignItems: "center", gap: "6px", height: "30px", fontSize: "11px", padding: "0 10px" }}
           >
-            <CommandIcon size={13} />
-            <span>Search (⌘K)</span>
+            <Search size={13} aria-hidden="true" />
+            <span>Search <kbd className="topbar-search-shortcut">{searchShortcut}</kbd></span>
           </button>
           <span className="topbar-divider" />
           <button className="icon-button theme-toggle" onClick={toggleTheme} aria-label={"Switch to " + (theme === "dark" ? "light" : "dark") + " theme"} title="Switch theme">
@@ -395,15 +402,29 @@ export function App() {
         ) : activeView === "Market Screener" ? (
           <><ScreenerPanel /><ScreenerControlsPanel /></>
         ) : activeView === "Paper Trading" ? (
-          <PaperTradingPanel initialStrategyId={pendingPaperStrategyId} onInitialStrategyApplied={() => setPendingPaperStrategyId(null)} />
+          <>
+            {["admin", "trader"].includes(auth?.user.role.toLowerCase() ?? "") &&
+              <PaperReadiness completed={completedReviewSteps} evidence={paperEvidence?.label ?? null}
+                evidenceView={evidenceView}
+                onComplete={() => setCompletedReviewSteps((steps) => Math.min(steps + 1, PAPER_READINESS_STEPS))}
+                onReset={() => { setCompletedReviewSteps(0); setPaperEvidence(null); }}
+                onSelectView={selectView} />}
+            <PaperTradingPanel paperReady={paperReady} onDeployPreparedStrategy={() => selectView(evidenceView)} />
+          </>
         ) : activeView === "Strategy Library" ? (
-          <StrategyLibraryPanel onSelectForBacktest={handleSelectStrategyForBacktest} onSelectForPaper={handleSelectStrategyForPaper} />
+          <StrategyLibraryPanel onSelectForBacktest={handleSelectStrategyForBacktest} />
+        ) : activeView === "Liquidation Heatmap" ? (
+          <LiquidationHeatmapPanel />
         ) : activeView === "Wallet Tracking" ? (
           <WalletTrackingPanel />
         ) : activeView === "Backtest Studio" ? (
-          <BacktestStudioPanel initialStrategyId={pendingBacktestStrategyId} onInitialStrategyApplied={clearPendingBacktestStrategy} />
+          <BacktestStudioPanel initialStrategyId={pendingBacktestStrategyId} onInitialStrategyApplied={clearPendingBacktestStrategy} paperReady={paperReady}
+            selectedEvidenceRunId={paperEvidence?.kind === "backtest" ? paperEvidence.id : undefined}
+            onSelectPaperEvidence={(run) => selectPaperEvidence({ kind: "backtest", id: run.id, label: `Run #${run.id} · ${run.strategy} · ${run.symbol} · ${run.market} · ${run.timeframe}` })} />
         ) : activeView === "ML Studio" ? (
-          <MLStudioPanel />
+          <MLStudioPanel paperReady={paperReady}
+            selectedEvidenceModelId={paperEvidence?.kind === "model" ? paperEvidence.id : undefined}
+            onSelectPaperEvidence={(id) => selectPaperEvidence({ kind: "model", id, label: `ML filter · ${id}` })} />
         ) : activeView === "Research" ? (
           <ResearchPanel historyOnly />
         ) : activeView === "News AI" ? (
@@ -439,9 +460,9 @@ export function App() {
     />
 
     <OnboardingWizard
-      isOpen={Boolean(showOnboarding && !onboardingDismissed)}
-      onClose={() => setOnboardingDismissed(true)}
-      onComplete={() => setOnboardingDismissed(true)}
+      isOpen={showOnboarding}
+      onClose={() => setShowOnboarding(false)}
+      onComplete={() => setShowOnboarding(false)}
     />
   </div>;
 }

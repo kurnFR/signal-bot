@@ -40,6 +40,7 @@ import logging
 import sys
 import os
 import time
+from db.service_control import pause_gate
 import argparse
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -251,6 +252,8 @@ def poll_once():
 
 def run(once=False):
     while True:
+        if not once and pause_gate("news_ai", "news_execution", NEWS_AI_EXECUTION_POLL_INTERVAL_SECONDS):
+            continue
         start = time.time()
         try:
             poll_once()

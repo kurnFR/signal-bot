@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import PAPER_ENGINE_POLL_INTERVAL_SECONDS
 from paper.engine import sync_and_evaluate_paper_trading
 from db.db import heartbeat
+from db.service_control import pause_gate
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("run_paper_engine")
@@ -63,6 +64,8 @@ def main():
     logger.info("==================================================================")
 
     while True:
+        if pause_gate("paper_engine", "paper_engine", PAPER_ENGINE_POLL_INTERVAL_SECONDS):
+            continue
         start = time.time()
         try:
             poll_once()

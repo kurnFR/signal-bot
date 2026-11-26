@@ -43,6 +43,7 @@ from web.routes.news_routes import router as news_router
 from web.routes.research_routes import router as research_router
 from web.routes.wallet_routes import router as wallet_router
 from web.routes.ws_routes import router as ws_router
+from web.routes.liquidations import router as liquidations_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -220,6 +221,8 @@ AUTHENTICATED_READ_PATHS = (
     "/api/crypto/search",
     "/api/crypto/popular",
     "/api/market/candles",
+    "/api/liquidations/markets",
+    "/api/liquidations/heatmap",
     "/api/master-data/coverage",
     "/api/master-data/jobs",
     "/api/master-data/jobs/{job_id}",
@@ -390,6 +393,7 @@ app.include_router(news_router)
 app.include_router(research_router)
 app.include_router(wallet_router)
 app.include_router(ws_router)
+app.include_router(liquidations_router)
 
 
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
@@ -411,7 +415,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 FRONTEND_DIST_DIR = os.path.join(BASE_DIR, "frontend", "dist")
 MODERN_VIEWS = {"overview", "trading-desk", "market-screener", "paper-trading", "strategy-library", "wallet-tracking",
-                "backtest-studio", "ml-studio", "research", "news-ai", "master-data", "settings"}
+                "backtest-studio", "ml-studio", "research", "news-ai", "master-data", "settings", "liquidation-heatmap"}
 modern_index_path = os.path.join(FRONTEND_DIST_DIR, "index.html")
 if os.path.isfile(modern_index_path):
     @app.get("/modern/{view}", include_in_schema=False)

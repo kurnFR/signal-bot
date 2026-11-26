@@ -742,8 +742,8 @@ test("responsive acceptance matrix covers every preview view across tablet and d
         if (await openNavigation.isVisible()) await openNavigation.click();
         const navigation = page.getByRole("navigation", { name: "Primary navigation" });
         const navigationItem = navigation.getByRole("button", {
-          // The visible V2 badge is included in this button's accessible name.
-          name: view === "Market Screener" ? /^Market Screener(?: V2)?$/ : view,
+          name: view,
+          exact: true,
         });
         await expect(navigation).toBeVisible();
         await expect(navigationItem, `${view} navigation item must be available at ${width}px in ${theme} theme`).toBeVisible();
@@ -763,4 +763,108 @@ test("responsive acceptance matrix covers every preview view across tablet and d
       }
     }
   }
+});
+
+test("paper activation follows ordered review and carries the saved run back to deployment", async ({ page }) => {
+  await mockApi(page);
+  const run = {
+    id: 42, symbol: "ETHUSDT", market: "spot", timeframe: "1h", strategy: "trend_ema_v1",
+    dataSegment: "holdout", totalTrades: 0, winRatePct: null, expectancyR: null, profitFactor: null,
+    maxDrawdownR: null, createdAt: "2026-11-23T00:00:00Z",
+  };
+  await page.route("**/api/backtest/history?*", (route) => route.fulfill({ json: { runs: [run] } }));
+  await page.route("**/api/backtest/runs/42", (route) => route.fulfill({ json: { run: { ...run, params: {} }, trades: [] } }));
+  const deployments: unknown[] = [];
+  await page.route("**/api/paper/deploy", (route) => {
+    deployments.push(route.request().postDataJSON());
+    return route.fulfill({ json: { status: "success", message: "Paper deployment saved.", config: {} } });
+  });
+  await signIn(page);
+
+  const sidebar = page.getByRole("navigation", { name: "Primary navigation" });
+  await expect(sidebar.getByRole("button").last()).toHaveText("Settings");
+  await sidebar.getByRole("button", { name: "Paper Trading", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Deploy Strategy", exact: true })).toBeDisabled();
+  const confirm = page.getByRole("button", { name: "Confirm review" });
+  await confirm.click();
+  await confirm.click();
+  await expect(confirm).toBeDisabled();
+
+  await sidebar.getByRole("button", { name: "Backtest Studio", exact: true }).click();
+  await page.getByRole("button", { name: "Use run for paper readiness" }).click();
+  await expect(page.getByRole("main")).toContainText("Run #42 · trend_ema_v1 · ETHUSDT");
+  await confirm.click();
+  await confirm.click();
+  await expect(page.getByRole("status").filter({ hasText: "Ready to deploy" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Return to selected evidence" }).click();
+  await expect(page.getByRole("button", { name: "#42", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Deploy to Paper Trading" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("ETHUSDT");
+  await expect(dialog.getByLabel("Paper Timeframe")).toHaveValue("1h");
+  await expect(dialog.getByRole("checkbox")).not.toBeChecked();
+  expect(deployments).toEqual([]);
+  await dialog.getByRole("button", { name: "Deploy to Paper Trading" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Paper deployment saved." })).toBeVisible();
+  expect(deployments).toMatchObject([{ symbol: "ETHUSDT", market: "spot", timeframe: "1h", strategy_name: "trend_ema_v1", send_telegram: false }]);
+});
+
+test("liquidation heatmap compares both sides and supports keyboard inspection", async ({ page }) => {
+  await mockApi(page);
+  await page.route("**/api/liquidations/markets", (route) => route.fulfill({ json: { symbols: ["BTC", "ETH"] } }));
+  await page.route("**/api/liquidations/heatmap?*", (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    const heatmap = params.get("symbol") === "BTC" ? {
+      levels: [90, 100, 110],
+      candles: [[1795540500000, 98], [1795541100000, 100]],
+      cells: [[0, 0, 1500000], [1, 0, 4000000], [1, 2, 6000000]],
+      updatedAt: 1795541100000, price: 100, priceStale: false,
+    } : null;
+    return route.fulfill({ json: { heatmap } });
+  });
+  await signIn(page);
+  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: "Liquidation Heatmap" }).click();
+  await expect(page).toHaveURL(/\/modern\/liquidation-heatmap$/);
+  await expect(page.getByText("$4M estimated", { exact: true })).toBeVisible();
+  await expect(page.getByText("$6M estimated", { exact: true })).toBeVisible();
+  const plot = page.getByRole("group", { name: "Inspect chart with the arrow keys" });
+  await plot.focus();
+  await plot.press("ArrowUp");
+  await expect(page.locator("output")).toContainText("$6M estimated");
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.getByRole("combobox", { name: "Asset", exact: true }).selectOption("ETH");
+  await expect(page.getByText("No modeled clusters are available for ETH in this window.")).toBeVisible();
+});
+
+test("news events have readable rows, labelled WIB dates, and local mobile overflow", async ({ page }) => {
+  await mockApi(page);
+  await page.route("**/api/news/events?*", (route) => route.fulfill({ json: { events: [
+    { id: 1, category: "macro_calendar", source: "forexfactory", headline: "USD Core PPI m/m", url: null, impact: "high", symbols: null,
+      country: "US", published_at: null, scheduled_at: "2026-11-08 14:30:00", fetched_at: "2026-11-08T05:58:47Z",
+      actual_value: null, forecast_value: null, previous_value: null, processed_at: null },
+    { id: 2, category: "crypto", source: "Market Wire", headline: "Bitcoin market update", url: null, impact: "medium", symbols: "BTCUSDT",
+      country: null, published_at: "2026-11-08T12:00:00Z", scheduled_at: null, fetched_at: "2026-11-08T12:03:00Z",
+      actual_value: null, forecast_value: null, previous_value: null, processed_at: null },
+  ] } }));
+  await signIn(page);
+  await page.getByRole("button", { name: "News AI", exact: true }).click();
+  const table = page.getByRole("table", { name: "Macro & crypto events" });
+  const release = table.getByRole("row").filter({ hasText: "USD Core PPI" });
+  await expect(release).toContainText("Economic calendar");
+  await expect(release).toContainText("Forex Factory");
+  await expect(release).toContainText("21:30");
+  await expect(release).toContainText("Scheduled");
+  await expect(table.getByRole("cell", { name: "USD Core PPI m/m" })).toHaveCSS("border-bottom-width", "1px");
+  await expect(table.getByRole("cell", { name: "USD Core PPI m/m" })).toHaveCSS("font-size", "13px");
+  await page.setViewportSize({ width: 375, height: 844 });
+  const scroller = page.getByRole("region", { name: "Macro and crypto events table" });
+  await scroller.focus();
+  await expect(scroller).toBeFocused();
+  const scroll = await scroller.evaluate((element) => ({
+    tableWidth: element.scrollWidth, visibleWidth: element.clientWidth, pageWidth: document.documentElement.scrollWidth,
+  }));
+  expect(scroll.tableWidth).toBeGreaterThan(scroll.visibleWidth);
+  expect(scroll.pageWidth).toBeLessThanOrEqual(375);
 });

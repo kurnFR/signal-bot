@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 describe("Backtest auto-promotion side-effect consent", () => {
-  it("requires explicit acknowledgement when the saved policy may activate a strategy or send Telegram", async () => {
+  it("runs a single backtest without promotion consent even when the saved policy is enabled", async () => {
     window.localStorage.setItem("token", "trader-session");
     const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
     const strategies = { strategies: [{ id: "trend_ema_v1", baseName: "trend_ema_v1", isInverse: false, displayName: "Trend EMA Crossover", category: "Trend", validated: false, description: "Trend strategy", params: [], sharedParams: [] }] };
@@ -39,19 +39,14 @@ describe("Backtest auto-promotion side-effect consent", () => {
     await waitFor(() => expect(reviewButton).toBeEnabled());
     fireEvent.click(reviewButton);
 
-    expect(await screen.findByText("Auto-promotion is enabled")).toBeInTheDocument();
-    expect(screen.getByText(/This run may activate a paper strategy/)).toBeInTheDocument();
     const runButton = screen.getByRole("button", { name: "Run backtest" });
-    expect(runButton).toBeDisabled();
-    expect(screen.getByRole("checkbox", { name: "Acknowledge auto-promotion side effects" })).toBeInTheDocument();
-    expect(calls.some((call) => call.path === "/api/backtest/run" && call.method === "POST")).toBe(false);
-
-    fireEvent.click(screen.getByRole("checkbox", { name: "Acknowledge auto-promotion side effects" }));
     expect(runButton).toBeEnabled();
     expect(calls.every((call) => call.method === "GET")).toBe(true);
+    fireEvent.click(runButton);
+    await waitFor(() => expect(calls.some((call) => call.path === "/api/backtest/run" && call.method === "POST")).toBe(true));
   });
   
-  it("keeps backtest review disabled until a failed promotion-policy read is retried successfully", async () => {
+  it("keeps research backtest review available during a promotion-policy outage", async () => {
     window.localStorage.setItem("token", "trader-session");
     const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
     const strategies = { strategies: [{ id: "trend_ema_v1", baseName: "trend_ema_v1", isInverse: false, displayName: "Trend EMA Crossover", category: "Trend", validated: false, description: "Trend strategy", params: [], sharedParams: [] }] };
@@ -80,11 +75,6 @@ describe("Backtest auto-promotion side-effect consent", () => {
     render(<AuthGate><BacktestStudioPanel /></AuthGate>);
     const reviewButton = await screen.findByRole("button", { name: "Review backtest run" });
     expect(await screen.findByRole("alert")).toHaveTextContent("Promotion policy and audit could not be loaded.");
-    expect(reviewButton).toBeDisabled();
-    expect(calls.some((call) => call.path === "/api/backtest/run" && call.method === "POST")).toBe(false);
-
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Backtest strategy" })).toHaveValue("trend_ema_v1"));
     await waitFor(() => expect(reviewButton).toBeEnabled());
     expect(calls.some((call) => call.path === "/api/backtest/run" && call.method === "POST")).toBe(false);
   });
