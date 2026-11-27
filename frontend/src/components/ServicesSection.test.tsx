@@ -18,7 +18,12 @@ const row = (over = {}) => ({
   ...over,
 });
 
-afterEach(() => { cleanup(); fetchServicesMock.mockReset(); setServiceEnabledMock.mockReset(); });
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  fetchServicesMock.mockReset();
+  setServiceEnabledMock.mockReset();
+});
 
 describe("ServicesSection", () => {
   it("requires explicit confirmation (with risk warning) before pausing", async () => {
@@ -60,6 +65,29 @@ describe("ServicesSection", () => {
     })]);
     render(<ServicesSection isAdmin />);
     expect(await screen.findByText("Stale heartbeat")).toBeInTheDocument();
+  });
+
+  it("resumes the Screener without overwriting its threshold overrides", async () => {
+    fetchServicesMock.mockResolvedValue([]);
+    const overrides = { min_rvol: 2.5 };
+    const calls: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const path = new URL(input, "http://localhost").pathname;
+      const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+      if (path.endsWith("/status")) return json({
+        running: false, database_ok: true, enabled: false, timeframe: "1m",
+        symbols_monitored: 0, last_beat_at: null, last_signal_at: null, last_universe_refresh: null,
+      });
+      if (path.endsWith("/control") && init?.method === "POST") {
+        calls.push(JSON.parse(String(init.body)));
+        return json({ status: "ok", note: "Saved" });
+      }
+      return json({ enabled: false, overrides, updated_at: null, tunable_fields: Object.keys(overrides) });
+    }));
+    render(<ServicesSection isAdmin />);
+    fireEvent.click(await screen.findByRole("button", { name: "Resume Screener" }));
+    await waitFor(() => expect(calls).toEqual([{ enabled: true, overrides }]));
+    expect(setServiceEnabledMock).not.toHaveBeenCalled();
   });
 
   it("does not call the admin API for non-admins", async () => {

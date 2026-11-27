@@ -701,6 +701,37 @@ class OutboxSessionManager:
             if cursor is not None:
                 cursor.close()
 
+    def delivery_paused(self) -> bool:
+        """Read the switch on the same verified database session used for claims."""
+        try:
+            with self.s_lock.cursor() as cursor:
+                cursor.execute("SELECT enabled FROM service_control WHERE service = %s", ("telegram_outbox",))
+                row = cursor.fetchone()
+            # End the read transaction so the next check observes operator changes.
+            self.s_lock.rollback()
+            return row is not None and row[0] != 1
+        except Exception as exc:
+            logger.warning("Outbox pause control unavailable (%s); claims blocked", type(exc).__name__)
+            return True
+
+    def write_service_heartbeat(self, detail: str) -> None:
+        try:
+            with self.s_lock.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO collector_heartbeat (collector_name, status, detail, last_beat_time)
+                       VALUES ('telegram_outbox', 'ok', %s, NOW())
+                       ON DUPLICATE KEY UPDATE status=VALUES(status), detail=VALUES(detail),
+                           last_beat_time=VALUES(last_beat_time)""",
+                    (detail,),
+                )
+            self.s_lock.commit()
+        except Exception as exc:
+            try:
+                self.s_lock.rollback()
+            except Exception as rollback_error:
+                logger.warning("Outbox service heartbeat rollback failed (%s)", type(rollback_error).__name__)
+            logger.warning("Outbox service heartbeat unavailable (%s)", type(exc).__name__)
+
     def claim_event(self, lease_seconds: int = 90) -> Optional[Dict]:
         """Claim one outbox event on S_lock; commits transaction before return."""
         if not self.check_lock_owned():
@@ -814,6 +845,7 @@ class OutboxWorker:
         self.database = db_config.get("database", "")
         self.require_delivery_setting = self.database in EXPLICIT_OUTBOX_DELIVERY_DATABASES
         self._last_delivery_block_warning = float("-inf")
+        self._last_service_heartbeat = float("-inf")
         self.state = OutboxWorkerState.INITIALIZING
         self._shutdown_requested = False
         self._fatal_pgid: Optional[int] = None
@@ -844,6 +876,11 @@ class OutboxWorker:
             raise ValueError(f"Operational outbox event {event.get('id')} missing 'text' payload")
         raise ValueError(f"Unsupported outbox event_type: {event_type!r}")
 
+    def _write_service_heartbeat(self, detail: str, now: float) -> None:
+        if now - self._last_service_heartbeat >= 30:
+            self.session_mgr.write_service_heartbeat(detail)
+            self._last_service_heartbeat = now
+
     def process_one_event(self) -> bool:
         """Claim and process at most one due event. Returns True if an event was processed."""
         if self.state == OutboxWorkerState.FATAL_LOCKOUT:
@@ -864,11 +901,16 @@ class OutboxWorker:
             )
             return False
 
+        now = time.monotonic()
+        if self.database and self.session_mgr.delivery_paused():
+            self._write_service_heartbeat("claiming paused", now)
+            return False
+
         # Keep due events queued while delivery is disabled or settings are unavailable.
         if self.require_delivery_setting:
             _, reason = get_telegram_outbox_authorization(self.database)
             if reason:
-                now = time.monotonic()
+                self._write_service_heartbeat("delivery authorization blocked", now)
                 if now - self._last_delivery_block_warning >= 300:
                     if reason == "explicit_authorization_missing":
                         logger.warning("Outbox delivery blocked: no explicit delivery authorization for database %s", self.database)
@@ -877,6 +919,8 @@ class OutboxWorker:
                     self._last_delivery_block_warning = now
                 return False
 
+        if self.database:
+            self._write_service_heartbeat("running", now)
         event = self.session_mgr.claim_event(lease_seconds=self.lease_seconds)
         if not event:
             return False

@@ -27,6 +27,12 @@ setting is absent or false. The independent environment delivery ceiling still
 applies. The worker's explicit-setting database list is defined by
 `EXPLICIT_OUTBOX_DELIVERY_DATABASES` and defaults to `crypto_signals`.
 
+The delivery worker also checks `service_control` on its outbox database. Grant
+the delivery identity SELECT on that table. An unreadable pause control blocks
+claims. Grant SELECT, INSERT, and UPDATE on `collector_heartbeat` for the
+`telegram_outbox` heartbeat. Observation mode retains its existing read-only
+permissions and does not write a heartbeat.
+
 ### Steps
 1. Clone repository and generate secrets:
    ```bash
