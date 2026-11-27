@@ -1,72 +1,66 @@
-"""Saved custom-strategy replacement and idempotent deletion contracts.
+"""Route validation, definition reload, and auditable strategy state changes."""
+from types import SimpleNamespace
 
-All filesystem state and global strategy registry entries are isolated per test.
-"""
-import json
+import pytest
+from fastapi import HTTPException
 
+from db.custom_strategy_store import StrategyInUseError
 from web.routes import custom_strategy
 
 
-def _request(name: str, display_name: str, threshold: int) -> custom_strategy.CustomStrategyRequest:
+def _request(name="replace_me", indicator="rsi"):
     return custom_strategy.CustomStrategyRequest(
-        name=name,
-        displayName=display_name,
-        description=f"{display_name} description",
-        rationale=f"{display_name} rationale",
-        longConditions=[{"indicator": "rsi", "operator": "<", "value": threshold}],
-        shortConditions=[{"indicator": "rsi", "operator": ">", "value": 70}],
-        slAtrMult=2.0,
-        riskRewardRatio=3.0,
+        name=name, displayName="New version",
+        longConditions=[{"indicator": indicator, "operator": "<", "value": 25}],
     )
 
 
-def test_create_replaces_existing_definition_and_registry_entry(tmp_path, monkeypatch):
-    path = tmp_path / "custom_strategies.json"
-    path.write_text(json.dumps([
-        {"name": "replace_me", "displayName": "Old version", "longConditions": []},
-        {"name": "keep_me", "displayName": "Unrelated strategy"},
-    ]), encoding="utf-8")
-    monkeypatch.setattr(custom_strategy, "CUSTOM_FILE", str(path))
+def _actor():
+    return SimpleNamespace(state=SimpleNamespace(user={"username": "tester", "id": 1}), client=None)
 
-    old_runner = lambda *_args, **_kwargs: ["old"]
-    old_inverse_runner = lambda *_args, **_kwargs: ["old-inverse"]
-    monkeypatch.setitem(custom_strategy.STRATEGIES, "replace_me", old_runner)
-    monkeypatch.setitem(custom_strategy.STRATEGIES, "inverse_replace_me", old_inverse_runner)
-    monkeypatch.setitem(custom_strategy.STRATEGY_METADATA, "replace_me", {"displayName": "Old version"})
 
-    result = custom_strategy.create_custom_strategy(_request("replace_me", "New version", 25))
+def test_update_persists_definition_and_reloads_both_runners(monkeypatch):
+    saved = []
+    def mutate(name, action, *, definition):
+        assert action == "update"
+        saved.append(dict(definition, enabled=True))
+        return True
 
-    saved = json.loads(path.read_text(encoding="utf-8"))
-    replaced = [item for item in saved if item["name"] == "replace_me"]
+    monkeypatch.setattr(custom_strategy, "mutate_definition", mutate)
+    monkeypatch.setattr(custom_strategy, "list_definitions", lambda: saved)
+    monkeypatch.setattr(custom_strategy, "STRATEGIES", {})
+    monkeypatch.setattr(custom_strategy, "STRATEGY_METADATA", {})
+    monkeypatch.setattr(custom_strategy, "log_audit", lambda *args: True)
+    result = custom_strategy.update_custom_strategy(_request(), _actor(), "replace_me")
     assert result["status"] == "success"
-    assert result["name"] == "replace_me"
-    assert len(replaced) == 1
-    assert replaced[0]["displayName"] == "New version"
-    assert replaced[0]["longConditions"] == [{"indicator": "rsi", "operator": "<", "value": 25.0}]
-    assert [item["name"] for item in saved].count("keep_me") == 1
-    assert custom_strategy.STRATEGIES["replace_me"] is not old_runner
-    assert custom_strategy.STRATEGIES["inverse_replace_me"] is not old_inverse_runner
-    assert custom_strategy.STRATEGY_METADATA["replace_me"]["displayName"] == "New version"
-    assert custom_strategy.STRATEGY_METADATA["replace_me"]["longConditions"] == [
-        {"indicator": "rsi", "operator": "<", "value": 25.0}
-    ]
+    assert saved[0]["longConditions"] == [{"indicator": "rsi", "operator": "<", "value": 25.0}]
+    assert set(custom_strategy.STRATEGIES) == {"replace_me", "inverse_replace_me"}
+
+    saved[0]["enabled"] = False
+    custom_strategy.load_custom_strategies()
+    assert custom_strategy.STRATEGIES == {}
 
 
-def test_delete_missing_saved_name_is_idempotent_and_preserves_unrelated_strategies(tmp_path, monkeypatch):
-    path = tmp_path / "custom_strategies.json"
-    original = [{"name": "keep_me", "displayName": "Unrelated strategy"}]
-    path.write_text(json.dumps(original), encoding="utf-8")
-    monkeypatch.setattr(custom_strategy, "CUSTOM_FILE", str(path))
+@pytest.mark.parametrize("request_body", [_request("renamed"), _request(indicator="not_an_indicator")])
+def test_update_rejects_name_changes_and_invalid_rules(monkeypatch, request_body):
+    def unexpected_mutation(*args, **kwargs):
+        pytest.fail("invalid request reached storage")
 
-    unrelated_runner = lambda *_args, **_kwargs: []
-    monkeypatch.setitem(custom_strategy.STRATEGIES, "keep_me", unrelated_runner)
-    monkeypatch.setitem(custom_strategy.STRATEGIES, "inverse_keep_me", unrelated_runner)
-    monkeypatch.setitem(custom_strategy.STRATEGY_METADATA, "keep_me", {"displayName": "Unrelated strategy"})
+    monkeypatch.setattr(custom_strategy, "mutate_definition", unexpected_mutation)
+    with pytest.raises(HTTPException) as exc:
+        custom_strategy.update_custom_strategy(request_body, _actor(), "replace_me")
+    assert exc.value.status_code == 400
 
-    result = custom_strategy.delete_custom_strategy("not_saved")
 
-    assert result["status"] == "success"
-    assert json.loads(path.read_text(encoding="utf-8")) == original
-    assert custom_strategy.STRATEGIES["keep_me"] is unrelated_runner
-    assert custom_strategy.STRATEGIES["inverse_keep_me"] is unrelated_runner
-    assert custom_strategy.STRATEGY_METADATA["keep_me"] == {"displayName": "Unrelated strategy"}
+def test_active_deployment_conflict_exposes_symbol_timeframe_and_id(monkeypatch):
+    deployments = [{"id": 42, "symbol": "BTCUSDT", "timeframe": "1h"}]
+    def conflict(*args, **kwargs):
+        raise StrategyInUseError("Pause active deployments first.", deployments)
+
+    monkeypatch.setattr(custom_strategy, "mutate_definition", conflict)
+    with pytest.raises(HTTPException) as exc:
+        custom_strategy.toggle_custom_strategy(
+            custom_strategy.StrategyEnabledRequest(enabled=False), _actor(), "replace_me",
+        )
+    assert exc.value.status_code == 409
+    assert exc.value.detail["deployments"] == deployments
