@@ -15,7 +15,7 @@ from backtest.custom_strategy import (
 )
 from backtest.params import BASE_PARAMS
 from backtest.metrics import compute_metrics
-from db.custom_strategy_store import StrategyInUseError, list_definitions, mutate_definition
+from db.custom_strategy_store import StrategyInUseError, legacy_strategy_drift, list_definitions, mutate_definition
 from db.db import fetch_ohlcv_with_features_df
 from web.auth import log_audit
 from config import (
@@ -579,7 +579,9 @@ def get_indicators():
 @router.get("/list")
 def list_custom_strategies():
     try:
-        return {"strategies": list_definitions(include_deployments=True)}
+        strategies = list_definitions(include_deployments=True)
+        missing = legacy_strategy_drift(names={definition["name"] for definition in strategies})
+        return {"strategies": strategies, "legacy_strategies_not_imported": missing or 0}
     except Exception as exc:
         logger.warning("Could not list custom strategies (%s)", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Saved strategies are unavailable.") from exc

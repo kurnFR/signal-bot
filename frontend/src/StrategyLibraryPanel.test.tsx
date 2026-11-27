@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { AuthGate } from "./AuthGate";
 import { StrategyLibraryPanel } from "./StrategyLibraryPanel";
 
@@ -10,6 +10,22 @@ const payloads: Record<string, unknown> = {
   "/api/backtest/strategies": { strategies: [] },
 };
 describe("read-only strategy library", () => {
+  it("shows the missing-legacy-strategy warning and clears it after refresh", async () => {
+    let missing = 2;
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => {
+      const payload = path === "/api/custom-strategy/list" ? {
+        strategies: [], legacy_strategies_not_imported: missing,
+      } : payloads[path];
+      return Response.json(payload);
+    }));
+    render(<StrategyLibraryPanel />);
+    expect(await screen.findByText("2 legacy strategies were not imported.")).toBeInTheDocument();
+    missing = 0;
+    const region = screen.getByRole("region", { name: "Custom strategy library" });
+    fireEvent.click(within(region).getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(screen.queryByText("2 legacy strategies were not imported.")).not.toBeInTheDocument());
+  });
+
   it("renders saved strategy rules and backend indicator metadata using GET only", async () => {
     const fetchMock = vi.fn().mockImplementation((path: string) => Promise.resolve(new Response(JSON.stringify(payloads[path]), { status: 200, headers: { "content-type": "application/json" } })));
     vi.stubGlobal("fetch", fetchMock);

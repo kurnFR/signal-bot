@@ -20,7 +20,7 @@ export interface CustomStrategy {
   trailActivationR?: number;
   trailDistanceAtrMult?: number;
 }
-export interface StrategyLibraryResponse { strategies: CustomStrategy[] }
+export interface StrategyLibraryResponse { strategies: CustomStrategy[]; legacy_strategies_not_imported?: number }
 export interface StrategyIndicator {
   name: string;
   label?: string;
@@ -75,7 +75,8 @@ function validStrategyIndicator(value: unknown): value is StrategyIndicator {
 }
 export async function fetchCustomStrategies(signal?: AbortSignal): Promise<StrategyLibraryResponse> {
   const response = await getJson<unknown>("/api/custom-strategy/list", signal);
-  if (!isRecord(response) || !Array.isArray(response.strategies) || !response.strategies.every(validCustomStrategy)) {
+  if (!isRecord(response) || !Array.isArray(response.strategies) || !response.strategies.every(validCustomStrategy) ||
+      (response.legacy_strategies_not_imported !== undefined && !isCount(response.legacy_strategies_not_imported))) {
     throw new Error("Strategy library returned an invalid response");
   }
   return response as unknown as StrategyLibraryResponse;

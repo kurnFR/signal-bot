@@ -250,3 +250,22 @@ python3 run_all.py
 2. Repeat the listener, authentication, and signed-in readiness checks in Step 3.3.
 3. Confirm collectors and screener resume normal operation.
 4. Document the incident, root cause, and rollback timestamp in the incident log.
+
+### Custom strategy data on migration and rollback
+
+Before running `db.migrate`, place the approved legacy
+`custom_strategies.json` at the migrating environment's repository root. The
+Docker build ignores it. Copy it explicitly to `web:/app/custom_strategies.json`
+for the Docker migration. For systemd, use the checkout running the migration.
+
+If migration 038 has already run, set the target `MYSQL_DATABASE` explicitly
+and run `python -m tools.import_custom_strategies --path "$LEGACY_STRATEGIES" --dry-run`
+before the import without `--dry-run`. Verify the final dry run reports all
+definitions already present and none invalid. A subsequent DB edit is preserved
+when a legacy file is imported again.
+
+Before switching to a JSON-backed release, export the current DB definitions
+with `python -m tools.export_custom_strategies --out "$STRATEGY_EXPORT"` and
+verify its count. The original legacy file lacks any strategy created or edited
+after migration. Install the verified export at the old release's expected
+repository-root JSON path and rehearse readiness before sign-off.

@@ -16,6 +16,7 @@ function Conditions({ label, items }: { label: string; items?: CustomStrategy["l
   return <div className="strategy-conditions"><strong>{label}</strong>{items?.length ? <ul>{items.map((condition, index) => <li key={label + index}><code>{condition.indicator ?? "indicator"} {condition.operator ?? "?"} {String(condition.value ?? "—")}</code></li>)}</ul> : <p className="empty-state">No conditions defined.</p>}</div>;
 }
 export function StrategyLibraryPanel({ onSelectForBacktest, onSelectForPaper }: StrategyLibraryPanelProps = {}) {
+  const [missingLegacy, setMissingLegacy] = useState(0);
   const [strategies, setStrategies] = useState<CustomStrategy[]>([]);
   const [catalogStrategies, setCatalogStrategies] = useState<BacktestStrategy[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -66,6 +67,8 @@ export function StrategyLibraryPanel({ onSelectForBacktest, onSelectForPaper }: 
     setLoading(true); setError(null);
     Promise.all([fetchCustomStrategies(controller.signal), fetchStrategyIndicators(controller.signal)])
       .then(([saved, definitions]) => {
+        if (controller.signal.aborted) return;
+        setMissingLegacy(saved.legacy_strategies_not_imported ?? 0);
         setStrategies(Array.isArray(saved.strategies) ? saved.strategies : []);
         setIndicators(Array.isArray(definitions.indicators) ? definitions.indicators : []);
         setOperators(Array.isArray(definitions.operators) && definitions.operators.length ? definitions.operators : ["<", "<=", ">", ">=", "==", "!="]);
@@ -292,6 +295,7 @@ export function StrategyLibraryPanel({ onSelectForBacktest, onSelectForPaper }: 
       <article className="metric-card"><div className="metric-top"><span>Available indicators</span><span className="metric-icon"><ShieldCheck size={17} /></span></div><div className="metric-value">{loading && !indicators.length ? "Loading…" : indicators.length}</div><div className="metric-foot"><span>From backend metadata</span></div></article>
     </section>
     {error && <div className="error-banner" role="alert"><p>{error}</p><button className="button button-secondary" onClick={() => setAttempt((n) => n + 1)}><RefreshCw size={15} /> Retry</button></div>}
+    {missingLegacy > 0 && <p className="error-banner" role="alert">{missingLegacy} legacy {missingLegacy === 1 ? "strategy was" : "strategies were"} not imported.</p>}
     {quickTestError && <div className="error-banner" role="alert"><p>{quickTestError}</p><button className="button button-secondary" onClick={() => setQuickTestError(null)}>Dismiss</button></div>}
     {aiHistory.length > 0 && <div className="panel-subsection" aria-label="AI strategy conversation"><div className="panel-heading"><div><h3>Conversation history</h3><p>Follow-up prompts include earlier successful turns from this session.</p></div><button className="button button-secondary" type="button" onClick={() => setAiHistory([])} disabled={aiBusy}>Clear history</button></div><ol className="strategy-conversation-list">{aiHistory.map((message, index) => <li key={`${message.role}-${index}`}><strong>{message.role === "user" ? "You" : "AI"}</strong><p>{message.content}</p></li>)}</ol></div>}
     {aiError && <div className="error-banner" role="alert"><p>{aiError}</p><button className="button button-secondary" onClick={() => setAiError(null)}>Dismiss</button></div>}

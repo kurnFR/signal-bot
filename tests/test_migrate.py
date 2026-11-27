@@ -199,6 +199,17 @@ class TestApply(unittest.TestCase):
         importer.assert_called_once()
         self.assertEqual(importer.call_args.args[1], [{"name": "legacy_rsi"}])
 
+    def test_missing_strategy_file_warns_and_records_migration(self):
+        from unittest.mock import patch
+        import db.migrate as migration_module
+
+        migration = next(m for m in MIGRATIONS if m.version == "038_custom_strategies")
+        messages = []
+        conn = FakeConn()
+        with patch.object(migration_module, "ROOT", self.dir):
+            assert apply_pending(conn, migrations=[migration], log=messages.append) == [migration.version]
+        assert any("WARNING" in msg and "tools.import_custom_strategies" in msg for msg in messages)
+
     def test_fresh_install_marks_upgrade_only_as_baseline_covered(self):
         migs = write_set(self.dir, [("base.sql", "CREATE TABLE t (i INT);", False),
                                     ("upg.sql", "ALTER TABLE t ADD COLUMN c INT;", True)])
