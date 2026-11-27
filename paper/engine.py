@@ -631,6 +631,10 @@ class PaperConfigHasHistory(ValueError):
     """Raised when a permanent delete would destroy ledger history."""
 
 
+class PaperConfigActive(ValueError):
+    """Raised when a deployment must be paused before permanent deletion."""
+
+
 def purge_paper_config(config_id: int, *, allow_unarchived: bool = False) -> bool:
     """Permanently delete a deployment without ledger history after explicit confirmation.
 
@@ -645,11 +649,13 @@ def purge_paper_config(config_id: int, *, allow_unarchived: bool = False) -> boo
         conn = get_pool().get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT archived_at FROM paper_configs WHERE id = %s FOR UPDATE", (config_id,))
+                cur.execute("SELECT archived_at, is_active FROM paper_configs WHERE id = %s FOR UPDATE", (config_id,))
                 row = cur.fetchone()
                 if row is None:
                     conn.rollback()
                     return False
+                if row[1]:
+                    raise PaperConfigActive("Pause this deployment first")
                 if row[0] is None and not allow_unarchived:
                     conn.rollback()
                     raise ValueError("Archive the deployment before deleting it permanently")

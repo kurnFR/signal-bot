@@ -345,7 +345,7 @@ def test_observation_mode_mutation_boundary_defense(monkeypatch):
     ],
 )
 def test_outbox_enqueue_requires_both_authorization_flags(monkeypatch, enqueue_flag, delivery_flag, expected):
-    """12. Enqueuing requires RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1 and valid database allowlist, independent of RETAILBOT2_ALLOW_TELEGRAM_DELIVERY."""
+    """Production enqueue requires both OUTBOX and PRODUCTION enqueue flags, independent of delivery."""
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", enqueue_flag)
     monkeypatch.setenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", "1")

@@ -1303,7 +1303,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
                             <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={() => { setParameterDraft(null); setEditingConfig(c); }}>Edit</button>
                             <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={() => setPendingArchive(c)}>Archive</button>
                           </>}
-                          <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={() => setPendingPurge(c)}>Delete permanently</button>
+                          <button className="button button-secondary button-sm" type="button" disabled={c.is_active || loading || savingPreference || togglingConfigId !== null} title={c.is_active ? "Pause this deployment first" : undefined} onClick={() => setPendingPurge(c)}>Delete permanently</button>
                         </div>
                       </td>
                     )}

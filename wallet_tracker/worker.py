@@ -5,8 +5,9 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import config
-from wallet_tracker import analyzer, store
+from db.db import heartbeat
 from db.service_control import is_service_paused
+from wallet_tracker import analyzer, store
 from wallet_tracker.chains import is_supported_chain
 from wallet_tracker.providers import (BirdeyeProvider, DexScreenerProvider,
                                       GeckoTerminalProvider)
@@ -333,6 +334,13 @@ def _init_fallback_provider(settings):
         return None
 
 
+def _record_heartbeat(status="ok", detail=None):
+    try:
+        heartbeat("wallet_tracker", status=status, detail=detail)
+    except Exception as exc:
+        logger.warning("Wallet tracker heartbeat unavailable (%s)", type(exc).__name__)
+
+
 def run(stop_event=None):
     """Run polling cycles until stopped; optional event is used if lock ownership is lost."""
     store.ensure_tables()
@@ -350,6 +358,7 @@ def run(stop_event=None):
     logger.info("Wallet tracker started; settings are loaded from the dashboard.")
     while stop_event is None or not stop_event.is_set():
         if is_service_paused("wallet_tracker"):
+            _record_heartbeat(detail="paused by operator")
             if stop_event is not None:
                 if stop_event.wait(30):
                     break
@@ -369,7 +378,9 @@ def run(stop_event=None):
                     logger.info("Birdeye fallback enabled/updated from settings.")
                 else:
                     logger.info("Birdeye fallback disabled (no key configured).")
+            _record_heartbeat()
         except Exception:
+            _record_heartbeat(status="error", detail="poll cycle failed")
             logger.exception("cycle failed")
             settings = store.get_settings()
         if stop_event is not None:

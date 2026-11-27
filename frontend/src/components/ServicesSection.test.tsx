@@ -42,10 +42,24 @@ describe("ServicesSection", () => {
   });
 
   it("shows launch guidance when the optional worker has no heartbeat", async () => {
-    fetchServicesMock.mockResolvedValue([row({ heartbeats: [] })]);
+    fetchServicesMock.mockResolvedValue([
+      row({ enabled: false, heartbeats: [] }),
+      row({ service: "paper_report", label: "Paper Performance Reports", heartbeats: [] }),
+    ]);
     render(<ServicesSection isAdmin />);
     expect(await screen.findByText("PAPER_ENGINE_ENABLED=1")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Pause Paper Trading Engine/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Resume Paper Trading Engine" })).toBeInTheDocument();
+    expect(screen.getByText("PAPER_REPORT_ENABLED=1 (requires the Telegram outbox worker)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pause Paper Performance Reports" })).toBeInTheDocument();
+  });
+
+  it("shows a stale heartbeat for an enabled service past its threshold", async () => {
+    fetchServicesMock.mockResolvedValue([row({
+      staleAfterSeconds: 180,
+      heartbeats: [{ lastBeat: new Date(Date.now() - 181_000).toISOString() }],
+    })]);
+    render(<ServicesSection isAdmin />);
+    expect(await screen.findByText("Stale heartbeat")).toBeInTheDocument();
   });
 
   it("does not call the admin API for non-admins", async () => {

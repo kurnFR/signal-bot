@@ -19,6 +19,14 @@ Crypto Signal Bot is an institutional quantitative trading, backtesting, paper e
 - Docker Engine 24+ and Docker Compose v2+
 - Port 8050 (HTTP/WS) accessible or behind reverse proxy (Caddy / Nginx)
 
+### Pre-deploy Telegram authorization
+
+Ensure `app_telegram_settings.delivery_authorized` is explicitly set on
+`crypto_signals` through Settings. The outbox stays paused for claiming when the
+setting is absent or false. The independent environment delivery ceiling still
+applies. The worker's explicit-setting database list is defined by
+`EXPLICIT_OUTBOX_DELIVERY_DATABASES` and defaults to `crypto_signals`.
+
 ### Steps
 1. Clone repository and generate secrets:
    ```bash

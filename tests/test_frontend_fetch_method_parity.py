@@ -7,6 +7,7 @@ only; it sends no requests and does not start the application lifespan.
 from html.parser import HTMLParser
 from pathlib import Path
 import re
+from datetime import date
 import unittest
 
 from web.app import app
@@ -126,12 +127,24 @@ class TestFrontendFetchMethodParity(unittest.TestCase):
 
 
 # Each exception is an existing backend surface that has no Modern caller.
+# Fixed audit clock keeps this parity test deterministic.
+AUDIT_DATE = date(2026, 11, 27)
 MUTATION_EXCEPTIONS = {
-    ("DELETE", "/api/wallets/tracked"): "Address-based legacy alias. Modern uses the ID route.",
-    ("POST", "/api/ml/rl/train"): "Research endpoint awaiting a UI or retirement decision.",
-    ("POST", "/api/ml/walk-forward"): "Research endpoint awaiting a UI or retirement decision.",
-    ("POST", "/api/research/retailbot2/control"): "RetailBot2 research navigation retired.",
-    ("POST", "/api/research/retailbot2/strategies"): "RetailBot2 research navigation retired.",
+    ("DELETE", "/api/wallets/tracked"): (
+        "Address-based legacy alias. Modern uses the ID route.", "Wallet Tracking", date(2027, 2, 25),
+    ),
+    ("POST", "/api/ml/rl/train"): (
+        "Research endpoint awaiting a UI or retirement decision.", "ML Studio", date(2026, 12, 27),
+    ),
+    ("POST", "/api/ml/walk-forward"): (
+        "Research endpoint awaiting a UI or retirement decision.", "ML Studio", date(2026, 12, 27),
+    ),
+    ("POST", "/api/research/retailbot2/control"): (
+        "RetailBot2 research navigation retired.", "RetailBot2 Archive", date(2027, 2, 25),
+    ),
+    ("POST", "/api/research/retailbot2/strategies"): (
+        "RetailBot2 research navigation retired.", "RetailBot2 Archive", date(2027, 2, 25),
+    ),
 }
 
 
@@ -148,6 +161,10 @@ class TestModernMutationCoverage(unittest.TestCase):
     def test_missing_modern_mutation_callers_require_explicit_exceptions(self):
         missing = {key for key, callers in mutation_matrix().items() if not callers}
         self.assertEqual(missing, MUTATION_EXCEPTIONS.keys())
+        for key, (reason, owner, review_by) in MUTATION_EXCEPTIONS.items():
+            with self.subTest(endpoint=key):
+                self.assertTrue(reason and owner)
+                self.assertGreaterEqual(review_by, AUDIT_DATE)
 
 
 class LegacyControls(HTMLParser):
@@ -207,7 +224,8 @@ def print_control_matrix():
     print("|---|---|")
     for (method, path), callers in mutation_matrix().items():
         locations = ", ".join(f"`{caller.split(': ', 1)[0]}`" for caller in callers)
-        result = locations or f"None. {MUTATION_EXCEPTIONS.get((method, path), 'Unallowlisted.')}"
+        exemption = MUTATION_EXCEPTIONS.get((method, path))
+        result = locations or f"None. {exemption[0] if exemption else 'Unallowlisted.'}"
         print(f"| `{method} {path}` | {result} |")
 
 

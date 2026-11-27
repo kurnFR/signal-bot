@@ -15,6 +15,7 @@ export interface ServiceState {
   enabled: boolean;
   updatedBy: string | null;
   updatedAt: string | null;
+  staleAfterSeconds?: number;
   heartbeats: ServiceHeartbeat[];
 }
 

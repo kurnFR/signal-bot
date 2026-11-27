@@ -5,6 +5,7 @@ import { fetchServices, setServiceEnabled, type ServiceState } from "../lib/serv
 const serviceLaunchFlags: Record<string, string> = {
   paper_engine: "PAPER_ENGINE_ENABLED=1",
   news_ai: "NEWS_AI_ENABLED=1",
+  paper_report: "PAPER_REPORT_ENABLED=1 (requires the Telegram outbox worker)",
 };
 
 /** Admin-only runtime pause/resume for background workers (no restart, no .env edit). */
@@ -86,6 +87,8 @@ export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
                   .at(-1);
                 const launchFlag = serviceLaunchFlags[svc.service];
                 const awaitingHeartbeat = Boolean(launchFlag && !latest);
+                const stale = latest && svc.staleAfterSeconds != null &&
+                  Date.now() - Date.parse(latest) > svc.staleAfterSeconds * 1000;
                 return (
                   <tr key={svc.service}>
                     <td>
@@ -94,15 +97,13 @@ export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
                       {svc.updatedBy && <div className="panel-subtitle">Last changed by {svc.updatedBy}</div>}
                     </td>
                     <td>
-                      <span className={svc.enabled && !awaitingHeartbeat ? "badge badge-ok" : "badge badge-warn"}>
-                        {awaitingHeartbeat ? "No heartbeat" : svc.enabled ? "Enabled" : "Paused"}
+                      <span className={svc.enabled && !awaitingHeartbeat && !stale ? "badge badge-ok" : "badge badge-warn"}>
+                        {!svc.enabled ? "Paused" : awaitingHeartbeat ? "No heartbeat" : stale ? "Stale heartbeat" : "Enabled"}
                       </span>
                     </td>
                     <td>{latest ?? "—"}</td>
                     <td>
-                      {awaitingHeartbeat ? (
-                        <span>Check the worker process and its launcher setting <code>{launchFlag}</code>.</span>
-                      ) : confirming === svc.service ? (
+                      {confirming === svc.service ? (
                         <div role="group" aria-label={`Confirm pausing ${svc.label}`}>
                           <p className="api-error" role="alert">{svc.pauseWarning}</p>
                           <button
@@ -135,6 +136,9 @@ export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
                         >
                           Resume {svc.label}
                         </button>
+                      )}
+                      {awaitingHeartbeat && (
+                        <div className="panel-subtitle">Check the worker process and its launcher setting <code>{launchFlag}</code>.</div>
                       )}
                     </td>
                   </tr>

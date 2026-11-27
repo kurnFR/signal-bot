@@ -4,6 +4,8 @@ export interface TelegramStatus {
   outbox?: Record<string, number> | null;
   configured: boolean;
   deliveryAuthorized?: boolean;
+  delivery_authorized?: boolean | null;
+  outbox_blocked_reason?: string | null;
   chatId: string | null;
   hasToken: boolean;
 }

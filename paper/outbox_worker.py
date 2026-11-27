@@ -38,7 +38,11 @@ from paper.outbox_store import (
     format_entry_message,
     format_exit_message,
 )
-from notifications.telegram_notifier import is_telegram_delivery_authorized
+from notifications.telegram_notifier import (
+    EXPLICIT_OUTBOX_DELIVERY_DATABASES,
+    get_telegram_outbox_authorization,
+    is_telegram_delivery_authorized,
+)
 from paper.outbox_transport import (
     DELIVERY_UNKNOWN_MARKER,
     DELIVERY_UNKNOWN_PREFIX,
@@ -807,7 +811,9 @@ class OutboxWorker:
         self.mock_transport_response = mock_transport_response
         self.proc_root = proc_root
         self.observation_mode = observation_mode
-        self.require_delivery_setting = db_config.get("database") == "crypto_signals"
+        self.database = db_config.get("database", "")
+        self.require_delivery_setting = self.database in EXPLICIT_OUTBOX_DELIVERY_DATABASES
+        self._last_delivery_block_warning = float("-inf")
         self.state = OutboxWorkerState.INITIALIZING
         self._shutdown_requested = False
         self._fatal_pgid: Optional[int] = None
@@ -859,8 +865,17 @@ class OutboxWorker:
             return False
 
         # Keep due events queued while delivery is disabled or settings are unavailable.
-        if self.require_delivery_setting and not is_telegram_delivery_authorized(require_explicit_setting=True):
-            return False
+        if self.require_delivery_setting:
+            _, reason = get_telegram_outbox_authorization(self.database)
+            if reason:
+                now = time.monotonic()
+                if now - self._last_delivery_block_warning >= 300:
+                    if reason == "explicit_authorization_missing":
+                        logger.warning("Outbox delivery blocked: no explicit delivery authorization for database %s", self.database)
+                    else:
+                        logger.warning("Outbox delivery blocked for database %s (%s)", self.database, reason)
+                    self._last_delivery_block_warning = now
+                return False
 
         event = self.session_mgr.claim_event(lease_seconds=self.lease_seconds)
         if not event:

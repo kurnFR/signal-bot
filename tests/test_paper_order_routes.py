@@ -212,7 +212,7 @@ class TestPaperOrderRoutes(unittest.TestCase):
         self.assertIn("Cannot delete with open position", response.json()["detail"])
 
     def test_purge_paper_config_maps_outcomes_and_audits(self):
-        from paper.engine import PaperConfigHasHistory
+        from paper.engine import PaperConfigActive, PaperConfigHasHistory
         with patch("web.app.authenticate_request", return_value=_user("admin")), \
              patch("web.routes.paper_routes.purge_paper_config", return_value=True) as purge, \
              patch("web.routes.paper_routes.log_audit") as audit:
@@ -220,7 +220,7 @@ class TestPaperOrderRoutes(unittest.TestCase):
         self.assertEqual(ok.status_code, 200)
         purge.assert_called_once_with(15)
         self.assertEqual(audit.call_args.args[0], "PAPER_CONFIG_PURGED")
-        for exc, code in ((PaperConfigHasHistory("has trades"), 409), (ValueError("Archive first"), 400)):
+        for exc, code in ((PaperConfigActive("Pause first"), 409), (PaperConfigHasHistory("has trades"), 409), (ValueError("Archive first"), 400)):
             with patch("web.app.authenticate_request", return_value=_user("admin")), \
                  patch("web.routes.paper_routes.purge_paper_config", side_effect=exc):
                 self.assertEqual(self.client.delete("/api/paper/configs/15/permanent").status_code, code)

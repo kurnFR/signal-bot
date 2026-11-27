@@ -122,3 +122,41 @@ def test_retailbot2_alert_global_authorization_follows_ceiling(
             token="<redacted>", chat_id="123456", logger=logging.getLogger("test-ceiling")
         )
     assert alert.global_authorized is expected
+
+
+def test_missing_outbox_authorization_warning_is_rate_limited(monkeypatch, caplog):
+    from paper import outbox_worker
+
+    now = iter([0, 299, 300])
+    monkeypatch.setattr(outbox_worker, "time", MagicMock(monotonic=lambda: next(now)))
+    worker = outbox_worker.OutboxWorker({"database": "crypto_signals"})
+    worker.session_mgr = MagicMock()
+    with _gate(monkeypatch, "1", None):
+        for _ in range(3):
+            assert worker.process_one_event() is False
+    worker.session_mgr.claim_event.assert_not_called()
+    assert caplog.messages.count(
+        "Outbox delivery blocked: no explicit delivery authorization for database crypto_signals"
+    ) == 2
+
+
+@pytest.mark.parametrize("row,value,reason", [
+    (None, None, "explicit_authorization_missing"),
+    (DB_OFF, False, "delivery_disabled_in_settings"),
+    (DB_ON, True, None),
+])
+def test_telegram_status_reports_outbox_authorization(monkeypatch, row, value, reason):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from web.routes import telegram_routes
+
+    monkeypatch.setattr(telegram_routes, "MYSQL_CONFIG", {"database": "crypto_signals"})
+    app = FastAPI()
+    app.include_router(telegram_routes.router)
+    with _gate(monkeypatch, "1", row), TestClient(app) as client:
+        response = client.get("/api/telegram/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["delivery_authorized"] is value
+    assert payload["outbox_blocked_reason"] == reason

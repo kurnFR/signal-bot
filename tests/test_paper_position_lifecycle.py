@@ -653,8 +653,9 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         self.assertIsNone(restored["archived_at"])
 
     def test_purge_requires_archive_and_refuses_ledger_history(self):
-        """Permanent delete: archived + zero history only; ledger is never destroyed."""
+        """Permanent delete requires an inactive deployment without ledger history."""
         pristine = self._create_config(strategy_name="trend_ema_v1")
+        self.assertTrue(pe.update_paper_deployment(pristine, is_active=False))
         with self.assertRaisesRegex(ValueError, "Archive the deployment"):
             pe.purge_paper_config(pristine)
         self.assertTrue(pe.delete_paper_config(pristine))
@@ -663,10 +664,14 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         self.assertFalse(pe.purge_paper_config(pristine))  # already gone -> not found
 
         active = self._create_config(symbol="AVAXUSDT", strategy_name="trend_ema_v1")
+        with self.assertRaisesRegex(pe.PaperConfigActive, "Pause this deployment first"):
+            pe.purge_paper_config(active, allow_unarchived=True)
+        self.assertTrue(pe.update_paper_deployment(active, is_active=False))
         self.assertTrue(pe.purge_paper_config(active, allow_unarchived=True))
 
         traded = self._create_config(symbol="ETHUSDT", strategy_name="BB_REV_INV")
         self._create_position(config_id=traded, symbol="ETHUSDT", strategy_name="BB_REV_INV")
+        self.assertTrue(pe.update_paper_deployment(traded, is_active=False))
         with self.assertRaises(pe.PaperConfigHasHistory):
             pe.purge_paper_config(traded, allow_unarchived=True)
         self.assertTrue(pe.delete_paper_config(traded))
