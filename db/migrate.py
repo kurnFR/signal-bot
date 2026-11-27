@@ -101,6 +101,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("036_service_control", "migrate_service_control.sql", "Runtime pause/resume switches for background workers"),
     Migration("037_news_ai_settings", "migrate_news_ai_settings.sql", "Runtime overrides for News AI guardrails"),
     Migration("038_custom_strategies", "migrate_custom_strategies.sql", "Shared custom strategy definitions"),
+    Migration("039_news_ai_runtime_controls", "migrate_news_ai_runtime_controls.sql", "News AI sizing and polling overrides"),
 )
 
 
