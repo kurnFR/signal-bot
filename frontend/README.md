@@ -38,7 +38,7 @@ python -m db.migrate
 PYTHONPATH=. python frontend/e2e/seed_real_backend.py
 npm --prefix frontend ci
 npm --prefix frontend run build
-SIGNAL_BOT_USE_MODERN_UI=0 python -m uvicorn web.app:app --host 127.0.0.1 --port 8050
+SIGNAL_BOT_USE_MODERN_UI=0 PYTHONPATH=. python -m uvicorn frontend.e2e.fixture_app:app --host 127.0.0.1 --port 8050
 ```
 
 In another terminal with the same fixture environment, including
@@ -52,3 +52,15 @@ SIGNAL_BOT_REAL_E2E_URL=http://127.0.0.1:8050 npx playwright test --project real
 The default Playwright command runs the mocked dashboard suite. The real-backend
 project logs in through the UI and exercises the actual FastAPI routes. It
 disables traces to keep fixture credentials out of recorded browser actions.
+
+
+The fixture app uses FastAPI's regular routes and a local market-data source
+that waits for the test to cancel the backfill. The model catalog reads a
+fixture manifest from a temporary directory. These fixtures require the
+loopback database and test-run identity.
+
+In GitHub branch protection, require the `real-backend-e2e` check on
+`master`. The workflow also reports success on documentation-only changes
+so the required check resolves even when the browser suite is unnecessary.
+Both browser workflows install Chromium from the lockfile-pinned Playwright
+1.64.1 package.

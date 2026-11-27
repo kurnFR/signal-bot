@@ -227,6 +227,9 @@ _child_preexec_pdeathsig(os.getppid() + 9999)
             "PYTHONPATH": "/srv/signal-bot",
         }
 
+    # The two escalation tests expect PID 1 to reap adopted grandchildren.
+    # A sandbox PID 1 without a reaper can leave a zombie PID visible to
+    # kill(pid, 0) even after the process group has no running descendants.
     def test_direct_child_exits_while_grandchild_survives_and_is_terminated_by_sigterm(self, tmp_path):
         # Direct child exits immediately while grandchild stays alive in same PGID
         pid_file = tmp_path / "grandchild_sigterm.pid"

@@ -36,8 +36,7 @@ async function confirmDeploymentDelete(page: Page, symbol: string) {
   await page.getByRole("button", { name: "Confirm permanent delete" }).click();
 }
 
-test("deploy, pause, edit parameters, archive and delete paper deployments", async ({ page }) => {
-  await signIn(page, "paper-trading");
+async function completePaperReadiness(page: Page) {
   const review = page.getByRole("button", { name: "Confirm review" });
   await review.click();
   await review.click();
@@ -47,6 +46,12 @@ test("deploy, pause, edit parameters, archive and delete paper deployments", asy
   await page.getByRole("button", { name: "Use run for paper readiness" }).click();
   await review.click();
   await review.click();
+  return nav;
+}
+
+test("deploy, pause, edit parameters, archive and delete paper deployments", async ({ page }) => {
+  await signIn(page, "paper-trading");
+  const nav = await completePaperReadiness(page);
   await page.getByRole("button", { name: "Return to selected evidence" }).click();
   await page.getByRole("button", { name: "Deploy to Paper Trading" }).click();
   const deploy = page.getByRole("dialog", { name: "Deploy Tested Strategy to Paper Trading" });
@@ -198,4 +203,54 @@ test("Modern and Legacy show the same seeded coverage KPIs", async ({ page }) =>
   for (const [label, value] of Object.entries(kpis)) {
     await expect(page.locator(`#home-kpi-${label.toLowerCase()}`)).toHaveText(value);
   }
+});
+
+test("edit a paper model and clone a prefilled inactive deployment", async ({ page }) => {
+  await signIn(page, "paper-trading");
+  const nav = await completePaperReadiness(page);
+  await nav.getByRole("button", { name: "Paper Trading", exact: true }).click();
+  const row = page.getByRole("row").filter({ hasText: "E2EMODELUSDT" });
+  const editor = page.getByRole("region", { name: "Edit paper deployment" });
+  await row.getByRole("button", { name: "Edit", exact: true }).click();
+  await editor.getByLabel("Filter model").selectOption("e2e-filter");
+  await editor.getByRole("button", { name: "Save deployment" }).click();
+  await expect(editor).toBeHidden();
+  await row.getByRole("button", { name: "Clone as new" }).click();
+  const dialog = page.getByRole("dialog", { name: "Clone paper deployment" });
+  await expect(dialog.getByLabel("Symbol", { exact: true })).toHaveValue("E2EMODELUSDT");
+  await expect(dialog.getByLabel("Filter model")).toHaveValue("e2e-filter");
+  await expect(dialog.getByLabel("Allocated Virtual Capital ($)")).toHaveValue("6400");
+  await expect(dialog.getByLabel("Risk Per Trade (%)")).toHaveValue("1.75");
+  await dialog.getByLabel("Symbol", { exact: true }).fill("E2ECLONEUSDT");
+  await dialog.getByRole("button", { name: "Create inactive deployment" }).click();
+  const clone = page.getByRole("row").filter({ hasText: "E2ECLONEUSDT" });
+  await expect(clone).toContainText("Paused");
+  await expect(clone).toContainText("6,400");
+  await clone.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(editor.getByLabel("Filter model")).toHaveValue("e2e-filter");
+});
+
+test("start and cancel an isolated Master Data backfill", async ({ page }) => {
+  await signIn(page, "master-data");
+  await page.getByLabel("Backfill symbol").fill("E2ECANCELUSDT");
+  await page.getByRole("button", { name: "Review backfill" }).click();
+  await page.getByRole("button", { name: "Start backfill" }).click();
+  const job = page.getByRole("row").filter({ hasText: "E2ECANCELUSDT" });
+  await expect(job.getByText("running", { exact: true })).toBeVisible();
+  await job.getByRole("button", { name: /Cancel job/ }).click();
+  await page.getByRole("button", { name: "Confirm cancellation" }).click();
+  await expect(job.getByText("cancelled", { exact: true })).toBeVisible();
+});
+
+test("sort and search the shared dataset coverage table", async ({ page }) => {
+  await signIn(page, "master-data");
+  const table = page.getByRole("table", { name: "datasets" });
+  const rows = table.locator("tbody tr");
+  await table.getByRole("button", { name: "Candles" }).click();
+  await expect(rows.first()).toContainText("ETHUSDT");
+  await table.getByRole("button", { name: "Candles" }).click();
+  await expect(rows.first()).toContainText("BTCUSDT");
+  await page.getByRole("searchbox", { name: "Filter datasets" }).fill("futures");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText("ETHUSDT");
 });
