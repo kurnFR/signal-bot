@@ -1366,6 +1366,69 @@ def get_retailbot2_stats():
         return {"by_strategy": stats_rows, "by_mode": by_mode}
 
 
+RETAILBOT2_ARCHIVE_COLUMNS = {
+    "rdt_trades": (
+        "id", "symbol", "side", "mode", "entry_price", "stop_price", "target_price",
+        "atr", "rr", "units", "strategy", "strategies_json", "telegram_enabled",
+        "confluence_score", "reason", "status", "exit_price", "exit_reason",
+        "net_pnl", "pnl_percent", "entry_time", "exit_time", "created_at",
+    ),
+    "rdt_strategy_stats": (
+        "id", "strategy", "mode", "total_trades", "wins", "losses", "total_pnl", "last_updated",
+    ),
+}
+
+
+def get_retailbot2_archive_summary():
+    """Return read-only row counts for the archived rdt_trades and rdt_strategy_stats tables."""
+    conn = get_retailbot2_pool().get_connection()
+    with _owned_cursor(conn) as cur:
+        cur.execute("SELECT COUNT(*) FROM rdt_trades")
+        trades_count = int((cur.fetchone() or (0,))[0] or 0)
+        cur.execute("SELECT COUNT(*) FROM rdt_strategy_stats")
+        stats_count = int((cur.fetchone() or (0,))[0] or 0)
+    return {"trades_count": trades_count, "stats_count": stats_count}
+
+
+def iter_retailbot2_table_batches(table_name: str, batch_size: int = 500):
+    """Yield keyset-paginated read-only batches from an allowlisted rdt_* table.
+
+    Never loads the entire table into Python memory; uses WHERE id > %s ORDER BY id ASC LIMIT %s
+    over a single read snapshot so exported row counts remain consistent with COUNT(*).
+    """
+    columns = RETAILBOT2_ARCHIVE_COLUMNS.get(table_name)
+    if columns is None:
+        raise ValueError(f"Unsupported archive table: {table_name!r}")
+    limit = max(1, min(int(batch_size), 1000))
+    cols_sql = ", ".join(columns)
+    query = f"SELECT {cols_sql} FROM {table_name} WHERE id > %s ORDER BY id ASC LIMIT %s"
+    conn = get_retailbot2_pool().get_connection()
+    cur = None
+    try:
+        cur = conn.cursor()
+        last_id = 0
+        while True:
+            cur.execute(query, (last_id, limit))
+            rows = cur.fetchall()
+            if not rows:
+                break
+            yield rows
+            last_id = int(rows[-1][0])
+            if len(rows) < limit:
+                break
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        conn.close()
+
+
 # ----------------------------------------------------------------------------
 # Screen/screening.py (smart-money volume screener) -- read helpers.
 # Uses the main crypto_signals pool since this table lives there.

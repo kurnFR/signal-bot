@@ -21,7 +21,7 @@ import { TermsModal } from "./components/TermsModal";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { Activity, ChevronDown, ChevronLeft, ChevronRight, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, ShieldCheck, Sun, X } from "lucide-react";
 import { useAuth } from "./AuthGate";
-import { WORKSPACE_GROUPS, viewPath } from "./lib/workspaceNavigation";
+import { visibleWorkspaceGroups, viewPath } from "./lib/workspaceNavigation";
 import { PaperReadiness, PAPER_READINESS_STEPS } from "./components/PaperReadiness";
 
 type Theme = "dark" | "light";
@@ -155,6 +155,7 @@ export function App() {
   const auth = useAuth();
   const [branding, setBranding] = useState<BrandingConfig>({ brandName: "Signal Bot", logoUrl: null });
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
+  const [showRetailbot2History, setShowRetailbot2History] = useState(false);
   const [clockText, setClockText] = useState<string>(() => formatWibClock());
   const searchShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl+K";
   const [systemHealth, setSystemHealth] = useState<{
@@ -178,6 +179,7 @@ export function App() {
         if (!mounted) return;
         if (res.branding?.brandName) setBranding(res.branding);
         if (res.license) setLicenseStatus(res.license);
+        setShowRetailbot2History(Boolean(res.uiFlags?.showRetailbot2History));
         const dbOk = res.database.status === "ok";
         const unhealthy = res.heartbeats.filter((heartbeat) => !["ok", "retired", "disabled"].includes(heartbeat.status));
         if (!dbOk || unhealthy.length > 0) {
@@ -286,6 +288,8 @@ export function App() {
     description: "Quantitative trading platform operations and intelligence.",
   };
 
+  const navGroups = visibleWorkspaceGroups(showRetailbot2History);
+
   return <div className={"app-frame" + (sidebarCollapsed ? " sidebar-is-collapsed" : "")}>
     <a className="skip-link" href="#main-content">Skip to main content</a>
     {sidebarOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />}
@@ -307,7 +311,7 @@ export function App() {
         <button ref={sidebarCloseButtonRef} className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18} /></button>
       </div>
       <nav className="nav-list" aria-label="Primary navigation">
-        {WORKSPACE_GROUPS.map(({ label: group, items }) => <section className="nav-group" aria-label={group} key={group}>
+        {navGroups.map(({ label: group, items }) => <section className="nav-group" aria-label={group} key={group}>
           <h2 className="workspace-label">{group}</h2>
           {items.map(({ label, icon: Icon }) => <button key={label} type="button"
             className={"nav-item " + (activeView === label ? "nav-item-active" : "")}
@@ -452,6 +456,7 @@ export function App() {
       open={commandPaletteOpen}
       onOpenChange={setCommandPaletteOpen}
       onSelectView={selectView}
+      groups={navGroups}
     />
 
     <TermsModal

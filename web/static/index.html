@@ -189,7 +189,7 @@
                             <span class="whitespace-nowrap">News AI Signals</span>
                         </div>
                     </button>
-                    <button type="button" data-tab="research" aria-controls="view-research" title="Research Bots" class="nav-btn w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-purple-300 hover:text-white hover:bg-slate-800/50 transition-all">
+                    <button type="button" id="nav-btn-research" data-tab="research" aria-controls="view-research" title="Research Bots" class="nav-btn hidden w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-semibold text-purple-300 hover:text-white hover:bg-slate-800/50 transition-all">
                         <i data-lucide="flask-conical" class="w-4 h-4 text-purple-400 shrink-0"></i>
                         <div class="flex items-center justify-between w-full sidebar-text-label overflow-hidden">
                             <span class="whitespace-nowrap">Research Bots</span>
@@ -2215,6 +2215,41 @@
                                 <i data-lucide="send" class="w-3 h-3"></i> Ping Bot
                             </button>
                         </div>
+                    </div>
+                </div>
+
+                <!-- RetailBot2 Historical Archive (Read-Only) -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                                <i data-lucide="archive" class="w-4 h-4 text-purple-400"></i>
+                                RetailBot2 Historical Archive (Read-Only)
+                            </h3>
+                            <p class="text-xs text-slate-400 mt-0.5">Stream CSV archives of <code>rdt_trades</code> and <code>rdt_strategy_stats</code> without altering or deleting legacy tables.</p>
+                        </div>
+                        <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700 uppercase">Read-Only</span>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div class="p-3 rounded-lg bg-slate-850 border border-slate-800 flex justify-between">
+                            <span class="text-slate-400">Archived rdt_trades:</span>
+                            <span id="archive-trades-count" class="font-mono font-bold text-slate-100">—</span>
+                        </div>
+                        <div class="p-3 rounded-lg bg-slate-850 border border-slate-800 flex justify-between">
+                            <span class="text-slate-400">Archived rdt_strategy_stats:</span>
+                            <span id="archive-stats-count" class="font-mono font-bold text-slate-100">—</span>
+                        </div>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" onclick="App.fetchRetailbot2ArchiveSummary()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold">
+                            Load Archive Counts
+                        </button>
+                        <button type="button" onclick="App.downloadRetailbot2ArchiveCsv('trades')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 text-xs font-semibold">
+                            Export rdt_trades (CSV)
+                        </button>
+                        <button type="button" onclick="App.downloadRetailbot2ArchiveCsv('stats')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 text-xs font-semibold">
+                            Export rdt_strategy_stats (CSV)
+                        </button>
                     </div>
                 </div>
             </section>

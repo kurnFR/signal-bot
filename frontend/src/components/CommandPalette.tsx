@@ -6,7 +6,7 @@ import {
   Settings,
   ShieldAlert,
 } from "lucide-react";
-import { WORKSPACE_GROUPS } from "../lib/workspaceNavigation";
+import { visibleWorkspaceGroups, type WorkspaceGroup } from "../lib/workspaceNavigation";
 import { useProTraderStore } from "../lib/store";
 
 interface CommandPaletteProps {
@@ -15,6 +15,7 @@ interface CommandPaletteProps {
   onSelectView: (view: string) => void;
   onSelectSymbol?: (symbol: string) => void;
   onEmergencyStop?: () => void;
+  groups?: WorkspaceGroup[];
 }
 
 const COMMON_SYMBOLS = [
@@ -36,6 +37,7 @@ export function CommandPalette({
   onSelectView,
   onSelectSymbol,
   onEmergencyStop,
+  groups = visibleWorkspaceGroups(false),
 }: CommandPaletteProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
@@ -191,7 +193,7 @@ export function CommandPalette({
                   No matching symbol or action found.
                 </Command.Empty>
 
-                {WORKSPACE_GROUPS.map(({ label: group, items }) => (
+                {groups.map(({ label: group, items }) => (
                   <Command.Group key={group} heading={group} style={{ padding: "4px 8px", fontSize: "11px", color: "var(--color-muted)" }}>
                     {items.map(({ label, icon: Icon, keywords }) => (
                       <Command.Item key={label} value={label} keywords={keywords} onSelect={() => handleNavigate(label)}

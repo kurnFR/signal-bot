@@ -330,16 +330,20 @@ test("all domain preview views remain read-only during browser navigation", asyn
     "Wallet Tracking",
     "Backtest Studio",
     "ML Studio",
-    "Research",
     "News AI",
     "Master Data",
     "Settings",
   ];
 
+  await expect(page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: "Research", exact: true })).toHaveCount(0);
+
   for (const view of views) {
     await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("button", { name: view, exact: true }).click();
     await expect(page.locator("h1")).toHaveText(view);
   }
+
+  await page.goto("/modern/research");
+  await expect(page.locator("h1")).toHaveText("Research");
 
   expect(mutations).toEqual([]);
 });
@@ -357,7 +361,6 @@ test("all read-only domain views fit a narrow mobile viewport", async ({ page })
     "Wallet Tracking",
     "Backtest Studio",
     "ML Studio",
-    "Research",
     "News AI",
     "Master Data",
     "Settings",
@@ -723,7 +726,6 @@ test("responsive acceptance matrix covers every preview view across tablet and d
     "Wallet Tracking",
     "Backtest Studio",
     "ML Studio",
-    "Research",
     "News AI",
     "Master Data",
     "Settings",

@@ -8,7 +8,7 @@ from typing import Optional, List, Dict, Any
 import json
 
 from config import ENABLE_FUTURES
-from web.routes.settings import collect_system_status
+from web.routes.settings import collect_system_status, is_retailbot2_history_visible
 from db.db import get_pool, _owned_cursor
 from web.auth import require_admin
 from web.licensing import get_branding_config, verify_license_key
@@ -52,4 +52,7 @@ def get_public_system_status():
         },
         "branding": get_branding_config(),
         "license": verify_license_key(),
+        "uiFlags": full.get("uiFlags") or {
+            "showRetailbot2History": is_retailbot2_history_visible(),
+        },
     }

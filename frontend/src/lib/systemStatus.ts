@@ -20,6 +20,10 @@ export interface LicenseStatus {
   reason: string | null;
 }
 
+export interface UIFeatureFlags {
+  showRetailbot2History?: boolean;
+}
+
 export interface SystemStatusResponse {
   database: {
     status: string;
@@ -39,6 +43,7 @@ export interface SystemStatusResponse {
   loginRateLimiter?: LoginRateLimiterStatus;
   branding?: BrandingConfig;
   license?: LicenseStatus;
+  uiFlags?: UIFeatureFlags;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -63,6 +68,11 @@ function isPublicSystemStatus(value: unknown): value is SystemStatusResponse {
   const limiter = value.loginRateLimiter;
   if (limiter !== undefined &&
       (!isRecord(limiter) || !isNonEmptyString(limiter.mode) || typeof limiter.degraded !== "boolean")) return false;
+  const uiFlags = value.uiFlags;
+  if (uiFlags !== undefined &&
+      (!isRecord(uiFlags) || (uiFlags.showRetailbot2History !== undefined && typeof uiFlags.showRetailbot2History !== "boolean"))) {
+    return false;
+  }
   return isNonEmptyString(value.binance.spotApi) &&
     isNonEmptyString(value.binance.futuresApi) &&
     typeof value.binance.enableFuturesConfig === "boolean";
@@ -95,6 +105,7 @@ export interface AdminSystemStatusResponse {
   binance: SystemStatusResponse["binance"];
   loginRateLimiter?: LoginRateLimiterStatus;
   system?: { timezone?: string };
+  uiFlags?: UIFeatureFlags;
 }
 function isAdminSystemStatus(value: unknown): value is AdminSystemStatusResponse {
   if (!isRecord(value) || !isRecord(value.database) ||
