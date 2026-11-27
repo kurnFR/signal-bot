@@ -4,6 +4,9 @@ import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.parse import urlsplit
+
+import requests
 
 if (
     os.environ.get("MYSQL_HOST") != "127.0.0.1"
@@ -26,6 +29,24 @@ def wait_for_cancellation(_url, symbol, _timeframe, _start, _end):
     if not cancel_event.wait(timeout=20):
         raise TimeoutError("Browser did not cancel the fixture backfill")
     return []
+
+
+request_market_data = requests.Session.request
+
+
+def request_with_local_binance_data(session, method, url, *args, **kwargs):
+    host = urlsplit(url).hostname or ""
+    if host != "binance.com" and not host.endswith(".binance.com"):
+        return request_market_data(session, method, url, *args, **kwargs)
+    # Settings pings and the optional popular-symbol list can use empty
+    # market responses. All tested candle data comes from the fixture DB.
+    response = requests.Response()
+    response.status_code = 200
+    response._content = b"[]"
+    return response
+
+
+requests.Session.request = request_with_local_binance_data
 
 
 master_data.fetch_klines = wait_for_cancellation

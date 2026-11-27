@@ -55,7 +55,8 @@ disables traces to keep fixture credentials out of recorded browser actions.
 
 
 The fixture app uses FastAPI's regular routes and a local market-data source
-that waits for the test to cancel the backfill. The model catalog reads a
+that waits for the test to cancel the backfill. Binance diagnostics and
+popular-symbol requests use local responses. The model catalog reads a
 fixture manifest from a temporary directory. These fixtures require the
 loopback database and test-run identity.
 
