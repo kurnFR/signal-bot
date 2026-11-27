@@ -2,15 +2,20 @@
 from __future__ import annotations
 
 import hashlib
-import fcntl
 import json
 import os
 from pathlib import Path
 from dataclasses import replace
 from contextlib import contextmanager
 import stat
+import sys
 import tempfile
 from typing import Any
+
+if sys.platform != "win32":
+    import fcntl
+else:
+    import msvcrt
 
 try:
     import joblib
@@ -39,21 +44,32 @@ class ModelStore:
 
     @contextmanager
     def _model_save_lock(self, model_id: str):
-        """Serialize save/recovery for one model across processes on POSIX."""
+        """Serialize save/recovery for one model across processes."""
         root = self.root.resolve()
         lock_path = root / f".model-{model_id}.lock"
         descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            if sys.platform != "win32":
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+            else:
+                msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
             yield
         finally:
             try:
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
+                if sys.platform != "win32":
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                else:
+                    try:
+                        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+                    except OSError:
+                        pass
             finally:
                 os.close(descriptor)
 
     @staticmethod
     def _fsync_directory(directory: Path) -> None:
+        if sys.platform == "win32":
+            return  # Windows does not support fsync on directories
         descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
         try:
             os.fsync(descriptor)
