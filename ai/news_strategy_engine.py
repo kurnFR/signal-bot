@@ -36,7 +36,7 @@ from config import (
     NINEROUTER_API_KEY, NINEROUTER_BASE_URL, NINEROUTER_MODEL,
     OPENROUTER_API_KEY, OPENROUTER_BASE_URL, OPENROUTER_MODEL,
     ANTHROPIC_API_KEY, ANTHROPIC_API_URL, ANTHROPIC_MODEL,
-    NEWS_AI_POLL_INTERVAL_SECONDS, NEWS_AI_MIN_CONFIDENCE, NEWS_AI_MAX_EVENTS_PER_SYMBOL,
+    NEWS_AI_MAX_EVENTS_PER_SYMBOL,
 )
 from db.db import (
     get_unprocessed_news_events, mark_news_events_processed, insert_news_ai_signal,
@@ -398,7 +398,8 @@ def run(once=False):
         logger.info(f"Using Anthropic API with model '{ANTHROPIC_MODEL}'")
 
     while True:
-        if not once and pause_gate("news_ai", "news_strategy_engine", NEWS_AI_POLL_INTERVAL_SECONDS):
+        interval = get_effective_settings()["poll_interval_seconds"]
+        if not once and pause_gate("news_ai", "news_strategy_engine", interval):
             continue
         start = time.time()
         try:
@@ -409,7 +410,7 @@ def run(once=False):
         if once:
             return
         elapsed = time.time() - start
-        time.sleep(max(0, NEWS_AI_POLL_INTERVAL_SECONDS - elapsed))
+        time.sleep(max(0, interval - elapsed))
 
 
 if __name__ == "__main__":

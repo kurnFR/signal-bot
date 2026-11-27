@@ -63,9 +63,62 @@ def test_override_roundtrip_and_reset():
     nac.set_settings(88, 1, "tester")
     d = nac.get_settings_detail()
     assert (d["min_confidence"], d["max_trades_per_day"], d["source"], d["updated_by"]) == (88, 1, "override", "tester")
-    assert nac.get_effective_settings(use_cache=False) == {"min_confidence": 88, "max_trades_per_day": 1}
+    assert nac.get_effective_settings(use_cache=False) == {**nac._defaults(), "min_confidence": 88, "max_trades_per_day": 1}
     assert nac.reset_settings() is True
     assert nac.get_settings_detail()["source"] == "default"
+
+
+@pytest.mark.parametrize("changes", [
+    {"stop_atr_mult": 0.49}, {"tp_r_scalp": 10.01}, {"tp_r_intraday": float("nan")},
+    {"tp_r_swing": True}, {"poll_interval_seconds": 29}, {"execution_poll_interval_seconds": 3601},
+    {"poll_interval_seconds": 31.5},
+])
+def test_runtime_override_validation(changes):
+    with pytest.raises(ValueError):
+        nac.validate_settings(**changes)
+
+
+@db_required
+def test_partial_update_and_per_field_reset():
+    nac.reset_settings()
+    try:
+        nac.set_settings(stop_atr_mult=2.25, tp_r_swing=4, updated_by="tester")
+        nac.set_settings(poll_interval_seconds=45, updated_by="tester")
+        detail = nac.get_settings_detail()
+        assert detail["overrides"] == {"stop_atr_mult": 2.25, "tp_r_swing": 4.0, "poll_interval_seconds": 45}
+        assert detail["min_confidence"] == detail["defaults"]["min_confidence"]
+        nac.set_settings(stop_atr_mult=None, updated_by="tester")
+        assert nac.get_effective_settings()["stop_atr_mult"] == nac._defaults()["stop_atr_mult"]
+        assert nac.get_effective_settings()["tp_r_swing"] == 4
+    finally:
+        nac.reset_settings()
+
+
+def test_trade_uses_effective_stop_and_target(monkeypatch):
+    import pandas as pd
+    from ai import news_execution
+
+    frame = pd.DataFrame([{"atr": 2, "close": 100, "open_time": 1000}] * 5)
+    monkeypatch.setattr(news_execution, "fetch_ohlcv_with_features_df", lambda *args, **kwargs: frame)
+    monkeypatch.setattr(news_execution, "get_effective_settings", lambda: {"stop_atr_mult": 2.5, "tp_r_scalp": 4})
+    trade = news_execution._compute_trade("BTCUSDT", "spot", "1h", "long", "scalp")
+    assert trade["stop_loss"] == 95
+    assert trade["take_profit"] == 120
+
+
+@db_required
+def test_runtime_controls_migration_can_reapply():
+    from db.migrate import HERE, MIGRATIONS, run_statements, split_statements
+
+    migration = next(m for m in MIGRATIONS if m.version == "039_news_ai_runtime_controls")
+    sql = (HERE / migration.filename).read_text()
+    conn = get_pool().get_connection()
+    try:
+        with conn.cursor() as cur:
+            for _ in range(2):
+                assert run_statements(cur, split_statements(sql), label=migration.version, log=lambda _: None) == 0
+    finally:
+        conn.close()
 
 
 @db_required
@@ -134,7 +187,7 @@ def test_routes_roles_and_outcomes():
              patch("web.routes.news_routes.set_settings") as setter, patch("web.routes.news_routes.log_audit") as audit:
             assert c.get("/api/news/settings", headers=h).status_code == 200
             assert c.put("/api/news/settings", json={"min_confidence": 80, "max_trades_per_day": 2}, headers=h).status_code == 200
-            setter.assert_called_once_with(80, 2, "u")
+            setter.assert_called_once_with(min_confidence=80, max_trades_per_day=2, updated_by="u")
             assert audit.call_args.args[0] == "NEWS_AI_SETTINGS_UPDATED"
         with patch("web.routes.news_routes.set_settings", side_effect=ValueError("min_confidence must be")):
             assert c.put("/api/news/settings", json={"min_confidence": 10, "max_trades_per_day": 2}, headers=h).status_code == 400

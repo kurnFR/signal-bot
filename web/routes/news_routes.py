@@ -50,8 +50,16 @@ def news_events(limit: int = 30):
 
 
 class NewsAISettingsRequest(BaseModel):
-    min_confidence: int
-    max_trades_per_day: int
+    model_config = {"extra": "forbid", "strict": True}
+
+    min_confidence: int | None = None
+    max_trades_per_day: int | None = None
+    stop_atr_mult: float | None = None
+    tp_r_scalp: float | None = None
+    tp_r_intraday: float | None = None
+    tp_r_swing: float | None = None
+    poll_interval_seconds: int | None = None
+    execution_poll_interval_seconds: int | None = None
 
 
 @router.get("/settings")
@@ -66,17 +74,18 @@ def news_settings(admin: dict = Depends(require_admin)):
 
 @router.put("/settings")
 def update_news_settings(req: NewsAISettingsRequest, request: Request, admin: dict = Depends(require_admin)):
+    changes = req.model_dump(exclude_unset=True)
     try:
-        set_settings(req.min_confidence, req.max_trades_per_day, admin["username"])
+        set_settings(**changes, updated_by=admin["username"])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("update_news_settings failed (%s)", type(e).__name__)
         raise HTTPException(status_code=500, detail="Failed to update News AI settings")
     log_audit("NEWS_AI_SETTINGS_UPDATED", admin["username"], admin["id"],
-              {"min_confidence": req.min_confidence, "max_trades_per_day": req.max_trades_per_day},
+              changes,
               request.client.host if request.client else "unknown")
-    return get_settings_detail()
+    return news_settings(admin)
 
 
 @router.delete("/settings")
@@ -89,7 +98,7 @@ def reset_news_settings(request: Request, admin: dict = Depends(require_admin)):
         raise HTTPException(status_code=500, detail="Failed to reset News AI settings")
     log_audit("NEWS_AI_SETTINGS_RESET", admin["username"], admin["id"], {},
               request.client.host if request.client else "unknown")
-    return get_settings_detail()
+    return news_settings(admin)
 
 
 @router.post("/signals/{signal_id}/dismiss")

@@ -164,11 +164,19 @@ export async function fetchNewsSnapshot(signal?: AbortSignal): Promise<NewsSnaps
   return { stats, signals: signals.signals, events: events.events };
 }
 
-export interface NewsAISettings {
+export type NewsAISettingKey =
+  | "min_confidence" | "max_trades_per_day"
+  | "stop_atr_mult" | "tp_r_scalp" | "tp_r_intraday" | "tp_r_swing"
+  | "poll_interval_seconds" | "execution_poll_interval_seconds";
+
+export type NewsAISettingsPatch = Partial<Record<NewsAISettingKey, number | null>>;
+
+export interface NewsAISettings extends Partial<Record<NewsAISettingKey, number>> {
   min_confidence: number;
   max_trades_per_day: number;
   source: "default" | "override";
-  defaults: { min_confidence: number; max_trades_per_day: number };
+  defaults: Partial<Record<NewsAISettingKey, number>>;
+  overrides?: Partial<Record<NewsAISettingKey, number>>;
   updated_by: string | null;
   updated_at: string | null;
 }
@@ -177,8 +185,10 @@ export const NEWS_MIN_CONFIDENCE_FLOOR = 50;
 export const NEWS_MAX_TRADES_CEILING = 20;
 
 function validSettings(value: unknown): value is NewsAISettings {
-  return isRecord(value) && typeof value.min_confidence === "number" && typeof value.max_trades_per_day === "number"
-    && (value.source === "default" || value.source === "override") && isRecord(value.defaults);
+  return isRecord(value) && Number.isFinite(value.min_confidence) && Number.isFinite(value.max_trades_per_day)
+    && (value.source === "default" || value.source === "override") && isRecord(value.defaults)
+    && Object.values(value.defaults).every(Number.isFinite)
+    && (value.overrides === undefined || (isRecord(value.overrides) && Object.values(value.overrides).every(Number.isFinite)));
 }
 
 export async function fetchNewsAISettings(signal?: AbortSignal): Promise<NewsAISettings> {
@@ -187,8 +197,8 @@ export async function fetchNewsAISettings(signal?: AbortSignal): Promise<NewsAIS
   return data;
 }
 
-export async function updateNewsAISettings(min_confidence: number, max_trades_per_day: number): Promise<void> {
-  await apiRequest("/api/news/settings", { method: "PUT", json: { min_confidence, max_trades_per_day } });
+export async function updateNewsAISettings(changes: NewsAISettingsPatch): Promise<void> {
+  await apiRequest("/api/news/settings", { method: "PUT", json: changes });
 }
 
 export async function resetNewsAISettings(): Promise<void> {
