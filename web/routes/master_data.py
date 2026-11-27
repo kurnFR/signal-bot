@@ -3,8 +3,9 @@ import uuid
 import threading
 import logging
 import re
+from concurrent.futures import CancelledError
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path as ApiPath, Query, Request
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
@@ -34,7 +35,37 @@ JOBS_LOCK = threading.RLock()
 def _persist(job_id: str) -> None:
     job = JOBS.get(job_id)
     if job:
-        job_store.save_job(dict(job))
+        job_store.save_job(_job_snapshot(job))
+
+
+def _job_snapshot(job: dict) -> dict:
+    return {key: value for key, value in job.items() if key != "cancel_event"}
+
+
+def _begin_job(job_id: str, message: str):
+    with JOBS_LOCK:
+        job = JOBS[job_id]
+        event = job.setdefault("cancel_event", threading.Event())
+
+        def checkpoint():
+            if event.is_set():
+                raise CancelledError
+
+        checkpoint()
+        job.update(status="running", message=message, updated_at=time.time())
+        _persist(job_id)
+        return checkpoint
+
+
+def _finish_job(job_id: str, status: str, message: str, **fields) -> None:
+    with JOBS_LOCK:
+        job = JOBS[job_id]
+        if job.get("cancel_event") and job["cancel_event"].is_set():
+            status, message = "cancelled", "Cancelled. Any completed batches were retained."
+            fields.pop("progress", None)
+        job.update(status=status, message=message, updated_at=time.time(), **fields)
+        job.pop("cancel_event", None)
+        _persist(job_id)
 
 
 class BackfillRequest(BaseModel):
@@ -101,11 +132,9 @@ class FeatureBuildRequest(BaseModel):
 
 def _run_backfill_job(job_id: str, symbol: str, market: str, timeframe: str, years: float, auto_compute_features: bool):
     try:
-        with JOBS_LOCK:
-            JOBS[job_id]["status"] = "running"
-            JOBS[job_id]["message"] = f"Initializing backfill for {symbol} {market} {timeframe} ({years} years)..."
-            JOBS[job_id]["updated_at"] = time.time()
-            _persist(job_id)
+        checkpoint = _begin_job(
+            job_id, f"Initializing backfill for {symbol} {market} {timeframe} ({years} years)..."
+        )
 
         url = SPOT_KLINE_URL if market == "spot" else FUTURES_KLINE_URL
         end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -116,10 +145,12 @@ def _run_backfill_job(job_id: str, symbol: str, market: str, timeframe: str, yea
         total_rows = 0
 
         while cursor < end_ms:
+            checkpoint()
             raw = fetch_klines(url, symbol, timeframe, cursor, end_ms)
             if not raw:
                 break
             rows = klines_to_rows(symbol, market, timeframe, raw)
+            checkpoint()
             upsert_ohlcv(rows)
             total_rows += len(rows)
 
@@ -134,7 +165,8 @@ def _run_backfill_job(job_id: str, symbol: str, market: str, timeframe: str, yea
             with JOBS_LOCK:
                 JOBS[job_id]["progress"] = progress_pct
                 JOBS[job_id]["candles_fetched"] = total_rows
-                JOBS[job_id]["message"] = f"Fetched & upserted {total_rows:,} candles..."
+                if JOBS[job_id]["status"] != "cancelling":
+                    JOBS[job_id]["message"] = f"Fetched & upserted {total_rows:,} candles..."
                 JOBS[job_id]["updated_at"] = time.time()
                 _persist(job_id)
 
@@ -143,61 +175,48 @@ def _run_backfill_job(job_id: str, symbol: str, market: str, timeframe: str, yea
 
             time.sleep(0.15)  # respectful of rate limits
 
+        checkpoint()
         if auto_compute_features and total_rows > 0:
             with JOBS_LOCK:
+                checkpoint()
                 JOBS[job_id]["progress"] = 96.0
                 JOBS[job_id]["message"] = f"Backfill complete ({total_rows:,} candles). Computing indicators (RSI, MACD, ATR, S/R, Fib)..."
                 JOBS[job_id]["updated_at"] = time.time()
                 _persist(job_id)
 
             try:
-                feat_count = build_one(symbol, market, timeframe)
+                feat_count = build_one(symbol, market, timeframe, checkpoint=checkpoint)
                 msg = f"Completed successfully: {total_rows:,} candles backfilled, {feat_count:,} features computed."
-            except Exception as feat_err:
-                logger.exception("Feature computation failed for %s", symbol)
+            except CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Feature computation failed (%s)", type(exc).__name__)
                 msg = f"Candles backfilled ({total_rows:,}), but feature calculation failed. Check server logs for details."
         else:
             msg = f"Backfill complete: {total_rows:,} candles stored."
 
-        with JOBS_LOCK:
-            JOBS[job_id]["status"] = "completed"
-            JOBS[job_id]["progress"] = 100.0
-            JOBS[job_id]["candles_fetched"] = total_rows
-            JOBS[job_id]["message"] = msg
-            JOBS[job_id]["updated_at"] = time.time()
-            _persist(job_id)
-
-    except Exception as e:
-        logger.exception(f"Backfill job {job_id} failed: {e}")
-        with JOBS_LOCK:
-            JOBS[job_id]["status"] = "failed"
-            JOBS[job_id]["message"] = f"Backfill failed ({type(e).__name__}). Check server logs for details."
-            JOBS[job_id]["updated_at"] = time.time()
-            _persist(job_id)
+        _finish_job(job_id, "completed", msg, progress=100.0, candles_fetched=total_rows)
+    except CancelledError:
+        _finish_job(job_id, "cancelled", "Cancelled. Any completed batches were retained.")
+    except Exception as exc:
+        logger.warning("Backfill job %s failed (%s)", job_id, type(exc).__name__)
+        _finish_job(job_id, "failed", "Backfill failed. Check server logs for details.")
 
 
 def _run_features_job(job_id: str, symbol: str, market: str, timeframe: str):
     try:
-        with JOBS_LOCK:
-            JOBS[job_id]["status"] = "running"
-            JOBS[job_id]["message"] = f"Computing indicators for {symbol} {market} {timeframe}..."
-            JOBS[job_id]["updated_at"] = time.time()
-            _persist(job_id)
-
-        count = build_one(symbol, market, timeframe)
-        with JOBS_LOCK:
-            JOBS[job_id]["status"] = "completed"
-            JOBS[job_id]["progress"] = 100.0
-            JOBS[job_id]["message"] = f"Successfully computed {count:,} feature rows for {symbol} {market} {timeframe}."
-            JOBS[job_id]["updated_at"] = time.time()
-            _persist(job_id)
-    except Exception as e:
-        logger.exception(f"Feature job {job_id} failed: {e}")
-        with JOBS_LOCK:
-            JOBS[job_id]["status"] = "failed"
-            JOBS[job_id]["message"] = f"Failed to compute features ({type(e).__name__}). Check server logs for details."
-            JOBS[job_id]["updated_at"] = time.time()
-            _persist(job_id)
+        checkpoint = _begin_job(job_id, f"Computing indicators for {symbol} {market} {timeframe}...")
+        count = build_one(symbol, market, timeframe, checkpoint=checkpoint)
+        _finish_job(
+            job_id, "completed",
+            f"Successfully computed {count:,} feature rows for {symbol} {market} {timeframe}.",
+            progress=100.0,
+        )
+    except CancelledError:
+        _finish_job(job_id, "cancelled", "Cancelled. Any completed batches were retained.")
+    except Exception as exc:
+        logger.warning("Feature job %s failed (%s)", job_id, type(exc).__name__)
+        _finish_job(job_id, "failed", "Failed to compute features. Check server logs for details.")
 
 
 @router.get("/coverage")
@@ -286,7 +305,7 @@ def trigger_backfill(req: BackfillRequest, background_tasks: BackgroundTasks):
     }
 
     with JOBS_LOCK:
-        JOBS[job_id] = job_info
+        JOBS[job_id] = {**job_info, "cancel_event": threading.Event()}
         _persist(job_id)
 
     # Launch background thread
@@ -322,7 +341,7 @@ def trigger_build_features(req: FeatureBuildRequest):
     }
 
     with JOBS_LOCK:
-        JOBS[job_id] = job_info
+        JOBS[job_id] = {**job_info, "cancel_event": threading.Event()}
         _persist(job_id)
 
     thread = threading.Thread(
@@ -338,7 +357,12 @@ def trigger_build_features(req: FeatureBuildRequest):
 @router.get("/jobs")
 def list_jobs():
     with JOBS_LOCK:
-        live = [dict(j) for j in JOBS.values()]
+        live = [
+            _job_snapshot(job) | {
+                "can_cancel": job["status"] in {"queued", "running"} and "cancel_event" in job
+            }
+            for job in JOBS.values()
+        ]
     return {"jobs": job_store.merge_jobs(live, job_store.list_jobs(30), 30)}
 
 
@@ -346,7 +370,7 @@ def list_jobs():
 def get_job(job_id: str):
     with JOBS_LOCK:
         job = JOBS.get(job_id)
-        job = dict(job) if job else None
+        job = _job_snapshot(job) if job else None
     if not job:
         job = job_store.load_job(job_id)
     if not job:
@@ -354,8 +378,31 @@ def get_job(job_id: str):
     return job
 
 
+@router.post("/jobs/{job_id}/cancel", status_code=202)
+def cancel_job(request: Request, job_id: str = ApiPath(..., max_length=64, pattern=r"^[A-Za-z0-9_-]+$")):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if job is None:
+            if job_store.load_job(job_id) is None:
+                raise HTTPException(status_code=404, detail="Job not found")
+            raise HTTPException(status_code=409, detail="Job not running in this process")
+        event = job.get("cancel_event")
+        if job["status"] == "cancelling" and event is not None:
+            return _job_snapshot(job)
+        if job["status"] not in {"queued", "running"} or event is None:
+            raise HTTPException(status_code=409, detail="Job not running in this process")
+        event.set()
+        job.update(status="cancelling", message="Stopping after the current batch.", updated_at=time.time())
+        _persist(job_id)
+        result = _job_snapshot(job)
+    user = request.state.user
+    log_audit("MASTER_DATA_JOB_CANCEL_REQUESTED", str(user["username"]), user["id"],
+              {"job_id": job_id}, request.client.host if request.client else "unknown")
+    return result
+
+
 _DELETE_BATCH = 50_000
-_ACTIVE_JOB_STATES = {"queued", "running"}
+_ACTIVE_JOB_STATES = set(job_store.ACTIVE_STATES)
 
 
 def _delete_in_batches(cur, conn, table: str, symbol: str, market: str, timeframe: str) -> int:

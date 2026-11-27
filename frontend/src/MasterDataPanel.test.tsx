@@ -92,6 +92,27 @@ describe("MasterDataPanel", () => {
     expect(calls.some((call) => call.method === "POST")).toBe(false);
   });
 
+  it("lets a trader confirm cancellation and shows the new state", async () => {
+    window.localStorage.setItem("token", "test-session");
+    const job = { ...responses["/api/master-data/jobs"].jobs[0], status: "running", progress: 30, can_cancel: true };
+    const cancelPath = "/api/master-data/jobs/job-1/cancel";
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } });
+      if (path === "/api/auth/me") return json({ id: 4, username: "trader", email: null, role: "trader", must_change_password: false });
+      if (path === "/api/master-data/jobs") return json({ jobs: [job] });
+      if (path === cancelPath && init?.method === "POST") return json({ ...job, status: "cancelling", can_cancel: false }, 202);
+      return json(responses[path as keyof typeof responses]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><MasterDataPanel /></AuthGate>);
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel job job-1" }));
+    expect(screen.getByRole("heading", { name: "Cancel job job-1?" })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([path]) => String(path).endsWith(cancelPath))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm cancellation" }));
+    expect(await screen.findByText("cancelling")).toBeInTheDocument();
+  });
+
   it("requires an explicit confirmation before a trader can launch a backfill", async () => {
     window.localStorage.setItem("token", "trader-session");
     const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
