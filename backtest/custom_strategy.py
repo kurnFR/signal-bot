@@ -21,16 +21,21 @@ def read_definitions(path):
 
 def paper_strategy_registry(registry, path=None):
     # A dashboard-triggered tick may already have web-registered custom runners.
-    # Replace those with the same on-disk snapshot an independent worker sees.
+    # Replace those with the same database snapshot an independent worker sees.
     current = {name: fn for name, fn in registry.items() if getattr(fn, "__module__", None) != __name__}
     try:
-        definitions = read_definitions(path or CUSTOM_FILE)
-    except (OSError, ValueError):
-        logging.getLogger(__name__).exception("Cannot read saved custom strategies")
+        from db.custom_strategy_store import list_definitions
+        definitions = read_definitions(path) if path is not None else list_definitions()
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Cannot read saved custom strategies (%s)", type(exc).__name__)
         return current
     for definition in definitions:
+        if not definition.get("enabled", True):
+            continue
         try:
             name = definition["name"]
+            if name in current or f"inverse_{name}" in current:
+                continue
             current[name], current[f"inverse_{name}"] = _create_strategy_runner(definition)
         except (KeyError, TypeError, ValueError):
             logging.getLogger(__name__).exception("Invalid saved strategy %r", definition.get("name"))

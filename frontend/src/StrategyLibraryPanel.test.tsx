@@ -111,7 +111,7 @@ describe("read-only strategy library", () => {
       if (path === "/api/custom-strategy/list") return json(payloads["/api/custom-strategy/list"]);
       if (path === "/api/custom-strategy/indicators") return json(payloads["/api/custom-strategy/indicators"]);
       if (path === "/api/backtest/strategies") return json({ strategies: [] });
-      if (path === "/api/custom-strategy/create" && method === "POST") return json({ status: "success", name: "rsi_volume_v1", displayName: "RSI + Volume", message: "Strategy rsi_volume_v1 updated." });
+      if (path === "/api/custom-strategy/rsi_volume_v1" && method === "PUT") return json({ status: "success", name: "rsi_volume_v1", displayName: "RSI + Volume", message: "Strategy rsi_volume_v1 updated." });
       throw new Error("Unexpected endpoint: " + method + " " + path);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -124,17 +124,51 @@ describe("read-only strategy library", () => {
     fireEvent.click(screen.getByRole("button", { name: "Review update" }));
     expect(await screen.findByRole("heading", { name: "Confirm strategy update" })).toBeInTheDocument();
     expect(screen.getByText("rsi_volume_v1", { selector: "strong" })).toBeInTheDocument();
-    expect(calls.filter((call) => call.path === "/api/custom-strategy/create" && call.method === "POST")).toEqual([]);
+    expect(calls.filter((call) => call.path === "/api/custom-strategy/rsi_volume_v1" && call.method === "PUT")).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "Confirm update" }));
     expect(await screen.findByText("Strategy rsi_volume_v1 updated.")).toBeInTheDocument();
-    const request = calls.find((call) => call.path === "/api/custom-strategy/create" && call.method === "POST");
+    const request = calls.find((call) => call.path === "/api/custom-strategy/rsi_volume_v1" && call.method === "PUT");
     expect(request?.body).toMatchObject({
       name: "rsi_volume_v1", displayName: "RSI + Volume",
       longConditions: [{ indicator: "rsi", operator: "<", value: 30 }],
       shortConditions: [{ indicator: "rsi", operator: ">", value: 70 }],
       slAtrMult: 1.5, riskRewardRatio: 2.5,
     });
+  });
+
+  it("shows the deployment conflict and explicitly confirms forced disable", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const fixture = payloads["/api/custom-strategy/list"] as { strategies: Array<Record<string, unknown>> };
+    const strategy = { ...fixture.strategies[0], enabled: true, active_deployments: 1 };
+    const mutations: Array<{ force: string | null; body: unknown }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
+        status, headers: { "content-type": "application/json" },
+      });
+      if (url.pathname === "/api/auth/me") return json({ id: 4, username: "trader", email: null, role: "trader", must_change_password: false });
+      if (url.pathname === "/api/custom-strategy/list") return json({ strategies: [strategy] });
+      if (url.pathname.endsWith("/enabled") && init?.method === "PATCH") {
+        const force = url.searchParams.get("force");
+        mutations.push({ force, body: JSON.parse(String(init.body)) });
+        if (force !== "true") return json({
+          detail: { message: "Pause the active deployments.", deployments: [{ id: 42, symbol: "ETHUSDT", timeframe: "1h" }] },
+        }, 409);
+        strategy.enabled = false;
+        return json({ status: "success", message: "Strategy disabled." });
+      }
+      return json(payloads[url.pathname as keyof typeof payloads] ?? { strategies: [] });
+    }));
+    render(<AuthGate><StrategyLibraryPanel /></AuthGate>);
+    fireEvent.click(await screen.findByRole("button", { name: "Disable strategy" }));
+    expect(await screen.findByText(/ETHUSDT\/1h \(#42\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Disable despite active deployments" }));
+    expect(await screen.findByRole("button", { name: "Enable strategy" })).toBeInTheDocument();
+    expect(mutations).toEqual([
+      { force: "false", body: { enabled: false } },
+      { force: "true", body: { enabled: false } },
+    ]);
   });
 
   it("keeps AI-generated strategies as drafts until the user explicitly saves them", async () => {

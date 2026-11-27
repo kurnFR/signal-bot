@@ -1,22 +1,23 @@
 import json
-import os
 import re
 import time
 import logging
-import tempfile
+import math
+import threading
 from typing import List, Dict, Any, Optional, Union
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Path, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 import requests
 from backtest.strategies import STRATEGIES
 from backtest.custom_strategy import (
-    CUSTOM_FILE, _create_strategy_runner, _eval_condition, _normalize_indicator_name,
-    read_definitions,
+    _create_strategy_runner, _eval_condition, _normalize_indicator_name,
 )
 from backtest.params import BASE_PARAMS
 from backtest.metrics import compute_metrics
+from db.custom_strategy_store import StrategyInUseError, list_definitions, mutate_definition
 from db.db import fetch_ohlcv_with_features_df
+from web.auth import log_audit
 from config import (
     LLM_PROVIDER,
     NINEROUTER_API_KEY, NINEROUTER_BASE_URL, NINEROUTER_MODEL,
@@ -40,35 +41,9 @@ MAX_AI_HISTORY_MESSAGE_CHARS = 2_000
 MAX_AI_CURRENT_CONFIG_CHARS = 8_000
 MAX_AI_CONTEXT_CHARS = 16_000
 
-def _read_saved_strategies() -> list:
-    """Read persisted strategies without silently discarding corrupt state."""
-    try:
-        return read_definitions(CUSTOM_FILE)
-    except (OSError, ValueError) as exc:
-        raise HTTPException(status_code=500, detail="Saved custom strategies could not be read safely") from exc
+_REGISTRY_LOCK = threading.Lock()
+_BUILT_IN_NAMES = frozenset(STRATEGIES)
 
-
-def _write_saved_strategies(saved: list) -> None:
-    """Atomically replace the strategy file so interrupted writes preserve old data."""
-    directory = os.path.dirname(CUSTOM_FILE) or "."
-    temp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory, prefix=".custom-strategies-", suffix=".tmp", delete=False) as f:
-            temp_path = f.name
-            json.dump(saved, f, indent=2, allow_nan=False)
-            f.write("\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(temp_path, CUSTOM_FILE)
-        temp_path = None
-    except (OSError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=500, detail="Saved custom strategies could not be written safely") from exc
-    finally:
-        if temp_path is not None:
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
 
 # Metadata dictionary of all indicators available in the features dataset
 INDICATOR_DEFINITIONS = {
@@ -219,18 +194,18 @@ INDICATOR_DEFINITIONS = {
 }
 
 class RuleCondition(BaseModel):
-    indicator: str = Field(..., json_schema_extra={"example": "rsi"})
-    operator: str = Field(..., json_schema_extra={"example": "<"})
+    indicator: str = Field(..., max_length=100, json_schema_extra={"example": "rsi"})
+    operator: str = Field(..., max_length=2, json_schema_extra={"example": "<"})
     value: Union[float, int, str] = Field(..., json_schema_extra={"example": 30.0})
 
 
 class CustomStrategyRequest(BaseModel):
-    name: str = Field(..., json_schema_extra={"example": "rsi_volume_surge_v1"})
-    displayName: str = Field(..., json_schema_extra={"example": "RSI + Volume Surge"})
-    description: str = Field("Custom rule-based strategy", json_schema_extra={"example": "Fades RSI extremes with volume confirmation"})
-    rationale: Optional[str] = Field("", json_schema_extra={"example": "Combines mean reversion with institutional volume surge."})
-    longConditions: List[RuleCondition] = Field(default_factory=list)
-    shortConditions: List[RuleCondition] = Field(default_factory=list)
+    name: str = Field(..., min_length=1, max_length=80, json_schema_extra={"example": "rsi_volume_surge_v1"})
+    displayName: str = Field(..., min_length=1, max_length=200, json_schema_extra={"example": "RSI + Volume Surge"})
+    description: str = Field("Custom rule-based strategy", max_length=2000, json_schema_extra={"example": "Fades RSI extremes with volume confirmation"})
+    rationale: Optional[str] = Field("", max_length=2000, json_schema_extra={"example": "Combines mean reversion with institutional volume surge."})
+    longConditions: List[RuleCondition] = Field(default_factory=list, max_length=100)
+    shortConditions: List[RuleCondition] = Field(default_factory=list, max_length=100)
     slAtrMult: float = Field(1.5, ge=0.5, le=5.0)
     riskRewardRatio: float = Field(2.5, ge=1.0, le=6.0)
     useTrailingStop: bool = Field(False)
@@ -303,33 +278,47 @@ class QuickTestRequest(BaseModel):
 
 
 def load_custom_strategies():
-    if not os.path.exists(CUSTOM_FILE):
-        return
+    """Refresh web runners and metadata using the committed shared definitions."""
     try:
-        for s in read_definitions(CUSTOM_FILE):
-            name = s.get("name")
-            if not name:
-                continue
-            run_fn, run_inv_fn = _create_strategy_runner(s)
-            STRATEGIES[name] = run_fn
-            STRATEGIES[f"inverse_{name}"] = run_inv_fn
-            STRATEGY_METADATA[name] = {
-                "displayName": s.get("displayName", name),
-                "category": "Custom AI Strategy",
-                "validated": False,
-                "description": s.get("description", ""),
-                "rationale": s.get("rationale", ""),
-                "longConditions": s.get("longConditions", []),
-                "shortConditions": s.get("shortConditions", []),
-                "useTrailingStop": s.get("useTrailingStop", False),
-                "params": [
-                    {"key": "CUSTOM_SL_ATR_MULT", "label": "Stop-Loss (ATR Multiple)", "type": "float", "default": s.get("slAtrMult", 1.5), "min": 0.5, "max": 5.0, "step": 0.25},
-                    {"key": "CUSTOM_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": s.get("riskRewardRatio", 2.5), "min": 1.0, "max": 6.0, "step": 0.5},
-                ]
-            }
-            logger.info(f"Loaded custom strategy: {name}")
-    except Exception as e:
-        logger.error(f"Failed to load custom strategies: {e}")
+        with _REGISTRY_LOCK:
+            saved = list_definitions()
+            runners = {}
+            metadata = {}
+            for s in saved:
+                if not s["enabled"]:
+                    continue
+                name = s["name"]
+                if name in _BUILT_IN_NAMES or f"inverse_{name}" in _BUILT_IN_NAMES:
+                    continue
+                runners[name], runners[f"inverse_{name}"] = _create_strategy_runner(s)
+                metadata[name] = {
+                    "displayName": s.get("displayName", name),
+                    "category": "Custom AI Strategy",
+                    "validated": False,
+                    "description": s.get("description", ""),
+                    "rationale": s.get("rationale", ""),
+                    "longConditions": s.get("longConditions", []),
+                    "shortConditions": s.get("shortConditions", []),
+                    "useTrailingStop": s.get("useTrailingStop", False),
+                    "params": [
+                        {"key": "CUSTOM_SL_ATR_MULT", "label": "Stop-Loss (ATR Multiple)", "type": "float", "default": s.get("slAtrMult", 1.5), "min": 0.5, "max": 5.0, "step": 0.25},
+                        {"key": "CUSTOM_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": s.get("riskRewardRatio", 2.5), "min": 1.0, "max": 6.0, "step": 0.5},
+                    ]
+                }
+            for name, runner in STRATEGIES.copy().items():
+                if getattr(runner, "__module__", None) == _create_strategy_runner.__module__:
+                    STRATEGIES.pop(name, None)
+                    STRATEGY_METADATA.pop(name, None)
+            STRATEGIES.update(runners)
+            STRATEGY_METADATA.update(metadata)
+    except Exception as exc:
+        logger.warning("Could not refresh custom strategy registry (%s)", type(exc).__name__)
+        # An unavailable or invalid snapshot must never keep disabled runners active.
+        with _REGISTRY_LOCK:
+            for name, runner in STRATEGIES.copy().items():
+                if getattr(runner, "__module__", None) == _create_strategy_runner.__module__:
+                    STRATEGIES.pop(name, None)
+                    STRATEGY_METADATA.pop(name, None)
 
 
 def _call_openai_compatible_api(url: str, api_key: str, model: str, messages: list, timeout: Union[int, float, tuple] = (3.0, 25.0)) -> Optional[str]:
@@ -589,14 +578,11 @@ def get_indicators():
 
 @router.get("/list")
 def list_custom_strategies():
-    saved = []
-    if os.path.exists(CUSTOM_FILE):
-        try:
-            with open(CUSTOM_FILE, "r") as f:
-                saved = json.load(f)
-        except Exception as e:
-            logger.error(f"Error reading {CUSTOM_FILE}: {e}")
-    return {"strategies": saved}
+    try:
+        return {"strategies": list_definitions(include_deployments=True)}
+    except Exception as exc:
+        logger.warning("Could not list custom strategies (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Saved strategies are unavailable.") from exc
 
 
 @router.post("/generate-ai")
@@ -744,89 +730,91 @@ def generate_ai_strategy(req: GenerateAIStrategyRequest):
     }
 
 
+_NAME_PATH = Path(..., max_length=80, pattern=r"^[a-z0-9_]+$")
+
+
+def _validated_definition(req: CustomStrategyRequest, name: str) -> dict:
+    if not name or name.startswith("inverse_") or name in _BUILT_IN_NAMES or f"inverse_{name}" in _BUILT_IN_NAMES:
+        raise HTTPException(status_code=400, detail="Choose an available custom strategy name.")
+    if not req.displayName.strip() or not (req.longConditions or req.shortConditions):
+        raise HTTPException(status_code=400, detail="A display name and at least one rule are required.")
+    definition = req.model_dump()
+    definition["name"] = name
+    # Validate both indicator operands before a definition can reach any runner.
+    for rule in definition["longConditions"] + definition["shortConditions"]:
+        indicator = _normalize_indicator_name(rule["indicator"])
+        if indicator not in INDICATOR_DEFINITIONS or rule["operator"] not in {"<", "<=", ">", ">=", "==", "!="}:
+            raise HTTPException(status_code=400, detail="Every rule needs a supported indicator and operator.")
+        value = rule["value"]
+        if isinstance(value, str) and len(value) > 100:
+            raise HTTPException(status_code=400, detail="Rule comparison value is too long.")
+        comparison = _normalize_indicator_name(value) if isinstance(value, str) else None
+        if comparison in INDICATOR_DEFINITIONS:
+            value = comparison
+        else:
+            try:
+                value = float(value)
+                if not math.isfinite(value):
+                    raise ValueError
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(status_code=400, detail="Rule values must be finite numbers or supported indicators.") from exc
+        rule.update(indicator=indicator, value=value)
+    return definition
+
+
+def _mutate_strategy(request: Request, name: str, action: str, **kwargs):
+    try:
+        found = mutate_definition(name, action, **kwargs)
+    except StrategyInUseError as exc:
+        raise HTTPException(status_code=409, detail={"message": str(exc), "deployments": exc.deployments}) from exc
+    except Exception as exc:
+        logger.warning("Custom strategy change failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Could not save the custom strategy.") from exc
+    if not found and action != "delete":
+        raise HTTPException(status_code=404, detail="Custom strategy not found.")
+    if found:
+        load_custom_strategies()
+        verb = ("enabled" if kwargs["enabled"] else "disabled") if action == "toggle" else {
+            "create": "saved", "update": "updated", "delete": "deleted",
+        }[action]
+        user = request.state.user
+        log_audit(
+            f"CUSTOM_STRATEGY_{verb.upper()}", user["username"], user.get("id"),
+            {"name": name, "force": kwargs.get("force", False)},
+            request.client.host if request.client else "unknown",
+        )
+    else:
+        verb = "deleted"
+    return {"status": "success", "name": name, "message": f"Strategy {name} {verb}."}
+
+
 @router.post("/create")
-def create_custom_strategy(req: CustomStrategyRequest):
-    clean_name = re.sub(r"[^a-z0-9_]", "_", req.name.strip().lower()).strip("_")
-    if not clean_name:
-        raise HTTPException(status_code=400, detail="Strategy name cannot be empty")
-
-    def_dict = req.model_dump() if hasattr(req, "model_dump") else req.dict()
-    def_dict["name"] = clean_name
-
-    long_list = [c.model_dump() if hasattr(c, "model_dump") else c.dict() for c in req.longConditions]
-    short_list = [c.model_dump() if hasattr(c, "model_dump") else c.dict() for c in req.shortConditions]
-
-    # Persist first. If disk I/O fails, leave the in-memory registry unchanged.
-    saved = _read_saved_strategies()
-    saved = [s for s in saved if s.get("name") != clean_name]
-    saved.append(def_dict)
-    _write_saved_strategies(saved)
-
-    run_fn, run_inv_fn = _create_strategy_runner(def_dict)
-    STRATEGIES[clean_name] = run_fn
-    STRATEGIES[f"inverse_{clean_name}"] = run_inv_fn
-
-    STRATEGY_METADATA[clean_name] = {
-        "displayName": req.displayName or clean_name,
-        "category": "Custom AI Strategy",
-        "validated": False,
-        "description": req.description,
-        "rationale": req.rationale or "",
-        "longConditions": long_list,
-        "shortConditions": short_list,
-        "useTrailingStop": req.useTrailingStop,
-        "params": [
-            {"key": "CUSTOM_SL_ATR_MULT", "label": "Stop-Loss (ATR Multiple)", "type": "float", "default": req.slAtrMult, "min": 0.5, "max": 5.0, "step": 0.25},
-            {"key": "CUSTOM_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": req.riskRewardRatio, "min": 1.0, "max": 6.0, "step": 0.5},
-        ]
-    }
+def create_custom_strategy(req: CustomStrategyRequest, request: Request):
+    name = re.sub(r"[^a-z0-9_]", "_", req.name.strip().lower()).strip("_")
+    definition = _validated_definition(req, name)
+    result = _mutate_strategy(request, name, "create", definition=definition)
+    return {**result, "displayName": req.displayName}
 
 
-    return {
-        "status": "success",
-        "name": clean_name,
-        "displayName": req.displayName,
-        "message": f"Strategy {clean_name} saved and registered successfully!"
-    }
+@router.put("/{name}")
+def update_custom_strategy(req: CustomStrategyRequest, request: Request, name: str = _NAME_PATH):
+    if name != req.name:
+        raise HTTPException(status_code=400, detail="The strategy name cannot be changed.")
+    return _mutate_strategy(request, name, "update", definition=_validated_definition(req, name))
+
+
+class StrategyEnabledRequest(BaseModel):
+    enabled: bool = Field(strict=True)
+
+
+@router.patch("/{name}/enabled")
+def toggle_custom_strategy(req: StrategyEnabledRequest, request: Request, name: str = _NAME_PATH, force: bool = False):
+    return _mutate_strategy(request, name, "toggle", enabled=req.enabled, force=force)
 
 
 @router.delete("/{name}")
-def delete_custom_strategy(name: str):
-    clean_name = name.strip().lower()
-    saved = _read_saved_strategies()
-    saved = [s for s in saved if s.get("name") != clean_name]
-    _write_saved_strategies(saved)
-
-    STRATEGIES.pop(clean_name, None)
-    STRATEGIES.pop(f"inverse_{clean_name}", None)
-    STRATEGY_METADATA.pop(clean_name, None)
-
-    paused_deployments = 0
-    try:
-        from db.db import get_pool
-        pool = get_pool()
-        with pool.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE paper_configs
-                    SET is_active = 0
-                    WHERE strategy_name IN (%s, %s) AND is_active = 1
-                    """,
-                    (clean_name, f"inverse_{clean_name}"),
-                )
-                paused_deployments = cur.rowcount
-                conn.commit()
-    except Exception as exc:
-        logger.warning(
-            "Failed to pause active paper configs for deleted strategy %s: %s", clean_name, exc
-        )
-
-    return {
-        "status": "success",
-        "message": f"Strategy {clean_name} deleted.",
-        "paused_deployments": paused_deployments,
-    }
+def delete_custom_strategy(request: Request, name: str = _NAME_PATH):
+    return _mutate_strategy(request, name, "delete")
 
 
 @router.post("/quick-test")
@@ -877,7 +865,3 @@ def quick_test_strategy(req: QuickTestRequest):
         "maxDrawdownR": _clean_num(metrics.get("max_drawdown_r"), 0.0),
         "expectancyR": _clean_num(metrics.get("expectancy_r")),
     }
-
-
-# Initial load at startup
-load_custom_strategies()

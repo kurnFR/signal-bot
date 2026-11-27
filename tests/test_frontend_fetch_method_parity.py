@@ -88,7 +88,7 @@ def _frontend_fetch_requests() -> dict[tuple[str, str], list[str]]:
             ):
                 _add_request(requests, method, match.group(2), source, text, match.start())
         for match in re.finditer(
-            r"""mutateStrategyLibrary\s*\(\s*(['"`])(/api/[^'"`]+)\1\s*,\s*(['"])(POST|DELETE)\3""",
+            r"""mutateStrategyLibrary\s*\(\s*(['"`])(/api/[^'"`]+)\1\s*,\s*(['"])(POST|PUT|PATCH|DELETE)\3""",
             text,
         ):
             _add_request(requests, match.group(4), match.group(2), source, text, match.start())

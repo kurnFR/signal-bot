@@ -50,6 +50,8 @@ async def lifespan(app: FastAPI):
     validate_production_secret_config()
     seed_default_admin()
     enable_durable_rate_limit()
+    from web.routes.custom_strategy import load_custom_strategies
+    load_custom_strategies()
     try:
         from web.job_store import mark_interrupted
         stale = mark_interrupted()

@@ -159,7 +159,7 @@ class TestWorkOrder71951Integration(unittest.TestCase):
             "slAtrMult": 1.5,
             "riskRewardRatio": 2.5,
         }]
-        with patch("backtest.custom_strategy.read_definitions", return_value=definitions):
+        with patch("db.custom_strategy_store.list_definitions", return_value=definitions):
             self.assertTrue(paper_routes._is_known_paper_strategy("custom_strat_alpha"))
 
             # Deploying this strategy is accepted by the validation gate
@@ -349,20 +349,6 @@ class TestWorkOrder71951Integration(unittest.TestCase):
             self.assertEqual(res.status_code, 200)
             self.assertEqual(res.json()["status"], "success")
 
-    def test_delete_custom_strategy_pauses_active_deployments(self):
-        from web.routes import custom_strategy
-        with patch("web.routes.custom_strategy._read_saved_strategies", return_value=[{"name": "test_strat"}]), \
-             patch("web.routes.custom_strategy._write_saved_strategies"), \
-             patch("db.db.get_pool") as mock_pool:
-            mock_conn = MagicMock()
-            mock_cur = MagicMock()
-            mock_cur.rowcount = 2
-            mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-            mock_pool.return_value.get_connection.return_value.__enter__.return_value = mock_conn
-
-            res = custom_strategy.delete_custom_strategy("test_strat")
-            self.assertEqual(res["status"], "success")
-            self.assertEqual(res["paused_deployments"], 2)
 
 
 if __name__ == "__main__":
