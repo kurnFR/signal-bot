@@ -27,12 +27,12 @@ from paper.outbox_worker import (
     OutboxWorkerState,
     verify_database_identity,
 )
-from paper.retailbot2 import (
-    OUTBOX_LOCK_NAME,
-    DatabaseManager,
-    RetailDeathTrapBot,
-    TelegramAlert,
-)
+# Step 3: the worker (paper/retailbot2.py) is deleted. The advisory lock
+# constant lives in paper/outbox_store.py. The three "legacy dispatcher"
+# tests below are deleted with the worker: there is no in-process dispatcher
+# left that could bypass the standalone worker, so the bypass they guarded
+# against is impossible by construction.
+from paper.outbox_store import OUTBOX_LOCK_NAME
 
 
 TEST_DB_HOST = "127.0.0.1"
@@ -305,47 +305,6 @@ class TestAdvisoryLockOwnership:
             worker2.close()
 
     @pytest.mark.db_integration
-    def test_legacy_retailbot2_dispatcher_cannot_bypass_standalone_worker(self):
-        db_cfg = _test_db_config()
-        standalone = OutboxSessionManager(db_cfg, ALLOWED_TEST_DATABASES)
-
-        clean_conn = _test_connection()
-        _clean_test_outbox_events(clean_conn)
-        event_id = _insert_test_event(clean_conn)
-        clean_conn.close()
-
-        assert standalone.connect_and_acquire() is True
-
-        try:
-            # Legacy in-process delivery must remain disabled while standalone worker owns the lock.
-            db_mgr = object.__new__(DatabaseManager)
-            db_mgr.logger = logging.getLogger("test_dispatch")
-            db_mgr.get_conn = Mock(side_effect=AssertionError('legacy dispatcher must not open a DB connection'))
-
-            bot = object.__new__(RetailDeathTrapBot)
-            bot.db = db_mgr
-            bot.tg = object.__new__(TelegramAlert)
-            bot.tg.enabled = True
-            bot.logger = logging.getLogger("test_bot")
-
-            # Compatibility method must not touch the DB or send directly.
-            delivered = bot._dispatch_telegram_outbox(limit=1)
-            assert delivered == 0
-            db_mgr.get_conn.assert_not_called()
-
-            # Event should remain pending in outbox
-            chk_conn = _test_connection()
-            cur = chk_conn.cursor(dictionary=True)
-            cur.execute("SELECT status, claim_token FROM rdt_telegram_outbox WHERE id=%s", (event_id,))
-            row = cur.fetchone()
-            cur.close()
-            chk_conn.close()
-
-            assert row["status"] == "pending"
-            assert row["claim_token"] is None
-        finally:
-            standalone.close()
-
     @pytest.mark.db_integration
     def test_lock_loss_prevents_further_claims(self):
         db_cfg = _test_db_config()
@@ -420,37 +379,6 @@ class TestAdvisoryLockOwnership:
             cur.close()
         finally:
             mgr.close()
-
-    def test_legacy_dispatcher_is_disabled_without_lock_api(self):
-        # Database manager lacks acquire_outbox_lock or get_conn
-        db_mgr = object.__new__(DatabaseManager)
-        db_mgr.logger = logging.getLogger("test_dispatch_fail_closed")
-        # Do not provide acquire_outbox_lock
-        bot = object.__new__(RetailDeathTrapBot)
-        bot.db = db_mgr
-        bot.tg = object.__new__(TelegramAlert)
-        bot.tg.enabled = True
-        bot.logger = logging.getLogger("test_bot")
-
-        # Must return without attempting to open a connection or touch the outbox.
-        assert bot._dispatch_telegram_outbox(limit=1) == 0
-
-    def test_legacy_dispatcher_never_attempts_lock_acquisition(self):
-        db_mgr = object.__new__(DatabaseManager)
-        db_mgr.logger = logging.getLogger("test_dispatch_fail_closed")
-        db_mgr.get_conn = Mock(side_effect=AssertionError("legacy dispatcher must not open a DB connection"))
-        db_mgr.acquire_outbox_lock = Mock(side_effect=RuntimeError("Simulated lock acquisition error"))
-
-        bot = object.__new__(RetailDeathTrapBot)
-        bot.db = db_mgr
-        bot.tg = object.__new__(TelegramAlert)
-        bot.tg.enabled = True
-        bot.logger = logging.getLogger("test_bot")
-
-        # Compatibility path must not attempt advisory-lock acquisition.
-        assert bot._dispatch_telegram_outbox(limit=1) == 0
-        db_mgr.get_conn.assert_not_called()
-        db_mgr.acquire_outbox_lock.assert_not_called()
 
     @pytest.mark.db_integration
     def test_real_mariadb_advisory_lock_retention_during_fatal_lockout(self):

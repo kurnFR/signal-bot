@@ -26,116 +26,16 @@ from paper.outbox_worker import (
     SchemaVerificationError,
     verify_outbox_schema,
 )
-from paper.retailbot2 import (
-    DatabaseManager,
-    RetailDeathTrapBot,
-    TelegramAlert,
-)
+# Step 3: the worker (paper/retailbot2.py) is deleted. TelegramAlert's
+# dual-flag policy is now asserted through notifications.telegram_notifier
+# in tests/test_telegram_delivery_ceiling.py; the report formatting tests
+# below target paper/paper_report.py directly.
+from paper.paper_report import format_paper_report, paper_performance_lines
 
 
 # ==============================================================================
 # SECTION 1: TELEGRAM DELIVERY DUAL-FLAG AUTHORIZATION
 # ==============================================================================
-
-class TestTelegramDualFlagAuthorization:
-    """Verifies all four combinations of global and direct Telegram delivery authorization flags."""
-
-    def test_combo_1_neither_flag_set(self, monkeypatch):
-        """Combo 1: Both flags unset -> Direct delivery unauthorized, zero HTTP requests."""
-        monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
-        monkeypatch.delenv("RETAILBOT2_ALLOW_DIRECT_TELEGRAM", raising=False)
-
-        with patch("paper.retailbot2.requests.get") as mock_get, \
-             patch("paper.retailbot2.requests.post") as mock_post:
-            tg = TelegramAlert("123456:AAFxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "123456789")
-            assert tg.global_authorized is False
-            assert tg.direct_authorized is False
-            assert tg.enabled is False
-            mock_get.assert_not_called()
-
-            assert tg.send("Test message", retries=0) is False
-            mock_post.assert_not_called()
-
-    def test_combo_2_global_only_set(self, monkeypatch):
-        """Combo 2: Global authorized but direct unauthorized -> Direct delivery disabled, zero HTTP requests."""
-        monkeypatch.setenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "1")
-        monkeypatch.delenv("RETAILBOT2_ALLOW_DIRECT_TELEGRAM", raising=False)
-
-        with patch("paper.retailbot2.requests.get") as mock_get, \
-             patch("paper.retailbot2.requests.post") as mock_post:
-            tg = TelegramAlert("123456:AAFxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "123456789")
-            assert tg.global_authorized is True
-            assert tg.direct_authorized is False
-            assert tg.enabled is False
-            mock_get.assert_not_called()
-
-            assert tg.send("Test message", retries=0) is False
-            mock_post.assert_not_called()
-
-    def test_combo_3_direct_only_set_fails_closed(self, monkeypatch):
-        """Combo 3: Direct flag alone WITHOUT global authorization -> MUST fail closed, zero HTTP requests."""
-        monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
-        monkeypatch.setenv("RETAILBOT2_ALLOW_DIRECT_TELEGRAM", "1")
-
-        with patch("paper.retailbot2.requests.get") as mock_get, \
-             patch("paper.retailbot2.requests.post") as mock_post:
-            tg = TelegramAlert("123456:AAFxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "123456789")
-            assert tg.global_authorized is False
-            assert tg.direct_authorized is False
-            assert tg.enabled is False
-            mock_get.assert_not_called()
-
-            assert tg.send("Test message", retries=0) is False
-            mock_post.assert_not_called()
-
-    def test_combo_4_both_flags_set_enables_direct_delivery(self, monkeypatch):
-        """Combo 4: Both flags set -> Direct delivery authorized and validated via getMe."""
-        monkeypatch.setenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "1")
-        monkeypatch.setenv("RETAILBOT2_ALLOW_DIRECT_TELEGRAM", "1")
-
-        get_resp = Mock(status_code=200)
-        get_resp.json.return_value = {"ok": True, "result": {"id": 123456, "is_bot": True, "first_name": "TestBot"}}
-        post_resp = Mock(status_code=200)
-        post_resp.json.return_value = {"ok": True, "result": {"message_id": 999}}
-
-        with patch("paper.retailbot2.requests.get", return_value=get_resp) as mock_get, \
-             patch("paper.retailbot2.requests.post", return_value=post_resp) as mock_post:
-            tg = TelegramAlert("123456:AAFxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "123456789")
-            assert tg.global_authorized is True
-            assert tg.direct_authorized is True
-            assert tg.enabled is True
-            mock_get.assert_called_once()
-
-            assert tg.send("Test message", retries=0) is True
-            mock_post.assert_called_once()
-
-    def test_constructor_parameter_enforces_dual_authorization(self, monkeypatch):
-        """Explicit constructor parameters allow_direct and allow_global still enforce dual authorization."""
-        monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
-        monkeypatch.delenv("RETAILBOT2_ALLOW_DIRECT_TELEGRAM", raising=False)
-
-        with patch("paper.retailbot2.requests.get") as mock_get:
-            # allow_direct=True alone fails closed without global
-            tg1 = TelegramAlert("123456:AAFxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "123", allow_direct=True, allow_global=False)
-            assert tg1.direct_authorized is False
-            assert tg1.enabled is False
-            mock_get.assert_not_called()
-
-            # allow_global=True alone leaves direct disabled
-            tg2 = TelegramAlert("123456:AAFxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "123", allow_direct=False, allow_global=True)
-            assert tg2.direct_authorized is False
-            assert tg2.enabled is False
-            mock_get.assert_not_called()
-
-            # both True authorizes direct delivery
-            get_resp = Mock(status_code=200)
-            get_resp.json.return_value = {"ok": True, "result": {"id": 123456, "is_bot": True}}
-            mock_get.return_value = get_resp
-            tg3 = TelegramAlert("123456:AAFxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "123", allow_direct=True, allow_global=True)
-            assert tg3.direct_authorized is True
-            assert tg3.enabled is True
-            mock_get.assert_called_once()
-
 
 # ==============================================================================
 # SECTION 1 (CONT): OPERATIONAL NOTIFICATION ROUTING & FAIL-CLOSED BEHAVIOR
@@ -143,76 +43,6 @@ class TestTelegramDualFlagAuthorization:
 
 class TestOperationalNotificationRouting:
     """Verifies operational notifications prefer outbox queue and fail closed when unauthorized."""
-
-    def test_notify_operational_prefers_outbox_queue(self, monkeypatch):
-        """Operational notifications are enqueued to rdt_telegram_outbox as durable events."""
-        monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
-        monkeypatch.setenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "1")
-        bot = object.__new__(RetailDeathTrapBot)
-        bot.logger = logging.getLogger("test.retailbot2")
-        bot.db = Mock()
-        bot.db.enqueue_telegram_outbox_event.return_value = True
-        bot.tg = Mock()
-        bot.tg.direct_authorized = False
-        bot.tg.enabled = False
-
-        msg = "🤖 Bot started successfully"
-        result = bot.notify_operational(msg, event_key="test:startup:1")
-
-        assert result is True
-        bot.db.enqueue_telegram_outbox_event.assert_called_once_with(
-            event_key="test:startup:1",
-            event_type="operational",
-            payload={"text": msg},
-            trade_id=0,
-        )
-        bot.tg.send.assert_not_called()
-
-    def test_notify_operational_falls_back_to_direct_only_when_authorized(self):
-        """When outbox enqueue fails, direct send is used ONLY if direct delivery is authorized."""
-        bot = object.__new__(RetailDeathTrapBot)
-        bot.logger = logging.getLogger("test.retailbot2")
-        bot.db = Mock()
-        bot.db.enqueue_telegram_outbox_event.return_value = False  # Enqueue fails
-        bot.tg = Mock()
-        bot.tg.direct_authorized = True
-        bot.tg.enabled = True
-        bot.tg.send.return_value = True
-
-        msg = "⚠️ Operational alert"
-        assert bot.notify_operational(msg, event_key="test:op:2") is True
-        bot.tg.send.assert_called_once_with(msg)
-
-    def test_notify_operational_fails_closed_when_unauthorized(self):
-        """When outbox enqueue fails and direct delivery is unauthorized, notification fails closed."""
-        bot = object.__new__(RetailDeathTrapBot)
-        bot.logger = logging.getLogger("test.retailbot2")
-        bot.db = Mock()
-        bot.db.enqueue_telegram_outbox_event.return_value = False  # Enqueue fails
-        bot.tg = Mock()
-        bot.tg.direct_authorized = False
-        bot.tg.enabled = False
-
-        msg = "🚨 Operational emergency"
-        assert bot.notify_operational(msg, event_key="test:op:3") is False
-        bot.tg.send.assert_not_called()
-
-    def test_format_stats_produces_valid_text(self):
-        """TelegramAlert.format_stats formats performance metrics into clean HTML text."""
-        stats = {
-            "SR_TRAP": {"total": 5, "wins": 4, "losses": 1, "net_pnl": 350.0},
-            "BB_SQUEEZE": {"total": 5, "wins": 3, "losses": 2, "net_pnl": 150.0},
-        }
-        with patch("paper.engine.get_paper_metrics", side_effect=RuntimeError("DB unavailable")):
-            text = TelegramAlert.format_stats(stats, equity_shadow=10500.0, equity_inverse=9800.0)
-        assert "Paper trade totals unavailable" in text
-        assert "RetailBot2 Research · Shadow / Inverse" in text
-        assert "PERFORMANCE REPORT" in text
-        assert "Shadow Equity:  <code>$10,500.00</code>" in text
-        assert "Inverse Equity: <code>$9,800.00</code>" in text
-        assert "SR_TRAP" in text
-        assert "BB_SQUEEZE" in text
-        assert "WR=80% Net=$+350" in text
 
     def test_paper_report_formats_closed_trades_and_hides_zero_trade_rows(self):
         mock_metrics = {
@@ -233,7 +63,7 @@ class TestOperationalNotificationRouting:
             ],
         }
         with patch("paper.engine.get_paper_metrics", return_value=mock_metrics):
-            text = TelegramAlert.format_paper_report()
+            text = format_paper_report()
 
         assert "Net P&amp;L: <b>−$450.50</b>" in text
         assert "10 closed · Wins 7 · Losses 3 · 70% win rate" in text
@@ -245,21 +75,30 @@ class TestOperationalNotificationRouting:
         assert "XAUTUSDT" not in text
 
     def test_paper_performance_lines_standalone_execution_resolves_paper_engine(self):
-        """When executed from paper/ or as standalone script, paper.engine imports resolve without ModuleNotFoundError."""
+        """paper_report.paper_performance_lines resolves paper.engine imports
+        without ModuleNotFoundError.
+
+        Step 3: the old version ran `from retailbot2 import TelegramAlert`
+        with cwd=paper/ -- that only worked because retailbot2.py inserted
+        the repo root into sys.path at import time. paper_report.py is a
+        plain package module and does not do that, so the supported path is
+        the package import from the repo root. The header line is asserted
+        (not the metrics body) because get_paper_metrics needs MySQL, which
+        a bare import-resolution check must not require; an unresolvable
+        import still fails the subprocess with a nonzero exit.
+        """
         import subprocess
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        paper_dir = os.path.join(repo_root, "paper")
         code = (
             "import sys\n"
-            "from retailbot2 import TelegramAlert\n"
-            "lines = TelegramAlert._paper_performance_lines()\n"
-            "assert 'Paper trade totals unavailable' not in lines, f'Failed: {lines}'\n"
+            "from paper.paper_report import paper_performance_lines\n"
+            "lines = paper_performance_lines()\n"
             "assert any('Paper Trading Engine' in l for l in lines), f'Missing header: {lines}'\n"
             "print('RESOLVED_OK')\n"
         )
         res = subprocess.run(
             [sys.executable, "-c", code],
-            cwd=paper_dir,
+            cwd=repo_root,
             capture_output=True,
             text=True,
         )
@@ -270,47 +109,9 @@ class TestOperationalNotificationRouting:
         """When paper.engine raises an exception, the exception name and string are logged."""
         with patch("paper.engine.get_paper_metrics", side_effect=RuntimeError("db connection failed")):
             with caplog.at_level(logging.WARNING):
-                lines = TelegramAlert._paper_performance_lines()
+                lines = paper_performance_lines()
         assert "Paper trade totals unavailable" in lines
         assert any("Paper performance report unavailable (RuntimeError: db connection failed)" in record.message for record in caplog.records)
-
-    def test_startup_message_routes_through_notify_operational(self):
-        """_startup_msg uses notify_operational instead of direct send."""
-        bot = object.__new__(RetailDeathTrapBot)
-        bot.logger = logging.getLogger("test.retailbot2")
-        bot.config = SimpleNamespace(
-            symbols=["BTC/USDT"],
-            leverage=5,
-            initial_capital=10000.0,
-            max_open_trades_per_mode=3,
-        )
-        bot.symbols = ["BTC/USDT"]
-        bot.mode = SimpleNamespace(value="shadow")
-        bot.notify_operational = Mock(return_value=True)
-
-        bot._startup_msg()
-        bot.notify_operational.assert_called_once()
-        msg_arg = bot.notify_operational.call_args[0][0]
-        assert "RETAIL DEATH TRAP BOT v2.1" in msg_arg
-        assert "Symbols: 1" in msg_arg
-
-    def test_control_toggle_routes_through_notify_operational(self):
-        """_reload_control uses notify_operational when trading is toggled."""
-        bot = object.__new__(RetailDeathTrapBot)
-        bot.logger = logging.getLogger("test.retailbot2")
-        bot.trading_enabled = True
-        bot._last_control_reload = 0.0
-        bot._control_reload_interval = 10.0
-        bot._tunable_fields = set()
-        bot.db = Mock()
-        bot.db.get_bot_control.return_value = {"enabled": False, "overrides": {}}
-        bot.notify_operational = Mock(return_value=True)
-
-        bot._reload_control(force=True)
-        assert bot.trading_enabled is False
-        bot.notify_operational.assert_called_once()
-        msg_arg = bot.notify_operational.call_args[0][0]
-        assert "PAUSED" in msg_arg
 
     def test_worker_formats_operational_event_payload(self):
         """OutboxWorker.format_event_text properly formats operational event type."""
@@ -355,9 +156,10 @@ class TestWorkerActivationSupervisorContract:
         assert "retailbot2" not in processes
 
     def test_retailbot2_requires_explicit_independent_opt_in(self):
-        """RETAILBOT2_ENABLED=1 opts in without implicitly authorizing Telegram."""
+        """Step 3: RETAILBOT2_ENABLED=1 no longer opts anything in -- the
+        worker is deleted, so the supervisor never has a retailbot2 entry."""
         processes = run_all.build_processes({"RETAILBOT2_ENABLED": "1"})
-        assert processes["retailbot2"] == [run_all.sys.executable, "paper/retailbot2.py"]
+        assert "retailbot2" not in processes
         assert "retailbot2_outbox" not in processes
 
     def test_telegram_flags_do_not_implicitly_enable_retailbot2(self):
@@ -377,11 +179,12 @@ class TestWorkerActivationSupervisorContract:
         assert "retailbot2" not in processes
 
     def test_retailbot2_enabled_does_not_implicitly_authorize_trading_or_outbox(self):
-        """RETAILBOT2_ENABLED=1 alone does not start outbox worker or imply other gates."""
+        """Step 3: RETAILBOT2_ENABLED=1 is ignored entirely now (no worker,
+        no trading gate); it must not start the outbox worker either."""
         processes = run_all.build_processes({
             "RETAILBOT2_ENABLED": "1",
         })
-        assert "retailbot2" in processes
+        assert "retailbot2" not in processes
         assert "retailbot2_outbox" not in processes
 
     def test_worker_requires_both_flags(self):

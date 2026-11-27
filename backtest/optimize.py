@@ -27,7 +27,7 @@ from backtest.strategies import STRATEGIES, FUNDING_STRATEGIES
 from backtest.strategies import TREND_ALIGNMENT_STRATEGIES, PAIRS_STRATEGIES
 from backtest.strategies.trend_alignment import HTF_TIMEFRAME
 from backtest.params import BASE_PARAMS, retailbot2_param_overrides
-from backtest.strategies.retailbot2_strategies import RETAILBOT2_STRATEGY_NAMES
+from backtest.strategies.retail_death_trap import RETAILBOT2_STRATEGY_NAMES
 from backtest.metrics import compute_metrics
 from backtest.holdout import compute_holdout_cutoff, split_by_cutoff
 

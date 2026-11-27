@@ -1,4 +1,7 @@
-"""Research control singleton writes must persist even if the seed row is absent."""
+"""Research control singleton writes must persist even if the seed row is absent.
+
+Step 3: the RetailBot2 control setter (set_retailbot2_control) is deleted
+with the worker; only the live screener control remains."""
 import unittest
 from unittest.mock import Mock, patch
 
@@ -22,14 +25,6 @@ class TestResearchControlPersistence(unittest.TestCase):
         self.assertIn("OVERRIDES_JSON=VALUES(OVERRIDES_JSON)", statement)
         conn.commit.assert_called_once()
         conn.close.assert_called_once()
-
-    def test_retailbot2_control_uses_singleton_upsert(self):
-        self._assert_singleton_upsert(
-            "db.db.get_retailbot2_pool",
-            db_helpers.set_retailbot2_control,
-            False,
-            {"max_open_positions": 3},
-        )
 
     def test_screener_control_uses_singleton_upsert(self):
         self._assert_singleton_upsert(

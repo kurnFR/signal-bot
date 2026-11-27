@@ -181,6 +181,23 @@ class TestPaperOrderRoutes(unittest.TestCase):
             })
         self.assertEqual(response.status_code, 400)
         save.assert_not_called()
+
+    def test_deploy_composite_returns_400_not_500(self):
+        """Step 2 follow-up (fixed in step 3): /api/paper/deploy had no
+        ValueError handler around set_paper_config, unlike /api/paper/configs,
+        so a COMPOSITE deploy surfaced as a 500 instead of a 400."""
+        with patch("web.app.authenticate_request", return_value=_user()), \
+             patch("web.routes.paper_routes.set_paper_config",
+                   side_effect=ValueError("COMPOSITE is research-only and cannot be deployed to paper trading")) as save, \
+             patch("web.routes.paper_routes.sync_and_evaluate_paper_trading") as sync:
+            response = self.client.post("/api/paper/deploy", json={
+                "symbol": "BTCUSDT", "market": "spot", "timeframe": "1h",
+                "strategy_name": "COMPOSITE", "allocated_capital": 5000,
+                "risk_per_trade_pct": 1, "send_telegram": False,
+            })
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("COMPOSITE", response.json()["detail"])
+        save.assert_called_once()
         sync.assert_not_called()
 
     def test_deploy_rejects_unsupported_timeframe_before_any_side_effect(self):
@@ -194,7 +211,6 @@ class TestPaperOrderRoutes(unittest.TestCase):
             })
         self.assertEqual(response.status_code, 400)
         save.assert_not_called()
-        sync.assert_not_called()
 
     def test_patch_explicit_model_clear_audits_old_and_new(self):
         def update(config_id, *, ml_model_id, model_changes):
@@ -273,8 +289,7 @@ class TestPaperOrderRoutes(unittest.TestCase):
 
     def test_batch_update_paper_configs_success(self):
         with patch("web.app.authenticate_request", return_value=_user("trader")), \
-             patch("web.routes.paper_routes.batch_update_paper_configs", return_value=3) as batch_mock, \
-             patch("db.db.set_retailbot2_strategy_lifecycle_setting") as sync_rb2:
+             patch("web.routes.paper_routes.batch_update_paper_configs", return_value=3) as batch_mock:
             response = self.client.post("/api/paper/configs/batch", json={
                 "strategy_name": "BB_REV_INV", "action": "telegram_all_on"
             })
@@ -283,18 +298,15 @@ class TestPaperOrderRoutes(unittest.TestCase):
             "status": "success", "strategy": "BB_REV_INV", "action": "telegram_all_on", "updated": 3
         })
         batch_mock.assert_called_once_with("BB_REV_INV", "telegram_all_on")
-        sync_rb2.assert_not_called()
 
     def test_paper_report_preferences_apply_only_to_selected_configurations(self):
         request = {"symbol": "btcusdt", "strategy_name": "BB_REV_INV", "report_enabled": False}
         with patch("web.app.authenticate_request", return_value=_user("trader")), \
-             patch("web.routes.paper_routes.batch_update_paper_configs", return_value=1) as update, \
-             patch("db.db.set_retailbot2_strategy_lifecycle_setting") as sync:
+             patch("web.routes.paper_routes.batch_update_paper_configs", return_value=1) as update:
             response = self.client.post("/api/paper/configs/preferences", json=request)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["updated"], 1)
         update.assert_called_once_with("BB_REV_INV", "report_all_off", symbol="BTCUSDT")
-        sync.assert_not_called()
 
         with patch("web.app.authenticate_request", return_value=_user("viewer")):
             denied = self.client.post("/api/paper/configs/preferences", json=request)

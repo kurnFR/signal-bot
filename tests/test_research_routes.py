@@ -41,9 +41,7 @@ class TestResearchRoutes(unittest.TestCase):
             patch("web.routes.research_routes.get_retailbot2_control", return_value={
                 "enabled": True, "overrides": {}, "updated_at": None
             }),
-            patch("web.routes.research_routes.set_retailbot2_control"),
             patch("web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings", return_value=[]),
-            patch("web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting"),
             patch("web.routes.research_routes.get_screener_control", return_value={
                 "enabled": True, "overrides": {}, "updated_at": None
             }),
@@ -173,146 +171,40 @@ class TestResearchRoutes(unittest.TestCase):
         self.assertTrue(row["report_enabled"])
         self.assertFalse(row["auto_promote_enabled"])
 
-    def test_strategy_lifecycle_rejects_auto_promotion_until_validation_workflow_exists(self):
-        with patch(
-            "web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting"
-        ) as save:
+    def test_retailbot2_strategy_lifecycle_writes_are_retired(self):
+        """Step 3: POST /retailbot2/strategies is retired with the worker.
+        There is no process left to apply lifecycle writes. The route is
+        gone, and the api_security_boundary fails closed with 403 for a
+        POST to a path that matches no write prefix (not a 400 for a bad
+        payload, and not a silent no-op)."""
+        for payload in (
+            {
+                "strategy_id": "BB_REV_INV", "mode": "inverse",
+                "evaluation_enabled": True, "paper_enabled": True,
+                "telegram_enabled": True, "report_enabled": True,
+            },
+            {
+                "strategy_id": "DBL_PAT_INV", "mode": "inverse",
+                "evaluation_enabled": True, "paper_enabled": True,
+                "telegram_enabled": False, "report_enabled": True,
+                "auto_promote_enabled": True,
+            },
+        ):
             res = self.client.post(
                 "/api/research/retailbot2/strategies",
-                headers=self.headers,
-                json={
-                    "strategy_id": "DBL_PAT_INV",
-                    "mode": "inverse",
-                    "evaluation_enabled": True,
-                    "paper_enabled": True,
-                    "telegram_enabled": False,
-                    "report_enabled": True,
-                    "auto_promote_enabled": True,
-                },
+                headers=self.headers, json=payload,
             )
-        self.assertEqual(res.status_code, 400)
-        self.assertIn("not available", res.json()["detail"].lower())
-        save.assert_not_called()
+            self.assertEqual(res.status_code, 403, payload)
 
-    def test_strategy_lifecycle_rejects_unknown_strategy(self):
-        res = self.client.post("/api/research/retailbot2/strategies", headers=self.headers, json={
-            "strategy_id": "NOT_A_STRATEGY", "mode": "shadow",
-            "evaluation_enabled": True, "paper_enabled": True,
-            "telegram_enabled": True, "report_enabled": True,
-        })
-        self.assertEqual(res.status_code, 400)
-
-    def test_strategy_lifecycle_rejects_coerced_boolean_values(self):
-        # These controls must receive explicit JSON booleans. Pydantic's plain
-        # bool coercion would otherwise accept strings and numeric 0/1 values.
-        with patch("web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting") as save:
-            for field in (
-                "evaluation_enabled", "paper_enabled",
-                "telegram_enabled", "report_enabled", "auto_promote_enabled",
-            ):
-                for invalid in (1, 0, "true", "false"):
-                    payload = {
-                        "strategy_id": "BB_REV_INV",
-                        "mode": "inverse",
-                        "evaluation_enabled": True,
-                        "paper_enabled": True,
-                        "telegram_enabled": False,
-                        "report_enabled": True,
-                        "auto_promote_enabled": False,
-                    }
-                    payload[field] = invalid
-                    response = self.client.post(
-                        "/api/research/retailbot2/strategies",
-                        headers=self.headers,
-                        json=payload,
-                    )
-                    self.assertEqual(
-                        response.status_code, 422,
-                        f"{field}={invalid!r} should require an explicit JSON boolean",
-                    )
-        save.assert_not_called()
-
-    def test_strategy_lifecycle_saves_and_reads_back_user_selected_telegram_promotion(self):
-        saved_rows = []
-
-        def save_setting(strategy_id, mode, settings):
-            saved_rows[:] = [{
-                "strategy_id": strategy_id,
-                "mode": mode,
-                **settings,
-                "updated_at": "2026-11-09 00:00:00",
-            }]
-
-        with patch(
-            "web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting",
-            side_effect=save_setting,
-        ) as save, patch(
-            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
-            side_effect=lambda: [dict(row) for row in saved_rows],
-        ):
-            res = self.client.post("/api/research/retailbot2/strategies", headers=self.headers, json={
-                "strategy_id": "BB_REV_INV", "mode": "inverse",
-                "evaluation_enabled": True, "paper_enabled": True,
-                "telegram_enabled": True, "report_enabled": True,
-            })
-
-        self.assertEqual(res.status_code, 200)
-        args = save.call_args.args
-        self.assertEqual(args[0:2], ("BB_REV_INV", "inverse"))
-        self.assertTrue(args[2]["telegram_enabled"])
-        self.assertFalse(args[2]["auto_promote_enabled"])
-        self.assertTrue(res.json()["settings"]["telegram_enabled"])
-
-    def test_strategy_lifecycle_does_not_claim_success_when_readback_is_missing(self):
-        with patch("web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting"), patch(
-            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
-            return_value=[],
-        ):
-            res = self.client.post("/api/research/retailbot2/strategies", headers=self.headers, json={
-                "strategy_id": "BB_REV_INV", "mode": "inverse",
-                "evaluation_enabled": True, "paper_enabled": True,
-                "telegram_enabled": True, "report_enabled": True,
-            })
-
-        self.assertEqual(res.status_code, 503)
-        self.assertIn("readback", res.json()["detail"].lower())
-
-    def test_strategy_lifecycle_does_not_claim_success_when_saved_telegram_flag_differs(self):
-        persisted = [{
-            "strategy_id": "BB_REV_INV",
-            "mode": "inverse",
-            "evaluation_enabled": True,
-            "paper_enabled": True,
-            "telegram_enabled": False,
-            "report_enabled": True,
-            "auto_promote_enabled": False,
-        }]
-        with patch("web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting"), patch(
-            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
-            return_value=persisted,
-        ):
-            res = self.client.post("/api/research/retailbot2/strategies", headers=self.headers, json={
-                "strategy_id": "BB_REV_INV", "mode": "inverse",
-                "evaluation_enabled": True, "paper_enabled": True,
-                "telegram_enabled": True, "report_enabled": True,
-            })
-
-        self.assertEqual(res.status_code, 503)
-        self.assertIn("did not match", res.json()["detail"].lower())
-
-    def test_strategy_lifecycle_readback_failure_is_not_reported_as_success(self):
-        with patch("web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting"), patch(
-            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
-            side_effect=RuntimeError("database read unavailable"),
-        ):
-            res = self.client.post("/api/research/retailbot2/strategies", headers=self.headers, json={
-                "strategy_id": "BB_REV_INV", "mode": "inverse",
-                "evaluation_enabled": True, "paper_enabled": True,
-                "telegram_enabled": True, "report_enabled": True,
-            })
-
-        self.assertEqual(res.status_code, 503)
-        self.assertIn("could not be verified", res.json()["detail"].lower())
+    def test_retailbot2_control_write_is_retired(self):
+        """Step 3: POST /retailbot2/control is retired with the worker
+        (403 from the security boundary, as above)."""
+        res = self.client.post(
+            "/api/research/retailbot2/control",
+            headers=self.headers,
+            json={"enabled": True, "overrides": {"rr_ratio": 2.5}},
+        )
+        self.assertEqual(res.status_code, 403)
 
     def test_strategy_lifecycle_get_surfaces_persistence_read_failure(self):
         with patch(
@@ -323,54 +215,6 @@ class TestResearchRoutes(unittest.TestCase):
 
         self.assertEqual(res.status_code, 500)
         self.assertIn("failed to load", res.json()["detail"].lower())
-
-    def test_strategy_lifecycle_stop_and_hide_persist_across_dashboard_reload(self):
-        saved_rows = []
-
-        def save_setting(strategy_id, mode, settings):
-            saved_rows[:] = [{
-                "strategy_id": strategy_id,
-                "mode": mode,
-                **settings,
-                "updated_at": "2026-10-25 00:00:00",
-            }]
-
-        with patch(
-            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
-            side_effect=lambda: [dict(row) for row in saved_rows],
-        ), patch(
-            "web.routes.research_routes.set_retailbot2_strategy_lifecycle_setting",
-            side_effect=save_setting,
-        ):
-            stopped = self.client.post(
-                "/api/research/retailbot2/strategies",
-                headers=self.headers,
-                json={
-                    "strategy_id": "DBL_PAT_INV",
-                    "mode": "inverse",
-                    "evaluation_enabled": False,
-                    "paper_enabled": False,
-                    "telegram_enabled": False,
-                    "report_enabled": False,
-                    "auto_promote_enabled": False,
-                },
-            )
-            self.assertEqual(stopped.status_code, 200)
-
-            # A separate GET represents a dashboard refresh / new client session.
-            refreshed = self.client.get(
-                "/api/research/retailbot2/strategies",
-                headers=self.headers,
-            )
-            self.assertEqual(refreshed.status_code, 200)
-            row = next(
-                item for item in refreshed.json()["strategies"]
-                if item["strategy_id"] == "DBL_PAT_INV" and item["mode"] == "inverse"
-            )
-            self.assertFalse(row["evaluation_enabled"])
-            self.assertFalse(row["paper_enabled"])
-            self.assertFalse(row["telegram_enabled"])
-            self.assertFalse(row["report_enabled"])
 
     def test_retailbot2_positions_endpoint(self):
         res = self.client.get("/api/research/retailbot2/positions", headers=self.headers)
@@ -411,29 +255,24 @@ class TestResearchRoutes(unittest.TestCase):
         self.assertIn("signals_last_24h", data)
         self.assertIn("by_type_last_24h", data)
 
-    def test_retailbot2_control_get_and_set(self):
-        # GET
+    def test_retailbot2_control_get_is_read_only(self):
+        # GET still serves the saved control row for archive display.
         res = self.client.get("/api/research/retailbot2/control", headers=self.headers)
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertIn("enabled", data)
         self.assertIn("tunable_fields", data)
 
-        # POST valid override
-        post_res = self.client.post(
-            "/api/research/retailbot2/control",
-            headers=self.headers,
-            json={"enabled": True, "overrides": {"rr_ratio": 2.5}}
-        )
-        self.assertEqual(post_res.status_code, 200)
-
-        # POST invalid override (credentials/unknown key should be rejected with 400)
+        # POST is retired with the worker (see
+        # test_retailbot2_control_write_is_retired); even an unknown override
+        # key is a 403 now, not a 400 -- there is no write path left to
+        # validate against.
         bad_res = self.client.post(
             "/api/research/retailbot2/control",
             headers=self.headers,
             json={"enabled": True, "overrides": {"db_password": 123.0}}
         )
-        self.assertEqual(bad_res.status_code, 400)
+        self.assertEqual(bad_res.status_code, 403)
 
     def test_screener_control_get_and_set(self):
         # GET

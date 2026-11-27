@@ -1,18 +1,16 @@
 """
-API Router for the retailbot2 (Retail Death Trap Bot) and Screen/screening.py
-(Smart Money Volume Detector) visibility panels.
+API Router for the retired RetailBot2 (Retail Death Trap Bot) historical
+archive and Screen/screening.py (Smart Money Volume Detector) visibility
+panels.
 
-Read-only endpoints don't run either bot or the screener themselves --
-those remain separate long-running processes (paper/retailbot2.py and
-Screen/screening.py). The control endpoints (enable/disable, parameter
-overrides) are a "soft" remote control: they write to a small DB row that
-each bot polls on its own (~30-60s interval) and applies to itself. This
-repo does NOT give the web server permission to start/stop/kill the OS
-processes themselves -- that's a real security/reliability line (process
-control from a web request needs its own privilege boundary and failure
-handling, and is a different problem from "pause the trading logic"). The
-process itself is still your responsibility to keep running (tmux/systemd/
-supervisor) -- these toggles only pause/resume what it does once it's up.
+The RetailBot2 worker is retired: paper/retailbot2.py is deleted and the
+rdt_* tables are a read-only archive. The /retailbot2/* GET routes below
+serve that history only. The former POST /retailbot2/strategies and
+POST /retailbot2/control lifecycle writes were retired with the worker --
+there is no process left to poll those tables, so writing them could only
+mislead the UI into showing controls as live. The Screener control
+endpoints are unaffected: the screener is still a live process that polls
+its own control table.
 """
 import csv
 import io
@@ -23,15 +21,15 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, StrictBool
+from pydantic import BaseModel, Field
 
 from db.db import (
     RETAILBOT2_ARCHIVE_COLUMNS,
     get_retailbot2_open_trades, get_retailbot2_recent_trades, get_retailbot2_stats,
     get_retailbot2_archive_summary, iter_retailbot2_table_batches,
     get_recent_smart_money_signals, get_smart_money_stats,
-    get_retailbot2_control, set_retailbot2_control, RETAILBOT2_TUNABLE_FIELDS,
-    get_retailbot2_strategy_lifecycle_settings, set_retailbot2_strategy_lifecycle_setting,
+    get_retailbot2_control, RETAILBOT2_TUNABLE_FIELDS,
+    get_retailbot2_strategy_lifecycle_settings,
     get_screener_control, set_screener_control, get_screener_status, SCREENER_TUNABLE_FIELDS,
 )
 
@@ -44,16 +42,9 @@ class BotControlRequest(BaseModel):
     overrides: Dict[str, Any] = Field(default_factory=dict)
 
 
-class StrategyLifecycleRequest(BaseModel):
-    strategy_id: str = Field(min_length=1, max_length=64)
-    mode: str
-    # Lifecycle switches are security-sensitive controls. Accept JSON booleans
-    # only; do not silently coerce strings or numeric values into decisions.
-    evaluation_enabled: StrictBool
-    paper_enabled: StrictBool
-    telegram_enabled: StrictBool
-    report_enabled: StrictBool
-    auto_promote_enabled: StrictBool = False
+# NOTE: StrategyLifecycleRequest was removed with POST /retailbot2/strategies
+# (RetailBot2 migration step 3). The GET /retailbot2/strategies endpoint
+# below still returns the saved lifecycle rows for the read-only archive UI.
 
 
 def _stored_lifecycle_bool(value: Any) -> bool:
@@ -296,86 +287,12 @@ def retailbot2_strategies_get():
         raise HTTPException(status_code=500, detail="Failed to load strategy lifecycle settings")
 
 
-@router.post("/retailbot2/strategies")
-def retailbot2_strategies_set(req: StrategyLifecycleRequest):
-    known = {
-        (row["strategy_id"], row["mode"])
-        for row in _strategy_lifecycle_registry()
-    }
-    if (req.strategy_id, req.mode) not in known:
-        raise HTTPException(status_code=400, detail="Unknown strategy identity or mode")
-    if req.mode not in {"shadow", "inverse"}:
-        raise HTTPException(status_code=400, detail="Mode must be shadow or inverse")
-    registry_entry = next(
-        row for row in _strategy_lifecycle_registry()
-        if (row["strategy_id"], row["mode"]) == (req.strategy_id, req.mode)
-    )
-    if registry_entry.get("historical_only") and (
-        req.evaluation_enabled or req.paper_enabled or req.telegram_enabled
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Historical composite rows can only be shown or hidden in reports",
-        )
-    settings = {
-        "evaluation_enabled": req.evaluation_enabled,
-        "paper_enabled": req.paper_enabled,
-        "telegram_enabled": req.telegram_enabled,
-        "report_enabled": req.report_enabled,
-        # Auto-promotion remains fail-closed until its backtest validation
-        # workflow is implemented; this endpoint cannot enable it yet.
-        "auto_promote_enabled": False,
-    }
-    if req.auto_promote_enabled:
-        raise HTTPException(status_code=400, detail="Automatic promotion is not available yet")
-    try:
-        set_retailbot2_strategy_lifecycle_setting(req.strategy_id, req.mode, settings)
-    except Exception as e:
-        logger.error("retailbot2_strategies_set failed (%s)", type(e).__name__)
-        raise HTTPException(status_code=500, detail="Failed to save strategy lifecycle settings")
-
-    # A committed write is not enough to tell the UI that the Telegram toggle
-    # was saved. Read the row back through the same persistence path and fail
-    # closed if it is missing, malformed, or different from the submitted flags.
-    try:
-        persisted = get_retailbot2_strategy_lifecycle_settings()
-    except Exception as e:
-        logger.error("retailbot2_strategies_readback failed (%s)", type(e).__name__)
-        raise HTTPException(
-            status_code=503,
-            detail="Settings may have been written, but persisted readback could not be verified. Refresh before retrying.",
-        )
-
-    saved = next(
-        (
-            row for row in persisted
-            if row.get("strategy_id") == req.strategy_id and row.get("mode") == req.mode
-        ),
-        None,
-    )
-    if saved is None or any(saved.get(key) is not expected for key, expected in settings.items()):
-        logger.error(
-            "retailbot2_strategies_readback_mismatch strategy=%s mode=%s",
-            req.strategy_id,
-            req.mode,
-        )
-        raise HTTPException(
-            status_code=503,
-            detail="Settings were submitted but persisted readback did not match. Refresh and verify the saved values before retrying.",
-        )
-
-    verified_settings = {key: saved[key] for key in settings}
-    return {
-        "status": "ok",
-        "strategy_id": req.strategy_id,
-        "mode": req.mode,
-        "settings": verified_settings,
-        "note": "Settings were persisted and read back. Runtime worker applies them on its next lifecycle refresh.",
-    }
-
-
 @router.get("/retailbot2/control")
 def retailbot2_control_get():
+    """Read-only: the saved control row from the retired worker, for archive display.
+
+    There is no POST counterpart anymore -- the worker that polled this row
+    is retired, so the saved values are history, not live controls."""
     try:
         control = get_retailbot2_control()
         control["tunable_fields"] = sorted(RETAILBOT2_TUNABLE_FIELDS)
@@ -384,19 +301,8 @@ def retailbot2_control_get():
         logger.error("retailbot2_control_get failed (%s)", type(e).__name__)
         raise HTTPException(
             status_code=500,
-            detail="Failed to load retailbot2 control; verify the worker has initialized its control state",
+            detail="Failed to load retailbot2 control archive; verify database connectivity and run 'python -m db.migrate'",
         )
-
-
-@router.post("/retailbot2/control")
-def retailbot2_control_set(req: BotControlRequest):
-    overrides = _filter_overrides(req.overrides, RETAILBOT2_TUNABLE_FIELDS, "retailbot2")
-    try:
-        set_retailbot2_control(req.enabled, overrides)
-        return {"status": "ok", "note": "Takes effect within ~30s -- retailbot2 polls this table periodically, no restart needed."}
-    except Exception as e:
-        logger.error("retailbot2_control_set failed (%s)", type(e).__name__)
-        raise HTTPException(status_code=500, detail="Failed to update retailbot2 control")
 
 
 @router.get("/screener/status")

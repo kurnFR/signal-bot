@@ -662,7 +662,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         conn.close()
 
     def test_telegram_performance_report_reflects_committed_paper_trailing_exit(self):
-        from paper.retailbot2 import TelegramAlert
+        from paper.paper_report import format_paper_report
 
         cfg_id = self._create_config(strategy_name="BB_REV_INV")
         pos_id = self._create_position(
@@ -673,8 +673,10 @@ class TestPaperPositionLifecycle(unittest.TestCase):
             cur.execute("SELECT * FROM paper_positions WHERE id=%s", (pos_id,))
             pos = cur.fetchone()
 
-        retail_stats = {"BB_REV_INV_inverse": {"total": 2, "wins": 1, "losses": 1, "net_pnl": 50}}
-        before = TelegramAlert.format_stats(retail_stats, 10000, 10050)
+        # Step 3: TelegramAlert.format_stats is deleted with the worker; the
+        # report now comes from paper/paper_report.py, which reads the same
+        # paper ledger (get_paper_metrics) instead of a caller-supplied dict.
+        before = format_paper_report()
         self.assertIn("No closed trades included in reporting", before)
 
         exit_time = pos["entry_time"] + 10 * 3_600_000
@@ -683,7 +685,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
             cur.execute("SELECT net_pnl FROM paper_trades WHERE position_id=%s", (pos_id,))
             net_pnl, = cur.fetchone()
         self.assertGreater(net_pnl, 0)
-        after = TelegramAlert.format_stats(retail_stats, 10000, 10050)
+        after = format_paper_report()
         self.assertIn(f"Net P&amp;L: <b>+${net_pnl:,.2f}</b>", after)
         self.assertIn("1 closed · Wins 1 · Losses 0 · 100% win rate", after)
         self.assertIn(f"<b>BTCUSDT</b> · +${net_pnl:,.2f}", after)
@@ -700,7 +702,6 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         self.assertTrue(configs["ETHUSDT", "BB_REV_INV"]["report_enabled"])
         self.assertFalse(configs["ETHUSDT", "BB_REV_INV"]["telegram_enabled"])
         self.assertEqual(pe.get_paper_metrics()["totalTrades"], 0)
-        self.assertIn("BB_REV_INV_inverse</b>: T=2 W=1 L=1 WR=50% Net=$+50", after)
         self.assertTrue(pe.update_paper_deployment(cfg_id, report_enabled=True))
         self.assertEqual(pe.get_paper_metrics(closed_since_ms=exit_time)["totalTrades"], 1)
         self.assertEqual(pe.get_paper_metrics(closed_since_ms=exit_time + 1)["totalTrades"], 0)
@@ -710,7 +711,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         self.assertTrue(cfg["archived_at"])
         self.assertAlmostEqual(cfg["realized_equity"], 5000 + float(net_pnl), places=6)
         self.assertEqual(pe.get_paper_metrics()["totalTrades"], 1)
-        self.assertNotIn("Shadow Equity", TelegramAlert.format_paper_report())
+        self.assertNotIn("Shadow Equity", format_paper_report())
         self.assertTrue(pe.update_paper_deployment(cfg_id, is_active=True))
         restored = next(row for row in pe.get_paper_configs() if row["id"] == cfg_id)
         self.assertTrue(restored["is_active"])

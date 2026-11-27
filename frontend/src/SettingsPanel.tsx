@@ -999,7 +999,7 @@ export function SettingsPanel({ theme, onToggleTheme, username, role, license }:
                   ? "Configured · delivery enabled"
                   : "Configured · delivery disabled"
             }</strong></div>
-            <div><span>RetailBot2 outbox</span><strong>{telegramStatus.outbox == null ? "Unavailable" :
+            <div><span>Telegram outbox</span><strong>{telegramStatus.outbox == null ? "Unavailable" :
               Object.entries(telegramStatus.outbox).map(([state, count]) => count + " " + state).join(", ") || "Empty"}</strong></div>
             <div><span>Bot token</span><strong>{telegramStatus.hasToken ? "Present (hidden)" : "Missing"}</strong></div>
             <div><span>Target chat ID</span><strong>{telegramStatus.chatId || "Not configured"}</strong></div>

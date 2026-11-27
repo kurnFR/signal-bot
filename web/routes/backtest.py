@@ -18,7 +18,7 @@ from backtest.strategies import (
 )
 from backtest.strategies.trend_alignment import HTF_TIMEFRAME
 from backtest.params import BASE_PARAMS, retailbot2_param_overrides, validate_param_overrides
-from backtest.strategies.retailbot2_strategies import RETAILBOT2_STRATEGY_NAMES
+from backtest.strategies.retail_death_trap import RETAILBOT2_STRATEGY_NAMES
 from backtest.metrics import compute_metrics
 from backtest.equity import simulate_equity_curve
 from backtest.holdout import compute_holdout_cutoff, split_by_cutoff
@@ -754,11 +754,8 @@ def list_strategies():
         is_inverse = (
             name.startswith("inverse_")
             or name.endswith("_INV")
-            or name.endswith("_INV_inverse")
         )
-        if name.endswith("_INV_inverse"):
-            base_name = name[:-12]
-        elif name.endswith("_INV"):
+        if name.endswith("_INV"):
             base_name = name[:-4]
         elif name.startswith("inverse_"):
             base_name = name[8:]

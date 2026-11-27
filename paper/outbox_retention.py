@@ -28,7 +28,7 @@ from paper.outbox_transport import (
     format_delivery_unknown_error,
 )
 
-logger = logging.getLogger("retailbot2.retention")
+logger = logging.getLogger("telegram.outbox.retention")
 
 DEFAULT_SENT_RETENTION_DAYS = 14
 DEFAULT_DEAD_RETENTION_DAYS = 90

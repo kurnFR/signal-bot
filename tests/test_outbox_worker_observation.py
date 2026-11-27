@@ -28,11 +28,11 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from notifications.telegram_notifier import is_telegram_delivery_authorized
-from paper.retailbot2 import (
-    BotConfig,
-    is_outbox_enqueue_authorized,
-    is_trading_authorized,
-)
+# Step 3: the worker (paper/retailbot2.py) is deleted; the enqueue gate
+# lives in paper/outbox_store.py. Trading authorization died with the
+# worker -- the "does not authorize trading" leg of the test below is
+# covered by the enqueue/delivery/supervisor assertions that remain.
+from paper.outbox_store import is_outbox_enqueue_authorized
 import run_all
 from paper.outbox_worker import (
     ALLOWED_PROD_DATABASES,
@@ -234,9 +234,6 @@ def test_prod_observation_flag_does_not_authorize_enqueue_trading_or_delivery(mo
 
     # Outbox enqueue remains rejected
     assert is_outbox_enqueue_authorized(cfg, conn=None) is False
-
-    # Trading remains unauthorized
-    assert is_trading_authorized(cfg) is False
 
     # Telegram delivery remains unauthorized
     assert is_telegram_delivery_authorized() is False

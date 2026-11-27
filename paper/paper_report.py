@@ -1,8 +1,9 @@
 """Paper Trading performance report text (Telegram HTML).
 
-Extracted from ``paper/retailbot2.py`` so the hourly report no longer depends on
-the retired RetailBot2 worker. ``TelegramAlert`` delegates here, so existing
-callers and tests keep working unchanged.
+Extracted from the retired RetailBot2 worker (``paper/retailbot2.py``,
+deleted in the retailbot2 migration) so the hourly report no longer
+depends on the worker. The report is delivered through the standalone
+Telegram outbox (``paper/outbox_store.py``).
 """
 import logging
 from html import escape

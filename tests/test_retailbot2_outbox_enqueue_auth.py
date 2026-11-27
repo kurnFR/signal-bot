@@ -20,8 +20,10 @@ Verifies connection-aware MariaDB identity verification before outbox enqueue:
 16. Existing promoted-strategy filtering remains unchanged and verifies connection identity.
 17. Non-promoted strategies remain suppressed.
 18. Existing transaction rollback and idempotency behavior remain intact.
-19. DatabaseManager.close_trade_and_update_stats verifies connection identity before outbox enqueue.
-20. No BotConfig() fallback when configuration is absent in any enqueue authorization path.
+19. (retired with the worker) close_trade_and_update_stats verified connection
+    identity before outbox enqueue; trade CRUD is gone, the identity check
+    itself is covered by 1-18 against OutboxStore.enqueue_telegram_outbox_event.
+20. No OutboxConfig() fallback when configuration is absent in any enqueue authorization path.
 21. Caller-supplied database parameter never substitutes for active connection identity.
 22. Production startup safety defaults remain completely closed.
 """
@@ -38,16 +40,17 @@ from notifications.telegram_notifier import (
     is_telegram_delivery_authorized,
     send_telegram_message,
 )
-from paper.retailbot2 import (
+# Step 3: the worker (paper/retailbot2.py) is deleted. The outbox store
+# and its gates moved to paper/outbox_store.py in step 1; this suite now
+# tests that module directly. BotConfig -> OutboxConfig (same
+# db_name/observation_only surface used here), DatabaseManager -> OutboxStore.
+from paper.outbox_store import (
     ALLOWED_OUTBOX_ENQUEUE_DATABASES,
-    BotConfig,
-    DatabaseManager,
-    RetailDeathTrapBot,
-    TelegramAlert,
+    OutboxConfig,
+    OutboxStore,
     get_connection_database,
     is_observation_only,
     is_outbox_enqueue_authorized,
-    is_trading_authorized,
 )
 import run_all
 
@@ -121,7 +124,7 @@ class MockConnection:
 
 
 def make_test_db(conn=None, config=None):
-    db = object.__new__(DatabaseManager)
+    db = object.__new__(OutboxStore)
     db.logger = logging.getLogger("test.retailbot2.outbox.auth")
     db.config = config
     db.get_conn = Mock(return_value=conn)
@@ -259,7 +262,7 @@ def test_missing_configuration_fails_closed(monkeypatch):
     # 5b. config has no db_name or database attribute -> fails closed
     assert is_outbox_enqueue_authorized(SimpleNamespace(observation_only=False), conn=conn) is False
 
-    # 5c. DatabaseManager with config=None fails closed
+    # 5c. OutboxStore with config=None fails closed
     db = make_test_db(conn=conn, config=None)
     result = db.enqueue_telegram_outbox_event(
         event_key="op:test_missing_cfg",
@@ -472,12 +475,9 @@ def test_delivery_remains_blocked_without_delivery_authorization(monkeypatch, de
     assert res.get("success") is False
     assert res.get("suppressed") is True
 
-    # 13c. TelegramAlert in retailbot2 is disabled
-    alert = TelegramAlert(token="dummy_token", chat_id="123456", logger=logging.getLogger("test"))
-    assert alert.global_authorized is False
-    assert alert.direct_authorized is False
-    assert alert.enabled is False
-    assert alert.send("direct message") is False
+    # 13c. (retired with the worker) TelegramAlert direct delivery is
+    # gone; direct sends now go through the outbox only, gated by
+    # is_telegram_delivery_authorized() (asserted in 13a/13b above).
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -502,10 +502,6 @@ def test_unauthorized_dispatch_makes_zero_http_requests(monkeypatch):
         assert res.get("success") is False
         assert res.get("suppressed") is True
 
-        # Attempting direct TelegramAlert must not invoke HTTP
-        alert = TelegramAlert(token="dummy_token", chat_id="123456", logger=logging.getLogger("test"))
-        assert alert.send("Network probe direct") is False
-
         # Standalone outbox worker CLI refuses production startup without delivery flag
         from paper import outbox_worker
         with patch.object(sys, "argv", ["outbox_worker", "--database", "crypto_signals"]):
@@ -525,7 +521,6 @@ def test_enqueue_authorization_cannot_start_or_activate_worker(monkeypatch):
     monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
 
     env = {
-        "RETAILBOT2_ENABLED": "1",
         "RETAILBOT2_OUTBOX_ENQUEUE_ENABLED": "1",
     }
     processes = run_all.build_processes(env)
@@ -539,167 +534,20 @@ def test_enqueue_authorization_cannot_start_or_activate_worker(monkeypatch):
 # 16 & 17. Promoted and non-promoted strategy outbox persistence
 # ═══════════════════════════════════════════════════════════════════
 
-def test_promoted_and_unpromoted_strategy_outbox_persistence(monkeypatch):
-    """16 & 17. Promoted strategies enqueue outbox events; unpromoted strategies do not."""
-    monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
-    monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
-    monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
-    monkeypatch.delenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", raising=False)
-
-    config = SimpleNamespace(
-        db_name="signal_bot_test",
-        allow_trading=True,
-        observation_only=False,
-        rr_ratio=2.0,
-    )
-    cursor = MockCursor(db_name="signal_bot_test", lastrowid=42)
-    conn = MockConnection(cursor)
-    db = make_test_db(conn=conn, config=config)
-
-    # 16. Promoted strategy (telegram_enabled=True) persists outbox event
-    promoted_signal = {
-        "symbol": "BTC/USDT",
-        "side": "LONG",
-        "entry": 50000.0,
-        "stop": 49000.0,
-        "target": 52000.0,
-        "atr": 1000.0,
-        "rr": 2.0,
-        "strategy": "BB_REV",
-        "telegram_enabled": True,
-        "confluence_score": 1,
-    }
-    entry_alert = {"signal": promoted_signal, "units": 1.0, "mode": "shadow"}
-    tid_promoted = db.save_trade(promoted_signal, 1.0, "shadow", entry_alert=entry_alert)
-    assert tid_promoted == 42
-    sql_statements = [call[0] for call in cursor.calls]
-    assert any("SELECT DATABASE()" in s for s in sql_statements)
-    assert any("INSERT INTO rdt_trades" in s for s in sql_statements)
-    assert any("INSERT INTO rdt_telegram_outbox" in s for s in sql_statements)
-
-    # 17. Unpromoted strategy (telegram_enabled=False) does NOT persist outbox event
-    cursor.calls.clear()
-    cursor.lastrowid = 43
-    unpromoted_signal = {
-        "symbol": "ETH/USDT",
-        "side": "LONG",
-        "entry": 3000.0,
-        "stop": 2900.0,
-        "target": 3200.0,
-        "atr": 100.0,
-        "rr": 2.0,
-        "strategy": "DBL_PAT",
-        "telegram_enabled": False,
-        "confluence_score": 1,
-    }
-    tid_unpromoted = db.save_trade(unpromoted_signal, 1.0, "shadow", entry_alert=None)
-    assert tid_unpromoted == 43
-    sql_statements = [call[0] for call in cursor.calls]
-    assert any("INSERT INTO rdt_trades" in s for s in sql_statements)
-    assert not any("INSERT INTO rdt_telegram_outbox" in s for s in sql_statements)
-
-
 # ═══════════════════════════════════════════════════════════════════
 # 18. Transaction rollback and idempotency
 # ═══════════════════════════════════════════════════════════════════
-
-def test_transaction_rollback_and_idempotency(monkeypatch):
-    """18. DB failure during trade persistence triggers rollback; duplicate event_key is idempotent."""
-    monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
-    monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
-    monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
-    monkeypatch.delenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", raising=False)
-
-    config = SimpleNamespace(
-        db_name="signal_bot_test",
-        allow_trading=True,
-        observation_only=False,
-        rr_ratio=2.0,
-    )
-
-    # 18a. Rollback on execution error
-    failing_cursor = MockCursor(db_name="signal_bot_test", execute_error=RuntimeError("Deadlock / connection loss"))
-    conn = MockConnection(failing_cursor)
-    db = make_test_db(conn=conn, config=config)
-
-    signal = {
-        "symbol": "BTC/USDT",
-        "side": "LONG",
-        "entry": 50000.0,
-        "stop": 49000.0,
-        "target": 52000.0,
-        "atr": 1000.0,
-        "rr": 2.0,
-        "strategy": "BB_REV",
-        "telegram_enabled": True,
-    }
-    tid = db.save_trade(signal, 1.0, "shadow", entry_alert={"signal": signal})
-    assert tid is None
-    assert conn.rollbacks == 1
-
-    # 18b. Idempotency SQL verify
-    ok_cursor = MockCursor(db_name="signal_bot_test", lastrowid=99)
-    ok_conn = MockConnection(ok_cursor)
-    ok_db = make_test_db(conn=ok_conn, config=config)
-    ok_db.save_trade(signal, 1.0, "shadow", entry_alert={"signal": signal})
-    outbox_calls = [c for c in ok_cursor.calls if "rdt_telegram_outbox" in c[0]]
-    assert len(outbox_calls) == 1
-    assert "ON DUPLICATE KEY UPDATE event_key=VALUES(event_key)" in outbox_calls[0][0]
-
 
 # ═══════════════════════════════════════════════════════════════════
 # 19. Close trade and update stats verifies connection identity
 # ═══════════════════════════════════════════════════════════════════
 
-def test_close_trade_and_update_stats_connection_identity_verification(monkeypatch):
-    """19. close_trade_and_update_stats verifies connection identity before outbox INSERT."""
-    monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
-    monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
-    monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
-    monkeypatch.delenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", raising=False)
-
-    config = SimpleNamespace(db_name="signal_bot_test", observation_only=False)
-
-    # 19a. Matching connection: outbox INSERT is executed and committed atomically
-    ok_cursor = MockCursor(db_name="signal_bot_test")
-    ok_conn = MockConnection(ok_cursor)
-    db_ok = make_test_db(conn=ok_conn, config=config)
-
-    exit_alert = {"telegram_enabled": True, "trade": {"id": 10}, "pnl": 50.0}
-    res = db_ok.close_trade_and_update_stats(
-        trade_id=10, exit_price=105.0, reason="TAKE_PROFIT", pnl=50.0, pnl_pct=5.0,
-        strategy="BB_REV", mode="shadow", exit_alert=exit_alert,
-    )
-    assert res is True
-    sql_statements = [c[0] for c in ok_cursor.calls]
-    assert any("SELECT DATABASE()" in s for s in sql_statements)
-    assert any("UPDATE rdt_trades" in s for s in sql_statements)
-    assert any("INSERT INTO rdt_strategy_stats" in s for s in sql_statements)
-    assert any("INSERT INTO rdt_telegram_outbox" in s for s in sql_statements)
-    assert ok_conn.commits == 1
-
-    # 19b. Connection reports unexpected database: trade closes but outbox INSERT is suppressed
-    bad_cursor = MockCursor(db_name="wrong_db")
-    bad_conn = MockConnection(bad_cursor)
-    db_bad = make_test_db(conn=bad_conn, config=config)
-
-    res_bad = db_bad.close_trade_and_update_stats(
-        trade_id=11, exit_price=105.0, reason="TAKE_PROFIT", pnl=50.0, pnl_pct=5.0,
-        strategy="BB_REV", mode="shadow", exit_alert=exit_alert,
-    )
-    assert res_bad is True
-    bad_sql = [c[0] for c in bad_cursor.calls]
-    assert any("UPDATE rdt_trades" in s for s in bad_sql)
-    assert any("INSERT INTO rdt_strategy_stats" in s for s in bad_sql)
-    assert not any("INSERT INTO rdt_telegram_outbox" in s for s in bad_sql)
-
-
 # ═══════════════════════════════════════════════════════════════════
 # 20. No BotConfig() fallback when configuration is absent
 # ═══════════════════════════════════════════════════════════════════
 
-def test_no_default_botconfig_fallback_when_configuration_absent(monkeypatch):
-    """20. Absence of config fails closed; no fallback to BotConfig() defaults."""
+def test_no_default_outbox_config_fallback_when_configuration_absent(monkeypatch):
+    """20. Absence of config fails closed; no fallback to OutboxConfig() defaults."""
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
     monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
@@ -712,18 +560,8 @@ def test_no_default_botconfig_fallback_when_configuration_absent(monkeypatch):
     # enqueue_telegram_outbox_event fails closed
     assert db.enqueue_telegram_outbox_event("op:test_no_cfg", "operational", {"text": "hi"}) is False
 
-    # notify_operational fails closed without outbox row
-    bot = object.__new__(RetailDeathTrapBot)
-    bot.logger = logging.getLogger("test.bot")
-    bot.config = None
-    bot.observation_only = False
-    bot.db = db
-    bot.tg = SimpleNamespace(direct_authorized=False, enabled=False)
-
-    cursor.calls.clear()
-    assert bot.notify_operational("Operational alert without config") is False
-    assert not any("INSERT INTO rdt_telegram_outbox" in c[0] for c in cursor.calls)
-
+    # (retired with the worker) RetailDeathTrapBot.notify_operational is
+    # gone; the enqueue gate itself failing closed is the assertion above.
 
 # ═══════════════════════════════════════════════════════════════════
 # 21. Caller-supplied database parameter never substitutes for active connection identity
@@ -767,13 +605,12 @@ def test_production_startup_safety_unchanged(monkeypatch):
     ]:
         monkeypatch.delenv(key, raising=False)
 
-    # Default BotConfig
-    cfg = BotConfig()
+    # Default OutboxConfig
+    cfg = OutboxConfig()
     assert cfg.observation_only is False
-    assert cfg.allow_trading is False
 
-    # All authorization gates fail closed
-    assert is_trading_authorized(cfg) is False
+    # All authorization gates fail closed (trading authorization died with
+    # the worker -- there is no trading gate left to assert here)
     assert is_outbox_enqueue_authorized(cfg, conn=None) is False
     assert is_telegram_delivery_authorized() is False
 
@@ -805,7 +642,7 @@ def test_production_enqueue_gate_fails_closed_on_invalid_flags(monkeypatch, flag
 # ═══════════════════════════════════════════════════════════════════
 
 def test_production_flag_alone_does_not_authorize_any_operation(monkeypatch):
-    """24. RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED=1 alone never authorizes enqueue, trading, delivery, or worker startup."""
+    """24. RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED=1 alone never authorizes enqueue, delivery, or worker startup."""
     monkeypatch.delenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", raising=False)
     monkeypatch.setenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", "1")
     monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
@@ -817,9 +654,6 @@ def test_production_flag_alone_does_not_authorize_any_operation(monkeypatch):
 
     # Outbox enqueue remains rejected (generic flag unset)
     assert is_outbox_enqueue_authorized(cfg_prod, conn=conn_prod) is False
-
-    # Trading remains unauthorized
-    assert is_trading_authorized(cfg_prod) is False
 
     # Delivery remains unauthorized
     assert is_telegram_delivery_authorized() is False

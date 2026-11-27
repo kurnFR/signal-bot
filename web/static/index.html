@@ -1581,49 +1581,22 @@
                 <!-- ===== Retail Death Trap Bot v2 ===== -->
                 <div class="flex items-center gap-2">
                     <i data-lucide="skull" class="w-4 h-4 text-purple-400"></i>
-                    <h2 class="text-sm font-bold text-slate-100">Retail Death Trap Bot v2</h2>
-                    <span class="text-[10px] text-slate-500">7-strategy shadow/inverse confluence bot &middot; separate database</span>
+                    <h2 class="text-sm font-bold text-slate-100">RetailBot2 Historical Archive (Read-Only)</h2>
+                    <span class="text-[10px] text-slate-500">Retired worker &middot; saved positions, trades, and lifecycle rows only</span>
                     <button type="button" aria-label="Refresh research data" onclick="App.fetchResearchData()" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
                         <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
                     </button>
                 </div>
 
-                <!-- Bot Control: retailbot2 -->
-                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+                <!-- Bot Control: retailbot2 -- RETIRED. The worker is deleted and
+                     POST /api/research/retailbot2/control is retired; the saved
+                     control row is shown for reference only and cannot be edited. -->
+                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
                     <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-3">
-                            <label class="relative inline-flex items-center cursor-pointer">
-                                <input type="checkbox" id="rb2-ctl-enabled" class="sr-only peer">
-                                <div class="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:bg-emerald-600 transition-all"></div>
-                                <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-all peer-checked:translate-x-5"></span>
-                            </label>
-                            <span class="text-xs font-semibold text-slate-200">Trading Enabled</span>
-                            <span id="rb2-ctl-status-note" class="text-[10px] text-slate-500">Existing open positions are always managed regardless of this toggle</span>
-                        </div>
-                        <span id="rb2-ctl-updated" class="text-[10px] text-slate-600"></span>
+                        <h3 class="text-sm font-bold text-slate-100">RetailBot2 is retired</h3>
+                        <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700 uppercase">Read-Only Archive</span>
                     </div>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                        <label class="text-[11px] text-slate-400">ATR Stop Multiplier<input type="number" step="0.1" id="rb2-ctl-atr_sl_multiplier" class="cfg-input" placeholder="1.5"></label>
-                        <label class="text-[11px] text-slate-400">Risk:Reward Ratio<input type="number" step="0.1" id="rb2-ctl-rr_ratio" class="cfg-input" placeholder="2.0"></label>
-                        <label class="text-[11px] text-slate-400">Risk Per Trade (frac, e.g. 0.01=1%)<input type="number" step="0.001" id="rb2-ctl-risk_per_trade" class="cfg-input" placeholder="0.01"></label>
-                        <label class="text-[11px] text-slate-400">Max Open Trades / Mode<input type="number" step="1" id="rb2-ctl-max_open_trades_per_mode" class="cfg-input" placeholder="8"></label>
-                        <label class="text-[11px] text-slate-400">Max Trades / Symbol<input type="number" step="1" id="rb2-ctl-max_trades_per_symbol" class="cfg-input" placeholder="1"></label>
-                        <label class="text-[11px] text-slate-400">Cooldown (hours)<input type="number" step="0.5" id="rb2-ctl-min_trade_interval_hours" class="cfg-input" placeholder="2"></label>
-                        <label class="text-[11px] text-slate-400">RSI Oversold<input type="number" step="1" id="rb2-ctl-rsi_oversold" class="cfg-input" placeholder="35"></label>
-                        <label class="text-[11px] text-slate-400">RSI Overbought<input type="number" step="1" id="rb2-ctl-rsi_overbought" class="cfg-input" placeholder="65"></label>
-                        <label class="text-[11px] text-slate-400">RSI Zone Width<input type="number" step="1" id="rb2-ctl-rsi_zone_width" class="cfg-input" placeholder="5"></label>
-                        <label class="text-[11px] text-slate-400">S/R Touch Threshold<input type="number" step="0.0001" id="rb2-ctl-sr_touch_threshold" class="cfg-input" placeholder="0.0015"></label>
-                        <label class="text-[11px] text-slate-400">S/R Min Touches<input type="number" step="1" id="rb2-ctl-sr_min_touches" class="cfg-input" placeholder="2"></label>
-                        <label class="text-[11px] text-slate-400">Bollinger Std Dev<input type="number" step="0.1" id="rb2-ctl-bb_std" class="cfg-input" placeholder="2.0"></label>
-                        <label class="text-[11px] text-slate-400">BB Proximity %<input type="number" step="0.001" id="rb2-ctl-bb_proximity_pct" class="cfg-input" placeholder="0.003"></label>
-                        <label class="text-[11px] text-slate-400">Pattern Tolerance<input type="number" step="0.001" id="rb2-ctl-pattern_tolerance" class="cfg-input" placeholder="0.002"></label>
-                        <label class="text-[11px] text-slate-400">Pattern Min Bars Apart<input type="number" step="1" id="rb2-ctl-pattern_min_bars_apart" class="cfg-input" placeholder="10"></label>
-                        <label class="text-[11px] text-slate-400">Spike Fade ATR Mult<input type="number" step="0.1" id="rb2-ctl-spike_atr_multiplier" class="cfg-input" placeholder="2.5"></label>
-                    </div>
-                    <div class="flex items-center gap-3">
-                        <button type="button" onclick="App.saveBotControl('retailbot2')" class="px-4 py-2 text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white rounded-lg transition-all">Save Changes</button>
-                        <span class="text-[10px] text-slate-500">Takes effect within ~30s on the running process -- no restart needed</span>
-                    </div>
+                    <p class="text-xs text-slate-400">The RetailBot2 worker is deleted. Its saved bot-control row and strategy lifecycle flags are a read-only archive — no worker applies them anymore. Active simulations run in Paper Trading; Telegram delivery is governed by the Telegram outbox settings.</p>
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
@@ -1650,7 +1623,7 @@
                 </div>
 
                 <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
-                    <h3 class="text-sm font-bold text-slate-100">Open Positions</h3>
+                    <h3 class="text-sm font-bold text-slate-100">Historical Open Positions</h3>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left custom-table">
                             <thead>
@@ -1684,8 +1657,8 @@
 
                 <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
                     <div>
-                        <h3 class="text-sm font-bold text-slate-100">Strategy Lifecycle &amp; Telegram Promotion</h3>
-                        <p class="text-[11px] text-slate-500 mt-1">Each strategy/mode runs and reports independently. Telegram alerts default off until you enable them. Changes are saved to the database and applied by the running worker.</p>
+                        <h3 class="text-sm font-bold text-slate-100">Saved Strategy Lifecycle (Read-Only)</h3>
+                        <p class="text-[11px] text-slate-500 mt-1">Saved per-strategy flags from the retired worker. These rows are a read-only archive — they are no longer applied by any worker. Manage new simulations in Paper Trading.</p>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left custom-table">
@@ -1696,7 +1669,6 @@
                                     <th scope="col">Paper Track</th>
                                     <th scope="col">Telegram Alerts</th>
                                     <th scope="col">Performance Report</th>
-                                    <th scope="col">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="rb2-lifecycle-table-body">

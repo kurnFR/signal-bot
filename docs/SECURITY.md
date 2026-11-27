@@ -54,7 +54,15 @@ All outbound Telegram delivery across `notifications/telegram_notifier.py`, `Scr
 
 This platform performs **paper/simulated execution only** — no live exchange trading keys or order-submission endpoints exist.
 - **Paper Circuit Breakers (`paper/circuit_breaker.py`):** Fail closed on max concurrent positions, max daily realized loss, max total open notional, and cross-process emergency stop (`system_flags`).
-- **RetailBot2 Dual Gate:** Requires both `bot_control.enabled=TRUE` and explicit `RETAILBOT2_ALLOW_TRADING=1`; `RETAILBOT2_OBSERVATION_ONLY=1` strictly suppresses all mutations.
+- **RetailBot2 Dual Gate (retired with the worker):** The old gate
+  (`bot_control.enabled=TRUE` plus explicit `RETAILBOT2_ALLOW_TRADING=1`,
+  with `RETAILBOT2_OBSERVATION_ONLY=1` suppressing all mutations) died
+  with `paper/retailbot2.py`. There is no trading worker left for it to
+  guard: the platform is paper-only, the saved `bot_control` row is
+  archive history served read-only by `GET /api/research/retailbot2/control`,
+  and Telegram delivery is governed solely by the §5 ceiling
+  (`TELEGRAM_DELIVERY_ENABLED`, deprecated alias
+  `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY`).
 
 ## 7. Commercial Licensing
 

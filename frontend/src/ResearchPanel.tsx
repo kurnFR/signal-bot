@@ -1,13 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, AlertTriangle, CheckCircle, RefreshCw, ShieldCheck, X } from "lucide-react";
-import { useAuth } from "./AuthGate";
+import { useEffect, useMemo, useState } from "react";
+import { Activity, RefreshCw, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
-import { trapFocus } from "./lib/dialog";
 import {
   fetchResearchSnapshot,
-  ResearchActionError,
-  saveStrategyLifecycle,
-  stopAndHideStrategy,
   type ResearchSnapshot,
   type ResearchStrategy,
 } from "./lib/research";
@@ -29,10 +24,12 @@ function errorMessage(cause: unknown) {
   return "Research data could not be loaded. Check API/database health, then retry.";
 }
 
-export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean } = {}) {
-  const auth = useAuth();
-  const canTrade = !historyOnly && ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
-
+// RetailBot2 is retired: this panel is a read-only archive of its saved
+// positions, trades, stats, and lifecycle rows. The worker is deleted and
+// POST /api/research/retailbot2/strategies and /control are retired, so
+// there are no lifecycle controls here. Active simulations live in
+// Strategy Library and Paper Trading.
+export function ResearchPanel() {
   const [data, setData] = useState<ResearchSnapshot | null>(null);
   const [strategies, setStrategies] = useState<ResearchStrategy[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,25 +37,11 @@ export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean }
   const [attempt, setAttempt] = useState(0);
   const [filter, setFilter] = useState("");
 
-  // Feedback notifications
-  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-
-  // RB-03: Row-level saving state
-  const [savingRowKey, setSavingRowKey] = useState<string | null>(null);
-
-  // RB-04: Stop & hide modal state
-  const [stopTargetRow, setStopTargetRow] = useState<ResearchStrategy | null>(null);
-  const [stopping, setStopping] = useState(false);
-  const [stopError, setStopError] = useState<string | null>(null);
-  const stopDialogRef = useRef<HTMLDialogElement | null>(null);
-  const stopTriggerRef = useRef<HTMLButtonElement | null>(null);
-
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetchResearchSnapshot(controller.signal, !historyOnly)
+    fetchResearchSnapshot(controller.signal)
       .then((result) => {
         if (!controller.signal.aborted) {
           setData(result);
@@ -72,105 +55,7 @@ export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean }
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [attempt, historyOnly]);
-
-  // Modal lifecycle: stop & hide
-  useEffect(() => {
-    const dialog = stopDialogRef.current;
-    if (stopTargetRow && dialog && !dialog.open) {
-      if (typeof dialog.showModal === "function") {
-        dialog.showModal();
-      } else {
-        dialog.setAttribute("open", "");
-      }
-    }
-  }, [stopTargetRow]);
-
-  const openStopModal = (row: ResearchStrategy, trigger: HTMLButtonElement) => {
-    stopTriggerRef.current = trigger;
-    setStopTargetRow(row);
-    setStopError(null);
-  };
-
-  const closeStopModal = () => {
-    const dialog = stopDialogRef.current;
-    if (dialog?.open) {
-      if (typeof dialog.close === "function") {
-        dialog.close();
-      } else {
-        dialog.removeAttribute("open");
-      }
-    }
-    setStopTargetRow(null);
-    setStopError(null);
-    stopTriggerRef.current?.focus();
-  };
-
-  // RB-03: Toggle strategy flag in local state
-  const handleCheckboxChange = (
-    strategyId: string,
-    mode: string,
-    field: "evaluation_enabled" | "paper_enabled" | "telegram_enabled" | "report_enabled",
-    checked: boolean,
-  ) => {
-    setStrategies((prev) =>
-      prev.map((item) =>
-        item.strategy_id === strategyId && item.mode === mode
-          ? { ...item, [field]: checked }
-          : item,
-      ),
-    );
-  };
-
-  // RB-03: Save lifecycle settings for row
-  const handleSaveLifecycle = async (row: ResearchStrategy) => {
-    const rowKey = `${row.strategy_id}:${row.mode}`;
-    if (savingRowKey !== null) return;
-    setSavingRowKey(rowKey);
-    setActionError(null);
-    setActionSuccess(null);
-
-    try {
-      await saveStrategyLifecycle({
-        strategy_id: row.strategy_id,
-        mode: row.mode as "shadow" | "inverse",
-        evaluation_enabled: row.evaluation_enabled,
-        paper_enabled: row.paper_enabled,
-        telegram_enabled: row.telegram_enabled,
-        report_enabled: row.report_enabled,
-        auto_promote_enabled: false,
-      });
-      setActionSuccess(`Lifecycle settings saved for '${row.strategy_id}' (${row.mode}).`);
-      setAttempt((n) => n + 1);
-    } catch (cause) {
-      setActionError(cause instanceof ResearchActionError ? cause.message : "Failed to save strategy lifecycle.");
-    } finally {
-      setSavingRowKey(null);
-    }
-  };
-
-  // RB-04: Execute stop & hide
-  const handleExecuteStopAndHide = async () => {
-    if (!stopTargetRow || stopping) return;
-    setStopping(true);
-    setStopError(null);
-    setActionError(null);
-    setActionSuccess(null);
-
-    try {
-      await stopAndHideStrategy(
-        stopTargetRow.strategy_id,
-        stopTargetRow.mode as "shadow" | "inverse",
-      );
-      setActionSuccess(`Strategy '${stopTargetRow.strategy_id}' (${stopTargetRow.mode}) stopped and hidden.`);
-      closeStopModal();
-      setAttempt((n) => n + 1);
-    } catch (cause) {
-      setStopError(cause instanceof ResearchActionError ? cause.message : "Failed to stop strategy.");
-    } finally {
-      setStopping(false);
-    }
-  };
+  }, [attempt]);
 
   const filteredStrategies = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -184,39 +69,13 @@ export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean }
       <section className="panel paper-safety-banner">
         <ShieldCheck size={19} />
         <div>
-          <strong>{historyOnly ? "RetailBot2 Historical Archive (Read-Only)" : "RetailBot2 Research & Strategy Lifecycle"}</strong>
+          <strong>RetailBot2 Historical Archive (Read-Only)</strong>
           <p>
-            {historyOnly
-              ? "Review historical RetailBot2 positions, closed trades, and saved mode/strategy performance summaries. RetailBot2 is retired — use Strategy Library and Paper Trading for active simulations."
-              : "Review RetailBot2 positions, closed trades, strategy lifecycle flags, and saved performance summaries. Authorized operators can configure evaluation, paper tracking, Telegram alerts, and report visibility below."}
+            Review historical RetailBot2 positions, closed trades, and saved mode/strategy performance summaries. RetailBot2 is retired — use Strategy Library and Paper Trading for active simulations.
           </p>
         </div>
-        <span className="panel-counter">{historyOnly ? "ARCHIVE" : "RESEARCH"}</span>
+        <span className="panel-counter">ARCHIVE</span>
       </section>
-
-      {actionSuccess && (
-        <div className="api-success" role="status" aria-live="polite" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <CheckCircle size={17} />
-            <span>{actionSuccess}</span>
-          </div>
-          <button type="button" className="icon-button" aria-label="Dismiss message" onClick={() => setActionSuccess(null)}>
-            <X size={15} />
-          </button>
-        </div>
-      )}
-
-      {actionError && (
-        <div className="api-error" role="alert" aria-live="assertive" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <AlertTriangle size={17} />
-            <span>{actionError}</span>
-          </div>
-          <button type="button" className="icon-button" aria-label="Dismiss error" onClick={() => setActionError(null)}>
-            <X size={15} />
-          </button>
-        </div>
-      )}
 
       {error && (
         <div className="api-error" role="alert">
@@ -231,19 +90,10 @@ export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean }
       )}
 
       <section className="metrics-grid" aria-label="Research summary">
-        <article className="metric-card"><div className="metric-top"><span>Open positions</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : data?.positions.length ?? "—"}</div><div className="metric-foot"><span>{historyOnly ? "Historical RetailBot2 open rows" : "Active RetailBot2 trades"}</span></div></article>
+        <article className="metric-card"><div className="metric-top"><span>Open positions</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : data?.positions.length ?? "—"}</div><div className="metric-foot"><span>Historical RetailBot2 open rows</span></div></article>
         <article className="metric-card"><div className="metric-top"><span>Recent closed trades</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : data?.trades.length ?? "—"}</div><div className="metric-foot"><span>Latest 50 returned by API</span></div></article>
-        {historyOnly ? (
-          <>
-            <article className="metric-card"><div className="metric-top"><span>Shadow realized PnL</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : value(data?.stats.by_mode.shadow?.realized_pnl)}</div><div className="metric-foot"><span>{data?.stats.by_mode.shadow ? `${value(data.stats.by_mode.shadow.closed_count)} closed trades` : "Historical shadow ledger"}</span></div></article>
-            <article className="metric-card"><div className="metric-top"><span>Inverse realized PnL</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : value(data?.stats.by_mode.inverse?.realized_pnl)}</div><div className="metric-foot"><span>{data?.stats.by_mode.inverse ? `${value(data.stats.by_mode.inverse.closed_count)} closed trades` : "Historical inverse ledger"}</span></div></article>
-          </>
-        ) : (
-          <>
-            <article className="metric-card"><div className="metric-top"><span>Registered strategy rows</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : data?.strategies.length ?? "—"}</div><div className="metric-foot"><span>Shadow and inverse modes</span></div></article>
-            <article className="metric-card"><div className="metric-top"><span>Telegram-enabled rows</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : strategies.filter((row) => row.telegram_enabled).length}</div><div className="metric-foot"><span>Persisted lifecycle readback</span></div></article>
-          </>
-        )}
+        <article className="metric-card"><div className="metric-top"><span>Shadow realized PnL</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : value(data?.stats.by_mode.shadow?.realized_pnl)}</div><div className="metric-foot"><span>{data?.stats.by_mode.shadow ? `${value(data.stats.by_mode.shadow.closed_count)} closed trades` : "Historical shadow ledger"}</span></div></article>
+        <article className="metric-card"><div className="metric-top"><span>Inverse realized PnL</span><span className="metric-icon"><Activity size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : value(data?.stats.by_mode.inverse?.realized_pnl)}</div><div className="metric-foot"><span>{data?.stats.by_mode.inverse ? `${value(data.stats.by_mode.inverse.closed_count)} closed trades` : "Historical inverse ledger"}</span></div></article>
       </section>
 
       <section className="panel" aria-labelledby="research-performance-title">
@@ -336,8 +186,8 @@ export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean }
       <section className="panel" aria-labelledby="research-positions-title">
         <div className="panel-heading">
           <div>
-            <h2 id="research-positions-title">Active positions</h2>
-            <p>Open RetailBot2 rows from the existing API; no current-price or unrealized-PnL fields are returned by this route.</p>
+            <h2 id="research-positions-title">Historical open positions</h2>
+            <p>Historical open RetailBot2 rows from the archive; no current-price or unrealized-PnL fields are returned by this route.</p>
           </div>
           <span className="panel-counter">{data?.positions.length ?? 0} ROWS</span>
         </div>
@@ -375,7 +225,7 @@ export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean }
             </table>
           </div>
         ) : (
-          <p className="empty-state">{loading ? "Loading positions…" : "No active Research positions returned."}</p>
+          <p className="empty-state">{loading ? "Loading positions…" : "No historical open positions returned."}</p>
         )}
       </section>
 
@@ -423,13 +273,13 @@ export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean }
         )}
       </section>
 
-      {/* RB-03 & RB-04: Strategy Lifecycle Snapshot & Management (hidden in retired historyOnly mode) */}
-      {!historyOnly && (
+      {/* Read-only snapshot of the saved lifecycle rows (archived). No
+          editing: the POST endpoints that wrote these rows are retired. */}
       <section className="panel" aria-labelledby="research-strategies-title">
         <div className="panel-heading">
           <div>
             <h2 id="research-strategies-title">Strategy lifecycle snapshot</h2>
-            <p>{historyOnly ? "Saved settings from the legacy research worker. Manage new simulations in Paper Trading." : "Evaluation, paper, Telegram, and report visibility controls for registered RetailBot2 strategies."}</p>
+            <p>Saved settings from the legacy research worker. Manage new simulations in Paper Trading.</p>
           </div>
           <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
             <span className="panel-counter">{filteredStrategies.length} ROWS</span>
@@ -461,114 +311,23 @@ export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean }
                   <th scope="col">Telegram</th>
                   <th scope="col">Report</th>
                   <th scope="col">Auto-promote</th>
-                  <th scope="col">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredStrategies.map((row) => {
                   const rowKey = `${row.strategy_id}:${row.mode}`;
-                  const isSaving = savingRowKey === rowKey;
                   return (
                     <tr key={rowKey}>
                       <td><strong>{row.strategy_id}</strong></td>
                       <td>{row.mode}</td>
-                      <td>
-                        {canTrade ? (
-                          <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", cursor: row.historical_only ? "not-allowed" : "pointer" }}>
-                            <input
-                              type="checkbox"
-                              checked={row.evaluation_enabled}
-                              disabled={row.historical_only || isSaving}
-                              title={row.historical_only ? "Historical-only strategy cannot be enabled for live evaluation" : undefined}
-                              aria-label={`Evaluation for ${row.strategy_id} (${row.mode})`}
-                              onChange={(e) => handleCheckboxChange(row.strategy_id, row.mode, "evaluation_enabled", e.target.checked)}
-                            />
-                            <span>{row.evaluation_enabled ? "On" : "Off"}</span>
-                          </label>
-                        ) : (
-                          <span>{row.evaluation_enabled ? "On" : "Off"}</span>
-                        )}
-                      </td>
-                      <td>
-                        {canTrade ? (
-                          <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", cursor: row.historical_only ? "not-allowed" : "pointer" }}>
-                            <input
-                              type="checkbox"
-                              checked={row.paper_enabled}
-                              disabled={row.historical_only || isSaving}
-                              title={row.historical_only ? "Historical-only strategy cannot be enabled for paper trading" : undefined}
-                              aria-label={`Paper tracking for ${row.strategy_id} (${row.mode})`}
-                              onChange={(e) => handleCheckboxChange(row.strategy_id, row.mode, "paper_enabled", e.target.checked)}
-                            />
-                            <span>{row.paper_enabled ? "On" : "Off"}</span>
-                          </label>
-                        ) : (
-                          <span>{row.paper_enabled ? "On" : "Off"}</span>
-                        )}
-                      </td>
-                      <td>
-                        {canTrade ? (
-                          <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", cursor: row.historical_only ? "not-allowed" : "pointer" }}>
-                            <input
-                              type="checkbox"
-                              checked={row.telegram_enabled}
-                              disabled={row.historical_only || isSaving}
-                              title={row.historical_only ? "Historical-only strategy cannot broadcast to Telegram" : undefined}
-                              aria-label={`Telegram alerts for ${row.strategy_id} (${row.mode})`}
-                              onChange={(e) => handleCheckboxChange(row.strategy_id, row.mode, "telegram_enabled", e.target.checked)}
-                            />
-                            <span>{row.telegram_enabled ? "On" : "Off"}</span>
-                          </label>
-                        ) : (
-                          <span>{row.telegram_enabled ? "On" : "Off"}</span>
-                        )}
-                      </td>
-                      <td>
-                        {canTrade ? (
-                          <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-                            <input
-                              type="checkbox"
-                              checked={row.report_enabled}
-                              disabled={isSaving}
-                              aria-label={`Report visibility for ${row.strategy_id} (${row.mode})`}
-                              onChange={(e) => handleCheckboxChange(row.strategy_id, row.mode, "report_enabled", e.target.checked)}
-                            />
-                            <span>{row.report_enabled ? "Visible" : "Hidden"}</span>
-                          </label>
-                        ) : (
-                          <span>{row.report_enabled ? "Visible" : "Hidden"}</span>
-                        )}
-                      </td>
+                      <td>{row.evaluation_enabled ? "On" : "Off"}</td>
+                      <td>{row.paper_enabled ? "On" : "Off"}</td>
+                      <td>{row.telegram_enabled ? "On" : "Off"}</td>
+                      <td>{row.report_enabled ? "Visible" : "Hidden"}</td>
                       <td>
                         <span title="Auto-promote is currently unavailable">
                           {row.auto_promote_enabled ? "On" : "Unavailable"}
                         </span>
-                      </td>
-                      <td>
-                        {canTrade ? (
-                          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                            <button
-                              type="button"
-                              className="button button-secondary button-small"
-                              onClick={() => handleSaveLifecycle(row)}
-                              disabled={isSaving}
-                            >
-                              {isSaving ? "Saving…" : "Save"}
-                            </button>
-                            {!row.historical_only && (
-                              <button
-                                type="button"
-                                className="button button-danger button-small"
-                                onClick={(e) => openStopModal(row, e.currentTarget)}
-                                disabled={isSaving}
-                              >
-                                Stop &amp; Hide
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-muted text-sm">View only</span>
-                        )}
                       </td>
                     </tr>
                   );
@@ -580,52 +339,6 @@ export function ResearchPanel({ historyOnly = false }: { historyOnly?: boolean }
           <p className="empty-state">{loading ? "Loading strategies…" : "No strategies match this filter."}</p>
         )}
       </section>
-      )}
-
-      {/* RB-04 Modal: Stop & Hide Confirmation */}
-      {!historyOnly && stopTargetRow && (
-        <dialog
-          ref={stopDialogRef}
-          className="app-dialog"
-          aria-labelledby="stop-modal-title"
-          aria-describedby="stop-modal-desc"
-          onCancel={(e) => { e.preventDefault(); closeStopModal(); }}
-          onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); closeStopModal(); } else { trapFocus(e); } }}
-        >
-          <div className="panel-heading" style={{ marginBottom: "16px" }}>
-            <div>
-              <h3 id="stop-modal-title">Stop &amp; Hide Strategy</h3>
-              <p id="stop-modal-desc">
-                Are you sure you want to stop and hide strategy <strong>{stopTargetRow.strategy_id}</strong> ({stopTargetRow.mode})?
-              </p>
-            </div>
-            <button type="button" aria-label="Close dialog" onClick={closeStopModal} className="icon-button">
-              <X size={16} />
-            </button>
-          </div>
-
-          <div style={{ background: "var(--color-elevated)", padding: "12px", borderRadius: "8px", marginBottom: "16px", fontSize: "0.85rem" }}>
-            <p style={{ margin: 0 }}>
-              This will disable live evaluation, paper tracking, and Telegram alerts, and hide the strategy from performance reports.
-            </p>
-          </div>
-
-          {stopError && (
-            <div className="api-error" role="alert" style={{ marginBottom: "14px" }}>
-              <div><p>{stopError}</p></div>
-            </div>
-          )}
-
-          <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-            <button type="button" className="button button-secondary" onClick={closeStopModal} disabled={stopping}>
-              Cancel
-            </button>
-            <button type="button" className="button button-danger" onClick={handleExecuteStopAndHide} disabled={stopping}>
-              {stopping ? "Stopping…" : "Stop & Hide Strategy"}
-            </button>
-          </div>
-        </dialog>
-      )}
     </div>
   );
 }

@@ -27,7 +27,7 @@ class TestMigrationManagedStartupDocs(unittest.TestCase):
         self.assertIn("read-only", text)
 
     def test_retailbot2_outbox_runbook_documents_authoritative_advisory_lock(self):
-        from paper.retailbot2 import OUTBOX_LOCK_NAME
+        from paper.outbox_store import OUTBOX_LOCK_NAME
         self.assertEqual(OUTBOX_LOCK_NAME, "rdt_outbox_worker_lock")
 
         release_gates = _doc("docs/RETAILBOT2_AND_MODERN_UI_RELEASE_GATES.md").read_text(encoding="utf-8")

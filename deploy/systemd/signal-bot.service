@@ -17,7 +17,7 @@ EnvironmentFile=-/opt/signal-bot/.env
 Environment=PYTHONUNBUFFERED=1
 Environment="SIGNAL_BOT_USE_MODERN_UI=1"
 
-# Process supervisor entry point (runs web, collectors, screener, wallet_tracker, paper_engine, retailbot2, outbox)
+# Process supervisor entry point (runs web, collectors, screener, wallet_tracker, paper_engine, outbox)
 ExecStart=/usr/bin/python3 run_all.py
 
 # Process lifecycle and recovery

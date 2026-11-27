@@ -60,7 +60,6 @@ services:
       SIGNAL_BOT_LOGO_URL: ${SIGNAL_BOT_LOGO_URL:-}
       SIGNAL_BOT_ALLOWED_ORIGINS: ${SIGNAL_BOT_ALLOWED_ORIGINS:-http://localhost:8050,http://127.0.0.1:8050}
       ENABLE_FUTURES: ${ENABLE_FUTURES:-False}
-      RETAILBOT2_ALLOW_TRADING: "0"
     ports:
       # Loopback only, like MariaDB below: the dashboard has no TLS of its
       # own. Use the docker-compose.prod.yml Caddy overlay to expose it.
@@ -171,7 +170,6 @@ services:
       RETAILBOT2_ALLOW_TELEGRAM_DELIVERY: ${RETAILBOT2_ALLOW_TELEGRAM_DELIVERY:-0}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
-      RETAILBOT2_ALLOW_TRADING: "0"
 
 volumes:
   mariadb_data:

@@ -104,7 +104,7 @@ gunzip < backup_signal_bot_YYYYMMDD_HHMMSS.sql.gz | docker compose exec -T maria
 2. **First-Login Compliance Gate**:
    - All users must accept the Terms of Service & Financial Risk Disclaimer (`POST /api/auth/accept-terms`) and rotate default passwords before full workstation access is granted.
 3. **Safety Rail**:
-   - `RETAILBOT2_ALLOW_TRADING=0` is hardcoded across all environments to ensure no real funds are ever placed at risk. Real money trading is disabled.
+   - No live trading exists anywhere in this platform: execution is paper/simulated only, and the RetailBot2 worker that once had a separate `RETAILBOT2_ALLOW_TRADING` gate is deleted (see `docs/RETAILBOT2_RETIREMENT.md`). Real money trading is disabled by construction, not by an env flag.
 4. **Rate Limiting**:
    - Compute-intensive routes (`POST /api/backtest/*`, `POST /api/ml/*`) are limited to 30 requests/minute per client with automatic HTTP 429 response containing `Retry-After`.
 
