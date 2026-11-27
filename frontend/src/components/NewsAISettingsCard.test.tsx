@@ -52,7 +52,23 @@ describe("NewsAISettingsCard", () => {
     fireEvent.change(field, { target: { value: "85" } });
     fireEvent.change(screen.getByLabelText(/Max trades per day/), { target: { value: "0" } });
     fireEvent.click(screen.getByRole("button", { name: "Save guardrails" }));
-    await waitFor(() => expect(m.updateNewsAISettings).toHaveBeenCalledWith(85, 0));
+    await waitFor(() => expect(m.updateNewsAISettings).toHaveBeenCalledWith({ min_confidence: 85, max_trades_per_day: 0 }));
+  });
+
+  it("shows new defaults and resets a single override with null", async () => {
+    m.fetchNewsAISettings.mockResolvedValue(settings({
+      source: "override",
+      stop_atr_mult: 2.5,
+      defaults: { min_confidence: 75, max_trades_per_day: 3, stop_atr_mult: 1.5 },
+      overrides: { stop_atr_mult: 2.5 },
+    }));
+    m.updateNewsAISettings.mockResolvedValue(undefined);
+    render(<NewsAISettingsCard isAdmin />);
+    expect(await screen.findByLabelText(/Stop loss \(ATR multiple\)/)).toHaveValue("2.5");
+    expect(screen.getByText("Default 1.5")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reset Stop loss (ATR multiple)" }));
+    await waitFor(() => expect(m.updateNewsAISettings).toHaveBeenCalledWith({ stop_atr_mult: null }));
+    expect(m.resetNewsAISettings).not.toHaveBeenCalled();
   });
 
   it("resets an override", async () => {

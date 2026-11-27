@@ -46,8 +46,7 @@ import argparse
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
-    NEWS_AI_EXECUTION_POLL_INTERVAL_SECONDS, NEWS_AI_MAX_TRADES_PER_DAY,
-    NEWS_AI_STOP_ATR_MULT, NEWS_AI_TP_R_MULTIPLE, NEWS_AI_DEFAULT_TP_R_MULTIPLE,
+    NEWS_AI_DEFAULT_TP_R_MULTIPLE,
 )
 from db.db import (
     get_unacted_news_signals, get_news_event, mark_news_signal_acted,
@@ -123,9 +122,10 @@ def _compute_trade(symbol, market, timeframe, bias, time_horizon):
     entry_price = float(latest["close"])
     candle_open_time = int(latest["open_time"])
     direction = "LONG" if bias == "long" else "SHORT"
-    r_mult = NEWS_AI_TP_R_MULTIPLE.get(time_horizon, NEWS_AI_DEFAULT_TP_R_MULTIPLE)
+    settings = get_effective_settings()
+    r_mult = settings.get(f"tp_r_{time_horizon}", NEWS_AI_DEFAULT_TP_R_MULTIPLE)
 
-    stop_distance = NEWS_AI_STOP_ATR_MULT * atr
+    stop_distance = settings["stop_atr_mult"] * atr
     if direction == "LONG":
         stop_loss = entry_price - stop_distance
         take_profit = entry_price + stop_distance * r_mult
@@ -254,7 +254,8 @@ def poll_once():
 
 def run(once=False):
     while True:
-        if not once and pause_gate("news_ai", "news_execution", NEWS_AI_EXECUTION_POLL_INTERVAL_SECONDS):
+        interval = get_effective_settings()["execution_poll_interval_seconds"]
+        if not once and pause_gate("news_ai", "news_execution", interval):
             continue
         start = time.time()
         try:
@@ -265,7 +266,7 @@ def run(once=False):
         if once:
             return
         elapsed = time.time() - start
-        time.sleep(max(0, NEWS_AI_EXECUTION_POLL_INTERVAL_SECONDS - elapsed))
+        time.sleep(max(0, interval - elapsed))
 
 
 if __name__ == "__main__":
