@@ -1,3 +1,4 @@
+import { DataTable } from "./components/DataTable";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./AuthGate";
 import { BookOpen, RefreshCw, ShieldCheck } from "lucide-react";
@@ -368,7 +369,16 @@ export function StrategyLibraryPanel({ onSelectForBacktest, onSelectForPaper }: 
     </section>
     <section className="panel" aria-labelledby="indicator-catalog-title">
       <div className="panel-heading"><div><h2 id="indicator-catalog-title">Indicator catalog</h2><p>Definitions and descriptions provided by the backend.</p></div><span className="panel-counter">{indicators.length} INDICATORS</span></div>
-      {loading && !indicators.length && !error ? <p className="empty-state" role="status">Loading indicator catalog…</p> : <div className="table-scroll"><table><thead><tr><th scope="col">Indicator</th><th scope="col">Category</th><th scope="col">Description</th><th scope="col">Default</th></tr></thead><tbody>{indicators.map((item) => <tr key={item.name}><td><strong>{item.label || item.name}</strong><div><code>{item.name}</code></div></td><td>{item.category || "—"}</td><td>{item.description || "—"}</td><td>{item.default ?? "—"}</td></tr>)}</tbody></table></div>}
+      <DataTable rows={indicators} rowKey={(row) => row.name} storageId="strategy-indicator-catalog"
+        label="indicators" loading={loading}
+        searchText={(row) => [row.name, row.label, row.category, row.description].join(" ")}
+        columns={[
+          { key: "indicator", label: "Indicator", value: (row) => row.label || row.name, cell: (row) => <><strong>{row.label || row.name}</strong><div><code>{row.name}</code></div></> },
+          { key: "category", label: "Category", value: (row) => row.category },
+          { key: "description", label: "Description", value: (row) => row.description },
+          { key: "default", label: "Default", value: (row) => row.default },
+        ]} />
+
     </section>
     <p className="page-description">Safety: admin/trader users can generate a draft, quick-test, create, and delete saved definitions. AI generation and quick tests are non-persisted; generated drafts must be reviewed and explicitly saved. Creation/deletion changes the saved library but does not activate or promote a strategy. Use the catalog to review a backtest or configure a paper deployment.</p>
     {pendingDisable && <section className="panel" aria-labelledby="strategy-disable-confirm-title">

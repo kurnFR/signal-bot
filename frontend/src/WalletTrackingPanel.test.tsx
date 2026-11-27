@@ -35,6 +35,20 @@ describe("WalletTrackingPanel", () => {
     }));
   });
   afterEach(() => vi.unstubAllGlobals());
+  it("sorts and searches the tracked-wallet table", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      const payload = responses[url.pathname + url.search];
+      return payload ? Response.json(payload) : Response.json({ detail: "No fixture" }, { status: 404 });
+    }));
+    render(<WalletTrackingPanel />);
+    const table = await screen.findByRole("table", { name: "tracked wallets" });
+    fireEvent.click(within(table).getByRole("button", { name: "Wallet / label" }));
+    expect(within(table).getByRole("columnheader", { name: "Wallet / label" })).toHaveAttribute("aria-sort", "ascending");
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search tracked wallets" }), { target: { value: "missing" } });
+    expect(screen.getByText("No rows match these filters.")).toBeInTheDocument();
+  });
+
   it("renders tracker health, tracked wallets, token flow, and recent events", async () => {
     render(<WalletTrackingPanel />);
     expect(await screen.findByText("Test wallet")).toBeInTheDocument();

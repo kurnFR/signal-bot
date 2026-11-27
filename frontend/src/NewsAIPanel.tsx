@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { DataTable } from "./components/DataTable";
+import { useEffect, useState } from "react";
 import { Activity, Newspaper, RefreshCw, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
 import { useAuth } from "./AuthGate";
@@ -48,7 +49,6 @@ export function NewsAIPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const [filter, setFilter] = useState("");
   const auth = useAuth();
   const role = (auth?.user.role ?? "").toLowerCase();
   const isAdmin = role === "admin";
@@ -80,11 +80,7 @@ export function NewsAIPanel() {
     return () => controller.abort();
   }, [attempt]);
 
-  const signals = useMemo(() => (data?.signals ?? []).filter((item) => {
-    const needle = filter.trim().toLowerCase();
-    return !needle || [item.symbol, item.headline, item.bias, item.time_horizon, item.source]
-      .some((value) => String(value ?? "").toLowerCase().includes(needle));
-  }), [data, filter]);
+  const signals = data?.signals ?? [];
 
   return <div className="news-ai-view" aria-busy={loading}>
     <section className="panel paper-safety-banner"><ShieldCheck size={19} /><div><strong>News AI overlay</strong><p>Inspect persisted collection metrics, AI decisions, execution outcomes, collector heartbeats, signals, and events. This view does not trigger polling, AI inference, strategy execution, or Telegram alerts. Traders and admins can dismiss pending signals; admins tune the guardrails below.</p></div><span className="panel-counter">OPERATOR CONTROLS</span></section>
@@ -106,25 +102,26 @@ export function NewsAIPanel() {
         <div><h2 id="news-signals-title">News AI signals</h2><p>Saved AI decisions and their source events. Times in WIB.</p></div>
         <span className="panel-counter">{signals.length} signals</span>
       </div>
-      <label className="filter-field">Filter signals <input aria-label="Filter News AI signals" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Symbol, headline, bias, source…" /></label>
       {actionError && <div className="api-error" role="alert">{actionError}</div>}
-      {signals.length ? <div className="table-scroll" tabIndex={0} role="region" aria-label="News AI signals table">
-        <table className="news-table" aria-labelledby="news-signals-title">
-          <thead><tr><th scope="col">Symbol</th><th scope="col">Headline</th><th scope="col">Bias</th><th scope="col">Confidence</th><th scope="col">Horizon</th><th scope="col">Decision</th><th scope="col">Created</th>{canDismiss && <th scope="col">Action</th>}</tr></thead>
-          <tbody>{signals.map((row) => <tr key={row.id}>
-            <td><strong>{row.symbol}</strong>{(row.market || row.timeframe) && <small>{[row.market, row.timeframe].filter(Boolean).join(" · ")}</small>}</td>
-            <td className="news-headline"><Headline url={row.url} text={row.headline} />{row.source && <small>{sourceLabel(row.source)}</small>}</td>
-            <td>{row.bias ?? "—"}</td>
-            <td>{num(row.confidence)}</td>
-            <td>{row.time_horizon ?? "—"}</td>
-            <td className="news-detail">{row.skip_reason === "dismissed_by_operator" ? <strong>Dismissed</strong> : row.acted_on ? "Acted on" : row.skip_reason ? <><strong>Skipped</strong><small>{row.skip_reason}</small></> : "Pending"}</td>
-            <td className="news-date"><NewsTime value={row.created_at} /></td>
-            {canDismiss && <td>{!row.acted_on && !row.skip_reason ? (confirmId === row.id
+      <DataTable rows={signals} rowKey={(row) => row.id} storageId="news-ai-signals"
+        label="News AI signals table" searchLabel="Filter News AI signals"
+        searchText={(row) => [row.symbol, row.headline, row.bias, row.source, sourceLabel(row.source)].join(" ")}
+        loading={loading} empty="No signals match this filter." noMatch="No signals match this filter." className="news-table"
+        columns={[
+          { key: "symbol", label: "Symbol", value: (row) => row.symbol, cell: (row) => <><strong>{row.symbol}</strong>{(row.market || row.timeframe) && <small>{[row.market, row.timeframe].filter(Boolean).join(" · ")}</small>}</> },
+          { key: "headline", label: "Headline", value: (row) => row.headline, className: "news-headline", cell: (row) => <><Headline url={row.url} text={row.headline} />{row.source && <small>{sourceLabel(row.source)}</small>}</> },
+          { key: "bias", label: "Bias", value: (row) => row.bias, cell: (row) => <>{row.bias ?? "—"}</> },
+          { key: "confidence", label: "Confidence", value: (row) => row.confidence, cell: (row) => <>{num(row.confidence)}</> },
+          { key: "horizon", label: "Horizon", value: (row) => row.time_horizon, cell: (row) => <>{row.time_horizon ?? "—"}</> },
+          { key: "decision", label: "Decision", value: (row) => row.skip_reason === "dismissed_by_operator" ? "Dismissed" : row.acted_on ? "Acted on" : row.skip_reason ? "Skipped" : "Pending", className: "news-detail", cell: (row) => <>{row.skip_reason === "dismissed_by_operator" ? <strong>Dismissed</strong> : row.acted_on ? "Acted on" : row.skip_reason ? <><strong>Skipped</strong><small>{row.skip_reason}</small></> : "Pending"}</> },
+          { key: "created", label: "Created", value: (row) => row.created_at, className: "news-date", cell: (row) => <><NewsTime value={row.created_at} /></> },
+          ...(canDismiss ? [{ key: "action", label: "Action", required: true, cell: (row: typeof signals[number]) => (
+            <>{!row.acted_on && !row.skip_reason ? (confirmId === row.id
               ? <div role="group" aria-label={`Confirm dismissing ${row.symbol} signal`}><button className="button button-danger" type="button" disabled={dismissingId === row.id} onClick={() => void dismiss(row.id)}>Confirm dismiss {row.symbol}</button>{" "}<button className="button button-secondary" type="button" onClick={() => setConfirmId(null)}>Cancel</button></div>
-              : <button className="button button-secondary" type="button" disabled={dismissingId !== null} onClick={() => setConfirmId(row.id)}>Dismiss {row.symbol} signal</button>) : "—"}</td>}
-          </tr>)}</tbody>
-        </table>
-      </div> : <p className="empty-state">{loading ? "Loading signals…" : "No signals match this filter."}</p>}
+              : <button className="button button-secondary" type="button" disabled={dismissingId !== null} onClick={() => setConfirmId(row.id)}>Dismiss {row.symbol} signal</button>) : "—"}</>
+          ) }] : []),
+        ]} />
+
     </section>
     <NewsAISettingsCard isAdmin={isAdmin} />
     <section className="panel" aria-labelledby="news-events-title">
