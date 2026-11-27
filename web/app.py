@@ -158,7 +158,6 @@ def readyz():
         pool = get_pool()
         conn = pool.get_connection()
         with _owned_cursor(conn, dictionary=True) as cur:
-            cur.execute("SELECT 1")
             cur.execute("SELECT COUNT(*) as cnt FROM information_schema.tables WHERE table_schema = DATABASE()")
             row = cur.fetchone()
             count = row.get("cnt", 0) if row else 0
@@ -172,7 +171,7 @@ def readyz():
         # Unauthenticated probe: do not leak raw DB error text (host, port,
         # user, access-denied details) to callers. Log it server-side and
         # return a generic reason, matching the project's redaction pattern.
-        logger.exception("Readiness probe failed: %s", exc)
+        logger.warning("Readiness probe failed (%s)", type(exc).__name__)
         return JSONResponse(
             status_code=503,
             content={"status": "not_ready", "reason": "database unavailable"},
