@@ -1,3 +1,4 @@
+import { DataTable } from "./components/DataTable";
 import { useEffect, useRef, useState } from "react";
 import { Activity, AlertTriangle, CheckCircle, Plus, RefreshCw, Settings, ShieldCheck, Wallet, X } from "lucide-react";
 import { useAuth } from "./AuthGate";
@@ -473,26 +474,12 @@ export function WalletTrackingPanel() {
           </div>
         </div>
 
-        {loading && !data ? (
-          <p className="empty-state" role="status">Loading tracked wallets…</p>
-        ) : data?.tracked.length ? (
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Wallet / label</th>
-                  <th scope="col">Chain</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Added</th>
-                  <th scope="col">Telegram swap alerts</th>
-                  <th scope="col">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.tracked.map((wallet) => (
-                  <tr key={wallet.id}>
-                    <td>
-                      {canTrade && labelEdit?.id === wallet.id ? <form onSubmit={async (event) => {
+        <DataTable rows={data?.tracked ?? []} rowKey={(wallet) => wallet.id}
+          storageId="tracked-wallets" label="tracked wallets" loading={loading}
+          empty="No active tracked wallets were returned."
+          searchText={(wallet) => [wallet.label, wallet.wallet, wallet.chain, data?.meta.chains[wallet.chain], wallet.status].join(" ")}
+          columns={[
+            { key: "wallet", label: "Wallet / label", required: true, value: (wallet) => wallet.label || wallet.wallet, cell: (wallet) => (<>{canTrade && labelEdit?.id === wallet.id ? <form onSubmit={async (event) => {
                         event.preventDefault();
                         if (savingLabel) return;
                         setSavingLabel(true);
@@ -519,12 +506,11 @@ export function WalletTrackingPanel() {
                         {canTrade && <button type="button" className="button button-small" disabled={savingLabel}
                           onClick={() => setLabelEdit({ id: wallet.id, text: wallet.label ?? "" })}>Edit label</button>}
                       </>}
-                      <div><code>{shorten(wallet.wallet)}</code></div>
-                    </td>
-                    <td>{data.meta.chains[wallet.chain] ?? wallet.chain}</td>
-                    <td>{wallet.status}</td>
-                    <td>{dateLabel(wallet.first_flagged_at ?? null)}</td>
-                    <td>{canTrade ? <button className="button button-small" disabled={changingAlert || loading}
+                      <div><code>{shorten(wallet.wallet)}</code></div></>) },
+            { key: "chain", label: "Chain", value: (wallet) => data?.meta.chains[wallet.chain] ?? wallet.chain },
+            { key: "status", label: "Status", value: (wallet) => wallet.status },
+            { key: "added", label: "Added", value: (wallet) => wallet.first_flagged_at, cell: (wallet) => dateLabel(wallet.first_flagged_at ?? null) },
+            { key: "telegram", label: "Telegram swap alerts", value: (wallet) => wallet.telegram_after_id == null ? "Off" : "Selected", cell: (wallet) => (<>{canTrade ? <button className="button button-small" disabled={changingAlert || loading}
                       aria-pressed={wallet.telegram_after_id != null}
                       onClick={async () => {
                         const enabled = wallet.telegram_after_id == null;
@@ -536,9 +522,8 @@ export function WalletTrackingPanel() {
                         } catch { setActionError("Could not update Telegram alerts."); }
                         finally { setChangingAlert(false); }
                       }}>{wallet.telegram_after_id == null ? "Enable Telegram" : "Disable Telegram"}</button> :
-                      wallet.telegram_after_id == null ? "Off" : "Selected"}</td>
-                    <td>
-                      {canTrade ? (
+                      wallet.telegram_after_id == null ? "Off" : "Selected"}</>) },
+            { key: "action", label: "Action", required: true, cell: (wallet) => (<>{canTrade ? (
                         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
                           <button
                             type="button"
@@ -579,16 +564,9 @@ export function WalletTrackingPanel() {
                         </div>
                       ) : (
                         <span className="text-muted text-sm">View only</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="empty-state">No active tracked wallets were returned.</p>
-        )}
+                      )}</>) },
+          ]} />
+
       </section>
 
       {/* Token Net Flow */}

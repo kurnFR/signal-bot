@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { DataTable } from "./components/DataTable";
+import { useEffect, useState } from "react";
 import { useAuth } from "./AuthGate";
 import { ArrowRight, Database, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
@@ -28,7 +29,6 @@ export function MasterDataPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const [filter, setFilter] = useState("");
   const [cryptoQuery, setCryptoQuery] = useState("");
   const [cryptoMarket, setCryptoMarket] = useState<"all" | "spot" | "futures">("all");
   const [cryptoResults, setCryptoResults] = useState<CryptoMarketTicker[]>([]);
@@ -105,10 +105,7 @@ export function MasterDataPanel() {
     return () => { controller.abort(); window.clearTimeout(timer); };
   }, [hasLiveJobs, loading, actionBusy]);
 
-  const coverage = useMemo(() => (data?.coverage ?? []).filter((row) => {
-    const needle = filter.trim().toLowerCase();
-    return !needle || [row.symbol, row.market, row.timeframe].some((part) => part.toLowerCase().includes(needle));
-  }), [data, filter]);
+  const coverage = data?.coverage ?? [];
 
   const searchAssets = async () => {
     setCryptoSearchBusy(true); setCryptoSearchError(null); setCryptoSearched(true);
@@ -231,8 +228,23 @@ export function MasterDataPanel() {
       <article className="metric-card"><div className="metric-top"><span>Jobs listed</span><span className="metric-icon"><Database size={17} /></span></div><div className="metric-value">{loading && !data ? "Loading…" : num(data?.jobs.length)}</div><div className="metric-foot"><span>Recent persisted and live status</span></div></article>
     </section>
     <section className="panel" aria-labelledby="master-coverage-title"><div className="panel-heading"><div><h2 id="master-coverage-title">Dataset coverage</h2><p>Stored candle counts and feature availability from the existing API.</p></div><span className="panel-counter">{coverage.length} ROWS</span></div>
-      <label className="filter-field">Filter datasets <input aria-label="Filter datasets" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Symbol, market, timeframe…" /></label>
-      {coverage.length ? <div className="table-scroll"><table><thead><tr><th>Symbol</th><th>Market</th><th>Timeframe</th><th>Candles</th><th>Features</th><th>First date</th><th>Last date</th>{canManageJobs && <th>Actions</th>}</tr></thead><tbody>{coverage.map((row) => <tr key={row.symbol + row.market + row.timeframe}><td>{row.symbol}</td><td>{row.market}</td><td>{row.timeframe}</td><td>{num(row.candleCount)}</td><td>{row.hasFeatures ? "Available" : "Missing"} ({num(row.featureCount)})</td><td>{dateLabel(row.startDate)}</td><td>{dateLabel(row.endDate)}</td>{canManageJobs && <td>{(row.market === "spot" || row.market === "futures") && <button className="button button-secondary" type="button" disabled={actionBusy || loading} onClick={() => { setActionError(null); setActionMessage(null); setPendingAction({ kind: "features", symbol: row.symbol, market: row.market as "spot" | "futures", timeframe: row.timeframe }); }}>Build features</button>}{isAdmin && (row.market === "spot" || row.market === "futures") && <>{" "}<button className="button button-secondary" type="button" disabled={actionBusy || loading} onClick={() => setPendingDelete({ symbol: row.symbol, market: row.market as "spot" | "futures", timeframe: row.timeframe, scope: "features" })}>Delete features {row.symbol} {row.market} {row.timeframe}</button>{" "}<button className="button button-danger" type="button" disabled={actionBusy || loading} onClick={() => setPendingDelete({ symbol: row.symbol, market: row.market as "spot" | "futures", timeframe: row.timeframe, scope: "all" })}>Delete dataset {row.symbol} {row.market} {row.timeframe}</button></>}</td>}</tr>)}</tbody></table></div> : <p className="empty-state">{loading ? "Loading datasets…" : "No datasets match this filter."}</p>}
+      <DataTable rows={coverage} rowKey={(row) => [row.symbol, row.market, row.timeframe].join("/")}
+        storageId="dataset-coverage" label="datasets" searchLabel="Filter datasets" loading={loading}
+        searchText={(row) => [row.symbol, row.market, row.timeframe].join(" ")}
+        empty="No datasets match this filter." noMatch="No datasets match this filter."
+        columns={[
+          { key: "symbol", label: "Symbol", value: (row) => row.symbol },
+          { key: "market", label: "Market", value: (row) => row.market },
+          { key: "timeframe", label: "Timeframe", value: (row) => row.timeframe },
+          { key: "candles", label: "Candles", value: (row) => row.candleCount, cell: (row) => num(row.candleCount) },
+          { key: "features", label: "Features", value: (row) => row.featureCount, cell: (row) => <>{row.hasFeatures ? "Available" : "Missing"} ({num(row.featureCount)})</> },
+          { key: "first", label: "First date", value: (row) => row.startDate, cell: (row) => dateLabel(row.startDate) },
+          { key: "last", label: "Last date", value: (row) => row.endDate, cell: (row) => dateLabel(row.endDate) },
+          ...(canManageJobs ? [{ key: "action", label: "Actions", required: true, cell: (row: typeof coverage[number]) => (
+            <>{(row.market === "spot" || row.market === "futures") && <button className="button button-secondary" type="button" disabled={actionBusy || loading} onClick={() => { setActionError(null); setActionMessage(null); setPendingAction({ kind: "features", symbol: row.symbol, market: row.market as "spot" | "futures", timeframe: row.timeframe }); }}>Build features</button>}{isAdmin && (row.market === "spot" || row.market === "futures") && <>{" "}<button className="button button-secondary" type="button" disabled={actionBusy || loading} onClick={() => setPendingDelete({ symbol: row.symbol, market: row.market as "spot" | "futures", timeframe: row.timeframe, scope: "features" })}>Delete features {row.symbol} {row.market} {row.timeframe}</button>{" "}<button className="button button-danger" type="button" disabled={actionBusy || loading} onClick={() => setPendingDelete({ symbol: row.symbol, market: row.market as "spot" | "futures", timeframe: row.timeframe, scope: "all" })}>Delete dataset {row.symbol} {row.market} {row.timeframe}</button></>}</>
+          ) }] : []),
+        ]} />
+
     </section>
     <section className="panel" aria-labelledby="master-jobs-title">
       <div className="panel-heading"><h2 id="master-jobs-title">Recent background jobs</h2></div>

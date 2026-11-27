@@ -22,6 +22,8 @@ describe("read-only Market Screener V2 panel", () => {
     render(<AuthGate><ScreenerPanel /></AuthGate>);
     expect(await screen.findByText("BTCUSDT")).toBeInTheDocument();
     expect(screen.getByText("ETHUSDT")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Price$/ }));
+    expect(screen.getByRole("columnheader", { name: "Price" })).toHaveAttribute("aria-sort", "ascending");
     fireEvent.change(screen.getByRole("searchbox", { name: "Filter signals" }), { target: { value: "btc" } });
     expect(screen.getByText("BTCUSDT")).toBeInTheDocument();
     expect(screen.queryByText("ETHUSDT")).not.toBeInTheDocument();
