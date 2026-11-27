@@ -100,6 +100,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("035_durable_ws_tickets_and_rate_limits", "migrate_durable_ws_tickets_and_rate_limits.sql", "Durable multi-worker WebSocket tickets and compute rate limits"),
     Migration("036_service_control", "migrate_service_control.sql", "Runtime pause/resume switches for background workers"),
     Migration("037_news_ai_settings", "migrate_news_ai_settings.sql", "Runtime overrides for News AI guardrails"),
+    Migration("038_custom_strategies", "migrate_custom_strategies.sql", "Shared custom strategy definitions"),
 )
 
 
@@ -312,6 +313,12 @@ def apply_pending(
 
             log(f"applying {m.version}  {m.filename}")
             tolerated = run_statements(cursor, split_statements(text), label=m.version, log=log)
+            if m.version == "038_custom_strategies":
+                legacy_path = ROOT / "custom_strategies.json"
+                if legacy_path.is_file():
+                    from backtest.custom_strategy import read_definitions
+                    from db.custom_strategy_store import import_legacy_definitions
+                    import_legacy_definitions(cursor, read_definitions(legacy_path))
             _record(cursor, conn, m, digest, "applied" if not tolerated else "applied-idempotent")
             handled.append(m.version)
         return handled

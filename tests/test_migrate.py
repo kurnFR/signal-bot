@@ -183,6 +183,22 @@ class TestApply(unittest.TestCase):
         self.assertEqual(again, [])
         self.assertEqual(len(conn.executed), 2)
 
+    def test_custom_strategy_migration_imports_legacy_file_only_once(self):
+        from unittest.mock import patch
+        import db.migrate as migration_module
+
+        (self.dir / "custom_strategies.json").write_text('[{"name":"legacy_rsi"}]', encoding="utf-8")
+        migration = next(m for m in MIGRATIONS if m.version == "038_custom_strategies")
+        conn = FakeConn()
+        with (
+            patch.object(migration_module, "ROOT", self.dir),
+            patch("db.custom_strategy_store.import_legacy_definitions") as importer,
+        ):
+            self.assertEqual(apply_pending(conn, migrations=[migration], log=lambda _: None), [migration.version])
+            self.assertEqual(apply_pending(conn, migrations=[migration], log=lambda _: None), [])
+        importer.assert_called_once()
+        self.assertEqual(importer.call_args.args[1], [{"name": "legacy_rsi"}])
+
     def test_fresh_install_marks_upgrade_only_as_baseline_covered(self):
         migs = write_set(self.dir, [("base.sql", "CREATE TABLE t (i INT);", False),
                                     ("upg.sql", "ALTER TABLE t ADD COLUMN c INT;", True)])

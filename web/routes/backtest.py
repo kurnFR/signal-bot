@@ -738,9 +738,11 @@ def _auto_promote_top_candidate(
 
 @router.get("/strategies")
 def list_strategies():
+    from web.routes.custom_strategy import load_custom_strategies
+    load_custom_strategies()
     results = []
     seen = set()
-    for name in STRATEGIES.keys():
+    for name in STRATEGIES.copy():
         if name in seen:
             continue
         seen.add(name)
@@ -1098,7 +1100,7 @@ def run_all_strategies(
 
     results = []
 
-    for strategy_name, strategy_fn in STRATEGIES.items():
+    for strategy_name, strategy_fn in STRATEGIES.copy().items():
         try:
             run_params = dict(BASE_PARAMS)
             run_params.update({

@@ -1,60 +1,33 @@
+"""Migration import and validation for the legacy on-disk definitions."""
 import json
+from unittest.mock import MagicMock
 
 import pytest
-from fastapi import HTTPException
 
-from web.routes import custom_strategy
+from backtest.custom_strategy import read_definitions
+from db.custom_strategy_store import import_legacy_definitions
 
 
-def test_read_saved_strategies_rejects_corrupt_json_without_overwriting(tmp_path, monkeypatch):
+@pytest.mark.parametrize("contents", ["{not valid json", '{"name": "not-a-list"}'])
+def test_legacy_import_rejects_corrupt_input_without_writing(tmp_path, contents):
     path = tmp_path / "custom_strategies.json"
-    original = "{not valid json"
-    path.write_text(original, encoding="utf-8")
-    monkeypatch.setattr(custom_strategy, "CUSTOM_FILE", str(path))
-
-    with pytest.raises(HTTPException) as exc:
-        custom_strategy._read_saved_strategies()
-
-    assert exc.value.status_code == 500
-    assert path.read_text(encoding="utf-8") == original
+    path.write_text(contents, encoding="utf-8")
+    with pytest.raises(ValueError):
+        read_definitions(path)
+    assert path.read_text(encoding="utf-8") == contents
 
 
-def test_read_saved_strategies_rejects_non_list_payload(tmp_path, monkeypatch):
-    path = tmp_path / "custom_strategies.json"
-    path.write_text(json.dumps({"name": "not-a-list"}), encoding="utf-8")
-    monkeypatch.setattr(custom_strategy, "CUSTOM_FILE", str(path))
-
-    with pytest.raises(HTTPException) as exc:
-        custom_strategy._read_saved_strategies()
-
-    assert exc.value.status_code == 500
+def test_legacy_import_maps_enabled_flag_and_preserves_existing_definition():
+    cursor = MagicMock()
+    saved = {"name": "prior_rule", "enabled": False}
+    import_legacy_definitions(cursor, [saved])
+    sql, args = cursor.execute.call_args.args
+    assert "ON DUPLICATE KEY UPDATE name = name" in sql
+    assert args == ("prior_rule", json.dumps(saved), False)
 
 
-def test_write_saved_strategies_atomically_persists_json(tmp_path, monkeypatch):
-    path = tmp_path / "custom_strategies.json"
-    path.write_text('[{"name": "old"}]', encoding="utf-8")
-    monkeypatch.setattr(custom_strategy, "CUSTOM_FILE", str(path))
-
-    custom_strategy._write_saved_strategies([{"name": "new"}])
-
-    assert json.loads(path.read_text(encoding="utf-8")) == [{"name": "new"}]
-    assert list(tmp_path.glob(".custom-strategies-*.tmp")) == []
-
-
-def test_failed_atomic_replace_preserves_previous_file(tmp_path, monkeypatch):
-    path = tmp_path / "custom_strategies.json"
-    original = '[{"name": "preserve-me"}]'
-    path.write_text(original, encoding="utf-8")
-    monkeypatch.setattr(custom_strategy, "CUSTOM_FILE", str(path))
-
-    def fail_replace(_source, _destination):
-        raise OSError("simulated replace failure")
-
-    monkeypatch.setattr(custom_strategy.os, "replace", fail_replace)
-
-    with pytest.raises(HTTPException) as exc:
-        custom_strategy._write_saved_strategies([{"name": "new"}])
-
-    assert exc.value.status_code == 500
-    assert path.read_text(encoding="utf-8") == original
-    assert list(tmp_path.glob(".custom-strategies-*.tmp")) == []
+def test_legacy_import_rejects_oversize_name_before_insert():
+    cursor = MagicMock()
+    with pytest.raises(ValueError):
+        import_legacy_definitions(cursor, [{"name": "a" * 81}])
+    cursor.execute.assert_not_called()

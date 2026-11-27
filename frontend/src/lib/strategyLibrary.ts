@@ -7,6 +7,8 @@ export interface StrategyCondition {
 }
 export interface CustomStrategy {
   name: string;
+  enabled?: boolean;
+  active_deployments?: number;
   displayName?: string;
   description?: string;
   rationale?: string;
@@ -51,6 +53,8 @@ function validCondition(value: unknown): value is StrategyCondition {
 }
 function validCustomStrategy(value: unknown): value is CustomStrategy {
   if (!isRecord(value) || typeof value.name !== "string" || !value.name.trim()) return false;
+  if (value.enabled !== undefined && typeof value.enabled !== "boolean") return false;
+  if (value.active_deployments !== undefined && !isCount(value.active_deployments)) return false;
   for (const key of ["displayName", "description", "rationale"] as const) {
     if (value[key] !== undefined && typeof value[key] !== "string") return false;
   }
@@ -194,15 +198,17 @@ export interface StrategyMutationResult {
   displayName?: string;
   message: string;
 }
+export interface StrategyDeploymentReference { id: number; symbol: string; timeframe: string }
+
 export class StrategyLibraryActionError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, message: string, readonly deployments: StrategyDeploymentReference[] = []) {
     super(message);
     this.name = "StrategyLibraryActionError";
   }
 }
 async function mutateStrategyLibrary(
   path: string,
-  method: "POST" | "DELETE",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   body?: unknown,
 ): Promise<StrategyMutationResult> {
   assertApiPath(path);
@@ -227,10 +233,14 @@ async function mutateStrategyLibrary(
     window.dispatchEvent(new Event("signal-bot:session-expired"));
   }
   if (!response.ok) {
-    const detail = payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string"
-      ? payload.detail.slice(0, 400)
-      : `Strategy library action failed (${response.status})`;
-    throw new StrategyLibraryActionError(response.status, detail);
+    const detail = isRecord(payload) ? payload.detail : null;
+    const message = typeof detail === "string" ? detail : isRecord(detail) && typeof detail.message === "string"
+      ? detail.message : `Strategy library action failed (${response.status})`;
+    const deployments = isRecord(detail) && Array.isArray(detail.deployments) ? detail.deployments.filter(
+      (row): row is StrategyDeploymentReference => isRecord(row) && isCount(row.id) &&
+        typeof row.symbol === "string" && typeof row.timeframe === "string",
+    ) : [];
+    throw new StrategyLibraryActionError(response.status, message.slice(0, 400), deployments);
   }
   if (!isRecord(payload) || typeof payload.message !== "string" ||
       (payload.status !== undefined && typeof payload.status !== "string") ||
@@ -243,6 +253,14 @@ async function mutateStrategyLibrary(
 export function createCustomStrategy(input: CreateCustomStrategyInput): Promise<StrategyMutationResult> {
   return mutateStrategyLibrary("/api/custom-strategy/create", "POST", input);
 }
+export function updateCustomStrategy(name: string, input: CreateCustomStrategyInput): Promise<StrategyMutationResult> {
+  return mutateStrategyLibrary(`/api/custom-strategy/${encodeURIComponent(name)}`, "PUT", input);
+}
+
+export function setCustomStrategyEnabled(name: string, enabled: boolean, force = false): Promise<StrategyMutationResult> {
+  return mutateStrategyLibrary(`/api/custom-strategy/${encodeURIComponent(name)}/enabled?force=${force}`, "PATCH", { enabled });
+}
+
 export function deleteCustomStrategy(name: string): Promise<StrategyMutationResult> {
   const normalized = name.trim().toLowerCase();
   if (!/^[a-z0-9_]{1,80}$/.test(normalized)) {

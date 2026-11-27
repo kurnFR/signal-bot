@@ -3,7 +3,7 @@ import { useAuth } from "./AuthGate";
 import { BookOpen, RefreshCw, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
 import { fetchBacktestStrategies, type BacktestStrategy } from "./lib/backtestStudio";
-import { createCustomStrategy, deleteCustomStrategy, fetchCustomStrategies, fetchStrategyIndicators, generateAIStrategyDraft, quickTestCustomStrategy, StrategyLibraryActionError, StrategyQuickTestError, type AIStrategyChatMessage, type AIStrategyDraftResponse, type CustomStrategy, type QuickTestResult, type StrategyConditionInput, type StrategyIndicator } from "./lib/strategyLibrary";
+import { updateCustomStrategy, setCustomStrategyEnabled, createCustomStrategy, deleteCustomStrategy, fetchCustomStrategies, fetchStrategyIndicators, generateAIStrategyDraft, quickTestCustomStrategy, StrategyLibraryActionError, StrategyQuickTestError, type AIStrategyChatMessage, type AIStrategyDraftResponse, type CustomStrategy, type QuickTestResult, type StrategyConditionInput, type StrategyIndicator } from "./lib/strategyLibrary";
 
 interface StrategyLibraryPanelProps { onSelectForBacktest?: (strategyId: string) => void; onSelectForPaper?: (strategyId: string) => void; }
 function messageFor(cause: unknown) {
@@ -48,7 +48,8 @@ export function StrategyLibraryPanel({ onSelectForBacktest, onSelectForPaper }: 
   const [useTrailingStop, setUseTrailingStop] = useState(false);
   const [trailActivationR, setTrailActivationR] = useState("1");
   const [trailDistanceAtrMult, setTrailDistanceAtrMult] = useState("1.5");
-  const [actionBusy, setActionBusy] = useState<"create" | "delete" | null>(null);
+  const [pendingDisable, setPendingDisable] = useState<CustomStrategy | null>(null);
+  const [actionBusy, setActionBusy] = useState<"create" | "delete" | "toggle" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<CustomStrategy | null>(null);
@@ -172,14 +173,15 @@ export function StrategyLibraryPanel({ onSelectForBacktest, onSelectForPaper }: 
     if (editingStrategyName && !confirmUpdate) { setPendingUpdateConfirmation(true); setActionError(null); setActionMessage(null); return; }
     setActionBusy("create"); setActionError(null); setActionMessage(null);
     try {
-      const result = await createCustomStrategy({
+      const input = {
         name: normalizedName, displayName: createDisplayName.trim(),
         description: createDescription.trim() || "Custom rule-based strategy",
         rationale: createRationale.trim(),
         longConditions: conditionInput(longConditions), shortConditions: conditionInput(shortConditions),
         slAtrMult: sl, riskRewardRatio: rr, useTrailingStop,
         trailActivationR: activation, trailDistanceAtrMult: distance,
-      });
+      };
+      const result = editingStrategyName ? await updateCustomStrategy(editingStrategyName, input) : await createCustomStrategy(input);
       setActionMessage(result.message); setShowCreateForm(false); setEditingStrategyName(null); setPendingUpdateConfirmation(false); setAttempt((value) => value + 1);
     } catch (cause) {
       if (cause instanceof StrategyLibraryActionError && cause.status === 403) setActionError("Your account cannot create strategies. Only admin or trader roles can perform this action.");
@@ -237,6 +239,26 @@ export function StrategyLibraryPanel({ onSelectForBacktest, onSelectForPaper }: 
     setActionError(null);
     setActionMessage("Generated draft loaded into the editor. Review it and select Save strategy to persist; nothing has been saved yet.");
   };
+  const toggleStrategy = async (strategy: CustomStrategy, enabled: boolean, force = false) => {
+    setActionBusy("toggle");
+    setActionError(null);
+    setActionMessage(null);
+    try {
+      const result = await setCustomStrategyEnabled(strategy.name, enabled, force);
+      setActionMessage(result.message);
+      setPendingDisable(null);
+      setAttempt((value) => value + 1);
+    } catch (cause) {
+      if (cause instanceof StrategyLibraryActionError && cause.deployments.length) {
+        const deployments = cause.deployments.map((row) => `${row.symbol}/${row.timeframe} (#${row.id})`).join(", ");
+        setActionError(`${cause.message} ${deployments}`);
+        if (!enabled) setPendingDisable(strategy);
+      } else setActionError(cause instanceof Error ? cause.message : "Could not change strategy state.");
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
   const confirmDeleteStrategy = async () => {
     if (!pendingDelete) return;
     setActionBusy("delete"); setActionError(null); setActionMessage(null);
@@ -245,7 +267,10 @@ export function StrategyLibraryPanel({ onSelectForBacktest, onSelectForPaper }: 
       setActionMessage(result.message); setPendingDelete(null); setAttempt((value) => value + 1);
     } catch (cause) {
       if (cause instanceof StrategyLibraryActionError && cause.status === 403) setActionError("Your account cannot delete strategies. Only admin or trader roles can perform this action.");
-      else setActionError(cause instanceof Error ? cause.message : "Strategy deletion failed. Please retry.");
+      else if (cause instanceof StrategyLibraryActionError && cause.deployments.length) {
+        const deployments = cause.deployments.map((row) => `${row.symbol}/${row.timeframe} (#${row.id})`).join(", ");
+        setActionError(`${cause.message} ${deployments}`);
+      } else setActionError(cause instanceof Error ? cause.message : "Strategy deletion failed. Please retry.");
     } finally { setActionBusy(null); }
   };
   const runQuickTest = async (strategy: CustomStrategy) => {
@@ -334,10 +359,11 @@ export function StrategyLibraryPanel({ onSelectForBacktest, onSelectForPaper }: 
     <section className="panel" aria-labelledby="strategy-library-title">
       <div className="panel-heading"><div><h2 id="strategy-library-title">Custom strategy library</h2><p>Saved rule definitions from the existing API. Creating or deleting a definition does not activate it.</p></div><button className="button button-secondary" onClick={() => setAttempt((n) => n + 1)} disabled={loading}><RefreshCw size={15} /> Refresh</button></div>
       {loading && !strategies.length && !error ? <p className="empty-state" role="status">Loading saved strategies…</p> : !strategies.length && !error ? <p className="empty-state">No saved custom strategies were returned by the API.</p> : <div className="strategy-library-list">{strategies.map((strategy) => <article className="strategy-library-card" key={strategy.name}>
-        <div className="panel-heading"><div><h3>{strategy.displayName || strategy.name}</h3><p>{strategy.name}</p></div><span className="panel-counter">SAVED DEFINITION</span></div>
+        <div className="panel-heading"><div><h3>{strategy.displayName || strategy.name}</h3><p>{strategy.name}</p></div><span className={strategy.enabled === false ? "badge badge-warn" : "badge badge-ok"}>{strategy.enabled === false ? "Disabled" : "Enabled"}</span></div>
+        <p className="panel-subtitle">Used by {strategy.active_deployments ?? 0} active deployments</p>
         {strategy.description && <p>{strategy.description}</p>}{strategy.rationale && <p className="strategy-rationale">{strategy.rationale}</p>}
         <div className="strategy-rule-grid"><Conditions label="Long entry conditions" items={strategy.longConditions} /><Conditions label="Short entry conditions" items={strategy.shortConditions} /></div>
-        <div className="strategy-param-list"><span>Stop loss: {strategy.slAtrMult ?? "—"} ATR</span><span>Risk/reward: {strategy.riskRewardRatio ?? "—"}:1</span><span>Trailing stop: {strategy.useTrailingStop ? "Enabled" : "Disabled"}</span></div>{canQuickTest && <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={quickTestBusy !== null || loading} onClick={() => void runQuickTest(strategy)}>{quickTestBusy === strategy.name ? "Testing…" : "Quick test"}</button><button className="button button-secondary" type="button" disabled={actionBusy !== null || loading} onClick={() => editSavedStrategy(strategy)}>Edit strategy</button>{canManageStrategies && <button className="button button-secondary" type="button" disabled={actionBusy !== null || loading} onClick={() => { setActionError(null); setActionMessage(null); setPendingDelete(strategy); }}>Delete strategy</button>}</div>}{quickTestResults[strategy.name] && <section className="strategy-quick-test-result" aria-label={`Quick test result for ${strategy.name}`}><h4>Quick-test result · {quickTestResults[strategy.name].symbol} {quickTestResults[strategy.name].market} {quickTestResults[strategy.name].timeframe}</h4><div className="metrics-grid"><article className="metric-card"><div className="metric-top"><span>Candles</span></div><div className="metric-value">{quickTestResults[strategy.name].totalCandles}</div></article><article className="metric-card"><div className="metric-top"><span>Trades</span></div><div className="metric-value">{quickTestResults[strategy.name].totalTrades}</div></article><article className="metric-card"><div className="metric-top"><span>Win rate</span></div><div className="metric-value">{quickTestResults[strategy.name].winRatePct == null ? "—" : `${Number(quickTestResults[strategy.name].winRatePct).toFixed(2)}%`}</div></article><article className="metric-card"><div className="metric-top"><span>Net R</span></div><div className="metric-value">{quickTestResults[strategy.name].netR ?? "—"}</div></article><article className="metric-card"><div className="metric-top"><span>Profit factor</span></div><div className="metric-value">{quickTestResults[strategy.name].profitFactor ?? "—"}</div></article><article className="metric-card"><div className="metric-top"><span>Max drawdown</span></div><div className="metric-value">{quickTestResults[strategy.name].maxDrawdownR == null ? "—" : `${quickTestResults[strategy.name].maxDrawdownR} R`}</div></article><article className="metric-card"><div className="metric-top"><span>Expectancy</span></div><div className="metric-value">{quickTestResults[strategy.name].expectancyR ?? "—"}</div></article></div></section>}
+        <div className="strategy-param-list"><span>Stop loss: {strategy.slAtrMult ?? "—"} ATR</span><span>Risk/reward: {strategy.riskRewardRatio ?? "—"}:1</span><span>Trailing stop: {strategy.useTrailingStop ? "Enabled" : "Disabled"}</span></div>{canQuickTest && <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={quickTestBusy !== null || loading} onClick={() => void runQuickTest(strategy)}>{quickTestBusy === strategy.name ? "Testing…" : "Quick test"}</button><button className="button button-secondary" type="button" disabled={actionBusy !== null || loading} onClick={() => editSavedStrategy(strategy)}>Edit strategy</button>{canManageStrategies && <button className="button button-secondary" type="button" disabled={actionBusy !== null || loading} onClick={() => void toggleStrategy(strategy, strategy.enabled === false)}>{strategy.enabled === false ? "Enable strategy" : "Disable strategy"}</button>}{canManageStrategies && <button className="button button-secondary" type="button" disabled={actionBusy !== null || loading} onClick={() => { setActionError(null); setActionMessage(null); setPendingDelete(strategy); }}>Delete strategy</button>}</div>}{quickTestResults[strategy.name] && <section className="strategy-quick-test-result" aria-label={`Quick test result for ${strategy.name}`}><h4>Quick-test result · {quickTestResults[strategy.name].symbol} {quickTestResults[strategy.name].market} {quickTestResults[strategy.name].timeframe}</h4><div className="metrics-grid"><article className="metric-card"><div className="metric-top"><span>Candles</span></div><div className="metric-value">{quickTestResults[strategy.name].totalCandles}</div></article><article className="metric-card"><div className="metric-top"><span>Trades</span></div><div className="metric-value">{quickTestResults[strategy.name].totalTrades}</div></article><article className="metric-card"><div className="metric-top"><span>Win rate</span></div><div className="metric-value">{quickTestResults[strategy.name].winRatePct == null ? "—" : `${Number(quickTestResults[strategy.name].winRatePct).toFixed(2)}%`}</div></article><article className="metric-card"><div className="metric-top"><span>Net R</span></div><div className="metric-value">{quickTestResults[strategy.name].netR ?? "—"}</div></article><article className="metric-card"><div className="metric-top"><span>Profit factor</span></div><div className="metric-value">{quickTestResults[strategy.name].profitFactor ?? "—"}</div></article><article className="metric-card"><div className="metric-top"><span>Max drawdown</span></div><div className="metric-value">{quickTestResults[strategy.name].maxDrawdownR == null ? "—" : `${quickTestResults[strategy.name].maxDrawdownR} R`}</div></article><article className="metric-card"><div className="metric-top"><span>Expectancy</span></div><div className="metric-value">{quickTestResults[strategy.name].expectancyR ?? "—"}</div></article></div></section>}
       </article>)}</div>}
     </section>
     <section className="panel" aria-labelledby="indicator-catalog-title">
@@ -345,6 +371,12 @@ export function StrategyLibraryPanel({ onSelectForBacktest, onSelectForPaper }: 
       {loading && !indicators.length && !error ? <p className="empty-state" role="status">Loading indicator catalog…</p> : <div className="table-scroll"><table><thead><tr><th scope="col">Indicator</th><th scope="col">Category</th><th scope="col">Description</th><th scope="col">Default</th></tr></thead><tbody>{indicators.map((item) => <tr key={item.name}><td><strong>{item.label || item.name}</strong><div><code>{item.name}</code></div></td><td>{item.category || "—"}</td><td>{item.description || "—"}</td><td>{item.default ?? "—"}</td></tr>)}</tbody></table></div>}
     </section>
     <p className="page-description">Safety: admin/trader users can generate a draft, quick-test, create, and delete saved definitions. AI generation and quick tests are non-persisted; generated drafts must be reviewed and explicitly saved. Creation/deletion changes the saved library but does not activate or promote a strategy. Use the catalog to review a backtest or configure a paper deployment.</p>
-    {pendingDelete && <section className="panel" aria-labelledby="strategy-delete-confirm-title"><div className="panel-heading"><div><h2 id="strategy-delete-confirm-title">Delete strategy?</h2><p>This permanently removes the saved definition and its inverse registration. It does not delete historical backtest records.</p></div></div><p><strong>{pendingDelete.displayName || pendingDelete.name}</strong> ({pendingDelete.name})</p><div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={actionBusy !== null} onClick={() => setPendingDelete(null)}>Cancel</button><button className="button button-primary" type="button" disabled={actionBusy !== null} onClick={() => void confirmDeleteStrategy()}>{actionBusy === "delete" ? "Deleting…" : "Delete strategy"}</button></div></section>}
+    {pendingDisable && <section className="panel" aria-labelledby="strategy-disable-confirm-title">
+      <h2 id="strategy-disable-confirm-title">Disable {pendingDisable.displayName || pendingDisable.name}?</h2>
+      <p>Active deployments stop opening positions. Pending entries are cancelled and open positions continue to be managed.</p>
+      <button className="button button-secondary" type="button" onClick={() => setPendingDisable(null)}>Keep enabled</button>{" "}
+      <button className="button button-danger" type="button" disabled={actionBusy !== null} onClick={() => void toggleStrategy(pendingDisable, false, true)}>Disable despite active deployments</button>
+    </section>}
+    {pendingDelete && <section className="panel" aria-labelledby="strategy-delete-confirm-title"><div className="panel-heading"><div><h2 id="strategy-delete-confirm-title">Delete strategy?</h2><p>This removes the saved definition and its inverse registration. Referenced deployments and open positions must be resolved first.</p></div></div><p><strong>{pendingDelete.displayName || pendingDelete.name}</strong> ({pendingDelete.name})</p><div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={actionBusy !== null} onClick={() => setPendingDelete(null)}>Cancel</button><button className="button button-primary" type="button" disabled={actionBusy !== null} onClick={() => void confirmDeleteStrategy()}>{actionBusy === "delete" ? "Deleting…" : "Delete strategy"}</button></div></section>}
   </>;
 }

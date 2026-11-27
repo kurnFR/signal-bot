@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 from textwrap import dedent
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 from mysql.connector import Error as DatabaseError
 from unittest.mock import patch
@@ -206,7 +207,6 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         frame = self._make_df(bars)
         frame.loc[59, "rsi"] = 25
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "custom_strategies.json"
             fixture = Path(tmp) / "candles.json"
             frame.to_json(fixture, orient="records")
             script = dedent("""
@@ -218,16 +218,19 @@ class TestPaperPositionLifecycle(unittest.TestCase):
                 app = FastAPI()
                 app.include_router(bt.router)
                 app.include_router(web.router)
+                @app.middleware("http")
+                async def fixture_actor(request, call_next):
+                    request.state.user = {"id": 1, "username": "admin"}
+                    return await call_next(request)
                 client = TestClient(app)
-                web.CUSTOM_FILE = sys.argv[1]
                 web.LLM_PROVIDER = "offline"
                 web.OPENROUTER_API_KEY = web.ANTHROPIC_API_KEY = ""
                 draft = client.post("/api/custom-strategy/generate-ai", json={"prompt": "RSI below 35, stop 2 ATR, RR 3"}).json()
                 rule = web.CustomStrategyRequest(**draft["strategy"])
-                rule.useTrailingStop = bool(int(sys.argv[3]))
+                rule.useTrailingStop = bool(int(sys.argv[2]))
                 rule.trailActivationR, rule.trailDistanceAtrMult = 2, 2.5
                 name = client.post("/api/custom-strategy/create", json=rule.model_dump()).json()["name"]
-                frame = pd.read_json(sys.argv[2], orient="records", convert_dates=False)
+                frame = pd.read_json(sys.argv[1], orient="records", convert_dates=False)
                 with patch.object(bt, "fetch_ohlcv_with_features_df", return_value=frame):
                     result = client.post("/api/backtest/run", json=dict(strategy=name, symbol="BTCUSDT",
                         market="spot", timeframe="1h", data_segment="full", save_to_db=False)).json()
@@ -236,18 +239,24 @@ class TestPaperPositionLifecycle(unittest.TestCase):
                 print(json.dumps([name, result["trades"][0]]))
             """)
             expected = subprocess.check_output(
-                [sys.executable, "-c", script, str(path), str(fixture), str(int(enabled))], text=True)
+                [sys.executable, "-c", script, str(fixture), str(int(enabled))], text=True)
             name, reference = json.loads(expected)
             pe.set_paper_config("BTCUSDT", "spot", "1h", name, True, telegram_enabled=enabled)
-            with (patch("backtest.custom_strategy.CUSTOM_FILE", str(path)),
-                  patch.object(pe, "fetch_ohlcv_with_features_df", return_value=frame.iloc[:60]) as candles,
+            def remove_definition():
+                conn = self.pool.get_connection()
+                with db._owned_cursor(conn) as cur:
+                    cur.execute("DELETE FROM custom_strategies WHERE name=%s", (name,))
+                    conn.commit()
+
+            self.addCleanup(remove_definition)
+            with (patch.object(pe, "fetch_ohlcv_with_features_df", return_value=frame.iloc[:60]) as candles,
                   patch.object(pe, "fetch_latest_open_candle", return_value=frame.iloc[60].to_dict()) as forming,
                   patch("time.time", return_value=entry / 1000 + 5),
                   patch("notifications.telegram_notifier.send_telegram_message") as transport):
                 # Leave a durable pending order, then delete the catalog definition before recovery.
                 with patch.object(pe, "fill_pending_order", return_value={"status": "pending"}):
                     pe.sync_and_evaluate_paper_trading()
-                path.write_text("[]")
+                remove_definition()
                 result = pe.sync_and_evaluate_paper_trading()
                 self.assertEqual(result["new_positions_opened"], 1)
                 position, = pe.get_active_positions()
@@ -329,6 +338,61 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         self.assertGreater(float(trades[0]["net_pnl"]), 0.0)
         cur.close()
         conn.close()
+
+    def test_concurrent_custom_strategy_creates_preserve_both_definitions(self):
+        from db.custom_strategy_store import list_definitions, mutate_definition
+
+        names = ("concurrent_rule_fixture_a", "concurrent_rule_fixture_b")
+
+        def create(name):
+            return mutate_definition(name, "create", definition={"name": name})
+
+        def cleanup_definitions():
+            conn = self.pool.get_connection()
+            with db._owned_cursor(conn) as cur:
+                cur.execute("DELETE FROM custom_strategies WHERE name IN (%s,%s)", names)
+                conn.commit()
+
+        self.addCleanup(cleanup_definitions)
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            self.assertEqual(list(workers.map(create, names)), [True, True])
+        self.assertTrue(set(names) <= {definition["name"] for definition in list_definitions()})
+
+    def test_disabled_custom_strategy_blocks_entries_and_still_manages_open_positions(self):
+        from db.custom_strategy_store import StrategyInUseError, mutate_definition
+
+        name = "disabled_exit_fixture"
+        definition = {
+            "name": name, "displayName": "Disabled exit fixture",
+            "longConditions": [{"indicator": "rsi", "operator": "<", "value": 30}],
+        }
+        self.assertTrue(mutate_definition(name, "create", definition=definition))
+        def cleanup_definition():
+            conn = self.pool.get_connection()
+            with db._owned_cursor(conn) as cur:
+                cur.execute("DELETE FROM custom_strategies WHERE name=%s", (name,))
+                conn.commit()
+        self.addCleanup(cleanup_definition)
+
+        cfg_id = self._create_config(strategy_name=name)
+        self._create_position(config_id=cfg_id, strategy_name=name, stop_loss=48000, last_update_time=1000)
+        with self.assertRaises(StrategyInUseError) as conflict:
+            mutate_definition(name, "toggle", enabled=False)
+        self.assertEqual(conflict.exception.deployments[0]["id"], cfg_id)
+        self.assertTrue(mutate_definition(name, "toggle", enabled=False, force=True))
+        with self.assertRaises(StrategyInUseError):
+            mutate_definition(name, "delete")
+        registry = pe.paper_strategy_registry(pe.STRATEGIES)
+        self.assertNotIn(name, registry)
+        self.assertNotIn(f"inverse_{name}", registry)
+
+        df = self._make_df([
+            {"open_time": 2000, "open": 49500, "high": 49800, "low": 47500, "close": 47800},
+        ])
+        with patch.object(pe, "fetch_ohlcv_with_features_df", return_value=df):
+            result = pe.sync_and_evaluate_paper_trading()
+        self.assertEqual(result["positions_closed"], 1)
+        self.assertEqual(result["new_positions_opened"], 0)
 
     def test_03_stop_loss_exit(self):
         """3. Stop-loss exit triggers at exact stop price with loss realized."""
