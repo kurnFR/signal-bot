@@ -142,3 +142,31 @@ Pushing a semantic version tag automatically runs the release test gate, publish
 git tag -a v1.0.0 -m "Release v1.0.0 — Commercial Quantitative Trading Workstation"
 git push origin v1.0.0
 ```
+
+### Preserve custom strategies before migration 038
+
+Before running `db.migrate`, copy the approved legacy
+`custom_strategies.json` into the migrating checkout or container at the
+repository root. Docker ignores the JSON file at build time. For an approved
+Docker rehearsal, copy the protected file into `web:/app/custom_strategies.json`
+and restrict access to the migration process. On systemd, use the root of the
+checkout running the migration.
+
+If migration 038 already ran without the file, supply the protected path and
+set the target `MYSQL_DATABASE` explicitly. Run the dry run before importing.
+
+```sh
+python -m tools.import_custom_strategies --path "$LEGACY_STRATEGIES" --dry-run
+python -m tools.import_custom_strategies --path "$LEGACY_STRATEGIES"
+python -m tools.import_custom_strategies --path "$LEGACY_STRATEGIES" --dry-run
+```
+
+Verify that the final dry run reports every definition as already present and
+zero invalid definitions. Existing DB rows are preserved. In the missing-file
+rehearsal, make the file visible to the web app after migration so readiness
+and Strategy Library can detect the missing names. Recheck both after import.
+
+Before rolling back to a JSON-based release, export the current DB definitions
+to a new restricted file with `python -m tools.export_custom_strategies --out "$STRATEGY_EXPORT"`.
+Edit and creation history after migration exists only in the DB. Preserve the
+export, verify its count, then install it at the old release's expected JSON path.

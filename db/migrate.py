@@ -316,10 +316,17 @@ def apply_pending(
             tolerated = run_statements(cursor, split_statements(text), label=m.version, log=log)
             if m.version == "038_custom_strategies":
                 legacy_path = ROOT / "custom_strategies.json"
-                if legacy_path.is_file():
-                    from backtest.custom_strategy import read_definitions
-                    from db.custom_strategy_store import import_legacy_definitions
-                    import_legacy_definitions(cursor, read_definitions(legacy_path))
+                from db.custom_strategy_store import import_legacy_definitions, load_legacy_definitions
+                try:
+                    definitions = load_legacy_definitions(legacy_path)
+                    inserted = import_legacy_definitions(cursor, definitions)
+                    log(f"custom_strategies.json found: {inserted} definitions imported")
+                except FileNotFoundError:
+                    log(f"WARNING: custom_strategies.json not found at {legacy_path}; no strategies imported. "
+                        "Run python -m tools.import_custom_strategies --path PATH.")
+                except (ValueError, OSError) as exc:
+                    conn.rollback()
+                    raise MigrationError(f"Invalid or unreadable legacy strategy file ({type(exc).__name__})") from exc
             _record(cursor, conn, m, digest, "applied" if not tolerated else "applied-idempotent")
             handled.append(m.version)
         return handled

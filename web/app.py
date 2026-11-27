@@ -52,6 +52,10 @@ async def lifespan(app: FastAPI):
     enable_durable_rate_limit()
     from web.routes.custom_strategy import load_custom_strategies
     load_custom_strategies()
+    from db.custom_strategy_store import legacy_strategy_drift
+    missing_strategies = legacy_strategy_drift()
+    if missing_strategies:
+        logger.warning("%d legacy strategies were not imported", missing_strategies)
     try:
         from web.job_store import mark_interrupted
         stale = mark_interrupted()
@@ -166,7 +170,11 @@ def readyz():
                     status_code=503,
                     content={"status": "not_ready", "reason": f"Insufficient tables ({count}) in database"},
                 )
-        return {"status": "ready"}
+        from db.custom_strategy_store import legacy_strategy_drift
+
+        missing = legacy_strategy_drift()
+        detail = {"legacy_strategies_not_imported": missing} if missing else {}
+        return {"status": "ready", **({"detail": detail} if detail else {})}
     except Exception as exc:
         # Unauthenticated probe: do not leak raw DB error text (host, port,
         # user, access-denied details) to callers. Log it server-side and
