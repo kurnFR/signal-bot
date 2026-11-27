@@ -7,11 +7,12 @@ from web.auth import log_audit
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 import math
+import re
 import time
 
 from paper.engine import (
     get_active_positions, get_paper_trades, get_paper_configs,
-    set_paper_config, delete_paper_config, purge_paper_config, PaperConfigActive, PaperConfigHasHistory, batch_update_paper_configs,
+    set_paper_config, delete_paper_config, purge_paper_config, PaperConfigActive, PaperConfigHasHistory, PaperDeploymentConflict, batch_update_paper_configs,
     manual_close_position, sync_and_evaluate_paper_trading,
     get_paper_metrics, update_paper_deployment, OVERLAY_STRATEGIES,
     _UNSET,
@@ -32,6 +33,7 @@ def _is_known_paper_strategy(strategy_name: str) -> bool:
 
 
 class PaperConfigRequest(BaseModel):
+    create_only: bool = False
     symbol: str = Field(..., max_length=20, json_schema_extra={"example": "ETHUSDT"})
     market: str = Field("spot", max_length=7, json_schema_extra={"example": "spot"})
     timeframe: str = Field("1d", max_length=10, json_schema_extra={"example": "1d"})
@@ -138,11 +140,13 @@ def _validate_generator_config(
 
 
 @router.post("/configs")
-def update_config(req: PaperConfigRequest):
+def update_config(req: PaperConfigRequest, request: Request = None):
     if not math.isfinite(req.allocated_capital) or not math.isfinite(req.risk_per_trade_pct):
         raise HTTPException(status_code=400, detail="allocated_capital and risk_per_trade_pct must be finite")
     if not req.symbol.strip() or not req.strategy_name.strip():
         raise HTTPException(status_code=400, detail="symbol and strategy_name must not be blank")
+    if req.create_only and not re.fullmatch(r"[A-Za-z0-9]{2,20}", req.symbol.strip()):
+        raise HTTPException(status_code=400, detail="Symbol must contain 2–20 letters or digits.")
     strategy_name = req.strategy_name.strip()
     norm_strategy = strategy_name[8:] if strategy_name.startswith("inverse_") else strategy_name
     if norm_strategy in PAIRS_STRATEGIES and req.symbol.strip().upper() == PAIRS_BASE_SYMBOL:
@@ -164,20 +168,33 @@ def update_config(req: PaperConfigRequest):
         strategy_name, req.ml_generator_model_id, req.ml_model_id, req.is_active
     )
     strategy_params = req.params if "params" in req.model_fields_set else _UNSET
-    res = set_paper_config(
-        req.symbol.strip().upper(),
-        req.market.strip().lower(),
-        req.timeframe.strip(),
-        strategy_name,
-        req.is_active,
-        req.allocated_capital,
-        req.risk_per_trade_pct,
-        req.ml_model_id.strip() if req.ml_model_id else None,
-        telegram_enabled=req.telegram_enabled,
-        report_enabled=req.report_enabled,
-        ml_generator_model_id=req.ml_generator_model_id.strip() if req.ml_generator_model_id else None,
-        strategy_params=strategy_params,
-    )
+    try:
+        res = set_paper_config(
+            req.symbol.strip().upper(),
+            req.market.strip().lower(),
+            req.timeframe.strip(),
+            strategy_name,
+            req.is_active,
+            req.allocated_capital,
+            req.risk_per_trade_pct,
+            req.ml_model_id.strip() if req.ml_model_id else None,
+            telegram_enabled=req.telegram_enabled,
+            report_enabled=req.report_enabled,
+            ml_generator_model_id=req.ml_generator_model_id.strip() if req.ml_generator_model_id else None,
+            strategy_params=strategy_params,
+            **({"create_only": True} if req.create_only else {}),
+        )
+    except PaperDeploymentConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logging.getLogger("web.paper_routes").warning("Paper config save failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Paper configuration could not be saved.") from exc
+    if req.create_only:
+        user = request.state.user
+        log_audit("PAPER_CONFIG_CLONED", user["username"], user["id"], {"config_id": res["id"]},
+                  request.client.host if request.client else "unknown")
     return res
 
 
@@ -226,6 +243,10 @@ def update_report_preferences(req: PaperReportPreferences):
 
 
 class PaperDeploymentPatch(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    ml_model_id: Optional[str] = Field(None, max_length=100)
+    ml_generator_model_id: Optional[str] = Field(None, max_length=100)
     is_active: Optional[bool] = None
     allocated_capital: Optional[float] = Field(None, ge=100, allow_inf_nan=False)
     risk_per_trade_pct: Optional[float] = Field(None, ge=0.1, le=10, allow_inf_nan=False)
@@ -235,7 +256,7 @@ class PaperDeploymentPatch(BaseModel):
 
 
 @router.patch("/configs/{config_id}")
-def edit_deployment(req: PaperDeploymentPatch, config_id: int = Path(..., gt=0)):
+def edit_deployment(req: PaperDeploymentPatch, config_id: int = Path(..., gt=0), request: Request = None):
     if req.is_active is True:
         config = next((row for row in get_paper_configs() if row["id"] == config_id), None)
         if config is None:
@@ -245,17 +266,33 @@ def edit_deployment(req: PaperDeploymentPatch, config_id: int = Path(..., gt=0))
             raise HTTPException(status_code=400, detail="This strategy is no longer available in the Strategy Library.")
         _validate_generator_config(
             config["symbol"], config["market"], config["timeframe"], strategy,
-            config.get("ml_generator_model_id"), config.get("ml_model_id"), True,
+            req.ml_generator_model_id if "ml_generator_model_id" in req.model_fields_set else config.get("ml_generator_model_id"),
+            req.ml_model_id if "ml_model_id" in req.model_fields_set else config.get("ml_model_id"), True,
         )
     patch_data = req.model_dump(exclude_none=True)
     if "params" in req.model_fields_set:
         patch_data["strategy_params"] = req.params if req.params else None
     patch_data.pop("params", None)
+    model_fields = {"ml_model_id", "ml_generator_model_id"} & req.model_fields_set
+    patch_data.update({field: getattr(req, field) for field in model_fields})
+    changes = {}
+    if model_fields:
+        patch_data["model_changes"] = changes
     try:
-        if not update_paper_deployment(config_id, **patch_data):
-            raise HTTPException(status_code=404, detail="Paper deployment not found")
+        updated = update_paper_deployment(config_id, **patch_data)
+    except PaperDeploymentConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logging.getLogger("web.paper_routes").warning("Paper deployment update failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Paper deployment could not be saved.") from exc
+    if not updated:
+        raise HTTPException(status_code=404, detail="Paper deployment not found")
+    if changes:
+        user = request.state.user
+        log_audit("PAPER_CONFIG_MODELS_UPDATED", user["username"], user["id"],
+                  {"config_id": config_id, "models": changes}, request.client.host if request.client else "unknown")
     updated_config = next((row for row in get_paper_configs() if row["id"] == config_id), None)
     return {
         "status": "success",
