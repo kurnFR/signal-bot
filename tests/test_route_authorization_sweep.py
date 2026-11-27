@@ -76,6 +76,7 @@ class TestRouteAuthorizationSweep(unittest.TestCase):
             "/api/settings",
             "/api/auth/audit-logs",
             "/api/custom-strategy",
+            "/api/news/settings",
         )
         for method, path in self.ops:
             if method != "GET":

@@ -19,7 +19,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import HOLDOUT_FRACTION, PAIRS_BASE_SYMBOL
 from db.db import fetch_ohlcv_with_features_df
 from backtest.strategies import STRATEGIES, FUNDING_STRATEGIES
-from backtest.params import BASE_PARAMS, parse_overrides
+from backtest.params import BASE_PARAMS, parse_overrides, retailbot2_param_overrides
+from backtest.strategies.retailbot2_strategies import RETAILBOT2_STRATEGY_NAMES
 from backtest.strategies import TREND_ALIGNMENT_STRATEGIES, PAIRS_STRATEGIES
 from backtest.strategies.trend_alignment import HTF_TIMEFRAME
 from backtest.metrics import compute_metrics
@@ -48,7 +49,10 @@ def run_walk_forward(symbol, market, timeframe, strategy_name, n_folds=4, overri
         print(f"Unknown strategy '{strategy_name}'. Available: {list(STRATEGIES.keys())}")
         return None
 
-    effective_params = dict(BASE_PARAMS, **(overrides or {}))
+    overrides = overrides or {}
+    if strategy_name in RETAILBOT2_STRATEGY_NAMES:
+        overrides = retailbot2_param_overrides(overrides)
+    effective_params = dict(BASE_PARAMS, **overrides)
     if overrides:
         print(f"Using parameter overrides: {overrides}\n")
 
@@ -158,7 +162,10 @@ def run_rolling_walk_forward(
     if strategy_name not in STRATEGIES:
         raise ValueError(f"Unknown strategy '{strategy_name}'. Available: {list(STRATEGIES.keys())}")
 
-    effective_params = dict(BASE_PARAMS, **(overrides or {}))
+    overrides = overrides or {}
+    if strategy_name in RETAILBOT2_STRATEGY_NAMES:
+        overrides = retailbot2_param_overrides(overrides)
+    effective_params = dict(BASE_PARAMS, **overrides)
     strategy_fn = STRATEGIES[strategy_name]
     full_df = fetch_ohlcv_with_features_df(
         symbol, market, timeframe, closed_only=True,

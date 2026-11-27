@@ -23,6 +23,7 @@ import sys
 import os
 import time
 from db.service_control import pause_gate
+from db.news_ai_control import get_effective_settings
 import json
 import argparse
 from collections import defaultdict
@@ -304,7 +305,8 @@ def evaluate_symbol(symbol, market, timeframe, events):
         return event_ids, 0
 
     stored = 0
-    if parsed["confidence"] >= NEWS_AI_MIN_CONFIDENCE and parsed["bias"] != "neutral":
+    min_confidence = get_effective_settings()["min_confidence"]
+    if parsed["confidence"] >= min_confidence and parsed["bias"] != "neutral":
         # Link the signal to the most recent/highest-signal event in the
         # batch (macro events, if present, take priority as the likely driver).
         primary_event = next((e for e in events if e["category"] == "macro_calendar"), events[0])
@@ -328,7 +330,7 @@ def evaluate_symbol(symbol, market, timeframe, events):
     else:
         logger.info(
             f"{symbol}: below threshold or neutral -- bias={parsed['bias']} "
-            f"confidence={parsed['confidence']} (min={NEWS_AI_MIN_CONFIDENCE})"
+            f"confidence={parsed['confidence']} (min={min_confidence})"
         )
     return event_ids, stored
 

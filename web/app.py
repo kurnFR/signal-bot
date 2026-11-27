@@ -183,7 +183,7 @@ PASSWORD_CHANGE_ALLOWED_PATHS = {
     "/api/auth/logout",
     "/api/auth/change-password",
 }
-ADMIN_ONLY_PREFIXES = ("/api/settings", "/api/auth/audit-logs", "/api/master-data/dataset")
+ADMIN_ONLY_PREFIXES = ("/api/settings", "/api/auth/audit-logs", "/api/news/settings", "/api/master-data/dataset")
 ADMIN_OR_TRADER_PREFIXES = (
     "/api/master-data/backfill",
     "/api/master-data/build-features",
@@ -196,6 +196,7 @@ RESEARCH_CONTROL_PREFIXES = (
 )
 
 TRADER_OR_ADMIN_PREFIXES = (
+    "/api/news/signals",
     "/api/paper/configs",
     "/api/paper/positions",
     "/api/paper/orders",

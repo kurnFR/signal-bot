@@ -99,6 +99,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("034_app_telegram_and_compliance", "migrate_app_telegram_and_compliance.sql", "Database-backed Telegram settings and user compliance terms"),
     Migration("035_durable_ws_tickets_and_rate_limits", "migrate_durable_ws_tickets_and_rate_limits.sql", "Durable multi-worker WebSocket tickets and compute rate limits"),
     Migration("036_service_control", "migrate_service_control.sql", "Runtime pause/resume switches for background workers"),
+    Migration("037_news_ai_settings", "migrate_news_ai_settings.sql", "Runtime overrides for News AI guardrails"),
 )
 
 

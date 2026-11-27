@@ -1,4 +1,4 @@
-import { getJson } from "./api";
+import { apiRequest, getJson } from "./api";
 
 export interface NewsPerformance {
   closed_trades: number;
@@ -162,4 +162,40 @@ export async function fetchNewsSnapshot(signal?: AbortSignal): Promise<NewsSnaps
     throw new Error("News events returned an invalid response");
   }
   return { stats, signals: signals.signals, events: events.events };
+}
+
+export interface NewsAISettings {
+  min_confidence: number;
+  max_trades_per_day: number;
+  source: "default" | "override";
+  defaults: { min_confidence: number; max_trades_per_day: number };
+  updated_by: string | null;
+  updated_at: string | null;
+}
+
+export const NEWS_MIN_CONFIDENCE_FLOOR = 50;
+export const NEWS_MAX_TRADES_CEILING = 20;
+
+function validSettings(value: unknown): value is NewsAISettings {
+  return isRecord(value) && typeof value.min_confidence === "number" && typeof value.max_trades_per_day === "number"
+    && (value.source === "default" || value.source === "override") && isRecord(value.defaults);
+}
+
+export async function fetchNewsAISettings(signal?: AbortSignal): Promise<NewsAISettings> {
+  const data = await getJson<unknown>("/api/news/settings", signal);
+  if (!validSettings(data)) throw new Error("News AI settings returned an invalid response");
+  return data;
+}
+
+export async function updateNewsAISettings(min_confidence: number, max_trades_per_day: number): Promise<void> {
+  await apiRequest("/api/news/settings", { method: "PUT", json: { min_confidence, max_trades_per_day } });
+}
+
+export async function resetNewsAISettings(): Promise<void> {
+  await apiRequest("/api/news/settings", { method: "DELETE" });
+}
+
+/** Finalize a pending signal as dismissed so the execution worker never trades it. */
+export async function dismissNewsSignal(id: number): Promise<void> {
+  await apiRequest(`/api/news/signals/${id}/dismiss`, { method: "POST" });
 }

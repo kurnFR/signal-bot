@@ -14,7 +14,8 @@ and their inverse counterparts, as well as the composite consensus runner:
 """
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, List
+from scipy.signal import argrelextrema
+from typing import Dict, Any
 from backtest.simulate import simulate
 from paper.indicators import Indicators
 
@@ -25,7 +26,7 @@ def _prepare_df(df: pd.DataFrame, params: dict) -> pd.DataFrame:
     c_close = df["close"]
 
     # ATR
-    atr_period = params.get("ATR_PERIOD", 14)
+    atr_period = params.get("RB2_ATR_PERIOD", 14)
     df["atr"] = Indicators.atr(df, atr_period)
 
     # RSI
@@ -62,7 +63,7 @@ def _prepare_df(df: pd.DataFrame, params: dict) -> pd.DataFrame:
 
 
 def _retail_stop_target(direction: str, raw_entry_price: float, atr_at_signal: float, row, params: dict):
-    rr = params.get("RISK_REWARD_RATIO", 2.0)
+    rr = params.get("RB2_RISK_REWARD_RATIO", 2.0)
     sl_mult = params.get("ATR_SL_MULTIPLIER", 1.5)
     risk = (atr_at_signal if atr_at_signal > 0 else raw_entry_price * 0.01) * sl_mult
     if direction == "LONG":
@@ -75,6 +76,8 @@ def _retail_stop_target(direction: str, raw_entry_price: float, atr_at_signal: f
 # 1. BB_REV / BB_REV_INV: Bollinger Band Reversion
 # ============================================================================
 def _bb_long(row, prev_row, params: dict) -> bool:
+    if row.name < params.get("BB_PERIOD", 20) + 8:
+        return False
     lower = row.get("bb_lower")
     if pd.isna(lower) or pd.isna(row.get("atr")) or row.get("atr", 0) <= 0:
         return False
@@ -86,6 +89,8 @@ def _bb_long(row, prev_row, params: dict) -> bool:
 
 
 def _bb_short(row, prev_row, params: dict) -> bool:
+    if row.name < params.get("BB_PERIOD", 20) + 8:
+        return False
     upper = row.get("bb_upper")
     if pd.isna(upper) or pd.isna(row.get("atr")) or row.get("atr", 0) <= 0:
         return False
@@ -93,7 +98,7 @@ def _bb_short(row, prev_row, params: dict) -> bool:
     prev_price = float(prev_row["close"])
     prox = params.get("BB_PROXIMITY_PCT", 0.003)
     near_upper = abs(price - upper) / (upper + 1e-10) < prox
-    return near_upper or (prev_price > upper and price < upper)
+    return (near_upper or (prev_price > upper and price < upper)) and not _bb_long(row, prev_row, params)
 
 
 def run_bb_rev(df: pd.DataFrame, params: dict) -> list:
@@ -110,11 +115,13 @@ def run_bb_rev_inverse(df: pd.DataFrame, params: dict) -> list:
 # 2. RSI_CTR / RSI_CTR_INV: RSI Counter-Trend
 # ============================================================================
 def _rsi_long(row, prev_row, params: dict) -> bool:
+    if row.name < 48:
+        return False
     rsi = row.get("rsi")
     prev_rsi = prev_row.get("rsi")
     if pd.isna(rsi) or pd.isna(prev_rsi) or pd.isna(row.get("atr")) or row.get("atr", 0) <= 0:
         return False
-    oversold = params.get("RSI_OVERSOLD", 35)
+    oversold = params.get("RB2_RSI_OVERSOLD", 35)
     zone_width = params.get("RSI_ZONE_WIDTH", 5)
     rsi_was_oversold = prev_rsi < oversold
     rsi_recovering = rsi > prev_rsi
@@ -123,11 +130,13 @@ def _rsi_long(row, prev_row, params: dict) -> bool:
 
 
 def _rsi_short(row, prev_row, params: dict) -> bool:
+    if row.name < 48:
+        return False
     rsi = row.get("rsi")
     prev_rsi = prev_row.get("rsi")
     if pd.isna(rsi) or pd.isna(prev_rsi) or pd.isna(row.get("atr")) or row.get("atr", 0) <= 0:
         return False
-    overbought = params.get("RSI_OVERBOUGHT", 65)
+    overbought = params.get("RB2_RSI_OVERBOUGHT", 65)
     zone_width = params.get("RSI_ZONE_WIDTH", 5)
     rsi_was_overbought = prev_rsi > overbought
     rsi_rejecting = rsi < prev_rsi
@@ -149,6 +158,8 @@ def run_rsi_ctr_inverse(df: pd.DataFrame, params: dict) -> list:
 # 3. MA_WHIP / MA_WHIP_INV: MA Crossover Whipsaw
 # ============================================================================
 def _ma_long(row, prev_row, params: dict) -> bool:
+    if row.name < 48:
+        return False
     fast = row.get("ema_fast")
     slow = row.get("ema_slow")
     prev_fast = prev_row.get("ema_fast")
@@ -163,6 +174,8 @@ def _ma_long(row, prev_row, params: dict) -> bool:
 
 
 def _ma_short(row, prev_row, params: dict) -> bool:
+    if row.name < 48:
+        return False
     fast = row.get("ema_fast")
     slow = row.get("ema_slow")
     prev_fast = prev_row.get("ema_fast")
@@ -190,6 +203,8 @@ def run_ma_whip_inverse(df: pd.DataFrame, params: dict) -> list:
 # 4. SPIKE_FADE / SPIKE_FADE_INV: Spike Fade
 # ============================================================================
 def _spike_long(row, prev_row, params: dict) -> bool:
+    if row.name < 28:
+        return False
     atr = row.get("atr", 0)
     prev_atr = prev_row.get("atr", 0)
     if atr <= 0 or prev_atr <= 0:
@@ -202,6 +217,8 @@ def _spike_long(row, prev_row, params: dict) -> bool:
 
 
 def _spike_short(row, prev_row, params: dict) -> bool:
+    if row.name < 28:
+        return False
     atr = row.get("atr", 0)
     prev_atr = prev_row.get("atr", 0)
     if atr <= 0 or prev_atr <= 0:
@@ -227,72 +244,49 @@ def run_spike_fade_inverse(df: pd.DataFrame, params: dict) -> list:
 # 5. DBL_PAT / DBL_PAT_INV: Double Top / Bottom Pattern
 # ============================================================================
 def _precompute_double_pivots(df: pd.DataFrame, params: dict) -> pd.DataFrame:
-    df = df.copy()
-    n = len(df)
     lookback = params.get("PATTERN_LOOKBACK", 60)
-    tol = params.get("PATTERN_TOLERANCE", 0.002)
+    tolerance = params.get("PATTERN_TOLERANCE", 0.002)
     min_sep = params.get("PATTERN_MIN_BARS_APART", 10)
+    highs = df["high"].to_numpy()
+    lows = df["low"].to_numpy()
+    closes = df["close"].to_numpy()
+    long = np.zeros(len(df), dtype=bool)
+    short = np.zeros(len(df), dtype=bool)
 
-    is_double_bottom = [False] * n
-    is_double_top = [False] * n
-
-    highs = df["high"].values
-    lows = df["low"].values
-    closes = df["close"].values
-
-    recent_peaks = []    # (idx, price)
-    recent_troughs = []  # (idx, price)
-
-    order = 4
-    for i in range(order, n - order):
-        # Peak check
-        val_h = highs[i]
-        if all(val_h > highs[i - k] for k in range(1, order + 1)) and all(val_h >= highs[i + k] for k in range(1, order + 1)):
-            recent_peaks.append((i, val_h))
-            recent_peaks = [p for p in recent_peaks if i - p[0] <= lookback]
-            if len(recent_peaks) >= 2:
-                p1_idx, p1_val = recent_peaks[-2]
-                p2_idx, p2_val = recent_peaks[-1]
-                if p2_idx - p1_idx >= min_sep and abs(p1_val - p2_val) / (p1_val + 1e-10) < tol:
-                    pattern_high = max(p1_val, p2_val)
-                    if closes[i] < pattern_high * (1 - tol / 2):
-                        is_double_top[i] = True
-
-        # Trough check
-        val_l = lows[i]
-        if all(val_l < lows[i - k] for k in range(1, order + 1)) and all(val_l <= lows[i + k] for k in range(1, order + 1)):
-            recent_troughs.append((i, val_l))
-            recent_troughs = [t for t in recent_troughs if i - t[0] <= lookback]
-            if len(recent_troughs) >= 2:
-                t1_idx, t1_val = recent_troughs[-2]
-                t2_idx, t2_val = recent_troughs[-1]
-                if t2_idx - t1_idx >= min_sep and abs(t1_val - t2_val) / (t1_val + 1e-10) < tol:
-                    pattern_low = min(t1_val, t2_val)
-                    if closes[i] > pattern_low * (1 + tol / 2):
-                        is_double_bottom[i] = True
-
-    df["dbl_bottom"] = is_double_bottom
-    df["dbl_top"] = is_double_top
-    return df
+    for i in range(lookback + 8, len(df)):
+        window = slice(i - lookback, i + 1)
+        for values, compare, direction in ((highs, np.greater, "SHORT"), (lows, np.less, "LONG")):
+            recent = values[window]
+            pivots = argrelextrema(recent, compare, order=4)[0]
+            if len(pivots) < 2 or pivots[-1] - pivots[-2] < min_sep:
+                continue
+            first, last = recent[pivots[-2:]]
+            if abs(first - last) / (first + 1e-10) >= tolerance:
+                continue
+            if direction == "SHORT" and closes[i] < max(first, last) * (1 - tolerance / 2):
+                short[i] = True
+                break
+            if direction == "LONG" and closes[i] > min(first, last) * (1 + tolerance / 2):
+                long[i] = True
+    valid_atr = df["atr"].gt(0)
+    return df.assign(dbl_bottom=long & valid_atr, dbl_top=short & valid_atr)
 
 
 def _dbl_long(row, prev_row, params: dict) -> bool:
-    return bool(row.get("dbl_bottom", False)) and not bool(prev_row.get("dbl_bottom", False))
+    return bool(row["dbl_bottom"])
 
 
 def _dbl_short(row, prev_row, params: dict) -> bool:
-    return bool(row.get("dbl_top", False)) and not bool(prev_row.get("dbl_top", False))
+    return bool(row["dbl_top"])
 
 
 def run_dbl_pat(df: pd.DataFrame, params: dict) -> list:
-    df = _prepare_df(df, params)
-    df = _precompute_double_pivots(df, params)
+    df = _precompute_double_pivots(_prepare_df(df, params), params)
     return simulate(df, params, _dbl_long, _dbl_short, _retail_stop_target)
 
 
 def run_dbl_pat_inverse(df: pd.DataFrame, params: dict) -> list:
-    df = _prepare_df(df, params)
-    df = _precompute_double_pivots(df, params)
+    df = _precompute_double_pivots(_prepare_df(df, params), params)
     return simulate(df, params, _dbl_short, _dbl_long, _retail_stop_target)
 
 
@@ -300,63 +294,47 @@ def run_dbl_pat_inverse(df: pd.DataFrame, params: dict) -> list:
 # 6. MACD_DIV / MACD_DIV_INV: MACD Divergence
 # ============================================================================
 def _precompute_macd_div(df: pd.DataFrame, params: dict) -> pd.DataFrame:
-    df = df.copy()
-    n = len(df)
-    lb = params.get("DIVERGENCE_LOOKBACK", 30)
-    is_bull_div = [False] * n
-    is_bear_div = [False] * n
+    lookback = params.get("DIVERGENCE_LOOKBACK", 30)
+    highs = df["high"].to_numpy()
+    lows = df["low"].to_numpy()
+    hist = df["macd_hist"].to_numpy()
+    long = np.zeros(len(df), dtype=bool)
+    short = np.zeros(len(df), dtype=bool)
 
-    highs = df["high"].values
-    lows = df["low"].values
-    hist = df["macd_hist"].values
-
-    recent_min = []
-    recent_max = []
-
-    order = 3
-    for i in range(order, n - order):
-        v_low = lows[i]
-        if all(v_low < lows[i - k] for k in range(1, order + 1)) and all(v_low <= lows[i + k] for k in range(1, order + 1)):
-            recent_min.append((i, v_low, hist[i]))
-            recent_min = [m for m in recent_min if i - m[0] <= lb]
-            if len(recent_min) >= 2:
-                i1, l1, h1 = recent_min[-2]
-                i2, l2, h2 = recent_min[-1]
-                if i2 - i1 >= 5 and l2 < l1 and h2 > h1:
-                    is_bull_div[i] = True
-
-        v_high = highs[i]
-        if all(v_high > highs[i - k] for k in range(1, order + 1)) and all(v_high >= highs[i + k] for k in range(1, order + 1)):
-            recent_max.append((i, v_high, hist[i]))
-            recent_max = [m for m in recent_max if i - m[0] <= lb]
-            if len(recent_max) >= 2:
-                i1, hg1, h1 = recent_max[-2]
-                i2, hg2, h2 = recent_max[-1]
-                if i2 - i1 >= 5 and hg2 > hg1 and h2 < h1:
-                    is_bear_div[i] = True
-
-    df["bull_div"] = is_bull_div
-    df["bear_div"] = is_bear_div
-    return df
+    if lookback + 1 >= 20:
+        for i in range(lookback + 38, len(df)):
+            start = i - lookback
+            window = slice(start, i + 1)
+            for values, compare, divergence, flags in (
+                (lows, np.less, np.greater, long),
+                (highs, np.greater, np.less, short),
+            ):
+                pivots = argrelextrema(values[window], compare, order=3)[0]
+                if len(pivots) < 2 or pivots[-1] - pivots[-2] < 5:
+                    continue
+                first, last = start + pivots[-2:]
+                if compare(values[last], values[first]) and divergence(hist[last], hist[first]):
+                    flags[i] = True
+                    break
+    valid_signal = df["atr"].gt(0) & df["macd_hist"].notna()
+    return df.assign(bull_div=long & valid_signal, bear_div=short & valid_signal)
 
 
 def _macd_long(row, prev_row, params: dict) -> bool:
-    return bool(row.get("bull_div", False)) and not bool(prev_row.get("bull_div", False))
+    return bool(row["bull_div"])
 
 
 def _macd_short(row, prev_row, params: dict) -> bool:
-    return bool(row.get("bear_div", False)) and not bool(prev_row.get("bear_div", False))
+    return bool(row["bear_div"])
 
 
 def run_macd_div(df: pd.DataFrame, params: dict) -> list:
-    df = _prepare_df(df, params)
-    df = _precompute_macd_div(df, params)
+    df = _precompute_macd_div(_prepare_df(df, params), params)
     return simulate(df, params, _macd_long, _macd_short, _retail_stop_target)
 
 
 def run_macd_div_inverse(df: pd.DataFrame, params: dict) -> list:
-    df = _prepare_df(df, params)
-    df = _precompute_macd_div(df, params)
+    df = _precompute_macd_div(_prepare_df(df, params), params)
     return simulate(df, params, _macd_short, _macd_long, _retail_stop_target)
 
 
@@ -364,97 +342,93 @@ def run_macd_div_inverse(df: pd.DataFrame, params: dict) -> list:
 # 7. SR_TRAP / SR_TRAP_INV: Support & Resistance Bounce Trap
 # ============================================================================
 def _precompute_sr_traps(df: pd.DataFrame, params: dict) -> pd.DataFrame:
-    df = df.copy()
-    n = len(df)
     lookback = params.get("SR_LOOKBACK", 50)
-    thresh = params.get("SR_TOUCH_THRESHOLD", 0.0015)
-    sr_long = [False] * n
-    sr_short = [False] * n
+    threshold = params.get("SR_TOUCH_THRESHOLD", 0.0015)
+    min_touches = params.get("SR_MIN_TOUCHES", 2)
+    long = np.zeros(len(df), dtype=bool)
+    short = np.zeros(len(df), dtype=bool)
 
-    # Step over df with window strides for efficiency
-    step = 5
-    for i in range(lookback + 5, n, step):
-        slice_df = df.iloc[max(0, i - lookback):i]
-        supports, resistances = Indicators.find_sr_levels(slice_df, lookback, thresh, 2)
-        end_idx = min(n, i + step)
-        for j in range(i, end_idx):
-            price = float(df["close"].iloc[j])
-            for s in supports[:2]:
-                if abs(price - s) / (s + 1e-10) < thresh:
-                    sr_long[j] = True
-                    break
-            for r in resistances[:2]:
-                if abs(price - r) / (r + 1e-10) < thresh:
-                    sr_short[j] = True
-                    break
-
-    df["sr_long"] = sr_long
-    df["sr_short"] = sr_short
-    return df
+    for i in range(lookback + 8, len(df)):
+        # The helper requires five extra rows and takes its own lookback.
+        supports, resistances = Indicators.find_sr_levels(
+            df.iloc[i - lookback - 4:i + 1], lookback, threshold, min_touches
+        )
+        price = float(df["close"].iat[i])
+        long[i] = any(abs(price - level) / (level + 1e-10) < threshold for level in supports[:2])
+        short[i] = not long[i] and any(
+            abs(price - level) / (level + 1e-10) < threshold for level in resistances[:2]
+        )
+    valid_atr = df["atr"].gt(0)
+    return df.assign(sr_long=long & valid_atr, sr_short=short & valid_atr)
 
 
 def _sr_long(row, prev_row, params: dict) -> bool:
-    return bool(row.get("sr_long", False)) and not bool(prev_row.get("sr_long", False))
+    return bool(row["sr_long"])
 
 
 def _sr_short(row, prev_row, params: dict) -> bool:
-    return bool(row.get("sr_short", False)) and not bool(prev_row.get("sr_short", False))
+    return bool(row["sr_short"])
 
 
 def run_sr_trap(df: pd.DataFrame, params: dict) -> list:
-    df = _prepare_df(df, params)
-    df = _precompute_sr_traps(df, params)
+    df = _precompute_sr_traps(_prepare_df(df, params), params)
     return simulate(df, params, _sr_long, _sr_short, _retail_stop_target)
 
 
 def run_sr_trap_inverse(df: pd.DataFrame, params: dict) -> list:
-    df = _prepare_df(df, params)
-    df = _precompute_sr_traps(df, params)
+    df = _precompute_sr_traps(_prepare_df(df, params), params)
     return simulate(df, params, _sr_short, _sr_long, _retail_stop_target)
 
 
 # ============================================================================
 # 8. COMPOSITE / COMPOSITE_INV: Retail Consensus Strategy
 # ============================================================================
-def _composite_long(row, prev_row, params: dict) -> bool:
+def _prepare_composite_df(df: pd.DataFrame, params: dict) -> pd.DataFrame:
+    df = _prepare_df(df, params)
+    df = _precompute_sr_traps(df, params)
+    df = _precompute_macd_div(df, params)
+    return _precompute_double_pivots(df, params)
+
+
+def _composite_votes(row, prev_row, params: dict) -> tuple[int, int]:
     votes_long = sum([
-        _bb_long(row, prev_row, params),
         _rsi_long(row, prev_row, params),
         _ma_long(row, prev_row, params),
+        _sr_long(row, prev_row, params),
+        _macd_long(row, prev_row, params),
+        _bb_long(row, prev_row, params),
+        _dbl_long(row, prev_row, params),
         _spike_long(row, prev_row, params),
     ])
     votes_short = sum([
-        _bb_short(row, prev_row, params),
         _rsi_short(row, prev_row, params),
         _ma_short(row, prev_row, params),
+        _sr_short(row, prev_row, params),
+        _macd_short(row, prev_row, params),
+        _bb_short(row, prev_row, params),
+        _dbl_short(row, prev_row, params),
         _spike_short(row, prev_row, params),
     ])
-    return votes_long >= 2 and votes_long > votes_short
+    return votes_long, votes_short
+
+
+def _composite_long(row, prev_row, params: dict) -> bool:
+    votes_long, votes_short = _composite_votes(row, prev_row, params)
+    return votes_long > 0 and votes_long >= votes_short
 
 
 def _composite_short(row, prev_row, params: dict) -> bool:
-    votes_long = sum([
-        _bb_long(row, prev_row, params),
-        _rsi_long(row, prev_row, params),
-        _ma_long(row, prev_row, params),
-        _spike_long(row, prev_row, params),
-    ])
-    votes_short = sum([
-        _bb_short(row, prev_row, params),
-        _rsi_short(row, prev_row, params),
-        _ma_short(row, prev_row, params),
-        _spike_short(row, prev_row, params),
-    ])
-    return votes_short >= 2 and votes_short > votes_long
+    votes_long, votes_short = _composite_votes(row, prev_row, params)
+    return votes_short > votes_long
 
 
 def run_composite(df: pd.DataFrame, params: dict) -> list:
-    df = _prepare_df(df, params)
+    df = _prepare_composite_df(df, params)
     return simulate(df, params, _composite_long, _composite_short, _retail_stop_target)
 
 
 def run_composite_inverse(df: pd.DataFrame, params: dict) -> list:
-    df = _prepare_df(df, params)
+    df = _prepare_composite_df(df, params)
     return simulate(df, params, _composite_short, _composite_long, _retail_stop_target)
 
 

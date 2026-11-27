@@ -17,7 +17,8 @@ from backtest.strategies import (
     STRATEGIES, FUNDING_STRATEGIES, TREND_ALIGNMENT_STRATEGIES, PAIRS_STRATEGIES
 )
 from backtest.strategies.trend_alignment import HTF_TIMEFRAME
-from backtest.params import BASE_PARAMS, validate_param_overrides
+from backtest.params import BASE_PARAMS, retailbot2_param_overrides, validate_param_overrides
+from backtest.strategies.retailbot2_strategies import RETAILBOT2_STRATEGY_NAMES
 from backtest.metrics import compute_metrics
 from backtest.equity import simulate_equity_curve
 from backtest.holdout import compute_holdout_cutoff, split_by_cutoff
@@ -177,7 +178,7 @@ STRATEGY_METADATA = {
             {"key": "BB_PERIOD", "label": "BB Period", "type": "int", "default": 20, "min": 10, "max": 50, "step": 1},
             {"key": "BB_STD", "label": "BB Std Dev", "type": "float", "default": 2.0, "min": 1.0, "max": 3.5, "step": 0.1},
             {"key": "BB_PROXIMITY_PCT", "label": "Proximity Threshold (%)", "type": "float", "default": 0.3, "factor": 100, "min": 0.05, "max": 1.0, "step": 0.05},
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
     "BB_REV_INV": {
@@ -189,7 +190,7 @@ STRATEGY_METADATA = {
             {"key": "BB_PERIOD", "label": "BB Period", "type": "int", "default": 20, "min": 10, "max": 50, "step": 1},
             {"key": "BB_STD", "label": "BB Std Dev", "type": "float", "default": 2.0, "min": 1.0, "max": 3.5, "step": 0.1},
             {"key": "BB_PROXIMITY_PCT", "label": "Proximity Threshold (%)", "type": "float", "default": 0.3, "factor": 100, "min": 0.05, "max": 1.0, "step": 0.05},
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
     "DBL_PAT": {
@@ -200,7 +201,7 @@ STRATEGY_METADATA = {
         "params": [
             {"key": "PATTERN_LOOKBACK", "label": "Lookback Bars", "type": "int", "default": 60, "min": 20, "max": 120, "step": 5},
             {"key": "PATTERN_TOLERANCE", "label": "Pivot Tolerance (%)", "type": "float", "default": 0.2, "factor": 100, "min": 0.05, "max": 1.0, "step": 0.05},
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
     "DBL_PAT_INV": {
@@ -211,7 +212,7 @@ STRATEGY_METADATA = {
         "params": [
             {"key": "PATTERN_LOOKBACK", "label": "Lookback Bars", "type": "int", "default": 60, "min": 20, "max": 120, "step": 5},
             {"key": "PATTERN_TOLERANCE", "label": "Pivot Tolerance (%)", "type": "float", "default": 0.2, "factor": 100, "min": 0.05, "max": 1.0, "step": 0.05},
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
     "RSI_CTR": {
@@ -221,9 +222,9 @@ STRATEGY_METADATA = {
         "description": "Fades overbought/oversold RSI extremes without overall trend filter.",
         "params": [
             {"key": "RSI_PERIOD", "label": "RSI Period", "type": "int", "default": 14, "min": 7, "max": 30, "step": 1},
-            {"key": "RSI_OVERSOLD", "label": "RSI Oversold Level", "type": "int", "default": 35, "min": 20, "max": 45, "step": 1},
-            {"key": "RSI_OVERBOUGHT", "label": "RSI Overbought Level", "type": "int", "default": 65, "min": 55, "max": 80, "step": 1},
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RSI_OVERSOLD", "label": "RSI Oversold Level", "type": "int", "default": 35, "min": 20, "max": 45, "step": 1},
+            {"key": "RB2_RSI_OVERBOUGHT", "label": "RSI Overbought Level", "type": "int", "default": 65, "min": 55, "max": 80, "step": 1},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
     "RSI_CTR_INV": {
@@ -233,9 +234,9 @@ STRATEGY_METADATA = {
         "description": "Inverts RSI_CTR. Follows strong trend momentum when RSI pushes into extreme territory.",
         "params": [
             {"key": "RSI_PERIOD", "label": "RSI Period", "type": "int", "default": 14, "min": 7, "max": 30, "step": 1},
-            {"key": "RSI_OVERSOLD", "label": "RSI Oversold Level", "type": "int", "default": 35, "min": 20, "max": 45, "step": 1},
-            {"key": "RSI_OVERBOUGHT", "label": "RSI Overbought Level", "type": "int", "default": 65, "min": 55, "max": 80, "step": 1},
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RSI_OVERSOLD", "label": "RSI Oversold Level", "type": "int", "default": 35, "min": 20, "max": 45, "step": 1},
+            {"key": "RB2_RSI_OVERBOUGHT", "label": "RSI Overbought Level", "type": "int", "default": 65, "min": 55, "max": 80, "step": 1},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
     "MA_WHIP": {
@@ -246,7 +247,7 @@ STRATEGY_METADATA = {
         "params": [
             {"key": "MA_FAST", "label": "Fast EMA Period", "type": "int", "default": 9, "min": 3, "max": 20, "step": 1},
             {"key": "MA_SLOW", "label": "Slow EMA Period", "type": "int", "default": 21, "min": 15, "max": 50, "step": 1},
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
     "MA_WHIP_INV": {
@@ -257,7 +258,7 @@ STRATEGY_METADATA = {
         "params": [
             {"key": "MA_FAST", "label": "Fast EMA Period", "type": "int", "default": 9, "min": 3, "max": 20, "step": 1},
             {"key": "MA_SLOW", "label": "Slow EMA Period", "type": "int", "default": 21, "min": 15, "max": 50, "step": 1},
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
     "SR_TRAP": {
@@ -268,7 +269,7 @@ STRATEGY_METADATA = {
         "params": [
             {"key": "SR_LOOKBACK", "label": "S/R Lookback Bars", "type": "int", "default": 50, "min": 20, "max": 100, "step": 5},
             {"key": "SR_TOUCH_THRESHOLD", "label": "Touch Threshold (%)", "type": "float", "default": 0.15, "factor": 100, "min": 0.05, "max": 0.5, "step": 0.05},
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
     "SR_TRAP_INV": {
@@ -279,7 +280,7 @@ STRATEGY_METADATA = {
         "params": [
             {"key": "SR_LOOKBACK", "label": "S/R Lookback Bars", "type": "int", "default": 50, "min": 20, "max": 100, "step": 5},
             {"key": "SR_TOUCH_THRESHOLD", "label": "Touch Threshold (%)", "type": "float", "default": 0.15, "factor": 100, "min": 0.05, "max": 0.5, "step": 0.05},
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
     "MACD_DIV": {
@@ -291,7 +292,7 @@ STRATEGY_METADATA = {
             {"key": "MACD_FAST", "label": "MACD Fast Period", "type": "int", "default": 12, "min": 5, "max": 20, "step": 1},
             {"key": "MACD_SLOW", "label": "MACD Slow Period", "type": "int", "default": 26, "min": 20, "max": 40, "step": 1},
             {"key": "DIVERGENCE_LOOKBACK", "label": "Divergence Lookback", "type": "int", "default": 30, "min": 15, "max": 60, "step": 5},
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
     "MACD_DIV_INV": {
@@ -303,7 +304,7 @@ STRATEGY_METADATA = {
             {"key": "MACD_FAST", "label": "MACD Fast Period", "type": "int", "default": 12, "min": 5, "max": 20, "step": 1},
             {"key": "MACD_SLOW", "label": "MACD Slow Period", "type": "int", "default": 26, "min": 20, "max": 40, "step": 1},
             {"key": "DIVERGENCE_LOOKBACK", "label": "Divergence Lookback", "type": "int", "default": 30, "min": 15, "max": 60, "step": 5},
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
     "SPIKE_FADE": {
@@ -313,7 +314,7 @@ STRATEGY_METADATA = {
         "description": "Fades large volatility expansion candles anticipating immediate mean reversion.",
         "params": [
             {"key": "SPIKE_ATR_MULTIPLIER", "label": "Spike ATR Multiple", "type": "float", "default": 2.5, "min": 1.5, "max": 4.0, "step": 0.25},
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
     "SPIKE_FADE_INV": {
@@ -323,7 +324,7 @@ STRATEGY_METADATA = {
         "description": "Inverts SPIKE_FADE. Rides high-momentum breakout candles rather than fading them.",
         "params": [
             {"key": "SPIKE_ATR_MULTIPLIER", "label": "Spike ATR Multiple", "type": "float", "default": 2.5, "min": 1.5, "max": 4.0, "step": 0.25},
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
     "COMPOSITE": {
@@ -332,7 +333,7 @@ STRATEGY_METADATA = {
         "validated": False,
         "description": "Combines signals from all retail strategies; trades when majority consensus triggers.",
         "params": [
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
     "COMPOSITE_INV": {
@@ -341,7 +342,7 @@ STRATEGY_METADATA = {
         "validated": False,
         "description": "Inverts composite retail consensus. Takes opposite side of combined retail signals.",
         "params": [
-            {"key": "RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
+            {"key": "RB2_RISK_REWARD_RATIO", "label": "Risk:Reward Ratio", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5},
         ]
     },
 }
@@ -809,6 +810,8 @@ def execute_backtest(req: BacktestRunRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     run_params = dict(BASE_PARAMS)
+    if strategy_name in RETAILBOT2_STRATEGY_NAMES:
+        validated_params = retailbot2_param_overrides(validated_params)
     run_params.update(validated_params)
     run_params["symbol"] = req.symbol
     run_params["market"] = req.market
