@@ -94,7 +94,32 @@ def _safe_http_status(status: Any) -> str:
     return "unknown"
 
 
-def is_telegram_delivery_authorized() -> bool:
+# These databases require an explicit opt-in before the outbox can claim.
+EXPLICIT_OUTBOX_DELIVERY_DATABASES = frozenset({"crypto_signals"})
+
+
+def _telegram_delivery_ceiling_open() -> bool:
+    return (
+        os.getenv("TELEGRAM_DELIVERY_ENABLED", "").strip() == "1"
+        or os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
+    )
+
+
+def get_telegram_outbox_authorization(database: str) -> tuple[Optional[bool], Optional[str]]:
+    """Return the saved setting and the reason the outbox cannot claim."""
+    settings = _get_db_telegram_settings() or {}
+    value = settings.get("delivery_authorized")
+    authorization = None if value is None else bool(value)
+    if authorization is None and database in EXPLICIT_OUTBOX_DELIVERY_DATABASES:
+        return None, "explicit_authorization_missing"
+    if not _telegram_delivery_ceiling_open():
+        return authorization, "environment_delivery_disabled"
+    if authorization is False:
+        return False, "delivery_disabled_in_settings"
+    return authorization, None
+
+
+def is_telegram_delivery_authorized(*, require_explicit_setting: bool = False) -> bool:
     """Returns True only when Telegram delivery is authorized on BOTH layers.
 
     The environment flag ``TELEGRAM_DELIVERY_ENABLED`` (with deprecated legacy
@@ -102,20 +127,16 @@ def is_telegram_delivery_authorized() -> bool:
     ceiling) is a hard ceiling: when neither is ``"1"``, delivery is suppressed
     no matter what the database setting says. When the ceiling is open, the
     database setting (Settings UI, ``app_telegram_settings.delivery_authorized``)
-    decides if a row exists; with no DB row the env flag alone decides. Every
+    decides if a row exists. The production outbox requires an explicit setting. Every
     delivery consumer (notifier, wallet tracker, report scheduler, outbox
     worker, Screener) must gate on this helper so the layers can never diverge.
     """
-    env_authorized = (
-        os.getenv("TELEGRAM_DELIVERY_ENABLED", "").strip() == "1"
-        or os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
-    )
-    if not env_authorized:
+    if not _telegram_delivery_ceiling_open():
         return False
     db_settings = _get_db_telegram_settings()
     if db_settings and db_settings.get("delivery_authorized") is not None:
         return bool(db_settings["delivery_authorized"])
-    return True
+    return not require_explicit_setting
 
 
 def get_telegram_config() -> Dict[str, Any]:

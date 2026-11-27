@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity, AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle, Plus, RefreshCw, ShieldCheck, WalletCards, X } from "lucide-react";
+import { DeploymentParameters, type DeploymentOverrides } from "./components/DeploymentParameters";
 import { TradingChart } from "./components/TradingChart";
 import { PortfolioRiskDesk } from "./components/PortfolioRiskDesk";
 import { ExecutionBlotter } from "./components/ExecutionBlotter";
@@ -138,6 +139,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
   const deployDialogRef = useRef<HTMLDialogElement | null>(null);
   const deploySymbolInputRef = useRef<HTMLInputElement | null>(null);
   const deployTriggerRef = useRef<HTMLElement | null>(null);
+  const [parameterDraft, setParameterDraft] = useState<DeploymentOverrides | null>(null);
   const [editingConfig, setEditingConfig] = useState<PaperConfig | null>(null);
   const [pendingArchive, setPendingArchive] = useState<PaperConfig | null>(null);
   const [pendingPurge, setPendingPurge] = useState<PaperConfig | null>(null);
@@ -585,7 +587,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
     setActionError(null);
     setActionSuccess(null);
     try {
-      await purgePaperConfig(config.id);
+      await purgePaperConfig(config.id, !config.archived_at);
       setPendingPurge(null);
       setActionSuccess("Deployment permanently deleted.");
       setAttempt((current) => current + 1);
@@ -601,7 +603,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
     event.preventDefault();
     if (!editingConfig || togglingConfigId !== null) return;
     const { allocated_capital, risk_per_trade_pct } = editingConfig;
-    if (await saveDeploymentSettings(editingConfig, { allocated_capital, risk_per_trade_pct }, "Deployment settings saved.")) {
+    if (await saveDeploymentSettings(editingConfig, { allocated_capital, risk_per_trade_pct, ...(parameterDraft !== null ? { params: parameterDraft } : {}) }, "Deployment settings saved.")) {
       setEditingConfig(null);
     }
   };
@@ -1298,10 +1300,10 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
                             Report {c.report_enabled ? "On" : "Off"}
                           </button>
                           {!c.archived_at && <>
-                            <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={() => setEditingConfig(c)}>Edit</button>
+                            <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={() => { setParameterDraft(null); setEditingConfig(c); }}>Edit</button>
                             <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={() => setPendingArchive(c)}>Archive</button>
                           </>}
-                          {c.archived_at && <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={() => setPendingPurge(c)}>Delete permanently</button>}
+                          <button className="button button-secondary button-sm" type="button" disabled={c.is_active || loading || savingPreference || togglingConfigId !== null} title={c.is_active ? "Pause this deployment first" : undefined} onClick={() => setPendingPurge(c)}>Delete permanently</button>
                         </div>
                       </td>
                     )}
@@ -1324,6 +1326,9 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
               <input type="number" min={0.1} max={10} step="0.01" required value={editingConfig.risk_per_trade_pct} onChange={(event) => setEditingConfig({ ...editingConfig, risk_per_trade_pct: event.target.valueAsNumber })} />
             </label>
           </div>
+          <DeploymentParameters key={editingConfig.id} strategy={editingConfig.strategy_name}
+            value={parameterDraft ?? editingConfig.strategy_params ?? {}}
+            onChange={setParameterDraft} disabled={togglingConfigId !== null} />
           <button className="button button-secondary" type="button" disabled={togglingConfigId !== null} onClick={() => setEditingConfig(null)}>Cancel edit</button>
           <button className="button button-primary" type="submit" disabled={togglingConfigId !== null}>Save deployment</button>
         </form>
@@ -1337,7 +1342,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
 
       {pendingPurge && <section className="panel" aria-label="Confirm permanent delete">
         <h2>Permanently delete {pendingPurge.symbol} · {pendingPurge.strategy_name}?</h2>
-        <p>This cannot be undone. It is only allowed for archived deployments that never opened a position, trade or order; otherwise the server keeps it archived so performance history is preserved.</p>
+        <p>This cannot be undone. Permanent deletion is available for deployments with no position, trade, or order history. Use Archive to preserve a deployment and its history.</p>
         <button className="button button-secondary" type="button" disabled={togglingConfigId !== null} onClick={() => setPendingPurge(null)}>Cancel delete</button>
         <button className="button button-danger" type="button" disabled={togglingConfigId !== null} onClick={() => void purgeDeployment(pendingPurge)}>Confirm permanent delete</button>
       </section>}

@@ -5,10 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import Optional
 import logging
+from config import MYSQL_CONFIG
 from paper.outbox_store import get_outbox_counts
 from web.auth import require_admin
 from notifications.telegram_notifier import (
     get_telegram_config,
+    get_telegram_outbox_authorization,
     test_telegram_connection,
     send_telegram_message,
     is_telegram_delivery_authorized,
@@ -53,7 +55,10 @@ def get_status(request: Request):
     cfg = get_telegram_config()
     role = str(getattr(request.state, "user", {}).get("role", "")).lower()
     # The target chat identifier is operationally sensitive; only admins may view it.
+    authorization, blocked_reason = get_telegram_outbox_authorization(MYSQL_CONFIG["database"])
     result = {
+        "delivery_authorized": authorization,
+        "outbox_blocked_reason": blocked_reason,
         "configured": cfg["is_configured"],
         "deliveryAuthorized": is_telegram_delivery_authorized(),
         "chatId": cfg["chat_id"] if role == "admin" else None,
@@ -62,8 +67,8 @@ def get_status(request: Request):
     if role == "admin":
         try:
             result["outbox"] = get_outbox_counts()
-        except Exception:
-            logging.getLogger(__name__).exception("Telegram outbox health unavailable")
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Telegram outbox health unavailable (%s)", type(exc).__name__)
             result["outbox"] = None
     return result
 

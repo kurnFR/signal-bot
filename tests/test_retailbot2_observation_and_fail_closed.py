@@ -345,12 +345,13 @@ def test_observation_mode_mutation_boundary_defense(monkeypatch):
     ],
 )
 def test_outbox_enqueue_requires_both_authorization_flags(monkeypatch, enqueue_flag, delivery_flag, expected):
-    """12. Enqueuing requires RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1 and valid database allowlist, independent of RETAILBOT2_ALLOW_TELEGRAM_DELIVERY."""
+    """Production enqueue requires both OUTBOX and PRODUCTION enqueue flags, independent of delivery."""
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", enqueue_flag)
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", "1")
     monkeypatch.setenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", delivery_flag)
 
-    config = BotConfig(observation_only=False)
+    config = BotConfig(observation_only=False, db_name="crypto_signals")
     cursor = MockCursor(db_name=config.db_name)
     conn = MockConnection(cursor)
     assert is_outbox_enqueue_authorized(config, conn=conn) is expected
@@ -925,10 +926,11 @@ def test_mixed_strategy_lifecycle_queues_only_selected_telegram_alert(monkeypatc
 def test_mixed_strategy_exit_lifecycle_queues_only_selected_telegram_alert(monkeypatch):
     """The real close path must enqueue an exit alert only for trades persisted as Telegram-selected."""
     monkeypatch.setenv("RETAILBOT2_OUTBOX_ENQUEUE_ENABLED", "1")
+    monkeypatch.setenv("RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED", "1")
     monkeypatch.setenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "1")
     monkeypatch.delenv("RETAILBOT2_OBSERVATION_ONLY", raising=False)
 
-    config = BotConfig(observation_only=False)
+    config = BotConfig(observation_only=False, db_name="crypto_signals")
     selected_cursor = MockCursor(db_name=config.db_name)
     selected_cursor.rowcount = 1
     unselected_cursor = MockCursor(db_name=config.db_name)

@@ -847,6 +847,20 @@ def wallet_performance(period_hours, metric, limit):
         conn.close()
 
 
+def set_wallet_label(tracked_id, label):
+    conn = get_pool().get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM tracked_wallets WHERE id=%s AND status='ACTIVE' FOR UPDATE", (tracked_id,))
+            if not cur.fetchone():
+                return False
+            cur.execute("UPDATE tracked_wallets SET label=%s WHERE id=%s", (label, tracked_id))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
 def set_wallet_telegram(tracked_id, enabled):
     conn = get_pool().get_connection()
     try:

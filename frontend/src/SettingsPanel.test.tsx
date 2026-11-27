@@ -26,7 +26,7 @@ describe("SettingsPanel", () => {
     expect(onToggleTheme).toHaveBeenCalledTimes(1);
   });
 
-  it("loads Telegram status for admins and requires confirmation before a real test ping", async () => {
+  it.each([null, false])("shows blocked authorization (%s) and requires confirmation for a Telegram test ping", async (authorization) => {
     window.localStorage.setItem("token", "admin-session");
     const calls: Array<{ path: string; method: string; body?: unknown }> = [];
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
@@ -45,7 +45,7 @@ describe("SettingsPanel", () => {
           system: { timezone: "Asia/Jakarta (WIB UTC+7)" },
         });
       }
-      if (path === "/api/telegram/status" && method === "GET") return json({ configured: true, deliveryAuthorized: false, chatId: "-100123456789", hasToken: true });
+      if (path === "/api/telegram/status" && method === "GET") return json({ configured: true, deliveryAuthorized: false, delivery_authorized: authorization, outbox_blocked_reason: authorization === null ? "explicit_authorization_missing" : "delivery_disabled_in_settings", chatId: "-100123456789", hasToken: true });
       if (path === "/api/telegram/test" && method === "POST") return json({ success: true, bot: { username: "signal_test_bot" }, chat_id: "-100123456789" });
       if (path.startsWith("/api/auth/audit-logs") && method === "GET") return json({ items: [] });
       if (path === "/api/settings/services" && method === "GET") return json({ services: [] });
@@ -56,6 +56,7 @@ describe("SettingsPanel", () => {
     render(<SettingsPanel theme="dark" onToggleTheme={() => undefined} username="admin01" role="admin" />);
 
     expect(await screen.findByText("-100123456789")).toBeInTheDocument();
+    expect(screen.getByText("Telegram delivery is not authorized; queued alerts are waiting.")).toBeInTheDocument();
     expect(screen.getByText("Configured · delivery disabled")).toBeInTheDocument();
     expect(screen.getByText("Present (hidden)")).toBeInTheDocument();
     expect(screen.getByText("db.internal")).toBeInTheDocument();

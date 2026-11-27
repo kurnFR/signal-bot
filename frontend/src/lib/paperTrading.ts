@@ -3,7 +3,7 @@ import { parseTelegramDeliveryStatus, type TelegramDeliveryOutcome } from "./tel
 export { parseTelegramDeliveryStatus, type TelegramDeliveryOutcome };
 
 export interface PaperPosition { funding_pnl?: number | null; id: number; symbol: string; market: string; timeframe: string; strategy_name: string; direction: string; entry_price: number; current_price: number; stop_loss: number | null; take_profit: number | null; quantity: number; unrealized_pnl_pct: number | null; unrealized_r: number | null; allocated_capital: number; status: string; last_update_time: number }
-export interface PaperConfig { id: number; symbol: string; market: string; timeframe: string; strategy_name: string; is_active: boolean; allocated_capital: number; risk_per_trade_pct: number; telegram_enabled: boolean; report_enabled: boolean; archived_at?: string | null; realized_equity?: number; ml_model_id?: string | null; ml_generator_model_id?: string | null; created_at: string }
+export interface PaperConfig { strategy_params?: Record<string, string | number | boolean> | null; id: number; symbol: string; market: string; timeframe: string; strategy_name: string; is_active: boolean; allocated_capital: number; risk_per_trade_pct: number; telegram_enabled: boolean; report_enabled: boolean; archived_at?: string | null; realized_equity?: number; ml_model_id?: string | null; ml_generator_model_id?: string | null; created_at: string }
 export interface PaperOrder { id: number; config_id: number; symbol: string; market: string; timeframe: string; strategy_name: string; signal_open_time: number; entry_time: number; direction: string; requested_entry_price: number; stop_loss: number; take_profit: number; atr_at_signal: number; ml_model_id: string | null; ml_probability: number | null; status: string; state_reason: string | null; fill_price: number | null; position_id: number | null; created_at: string; updated_at: string; filled_at: string | null; terminal_at: string | null }
 export interface PaperTrade { funding_pnl?: number | null; id: number; symbol: string; market: string; timeframe: string; strategy_name: string; direction: string; entry_price: number; exit_price: number; net_pnl: number; net_return_pct: number; r_multiple: number; exit_reason: string; entry_time_wib: string; exit_time_wib: string }
 export interface PaperMetrics { totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number; byStrategy: Array<{ strategy: string; symbol?: string | null; market?: string; timeframe?: string; configId?: number | null; totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number }> }
@@ -143,6 +143,9 @@ function validConfig(value: unknown): boolean {
   return isRecord(value) && positiveId(value.id) &&
     ["symbol", "market", "timeframe", "strategy_name", "created_at"].every((key) => requiredText(value[key])) &&
     typeof value.is_active === "boolean" &&
+    (value.strategy_params == null || (isRecord(value.strategy_params) && Object.values(value.strategy_params).every(
+      (item) => typeof item === "string" || typeof item === "boolean" || finite(item),
+    ))) &&
     finite(value.allocated_capital) && finite(value.risk_per_trade_pct) &&
     typeof value.telegram_enabled === "boolean" && typeof value.report_enabled === "boolean";
 }
@@ -369,14 +372,18 @@ export async function archivePaperConfig(id: number): Promise<void> {
   await paperMutationRequest(`/api/paper/configs/${id}`, { method: "DELETE" });
 }
 
-/** Hard-delete an archived deployment with no ledger history (server refuses with 409 otherwise). */
-export async function purgePaperConfig(id: number): Promise<void> {
-  await paperMutationRequest(`/api/paper/configs/${id}/permanent`, { method: "DELETE" });
+/** Hard-delete a deployment with no ledger history. */
+export async function purgePaperConfig(id: number, allowUnarchived = false): Promise<void> {
+  if (allowUnarchived) {
+    await paperMutationRequest(`/api/paper/configs/${id}/permanent?allow_unarchived=true`, { method: "DELETE" });
+  } else {
+    await paperMutationRequest(`/api/paper/configs/${id}/permanent`, { method: "DELETE" });
+  }
 }
 
 export type PaperDeploymentSettings = Partial<Pick<PaperConfig,
   "is_active" | "allocated_capital" | "risk_per_trade_pct" | "telegram_enabled" | "report_enabled"
->>;
+>> & { params?: PaperConfig["strategy_params"] };
 
 export async function patchPaperDeployment(id: number, settings: PaperDeploymentSettings): Promise<void> {
   await paperMutationRequest(`/api/paper/configs/${id}`, { method: "PATCH", body: JSON.stringify(settings) });

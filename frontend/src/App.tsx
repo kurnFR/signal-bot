@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { fetchSystemStatus, type BrandingConfig, type LicenseStatus } from "./lib/systemStatus";
 import { getTokenExpiryMs, refreshSessionToken } from "./lib/auth";
+import { OverviewData } from "./OverviewData";
 import { SystemStatusPanel } from "./SystemStatusPanel";
 
 const ScreenerPanel = lazy(() => import("./ScreenerPanel").then((m) => ({ default: m.ScreenerPanel })));
@@ -400,7 +401,10 @@ export function App() {
 
         <Suspense fallback={<p className="empty-state" role="status">Loading workspace module…</p>}>
         {activeView === "Overview" ? (
-          <SystemStatusPanel />
+          <>
+            <OverviewData />
+            <SystemStatusPanel />
+          </>
         ) : activeView === "Trading Desk" ? (
           <TradingDeskPanel />
         ) : activeView === "Market Screener" ? (

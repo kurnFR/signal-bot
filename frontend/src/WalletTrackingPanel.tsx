@@ -12,6 +12,7 @@ import {
   saveWalletSettings,
   trackWallet,
   untrackWallet,
+  updateWalletLabel,
   WalletActionError,
   type TrackedWallet,
   type WalletTrackingSnapshot,
@@ -75,6 +76,8 @@ export function WalletTrackingPanel() {
   const trackTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   // WT-04: Untrack wallet modal
+  const [labelEdit, setLabelEdit] = useState<{ id: number; text: string } | null>(null);
+  const [savingLabel, setSavingLabel] = useState(false);
   const [untrackTarget, setUntrackTarget] = useState<TrackedWallet | null>(null);
   const [untrackBusy, setUntrackBusy] = useState(false);
   const [untrackError, setUntrackError] = useState<string | null>(null);
@@ -489,7 +492,33 @@ export function WalletTrackingPanel() {
                 {data.tracked.map((wallet) => (
                   <tr key={wallet.id}>
                     <td>
-                      <strong>{wallet.label || "Unlabelled wallet"}</strong>
+                      {canTrade && labelEdit?.id === wallet.id ? <form onSubmit={async (event) => {
+                        event.preventDefault();
+                        if (savingLabel) return;
+                        setSavingLabel(true);
+                        setActionError(null);
+                        setActionSuccess(null);
+                        try {
+                          await updateWalletLabel(wallet.id, labelEdit.text);
+                          setLabelEdit(null);
+                          setActionSuccess("Wallet label updated.");
+                          setAttempt((value) => value + 1);
+                        } catch {
+                          setActionError("Could not update the wallet label.");
+                        } finally {
+                          setSavingLabel(false);
+                        }
+                      }}>
+                        <input aria-label="Wallet label" maxLength={80} value={labelEdit.text} disabled={savingLabel}
+                          onChange={(event) => setLabelEdit({ id: wallet.id, text: event.target.value })} />
+                        <button type="submit" className="button button-small" disabled={savingLabel}>Save label</button>
+                        <button type="button" className="button button-small" disabled={savingLabel}
+                          onClick={() => setLabelEdit(null)}>Cancel</button>
+                      </form> : <>
+                        <strong>{wallet.label || "Unlabelled wallet"}</strong>
+                        {canTrade && <button type="button" className="button button-small" disabled={savingLabel}
+                          onClick={() => setLabelEdit({ id: wallet.id, text: wallet.label ?? "" })}>Edit label</button>}
+                      </>}
                       <div><code>{shorten(wallet.wallet)}</code></div>
                     </td>
                     <td>{data.meta.chains[wallet.chain] ?? wallet.chain}</td>

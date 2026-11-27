@@ -264,6 +264,18 @@ def wallets_untrack_by_query(chain: str = Query(...), wallet: str = Query(...)):
         raise HTTPException(status_code=500, detail="Failed to stop monitoring wallet")
 
 
+class WalletLabelRequest(BaseModel):
+    label: Optional[str] = Field(..., max_length=80)
+
+
+@router.patch("/tracked/{tracked_id}")
+def wallets_edit_label(tracked_id: int, req: WalletLabelRequest):
+    label = (req.label or "").strip() or None
+    if not store.set_wallet_label(tracked_id, label):
+        raise HTTPException(status_code=404, detail="Active tracked wallet not found")
+    return {"status": "ok", "tracked_id": tracked_id, "label": label}
+
+
 @router.delete("/tracked/{tracked_id}")
 def wallets_untrack(tracked_id: int):
     try:

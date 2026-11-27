@@ -12,29 +12,46 @@ import logging
 import time
 from typing import Dict, List, Optional
 
+from config import (
+    NEWS_AI_POLL_INTERVAL_SECONDS,
+    PAPER_ENGINE_POLL_INTERVAL_SECONDS,
+    WALLET_TRACKER_POLL_INTERVAL_SECONDS,
+)
+
 logger = logging.getLogger(__name__)
 
 # key -> metadata shown in the dashboard. ``heartbeats`` are collector_heartbeat names.
 SERVICES: Dict[str, Dict[str, object]] = {
     "paper_engine": {
+        "stale_after_seconds": 3 * PAPER_ENGINE_POLL_INTERVAL_SECONDS,
         "label": "Paper Trading Engine",
         "description": "Evaluates active strategies, opens paper positions and manages SL/TP/trailing exits.",
         "heartbeats": ["paper_engine"],
         "pause_warning": "While paused, open paper positions are NOT monitored: stop-loss, take-profit and trailing exits will not trigger until it is resumed.",
     },
     "news_ai": {
+        "stale_after_seconds": 3 * NEWS_AI_POLL_INTERVAL_SECONDS,
         "label": "News + Economic Calendar AI",
         "description": "News poller, economic calendar poller, AI strategy engine and news execution.",
         "heartbeats": ["news_poller", "econ_calendar_poller", "news_strategy_engine", "news_execution"],
         "pause_warning": "While paused, no new news or calendar events are ingested and no AI signals are generated.",
     },
+    "paper_report": {
+        "stale_after_seconds": 7200,
+        "label": "Paper Performance Reports",
+        "description": "Queues the hourly paper trading performance report via the Telegram outbox worker.",
+        "heartbeats": ["paper_report"],
+        "pause_warning": "While paused, no new hourly reports are queued. Reports already queued may still be delivered.",
+    },
     "wallet_tracker": {
+        "stale_after_seconds": 3 * WALLET_TRACKER_POLL_INTERVAL_SECONDS,
         "label": "Wallet Tracker",
         "description": "Polls tracked wallets and sends wallet alerts.",
-        "heartbeats": [],
+        "heartbeats": ["wallet_tracker"],
         "pause_warning": "While paused, tracked wallets are not polled and no wallet alerts are sent.",
     },
     "collectors": {
+        "stale_after_seconds": 300,
         "label": "Market Data Collectors",
         "description": "Kline WebSocket writer and open-interest poller.",
         "heartbeats": ["ws_kline_spot", "ws_kline_futures", "oi_poller"],
@@ -149,7 +166,7 @@ def list_services_with_heartbeats() -> List[Dict[str, object]]:
                     "name": r["collector_name"],
                     "status": r["status"],
                     "detail": r["detail"],
-                    "lastBeat": str(r["last_beat_time"]) if r["last_beat_time"] else None,
+                    "lastBeat": r["last_beat_time"].isoformat() + "Z" if r["last_beat_time"] else None,
                 }
             cur.close()
         finally:
@@ -167,6 +184,7 @@ def list_services_with_heartbeats() -> List[Dict[str, object]]:
             "enabled": st["enabled"],
             "updatedBy": st["updated_by"],
             "updatedAt": st["updated_at"],
+            "staleAfterSeconds": meta["stale_after_seconds"],
             "heartbeats": [beats[h] for h in meta["heartbeats"] if h in beats],
         })
     return out

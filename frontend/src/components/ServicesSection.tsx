@@ -2,6 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { Power, RefreshCw } from "lucide-react";
 import { fetchServices, setServiceEnabled, type ServiceState } from "../lib/services";
 
+const serviceLaunchFlags: Record<string, string> = {
+  paper_engine: "PAPER_ENGINE_ENABLED=1",
+  news_ai: "NEWS_AI_ENABLED=1",
+  paper_report: "PAPER_REPORT_ENABLED=1 (requires the Telegram outbox worker)",
+};
+
 /** Admin-only runtime pause/resume for background workers (no restart, no .env edit). */
 export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
   const [services, setServices] = useState<ServiceState[]>([]);
@@ -79,6 +85,10 @@ export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
                   .filter((v): v is string => Boolean(v))
                   .sort()
                   .at(-1);
+                const launchFlag = serviceLaunchFlags[svc.service];
+                const awaitingHeartbeat = Boolean(launchFlag && !latest);
+                const stale = latest && svc.staleAfterSeconds != null &&
+                  Date.now() - Date.parse(latest) > svc.staleAfterSeconds * 1000;
                 return (
                   <tr key={svc.service}>
                     <td>
@@ -87,8 +97,8 @@ export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
                       {svc.updatedBy && <div className="panel-subtitle">Last changed by {svc.updatedBy}</div>}
                     </td>
                     <td>
-                      <span className={svc.enabled ? "badge badge-ok" : "badge badge-warn"}>
-                        {svc.enabled ? "Running" : "Paused"}
+                      <span className={svc.enabled && !awaitingHeartbeat && !stale ? "badge badge-ok" : "badge badge-warn"}>
+                        {!svc.enabled ? "Paused" : awaitingHeartbeat ? "No heartbeat" : stale ? "Stale heartbeat" : "Enabled"}
                       </span>
                     </td>
                     <td>{latest ?? "—"}</td>
@@ -126,6 +136,9 @@ export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
                         >
                           Resume {svc.label}
                         </button>
+                      )}
+                      {awaitingHeartbeat && (
+                        <div className="panel-subtitle">Check the worker process and its launcher setting <code>{launchFlag}</code>.</div>
                       )}
                     </td>
                   </tr>

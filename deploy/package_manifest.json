@@ -6,7 +6,7 @@
     "deploy/env/outbox-worker.env.example": "407228c6de974c42bee98a73969de046482bb335c860951b040b66d90248ec57",
     "deploy/requirements-worker.txt": "597580c344905b902d0d7ca7f9e17041561e655ec97029288f2d516370f844fa",
     "paper/outbox_store.py": "3efd9e84a4615d65f6ee32cfe62f6450c426f948ae7c4b0e4b370039cd80c32e",
-    "paper/outbox_worker.py": "d35ec3b29f58c40117edb741799e89c47e93b2175fca47c798fdfd89d6d1ebe8",
+    "paper/outbox_worker.py": "85f48b05449d8bcbf847b8087217adf69981790569b1402636cc846a983166ef",
     "paper/outbox_transport.py": "84630db3c4666bc3d24df0757e15d42014768ec9d03f856d8c0ca3619d22b8f0",
     "paper/outbox_health.py": "8a8e0945042cd81b3671bdf12129136007b2c746c89a31b14de1dbf5efbf00f3",
     "paper/outbox_retention.py": "3f14306a4bc678c7cc439c80e95e84bfa5fc898fa7bf5642a33e6f6d3b5e100a",

@@ -287,7 +287,7 @@ export function SettingsPanel({ theme, onToggleTheme, username, role, license }:
   useEffect(() => {
     if (telegramStatus) {
       if (telegramStatus.chatId) setEditTelegramChatId(telegramStatus.chatId);
-      setEditTelegramDelivery(Boolean(telegramStatus.deliveryAuthorized));
+      setEditTelegramDelivery((telegramStatus.delivery_authorized ?? telegramStatus.deliveryAuthorized) === true);
     }
   }, [telegramStatus]);
 
@@ -986,6 +986,10 @@ export function SettingsPanel({ theme, onToggleTheme, username, role, license }:
       {!isAdmin ? <p className="empty-state">Telegram status and test controls are restricted to admins. This role does not fetch or display the configured chat ID.</p> : <>
         {telegramError && <div className="api-error" role="alert"><div><strong>Telegram status unavailable</strong><p>{telegramError}</p></div><button className="button button-secondary" type="button" onClick={() => setTelegramRefreshAttempt((value) => value + 1)}><RefreshCw size={15} /> Retry</button></div>}
         {telegramLoading && <p className="empty-state">Loading Telegram status…</p>}
+        {telegramStatus && (telegramStatus.delivery_authorized === false ||
+          telegramStatus.delivery_authorized === null || telegramStatus.outbox_blocked_reason) && (
+          <div className="api-error" role="alert">Telegram delivery is not authorized; queued alerts are waiting.</div>
+        )}
         {telegramStatus && <>
           <div className="settings-telegram-status">
             <div><span>Configuration</span><strong>{

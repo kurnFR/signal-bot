@@ -11,7 +11,7 @@ import time
 
 from paper.engine import (
     get_active_positions, get_paper_trades, get_paper_configs,
-    set_paper_config, delete_paper_config, purge_paper_config, PaperConfigHasHistory, batch_update_paper_configs,
+    set_paper_config, delete_paper_config, purge_paper_config, PaperConfigActive, PaperConfigHasHistory, batch_update_paper_configs,
     manual_close_position, sync_and_evaluate_paper_trading,
     get_paper_metrics, update_paper_deployment, OVERLAY_STRATEGIES,
     _UNSET,
@@ -276,11 +276,12 @@ def delete_config(config_id: int = Path(..., gt=0)):
 
 
 @router.delete("/configs/{config_id}/permanent")
-def purge_config(request: Request, config_id: int = Path(..., gt=0)):
-    """Hard-delete an archived deployment that never traded. Otherwise 409."""
+def purge_config(request: Request, config_id: int = Path(..., gt=0), allow_unarchived: bool = False):
+    """Hard-delete a deployment with no ledger history. Require explicit opt-in before archive."""
     try:
-        deleted = purge_paper_config(config_id)
-    except PaperConfigHasHistory as e:
+        deleted = (purge_paper_config(config_id, allow_unarchived=True)
+                   if allow_unarchived else purge_paper_config(config_id))
+    except (PaperConfigActive, PaperConfigHasHistory) as e:
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

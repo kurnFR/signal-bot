@@ -14,7 +14,14 @@ describe("frontend foundation shell", () => {
     window.history.replaceState(null, "", "/");
     window.localStorage.clear();
     document.documentElement.removeAttribute("data-theme");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(statusResponse), { status: 200, headers: { "content-type": "application/json" } })));
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/api/master-data/coverage") {
+        return Response.json({ coverage: [], summary: { totalCandles: 142, distinctSymbols: 2, coverageEntries: 3 } });
+      }
+      if (path === "/api/backtest/history?limit=10") return Response.json({ runs: [] });
+      return Response.json(statusResponse);
+    }));
   });
   afterEach(() => vi.unstubAllGlobals());
   it("restores the requested view on direct entry and browser navigation", () => {
@@ -30,9 +37,15 @@ describe("frontend foundation shell", () => {
   it("renders the quantitative platform header and footer", async () => {
     render(<App />);
     expect(screen.getByText("Signal Bot Quantitative Platform")).toBeInTheDocument();
-    expect(await screen.findByText("Connected")).toBeInTheDocument();
+    expect((await screen.findAllByText("Connected"))[0]).toBeInTheDocument();
     expect(screen.getByLabelText("Live clock (UTC+7)")).toHaveTextContent(/^\d{2}:\d{2}:\d{2} WIB$/);
     expect(screen.getByText(/v2\.0\.0 .*MariaDB/i)).toBeInTheDocument();
+  });
+  it("renders dataset counts and requests the ten most recent backtests", async () => {
+    render(<App />);
+    expect(await screen.findByText("142")).toBeInTheDocument();
+    expect(await screen.findByText("No backtests run yet.")).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith("/api/backtest/history?limit=10", expect.anything());
   });
   it("transitions the live status indicator to Disconnected when system status check fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network connection lost")));

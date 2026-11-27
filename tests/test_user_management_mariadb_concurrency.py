@@ -42,7 +42,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
                 "Live MariaDB concurrency tests require explicit SIGNAL_BOT_TEST_DB_USER and "
                 "SIGNAL_BOT_TEST_DB_PASSWORD; no fallback credentials are permitted."
             )
-        overrides = dict(host="127.0.0.1", port=3306, database="signal_bot_test",
+        overrides = dict(host="127.0.0.1", port=int(os.getenv("MYSQL_PORT", "3306")), database="signal_bot_test",
                          user=test_db_user, password=test_db_password)
         for patcher in (patch.dict(db_module.MYSQL_CONFIG, overrides),
                         patch.dict(db_module.RETAILBOT2_DB_CONFIG, overrides),

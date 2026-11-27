@@ -117,24 +117,25 @@ function validMasterDataJob(value: unknown): value is MasterDataJob {
   return value.candles_fetched === undefined || isCount(value.candles_fetched);
 }
 
-/** Read dataset coverage and job status; malformed rows fail closed before rendering. */
-export async function fetchMasterDataSnapshot(signal?: AbortSignal): Promise<MasterDataSnapshot> {
-  const [coverage, jobs] = await Promise.all([
-    getJson<unknown>("/api/master-data/coverage", signal),
-    getJson<unknown>("/api/master-data/jobs", signal),
-  ]);
+/** Read and validate the same dataset coverage used by Legacy Home. */
+export async function fetchDatasetCoverage(signal?: AbortSignal): Promise<Omit<MasterDataSnapshot, "jobs">> {
+  const coverage = await getJson<unknown>("/api/master-data/coverage", signal);
   if (!isRecord(coverage) || !validCoverageSummary(coverage.summary) ||
       !Array.isArray(coverage.coverage) || !coverage.coverage.every(validCoverageRow)) {
     throw new Error("Master Data coverage returned an invalid response");
   }
+  return { summary: coverage.summary, coverage: coverage.coverage };
+}
+
+export async function fetchMasterDataSnapshot(signal?: AbortSignal): Promise<MasterDataSnapshot> {
+  const [coverage, jobs] = await Promise.all([
+    fetchDatasetCoverage(signal),
+    getJson<unknown>("/api/master-data/jobs", signal),
+  ]);
   if (!isRecord(jobs) || !Array.isArray(jobs.jobs) || !jobs.jobs.every(validMasterDataJob)) {
     throw new Error("Master Data jobs returned an invalid response");
   }
-  return {
-    summary: coverage.summary,
-    coverage: coverage.coverage,
-    jobs: jobs.jobs,
-  };
+  return { ...coverage, jobs: jobs.jobs };
 }
 
 export interface BackfillInput {
