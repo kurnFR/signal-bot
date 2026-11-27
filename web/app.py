@@ -67,11 +67,12 @@ async def lifespan(app: FastAPI):
         ensure_wallet_tables()
     except Exception as e:
         logger.warning(f"Could not initialize wallet tracking tables on startup: {e}")
-    try:
-        from db.db import verify_retailbot2_schema
-        verify_retailbot2_schema()
-    except Exception as e:
-        logger.warning("RetailBot2 schema verification failed; run 'python -m db.migrate': %s", e)
+    if os.getenv("RETAILBOT2_ENABLED", "").strip() == "1":
+        try:
+            from db.db import verify_retailbot2_schema
+            verify_retailbot2_schema()
+        except Exception as e:
+            logger.warning("RetailBot2 schema verification failed; run 'python -m db.migrate': %s", e)
     try:
         from db.db import verify_strategy_auto_promotion_schema
         verify_strategy_auto_promotion_schema()

@@ -35,6 +35,7 @@ def test_package_file_presence_and_manifest():
         "deploy/systemd/retailbot2-outbox-worker.service",
         "deploy/env/outbox-worker.env.example",
         "deploy/requirements-worker.txt",
+        "paper/outbox_store.py",
         "paper/outbox_worker.py",
         "paper/outbox_transport.py",
         "paper/outbox_health.py",
@@ -83,6 +84,7 @@ def test_env_example_fail_closed_defaults():
     vars_dict = dict(l.split("=", 1) for l in lines if "=" in l)
 
     # Fail closed delivery and observation
+    assert vars_dict.get("TELEGRAM_DELIVERY_ENABLED") == "0"
     assert vars_dict.get("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY") == "0"
     assert vars_dict.get("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED") == "0"
 
@@ -257,6 +259,7 @@ def test_service_observation_and_env_fail_closed_contract():
     lines = [l.strip() for l in env_text.splitlines() if l.strip() and not l.startswith("#")]
     vars_dict = dict(l.split("=", 1) for l in lines if "=" in l)
     assert vars_dict.get("RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED") == "0"
+    assert vars_dict.get("TELEGRAM_DELIVERY_ENABLED") == "0"
     assert vars_dict.get("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY") == "0"
 
 

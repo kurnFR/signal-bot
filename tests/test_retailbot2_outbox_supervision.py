@@ -316,15 +316,15 @@ class TestWorkerLifecycleSimulation(unittest.TestCase):
                                 mock_worker_cls.assert_not_called()
 
     def test_normal_delivery_requires_explicit_delivery_authorization(self):
-        """Production worker without --observation and without --health requires RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1."""
+        """Production worker without --observation and without --health requires TELEGRAM_DELIVERY_ENABLED=1 (or legacy RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1)."""
         from paper.outbox_worker import main
-        with patch.dict(os.environ, {"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "0"}, clear=False):
+        with patch.dict(os.environ, {"TELEGRAM_DELIVERY_ENABLED": "0", "RETAILBOT2_ALLOW_TELEGRAM_DELIVERY": "0"}, clear=False):
             with patch("sys.argv", ["outbox_worker", "--database", "crypto_signals"]):
                 with self.assertLogs("outbox_worker", level="ERROR") as log_ctx:
                     with self.assertRaises(SystemExit) as ctx:
                         main()
                 self.assertEqual(ctx.exception.code, 1)
-                self.assertIn("Production outbox requires RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1", "\n".join(log_ctx.output))
+                self.assertIn("Production outbox requires TELEGRAM_DELIVERY_ENABLED=1", "\n".join(log_ctx.output))
 
 
 if __name__ == "__main__":

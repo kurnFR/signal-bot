@@ -51,14 +51,14 @@ def test_strategy_library_catalog_exposes_bb_rev_inv_and_dbl_pat_inv():
     assert bb_rev_inv["isInverse"] is True
     assert bb_rev_inv["baseName"] == "BB_REV"
     assert "Bollinger" in bb_rev_inv["displayName"]
-    assert bb_rev_inv["category"] == "RetailBot2 (Research)"
+    assert bb_rev_inv["category"] == "Crowd Contrarian"
     assert len(bb_rev_inv["params"]) >= 3
 
     dbl_pat_inv = by_id["DBL_PAT_INV"]
     assert dbl_pat_inv["isInverse"] is True
     assert dbl_pat_inv["baseName"] == "DBL_PAT"
     assert "Double" in dbl_pat_inv["displayName"]
-    assert dbl_pat_inv["category"] == "RetailBot2 (Research)"
+    assert dbl_pat_inv["category"] == "Crowd Contrarian"
 
 
 def test_paper_config_accepts_bb_rev_inv_without_changing_research_lifecycle():

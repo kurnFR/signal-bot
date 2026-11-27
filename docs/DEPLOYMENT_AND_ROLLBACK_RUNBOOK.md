@@ -24,7 +24,7 @@ Funding rate collection runs through the separate `signal-funding-collector.serv
 - **Paper Engine** (`run_paper_engine.py`): Excluded by default. Requires explicit `PAPER_ENGINE_ENABLED=1`.
 - **News AI** (`run_news_ai.py`): Excluded by default. Requires explicit `NEWS_AI_ENABLED=1`.
 - **RetailBot2** (`paper/retailbot2.py`): Excluded by default. Requires explicit `RETAILBOT2_ENABLED=1`. Furthermore, trade execution requires an independent authorization gate: `RETAILBOT2_ALLOW_TRADING=1`.
-- **RetailBot2 Outbox Worker** (`paper.outbox_worker`): Excluded by default. Requires **both** `RETAILBOT2_OUTBOX_WORKER_ENABLED=1` AND `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`.
+- **RetailBot2 Outbox Worker** (`paper.outbox_worker`): Excluded by default. Requires **both** `RETAILBOT2_OUTBOX_WORKER_ENABLED=1` AND `TELEGRAM_DELIVERY_ENABLED=1` (or deprecated alias `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`).
 - **Telegram Delivery**: Disabled globally by default. Enabling the supervisor or any individual service never enables live Telegram notifications.
 
 ### Database Migration Safety
@@ -73,7 +73,8 @@ Execute and record every check prior to deployment:
   - `RETAILBOT2_ENABLED=0` (or omitted)
   - `RETAILBOT2_ALLOW_TRADING=0` (or omitted)
   - `RETAILBOT2_OUTBOX_WORKER_ENABLED=0` (or omitted)
-  - `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0` (or omitted)
+  - `TELEGRAM_DELIVERY_ENABLED=0` (or omitted)
+  - `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0` (or omitted; deprecated alias)
 
 ---
 

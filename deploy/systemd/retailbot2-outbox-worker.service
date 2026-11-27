@@ -7,8 +7,8 @@
 # IMPORTANT SAFETY & AUTHORIZATION NOTICE:
 # - Installing or enabling this service does NOT authorize live trading or
 #   Telegram delivery.
-# - Telegram delivery remains fail-closed unless RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1
-#   is explicitly configured in the environment file.
+# - Telegram delivery remains fail-closed unless TELEGRAM_DELIVERY_ENABLED=1
+#   (or legacy alias RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1) is explicitly configured in the environment file.
 # - In read-only observation mode, configure --observation in ExecStart and
 #   set RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1 with dedicated
 #   observation credentials (retailbot2_obs@127.0.0.1).
@@ -51,7 +51,7 @@ EnvironmentFile=-/etc/retailbot2/outbox-worker.env
 # 3. DELIVERY SEPARATION: Enabling observation is SELECT-only and NEVER authorizes delivery.
 #    Any future transition from observation mode to active delivery mode requires:
 #    a. Deliberate written authorization from system owners.
-#    b. Setting RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 and delivery credentials in the env file.
+#    b. Setting TELEGRAM_DELIVERY_ENABLED=1 and delivery credentials in the env file.
 #    c. Operator configuration change (e.g. systemd drop-in override removing --observation).
 #    Never enable delivery authorization merely to satisfy health checks or observation.
 ExecStart=/opt/signal-bot/venv/bin/python3 -m paper.outbox_worker --database crypto_signals --poll-interval 1.0 --timeout 10.0 --observation

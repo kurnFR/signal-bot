@@ -138,7 +138,7 @@ services:
     # of the default stack. Add 'outbox' to COMPOSE_PROFILES in .env
     # (keeping 'bundled-db' if you use the bundled database -- a CLI
     # --profile flag REPLACES COMPOSE_PROFILES instead of adding to it)
-    # and set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 in .env.
+    # and set TELEGRAM_DELIVERY_ENABLED=1 in .env.
     profiles: ["outbox"]
     build:
       context: .
@@ -167,6 +167,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-crypto_signals}
       RETAILBOT2_OUTBOX_WORKER_ENABLED: 1
+      TELEGRAM_DELIVERY_ENABLED: ${TELEGRAM_DELIVERY_ENABLED:-0}
       RETAILBOT2_ALLOW_TELEGRAM_DELIVERY: ${RETAILBOT2_ALLOW_TELEGRAM_DELIVERY:-0}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}

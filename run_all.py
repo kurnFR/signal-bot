@@ -25,8 +25,8 @@ Trade execution requires separate, explicit authorization:
 
 The outbox worker is a separate opt-in and additionally requires
 RETAILBOT2_OUTBOX_WORKER_ENABLED=1 and
-RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1. Enabling RetailBot2 does not enable
-trading, Telegram delivery, or the outbox worker.
+TELEGRAM_DELIVERY_ENABLED=1 (or deprecated alias RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1).
+Enabling RetailBot2 does not enable trading, Telegram delivery, or the outbox worker.
 
 Automatic migrations are disabled by default. Run python3 -m db.migrate
 as a separately authorized deployment step, or explicitly opt in to automatic
@@ -99,15 +99,19 @@ def build_processes(environ=None):
     # Keep delivery disabled by default. Both flags are required so enabling
     # the process supervisor alone cannot accidentally enable production sends.
     if (env.get("RETAILBOT2_OUTBOX_WORKER_ENABLED") or "").strip() == "1":
-        if (env.get("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY") or "").strip() == "1":
+        delivery_enabled = (
+            (env.get("TELEGRAM_DELIVERY_ENABLED") or "").strip() == "1"
+            or (env.get("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY") or "").strip() == "1"
+        )
+        if delivery_enabled:
             processes["retailbot2_outbox"] = [
                 sys.executable, "-m", "paper.outbox_worker",
                 "--database", "crypto_signals",
             ]
         else:
             logger.error(
-                "RetailBot2 outbox worker requested but RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 "
-                "is missing; worker will remain disabled"
+                "RetailBot2 outbox worker requested but TELEGRAM_DELIVERY_ENABLED=1 "
+                "(or legacy RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1) is missing; worker will remain disabled"
             )
     report_enabled = (env.get("PAPER_REPORT_ENABLED") or "").strip()
     if not report_enabled:

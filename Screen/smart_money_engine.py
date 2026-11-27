@@ -347,7 +347,7 @@ class SmartMoneyTelegram:
         if not self.delivery_authorized:
             logger.info(
                 "ℹ️ Legacy Screener Telegram delivery is disabled (authorization missing; "
-                "set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 to enable delivery)."
+                "set TELEGRAM_DELIVERY_ENABLED=1 to enable delivery)."
             )
 
     @property
@@ -441,7 +441,7 @@ if telegram.delivery_authorized:
     else:
         logger.warning("⚠️ Legacy Telegram alerts are NOT configured: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing")
 else:
-    logger.info("ℹ️ Legacy Smart Money Telegram delivery disabled: RETAILBOT2_ALLOW_TELEGRAM_DELIVERY is not set to 1")
+    logger.info("ℹ️ Legacy Smart Money Telegram delivery disabled: TELEGRAM_DELIVERY_ENABLED is not set to 1")
 
 # =========================
 # BINANCE SYMBOL FILTERING
