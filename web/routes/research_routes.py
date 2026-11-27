@@ -14,15 +14,21 @@ handling, and is a different problem from "pause the trading logic"). The
 process itself is still your responsibility to keep running (tmux/systemd/
 supervisor) -- these toggles only pause/resume what it does once it's up.
 """
+import csv
+import io
 import logging
-import os
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field, StrictBool
-from typing import Any, Dict, Optional
 import math
+import os
+from typing import Any, Dict, Optional
+
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field, StrictBool
 
 from db.db import (
+    RETAILBOT2_ARCHIVE_COLUMNS,
     get_retailbot2_open_trades, get_retailbot2_recent_trades, get_retailbot2_stats,
+    get_retailbot2_archive_summary, iter_retailbot2_table_batches,
     get_recent_smart_money_signals, get_smart_money_stats,
     get_retailbot2_control, set_retailbot2_control, RETAILBOT2_TUNABLE_FIELDS,
     get_retailbot2_strategy_lifecycle_settings, set_retailbot2_strategy_lifecycle_setting,
@@ -177,6 +183,56 @@ def retailbot2_stats():
     except Exception as e:
         logger.error("retailbot2_stats failed (%s)", type(e).__name__)
         raise HTTPException(status_code=500, detail="Failed to load retailbot2 stats")
+
+
+def _stream_archive_csv(table_name: str, batch_size: int = 500):
+    columns = RETAILBOT2_ARCHIVE_COLUMNS[table_name]
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(columns)
+    yield buf.getvalue().encode("utf-8")
+    buf.seek(0)
+    buf.truncate(0)
+
+    for batch in iter_retailbot2_table_batches(table_name, batch_size=batch_size):
+        for row in batch:
+            writer.writerow(["" if val is None else str(val) for val in row])
+        chunk = buf.getvalue()
+        if chunk:
+            yield chunk.encode("utf-8")
+        buf.seek(0)
+        buf.truncate(0)
+
+
+@router.get("/retailbot2/archive/summary")
+def retailbot2_archive_summary():
+    try:
+        summary = get_retailbot2_archive_summary()
+        return {
+            "tradesCount": int(summary["trades_count"]),
+            "statsCount": int(summary["stats_count"]),
+        }
+    except Exception as e:
+        logger.error("retailbot2_archive_summary failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Failed to load retailbot2 archive summary")
+
+
+@router.get("/retailbot2/archive/trades.csv")
+def retailbot2_archive_trades_csv():
+    return StreamingResponse(
+        _stream_archive_csv("rdt_trades"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="rdt_trades_archive.csv"'},
+    )
+
+
+@router.get("/retailbot2/archive/stats.csv")
+def retailbot2_archive_stats_csv():
+    return StreamingResponse(
+        _stream_archive_csv("rdt_strategy_stats"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="rdt_strategy_stats_archive.csv"'},
+    )
 
 
 @router.get("/screener/signals")

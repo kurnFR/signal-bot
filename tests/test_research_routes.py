@@ -70,6 +70,9 @@ class TestResearchRoutes(unittest.TestCase):
             "/api/research/retailbot2/positions",
             "/api/research/retailbot2/trades",
             "/api/research/retailbot2/stats",
+            "/api/research/retailbot2/archive/summary",
+            "/api/research/retailbot2/archive/trades.csv",
+            "/api/research/retailbot2/archive/stats.csv",
             "/api/research/screener/status",
             "/api/research/screener/signals",
             "/api/research/screener/stats",
@@ -510,6 +513,114 @@ class TestResearchRoutes(unittest.TestCase):
         res = self.client.get("/api/research/retailbot2/stats", headers=self.headers)
         self.assertEqual(res.status_code, 500)
         self.assertIn("Failed to load retailbot2 stats", res.json().get("detail", ""))
+
+    @patch("web.routes.research_routes.get_retailbot2_archive_summary", return_value={"trades_count": 9042, "stats_count": 14})
+    def test_retailbot2_archive_summary_returns_exact_counts(self, mock_summary):
+        res = self.client.get("/api/research/retailbot2/archive/summary", headers=self.headers)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {"tradesCount": 9042, "statsCount": 14})
+        mock_summary.assert_called_once_with()
+
+    @patch("web.routes.research_routes.iter_retailbot2_table_batches")
+    def test_retailbot2_archive_trades_csv_streams_paginated_rows(self, mock_iter):
+        import csv
+        import io
+        from db.db import RETAILBOT2_ARCHIVE_COLUMNS
+
+        cols = RETAILBOT2_ARCHIVE_COLUMNS["rdt_trades"]
+        row1 = tuple(f"v1_{i}" for i in range(len(cols)))
+        row2 = (2, "BTCUSDT", "SHORT", "inverse", "50000.0", "50500.0", "49000.0", "250.0", "2.0", "0.1",
+                "BB_REV", '["BB_REV", "RSI_CTR"]', 0, 2, "fade, bounce\nline2", "CLOSED", "49000.0",
+                "TAKE_PROFIT", "100.0", "2.0", "2026-10-01 00:00:00", "2026-10-01 04:00:00", "2026-10-01 00:00:00")
+        row3 = (3, "ETHUSDT", "LONG", "shadow", "3000.0", "2950.0", "3100.0", "25.0", "2.0", "1.0",
+                "MA_WHIP", None, 1, 1, None, "OPEN", None, None, None, None, "2026-10-02 01:00:00", None, "2026-10-02 01:00:00")
+        mock_iter.return_value = iter([[row1, row2], [row3]])
+
+        res = self.client.get("/api/research/retailbot2/archive/trades.csv", headers=self.headers)
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("text/csv", res.headers.get("content-type", ""))
+        self.assertIn('filename="rdt_trades_archive.csv"', res.headers.get("content-disposition", ""))
+
+        parsed = list(csv.reader(io.StringIO(res.text)))
+        self.assertEqual(tuple(parsed[0]), cols)
+        self.assertEqual(len(parsed) - 1, 3)
+        self.assertEqual(parsed[2][14], "fade, bounce\nline2")
+        self.assertEqual(parsed[3][11], "")
+        mock_iter.assert_called_once_with("rdt_trades", batch_size=500)
+
+    @patch("web.routes.research_routes.iter_retailbot2_table_batches")
+    def test_retailbot2_archive_stats_csv_streams_rows(self, mock_iter):
+        import csv
+        import io
+        from db.db import RETAILBOT2_ARCHIVE_COLUMNS
+
+        cols = RETAILBOT2_ARCHIVE_COLUMNS["rdt_strategy_stats"]
+        rows = [
+            (1, "BB_REV", "shadow", 120, 40, 80, "-250.5", "2026-11-01 00:00:00"),
+            (2, "BB_REV", "inverse", 120, 80, 40, "310.25", "2026-11-01 00:00:00"),
+        ]
+        mock_iter.return_value = iter([rows])
+
+        res = self.client.get("/api/research/retailbot2/archive/stats.csv", headers=self.headers)
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('filename="rdt_strategy_stats_archive.csv"', res.headers.get("content-disposition", ""))
+
+        parsed = list(csv.reader(io.StringIO(res.text)))
+        self.assertEqual(tuple(parsed[0]), cols)
+        self.assertEqual(len(parsed) - 1, len(rows))
+        mock_iter.assert_called_once_with("rdt_strategy_stats", batch_size=500)
+
+    def test_iter_retailbot2_table_batches_uses_keyset_pagination(self):
+        from unittest.mock import MagicMock
+        import db.db as db_module
+
+        cursor = MagicMock()
+        cursor.fetchall.side_effect = [
+            [(1, "a"), (2, "b")],
+            [(5, "c")],
+        ]
+        conn = MagicMock()
+        conn.cursor.return_value = cursor
+        pool = MagicMock()
+        pool.get_connection.return_value = conn
+
+        with patch.object(db_module, "get_retailbot2_pool", return_value=pool):
+            batches = list(db_module.iter_retailbot2_table_batches("rdt_strategy_stats", batch_size=2))
+
+        self.assertEqual(batches, [[(1, "a"), (2, "b")], [(5, "c")]])
+        self.assertEqual(cursor.execute.call_count, 2)
+        self.assertIn("WHERE id > %s ORDER BY id ASC LIMIT %s", cursor.execute.call_args_list[0].args[0])
+        self.assertEqual(cursor.execute.call_args_list[0].args[1], (0, 2))
+        self.assertEqual(cursor.execute.call_args_list[1].args[1], (2, 2))
+        cursor.close.assert_called_once()
+        conn.rollback.assert_called_once()
+        conn.close.assert_called_once()
+
+    def test_ui_show_retailbot2_history_flag_exposed_in_status(self):
+        import os
+        with patch.dict(os.environ, {}, clear=False), \
+             patch("web.routes.settings.collect_system_status", return_value={
+                 "database": {"status": "ok", "tables": {}},
+                 "heartbeats": [],
+                 "binance": {"spotApi": "online", "futuresApi": "online", "enableFuturesConfig": True},
+                 "loginRateLimiter": {"mode": "memory", "degraded": False},
+             }):
+            os.environ.pop("UI_SHOW_RETAILBOT2_HISTORY", None)
+            from web.routes.settings import is_retailbot2_history_visible
+            self.assertFalse(is_retailbot2_history_visible())
+
+        with patch.dict(os.environ, {"UI_SHOW_RETAILBOT2_HISTORY": "1"}, clear=False):
+            from web.routes.settings import is_retailbot2_history_visible
+            self.assertTrue(is_retailbot2_history_visible())
+
+        res_default = self.client.get("/api/system/status", headers=self.headers)
+        self.assertEqual(res_default.status_code, 200)
+        self.assertFalse(res_default.json()["uiFlags"]["showRetailbot2History"])
+
+        with patch.dict(os.environ, {"UI_SHOW_RETAILBOT2_HISTORY": "true"}, clear=False):
+            res_enabled = self.client.get("/api/system/status", headers=self.headers)
+            self.assertEqual(res_enabled.status_code, 200)
+            self.assertTrue(res_enabled.json()["uiFlags"]["showRetailbot2History"])
 
 
 if __name__ == "__main__":

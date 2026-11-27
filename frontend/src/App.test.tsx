@@ -146,9 +146,27 @@ describe("frontend foundation shell", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Wallet Tracking" })).toBeInTheDocument();
     expect(screen.getByText(/ON-CHAIN \/ SMART MONEY/i)).toBeInTheDocument();
   });
-  it("routes Research to the active view", () => {
+  it("hides Research navigation by default while keeping /modern/research route functional and revealing nav when UI_SHOW_RETAILBOT2_HISTORY is enabled", async () => {
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: /Research/ }));
+    expect(screen.queryByRole("button", { name: /^Research$/ })).not.toBeInTheDocument();
+
+    window.history.replaceState(null, "", "/modern/research");
+    fireEvent.popState(window);
+    expect(await screen.findByRole("heading", { level: 1, name: "Research" })).toBeInTheDocument();
+
+    cleanup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          Response.json({ ...statusResponse, uiFlags: { showRetailbot2History: true } }),
+        ),
+      ),
+    );
+    window.history.replaceState(null, "", "/");
+    render(<App />);
+    const researchNav = await screen.findByRole("button", { name: /^Research$/ });
+    fireEvent.click(researchNav);
     expect(screen.getByRole("heading", { level: 1, name: "Research" })).toBeInTheDocument();
     expect(screen.getByText(/RESEARCH \/ BOT LAB/i)).toBeInTheDocument();
   });

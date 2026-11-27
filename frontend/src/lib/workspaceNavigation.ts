@@ -1,6 +1,9 @@
 import { Activity, BarChart3, BookOpen, BrainCircuit, Database, Flame, LayoutDashboard, Newspaper, Settings2, Wallet, WalletCards, Zap, type LucideIcon } from "lucide-react";
 
-export const WORKSPACE_GROUPS: { label: string; items: { label: string; icon: LucideIcon; keywords?: string[] }[] }[] = [
+export type WorkspaceNavItem = { label: string; icon: LucideIcon; keywords?: string[] };
+export type WorkspaceGroup = { label: string; items: WorkspaceNavItem[] };
+
+export const WORKSPACE_GROUPS: WorkspaceGroup[] = [
   {
     label: "Prepare workspace",
     items: [
@@ -38,5 +41,13 @@ export const WORKSPACE_GROUPS: { label: string; items: { label: string; icon: Lu
     items: [{ label: "Settings", icon: Settings2, keywords: ["Telegram", "alerts"] }],
   },
 ];
+
+export function visibleWorkspaceGroups(showRetailbot2History = false): WorkspaceGroup[] {
+  if (showRetailbot2History) return WORKSPACE_GROUPS;
+  return WORKSPACE_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => item.label !== "Research"),
+  })).filter((group) => group.items.length > 0);
+}
 
 export const viewPath = (label: string) => "/modern/" + label.toLowerCase().replaceAll(" ", "-");

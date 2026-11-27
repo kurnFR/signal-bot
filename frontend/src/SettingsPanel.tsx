@@ -7,6 +7,7 @@ import { fetchAdminSystemStatus, type AdminSystemStatusResponse } from "./lib/sy
 import { AuditLogsSection } from "./components/AuditLogsSection";
 import { ServicesSection } from "./components/ServicesSection";
 import { LicenseStatusCard } from "./components/LicenseStatusCard";
+import { RetailBot2ArchiveSection } from "./components/RetailBot2ArchiveSection";
 import type { LicenseStatus } from "./lib/systemStatus";
 import {
   createUser,
@@ -1152,5 +1153,7 @@ export function SettingsPanel({ theme, onToggleTheme, username, role, license }:
     {isAdmin && <ServicesSection isAdmin={isAdmin} />}
 
     {isAdmin && <AuditLogsSection />}
+
+    <RetailBot2ArchiveSection />
   </div>;
 }

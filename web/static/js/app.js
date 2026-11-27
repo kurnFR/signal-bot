@@ -2988,6 +2988,12 @@ const App = {
         if (dbBadge.textContent.trim() !== statusText) {
             dbBadge.innerHTML = `<span class="w-2 h-2 rounded-full ${dotClass}"></span> ${statusText}`;
         }
+
+        const researchNav = document.getElementById("nav-btn-research");
+        if (researchNav) {
+            const showResearch = Boolean(this.systemStatus?.uiFlags?.showRetailbot2History);
+            researchNav.classList.toggle("hidden", !showResearch);
+        }
     },
 
     async fetchCoverage() {
@@ -4543,6 +4549,41 @@ const App = {
         setText("settings-db-name", db.database);
         setText("settings-bin-spot", bin.spotApi);
         setText("settings-bin-futures", bin.futuresApi);
+    },
+
+    async fetchRetailbot2ArchiveSummary() {
+        try {
+            const res = await fetch(`${API_BASE}/api/research/retailbot2/archive/summary`, { headers: this.getAuthHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const tradesEl = document.getElementById("archive-trades-count");
+            const statsEl = document.getElementById("archive-stats-count");
+            if (tradesEl) tradesEl.innerText = `${Number(data.tradesCount ?? 0).toLocaleString()} rows`;
+            if (statsEl) statsEl.innerText = `${Number(data.statsCount ?? 0).toLocaleString()} rows`;
+        } catch (e) {
+            this.showToast(`Failed to load archive summary: ${e.message || "error"}`, "error");
+        }
+    },
+
+    async downloadRetailbot2ArchiveCsv(kind) {
+        const endpoint = kind === "stats" ? "/api/research/retailbot2/archive/stats.csv" : "/api/research/retailbot2/archive/trades.csv";
+        const filename = kind === "stats" ? "rdt_strategy_stats_archive.csv" : "rdt_trades_archive.csv";
+        try {
+            const res = await fetch(`${API_BASE}${endpoint}`, { headers: this.getAuthHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            this.showToast(`Downloaded ${filename}`, "success");
+        } catch (e) {
+            this.showToast(`Failed to export ${filename}: ${e.message || "error"}`, "error");
+        }
     },
 
     // ==========================================

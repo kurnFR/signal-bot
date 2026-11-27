@@ -11,6 +11,11 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 logger = logging.getLogger(__name__)
 
 
+def is_retailbot2_history_visible() -> bool:
+    """Return True when the legacy Research navigation item should be shown."""
+    return os.getenv("UI_SHOW_RETAILBOT2_HISTORY", "").strip().lower() in {"1", "true", "yes"}
+
+
 def collect_system_status() -> dict:
     """Full status (includes connection details). Callers decide what to expose."""
     # MariaDB check
@@ -82,7 +87,10 @@ def collect_system_status() -> dict:
         },
         "system": {
             "timezone": "Asia/Jakarta (WIB UTC+7)",
-        }
+        },
+        "uiFlags": {
+            "showRetailbot2History": is_retailbot2_history_visible(),
+        },
     }
 
 
