@@ -59,6 +59,7 @@ def test_production_outbox_requires_explicit_delivery_permission(monkeypatch, db
 
     worker = OutboxWorker({"database": "crypto_signals"})
     worker.session_mgr = MagicMock()
+    worker.session_mgr.delivery_paused.return_value = False
     worker.session_mgr.claim_event.return_value = None
     with _gate(monkeypatch, "1", db_row):
         assert worker.process_one_event() is False
@@ -131,6 +132,7 @@ def test_missing_outbox_authorization_warning_is_rate_limited(monkeypatch, caplo
     monkeypatch.setattr(outbox_worker, "time", MagicMock(monotonic=lambda: next(now)))
     worker = outbox_worker.OutboxWorker({"database": "crypto_signals"})
     worker.session_mgr = MagicMock()
+    worker.session_mgr.delivery_paused.return_value = False
     with _gate(monkeypatch, "1", None):
         for _ in range(3):
             assert worker.process_one_event() is False
@@ -160,3 +162,31 @@ def test_telegram_status_reports_outbox_authorization(monkeypatch, row, value, r
     payload = response.json()
     assert payload["delivery_authorized"] is value
     assert payload["outbox_blocked_reason"] == reason
+
+def test_production_outbox_pause_and_resume(monkeypatch):
+    from paper.outbox_worker import OutboxWorker
+
+    worker = OutboxWorker({"database": "crypto_signals"})
+    worker.session_mgr = MagicMock()
+    worker.session_mgr.delivery_paused.side_effect = [True, False]
+    worker.session_mgr.claim_event.return_value = None
+    with _gate(monkeypatch, "1", DB_ON):
+        assert worker.process_one_event() is False
+        worker.session_mgr.claim_event.assert_not_called()
+        assert worker.process_one_event() is False
+        worker.session_mgr.claim_event.assert_called_once()
+
+
+def test_outbox_pause_read_failure_blocks_claims(monkeypatch):
+    from paper.outbox_worker import OutboxWorker
+
+    worker = OutboxWorker({"database": "crypto_signals"})
+    worker.session_mgr.s_lock = MagicMock()
+    cursor = worker.session_mgr.s_lock.cursor.return_value.__enter__.return_value
+    cursor.execute.side_effect = RuntimeError("database read failed")
+    with patch.object(worker.session_mgr, "check_lock_owned", return_value=True), \
+         patch.object(worker.session_mgr, "write_service_heartbeat"), \
+         patch.object(worker.session_mgr, "claim_event") as claim, \
+         _gate(monkeypatch, "1", DB_ON):
+        assert worker.process_one_event() is False
+        claim.assert_not_called()

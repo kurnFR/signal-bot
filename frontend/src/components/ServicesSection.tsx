@@ -1,12 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
 import { Power, RefreshCw } from "lucide-react";
+import { fetchScreenerControl, fetchScreenerStatus, saveScreenerControl } from "../lib/screener";
+import { viewPath } from "../lib/workspaceNavigation";
 import { fetchServices, setServiceEnabled, type ServiceState } from "../lib/services";
 
 const serviceLaunchFlags: Record<string, string> = {
   paper_engine: "PAPER_ENGINE_ENABLED=1",
   news_ai: "NEWS_AI_ENABLED=1",
+  screener: "The default run_all.py worker set includes the Screener",
+  telegram_outbox: "RETAILBOT2_OUTBOX_WORKER_ENABLED=1 and TELEGRAM_DELIVERY_ENABLED=1",
   paper_report: "PAPER_REPORT_ENABLED=1 (requires the Telegram outbox worker)",
 };
+
+function heartbeatAgeSeconds(timestamp: string) {
+  const normalized = timestamp.includes("T") ? timestamp : timestamp.replace(" ", "T") + "Z";
+  return Math.max(0, Math.floor((Date.now() - Date.parse(normalized)) / 1000));
+}
 
 /** Admin-only runtime pause/resume for background workers (no restart, no .env edit). */
 export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
@@ -14,14 +23,37 @@ export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [screenerError, setScreenerError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
-      const rows = await fetchServices(signal);
-      if (!signal?.aborted) setServices(rows);
+      const [rows, screener] = await Promise.all([
+        fetchServices(signal),
+        fetchScreenerStatus(signal).then(
+          (status) => ({ status, error: null }),
+          () => ({ status: null, error: "Screener status unavailable. Refresh to retry." }),
+        ),
+      ]);
+      if (signal?.aborted) return;
+      setScreenerError(screener.error);
+      if (!screener.status) {
+        setServices(rows);
+        return;
+      }
+      setServices([...rows, {
+        service: "screener",
+        label: "Screener",
+        description: "Scans markets for smart-money signals.",
+        pauseWarning: "While paused, the Screener stops generating signals.",
+        enabled: screener.status.enabled,
+        updatedBy: null,
+        updatedAt: null,
+        staleAfterSeconds: 180,
+        heartbeats: [{ name: "screener", status: null, detail: null, lastBeat: screener.status.last_beat_at }],
+      }]);
     } catch (cause) {
       if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "Failed to load services");
     } finally {
@@ -43,7 +75,12 @@ export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
     setBusy(service);
     setError(null);
     try {
-      await setServiceEnabled(service, enabled);
+      if (service === "screener") {
+        const control = await fetchScreenerControl();
+        await saveScreenerControl(enabled, control.overrides);
+      } else {
+        await setServiceEnabled(service, enabled);
+      }
       setConfirming(null);
       await load();
     } catch (cause) {
@@ -70,6 +107,7 @@ export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
       </div>
 
       {error && <div className="api-error" role="alert" style={{ marginBottom: 12 }}>{error}</div>}
+      {screenerError && <p className="control-feedback control-error">{screenerError}</p>}
       {loading && services.length === 0 ? (
         <p className="empty-state" role="status">Loading services…</p>
       ) : (
@@ -87,13 +125,14 @@ export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
                   .at(-1);
                 const launchFlag = serviceLaunchFlags[svc.service];
                 const awaitingHeartbeat = Boolean(launchFlag && !latest);
-                const stale = latest && svc.staleAfterSeconds != null &&
-                  Date.now() - Date.parse(latest) > svc.staleAfterSeconds * 1000;
+                const age = latest ? heartbeatAgeSeconds(latest) : NaN;
+                const stale = svc.staleAfterSeconds != null && age > svc.staleAfterSeconds;
                 return (
                   <tr key={svc.service}>
                     <td>
                       <strong>{svc.label}</strong>
                       <div className="panel-subtitle">{svc.description}</div>
+                      {svc.service === "screener" && <a href={viewPath("Market Screener") + "#screener-controls-title"}>Screener thresholds</a>}
                       {svc.updatedBy && <div className="panel-subtitle">Last changed by {svc.updatedBy}</div>}
                     </td>
                     <td>
@@ -101,7 +140,7 @@ export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
                         {!svc.enabled ? "Paused" : awaitingHeartbeat ? "No heartbeat" : stale ? "Stale heartbeat" : "Enabled"}
                       </span>
                     </td>
-                    <td>{latest ?? "—"}</td>
+                    <td>{latest ?? "—"}{Number.isFinite(age) && <div className="panel-subtitle">{age.toLocaleString()}s ago</div>}</td>
                     <td>
                       {confirming === svc.service ? (
                         <div role="group" aria-label={`Confirm pausing ${svc.label}`}>

@@ -36,6 +36,13 @@ SERVICES: Dict[str, Dict[str, object]] = {
         "heartbeats": ["news_poller", "econ_calendar_poller", "news_strategy_engine", "news_execution"],
         "pause_warning": "While paused, no new news or calendar events are ingested and no AI signals are generated.",
     },
+    "telegram_outbox": {
+        "stale_after_seconds": 180,
+        "label": "Telegram Outbox",
+        "description": "Claims queued alerts and delivers them to Telegram.",
+        "heartbeats": ["telegram_outbox"],
+        "pause_warning": "While paused, no new alerts are claimed and the queue can grow. An in-flight alert can finish.",
+    },
     "paper_report": {
         "stale_after_seconds": 7200,
         "label": "Paper Performance Reports",

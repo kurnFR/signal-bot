@@ -67,6 +67,7 @@ jobs:
               for table, privileges in (("ohlcv", "SELECT, INSERT, UPDATE, DELETE"),
                                         ("funding_rate", "SELECT, INSERT, UPDATE"),
                                         ("collector_heartbeat", "SELECT, INSERT, UPDATE"),
+                                        ("service_control", "SELECT"),
                                         ("rdt_telegram_outbox", "SELECT, INSERT, UPDATE, DELETE"),
                                         ("rdt_trades", "SELECT, INSERT, UPDATE, DELETE"),
                                         ("rdt_strategy_lifecycle", "SELECT, INSERT, UPDATE, DELETE"),

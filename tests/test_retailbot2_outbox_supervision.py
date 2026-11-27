@@ -156,6 +156,7 @@ class TestWorkerLifecycleSimulation(unittest.TestCase):
         worker.session_mgr = MagicMock()
         worker.session_mgr.check_lock_owned.return_value = True
         worker.session_mgr.heartbeat.return_value = True
+        worker.session_mgr.delivery_paused.return_value = False
 
         event_sample = {
             "id": 999,
