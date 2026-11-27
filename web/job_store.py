@@ -16,7 +16,7 @@ from typing import Any, Callable, Optional
 
 logger = logging.getLogger("web.job_store")
 
-ACTIVE_STATES = ("queued", "running")
+ACTIVE_STATES = ("queued", "running", "cancelling")
 _PROMOTED = ("symbol", "market", "timeframe", "years", "candles_fetched")
 
 
@@ -49,7 +49,7 @@ def save_job(job: dict[str, Any], connect: Callable = _connect) -> bool:
             conn.close()
         return True
     except Exception as exc:
-        logger.warning("Could not persist job %s: %s", job.get("id"), exc)
+        logger.warning("Could not persist job %s (%s)", job.get("id"), type(exc).__name__)
         return False
 
 
@@ -87,7 +87,7 @@ def load_job(job_id: str, connect: Callable = _connect) -> Optional[dict[str, An
             conn.close()
         return _row_to_job(row) if row else None
     except Exception as exc:
-        logger.warning("Could not load job %s: %s", job_id, exc)
+        logger.warning("Could not load job %s (%s)", job_id, type(exc).__name__)
         return None
 
 
@@ -103,7 +103,7 @@ def list_jobs(limit: int = 30, connect: Callable = _connect) -> list[dict[str, A
             conn.close()
         return [_row_to_job(r) for r in rows]
     except Exception as exc:
-        logger.warning("Could not list jobs: %s", exc)
+        logger.warning("Could not list jobs (%s)", type(exc).__name__)
         return []
 
 
@@ -117,7 +117,7 @@ def mark_interrupted(connect: Callable = _connect, pid: Optional[int] = None) ->
             cur.execute(
                 "UPDATE background_jobs SET status = 'interrupted', "
                 "message = 'Interrupted by a server restart; run it again.' "
-                "WHERE status IN ('queued','running') AND (owner_pid IS NULL OR owner_pid <> %s)",
+                "WHERE status IN ('queued','running','cancelling') AND (owner_pid IS NULL OR owner_pid <> %s)",
                 (pid,),
             )
             changed = cur.rowcount
@@ -127,7 +127,7 @@ def mark_interrupted(connect: Callable = _connect, pid: Optional[int] = None) ->
             conn.close()
         return int(changed or 0)
     except Exception as exc:
-        logger.warning("Could not mark interrupted jobs: %s", exc)
+        logger.warning("Could not mark interrupted jobs (%s)", type(exc).__name__)
         return 0
 
 
