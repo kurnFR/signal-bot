@@ -757,15 +757,17 @@
                 <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
                     <div>
                         <h3 class="text-sm font-bold text-slate-100">Per-Strategy Paper Performance</h3>
-                        <p class="text-[11px] text-slate-500 mt-1">Closed paper trades are grouped by strategy. Telegram promotion is independent of tracking and reporting.</p>
+                        <p class="text-[11px] text-slate-500 mt-1">Closed paper trades are grouped by strategy. Click any strategy row to view its per-pair summary, or click any column header to sort.</p>
                     </div>
                     <div class="overflow-x-auto">
-                        <table class="w-full text-left custom-table">
+                        <table id="paper-strategy-performance-table" aria-label="Per-Strategy Paper Performance" class="w-full text-left custom-table">
                             <thead>
                                 <tr>
                                     <th scope="col">Strategy</th>
+                                    <th scope="col">Pairs</th>
                                     <th scope="col">Trades</th>
                                     <th scope="col">Wins</th>
+                                    <th scope="col">Losses</th>
                                     <th scope="col">Win Rate</th>
                                     <th scope="col">Expectancy (R)</th>
                                     <th scope="col">Cumulative (R)</th>
@@ -773,9 +775,36 @@
                                 </tr>
                             </thead>
                             <tbody id="paper-strategy-performance-body">
-                                <tr><td colspan="7" class="text-center py-6 text-slate-500 text-xs">Loading per-strategy performance...</td></tr>
+                                <tr><td colspan="9" class="text-center py-6 text-slate-500 text-xs">Loading per-strategy performance...</td></tr>
                             </tbody>
                         </table>
+                    </div>
+                    <div id="paper-strategy-pair-detail" class="hidden pt-4 border-t border-slate-800 space-y-3">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <h4 id="paper-strategy-pair-title" class="text-xs font-bold text-sky-300 uppercase tracking-wider">Performance by Pair</h4>
+                                <p id="paper-strategy-pair-subtitle" class="text-[11px] text-slate-500 mt-0.5">Click any column header to sort per-pair results.</p>
+                            </div>
+                            <button type="button" id="paper-strategy-pair-close" class="px-2.5 py-1 text-[11px] font-semibold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors">Close</button>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table id="paper-strategy-pair-table" aria-label="Strategy Performance by Pair" class="w-full text-left custom-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Pair</th>
+                                        <th scope="col">Market / TF</th>
+                                        <th scope="col">Trades</th>
+                                        <th scope="col">Wins</th>
+                                        <th scope="col">Losses</th>
+                                        <th scope="col">Win Rate</th>
+                                        <th scope="col">Expectancy (R)</th>
+                                        <th scope="col">Cumulative (R)</th>
+                                        <th scope="col" class="text-right">Net P&amp;L</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="paper-strategy-pair-body"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
@@ -2509,8 +2538,8 @@
          browsers can keep serving a stale cached copy indefinitely since
          this file has no explicit Cache-Control header. See the
          "still seeing the old bug after a fix was pushed" class of report. -->
-    <script src="/static/js/dashboard_enhancements.js?v=20261104-1"></script>
     <script src="/static/js/app.js?v=20261126-1"></script>
+    <script src="/static/js/dashboard_enhancements.js?v=20261125-1"></script>
     <script>
         if (window.lucide) window.lucide.createIcons();
     </script>

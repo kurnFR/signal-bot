@@ -21,6 +21,7 @@ const App = {
     paperTrades: [],
     paperConfigs: [],
     paperMetrics: {},
+    selectedPaperStrategyKey: null,
     aiStrategyChatHistory: [],
     availableIndicators: [],
     strategyArchitectInitialized: false,
@@ -77,6 +78,13 @@ const App = {
         const savePromotionPolicyButton = document.getElementById("btn-save-promotion-policy");
         if (savePromotionPolicyButton) {
             savePromotionPolicyButton.addEventListener("click", () => this.saveStrategyPromotionPolicy());
+        }
+        const closePairDetailBtn = document.getElementById("paper-strategy-pair-close");
+        if (closePairDetailBtn) {
+            closePairDetailBtn.addEventListener("click", () => {
+                this.selectedPaperStrategyKey = null;
+                this.renderPaperView();
+            });
         }
     },
 
@@ -2075,6 +2083,143 @@ const App = {
         }
     },
 
+    _groupPaperStrategyMetrics(rawRows, configs) {
+        const groupsByKey = new Map();
+        const safeRows = Array.isArray(rawRows) ? rawRows : [];
+        const safeConfigs = Array.isArray(configs) ? configs : [];
+
+        for (const r of safeRows) {
+            if (!r || typeof r !== "object") continue;
+            const strategy = String(r.strategy || "Unknown");
+            const genId = r.ml_generator_model_id || null;
+            const modelId = r.ml_model_id || null;
+            const key = `${strategy}::${genId || ""}::${modelId || ""}`;
+            if (!groupsByKey.has(key)) {
+                groupsByKey.set(key, {
+                    key,
+                    strategy,
+                    ml_generator_model_id: genId,
+                    ml_model_id: modelId,
+                    totalTrades: 0,
+                    wins: 0,
+                    losses: 0,
+                    cumulativeR: 0,
+                    netPnl: 0,
+                    winRatePct: 0,
+                    expectancyR: 0,
+                    pairs: [],
+                });
+            }
+            const group = groupsByKey.get(key);
+            const trades = Number(r.totalTrades || 0);
+            const wins = Number(r.wins || 0);
+            const losses = Number(r.losses || 0);
+            const cumR = Number(r.cumulativeR || 0);
+            const netPnl = Number(r.netPnl || 0);
+            group.totalTrades += trades;
+            group.wins += wins;
+            group.losses += losses;
+            group.cumulativeR += cumR;
+            group.netPnl += netPnl;
+            group.pairs.push({
+                symbol: r.symbol || "—",
+                market: r.market || "",
+                timeframe: r.timeframe || "",
+                configId: r.configId ?? null,
+                totalTrades: trades,
+                wins,
+                losses,
+                winRatePct: trades > 0 ? (wins / trades) * 100 : 0,
+                cumulativeR: cumR,
+                expectancyR: Number.isFinite(Number(r.expectancyR)) ? Number(r.expectancyR) : (trades > 0 ? cumR / trades : 0),
+                netPnl,
+            });
+        }
+
+        // Include active/report-enabled pairs with 0 closed trades for strategies already present.
+        for (const cfg of safeConfigs) {
+            if (!cfg || cfg.archived_at || cfg.report_enabled === false) continue;
+            const strategy = String(cfg.strategy_name || "Unknown");
+            const key = `${strategy}::${cfg.ml_generator_model_id || ""}::${cfg.ml_model_id || ""}`;
+            const group = groupsByKey.get(key);
+            if (!group) continue;
+            const exists = group.pairs.some(p =>
+                (cfg.id != null && p.configId === cfg.id) ||
+                (p.symbol === cfg.symbol && p.market === cfg.market && p.timeframe === cfg.timeframe)
+            );
+            if (!exists) {
+                group.pairs.push({
+                    symbol: cfg.symbol || "—",
+                    market: cfg.market || "",
+                    timeframe: cfg.timeframe || "",
+                    configId: cfg.id ?? null,
+                    totalTrades: 0,
+                    wins: 0,
+                    losses: 0,
+                    winRatePct: 0,
+                    cumulativeR: 0,
+                    expectancyR: 0,
+                    netPnl: 0,
+                });
+            }
+        }
+
+        const groups = Array.from(groupsByKey.values());
+        for (const g of groups) {
+            g.winRatePct = g.totalTrades > 0 ? (g.wins / g.totalTrades) * 100 : 0;
+            g.expectancyR = g.totalTrades > 0 ? g.cumulativeR / g.totalTrades : 0;
+            g.pairs.sort((a, b) => (b.netPnl - a.netPnl) || String(a.symbol).localeCompare(String(b.symbol)));
+        }
+        return groups;
+    },
+
+    _renderPaperStrategyPairDetail(groups) {
+        const panel = document.getElementById("paper-strategy-pair-detail");
+        const tbody = document.getElementById("paper-strategy-pair-body");
+        const titleEl = document.getElementById("paper-strategy-pair-title");
+        const subtitleEl = document.getElementById("paper-strategy-pair-subtitle");
+        if (!panel || !tbody) return;
+
+        const selected = (groups || []).find(g => g.key === this.selectedPaperStrategyKey);
+        if (!selected) {
+            panel.classList.add("hidden");
+            tbody.innerHTML = "";
+            return;
+        }
+
+        panel.classList.remove("hidden");
+        if (titleEl) {
+            titleEl.textContent = `${selected.strategy} — Performance by Pair`;
+        }
+        if (subtitleEl) {
+            subtitleEl.textContent = `${selected.pairs.length} pair${selected.pairs.length === 1 ? "" : "s"} · ${selected.totalTrades} closed trade${selected.totalTrades === 1 ? "" : "s"} · Click any column header to sort.`;
+        }
+        if (!selected.pairs.length) {
+            tbody.innerHTML = `<tr><td colspan="9" class="text-center py-5 text-slate-500 text-xs">No pair data recorded for this strategy.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = selected.pairs.map(p => {
+            const marketTf = p.market && p.timeframe ? `${p.market} / ${p.timeframe}` : (p.market || p.timeframe || "—");
+            return `
+                <tr>
+                    <td class="font-bold font-mono text-xs text-slate-100" data-sort-value="${this._escapeHtml(p.symbol)}">${this._escapeHtml(p.symbol)}</td>
+                    <td class="font-mono text-xs text-slate-400" data-sort-value="${this._escapeHtml(marketTf)}">${this._escapeHtml(marketTf)}</td>
+                    <td class="font-mono text-xs text-slate-200" data-sort-value="${p.totalTrades}">${this._escapeHtml(String(p.totalTrades))}</td>
+                    <td class="font-mono text-xs text-emerald-400" data-sort-value="${p.wins}">${this._escapeHtml(String(p.wins))}</td>
+                    <td class="font-mono text-xs text-rose-400" data-sort-value="${p.losses}">${this._escapeHtml(String(p.losses))}</td>
+                    <td class="font-mono text-xs text-slate-200" data-sort-value="${p.winRatePct}">${p.totalTrades > 0 ? `${p.winRatePct.toFixed(2)}%` : "—"}</td>
+                    <td class="font-mono text-xs ${p.expectancyR >= 0 ? "text-emerald-400" : "text-rose-400"}" data-sort-value="${p.expectancyR}">${p.expectancyR.toFixed(4)}R</td>
+                    <td class="font-mono text-xs ${p.cumulativeR >= 0 ? "text-emerald-400" : "text-rose-400"}" data-sort-value="${p.cumulativeR}">${p.cumulativeR.toFixed(4)}R</td>
+                    <td class="text-right font-mono text-xs ${p.netPnl >= 0 ? "text-emerald-400" : "text-rose-400"}" data-sort-value="${p.netPnl}">${p.netPnl >= 0 ? "+" : ""}$${p.netPnl.toFixed(2)}</td>
+                </tr>`;
+        }).join("");
+
+        if (window.DashboardTableSort) {
+            window.DashboardTableSort.reapply(document.getElementById("paper-strategy-pair-table"));
+        }
+    },
+
     async fetchPaperData() {
         try {
             const responses = await Promise.all([
@@ -2162,30 +2307,61 @@ const App = {
             elCumR.className = `text-2xl font-bold font-mono ${isPos ? "text-emerald-400" : "text-rose-400"}`;
         }
 
-        // 2. Render independent per-strategy closed-trade performance.
+        // 2. Render independent per-strategy closed-trade performance with clickable per-pair detail.
         const strategyPerformanceBody = document.getElementById("paper-strategy-performance-body");
         if (strategyPerformanceBody) {
-            const rows = Array.isArray(m.byStrategy) ? m.byStrategy : [];
-            if (!rows.length) {
-                strategyPerformanceBody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-500 text-xs">No closed paper trades recorded per strategy yet.</td></tr>`;
+            const rawRows = Array.isArray(m.byStrategy) ? m.byStrategy : [];
+            const groups = this._groupPaperStrategyMetrics(rawRows, this.paperConfigs);
+            if (!groups.length) {
+                this.selectedPaperStrategyKey = null;
+                strategyPerformanceBody.innerHTML = `<tr><td colspan="9" class="text-center py-6 text-slate-500 text-xs">No closed paper trades recorded per strategy yet.</td></tr>`;
             } else {
-                strategyPerformanceBody.innerHTML = rows.map(row => {
-                    const expectancy = Number(row.expectancyR || 0);
-                    const cumulative = Number(row.cumulativeR || 0);
-                    const netPnl = Number(row.netPnl || 0);
-                    const winRate = Number(row.winRatePct || 0);
+                if (this.selectedPaperStrategyKey && !groups.some(g => g.key === this.selectedPaperStrategyKey)) {
+                    this.selectedPaperStrategyKey = null;
+                }
+                strategyPerformanceBody.innerHTML = groups.map(group => {
+                    const isSelected = group.key === this.selectedPaperStrategyKey;
+                    const rowClass = isSelected
+                        ? "cursor-pointer bg-sky-950/40 hover:bg-sky-950/60"
+                        : "cursor-pointer hover:bg-slate-800/40";
                     return `
-                        <tr>
-                            <td class="font-mono text-xs text-sky-400">${this._escapeHtml(row.strategy || "Unknown")}${row.ml_generator_model_id ? `<div class="text-[10px] text-purple-300">${this._escapeHtml(row.ml_generator_model_id)}</div>` : row.ml_model_id ? `<div class="text-[10px] text-slate-400">${this._escapeHtml(row.ml_model_id)}</div>` : ""}</td>
-                            <td class="font-mono text-xs text-slate-200">${this._escapeHtml(String(row.totalTrades || 0))}</td>
-                            <td class="font-mono text-xs text-slate-200">${this._escapeHtml(String(row.wins || 0))}</td>
-                            <td class="font-mono text-xs text-slate-200">${Number.isFinite(winRate) ? winRate.toFixed(2) : "—"}%</td>
-                            <td class="font-mono text-xs ${expectancy >= 0 ? "text-emerald-400" : "text-rose-400"}">${Number.isFinite(expectancy) ? expectancy.toFixed(4) : "—"}R</td>
-                            <td class="font-mono text-xs ${cumulative >= 0 ? "text-emerald-400" : "text-rose-400"}">${Number.isFinite(cumulative) ? cumulative.toFixed(4) : "—"}R</td>
-                            <td class="text-right font-mono text-xs ${netPnl >= 0 ? "text-emerald-400" : "text-rose-400"}">${Number.isFinite(netPnl) ? netPnl.toFixed(2) : "—"}</td>
+                        <tr class="${rowClass}" data-strategy-key="${this._escapeHtml(group.key)}" tabindex="0" role="button" aria-expanded="${isSelected ? "true" : "false"}" title="Click to view per-pair summary for ${this._escapeHtml(group.strategy)}">
+                            <td class="font-mono text-xs text-sky-400" data-sort-value="${this._escapeHtml(group.strategy)}">
+                                <span class="inline-flex items-center gap-1.5">
+                                    <span>${this._escapeHtml(group.strategy)}</span>
+                                    <span class="text-[10px] text-slate-500">${isSelected ? "▾" : "▸"}</span>
+                                </span>
+                                ${group.ml_generator_model_id ? `<div class="text-[10px] text-purple-300">${this._escapeHtml(group.ml_generator_model_id)}</div>` : group.ml_model_id ? `<div class="text-[10px] text-slate-400">${this._escapeHtml(group.ml_model_id)}</div>` : ""}
+                            </td>
+                            <td class="font-mono text-xs text-slate-300" data-sort-value="${group.pairs.length}">${group.pairs.length}</td>
+                            <td class="font-mono text-xs text-slate-200" data-sort-value="${group.totalTrades}">${this._escapeHtml(String(group.totalTrades))}</td>
+                            <td class="font-mono text-xs text-emerald-400" data-sort-value="${group.wins}">${this._escapeHtml(String(group.wins))}</td>
+                            <td class="font-mono text-xs text-rose-400" data-sort-value="${group.losses}">${this._escapeHtml(String(group.losses))}</td>
+                            <td class="font-mono text-xs text-slate-200" data-sort-value="${group.winRatePct}">${Number.isFinite(group.winRatePct) ? group.winRatePct.toFixed(2) : "—"}%</td>
+                            <td class="font-mono text-xs ${group.expectancyR >= 0 ? "text-emerald-400" : "text-rose-400"}" data-sort-value="${group.expectancyR}">${Number.isFinite(group.expectancyR) ? group.expectancyR.toFixed(4) : "—"}R</td>
+                            <td class="font-mono text-xs ${group.cumulativeR >= 0 ? "text-emerald-400" : "text-rose-400"}" data-sort-value="${group.cumulativeR}">${Number.isFinite(group.cumulativeR) ? group.cumulativeR.toFixed(4) : "—"}R</td>
+                            <td class="text-right font-mono text-xs ${group.netPnl >= 0 ? "text-emerald-400" : "text-rose-400"}" data-sort-value="${group.netPnl}">${Number.isFinite(group.netPnl) ? `${group.netPnl >= 0 ? "+" : ""}$${group.netPnl.toFixed(2)}` : "—"}</td>
                         </tr>`;
                 }).join("");
+                strategyPerformanceBody.querySelectorAll("tr[data-strategy-key]").forEach(rowEl => {
+                    const toggle = () => {
+                        const key = rowEl.dataset.strategyKey || "";
+                        this.selectedPaperStrategyKey = this.selectedPaperStrategyKey === key ? null : key;
+                        this.renderPaperView();
+                    };
+                    rowEl.addEventListener("click", toggle);
+                    rowEl.addEventListener("keydown", event => {
+                        if ((event.key === "Enter" || event.key === " ") && !event.repeat) {
+                            event.preventDefault();
+                            toggle();
+                        }
+                    });
+                });
             }
+            if (window.DashboardTableSort) {
+                window.DashboardTableSort.reapply(document.getElementById("paper-strategy-performance-table"));
+            }
+            this._renderPaperStrategyPairDetail(groups);
         }
 
         // 3. Render Active Positions Table

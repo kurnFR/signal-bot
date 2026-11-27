@@ -853,12 +853,18 @@ def get_paper_metrics(*, closed_since_ms: Optional[int] = None) -> Dict[str, Any
         wins = int(summary["wins"] or 0)
         losses = int(summary["losses"] or 0)
         by_strategy = []
+        by_pair_acc: Dict[tuple, Dict[str, Any]] = {}
         for row in strategy_rows:
             strategy_total = int(row["total_trades"] or 0)
             strategy_wins = int(row["wins"] or 0)
+            strategy_losses = int(row["losses"] or 0)
+            raw_sum_r = float(row["sum_r"] or 0.0)
+            raw_net_pnl = float(row["net_pnl"] or 0.0)
+            strategy_name = row["strategy_name"]
+            symbol = row.get("symbol")
             by_strategy.append({
-                "strategy": row["strategy_name"],
-                "symbol": row.get("symbol"),
+                "strategy": strategy_name,
+                "symbol": symbol,
                 "market": row.get("market"),
                 "timeframe": row.get("timeframe"),
                 "configId": row.get("config_id"),
@@ -866,12 +872,41 @@ def get_paper_metrics(*, closed_since_ms: Optional[int] = None) -> Dict[str, Any
                 "ml_model_id": row.get("ml_model_id"),
                 "totalTrades": strategy_total,
                 "wins": strategy_wins,
-                "losses": int(row["losses"] or 0),
+                "losses": strategy_losses,
                 "winRatePct": round(strategy_wins / strategy_total * 100, 2) if strategy_total else 0.0,
-                "cumulativeR": round(float(row["sum_r"] or 0.0), 4),
+                "cumulativeR": round(raw_sum_r, 4),
                 "expectancyR": round(float(row["avg_r"] or 0.0), 4),
-                "netPnl": round(float(row["net_pnl"] or 0.0), 8),
+                "netPnl": round(raw_net_pnl, 8),
             })
+            pair_key = (strategy_name, symbol)
+            agg = by_pair_acc.setdefault(pair_key, {
+                "strategy": strategy_name,
+                "symbol": symbol,
+                "totalTrades": 0,
+                "wins": 0,
+                "losses": 0,
+                "sum_r": 0.0,
+                "net_pnl": 0.0,
+            })
+            agg["totalTrades"] += strategy_total
+            agg["wins"] += strategy_wins
+            agg["losses"] += strategy_losses
+            agg["sum_r"] += raw_sum_r
+            agg["net_pnl"] += raw_net_pnl
+        by_strategy_symbol = [
+            {
+                "strategy": agg["strategy"],
+                "symbol": agg["symbol"],
+                "totalTrades": agg["totalTrades"],
+                "wins": agg["wins"],
+                "losses": agg["losses"],
+                "winRatePct": round(agg["wins"] / agg["totalTrades"] * 100, 2) if agg["totalTrades"] else 0.0,
+                "cumulativeR": round(agg["sum_r"], 4),
+                "expectancyR": round(agg["sum_r"] / agg["totalTrades"], 4) if agg["totalTrades"] else 0.0,
+                "netPnl": round(agg["net_pnl"], 8),
+            }
+            for _, agg in sorted(by_pair_acc.items(), key=lambda item: (item[0][0] or "", item[0][1] or ""))
+        ]
         return {
             "totalTrades": total,
             "wins": wins,
@@ -881,6 +916,7 @@ def get_paper_metrics(*, closed_since_ms: Optional[int] = None) -> Dict[str, Any
             "expectancyR": round(float(summary["avg_r"] or 0.0), 4),
             "netPnl": round(float(summary["net_pnl"] or 0.0), 8),
             "byStrategy": by_strategy,
+            "byStrategySymbol": by_strategy_symbol,
         }
     finally:
         try:

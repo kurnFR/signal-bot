@@ -173,6 +173,18 @@
         document.querySelectorAll(SORTABLE_TABLE_SELECTOR).forEach(enhanceTable);
     }
 
+    function reapplyTableSort(table) {
+        if (!table) return;
+        enhanceTable(table);
+        const col = table.dataset.sortColumn;
+        const dir = Number(table.dataset.sortDirection || 0);
+        if (col !== undefined && col !== "" && (dir === 1 || dir === -1)) {
+            sortTable(table, Number(col), dir);
+        }
+    }
+
+    window.DashboardTableSort = { reapply: reapplyTableSort };
+
     function installTelegramPing() {
         if (!window.App || window.App._enhancedTelegramPingInstalled) return;
         window.App._enhancedTelegramPingInstalled = true;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, AlertTriangle, CheckCircle, Plus, RefreshCw, ShieldCheck, WalletCards, X } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle, Plus, RefreshCw, ShieldCheck, WalletCards, X } from "lucide-react";
 import { TradingChart } from "./components/TradingChart";
 import { PortfolioRiskDesk } from "./components/PortfolioRiskDesk";
 import { ExecutionBlotter } from "./components/ExecutionBlotter";
@@ -44,6 +44,56 @@ function dateLabel(value: string | number | null | undefined) {
 }
 function pnlClass(value: number | null | undefined) {
   return value == null || value === 0 ? "" : value > 0 ? "paper-positive" : "paper-negative";
+}
+
+type SortDirection = "asc" | "desc";
+type StrategySummarySortField = "strategy" | "pairCount" | "totalTrades" | "wins" | "losses" | "winRatePct" | "cumulativeR" | "expectancyR" | "netPnl";
+type PairDetailSortField = "symbol" | "marketTimeframe" | "totalTrades" | "wins" | "losses" | "winRatePct" | "cumulativeR" | "expectancyR" | "netPnl" | "realizedEquity";
+
+function compareSortValues(a: string | number | null | undefined, b: string | number | null | undefined, direction: SortDirection) {
+  const factor = direction === "asc" ? 1 : -1;
+  const aMissing = a == null || (typeof a === "number" && !Number.isFinite(a));
+  const bMissing = b == null || (typeof b === "number" && !Number.isFinite(b));
+  if (aMissing && bMissing) return 0;
+  if (aMissing) return 1;
+  if (bMissing) return -1;
+  if (typeof a === "number" && typeof b === "number") {
+    return (a - b) * factor;
+  }
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" }) * factor;
+}
+
+function SortableHeader<T extends string>({
+  field,
+  currentField,
+  direction,
+  label,
+  onSort,
+}: {
+  field: T;
+  currentField: T;
+  direction: SortDirection;
+  label: string;
+  onSort: (field: T) => void;
+}) {
+  const isActive = field === currentField;
+  return (
+    <th scope="col" aria-sort={isActive ? (direction === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        type="button"
+        className={"table-sort-button" + (isActive ? " is-active" : "")}
+        onClick={() => onSort(field)}
+        aria-label={`Sort by ${label}`}
+      >
+        <span>{label}</span>
+        {isActive ? (
+          direction === "asc" ? <ArrowUp size={13} className="sort-icon-active" aria-hidden="true" /> : <ArrowDown size={13} className="sort-icon-active" aria-hidden="true" />
+        ) : (
+          <ArrowUpDown size={12} className="sort-icon-idle" aria-hidden="true" />
+        )}
+      </button>
+    </th>
+  );
 }
 
 interface PaperTradingPanelProps {
@@ -97,6 +147,11 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
   const [reportTimeframe, setReportTimeframe] = useState("");
   const [reportSymbol, setReportSymbol] = useState("");
   const [reportStrategy, setReportStrategy] = useState("");
+  const [selectedStrategyKey, setSelectedStrategyKey] = useState<string | null>(null);
+  const [strategySortField, setStrategySortField] = useState<StrategySummarySortField>("netPnl");
+  const [strategySortDir, setStrategySortDir] = useState<SortDirection>("desc");
+  const [pairSortField, setPairSortField] = useState<PairDetailSortField>("netPnl");
+  const [pairSortDir, setPairSortDir] = useState<SortDirection>("desc");
   const [savingPreference, setSavingPreference] = useState(false);
   const [togglingConfigId, setTogglingConfigId] = useState<number | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -618,6 +673,89 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
     expectancyR: total.totalTrades ? total.cumulativeR / total.totalTrades : 0,
     byStrategy: rows,
   } : allMetrics && { ...allMetrics, byStrategy: rows };
+
+  const strategyGroupMap = new Map<string, {
+    key: string;
+    strategy: string;
+    pairCount: number;
+    totalTrades: number;
+    wins: number;
+    losses: number;
+    cumulativeR: number;
+    expectancyR: number;
+    winRatePct: number;
+    netPnl: number;
+    pairs: typeof rows;
+  }>();
+  for (const row of m?.byStrategy ?? []) {
+    const key = row.strategy;
+    let group = strategyGroupMap.get(key);
+    if (!group) {
+      group = {
+        key,
+        strategy: row.strategy,
+        pairCount: 0,
+        totalTrades: 0,
+        wins: 0,
+        losses: 0,
+        cumulativeR: 0,
+        expectancyR: 0,
+        winRatePct: 0,
+        netPnl: 0,
+        pairs: [],
+      };
+      strategyGroupMap.set(key, group);
+    }
+    group.pairs.push(row);
+    group.pairCount = group.pairs.length;
+    group.totalTrades += row.totalTrades;
+    group.wins += row.wins;
+    group.losses += row.losses;
+    group.cumulativeR += row.cumulativeR;
+    group.netPnl += row.netPnl;
+  }
+  const strategyGroups = Array.from(strategyGroupMap.values()).map((group) => ({
+    ...group,
+    winRatePct: group.totalTrades ? Math.round((group.wins / group.totalTrades) * 10000) / 100 : 0,
+    cumulativeR: Math.round(group.cumulativeR * 10000) / 10000,
+    expectancyR: group.totalTrades ? Math.round((group.cumulativeR / group.totalTrades) * 10000) / 10000 : 0,
+  }));
+
+  const handleStrategySort = (field: StrategySummarySortField) => {
+    if (strategySortField === field) {
+      setStrategySortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setStrategySortField(field);
+      setStrategySortDir(field === "strategy" ? "asc" : "desc");
+    }
+  };
+  const handlePairSort = (field: PairDetailSortField) => {
+    if (pairSortField === field) {
+      setPairSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setPairSortField(field);
+      setPairSortDir(field === "symbol" || field === "marketTimeframe" ? "asc" : "desc");
+    }
+  };
+
+  const sortedStrategyGroups = [...strategyGroups].sort((a, b) =>
+    compareSortValues(a[strategySortField], b[strategySortField], strategySortDir)
+    || a.strategy.localeCompare(b.strategy),
+  );
+  const selectedStrategyGroup = selectedStrategyKey
+    ? strategyGroups.find((group) => group.key === selectedStrategyKey) ?? null
+    : null;
+  const sortedSelectedPairs = selectedStrategyGroup
+    ? [...selectedStrategyGroup.pairs].sort((a, b) => {
+        const valueFor = (row: (typeof selectedStrategyGroup.pairs)[number]): string | number | null | undefined => {
+          if (pairSortField === "marketTimeframe") return `${row.market ?? ""} ${row.timeframe ?? ""}`.trim();
+          if (pairSortField === "realizedEquity") return configById.get(row.configId ?? 0)?.realized_equity ?? null;
+          return row[pairSortField];
+        };
+        return compareSortValues(valueFor(a), valueFor(b), pairSortDir)
+          || (a.symbol ?? "").localeCompare(b.symbol ?? "");
+      })
+    : [];
   const savePreference = async (field: "report_enabled" | "telegram_enabled", enabled: boolean) => {
     if (!canTrade || !filtered || !scopedConfigs.length || savingPreference || togglingConfigId !== null) return;
     setSavingPreference(true);
@@ -799,32 +937,115 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
 
       <section className="panel" aria-labelledby="paper-strategy-performance-title">
         <div className="panel-heading">
-          <div><h2 id="paper-strategy-performance-title">Strategy performance</h2><p>Closed-trade aggregates from the paper ledger, filtered by report visibility.</p></div>
-          <span className="panel-counter">{m?.byStrategy.length ?? 0} ROWS</span>
+          <div><h2 id="paper-strategy-performance-title">Strategy performance</h2><p>Closed-trade aggregates grouped by strategy. Click a strategy row for per-pair summary, or click any column header to sort.</p></div>
+          <span className="panel-counter">{strategyGroups.length} STRATEGIES · {m?.byStrategy.length ?? 0} PAIRS</span>
         </div>
-        {loading && !data ? <p className="empty-state">Loading strategy performance…</p> : m?.byStrategy.length ? (
-          <div className="status-table-wrap">
-            <table className="status-table">
-              <thead><tr><th>Pair</th><th>Strategy</th><th>Market / timeframe</th><th>Closed trades</th><th>Wins / losses</th><th>Win rate</th><th>Cumulative R</th><th>Expectancy</th><th>Net PnL</th><th>Realized equity (all time)</th></tr></thead>
-              <tbody>
-                {m.byStrategy.map((row, index) => (
-                  <tr key={`${row.symbol}-${row.strategy}-${row.configId}-${index}`}>
-                    <td>{row.symbol ?? "—"}</td>
-                    <td><strong>{row.strategy}</strong></td>
-                    <td>{row.market && row.timeframe ? `${row.market} · ${row.timeframe}` : "—"}</td>
-                    <td>{number.format(row.totalTrades)}</td>
-                    <td>{row.wins} / {row.losses}</td>
-                    <td>{row.totalTrades ? `${number.format(row.winRatePct)}%` : "—"}</td>
-                    <td className={pnlClass(row.cumulativeR)}>{number.format(row.cumulativeR)} R</td>
-                    <td className={pnlClass(row.expectancyR)}>{number.format(row.expectancyR)} R</td>
-                    <td className={pnlClass(row.netPnl)}>{money.format(row.netPnl)}</td>
-                    <td>{configById.get(row.configId ?? 0)?.realized_equity == null
-                      ? "—" : money.format(configById.get(row.configId ?? 0)!.realized_equity!)}</td>
+        {loading && !data ? <p className="empty-state">Loading strategy performance…</p> : strategyGroups.length ? (
+          <>
+            <div className="status-table-wrap">
+              <table className="status-table" aria-label="Strategy performance summary">
+                <thead>
+                  <tr>
+                    <SortableHeader field="strategy" currentField={strategySortField} direction={strategySortDir} label="Strategy" onSort={handleStrategySort} />
+                    <SortableHeader field="pairCount" currentField={strategySortField} direction={strategySortDir} label="Pairs" onSort={handleStrategySort} />
+                    <SortableHeader field="totalTrades" currentField={strategySortField} direction={strategySortDir} label="Closed trades" onSort={handleStrategySort} />
+                    <SortableHeader field="wins" currentField={strategySortField} direction={strategySortDir} label="Wins" onSort={handleStrategySort} />
+                    <SortableHeader field="losses" currentField={strategySortField} direction={strategySortDir} label="Losses" onSort={handleStrategySort} />
+                    <SortableHeader field="winRatePct" currentField={strategySortField} direction={strategySortDir} label="Win rate" onSort={handleStrategySort} />
+                    <SortableHeader field="cumulativeR" currentField={strategySortField} direction={strategySortDir} label="Cumulative R" onSort={handleStrategySort} />
+                    <SortableHeader field="expectancyR" currentField={strategySortField} direction={strategySortDir} label="Expectancy" onSort={handleStrategySort} />
+                    <SortableHeader field="netPnl" currentField={strategySortField} direction={strategySortDir} label="Net PnL" onSort={handleStrategySort} />
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {sortedStrategyGroups.map((group) => {
+                    const isSelected = selectedStrategyGroup?.key === group.key;
+                    return (
+                      <tr
+                        key={group.key}
+                        onClick={() => setSelectedStrategyKey(isSelected ? null : group.key)}
+                        style={{ cursor: "pointer", background: isSelected ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : undefined }}
+                      >
+                        <td>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedStrategyKey(isSelected ? null : group.key);
+                            }}
+                            aria-expanded={isSelected}
+                            style={{ background: "none", border: 0, padding: 0, color: "inherit", font: "inherit", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                          >
+                            <strong>{group.strategy}</strong>
+                            <span style={{ opacity: 0.65, fontSize: "0.75rem" }}>{isSelected ? "▾" : "▸"}</span>
+                          </button>
+                        </td>
+                        <td>{group.pairCount}</td>
+                        <td>{number.format(group.totalTrades)}</td>
+                        <td>{group.wins}</td>
+                        <td>{group.losses}</td>
+                        <td>{group.totalTrades ? `${number.format(group.winRatePct)}%` : "—"}</td>
+                        <td className={pnlClass(group.cumulativeR)}>{number.format(group.cumulativeR)} R</td>
+                        <td className={pnlClass(group.expectancyR)}>{number.format(group.expectancyR)} R</td>
+                        <td className={pnlClass(group.netPnl)}>{money.format(group.netPnl)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {selectedStrategyGroup && (
+              <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid var(--color-border)" }} aria-label={`${selectedStrategyGroup.strategy} per-pair detail`}>
+                <div className="panel-heading" style={{ paddingBottom: "10px", marginBottom: "10px" }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: "13px" }}>{selectedStrategyGroup.strategy} — Per-Pair Summary</h3>
+                    <p>{selectedStrategyGroup.pairCount} pair{selectedStrategyGroup.pairCount === 1 ? "" : "s"} · click any column header to sort.</p>
+                  </div>
+                  <button type="button" className="button button-secondary" onClick={() => setSelectedStrategyKey(null)}>
+                    Close
+                  </button>
+                </div>
+                <div className="status-table-wrap">
+                  <table className="status-table" aria-label="Strategy performance by pair">
+                    <thead>
+                      <tr>
+                        <SortableHeader field="symbol" currentField={pairSortField} direction={pairSortDir} label="Pair" onSort={handlePairSort} />
+                        <SortableHeader field="marketTimeframe" currentField={pairSortField} direction={pairSortDir} label="Market / timeframe" onSort={handlePairSort} />
+                        <SortableHeader field="totalTrades" currentField={pairSortField} direction={pairSortDir} label="Closed trades" onSort={handlePairSort} />
+                        <SortableHeader field="wins" currentField={pairSortField} direction={pairSortDir} label="Wins" onSort={handlePairSort} />
+                        <SortableHeader field="losses" currentField={pairSortField} direction={pairSortDir} label="Losses" onSort={handlePairSort} />
+                        <SortableHeader field="winRatePct" currentField={pairSortField} direction={pairSortDir} label="Win rate" onSort={handlePairSort} />
+                        <SortableHeader field="cumulativeR" currentField={pairSortField} direction={pairSortDir} label="Cumulative R" onSort={handlePairSort} />
+                        <SortableHeader field="expectancyR" currentField={pairSortField} direction={pairSortDir} label="Expectancy" onSort={handlePairSort} />
+                        <SortableHeader field="netPnl" currentField={pairSortField} direction={pairSortDir} label="Net PnL" onSort={handlePairSort} />
+                        <SortableHeader field="realizedEquity" currentField={pairSortField} direction={pairSortDir} label="Realized equity (all time)" onSort={handlePairSort} />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedSelectedPairs.map((row, index) => {
+                        const eq = configById.get(row.configId ?? 0)?.realized_equity ?? null;
+                        return (
+                          <tr key={`${row.symbol}-${row.strategy}-${row.configId}-${index}`}>
+                            <td><strong>{row.symbol ?? "—"}</strong></td>
+                            <td>{row.market && row.timeframe ? `${row.market} · ${row.timeframe}` : "—"}</td>
+                            <td>{number.format(row.totalTrades)}</td>
+                            <td>{row.wins}</td>
+                            <td>{row.losses}</td>
+                            <td>{row.totalTrades ? `${number.format(row.winRatePct)}%` : "—"}</td>
+                            <td className={pnlClass(row.cumulativeR)}>{number.format(row.cumulativeR)} R</td>
+                            <td className={pnlClass(row.expectancyR)}>{number.format(row.expectancyR)} R</td>
+                            <td className={pnlClass(row.netPnl)}>{money.format(row.netPnl)}</td>
+                            <td>{eq == null ? "—" : money.format(eq)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
         ) : <p className="empty-state">No strategy performance rows returned.</p>}
       </section>
 
