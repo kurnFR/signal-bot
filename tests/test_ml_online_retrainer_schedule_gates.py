@@ -25,6 +25,41 @@ class TestOnlineRetrainerScheduleGates(unittest.TestCase):
         self.assertFalse(online_retrainer._is_retraining_due(cfg, self.registry, 147, self.now))
         self.assertTrue(online_retrainer._is_retraining_due(cfg, self.registry, 148, self.now))
 
+    def test_drift_gate_triggers_early_only_when_min_candles_met(self):
+        cfg = {
+            "last_retrained_at": (self.now - timedelta(hours=1)).isoformat(),
+            "last_candle_count": 100,
+        }
+        reg = {**self.registry, "max_drift_psi": 0.25}
+        # Below min_new_candles (147 < 148): high drift still waits for min_new_candles
+        self.assertFalse(online_retrainer._is_retraining_due(cfg, reg, 147, self.now, drift_psi=0.60))
+        # At min_new_candles (148) with high drift: retrains before 24h interval expires
+        self.assertTrue(online_retrainer._is_retraining_due(cfg, reg, 148, self.now, drift_psi=0.25))
+        # Below drift threshold and before interval: skips
+        self.assertFalse(online_retrainer._is_retraining_due(cfg, reg, 200, self.now, drift_psi=0.10))
+
+    def test_recent_feature_drift_computation(self):
+        import numpy as np
+        import pandas as pd
+
+        rng = np.random.default_rng(7)
+        base = pd.DataFrame({
+            "rsi": rng.normal(50, 5, 160),
+            "atr_pct": rng.normal(0.01, 0.002, 160),
+            "volume_ratio": rng.normal(1.0, 0.2, 160),
+            "macd_hist": rng.normal(0.0, 0.5, 160),
+        })
+        shifted = pd.DataFrame({
+            "rsi": rng.normal(80, 5, 50),
+            "atr_pct": rng.normal(0.05, 0.01, 50),
+            "volume_ratio": rng.normal(4.0, 0.5, 50),
+            "macd_hist": rng.normal(3.0, 0.5, 50),
+        })
+        df = pd.concat([base, shifted], ignore_index=True)
+        psi = online_retrainer._compute_recent_feature_drift(df, min_new_candles=48)
+        self.assertGreater(psi, 0.25)
+        self.assertEqual(online_retrainer._compute_recent_feature_drift([None] * 200), 0.0)
+
     def test_explicit_force_bypasses_per_model_gates(self):
         cfg = {
             "last_retrained_at": self.now.isoformat(),

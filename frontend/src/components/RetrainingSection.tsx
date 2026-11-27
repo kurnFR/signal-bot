@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { RefreshCw, Repeat } from "lucide-react";
 import {
   fetchRetrainingStatus, registerRetrainingModel, removeRetrainingModel, setRetrainingEnabled,
-  setRetrainingModelEnabled, triggerRetraining, type RetrainingStatus,
+  setRetrainingModelEnabled, triggerModelRetraining, triggerRetraining, type RetrainingStatus,
 } from "../lib/mlRetraining";
 
 const TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"];
@@ -104,6 +104,10 @@ export function RetrainingSection() {
                             </div>
                           ) : (
                             <>
+                              <button type="button" className="button button-secondary button-sm" disabled={busy || !status.enabled || !on}
+                                onClick={() => void run(() => triggerModelRetraining(m.key, true), `Retraining queued for ${m.symbol} ${m.strategy_name}.`)}>
+                                Run {m.symbol} {m.strategy_name} now
+                              </button>{" "}
                               <button type="button" className="button button-secondary button-sm" disabled={busy}
                                 onClick={() => void run(() => setRetrainingModelEnabled(m.key, !on), on ? "Model paused." : "Model resumed.")}>
                                 {on ? `Pause ${m.symbol} ${m.strategy_name}` : `Resume ${m.symbol} ${m.strategy_name}`}
@@ -121,6 +125,53 @@ export function RetrainingSection() {
               </table>
             </div>
           )}
+
+          <div className="panel-subsection" style={{ marginTop: 12 }}>
+            <h3>Retraining history (recent audit)</h3>
+            {status.recent_audit.length === 0 ? (
+              <p className="empty-state">No retraining runs recorded yet.</p>
+            ) : (
+              <div className="status-table-wrap">
+                <table className="status-table">
+                  <thead>
+                    <tr>
+                      <th>Model</th>
+                      <th>Timestamp</th>
+                      <th>Status</th>
+                      <th>Winner</th>
+                      <th>New candles</th>
+                      <th>Drift PSI</th>
+                      <th>Baseline → ML (R)</th>
+                      <th>Promotion</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {status.recent_audit.map((entry, idx) => (
+                      <tr key={`${entry.key ?? "run"}-${entry.timestamp ?? idx}-${idx}`}>
+                        <td>{entry.key ?? "—"}</td>
+                        <td>{entry.timestamp ?? "—"}</td>
+                        <td>
+                          <span className={entry.status === "retrained" ? "badge badge-ok" : "badge badge-warn"}>
+                            {entry.status ?? "—"}
+                          </span>
+                          {entry.message ? <div className="panel-subtitle">{entry.message}</div> : null}
+                        </td>
+                        <td>{entry.winner_model ?? "—"}</td>
+                        <td>{typeof entry.new_candles_processed === "number" ? entry.new_candles_processed : "—"}</td>
+                        <td>{typeof entry.drift_psi === "number" ? entry.drift_psi.toFixed(3) : "—"}</td>
+                        <td>
+                          {typeof entry.baseline_test_r === "number" || typeof entry.ml_test_r === "number"
+                            ? `${typeof entry.baseline_test_r === "number" ? entry.baseline_test_r.toFixed(2) : "—"} → ${typeof entry.ml_test_r === "number" ? entry.ml_test_r.toFixed(2) : "—"}`
+                            : "—"}
+                        </td>
+                        <td>{entry.promotion_status ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </>
       )}
 
