@@ -58,6 +58,11 @@ def seed() -> None:
                          100,105,95,105,95,1,5,1795006800000,'CLOSED')""",
             (cur.lastrowid,),
         )
+        cur.execute(
+            """INSERT INTO paper_configs
+               (symbol, market, timeframe, strategy_name, is_active, allocated_capital, risk_per_trade_pct)
+               VALUES ('E2EMODELUSDT','spot','1h','trend_ema_v1',0,6400,1.75)"""
+        )
         conn.commit()
 
 

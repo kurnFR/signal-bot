@@ -1,3 +1,4 @@
+# Also exercises wallet, order and durable-state integrations on wallet_tracker_test and a no-DB smoke run.
 name: tests
 
 on:
