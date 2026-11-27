@@ -13,3 +13,8 @@ The report inventories Legacy HTML controls with IDs and lists reviewed Modern e
 Modern Overview shows the candle total, dataset count, and distinct symbol count from `GET /api/master-data/coverage`. It lists the ten most recent Backtest Studio runs from `GET /api/backtest/history?limit=10`, using the same values and order as Legacy Home. System and collector health come from the system status API.
 
 The previous workflow audit is available in Git history. Browser acceptance against seeded MariaDB should compare the displayed coverage totals and recent run rows across both UIs.
+
+## Pending owner decisions for research endpoints
+
+- ML reinforcement-learning training and model listing, plus walk-forward analysis, need a usage decision before the Modern UI adds workflows for them. The proposed default is deprecation if the owner no longer uses them.
+- The retired RetailBot2 research control can remain available as read-only status in Settings under RetailBot2 Archive, subject to the owner's decision.
