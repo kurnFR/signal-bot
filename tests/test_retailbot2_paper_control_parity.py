@@ -477,6 +477,16 @@ def test_get_paper_metrics_and_report_aggregate_by_strategy_and_symbol():
         "cumulativeR": 2.5,
         "expectancyR": 0.5,
         "netPnl": 175.0,
+        "pureTrades": 0,
+        "pureWins": 0,
+        "pureLosses": 0,
+        "pureWinRatePct": 0.0,
+        "pureNetPnl": 0.0,
+        "pureSumR": 0.0,
+        "pureCumulativeR": 0.0,
+        "pureExpectancyR": 0.0,
+        "avgWinR": 0.0,
+        "avgLossR": 0.0,
     }]
     assert "BTCUSDT" in report_html
     assert "BB_REV_INV" in report_html

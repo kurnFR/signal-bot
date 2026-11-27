@@ -347,6 +347,7 @@ def send_signal_alert(
     ml_threshold: Optional[float] = None,
     ml_model_id: Optional[str] = None,
     ml_generator_model_id: Optional[str] = None,
+    exit_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Formats and dispatches an official trade entry signal alert with optional ML gating metadata."""
     safe_symbol = escape(str(symbol))
@@ -377,6 +378,7 @@ def send_signal_alert(
         f"🛑 <b>Stop Loss:</b> <code>${stop_loss:,.4f}</code> (-{risk_pct}%)\n"
         f"🎯 <b>Take Profit:</b> <code>${take_profit:,.4f}</code>\n"
         f"⚖️ <b>Risk : Reward:</b> <code>1 : {rr_ratio}</code>\n"
+        f"🚪 <b>Exit:</b> <code>{escape(exit_mode) if exit_mode else 'Dynamic'}</code>\n"
     )
     if atr:
         msg += f"📈 <b>ATR Volatility:</b> <code>${atr:,.4f}</code>\n"

@@ -895,6 +895,17 @@ def get_paper_metrics(*, closed_since_ms: Optional[int] = None) -> Dict[str, Any
     cur = None
     try:
         cur = conn.cursor(dictionary=True)
+        # Pure TP/SL aggregates count only TP/SL exits; TRAIL / TIMEOUT /
+        # MANUAL partial wins must not inflate the pure win rate.
+        pure_select = """
+                   SUM(CASE WHEN t.exit_reason IN ('TP', 'SL') THEN 1 ELSE 0 END) AS pure_trades,
+                   SUM(CASE WHEN t.exit_reason IN ('TP', 'SL') AND t.r_multiple > 0 THEN 1 ELSE 0 END) AS pure_wins,
+                   SUM(CASE WHEN t.exit_reason IN ('TP', 'SL') AND t.r_multiple < 0 THEN 1 ELSE 0 END) AS pure_losses,
+                   SUM(CASE WHEN t.exit_reason IN ('TP', 'SL') THEN t.r_multiple ELSE 0 END) AS pure_sum_r,
+                   SUM(CASE WHEN t.exit_reason IN ('TP', 'SL') THEN t.net_pnl ELSE 0 END) AS pure_net_pnl,
+                   SUM(CASE WHEN t.exit_reason IN ('TP', 'SL') AND t.r_multiple > 0 THEN t.r_multiple ELSE 0 END) AS pure_win_sum_r,
+                   SUM(CASE WHEN t.exit_reason IN ('TP', 'SL') AND t.r_multiple < 0 THEN t.r_multiple ELSE 0 END) AS pure_loss_sum_r
+        """
         cur.execute(
             f"""
             SELECT COUNT(*) AS total_trades,
@@ -902,7 +913,8 @@ def get_paper_metrics(*, closed_since_ms: Optional[int] = None) -> Dict[str, Any
                    SUM(CASE WHEN t.r_multiple < 0 THEN 1 ELSE 0 END) AS losses,
                    SUM(t.r_multiple) AS sum_r,
                    AVG(t.r_multiple) AS avg_r,
-                   SUM(t.net_pnl) AS net_pnl
+                   SUM(t.net_pnl) AS net_pnl,
+                   {pure_select}
             FROM paper_trades t
             LEFT JOIN paper_configs c ON c.id = t.config_id
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE {date_filter}
@@ -917,7 +929,8 @@ def get_paper_metrics(*, closed_since_ms: Optional[int] = None) -> Dict[str, Any
                    SUM(CASE WHEN t.r_multiple < 0 THEN 1 ELSE 0 END) AS losses,
                    SUM(t.r_multiple) AS sum_r,
                    AVG(t.r_multiple) AS avg_r,
-                   SUM(t.net_pnl) AS net_pnl
+                   SUM(t.net_pnl) AS net_pnl,
+                   {pure_select}
             FROM paper_trades t
             LEFT JOIN paper_configs c ON c.id = t.config_id
             WHERE COALESCE(c.report_enabled, TRUE) = TRUE {date_filter}
@@ -926,9 +939,65 @@ def get_paper_metrics(*, closed_since_ms: Optional[int] = None) -> Dict[str, Any
             """, params
         )
         strategy_rows = cur.fetchall()
+        cur.execute(
+            f"""
+            SELECT t.exit_reason AS exit_reason,
+                   COUNT(*) AS trades,
+                   SUM(CASE WHEN t.r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
+                   SUM(CASE WHEN t.r_multiple < 0 THEN 1 ELSE 0 END) AS losses,
+                   SUM(t.net_pnl) AS net_pnl,
+                   SUM(t.r_multiple) AS sum_r
+            FROM paper_trades t
+            LEFT JOIN paper_configs c ON c.id = t.config_id
+            WHERE COALESCE(c.report_enabled, TRUE) = TRUE {date_filter}
+            GROUP BY t.exit_reason
+            """, params
+        )
+        breakdown_rows = cur.fetchall()
         total = int(summary["total_trades"] or 0)
         wins = int(summary["wins"] or 0)
         losses = int(summary["losses"] or 0)
+
+        def _pure_fields(row: Dict[str, Any]) -> Dict[str, Any]:
+            pure_trades = int(row.get("pure_trades") or 0)
+            pure_wins = int(row.get("pure_wins") or 0)
+            pure_losses = int(row.get("pure_losses") or 0)
+            pure_sum_r = float(row.get("pure_sum_r") or 0.0)
+            pure_win_sum_r = float(row.get("pure_win_sum_r") or 0.0)
+            pure_loss_sum_r = float(row.get("pure_loss_sum_r") or 0.0)
+            return {
+                "pureTrades": pure_trades,
+                "pureWins": pure_wins,
+                "pureLosses": pure_losses,
+                "pureWinRatePct": round(pure_wins / pure_trades * 100, 2) if pure_trades else 0.0,
+                "pureNetPnl": round(float(row.get("pure_net_pnl") or 0.0), 8),
+                "pureSumR": round(pure_sum_r, 4),
+                "pureCumulativeR": round(pure_sum_r, 4),
+                "pureExpectancyR": round(pure_sum_r / pure_trades, 4) if pure_trades else 0.0,
+                "avgWinR": round(pure_win_sum_r / pure_wins, 4) if pure_wins else 0.0,
+                "avgLossR": round(pure_loss_sum_r / pure_losses, 4) if pure_losses else 0.0,
+            }
+
+        breakdown_by_reason: Dict[str, Dict[str, Any]] = {}
+        for brow in breakdown_rows or []:
+            reason = str(brow.get("exit_reason") or "UNKNOWN")
+            breakdown_by_reason[reason] = {
+                "exitReason": reason,
+                "trades": int(brow.get("trades") or 0),
+                "wins": int(brow.get("wins") or 0),
+                "losses": int(brow.get("losses") or 0),
+                "netPnl": round(float(brow.get("net_pnl") or 0.0), 8),
+                "sumR": round(float(brow.get("sum_r") or 0.0), 4),
+            }
+        exit_reason_breakdown = [
+            breakdown_by_reason.get(reason, {"exitReason": reason, "trades": 0, "wins": 0,
+                                             "losses": 0, "netPnl": 0.0, "sumR": 0.0})
+            for reason in ("TP", "SL", "TRAIL", "TIMEOUT", "MANUAL")
+        ]
+        for reason in sorted(breakdown_by_reason):
+            if reason not in ("TP", "SL", "TRAIL", "TIMEOUT", "MANUAL"):
+                exit_reason_breakdown.append(breakdown_by_reason[reason])
+
         by_strategy = []
         by_pair_acc: Dict[tuple, Dict[str, Any]] = {}
         for row in strategy_rows:
@@ -939,6 +1008,7 @@ def get_paper_metrics(*, closed_since_ms: Optional[int] = None) -> Dict[str, Any
             raw_net_pnl = float(row["net_pnl"] or 0.0)
             strategy_name = row["strategy_name"]
             symbol = row.get("symbol")
+            pure = _pure_fields(row)
             by_strategy.append({
                 "strategy": strategy_name,
                 "symbol": symbol,
@@ -954,6 +1024,7 @@ def get_paper_metrics(*, closed_since_ms: Optional[int] = None) -> Dict[str, Any
                 "cumulativeR": round(raw_sum_r, 4),
                 "expectancyR": round(float(row["avg_r"] or 0.0), 4),
                 "netPnl": round(raw_net_pnl, 8),
+                **pure,
             })
             pair_key = (strategy_name, symbol)
             agg = by_pair_acc.setdefault(pair_key, {
@@ -964,12 +1035,22 @@ def get_paper_metrics(*, closed_since_ms: Optional[int] = None) -> Dict[str, Any
                 "losses": 0,
                 "sum_r": 0.0,
                 "net_pnl": 0.0,
+                "pure_trades": 0, "pure_wins": 0, "pure_losses": 0,
+                "pure_sum_r": 0.0, "pure_net_pnl": 0.0,
+                "pure_win_sum_r": 0.0, "pure_loss_sum_r": 0.0,
             })
             agg["totalTrades"] += strategy_total
             agg["wins"] += strategy_wins
             agg["losses"] += strategy_losses
             agg["sum_r"] += raw_sum_r
             agg["net_pnl"] += raw_net_pnl
+            agg["pure_trades"] += pure["pureTrades"]
+            agg["pure_wins"] += pure["pureWins"]
+            agg["pure_losses"] += pure["pureLosses"]
+            agg["pure_sum_r"] += float(row.get("pure_sum_r") or 0.0)
+            agg["pure_net_pnl"] += float(row.get("pure_net_pnl") or 0.0)
+            agg["pure_win_sum_r"] += float(row.get("pure_win_sum_r") or 0.0)
+            agg["pure_loss_sum_r"] += float(row.get("pure_loss_sum_r") or 0.0)
         by_strategy_symbol = [
             {
                 "strategy": agg["strategy"],
@@ -981,6 +1062,13 @@ def get_paper_metrics(*, closed_since_ms: Optional[int] = None) -> Dict[str, Any
                 "cumulativeR": round(agg["sum_r"], 4),
                 "expectancyR": round(agg["sum_r"] / agg["totalTrades"], 4) if agg["totalTrades"] else 0.0,
                 "netPnl": round(agg["net_pnl"], 8),
+                **_pure_fields({
+                    "pure_trades": agg["pure_trades"], "pure_wins": agg["pure_wins"],
+                    "pure_losses": agg["pure_losses"], "pure_sum_r": agg["pure_sum_r"],
+                    "pure_net_pnl": agg["pure_net_pnl"],
+                    "pure_win_sum_r": agg["pure_win_sum_r"],
+                    "pure_loss_sum_r": agg["pure_loss_sum_r"],
+                }),
             }
             for _, agg in sorted(by_pair_acc.items(), key=lambda item: (item[0][0] or "", item[0][1] or ""))
         ]
@@ -992,6 +1080,8 @@ def get_paper_metrics(*, closed_since_ms: Optional[int] = None) -> Dict[str, Any
             "cumulativeR": round(float(summary["sum_r"] or 0.0), 4),
             "expectancyR": round(float(summary["avg_r"] or 0.0), 4),
             "netPnl": round(float(summary["net_pnl"] or 0.0), 8),
+            **_pure_fields(summary),
+            "exitReasonBreakdown": exit_reason_breakdown,
             "byStrategy": by_strategy,
             "byStrategySymbol": by_strategy_symbol,
         }
@@ -1262,6 +1352,25 @@ def _insert_position(
     policy = trade.get("custom_exit_policy")
     if isinstance(policy, str):
         policy = json.loads(policy)
+    # Pure TP/SL deployments (PURE_TP_SL in the config's strategy_params)
+    # force a disabled exit policy on every new trade, even for strategies
+    # whose simulator run did not attach one (ML generator, news overlay).
+    # Existing OPEN positions keep the policy they were opened with.
+    cfg_params = cfg.get("strategy_params") if isinstance(cfg, dict) else None
+    pure_tp_sl = bool(isinstance(cfg_params, dict) and cfg_params.get("PURE_TP_SL") is True)
+    if pure_tp_sl:
+        from backtest.simulate import PURE_TP_SL_NO_TIMEOUT, PURE_TP_SL_TRAIL_SENTINEL
+        policy = {
+            "enabled": False, "activation_r": PURE_TP_SL_TRAIL_SENTINEL,
+            "distance_atr": float(policy.get("distance_atr")) if isinstance(policy, dict) and policy.get("distance_atr") else 1.5,
+            "max_hold_bars": PURE_TP_SL_NO_TIMEOUT,
+            "entry_open": float(trade["entry_price"]),
+            "atr": float(trade.get("atr_at_signal", 0.0) or 0.0),
+        }
+    elif isinstance(policy, dict) and policy.get("enabled") is False and policy.get("max_hold_bars") == 0:
+        # A disabled policy with no timeout is a pure trade even if the
+        # config flag was set after the order was created.
+        pure_tp_sl = True
     direction = trade["direction"]
     entry_fill = float(trade["entry_price"])
     stop_loss = float(trade["stop_loss"])
@@ -1305,16 +1414,24 @@ def _insert_position(
         ):
             raise ValueError("verified generator artifact has an invalid max-hold setting")
         artifact_max_hold = int(raw_artifact_max_hold)
-        if raw_max_hold_bars is not None and int(raw_max_hold_bars) != artifact_max_hold:
+        if pure_tp_sl:
+            # Pure mode intentionally overrides the artifact's max-hold with
+            # no timeout; the fee/slippage contract above still applies.
+            raw_max_hold_bars = 0
+        elif raw_max_hold_bars is not None and int(raw_max_hold_bars) != artifact_max_hold:
             raise ValueError("generator max-hold metadata does not match its verified artifact")
-        raw_max_hold_bars = artifact_max_hold
+        else:
+            raw_max_hold_bars = artifact_max_hold
     if raw_max_hold_bars is None:
         raw_max_hold_bars = 200
     if isinstance(raw_max_hold_bars, bool):
-        raise ValueError("max_hold_bars must be an integer between 1 and 1000")
+        raise ValueError("max_hold_bars must be an integer between 0 and 1000")
     max_hold_bars = int(raw_max_hold_bars)
-    if max_hold_bars < 1 or max_hold_bars > 1000 or max_hold_bars != raw_max_hold_bars:
-        raise ValueError("max_hold_bars must be an integer between 1 and 1000")
+    if max_hold_bars < 0 or max_hold_bars > 1000 or max_hold_bars != raw_max_hold_bars:
+        raise ValueError("max_hold_bars must be an integer between 0 and 1000")
+    # max_hold_bars == 0 means "no timeout" (Pure TP/SL). paper_positions
+    # stores it as-is (INT NOT NULL, no CHECK constraint); Phase 1 skips
+    # the TIMEOUT check when it is 0.
 
     # last_update_time = open_time of the last candle whose data has been
     # applied to this position (holding_bars, SL/TP, trailing). At insert
@@ -1439,7 +1556,24 @@ def _signal_already_traded(cfg: Dict[str, Any], entry_candle: int) -> bool:
 
 
 
-def _send_paper_entry_alert(order: Dict[str, Any], ml_threshold: Optional[float] = None) -> None:
+def _paper_exit_mode_label(order: Dict[str, Any], exit_mode: Optional[str] = None) -> str:
+    """'Pure TP/SL' when the order's exit policy is a disabled pure policy
+    (or the caller says so); 'Dynamic' otherwise."""
+    if exit_mode in ("pure", "dynamic"):
+        return "Pure TP/SL" if exit_mode == "pure" else "Dynamic"
+    policy = order.get("custom_exit_policy")
+    if isinstance(policy, str):
+        try:
+            policy = json.loads(policy)
+        except (ValueError, TypeError):
+            policy = None
+    if isinstance(policy, dict) and policy.get("enabled") is False and policy.get("max_hold_bars") == 0:
+        return "Pure TP/SL"
+    return "Dynamic"
+
+
+def _send_paper_entry_alert(order: Dict[str, Any], ml_threshold: Optional[float] = None,
+                            exit_mode: Optional[str] = None) -> None:
     """Send the same entry alert for immediate fills and restart-recovered fills."""
     try:
         from notifications.telegram_notifier import send_signal_alert
@@ -1456,6 +1590,7 @@ def _send_paper_entry_alert(order: Dict[str, Any], ml_threshold: Optional[float]
             ml_threshold=ml_threshold,
             ml_model_id=order.get("ml_model_id"),
             ml_generator_model_id=order.get("ml_generator_model_id"),
+            exit_mode=_paper_exit_mode_label(order, exit_mode),
         )
     except Exception as tel_err:
         logger.warning("Telegram entry alert failed for paper order #%s: %s", order.get("id"), tel_err)
@@ -1560,7 +1695,11 @@ def _process_pending_paper_orders(configs: List[Dict[str, Any]]) -> Dict[str, in
             if fill["status"] == "filled":
                 result["filled"] += 1
                 if cfg.get("telegram_enabled", False):
-                    _send_paper_entry_alert(order)
+                    _send_paper_entry_alert(
+                        order,
+                        exit_mode="pure" if isinstance(cfg.get("strategy_params"), dict)
+                        and cfg["strategy_params"].get("PURE_TP_SL") is True else "dynamic",
+                    )
             elif fill["status"] == "rejected":
                 result["rejected"] += 1
             elif fill["status"] == "expired":
@@ -1699,7 +1838,7 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
                     exit_price, exit_code = resolved_exit
                     exit_reason = "SL" if exit_code == "SL" else "TP"
 
-            if exit_reason is None and holding_bars >= max_hold_bars:
+            if exit_reason is None and max_hold_bars > 0 and holding_bars >= max_hold_bars:
                 exit_reason, exit_price = "TIMEOUT", bar_close
             elif policy is None and exit_reason is None and unrealized_r >= trail_act_r and atr > 0:
                 if direction == "LONG":
@@ -1850,6 +1989,10 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
             run_params["symbol"] = symbol
             run_params["market"] = market
             run_params["timeframe"] = timeframe
+        # Pure TP/SL deployments simulate without trailing/timeout and attach
+        # a disabled exit policy to every trade, so _insert_position opens
+        # the position with trail_activation_r 9999.0 and max_hold_bars 0.
+        run_params["_pure_tp_sl"] = bool(run_params.get("PURE_TP_SL") is True)
         if strategy_name == "ml_signal_generator_v1":
             generator_model_id = cfg.get("ml_generator_model_id")
             if not generator_model_id or cfg.get("ml_model_id"):
@@ -1992,7 +2135,10 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
                     result["orders_filled"] += 1
                     logger.info("Filled paper order #%s for %s (%s) via %s", order["id"], symbol, latest_trade["direction"], strategy_name)
                     if cfg.get("telegram_enabled", False):
-                        _send_paper_entry_alert(order, ml_threshold=ml_threshold)
+                        _send_paper_entry_alert(
+                            order, ml_threshold=ml_threshold,
+                            exit_mode="pure" if run_params.get("_pure_tp_sl") else "dynamic",
+                        )
 
 
     return result

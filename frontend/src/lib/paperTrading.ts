@@ -6,7 +6,21 @@ export interface PaperPosition { funding_pnl?: number | null; id: number; symbol
 export interface PaperConfig { strategy_params?: Record<string, string | number | boolean> | null; id: number; symbol: string; market: string; timeframe: string; strategy_name: string; is_active: boolean; allocated_capital: number; risk_per_trade_pct: number; telegram_enabled: boolean; report_enabled: boolean; archived_at?: string | null; realized_equity?: number; ml_model_id?: string | null; ml_generator_model_id?: string | null; created_at: string }
 export interface PaperOrder { id: number; config_id: number; symbol: string; market: string; timeframe: string; strategy_name: string; signal_open_time: number; entry_time: number; direction: string; requested_entry_price: number; stop_loss: number; take_profit: number; atr_at_signal: number; ml_model_id: string | null; ml_probability: number | null; status: string; state_reason: string | null; fill_price: number | null; position_id: number | null; created_at: string; updated_at: string; filled_at: string | null; terminal_at: string | null }
 export interface PaperTrade { funding_pnl?: number | null; id: number; symbol: string; market: string; timeframe: string; strategy_name: string; direction: string; entry_price: number; exit_price: number; net_pnl: number; net_return_pct: number; r_multiple: number; exit_reason: string; entry_time_wib: string; exit_time_wib: string }
-export interface PaperMetrics { totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number; byStrategy: Array<{ strategy: string; symbol?: string | null; market?: string; timeframe?: string; configId?: number | null; totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number }> }
+export interface PaperMetricsExitReasonRow { exitReason: string; trades: number; wins: number; losses: number; netPnl: number; sumR: number }
+export interface PaperMetrics {
+  totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number;
+  pureTrades?: number; pureWins?: number; pureLosses?: number; pureWinRatePct?: number; pureNetPnl?: number; pureSumR?: number; pureCumulativeR?: number; pureExpectancyR?: number; avgWinR?: number; avgLossR?: number;
+  exitReasonBreakdown?: PaperMetricsExitReasonRow[];
+  byStrategy: Array<{ strategy: string; symbol?: string | null; market?: string; timeframe?: string; configId?: number | null; totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number; pureTrades?: number; pureWins?: number; pureLosses?: number; pureWinRatePct?: number; pureNetPnl?: number; pureSumR?: number; pureExpectancyR?: number; avgWinR?: number; avgLossR?: number }>
+  byStrategySymbol?: Array<{ strategy: string; symbol?: string | null; totalTrades: number; wins: number; losses: number; winRatePct: number; cumulativeR: number; expectancyR: number; netPnl: number; pureTrades?: number; pureWinRatePct?: number; pureNetPnl?: number; pureExpectancyR?: number }>
+}
+
+/** Exit mode of a paper deployment, from its stored strategy_params.
+ * Pure TP/SL applies only to NEW trades; open positions keep the mode
+ * they were opened with. */
+export function paperExitModeLabel(strategyParams: PaperConfig["strategy_params"]): "Pure TP/SL" | "Dynamic" {
+  return strategyParams?.PURE_TP_SL === true ? "Pure TP/SL" : "Dynamic";
+}
 export interface PaperCircuitBreaker { status: string; emergency_stop_active: boolean; emergency_stop_reason: string | null; active_positions: number; max_concurrent_positions: number; today_realized_pnl_usd: number | null; max_daily_loss_usd: number; open_notional_usd: number | null; max_total_notional_usd: number; can_open_new_position: boolean; message: string }
 export interface PaperTradingSnapshot { positions: PaperPosition[]; configs: PaperConfig[]; orders: PaperOrder[]; trades: PaperTrade[]; metrics: PaperMetrics; breaker: PaperCircuitBreaker }
 

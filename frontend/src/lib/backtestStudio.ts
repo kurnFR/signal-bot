@@ -112,6 +112,8 @@ export async function fetchBacktestRunDetails(runId: number, signal?: AbortSigna
   return payload as unknown as BacktestDetailsResponse;
 }
 
+export type BacktestExitMode = "pure" | "dynamic" | "both";
+
 export interface BacktestExecutionInput {
   symbol: string;
   market: "spot" | "futures";
@@ -123,6 +125,28 @@ export interface BacktestExecutionInput {
   save_to_db: true;
   params: Record<string, string | number | boolean>;
   ml_generator_model_id?: string | null;
+  exit_mode?: BacktestExitMode;
+}
+
+export interface BacktestExecutionMetrics {
+  total_trades: number;
+  win_rate_pct: number | null;
+  expectancy_r: number | null;
+  profit_factor: number | null;
+  max_drawdown_r: number | null;
+  pure_trades?: number | null;
+  pure_win_rate_pct?: number | null;
+  pure_net_pnl?: number | null;
+  pure_expectancy_r?: number | null;
+  pure_sum_r?: number | null;
+  exit_reason_breakdown?: Array<{ exit_reason: string; trades: number; wins: number; losses: number; net_pnl: number; sum_r: number }>;
+  [key: string]: number | null | BacktestExecutionMetrics["exit_reason_breakdown"];
+}
+
+export interface BacktestModeResult {
+  metrics: BacktestExecutionMetrics;
+  equity: unknown;
+  trades: unknown[];
 }
 
 export interface BacktestExecutionResult {
@@ -132,16 +156,11 @@ export interface BacktestExecutionResult {
   timeframe: string;
   strategy: string;
   dataSegment: string;
+  exitMode?: BacktestExitMode;
   totalCandles: number;
-  metrics: {
-    total_trades: number;
-    win_rate_pct: number | null;
-    expectancy_r: number | null;
-    profit_factor: number | null;
-    max_drawdown_r: number | null;
-    [key: string]: number | null;
-  };
+  metrics: BacktestExecutionMetrics;
   trades: unknown[];
+  results?: { dynamic: BacktestModeResult; pure: BacktestModeResult };
 }
 
 export class BacktestExecutionError extends Error {
@@ -166,7 +185,12 @@ function isBacktestExecutionResult(value: unknown): value is BacktestExecutionRe
   const metrics = result.metrics as Record<string, unknown>;
   if (typeof metrics.total_trades !== "number" || !Number.isSafeInteger(metrics.total_trades) || metrics.total_trades < 0 ||
       !["win_rate_pct", "expectancy_r", "profit_factor", "max_drawdown_r"].every((key) => isFiniteNullableNumber(metrics[key]))) return false;
-  return Object.values(metrics).every(isFiniteNullableNumber);
+  // Pure TP/SL aggregates are numbers; exit_reason_breakdown is a list of
+  // per-reason rows, not a number, so it is validated separately.
+  const { exit_reason_breakdown, ...numericMetrics } = metrics;
+  if (exit_reason_breakdown !== undefined && (!Array.isArray(exit_reason_breakdown) || !exit_reason_breakdown.every(
+    (row) => isRecord(row) && typeof row.exit_reason === "string" && typeof row.trades === "number"))) return false;
+  return Object.values(numericMetrics).every(isFiniteNullableNumber);
 }
 
 /** Execute one explicitly confirmed, persisted backtest for an admin/trader session. */

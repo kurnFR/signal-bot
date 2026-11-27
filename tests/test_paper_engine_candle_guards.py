@@ -358,7 +358,7 @@ class TestSameCandleReEntryGuard(unittest.TestCase):
             symbol="BTCUSDT", market="spot", timeframe="1h", strategy_name="trend_ema_v1",
             direction="LONG", entry_price=100.0, stop_loss=95.0, take_profit=110.0,
             initial_risk=5.0, atr=5.0, ml_probability=0.82, ml_threshold=0.75,
-            ml_model_id="model-7", ml_generator_model_id=None,
+            ml_model_id="model-7", ml_generator_model_id=None, exit_mode="Dynamic",
         )
 
     def test_entry_is_not_backfilled_when_open_candle_is_not_the_next_interval(self):

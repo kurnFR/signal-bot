@@ -75,6 +75,20 @@ const baseFixture = {
         report_enabled: true,
         created_at: "2026-10-25T10:00:00Z",
       },
+      {
+        id: 3,
+        symbol: "ETHUSDT",
+        market: "spot",
+        timeframe: "1h",
+        strategy_name: "trend_ema_v1",
+        is_active: true,
+        allocated_capital: 5000,
+        risk_per_trade_pct: 1,
+        telegram_enabled: true,
+        report_enabled: true,
+        strategy_params: { PURE_TP_SL: true },
+        created_at: "2026-10-25T10:00:00Z",
+      },
     ],
   },
   "/api/paper/orders?limit=20": {
@@ -135,6 +149,22 @@ const baseFixture = {
       cumulativeR: 4.5,
       expectancyR: 0.45,
       netPnl: 125.5,
+      pureTrades: 7,
+      pureWins: 4,
+      pureLosses: 3,
+      pureWinRatePct: 57.14,
+      pureNetPnl: 90.0,
+      pureSumR: 3.0,
+      pureExpectancyR: 0.43,
+      avgWinR: 1.5,
+      avgLossR: -1.0,
+      exitReasonBreakdown: [
+        { exitReason: "TP", trades: 4, wins: 4, losses: 0, netPnl: 120, sumR: 6 },
+        { exitReason: "SL", trades: 3, wins: 0, losses: 3, netPnl: -30, sumR: -3 },
+        { exitReason: "TRAIL", trades: 2, wins: 2, losses: 0, netPnl: 25, sumR: 2 },
+        { exitReason: "TIMEOUT", trades: 1, wins: 0, losses: 1, netPnl: -10, sumR: -0.5 },
+        { exitReason: "MANUAL", trades: 0, wins: 0, losses: 0, netPnl: 0, sumR: 0 },
+      ],
       byStrategy: [
         {
           strategy: "trend_ema_v1",
@@ -146,6 +176,15 @@ const baseFixture = {
           cumulativeR: 1.25,
           expectancyR: 0.4167,
           netPnl: 10.25,
+          pureTrades: 2,
+          pureWins: 1,
+          pureLosses: 1,
+          pureWinRatePct: 50,
+          pureNetPnl: 5,
+          pureSumR: 1,
+          pureExpectancyR: 0.5,
+          avgWinR: 2,
+          avgLossR: -1,
         },
       ],
     },
@@ -179,6 +218,13 @@ describe("read-only Paper Trading panel", () => {
     expect((await screen.findAllByText("demo_strategy", { exact: false })).length).toBeGreaterThan(0);
     expect(screen.getByText("$125.50")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Strategy performance" })).toBeInTheDocument();
+    // Pure TP/SL section: TP/SL-only aggregates and the exit breakdown.
+    expect(screen.getByRole("heading", { name: "Pure TP/SL (TP/SL exits only)" })).toBeInTheDocument();
+    expect(screen.getByText("57.14%")).toBeInTheDocument();
+    expect(screen.getByText("Exits — TP: 4 (4W/0L, 6 R) · SL: 3 (0W/3L, -3 R) · TRAIL: 2 (2W/0L, 2 R) · TIMEOUT: 1 (0W/1L, -0.5 R)")).toBeInTheDocument();
+    // The pure deployment shows its exit mode in the configurations table.
+    expect(screen.getAllByText(/Pure TP\/SL/).length).toBeGreaterThan(1);
+    expect(screen.getByText("Dynamic")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Strategy performance" })).getByText("trend_ema_v1")).toBeInTheDocument();
     expect(screen.getByText("66.67%")).toBeInTheDocument();
     expect(screen.getByText("1.25 R")).toBeInTheDocument();
@@ -919,6 +965,7 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
         cumulativeR: 0.4645,
         expectancyR: 0.1161,
         netPnl: 23.22,
+        pureTrades: 4, pureWins: 2, pureLosses: 2, pureWinRatePct: 50, pureNetPnl: 23.22, pureSumR: 0.4645, pureExpectancyR: 0.1161, avgWinR: 1, avgLossR: -1,
       },
       {
         strategy: "BB_REV_INV",
@@ -933,6 +980,7 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
         cumulativeR: 2.0,
         expectancyR: 1.0,
         netPnl: 120.0,
+        pureTrades: 2, pureWins: 2, pureLosses: 0, pureWinRatePct: 100, pureNetPnl: 120, pureSumR: 2, pureExpectancyR: 1, avgWinR: 1, avgLossR: 0,
       },
       {
         strategy: "trend_ema_v1",
@@ -947,6 +995,7 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
         cumulativeR: -0.5,
         expectancyR: -0.1667,
         netPnl: -25.0,
+        pureTrades: 3, pureWins: 1, pureLosses: 2, pureWinRatePct: 33.33, pureNetPnl: -25, pureSumR: -0.5, pureExpectancyR: -0.1667, avgWinR: 1, avgLossR: -1,
       },
     ];
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {

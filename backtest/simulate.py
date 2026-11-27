@@ -12,6 +12,14 @@ from backtest.accounting import (
 
 logger = logging.getLogger("backtest.simulate")
 
+# Pure TP/SL mode: trades run only to TP/SL (or END_OF_DATA). Trailing never
+# arms and there is no timeout. A custom_exit_policy with these values is
+# attached to every pure trade so the paper engine opens the position with
+# the same exits; trail_activation_r 9999.0 is a never-arming sentinel and
+# max_hold_bars 0 means "no timeout" (see paper/engine.py _insert_position).
+PURE_TP_SL_TRAIL_SENTINEL = 9999.0
+PURE_TP_SL_NO_TIMEOUT = 0
+
 
 def trailing_bar(direction, bar, stop, active, entry_open, risk, activation_r, distance):
     """Check the existing stop before tightening it using this bar's favorable extreme."""
@@ -45,7 +53,11 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
     fee = params["BACKTEST_FEE_PCT"]
     slip = params["BACKTEST_SLIPPAGE_PCT"]
     max_hold = params["BACKTEST_MAX_HOLD_BARS"]
-    use_trailing = params.get("USE_TRAILING_STOP", False)
+    # Pure TP/SL mode is requested via params["_pure_tp_sl"] (set by the
+    # backtest API exit_mode and by the paper engine for PURE_TP_SL
+    # deployments) or directly via params["PURE_TP_SL"].
+    pure_tp_sl = bool(params.get("_pure_tp_sl") or params.get("PURE_TP_SL"))
+    use_trailing = False if pure_tp_sl else params.get("USE_TRAILING_STOP", False)
     trail_activation_r = params.get("TRAIL_ACTIVATION_R", 1.0)
     trail_distance_atr_mult = params.get("TRAIL_DISTANCE_ATR_MULT", 1.5)
     ml_filter = params.get("_ml_signal_filter")
@@ -215,7 +227,7 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
             if exit_price is not None:
                 exit_idx = j
                 break
-            if j - entry_idx + 1 >= max_hold:
+            if not pure_tp_sl and j - entry_idx + 1 >= max_hold:
                 exit_price, exit_reason, exit_idx = float(bar["close"]), "TIMEOUT", j
                 break
             j += 1
@@ -293,6 +305,15 @@ def simulate(df: pd.DataFrame, params: dict, long_condition, short_condition, st
             "r_multiple": float(accounting["r_multiple"]) if accounting["r_multiple"] is not None else None,
             "holding_bars": exit_idx - entry_idx + 1,
         }
+        if pure_tp_sl:
+            # Every trade (retail runners included — they never set a policy
+            # themselves) carries the pure exit policy into the paper engine.
+            trade["custom_exit_policy"] = {
+                "enabled": False, "activation_r": PURE_TP_SL_TRAIL_SENTINEL,
+                "distance_atr": float(trail_distance_atr_mult),
+                "max_hold_bars": PURE_TP_SL_NO_TIMEOUT,
+                "entry_open": raw_entry_price, "atr": float(atr_at_signal),
+            }
         if ml_probability is not None:
             trade["ml_probability"] = ml_probability
         trades.append(trade)
