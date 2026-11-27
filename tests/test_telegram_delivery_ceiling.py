@@ -28,6 +28,7 @@ DB_OFF = {"encrypted_bot_token": None, "chat_id": "-1001", "delivery_authorized"
 
 
 def _gate(monkeypatch, env_value, db_row):
+    monkeypatch.setenv("TELEGRAM_DELIVERY_ENABLED", "0")
     if env_value is None:
         monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
     else:
@@ -50,6 +51,18 @@ def _gate(monkeypatch, env_value, db_row):
 def test_helper_env_is_hard_ceiling(monkeypatch, env_value, db_row, expected):
     with _gate(monkeypatch, env_value, db_row):
         assert is_telegram_delivery_authorized() is expected
+
+
+@pytest.mark.parametrize("db_row,claims", [(None, False), (DB_OFF, False), (DB_ON, True)])
+def test_production_outbox_requires_explicit_delivery_permission(monkeypatch, db_row, claims):
+    from paper.outbox_worker import OutboxWorker
+
+    worker = OutboxWorker({"database": "crypto_signals"})
+    worker.session_mgr = MagicMock()
+    worker.session_mgr.claim_event.return_value = None
+    with _gate(monkeypatch, "1", db_row):
+        assert worker.process_one_event() is False
+    assert worker.session_mgr.claim_event.called is claims
 
 
 def test_config_reports_effective_authorization(monkeypatch):

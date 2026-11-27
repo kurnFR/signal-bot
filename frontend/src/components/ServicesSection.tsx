@@ -2,6 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Power, RefreshCw } from "lucide-react";
 import { fetchServices, setServiceEnabled, type ServiceState } from "../lib/services";
 
+const serviceLaunchFlags: Record<string, string> = {
+  paper_engine: "PAPER_ENGINE_ENABLED=1",
+  news_ai: "NEWS_AI_ENABLED=1",
+};
+
 /** Admin-only runtime pause/resume for background workers (no restart, no .env edit). */
 export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
   const [services, setServices] = useState<ServiceState[]>([]);
@@ -79,6 +84,8 @@ export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
                   .filter((v): v is string => Boolean(v))
                   .sort()
                   .at(-1);
+                const launchFlag = serviceLaunchFlags[svc.service];
+                const awaitingHeartbeat = Boolean(launchFlag && !latest);
                 return (
                   <tr key={svc.service}>
                     <td>
@@ -87,13 +94,15 @@ export function ServicesSection({ isAdmin }: { isAdmin: boolean }) {
                       {svc.updatedBy && <div className="panel-subtitle">Last changed by {svc.updatedBy}</div>}
                     </td>
                     <td>
-                      <span className={svc.enabled ? "badge badge-ok" : "badge badge-warn"}>
-                        {svc.enabled ? "Running" : "Paused"}
+                      <span className={svc.enabled && !awaitingHeartbeat ? "badge badge-ok" : "badge badge-warn"}>
+                        {awaitingHeartbeat ? "No heartbeat" : svc.enabled ? "Enabled" : "Paused"}
                       </span>
                     </td>
                     <td>{latest ?? "—"}</td>
                     <td>
-                      {confirming === svc.service ? (
+                      {awaitingHeartbeat ? (
+                        <span>Check the worker process and its launcher setting <code>{launchFlag}</code>.</span>
+                      ) : confirming === svc.service ? (
                         <div role="group" aria-label={`Confirm pausing ${svc.label}`}>
                           <p className="api-error" role="alert">{svc.pauseWarning}</p>
                           <button

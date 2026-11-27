@@ -539,6 +539,29 @@ class TestWalletRoutes(unittest.TestCase):
     def test_requires_auth(self):
         self.assertEqual(self.client.get("/api/wallets/positions").status_code, 401)
 
+    @patch("web.routes.wallet_routes.store.set_wallet_label", return_value=True)
+    def test_edit_wallet_label_as_trader(self, save):
+        self.role = "trader"
+        url = "/api/wallets/tracked/7"
+        response = self.client.patch(url, json={"label": "  Treasury  "}, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["label"], "Treasury")
+        save.assert_called_once_with(7, "Treasury")
+        response = self.client.patch(url, json={"label": None}, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        save.assert_called_with(7, None)
+
+    @patch("web.routes.wallet_routes.store.set_wallet_label", return_value=False)
+    def test_edit_wallet_label_requires_an_active_wallet_and_trader_access(self, save):
+        url = "/api/wallets/tracked/7"
+        self.role = "viewer"
+        self.assertEqual(self.client.patch(url, json={"label": "Treasury"}, headers=self.headers).status_code, 403)
+        save.assert_not_called()
+        self.role = "trader"
+        self.assertEqual(self.client.patch(url, json={"label": "x" * 81}, headers=self.headers).status_code, 422)
+        save.assert_not_called()
+        self.assertEqual(self.client.patch(url, json={"label": "Treasury"}, headers=self.headers).status_code, 404)
+
     def test_positions_validation(self):
         self.assertEqual(self.client.get("/api/wallets/positions?period_hours=5", headers=self.headers).status_code, 400)
         self.assertEqual(self.client.get("/api/wallets/positions?chain=doge", headers=self.headers).status_code, 400)

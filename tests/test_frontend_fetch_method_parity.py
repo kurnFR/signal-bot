@@ -4,6 +4,7 @@ The source scan covers literal fetch paths, local path constants passed to fetch
 and paths supplied to shared mutation helpers. It inspects source and route metadata
 only; it sends no requests and does not start the application lifespan.
 """
+from html.parser import HTMLParser
 from pathlib import Path
 import re
 import unittest
@@ -13,12 +14,14 @@ from web.app import app
 
 ROOT = Path(__file__).resolve().parents[1]
 FETCH_CALL = re.compile(
-    r"""(?:fetch|apiRequest)\s*(?:<[^>]+>)?\s*\(\s*(?:(['"`])([^'"`]+)\1|([A-Za-z_$][\w$]*))\s*(?:,\s*\{|\))"""
+    r"""(?:fetch|apiRequest|paperMutationRequest|walletMutationRequest|userRequest|mlMutationRequest)\s*(?:<[^\n]*?>)?\s*\(\s*(?:(['"`])((?:\$\{[^}]*\}|[^'"`])+?)\1|([A-Za-z_$][\w$]*))\s*(?:,\s*\{|\))"""
 )
 METHOD = re.compile(r"""\bmethod\s*:\s*(['"])(GET|POST|PUT|PATCH|DELETE)\1""", re.IGNORECASE)
 FUNCTION_BOUNDARY = re.compile(r"""(?:async\s+)?function\b|=>\s*\{""")
 MUTATION_HELPERS = {
     "postMasterDataJob": "POST",
+    "postJson": "POST",
+    "authPost": "POST",
 }
 
 
@@ -79,7 +82,7 @@ def _frontend_fetch_requests() -> dict[tuple[str, str], list[str]]:
         # method is fixed by the helper implementation, not by fetch()'s argument.
         for helper, method in MUTATION_HELPERS.items():
             for match in re.finditer(
-                rf"""{helper}\s*\(\s*(['"`])(/api/[^'"`]+)\1""",
+                rf"""{helper}(?:<[^\n]*?>)?\s*\(\s*(['"`])(/api/[^'"`]+)\1""",
                 text,
             ):
                 _add_request(requests, method, match.group(2), source, text, match.start())
@@ -120,3 +123,93 @@ class TestFrontendFetchMethodParity(unittest.TestCase):
             missing,
             "Preview fetch calls use unregistered API method/path pairs: " + repr(missing),
         )
+
+
+# Each exception is an existing backend surface that has no Modern caller.
+MUTATION_EXCEPTIONS = {
+    ("DELETE", "/api/wallets/tracked"): "Address-based legacy alias. Modern uses the ID route.",
+    ("POST", "/api/ml/rl/train"): "Research endpoint awaiting a UI or retirement decision.",
+    ("POST", "/api/ml/walk-forward"): "Research endpoint awaiting a UI or retirement decision.",
+    ("POST", "/api/research/retailbot2/control"): "RetailBot2 research navigation retired.",
+    ("POST", "/api/research/retailbot2/strategies"): "RetailBot2 research navigation retired.",
+}
+
+
+def mutation_matrix():
+    requests = _frontend_fetch_requests()
+    return {
+        key: requests.get(key, [])
+        for key in sorted(_registered_api_methods())
+        if key[0] in {"POST", "PUT", "PATCH", "DELETE"}
+    }
+
+
+class TestModernMutationCoverage(unittest.TestCase):
+    def test_missing_modern_mutation_callers_require_explicit_exceptions(self):
+        missing = {key for key, callers in mutation_matrix().items() if not callers}
+        self.assertEqual(missing, MUTATION_EXCEPTIONS.keys())
+
+
+class LegacyControls(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.controls = []
+
+    def handle_starttag(self, tag, attrs):
+        control_id = dict(attrs).get("id")
+        if control_id and tag in {"button", "input", "select", "textarea"}:
+            self.controls.append((control_id, tag))
+
+
+def print_control_matrix():
+    # React generally uses labels/state instead of preserving Legacy DOM IDs.
+    # Record reviewed equivalents explicitly so a name similarity never asserts parity.
+    reviewed = {
+        "login-username": "AuthGate.tsx / Username",
+        "login-password": "AuthGate.tsx / Password",
+        "force-old-pwd": "AuthGate.tsx / Current password",
+        "force-new-pwd": "AuthGate.tsx / New password",
+        "force-conf-pwd": "AuthGate.tsx / Confirm new password",
+        "screener-ctl-enabled": "ScreenerControlsPanel.tsx / Screener enabled",
+        "bt-symbol-select": "BacktestStudioPanel.tsx / Symbol",
+        "bt-market-select": "BacktestStudioPanel.tsx / Market",
+        "bt-timeframe-select": "BacktestStudioPanel.tsx / Timeframe",
+        "bt-strategy-select": "BacktestStudioPanel.tsx / Strategy",
+        "bt-segment-select": "BacktestStudioPanel.tsx / Data segment",
+        "bt-capital-input": "BacktestStudioPanel.tsx / Initial capital",
+        "bt-risk-input": "BacktestStudioPanel.tsx / Risk per trade",
+        "btn-run-backtest": "BacktestStudioPanel.tsx / Run Backtest",
+        "paper-config-symbol": "PaperTradingPanel.tsx / Deploy bot / Symbol",
+        "paper-config-market": "PaperTradingPanel.tsx / Deploy bot / Market",
+        "paper-config-timeframe": "PaperTradingPanel.tsx / Deploy bot / Timeframe",
+        "paper-config-strategy": "PaperTradingPanel.tsx / Deploy bot / Strategy",
+        "paper-config-capital": "PaperTradingPanel.tsx / Deploy bot / Allocated capital",
+        "paper-config-risk": "PaperTradingPanel.tsx / Deploy bot / Risk per trade",
+        "wt-add-chain": "WalletTrackingPanel.tsx / Track wallet / Chain",
+        "wt-add-wallet": "WalletTrackingPanel.tsx / Track wallet / Address",
+        "wt-add-label": "WalletTrackingPanel.tsx / Track wallet / Label",
+        "strat-catalog-search": "StrategyLibraryPanel.tsx / Search strategies",
+        "strat-catalog-filter": "StrategyLibraryPanel.tsx / Strategy type",
+        "btn-toggle-sidebar": "App.tsx / sidebar toggle",
+        "btn-top-toggle-sidebar": "App.tsx / sidebar toggle",
+    }
+    screener_source = (ROOT / "frontend/src/ScreenerControlsPanel.tsx").read_text(encoding="utf-8")
+    for key, label in re.findall(r'key: "([a-z0-9_]+)", label: "([^"]+)"', screener_source):
+        reviewed[f"screener-ctl-{key}"] = f"ScreenerControlsPanel.tsx / {label}"
+    print("| Legacy file | Control | Modern equivalent |")
+    print("|---|---|---|")
+    for source in sorted((ROOT / "web" / "static").rglob("*.html")):
+        parser = LegacyControls()
+        parser.feed(source.read_text(encoding="utf-8"))
+        for control_id, tag in parser.controls:
+            print(f"| {source.relative_to(ROOT)} | `{tag}#{control_id}` | {reviewed.get(control_id, 'none recorded')} |")
+    print("\n| Backend mutation | Modern caller or exception |")
+    print("|---|---|")
+    for (method, path), callers in mutation_matrix().items():
+        locations = ", ".join(f"`{caller.split(': ', 1)[0]}`" for caller in callers)
+        result = locations or f"None. {MUTATION_EXCEPTIONS.get((method, path), 'Unallowlisted.')}"
+        print(f"| `{method} {path}` | {result} |")
+
+
+if __name__ == "__main__":
+    print_control_matrix()

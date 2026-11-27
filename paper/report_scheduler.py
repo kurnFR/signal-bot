@@ -4,6 +4,8 @@ import logging
 import os
 import time
 
+from db.db import heartbeat
+from db.service_control import pause_gate
 from notifications.telegram_notifier import is_telegram_delivery_authorized
 from paper.outbox_store import OutboxConfig, OutboxStore
 from paper.paper_report import format_paper_report
@@ -29,6 +31,12 @@ def main():
     last_hour = None
     database = None
     while True:
+        if pause_gate("paper_report", "paper_report", 30):
+            continue
+        try:
+            heartbeat("paper_report")
+        except Exception as exc:
+            logger.warning("Paper performance report heartbeat failed (%s)", type(exc).__name__)
         now = time.time()
         hour = int(now) // 3600
         if hour != last_hour:

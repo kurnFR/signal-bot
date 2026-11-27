@@ -28,6 +28,12 @@ SERVICES: Dict[str, Dict[str, object]] = {
         "heartbeats": ["news_poller", "econ_calendar_poller", "news_strategy_engine", "news_execution"],
         "pause_warning": "While paused, no new news or calendar events are ingested and no AI signals are generated.",
     },
+    "paper_report": {
+        "label": "Paper Performance Reports",
+        "description": "Queues the hourly paper trading performance report.",
+        "heartbeats": ["paper_report"],
+        "pause_warning": "While paused, no new hourly reports are queued. Reports already queued may still be delivered.",
+    },
     "wallet_tracker": {
         "label": "Wallet Tracker",
         "description": "Polls tracked wallets and sends wallet alerts.",

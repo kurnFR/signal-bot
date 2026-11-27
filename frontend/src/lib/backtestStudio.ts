@@ -94,8 +94,8 @@ function isBacktestTrade(value: unknown): value is BacktestTrade {
 export async function fetchBacktestStrategies(signal?: AbortSignal): Promise<BacktestStrategiesResponse> {
   return getJson<BacktestStrategiesResponse>("/api/backtest/strategies", signal);
 }
-export async function fetchBacktestHistory(signal?: AbortSignal): Promise<BacktestHistoryResponse> {
-  const payload = await getJson<unknown>("/api/backtest/history?limit=100", signal);
+export async function fetchBacktestHistory(signal?: AbortSignal, limit = 100): Promise<BacktestHistoryResponse> {
+  const payload = await getJson<unknown>(`/api/backtest/history?limit=${limit}`, signal);
   if (!isRecord(payload) || !Array.isArray(payload.runs) || !payload.runs.every(isBacktestRunSummary)) {
     throw new Error("Backtest history returned an invalid response");
   }

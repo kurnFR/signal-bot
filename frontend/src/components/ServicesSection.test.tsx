@@ -41,6 +41,13 @@ describe("ServicesSection", () => {
     await waitFor(() => expect(setServiceEnabledMock).toHaveBeenCalledWith("paper_engine", true));
   });
 
+  it("shows launch guidance when the optional worker has no heartbeat", async () => {
+    fetchServicesMock.mockResolvedValue([row({ heartbeats: [] })]);
+    render(<ServicesSection isAdmin />);
+    expect(await screen.findByText("PAPER_ENGINE_ENABLED=1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Pause Paper Trading Engine/ })).toBeNull();
+  });
+
   it("does not call the admin API for non-admins", async () => {
     render(<ServicesSection isAdmin={false} />);
     await waitFor(() => expect(screen.queryByText("Loading services…")).not.toBeInTheDocument());

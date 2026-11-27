@@ -459,3 +459,10 @@ export async function toggleWalletTracking(
   }
   return { status: "ok", tracked: payload.tracked, chain: payload.chain, wallet: payload.wallet };
 }
+
+export async function updateWalletLabel(id: number, label: string): Promise<void> {
+  await walletMutationRequest(`/api/wallets/tracked/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ label: label.trim() || null }),
+  });
+}

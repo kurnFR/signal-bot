@@ -28,7 +28,7 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         # This suite replaces data in several tables. Require a disposable local database.
         if os.getenv("MYSQL_DATABASE") != "signal_bot_test":
             raise unittest.SkipTest("Set MYSQL_DATABASE=signal_bot_test to run against an isolated test database.")
-        settings = patch.dict(db.MYSQL_CONFIG, host="127.0.0.1", port=3306, database="signal_bot_test")
+        settings = patch.dict(db.MYSQL_CONFIG, host="127.0.0.1", port=int(os.getenv("MYSQL_PORT", "3306")), database="signal_bot_test")
         settings.start()
         cls.addClassCleanup(settings.stop)
         pool_override = patch.object(db, "_pool", None)
@@ -662,8 +662,13 @@ class TestPaperPositionLifecycle(unittest.TestCase):
         self.assertNotIn(pristine, [c["id"] for c in pe.get_paper_configs()])
         self.assertFalse(pe.purge_paper_config(pristine))  # already gone -> not found
 
+        active = self._create_config(symbol="AVAXUSDT", strategy_name="trend_ema_v1")
+        self.assertTrue(pe.purge_paper_config(active, allow_unarchived=True))
+
         traded = self._create_config(symbol="ETHUSDT", strategy_name="BB_REV_INV")
         self._create_position(config_id=traded, symbol="ETHUSDT", strategy_name="BB_REV_INV")
+        with self.assertRaises(pe.PaperConfigHasHistory):
+            pe.purge_paper_config(traded, allow_unarchived=True)
         self.assertTrue(pe.delete_paper_config(traded))
         with self.assertRaises(pe.PaperConfigHasHistory):
             pe.purge_paper_config(traded)

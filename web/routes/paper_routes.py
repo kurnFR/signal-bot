@@ -276,10 +276,11 @@ def delete_config(config_id: int = Path(..., gt=0)):
 
 
 @router.delete("/configs/{config_id}/permanent")
-def purge_config(request: Request, config_id: int = Path(..., gt=0)):
-    """Hard-delete an archived deployment that never traded. Otherwise 409."""
+def purge_config(request: Request, config_id: int = Path(..., gt=0), allow_unarchived: bool = False):
+    """Hard-delete a deployment with no ledger history. Require explicit opt-in before archive."""
     try:
-        deleted = purge_paper_config(config_id)
+        deleted = (purge_paper_config(config_id, allow_unarchived=True)
+                   if allow_unarchived else purge_paper_config(config_id))
     except PaperConfigHasHistory as e:
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:

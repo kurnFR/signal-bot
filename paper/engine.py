@@ -631,8 +631,8 @@ class PaperConfigHasHistory(ValueError):
     """Raised when a permanent delete would destroy ledger history."""
 
 
-def purge_paper_config(config_id: int) -> bool:
-    """Permanently delete an ARCHIVED deployment that has no ledger history.
+def purge_paper_config(config_id: int, *, allow_unarchived: bool = False) -> bool:
+    """Permanently delete a deployment without ledger history after explicit confirmation.
 
     Safe by construction: refuses (``PaperConfigHasHistory``) if any position,
     trade or order references the deployment, so closed-trade history and
@@ -650,7 +650,7 @@ def purge_paper_config(config_id: int) -> bool:
                 if row is None:
                     conn.rollback()
                     return False
-                if row[0] is None:
+                if row[0] is None and not allow_unarchived:
                     conn.rollback()
                     raise ValueError("Archive the deployment before deleting it permanently")
                 for table in ("paper_positions", "paper_trades", "paper_orders"):
@@ -661,7 +661,7 @@ def purge_paper_config(config_id: int) -> bool:
                             "This deployment has positions, trades or orders. "
                             "It stays archived so performance history is preserved."
                         )
-                cur.execute("DELETE FROM paper_configs WHERE id = %s AND archived_at IS NOT NULL", (config_id,))
+                cur.execute("DELETE FROM paper_configs WHERE id = %s", (config_id,))
                 deleted = cur.rowcount > 0
                 conn.commit()
                 return deleted

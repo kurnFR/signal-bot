@@ -807,6 +807,7 @@ class OutboxWorker:
         self.mock_transport_response = mock_transport_response
         self.proc_root = proc_root
         self.observation_mode = observation_mode
+        self.require_delivery_setting = db_config.get("database") == "crypto_signals"
         self.state = OutboxWorkerState.INITIALIZING
         self._shutdown_requested = False
         self._fatal_pgid: Optional[int] = None
@@ -855,6 +856,10 @@ class OutboxWorker:
                 summary.get("due_count", 0),
                 summary.get("status_counts", {}),
             )
+            return False
+
+        # Keep due events queued while delivery is disabled or settings are unavailable.
+        if self.require_delivery_setting and not is_telegram_delivery_authorized(require_explicit_setting=True):
             return False
 
         event = self.session_mgr.claim_event(lease_seconds=self.lease_seconds)

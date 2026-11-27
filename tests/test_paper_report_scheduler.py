@@ -18,6 +18,7 @@ def test_report_scheduler_runs_without_retailbot2_worker():
 def test_scheduler_uses_hourly_idempotent_key_and_delivery_gate(monkeypatch):
     database = Mock()
     monkeypatch.setattr("paper.report_scheduler.format_paper_report", lambda: "Paper report")
+    monkeypatch.setenv("TELEGRAM_DELIVERY_ENABLED", "0")
     monkeypatch.delenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", raising=False)
     assert not queue_current_hour(database, 3607)
     database.enqueue_telegram_outbox_event.assert_not_called()

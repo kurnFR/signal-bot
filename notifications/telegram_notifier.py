@@ -94,7 +94,7 @@ def _safe_http_status(status: Any) -> str:
     return "unknown"
 
 
-def is_telegram_delivery_authorized() -> bool:
+def is_telegram_delivery_authorized(*, require_explicit_setting: bool = False) -> bool:
     """Returns True only when Telegram delivery is authorized on BOTH layers.
 
     The environment flag ``TELEGRAM_DELIVERY_ENABLED`` (with deprecated legacy
@@ -102,7 +102,7 @@ def is_telegram_delivery_authorized() -> bool:
     ceiling) is a hard ceiling: when neither is ``"1"``, delivery is suppressed
     no matter what the database setting says. When the ceiling is open, the
     database setting (Settings UI, ``app_telegram_settings.delivery_authorized``)
-    decides if a row exists; with no DB row the env flag alone decides. Every
+    decides if a row exists. The production outbox requires an explicit setting. Every
     delivery consumer (notifier, wallet tracker, report scheduler, outbox
     worker, Screener) must gate on this helper so the layers can never diverge.
     """
@@ -115,7 +115,7 @@ def is_telegram_delivery_authorized() -> bool:
     db_settings = _get_db_telegram_settings()
     if db_settings and db_settings.get("delivery_authorized") is not None:
         return bool(db_settings["delivery_authorized"])
-    return True
+    return not require_explicit_setting
 
 
 def get_telegram_config() -> Dict[str, Any]:
