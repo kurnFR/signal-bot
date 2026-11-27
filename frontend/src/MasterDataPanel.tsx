@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./AuthGate";
 import { ArrowRight, Database, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
-import { fetchMasterDataSnapshot, fetchPopularCrypto, searchCryptoSymbols, MasterDataActionError, triggerMasterDataBackfill, triggerMasterDataFeatureBuild, type CryptoMarketTicker, type MasterDataSnapshot } from "./lib/masterData";
+import { fetchMasterDataSnapshot, fetchPopularCrypto, searchCryptoSymbols, MasterDataActionError, triggerMasterDataBackfill, triggerMasterDataFeatureBuild, deleteMasterDataset, type DeleteDatasetInput, type CryptoMarketTicker, type MasterDataSnapshot } from "./lib/masterData";
 
 const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 function num(value: number | null | undefined) {
@@ -40,6 +40,8 @@ export function MasterDataPanel() {
   const [popularError, setPopularError] = useState<string | null>(null);
   const [popularAttempt, setPopularAttempt] = useState(0);
   const auth = useAuth();
+  const isAdmin = (auth?.user.role ?? "").toLowerCase() === "admin";
+  const [pendingDelete, setPendingDelete] = useState<DeleteDatasetInput | null>(null);
   const canManageJobs = ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
   const [backfillSymbol, setBackfillSymbol] = useState("BTCUSDT");
   const [backfillMarket, setBackfillMarket] = useState<"spot" | "futures">("spot");
@@ -110,6 +112,22 @@ export function MasterDataPanel() {
     setPendingAction({ kind: "backfill", symbol, market: backfillMarket, timeframe: backfillTimeframe, years, auto_compute_features: autoComputeFeatures });
   };
 
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setActionBusy(true); setActionError(null); setActionMessage(null);
+    try {
+      const result = await deleteMasterDataset(pendingDelete);
+      setActionMessage(`Deleted ${num(result.features_deleted)} feature row(s) and ${num(result.candles_deleted)} candle(s).`);
+      setPendingDelete(null);
+      setAttempt((n) => n + 1);
+    } catch (cause) {
+      setPendingDelete(null);
+      setActionError(cause instanceof MasterDataActionError ? cause.message : "Could not delete the dataset.");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   const confirmPendingAction = async () => {
     if (!pendingAction) return;
     setActionBusy(true); setActionError(null); setActionMessage(null);
@@ -171,7 +189,7 @@ export function MasterDataPanel() {
     </section>
     <section className="panel" aria-labelledby="master-coverage-title"><div className="panel-heading"><div><h2 id="master-coverage-title">Dataset coverage</h2><p>Stored candle counts and feature availability from the existing API.</p></div><span className="panel-counter">{coverage.length} ROWS</span></div>
       <label className="filter-field">Filter datasets <input aria-label="Filter datasets" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Symbol, market, timeframe…" /></label>
-      {coverage.length ? <div className="table-scroll"><table><thead><tr><th>Symbol</th><th>Market</th><th>Timeframe</th><th>Candles</th><th>Features</th><th>First date</th><th>Last date</th>{canManageJobs && <th>Actions</th>}</tr></thead><tbody>{coverage.map((row) => <tr key={row.symbol + row.market + row.timeframe}><td>{row.symbol}</td><td>{row.market}</td><td>{row.timeframe}</td><td>{num(row.candleCount)}</td><td>{row.hasFeatures ? "Available" : "Missing"} ({num(row.featureCount)})</td><td>{dateLabel(row.startDate)}</td><td>{dateLabel(row.endDate)}</td>{canManageJobs && <td>{(row.market === "spot" || row.market === "futures") && <button className="button button-secondary" type="button" disabled={actionBusy || loading} onClick={() => { setActionError(null); setActionMessage(null); setPendingAction({ kind: "features", symbol: row.symbol, market: row.market as "spot" | "futures", timeframe: row.timeframe }); }}>Build features</button>}</td>}</tr>)}</tbody></table></div> : <p className="empty-state">{loading ? "Loading datasets…" : "No datasets match this filter."}</p>}
+      {coverage.length ? <div className="table-scroll"><table><thead><tr><th>Symbol</th><th>Market</th><th>Timeframe</th><th>Candles</th><th>Features</th><th>First date</th><th>Last date</th>{canManageJobs && <th>Actions</th>}</tr></thead><tbody>{coverage.map((row) => <tr key={row.symbol + row.market + row.timeframe}><td>{row.symbol}</td><td>{row.market}</td><td>{row.timeframe}</td><td>{num(row.candleCount)}</td><td>{row.hasFeatures ? "Available" : "Missing"} ({num(row.featureCount)})</td><td>{dateLabel(row.startDate)}</td><td>{dateLabel(row.endDate)}</td>{canManageJobs && <td>{(row.market === "spot" || row.market === "futures") && <button className="button button-secondary" type="button" disabled={actionBusy || loading} onClick={() => { setActionError(null); setActionMessage(null); setPendingAction({ kind: "features", symbol: row.symbol, market: row.market as "spot" | "futures", timeframe: row.timeframe }); }}>Build features</button>}{isAdmin && (row.market === "spot" || row.market === "futures") && <>{" "}<button className="button button-secondary" type="button" disabled={actionBusy || loading} onClick={() => setPendingDelete({ symbol: row.symbol, market: row.market as "spot" | "futures", timeframe: row.timeframe, scope: "features" })}>Delete features {row.symbol} {row.market} {row.timeframe}</button>{" "}<button className="button button-danger" type="button" disabled={actionBusy || loading} onClick={() => setPendingDelete({ symbol: row.symbol, market: row.market as "spot" | "futures", timeframe: row.timeframe, scope: "all" })}>Delete dataset {row.symbol} {row.market} {row.timeframe}</button></>}</td>}</tr>)}</tbody></table></div> : <p className="empty-state">{loading ? "Loading datasets…" : "No datasets match this filter."}</p>}
     </section>
     <section className="panel" aria-labelledby="master-jobs-title"><div className="panel-heading"><div><h2 id="master-jobs-title">Recent background jobs</h2><p>Read-only job history; no job is started or resumed here.</p></div><span className="panel-counter">{data?.jobs.length ?? 0} ROWS</span></div>
       {data?.jobs.length ? <div className="table-scroll"><table><thead><tr><th>Job</th><th>Dataset</th><th>Status</th><th>Progress</th><th>Created</th><th>Message</th></tr></thead><tbody>{data.jobs.map((row, index) => <tr key={row.id ?? row.job_id ?? index}><td>{row.type}</td><td>{[row.symbol, row.market, row.timeframe].filter(Boolean).join(" · ") || "—"}</td><td>{row.status}</td><td>{typeof row.progress === "number" ? num(row.progress) + "%" : "—"}</td><td>{jobDate(row.created_at)}</td><td>{row.message ?? row.error ?? "—"}</td></tr>)}</tbody></table></div> : <p className="empty-state">{loading ? "Loading jobs…" : "No recent background jobs returned."}</p>}
@@ -181,6 +199,11 @@ export function MasterDataPanel() {
       <p><strong>Dataset:</strong> {[pendingAction.symbol, pendingAction.market, pendingAction.timeframe].join(" · ")}</p>
       {pendingAction.kind === "backfill" && <p><strong>History:</strong> {pendingAction.years} year(s); automatic feature build {pendingAction.auto_compute_features ? "enabled" : "disabled"}.</p>}
       <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={actionBusy} onClick={() => setPendingAction(null)}>Cancel</button><button className="button button-primary" type="button" disabled={actionBusy} onClick={() => void confirmPendingAction()}>{actionBusy ? "Starting job…" : pendingAction.kind === "backfill" ? "Start backfill" : "Start feature build"}</button></div>
+    </section>}
+    {pendingDelete && <section className="panel" aria-labelledby="master-delete-confirm-title">
+      <div className="panel-heading"><div><h2 id="master-delete-confirm-title">Confirm delete ({pendingDelete.scope === "all" ? "candles + features" : "features only"})</h2><p>{pendingDelete.scope === "all" ? "This permanently removes stored candles and features for this dataset. Collectors or a backfill can rebuild them, but gaps may remain." : "Removes computed features only; candles are kept and features can be rebuilt."} The server refuses while an active paper deployment or a running job uses this dataset.</p></div></div>
+      <p><strong>Dataset:</strong> {[pendingDelete.symbol, pendingDelete.market, pendingDelete.timeframe].join(" · ")}</p>
+      <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={actionBusy} onClick={() => setPendingDelete(null)}>Cancel delete</button><button className="button button-danger" type="button" disabled={actionBusy} onClick={() => void confirmDelete()}>{actionBusy ? "Deleting…" : "Confirm delete"}</button></div>
     </section>}
   </div>;
 }

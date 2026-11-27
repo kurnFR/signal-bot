@@ -4,7 +4,7 @@ import threading
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
@@ -13,6 +13,7 @@ from collectors.backfill_klines import fetch_klines, klines_to_rows, KLINE_FETCH
 from config import SPOT_KLINE_URL, FUTURES_KLINE_URL
 from features.build_features import build_one
 from web import job_store
+from web.auth import log_audit, require_admin
 
 router = APIRouter(prefix="/api/master-data", tags=["master-data"])
 logger = logging.getLogger("web.master_data")
@@ -351,3 +352,74 @@ def get_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+_DELETE_BATCH = 50_000
+_ACTIVE_JOB_STATES = {"queued", "running"}
+
+
+def _delete_in_batches(cur, conn, table: str, symbol: str, market: str, timeframe: str) -> int:
+    total = 0
+    while True:
+        cur.execute(
+            f"DELETE FROM {table} WHERE symbol=%s AND market=%s AND timeframe=%s LIMIT {_DELETE_BATCH}",
+            (symbol, market, timeframe),
+        )
+        n = cur.rowcount
+        conn.commit()
+        total += n
+        if n < _DELETE_BATCH:
+            return total
+
+
+@router.delete("/dataset")
+def delete_dataset(
+    request: Request,
+    symbol: str = Query(..., min_length=2, max_length=20),
+    market: str = Query(...),
+    timeframe: str = Query(...),
+    scope: str = Query("features", pattern="^(features|all)$"),
+    admin: dict = Depends(require_admin),
+):
+    """Admin: delete computed features (rebuildable) or the whole dataset (candles + features).
+
+    Refused with 409 while an active deployment uses the dataset or a job is running for it.
+    """
+    symbol = symbol.strip().upper()
+    market = market.strip().lower()
+    timeframe = timeframe.strip()
+    if not VALID_SYMBOL_PATTERN.match(symbol) or market not in VALID_MARKETS or timeframe not in VALID_TIMEFRAMES:
+        raise HTTPException(status_code=400, detail="Invalid symbol, market or timeframe")
+
+    with JOBS_LOCK:
+        for job in JOBS.values():
+            if (job.get("symbol"), job.get("market"), job.get("timeframe")) == (symbol, market, timeframe) \
+                    and job.get("status") in _ACTIVE_JOB_STATES:
+                raise HTTPException(status_code=409, detail="A backfill or feature job is running for this dataset")
+
+    conn = get_pool().get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM paper_configs WHERE symbol=%s AND market=%s AND timeframe=%s AND archived_at IS NULL",
+            (symbol, market, timeframe),
+        )
+        in_use = int(cur.fetchone()[0])
+        if in_use:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{in_use} active paper deployment(s) use this dataset. Archive them first.",
+            )
+        features_deleted = _delete_in_batches(cur, conn, "features", symbol, market, timeframe)
+        candles_deleted = _delete_in_batches(cur, conn, "ohlcv", symbol, market, timeframe) if scope == "all" else 0
+        cur.close()
+    finally:
+        conn.close()
+
+    log_audit(
+        "MASTER_DATA_DELETED", admin["username"], admin["id"],
+        {"symbol": symbol, "market": market, "timeframe": timeframe, "scope": scope,
+         "features_deleted": features_deleted, "candles_deleted": candles_deleted},
+        request.client.host if request.client else "unknown",
+    )
+    return {"status": "success", "scope": scope, "features_deleted": features_deleted, "candles_deleted": candles_deleted}
