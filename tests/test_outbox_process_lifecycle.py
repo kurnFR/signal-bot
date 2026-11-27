@@ -227,6 +227,9 @@ _child_preexec_pdeathsig(os.getppid() + 9999)
             "PYTHONPATH": "/srv/signal-bot",
         }
 
+    # The two escalation tests expect PID 1 to reap adopted grandchildren.
+    # A sandbox PID 1 without a reaper can leave a zombie PID visible to
+    # kill(pid, 0) even after the process group has no running descendants.
     def test_direct_child_exits_while_grandchild_survives_and_is_terminated_by_sigterm(self, tmp_path):
         # Direct child exits immediately while grandchild stays alive in same PGID
         pid_file = tmp_path / "grandchild_sigterm.pid"
@@ -626,16 +629,14 @@ _child_preexec_pdeathsig(os.getppid() + 9999)
         pid_dir.mkdir()
         stat_file = pid_dir / "stat"
         stat_file.write_text("999 (python3) S 1 12345 100 0 0 0\n")
-        stat_file.chmod(0o000)
-
-        try:
+        # Inject the failed read so the test behaves identically under both
+        # ordinary CI users and root inside an isolated network namespace.
+        with patch("paper.outbox_worker.open", side_effect=PermissionError("Permission denied")):
             res_perm = inspect_process_group(12345, proc_root=str(perm_root))
             assert res_perm.status == ProcessInspectionStatus.STATE_UNVERIFIED
             assert "Permission denied" in res_perm.error
             with pytest.raises(ProcessInspectionError):
                 get_live_pids_in_pgid(12345, proc_root=str(perm_root))
-        finally:
-            stat_file.chmod(0o644)
 
         # 3. Malformed stat file (missing closing parenthesis)
         malformed_root = tmp_path / "proc_malformed"

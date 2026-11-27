@@ -1,0 +1,96 @@
+name: Provision test MariaDB
+description: Migrate a disposable database and seed the existing restricted test grants.
+inputs:
+  container-id:
+    description: MariaDB service container ID
+    required: true
+  test-user:
+    description: Optional restricted test account name
+  test-password:
+    description: Optional restricted test account password
+runs:
+  using: composite
+  steps:
+    - name: Provision isolated database credentials
+      env:
+        MARIADB_CONTAINER: ${{ inputs.container-id }}
+        SIGNAL_BOT_TEST_DB_USER: ${{ inputs.test-user }}
+        SIGNAL_BOT_TEST_DB_PASSWORD: ${{ inputs.test-password }}
+      shell: bash
+      run: |
+        set -eu
+        migration_password=$(openssl rand -hex 32)
+        # Forks and repositories without CI secrets still get a fresh test identity.
+        test_user=${SIGNAL_BOT_TEST_DB_USER:-signal_bot_test}
+        test_password=${SIGNAL_BOT_TEST_DB_PASSWORD:-$(openssl rand -hex 32)}
+        if [[ ! "$test_user" =~ ^[a-zA-Z0-9_]{1,32}$ || "$test_user" == root || "$test_user" == cms || "$test_user" == signal_bot_ci || "$test_password" == *$'\n'* || "$test_password" == *$'\r'* ]]; then
+          echo "Invalid isolated database credentials" >&2
+          exit 1
+        fi
+        echo "::add-mask::$migration_password"
+        echo "::add-mask::$test_password"
+        docker exec -i "$MARIADB_CONTAINER" mariadb --protocol=socket -uroot <<SQL
+        CREATE USER 'signal_bot_ci'@'%' IDENTIFIED BY '$migration_password';
+        GRANT ALL PRIVILEGES ON *.* TO 'signal_bot_ci'@'%' WITH GRANT OPTION;
+        SQL
+        {
+          printf 'MYSQL_PASSWORD=%s\n' "$migration_password"
+          printf 'SIGNAL_BOT_TEST_DB_USER=%s\n' "$test_user"
+          printf 'SIGNAL_BOT_TEST_DB_PASSWORD=%s\n' "$test_password"
+        } >> "$GITHUB_ENV"
+
+    - name: Apply migrations to isolated test database
+      shell: bash
+      run: python -m db.migrate
+
+    - name: Seed isolated test admin identity
+      shell: bash
+      run: |
+        python - <<'PY'
+        import os
+        import re
+        import secrets
+        from db.db import get_pool
+        from web.auth import hash_password
+
+        test_user = os.environ["SIGNAL_BOT_TEST_DB_USER"]
+        if not re.fullmatch(r"[A-Za-z0-9_]{1,32}", test_user):
+            raise ValueError("Invalid isolated database username")
+        account = f"'{test_user}'@'%'"
+        conn = get_pool().get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"CREATE USER {account} IDENTIFIED BY %s",
+                        (os.environ["SIGNAL_BOT_TEST_DB_PASSWORD"],))
+            for table, privileges in (("ohlcv", "SELECT, INSERT, UPDATE, DELETE"),
+                                      ("funding_rate", "SELECT, INSERT, UPDATE"),
+                                      ("collector_heartbeat", "SELECT, INSERT, UPDATE"),
+                                      ("service_control", "SELECT"),
+                                      ("rdt_telegram_outbox", "SELECT, INSERT, UPDATE, DELETE"),
+                                      ("rdt_trades", "SELECT, INSERT, UPDATE, DELETE"),
+                                      ("rdt_strategy_lifecycle", "SELECT, INSERT, UPDATE, DELETE"),
+                                      ("rdt_strategy_stats", "SELECT, INSERT, UPDATE, DELETE"),
+                                      ("users", "SELECT, INSERT, UPDATE, DELETE"),
+                                      ("audit_logs", "SELECT, INSERT, DELETE")):
+                cur.execute(f"GRANT {privileges} ON signal_bot_test.{table} TO {account}")
+            # The concurrency regression observes the waiting transaction in this disposable service.
+            cur.execute(f"GRANT PROCESS ON *.* TO {account}")
+            cur.execute(
+                """
+                INSERT INTO users
+                    (id, username, email, password_hash, role, is_active, must_change_password)
+                VALUES
+                    (1, 'admin', 'admin@example.test', %s, 'admin', 1, 0)
+                ON DUPLICATE KEY UPDATE
+                    username = VALUES(username),
+                    role = VALUES(role),
+                    is_active = VALUES(is_active),
+                    must_change_password = VALUES(must_change_password)
+                """,
+                (hash_password(secrets.token_urlsafe(32)),),
+            )
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+        PY

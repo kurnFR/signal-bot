@@ -22,3 +22,46 @@ Run from `frontend/`:
 - `npm run typecheck` — run strict TypeScript checking (`tsc --noEmit`).
 - `npm test` — run Vitest unit and component tests in jsdom.
 - `npm run build` — typecheck and build the production bundle in `dist/` (also executed automatically in Stage 1 of the root `Dockerfile`).
+
+### Browser checks against FastAPI and MariaDB
+
+Run these checks with the custom-strategy, paper-deployment, Services, and News AI
+work orders applied. Use a fresh disposable `signal_bot_test` database on
+`127.0.0.1`. Provide fixture credentials through the environment and set a
+unique `SIGNAL_BOT_TEST_RUN_ID`. The browser checks require that identity from
+the loopback API. Keep production delivery and enqueue flags disabled.
+
+From the repository root:
+
+```sh
+python -m db.migrate
+PYTHONPATH=. python frontend/e2e/seed_real_backend.py
+npm --prefix frontend ci
+npm --prefix frontend run build
+SIGNAL_BOT_USE_MODERN_UI=0 PYTHONPATH=. python -m uvicorn frontend.e2e.fixture_app:app --host 127.0.0.1 --port 8050
+```
+
+In another terminal with the same fixture environment, including
+`SIGNAL_BOT_REAL_E2E_PASSWORD` and `SIGNAL_BOT_TEST_RUN_ID`:
+
+```sh
+cd frontend
+SIGNAL_BOT_REAL_E2E_URL=http://127.0.0.1:8050 npx playwright test --project real-backend
+```
+
+The default Playwright command runs the mocked dashboard suite. The real-backend
+project logs in through the UI and exercises the actual FastAPI routes. It
+disables traces to keep fixture credentials out of recorded browser actions.
+
+
+The fixture app uses FastAPI's regular routes and a local market-data source
+that waits for the test to cancel the backfill. Binance diagnostics and
+popular-symbol requests use local responses. The model catalog reads a
+fixture manifest from a temporary directory. These fixtures require the
+loopback database and test-run identity.
+
+In GitHub branch protection, require the `real-backend-e2e` check on
+`master`. The workflow also reports success on documentation-only changes
+so the required check resolves even when the browser suite is unnecessary.
+Both browser workflows install Chromium from the lockfile-pinned Playwright
+1.64.1 package.
