@@ -26,7 +26,8 @@ from db.db import fetch_ohlcv_with_features_df
 from backtest.strategies import STRATEGIES, FUNDING_STRATEGIES
 from backtest.strategies import TREND_ALIGNMENT_STRATEGIES, PAIRS_STRATEGIES
 from backtest.strategies.trend_alignment import HTF_TIMEFRAME
-from backtest.params import BASE_PARAMS
+from backtest.params import BASE_PARAMS, retailbot2_param_overrides
+from backtest.strategies.retailbot2_strategies import RETAILBOT2_STRATEGY_NAMES
 from backtest.metrics import compute_metrics
 from backtest.holdout import compute_holdout_cutoff, split_by_cutoff
 
@@ -178,7 +179,9 @@ def run_optimize(symbol, market, timeframe, strategy_name, min_trades=10, top_n=
         seen_effective_combos.add(norm_key)
 
         call_params = dict(BASE_PARAMS)
-        call_params.update(overrides)
+        call_params.update(
+            retailbot2_param_overrides(overrides) if strategy_name in RETAILBOT2_STRATEGY_NAMES else overrides
+        )
         call_params["symbol"] = symbol
         call_params["market"] = market
         call_params["timeframe"] = timeframe

@@ -29,7 +29,35 @@ from config import (
     VOL_BREAKOUT_MIN_MARGIN_PCT, VOL_BREAKOUT_EMA_PERIOD, VOL_BREAKOUT_RISK_REWARD_RATIO,
 )
 
+RETAILBOT2_DEFAULT_PARAMS = {
+    "RB2_ATR_PERIOD": 14,
+    "ATR_SL_MULTIPLIER": 1.5,
+    "BB_PERIOD": 20,
+    "BB_PROXIMITY_PCT": 0.003,
+    "BB_STD": 2.0,
+    "DIVERGENCE_LOOKBACK": 30,
+    "MACD_FAST": 12,
+    "MACD_SIGNAL_PERIOD": 9,
+    "MACD_SLOW": 26,
+    "MA_FAST": 9,
+    "MA_SLOW": 21,
+    "MA_TREND": 200,
+    "PATTERN_LOOKBACK": 60,
+    "PATTERN_MIN_BARS_APART": 10,
+    "PATTERN_TOLERANCE": 0.002,
+    "RB2_RISK_REWARD_RATIO": 2.0,
+    "RB2_RSI_OVERBOUGHT": 65,
+    "RB2_RSI_OVERSOLD": 35,
+    "RSI_PERIOD": 14,
+    "RSI_ZONE_WIDTH": 5,
+    "SPIKE_ATR_MULTIPLIER": 2.5,
+    "SR_LOOKBACK": 50,
+    "SR_MIN_TOUCHES": 2,
+    "SR_TOUCH_THRESHOLD": 0.0015,
+}
+
 BASE_PARAMS = {
+    **RETAILBOT2_DEFAULT_PARAMS,
     "ATR_PERIOD": ATR_PERIOD,
     "RSI_OVERSOLD": RSI_OVERSOLD,
     "RSI_OVERBOUGHT": RSI_OVERBOUGHT,
@@ -82,6 +110,15 @@ BASE_PARAMS = {
     "VOL_BREAKOUT_EMA_PERIOD": VOL_BREAKOUT_EMA_PERIOD,
     "VOL_BREAKOUT_RISK_REWARD_RATIO": VOL_BREAKOUT_RISK_REWARD_RATIO,
 }
+
+
+def retailbot2_param_overrides(overrides):
+    """Translate shared keys in existing explicit RetailBot2 overrides."""
+    result = dict(overrides)
+    for name in ("ATR_PERIOD", "RISK_REWARD_RATIO", "RSI_OVERBOUGHT", "RSI_OVERSOLD"):
+        if name in result:
+            result.setdefault(f"RB2_{name}", result.pop(name))
+    return result
 
 
 def parse_overrides(override_strings):

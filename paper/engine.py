@@ -29,7 +29,8 @@ from backtest.strategies import (
 from backtest.strategies.trend_alignment import HTF_TIMEFRAME
 from backtest.custom_strategy import paper_strategy_registry
 from backtest.simulate import trailing_bar
-from backtest.params import BASE_PARAMS, validate_param_overrides
+from backtest.params import BASE_PARAMS, retailbot2_param_overrides, validate_param_overrides
+from backtest.strategies.retailbot2_strategies import RETAILBOT2_STRATEGY_NAMES
 from backtest.accounting import calculate_position_size, calculate_trade_accounting, resolve_stop_target_exit
 from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT, PAIRS_BASE_SYMBOL
 from paper.orders import create_pending_order, fill_pending_order, list_orders, transition_order
@@ -1729,7 +1730,10 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
 
         run_params = dict(BASE_PARAMS, symbol=symbol, market=market, timeframe=timeframe)
         if isinstance(cfg.get("strategy_params"), dict):
-            run_params.update(cfg["strategy_params"])
+            overrides = cfg["strategy_params"]
+            if strategy_name in RETAILBOT2_STRATEGY_NAMES:
+                overrides = retailbot2_param_overrides(overrides)
+            run_params.update(overrides)
             run_params["symbol"] = symbol
             run_params["market"] = market
             run_params["timeframe"] = timeframe
@@ -1760,6 +1764,9 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
                 run_params["pair_df"] = pair_df.copy()
             run_params["pair_symbol"] = PAIRS_BASE_SYMBOL
 
+        if strategy_name in RETAILBOT2_STRATEGY_NAMES:
+            # Historical bars warm up indicators. The paper book owns position state.
+            run_params["_simulation_start_open_time"] = candle_open_time
         sim_trades = strategies[strategy_name](signal_df, run_params)
         if sim_trades:
             latest_trade = sim_trades[-1]
