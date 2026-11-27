@@ -36,6 +36,25 @@ def paper_performance_lines() -> list[str]:
         f"{metrics['totalTrades']} closed · Wins {metrics['wins']} · Losses {metrics['losses']}"
         f" · {metrics['winRatePct']:g}% win rate",
     ])
+    # Pure TP/SL section: only TP/SL exits. TRAIL / TIMEOUT / MANUAL wins
+    # do not count here. Keys default to 0 for older metric payloads.
+    pure_trades = int(metrics.get("pureTrades") or 0)
+    pure_win_rate = float(metrics.get("pureWinRatePct") or 0.0)
+    pure_net = float(metrics.get("pureNetPnl") or 0.0)
+    pure_exp = float(metrics.get("pureExpectancyR") or 0.0)
+    lines.extend([
+        "",
+        "🎯 <b>Pure TP/SL</b> (TP/SL exits only)",
+        f"{pure_trades} closed · {pure_win_rate:g}% win rate · Net P&amp;L: <b>{pnl_label(pure_net)}</b>"
+        f" · Expectancy {pure_exp:+.2f}R",
+    ])
+    breakdown = metrics.get("exitReasonBreakdown") or []
+    breakdown_parts = [
+        f"{row['exitReason']}: {row['trades']}"
+        for row in breakdown if row.get("trades")
+    ]
+    if breakdown_parts:
+        lines.append("Other exits — " + " · ".join(breakdown_parts))
     by_pair: dict[str, dict[str, list]] = {}
     for row in metrics["byStrategy"]:
         if not row["totalTrades"]:

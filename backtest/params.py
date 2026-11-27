@@ -88,6 +88,11 @@ BASE_PARAMS = {
     "USE_TRAILING_STOP": USE_TRAILING_STOP,
     "TRAIL_ACTIVATION_R": TRAIL_ACTIVATION_R,
     "TRAIL_DISTANCE_ATR_MULT": TRAIL_DISTANCE_ATR_MULT,
+    # Per-deployment exit mode, stored in paper_configs.strategy_params (no
+    # DB migration). True = Pure TP/SL: new trades exit only on TP/SL, never
+    # on trailing stop or timeout. validate_param_overrides() treats bool
+    # defaults as bool-only, so True/False (never 1/0) is enforced.
+    "PURE_TP_SL": False,
     "FUNDING_EXTREME_POSITIVE_PCT": FUNDING_EXTREME_POSITIVE_PCT,
     "FUNDING_EXTREME_NEGATIVE_PCT": FUNDING_EXTREME_NEGATIVE_PCT,
     "FUNDING_RISK_REWARD_RATIO": FUNDING_RISK_REWARD_RATIO,

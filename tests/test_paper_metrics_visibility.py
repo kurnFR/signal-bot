@@ -22,6 +22,14 @@ def test_paper_metrics_headline_uses_same_report_visibility_as_strategy_rows():
             }
 
         def fetchall(self):
+            if "GROUP BY t.exit_reason" in self.queries[-1]:
+                return [{
+                    "exit_reason": "TP", "trades": 1, "wins": 1, "losses": 0,
+                    "net_pnl": 20.0, "sum_r": 2.0,
+                }, {
+                    "exit_reason": "TRAIL", "trades": 1, "wins": 0, "losses": 0,
+                    "net_pnl": -5.0, "sum_r": -0.5,
+                }]
             return [{
                 "strategy_name": "visible_strategy", "config_id": 11,
                 "ml_generator_model_id": "generator-1", "ml_model_id": None,
@@ -31,6 +39,9 @@ def test_paper_metrics_headline_uses_same_report_visibility_as_strategy_rows():
                 "sum_r": 0.5,
                 "avg_r": 0.25,
                 "net_pnl": 15.0,
+                "pure_trades": 1, "pure_wins": 1, "pure_losses": 0,
+                "pure_sum_r": 2.0, "pure_net_pnl": 20.0,
+                "pure_win_sum_r": 2.0, "pure_loss_sum_r": 0.0,
             }]
 
         def close(self):
@@ -53,11 +64,13 @@ def test_paper_metrics_headline_uses_same_report_visibility_as_strategy_rows():
     with patch("paper.engine.get_pool", return_value=Pool()):
         metrics = get_paper_metrics()
 
-    assert len(cursor.queries) == 2
-    summary_query, strategy_query = cursor.queries
-    for query in (summary_query, strategy_query):
+    assert len(cursor.queries) == 3
+    summary_query, strategy_query, breakdown_query = cursor.queries
+    for query in (summary_query, strategy_query, breakdown_query):
         assert "LEFT JOIN paper_configs c ON c.id = t.config_id" in query
         assert "WHERE COALESCE(c.report_enabled, TRUE) = TRUE" in query
+    assert "GROUP BY t.exit_reason" in breakdown_query
+    # The breakdown query reuses the same report-visibility filter.
 
     assert metrics["totalTrades"] == 2
     assert metrics["wins"] == 1
@@ -67,6 +80,14 @@ def test_paper_metrics_headline_uses_same_report_visibility_as_strategy_rows():
     assert [row["strategy"] for row in metrics["byStrategy"]] == ["visible_strategy"]
     assert metrics["byStrategy"][0]["configId"] == 11
     assert metrics["byStrategy"][0]["ml_generator_model_id"] == "generator-1"
+    # Pure aggregates count only the TP row; the TRAIL row is excluded.
+    assert metrics["byStrategy"][0]["pureTrades"] == 1
+    assert metrics["byStrategy"][0]["pureWins"] == 1
+    assert metrics["byStrategy"][0]["pureWinRatePct"] == 100.0
+    breakdown = {row["exitReason"]: row for row in metrics["exitReasonBreakdown"]}
+    assert breakdown["TP"]["trades"] == 1
+    assert breakdown["TRAIL"]["trades"] == 1
+    assert breakdown["SL"]["trades"] == 0
 
 
 

@@ -103,7 +103,57 @@ describe("BacktestStudioPanel", () => {
     await waitFor(() => expect(calls.find((call) => call.path === "/api/backtest/run" && call.method === "POST")?.body).toEqual({
       symbol: "ETHUSDT", market: "spot", timeframe: "1h", strategy: "trend_ema_v1",
       data_segment: "holdout", initial_capital: 7500, risk_per_trade_pct: 1.5, save_to_db: true, params: {},
+      exit_mode: "dynamic",
     }));
+  });
+
+  it("sends the selected exit mode and shows Pure vs Dynamic results for Both", async () => {
+    window.localStorage.setItem("token", "trader-session");
+    const profile = { id: 4, username: "trader01", email: null, role: "trader", must_change_password: false };
+    const execution = {
+      runId: 43, symbol: "BTCUSDT", market: "spot", timeframe: "1h", strategy: "trend_ema_v1",
+      dataSegment: "holdout", totalCandles: 100, exitMode: "both",
+      metrics: { total_trades: 10, win_rate_pct: 60, expectancy_r: 0.2, profit_factor: 1.4, max_drawdown_r: 1.5,
+        pure_trades: 6, pure_win_rate_pct: 50, pure_expectancy_r: 0.1, pure_net_pnl: 12,
+        exit_reason_breakdown: [{ exit_reason: "TP", trades: 3, wins: 3, losses: 0, net_pnl: 30, sum_r: 6 }] },
+      trades: Array.from({ length: 10 }, () => ({})),
+      results: {
+        dynamic: { metrics: { total_trades: 10, win_rate_pct: 60, expectancy_r: 0.2, profit_factor: 1.4, max_drawdown_r: 1.5 }, equity: {}, trades: [] },
+        pure: { metrics: { total_trades: 6, win_rate_pct: 50, expectancy_r: 0.1, profit_factor: 1.2, max_drawdown_r: 1.0 }, equity: {}, trades: [] },
+      },
+    };
+    const calls: Array<{ path: string; method: string; body?: unknown }> = [];
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const json = (payload: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }));
+      if (path === "/api/auth/me") return json(profile);
+      if (path === "/api/backtest/promotion-policy") return json({ policy: promotionPolicy });
+      if (path === "/api/backtest/promotion-audit?limit=5") return json({ events: [] });
+      if (path === "/api/backtest/strategies") return json(strategies);
+      if (path === "/api/backtest/history?limit=100") return json(history);
+      if (path === "/api/backtest/runs/42") return json(details);
+      if (path === "/api/backtest/run" && method === "POST") return json(execution);
+      throw new Error("Unexpected endpoint: " + method + " " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AuthGate><BacktestStudioPanel /></AuthGate>);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Review backtest run" })).toBeEnabled());
+    // Dynamic is the default exit mode.
+    expect(screen.getByRole("button", { name: "Dynamic" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Both" }));
+    expect(screen.getByRole("button", { name: "Both" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Review backtest run" }));
+    expect(await screen.findByRole("heading", { name: "Confirm backtest run" })).toBeInTheDocument();
+    expect(screen.getByText(/Both \(Pure \+ Dynamic\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Run backtest" }));
+    await waitFor(() => expect(calls.find((call) => call.path === "/api/backtest/run" && call.method === "POST")?.body).toEqual(expect.objectContaining({ exit_mode: "both" })));
+    expect(await screen.findByRole("heading", { name: "Latest execution result" })).toBeInTheDocument();
+    expect(screen.getByText("Pure TP/SL (TP/SL exits only)")).toBeInTheDocument();
+    expect(screen.getByText("Pure vs Dynamic comparison")).toBeInTheDocument();
+    expect(screen.getByText("Exits — TP: 3")).toBeInTheDocument();
   });
 
   it("does not claim a backtest was saved when the API returns a null run ID", async () => {
@@ -202,6 +252,7 @@ describe("BacktestStudioPanel", () => {
     await waitFor(() => expect(calls.find((call) => call.path === "/api/backtest/run" && call.method === "POST")?.body).toEqual({
       symbol: "ETHUSDT", market: "spot", timeframe: "1h", strategy: "trend_ema_v1",
       data_segment: "holdout", initial_capital: 7500, risk_per_trade_pct: 1.5, save_to_db: true, params: {},
+      exit_mode: "dynamic",
     }));
   });
 
@@ -498,6 +549,7 @@ describe("BacktestStudioPanel generator runs", () => {
     await waitFor(() => expect(calls.find((call) => call.path === "/api/backtest/run" && call.method === "POST")?.body).toEqual({
       symbol: "BTCUSDT", market: "spot", timeframe: "1d", strategy: "ml_signal_generator_v1",
       data_segment: "holdout", initial_capital: 5000, risk_per_trade_pct: 1, save_to_db: true, params: {},
+      exit_mode: "dynamic",
       ml_generator_model_id: "gen-btc-1d",
     }));
   });

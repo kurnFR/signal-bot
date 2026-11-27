@@ -429,6 +429,11 @@ class BacktestRunRequest(BaseModel):
     save_to_db: bool = Field(True)
     params: Dict[str, Any] = Field(default_factory=dict)
     ml_generator_model_id: Optional[str] = Field(None, max_length=100)
+    # Exit mode: 'dynamic' (current behaviour: trailing stop + timeout),
+    # 'pure' (TP/SL only — no trailing, no timeout, END_OF_DATA excluded
+    # from pure metrics), or 'both' (run twice, return both result sets
+    # under results.dynamic / results.pure; top level stays dynamic).
+    exit_mode: str = Field("dynamic", max_length=10)
 
 
 def _auto_promote_top_candidate(
@@ -778,11 +783,50 @@ def list_strategies():
     return {"strategies": results}
 
 
+def _run_backtest_once(strategy_fn, segment_df, run_params, initial_capital, risk_per_trade_pct):
+    """Run one simulation (pure or dynamic) and return raw trades, metrics,
+    equity curve and the API-formatted trade list."""
+    trades = strategy_fn(segment_df, run_params)
+    metrics = compute_metrics(trades)
+    # All-win runs have an unbounded profit factor. SQL DECIMAL and JSON
+    # represent an unavailable finite ratio as null.
+    if metrics["profit_factor"] is not None and not math.isfinite(metrics["profit_factor"]):
+        metrics["profit_factor"] = None
+    equity_res = simulate_equity_curve(trades, initial_capital, risk_per_trade_pct)
+    formatted_trades = []
+    for t in trades:
+        entry_ms = t.get("entry_time")
+        exit_ms = t.get("exit_time")
+        entry_dt = datetime.fromtimestamp((entry_ms // 1000) + 25200, tz=timezone.utc).strftime("%Y-%m-%d %H:%M") if entry_ms else ""
+        exit_dt = datetime.fromtimestamp((exit_ms // 1000) + 25200, tz=timezone.utc).strftime("%Y-%m-%d %H:%M") if exit_ms else ""
+        formatted_trades.append({
+            "direction": t.get("direction"),
+            "signalTime": t.get("signal_open_time"),
+            "entryTime": entry_ms,
+            "entryTimeWib": entry_dt,
+            "entryPrice": round(float(t.get("entry_price", 0)), 4),
+            "exitTime": exit_ms,
+            "exitTimeWib": exit_dt,
+            "exitPrice": round(float(t.get("exit_price", 0)), 4),
+            "exitReason": t.get("exit_reason"),
+            "stopLoss": round(float(t.get("stop_loss", 0)), 4),
+            "takeProfit": round(float(t.get("take_profit", 0)), 4),
+            "netReturnPct": round(float(t.get("net_return_pct", 0)), 3),
+            "rMultiple": round(float(t.get("r_multiple", 0)), 4) if t.get("r_multiple") is not None else None,
+            "holdingBars": t.get("holding_bars", 0),
+        })
+    return trades, metrics, equity_res, formatted_trades
+
+
 @router.post("/run")
 def execute_backtest(req: BacktestRunRequest):
     strategy_name = req.strategy
     if strategy_name not in STRATEGIES:
         raise HTTPException(status_code=400, detail=f"Unknown strategy: {strategy_name}")
+
+    exit_mode = (req.exit_mode or "dynamic").lower()
+    if exit_mode not in ("pure", "dynamic", "both"):
+        raise HTTPException(status_code=400, detail="exit_mode must be one of: pure, dynamic, both")
 
     strategy_fn = STRATEGIES[strategy_name]
     include_funding = strategy_name in FUNDING_STRATEGIES
@@ -876,56 +920,46 @@ def execute_backtest(req: BacktestRunRequest):
             run_params["pair_df"] = pair_full
         run_params["pair_symbol"] = PAIRS_BASE_SYMBOL
 
-    # Run the simulation
-    trades = strategy_fn(segment_df, run_params)
-    metrics = compute_metrics(trades)
-    # All-win runs have an unbounded profit factor. SQL DECIMAL and JSON
-    # represent an unavailable finite ratio as null.
-    if metrics["profit_factor"] is not None and not math.isfinite(metrics["profit_factor"]):
-        metrics["profit_factor"] = None
-    equity_res = simulate_equity_curve(trades, req.initial_capital, req.risk_per_trade_pct)
+    # Run the simulation. Pure mode disables trailing and timeout in the
+    # simulator (and forces custom strategies' exit policy off); dynamic
+    # is the previous behaviour, unchanged. 'both' runs the same data and
+    # params twice so the two modes are directly comparable.
+    pure_params = dict(run_params, _pure_tp_sl=True, USE_TRAILING_STOP=False)
+    if exit_mode == "pure":
+        trades, metrics, equity_res, formatted_trades = _run_backtest_once(
+            strategy_fn, segment_df, pure_params, req.initial_capital, req.risk_per_trade_pct)
+        primary_trades, primary_metrics = trades, metrics
+    elif exit_mode == "both":
+        dyn_trades, dyn_metrics, dyn_equity, dyn_formatted = _run_backtest_once(
+            strategy_fn, segment_df, run_params, req.initial_capital, req.risk_per_trade_pct)
+        pure_trades, pure_metrics, pure_equity, pure_formatted = _run_backtest_once(
+            strategy_fn, segment_df, pure_params, req.initial_capital, req.risk_per_trade_pct)
+        trades, metrics, equity_res, formatted_trades = dyn_trades, dyn_metrics, dyn_equity, dyn_formatted
+        primary_trades, primary_metrics = dyn_trades, dyn_metrics
+    else:
+        trades, metrics, equity_res, formatted_trades = _run_backtest_once(
+            strategy_fn, segment_df, run_params, req.initial_capital, req.risk_per_trade_pct)
+        primary_trades, primary_metrics = trades, metrics
 
-    # Save to database if requested
+    # Save to database if requested. For 'both' only the dynamic (primary)
+    # run is persisted, so history keeps one run per request.
     run_id = None
     if req.save_to_db:
         try:
             # Storable params only (exclude DataFrames)
             clean_params = {k: v for k, v in run_params.items() if not k.endswith("_df")}
+            clean_params["exit_mode"] = exit_mode
             run_id = insert_backtest_run(
                 req.symbol, req.market, req.timeframe, strategy_name, clean_params,
                 int(segment_df.iloc[0]["open_time"]), int(segment_df.iloc[-1]["open_time"]),
-                metrics["total_trades"], metrics["win_rate_pct"], metrics["expectancy_r"],
-                metrics["profit_factor"], metrics["max_drawdown_r"],
+                primary_metrics["total_trades"], primary_metrics["win_rate_pct"], primary_metrics["expectancy_r"],
+                primary_metrics["profit_factor"], primary_metrics["max_drawdown_r"],
                 data_segment=data_segment,
             )
-            insert_backtest_trades(run_id, trades)
+            insert_backtest_trades(run_id, primary_trades)
         except Exception as db_err:
             run_id = None
             logger.error("Failed to save backtest to DB (%s)", type(db_err).__name__)
-
-    # Format trades with human-readable timestamps
-    formatted_trades = []
-    for t in trades:
-        entry_ms = t.get("entry_time")
-        exit_ms = t.get("exit_time")
-        entry_dt = datetime.fromtimestamp((entry_ms // 1000) + 25200, tz=timezone.utc).strftime("%Y-%m-%d %H:%M") if entry_ms else ""
-        exit_dt = datetime.fromtimestamp((exit_ms // 1000) + 25200, tz=timezone.utc).strftime("%Y-%m-%d %H:%M") if exit_ms else ""
-        formatted_trades.append({
-            "direction": t.get("direction"),
-            "signalTime": t.get("signal_open_time"),
-            "entryTime": entry_ms,
-            "entryTimeWib": entry_dt,
-            "entryPrice": round(float(t.get("entry_price", 0)), 4),
-            "exitTime": exit_ms,
-            "exitTimeWib": exit_dt,
-            "exitPrice": round(float(t.get("exit_price", 0)), 4),
-            "exitReason": t.get("exit_reason"),
-            "stopLoss": round(float(t.get("stop_loss", 0)), 4),
-            "takeProfit": round(float(t.get("take_profit", 0)), 4),
-            "netReturnPct": round(float(t.get("net_return_pct", 0)), 3),
-            "rMultiple": round(float(t.get("r_multiple", 0)), 4) if t.get("r_multiple") is not None else None,
-            "holdingBars": t.get("holding_bars", 0),
-        })
 
     # Prepare candle slice (last 500 candles for chart plotting)
     plot_slice = segment_df.iloc[-500:] if len(segment_df) > 500 else segment_df
@@ -940,19 +974,26 @@ def execute_backtest(req: BacktestRunRequest):
             "volume": float(row["volume"]),
         })
 
-    return {
+    response = {
         "runId": run_id,
         "symbol": req.symbol,
         "market": req.market,
         "timeframe": req.timeframe,
         "strategy": strategy_name,
         "dataSegment": data_segment,
+        "exitMode": exit_mode,
         "totalCandles": len(segment_df),
         "metrics": metrics,
         "equity": equity_res,
         "trades": formatted_trades,
         "candles": candle_records,
     }
+    if exit_mode == "both":
+        response["results"] = {
+            "dynamic": {"metrics": dyn_metrics, "equity": dyn_equity, "trades": dyn_formatted},
+            "pure": {"metrics": pure_metrics, "equity": pure_equity, "trades": pure_formatted},
+        }
+    return response
 
 
 # ---------------------------------------------------------------------------

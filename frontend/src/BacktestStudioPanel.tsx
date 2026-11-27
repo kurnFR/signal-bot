@@ -17,6 +17,7 @@ import {
   fetchAiInsight,
   type BacktestExecutionInput,
   type BacktestExecutionResult,
+  type BacktestExitMode,
   type BacktestRunDetails,
   type BacktestRunSummary,
   type BacktestStrategy,
@@ -123,6 +124,8 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
   const [timeframe, setTimeframe] = useState("1d");
   const [strategyId, setStrategyId] = useState("");
   const [dataSegment, setDataSegment] = useState<"full" | "train" | "holdout">("holdout");
+  const [exitMode, setExitMode] = useState<BacktestExitMode>("dynamic");
+  const [deployExitMode, setDeployExitMode] = useState<BacktestExitMode>("dynamic");
   const [initialCapital, setInitialCapital] = useState("5000");
   const [riskPerTrade, setRiskPerTrade] = useState("1");
   const [parameterValues, setParameterValues] = useState<Record<string, string | number | boolean>>({});
@@ -320,6 +323,10 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
     try {
       const targetTimeframe = deployTimeframe as PaperTimeframe;
       const strategyOverrides = extractStrategyOverrides(deployRun);
+      const deployParams = {
+        ...strategyOverrides,
+        ...(deployExitMode === "pure" ? { PURE_TP_SL: true } : {}),
+      };
       const config = {
         symbol: deployRun.symbol,
         market: (deployRun.market.toLowerCase() === "futures" ? "futures" : "spot") as "spot" | "futures",
@@ -327,7 +334,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
         strategy_name: deployRun.strategy,
         allocated_capital: deployCapital,
         risk_per_trade_pct: deployRisk,
-        params: strategyOverrides,
+        params: deployParams,
       };
       if (deployRun.strategy === "ml_signal_generator_v1") {
         const modelId = deployRun.params?.ml_generator_model_id;
@@ -564,7 +571,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
     setPendingRun({
       symbol: normalizedSymbol, market, timeframe, strategy: strategyId,
       data_segment: dataSegment, initial_capital: capital, risk_per_trade_pct: risk,
-      save_to_db: true, params,
+      save_to_db: true, params, exit_mode: exitMode,
       ...(strategyId === "ml_signal_generator_v1" ? { ml_generator_model_id: selectedGeneratorModelId } : {}),
     });
   };
@@ -620,6 +627,17 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
         <label className="screener-control-field">Strategy<select aria-label="Backtest strategy" value={strategyId} onChange={(event) => setStrategyId(event.target.value)} required>{strategies.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.displayName}</option>)}</select></label>
         {strategyId === "ml_signal_generator_v1" && <label className="screener-control-field">ML generator model<select aria-label="ML generator model" value={selectedGeneratorModelId} onChange={(event) => setSelectedGeneratorModelId(event.target.value)} required><option value="">Select an eligible generator model</option>{matchingGeneratorModels.map((m) => <option key={m.model_id} value={m.model_id}>{m.model_id} ({m.model_type})</option>)}</select>{matchingGeneratorModels.length === 0 && <span role="alert" style={{ fontSize: "0.8rem", color: "#e53e3e" }}>No eligible generator models available for {symbol || "symbol"} {market} {timeframe}.</span>}</label>}
         <label className="screener-control-field">Data segment<select aria-label="Backtest data segment" value={dataSegment} onChange={(event) => setDataSegment(event.target.value as "full" | "train" | "holdout")}><option value="holdout">Holdout</option><option value="train">Train</option><option value="full">Full dataset</option></select></label>
+        <div className="screener-control-field">
+          <span id="backtest-exit-mode-label">Exit mode</span>
+          <div role="group" aria-labelledby="backtest-exit-mode-label" style={{ display: "flex", gap: "6px" }}>
+            {(["pure", "dynamic", "both"] as const).map((mode) => (
+              <button key={mode} type="button" className={"button " + (exitMode === mode ? "button-primary" : "button-secondary")} aria-pressed={exitMode === mode} onClick={() => setExitMode(mode)}>
+                {mode === "pure" ? "Pure TP/SL" : mode === "dynamic" ? "Dynamic" : "Both"}
+              </button>
+            ))}
+          </div>
+          <small>{exitMode === "pure" ? "TP/SL only — no trailing stop, no timeout." : exitMode === "both" ? "Runs the simulation twice and compares Pure vs Dynamic." : "Trailing stop and timeout, as before."}</small>
+        </div>
         <label className="screener-control-field">Initial capital<input aria-label="Initial capital" type="number" min="100" step="100" value={initialCapital} required onChange={(event) => setInitialCapital(event.target.value)} /></label>
         <label className="screener-control-field">Risk per trade (%)<input aria-label="Risk per trade" type="number" min="0.1" max="10" step="0.1" value={riskPerTrade} required onChange={(event) => setRiskPerTrade(event.target.value)} /></label>
       </form>
@@ -654,7 +672,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
       </div>
     </section> : <p className="empty-state">Backtest execution is restricted to admin and trader roles. This session can review saved results only.</p>}
     {executionResult && <section className="panel" aria-labelledby="backtest-latest-result-title">
-      <div className="panel-heading"><div><h2 id="backtest-latest-result-title">Latest execution result</h2><p>{executionResult.symbol} · {executionResult.market} · {executionResult.timeframe} · {executionResult.dataSegment}</p></div><span className="panel-counter">{executionResult.runId == null ? "NOT CONFIRMED SAVED" : `RUN #${executionResult.runId}`}</span></div>
+      <div className="panel-heading"><div><h2 id="backtest-latest-result-title">Latest execution result</h2><p>{executionResult.symbol} · {executionResult.market} · {executionResult.timeframe} · {executionResult.dataSegment} · Exit: {executionResult.exitMode === "pure" ? "Pure TP/SL" : executionResult.exitMode === "both" ? "Both (Pure + Dynamic)" : "Dynamic"}</p></div><span className="panel-counter">{executionResult.runId == null ? "NOT CONFIRMED SAVED" : `RUN #${executionResult.runId}`}</span></div>
       <div className="metrics-grid">
         <article className="metric-card"><div className="metric-top"><span>Trades</span></div><div className="metric-value">{executionResult.metrics.total_trades}</div></article>
         <article className="metric-card"><div className="metric-top"><span>Win rate</span></div><div className="metric-value">{executionResult.metrics.win_rate_pct == null ? "—" : `${pct.format(executionResult.metrics.win_rate_pct)}%`}</div></article>
@@ -663,6 +681,37 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
         <article className="metric-card"><div className="metric-top"><span>Max drawdown</span></div><div className="metric-value">{executionResult.metrics.max_drawdown_r == null ? "—" : `${numeric.format(executionResult.metrics.max_drawdown_r)} R`}</div></article>
         <article className="metric-card"><div className="metric-top"><span>Candles used</span></div><div className="metric-value">{executionResult.totalCandles}</div></article>
       </div>
+      <div className="panel-subsection">
+        <div className="panel-heading"><div><h3>Pure TP/SL (TP/SL exits only)</h3><p>Trailing, timeout, manual and end-of-data exits are excluded here; the full breakdown is in the metrics below.</p></div></div>
+        <div className="metrics-grid">
+          <article className="metric-card"><div className="metric-top"><span>Pure trades</span></div><div className="metric-value">{executionResult.metrics.pure_trades ?? "—"}</div></article>
+          <article className="metric-card"><div className="metric-top"><span>Pure win rate</span></div><div className="metric-value">{executionResult.metrics.pure_win_rate_pct == null ? "—" : `${pct.format(executionResult.metrics.pure_win_rate_pct)}%`}</div></article>
+          <article className="metric-card"><div className="metric-top"><span>Pure expectancy</span></div><div className="metric-value">{executionResult.metrics.pure_expectancy_r == null ? "—" : `${numeric.format(executionResult.metrics.pure_expectancy_r)} R`}</div></article>
+          <article className="metric-card"><div className="metric-top"><span>Pure net PnL</span></div><div className="metric-value">{executionResult.metrics.pure_net_pnl == null ? "—" : `${numeric.format(executionResult.metrics.pure_net_pnl)}`}</div></article>
+        </div>
+        {executionResult.metrics.exit_reason_breakdown && executionResult.metrics.exit_reason_breakdown.length > 0 && (
+          <p>Exits — {executionResult.metrics.exit_reason_breakdown.filter((row) => row.trades > 0).map((row) => `${row.exit_reason}: ${row.trades}`).join(" · ")}</p>
+        )}
+      </div>
+      {executionResult.results && <div className="panel-subsection">
+        <div className="panel-heading"><div><h3>Pure vs Dynamic comparison</h3><p>Same data and parameters, run twice. Top-level metrics above are the Dynamic run.</p></div></div>
+        {(["dynamic", "pure"] as const).map((mode) => {
+          const modeResult = executionResult.results?.[mode];
+          if (!modeResult) return null;
+          const mm = modeResult.metrics;
+          return (
+            <div key={mode} style={{ marginBottom: "12px" }}>
+              <h4>{mode === "pure" ? "Pure TP/SL" : "Dynamic"}</h4>
+              <div className="metrics-grid">
+                <article className="metric-card"><div className="metric-top"><span>Trades</span></div><div className="metric-value">{mm.total_trades}</div></article>
+                <article className="metric-card"><div className="metric-top"><span>Win rate</span></div><div className="metric-value">{mm.win_rate_pct == null ? "—" : `${pct.format(mm.win_rate_pct)}%`}</div></article>
+                <article className="metric-card"><div className="metric-top"><span>Expectancy</span></div><div className="metric-value">{mm.expectancy_r == null ? "—" : `${numeric.format(mm.expectancy_r)} R`}</div></article>
+                <article className="metric-card"><div className="metric-top"><span>Profit factor</span></div><div className="metric-value">{moneyish(mm.profit_factor)}</div></article>
+              </div>
+            </div>
+          );
+        })}
+      </div>}
     </section>}
     <section className="metrics-grid" aria-label="Backtest history summary">
       <article className="metric-card"><div className="metric-top"><span>Saved runs loaded</span><span className="metric-icon"><BarChart3 size={17} /></span></div><div className="metric-value">{loading && !runs.length ? "Loading…" : runs.length}</div><div className="metric-foot"><span>Latest 100 records maximum</span></div></article>
@@ -748,6 +797,7 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
     {pendingRun && <section className="panel" aria-labelledby="backtest-confirm-title">
       <div className="panel-heading"><div><h2 id="backtest-confirm-title">Confirm backtest run</h2><p>This simulation saves research evidence in Backtest Studio. Paper activation is a separate step.</p></div></div>
       <p><strong>Configuration:</strong> {[pendingRun.symbol, pendingRun.market, pendingRun.timeframe, pendingRun.strategy, pendingRun.data_segment].join(" · ")}</p>
+      <p><strong>Exit mode:</strong> {pendingRun.exit_mode === "pure" ? "Pure TP/SL (TP/SL only)" : pendingRun.exit_mode === "both" ? "Both (Pure + Dynamic)" : "Dynamic (trailing + timeout)"}</p>
       <p><strong>Capital / risk:</strong> {numeric.format(pendingRun.initial_capital)} / {pendingRun.risk_per_trade_pct}% per trade</p>
       {pendingRun.ml_generator_model_id && <p><strong>Generator model:</strong> {pendingRun.ml_generator_model_id}</p>}
       <div className="screener-control-footer"><button className="button button-secondary" type="button" disabled={runBusy} onClick={() => setPendingRun(null)}>Cancel</button><button className="button button-primary" type="button" disabled={runBusy} onClick={() => void confirmRun()}>{runBusy ? "Running simulation…" : "Run backtest"}</button></div>
@@ -854,6 +904,18 @@ export function BacktestStudioPanel({ initialStrategyId = null, onInitialStrateg
                 onChange={(e) => setDeployRisk(Number(e.target.value))}
               />
             </div>
+          </div>
+
+          <div className="screener-control-field" style={{ marginBottom: "12px" }}>
+            <span id="bt-deploy-exit-mode-label">Exit mode</span>
+            <div role="group" aria-labelledby="bt-deploy-exit-mode-label" style={{ display: "flex", gap: "6px", marginTop: "4px" }}>
+              {(["dynamic", "pure"] as const).map((mode) => (
+                <button key={mode} type="button" className={"button " + (deployExitMode === mode ? "button-primary" : "button-secondary")} aria-pressed={deployExitMode === mode} onClick={() => setDeployExitMode(mode)}>
+                  {mode === "pure" ? "Pure TP/SL" : "Dynamic"}
+                </button>
+              ))}
+            </div>
+            <small>{deployExitMode === "pure" ? "New trades exit only on TP/SL — no trailing stop, no timeout. Open positions keep their original mode." : "New trades use trailing stop and timeout, as before."}</small>
           </div>
 
           <label className="screener-alert-toggle" style={{ margin: "14px 0" }}>

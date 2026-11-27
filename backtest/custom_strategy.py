@@ -144,13 +144,16 @@ def _create_strategy_runner(def_dict: dict):
             return entry_price + stop_dist, entry_price - target_dist
 
     def evaluate(df, params, long_rule, short_rule):
-        p = dict(params, USE_TRAILING_STOP=use_trailing, TRAIL_ACTIVATION_R=trail_act,
-                 TRAIL_DISTANCE_ATR_MULT=trail_dist)
+        pure_tp_sl = bool(params.get("_pure_tp_sl") or params.get("PURE_TP_SL"))
+        p = dict(params, USE_TRAILING_STOP=False if pure_tp_sl else use_trailing,
+                 TRAIL_ACTIVATION_R=trail_act, TRAIL_DISTANCE_ATR_MULT=trail_dist)
         trades = simulate(df, p, long_rule, short_rule, stop_target)
         for trade in trades:
             trade["custom_exit_policy"] = {
-                "enabled": use_trailing, "activation_r": trail_act, "distance_atr": trail_dist,
-                "max_hold_bars": p["BACKTEST_MAX_HOLD_BARS"],
+                "enabled": False if pure_tp_sl else use_trailing,
+                "activation_r": 9999.0 if pure_tp_sl else trail_act,
+                "distance_atr": trail_dist,
+                "max_hold_bars": 0 if pure_tp_sl else p["BACKTEST_MAX_HOLD_BARS"],
                 "entry_open": trade["raw_entry_price"], "atr": trade["atr_at_signal"],
             }
         return trades

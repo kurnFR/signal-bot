@@ -17,6 +17,7 @@ import {
   deployPaperStrategy,
   fetchPaperTradingSnapshot,
   PaperTradingActionError,
+  paperExitModeLabel,
   parseTelegramDeliveryStatus,
   resetPaperCircuitBreaker,
   syncPaperMarketTick,
@@ -189,6 +190,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
   const [deployTelegram, setDeployTelegram] = useState(false);
   const [cloneSource, setCloneSource] = useState<PaperConfig | null>(null);
   const [cloneParams, setCloneParams] = useState<DeploymentOverrides>({});
+  const [deployExitMode, setDeployExitMode] = useState<"pure" | "dynamic">("dynamic");
   const [cloneReport, setCloneReport] = useState(false);
   const [cloneFilter, setCloneFilter] = useState("");
   const [filterModels, setFilterModels] = useState<MLModelManifest[]>([]);
@@ -386,6 +388,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
     setDeployTelegram(config.telegram_enabled);
     setCloneReport(config.report_enabled);
     setCloneParams(config.strategy_params ?? {});
+    setDeployExitMode(config.strategy_params?.PURE_TP_SL === true ? "pure" : "dynamic");
     setCloneFilter(config.ml_model_id ?? "");
     setSelectedGeneratorModelId(config.ml_generator_model_id ?? "");
     setShowDeployModal(true);
@@ -402,6 +405,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
     setShowDeployModal(false);
     setCloneSource(null);
     setDeployError(null);
+    setDeployExitMode("dynamic");
     deployTriggerRef.current?.focus();
   };
 
@@ -494,7 +498,8 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
           is_active: false,
           symbol: sym, market: deployMarket, timeframe: deployTimeframe, strategy_name: deployStrategy,
           allocated_capital: deployCapital, risk_per_trade_pct: deployRisk,
-          telegram_enabled: deployTelegram, report_enabled: cloneReport, params: cloneParams,
+          telegram_enabled: deployTelegram, report_enabled: cloneReport,
+          params: { ...cloneParams, PURE_TP_SL: deployExitMode === "pure" },
           ml_model_id: generator ? null : cloneFilter || null,
           ml_generator_model_id: generator ? selectedGeneratorModelId || null : null,
         });
@@ -527,6 +532,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
           ml_generator_model_id: selectedGeneratorModelId,
           telegram_enabled: deployTelegram,
           report_enabled: true,
+          params: deployExitMode === "pure" ? { PURE_TP_SL: true } : undefined,
         });
         setActionSuccess(`Strategy 'ml_signal_generator_v1' deployed to Paper Trading with model ${selectedGeneratorModelId}.`);
         closeDeployModal();
@@ -549,6 +555,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
         allocated_capital: deployCapital,
         risk_per_trade_pct: deployRisk,
         send_telegram: deployTelegram,
+        params: deployExitMode === "pure" ? { PURE_TP_SL: true } : undefined,
       });
 
       const isEvaluationPartial = res.status === "partial";
@@ -758,13 +765,28 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
       losses: sum.losses + row.losses,
       netPnl: sum.netPnl + row.netPnl,
       cumulativeR: sum.cumulativeR + row.cumulativeR,
+      pureTrades: sum.pureTrades + (row.pureTrades ?? 0),
+      pureWins: sum.pureWins + (row.pureWins ?? 0),
+      pureLosses: sum.pureLosses + (row.pureLosses ?? 0),
+      pureNetPnl: sum.pureNetPnl + (row.pureNetPnl ?? 0),
+      pureSumR: sum.pureSumR + (row.pureSumR ?? 0),
+      pureWinSumR: sum.pureWinSumR + (row.pureWins ? (row.avgWinR ?? 0) * row.pureWins : 0),
+      pureLossSumR: sum.pureLossSumR + (row.pureLosses ? (row.avgLossR ?? 0) * row.pureLosses : 0),
     }),
-    { totalTrades: 0, wins: 0, losses: 0, netPnl: 0, cumulativeR: 0 },
+    { totalTrades: 0, wins: 0, losses: 0, netPnl: 0, cumulativeR: 0, pureTrades: 0, pureWins: 0, pureLosses: 0, pureNetPnl: 0, pureSumR: 0, pureWinSumR: 0, pureLossSumR: 0 },
   );
   const m = allMetrics && filtered ? {
     ...total,
     winRatePct: total.totalTrades ? total.wins / total.totalTrades * 100 : 0,
     expectancyR: total.totalTrades ? total.cumulativeR / total.totalTrades : 0,
+    pureWinRatePct: total.pureTrades ? total.pureWins / total.pureTrades * 100 : 0,
+    pureExpectancyR: total.pureTrades ? total.pureSumR / total.pureTrades : 0,
+    pureCumulativeR: total.pureSumR,
+    avgWinR: total.pureWins ? total.pureWinSumR / total.pureWins : 0,
+    avgLossR: total.pureLosses ? total.pureLossSumR / total.pureLosses : 0,
+    // exitReasonBreakdown is a global (unfiltered) aggregate, so it is
+    // not shown for a filtered scope.
+    exitReasonBreakdown: undefined,
     byStrategy: rows,
   } : allMetrics && { ...allMetrics, byStrategy: rows };
 
@@ -1027,6 +1049,23 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
         {metric("Win rate", m ? `${number.format(m.winRatePct)}%` : loading ? "Loading…" : "—", m ? `${m.wins} wins · ${m.losses} losses` : "Closed paper trades", <Activity size={17} />)}
         {metric("Expectancy", m ? `${number.format(m.expectancyR)} R` : loading ? "Loading…" : "—", "Average R per closed trade", <Activity size={17} />, pnlClass(m?.expectancyR))}
         {metric("Open positions", data ? String(data.positions.length) : loading ? "Loading…" : "—", `${data?.configs.filter((item) => item.is_active).length ?? "—"} active configs`, <WalletCards size={17} />)}
+      </section>
+
+      <section className="panel" aria-label="Pure TP/SL performance">
+        <div className="panel-heading"><div><h2>Pure TP/SL (TP/SL exits only)</h2><p>Trailing, timeout and manual exits are excluded here, so partial wins cannot inflate the pure win rate. Applies to all strategies.</p></div></div>
+        {m ? (
+          <>
+            <div className="metrics-grid">
+              {metric("Pure trades", String(m.pureTrades ?? 0), "Closed by TP or SL", <Activity size={17} />)}
+              {metric("Pure win rate", `${number.format(m.pureWinRatePct ?? 0)}%`, `${m.pureWins ?? 0} wins · ${m.pureLosses ?? 0} losses`, <Activity size={17} />)}
+              {metric("Pure net PnL", money.format(m.pureNetPnl ?? 0), "TP/SL exits only", <Activity size={17} />, pnlClass(m.pureNetPnl))}
+              {metric("Pure expectancy", `${number.format(m.pureExpectancyR ?? 0)} R`, `Avg win ${(m.avgWinR ?? 0).toFixed(2)} R · Avg loss ${(m.avgLossR ?? 0).toFixed(2)} R`, <Activity size={17} />, pnlClass(m.pureExpectancyR))}
+            </div>
+            {m.exitReasonBreakdown && m.exitReasonBreakdown.length > 0 && (
+              <p>Exits — {m.exitReasonBreakdown.filter((row) => row.trades > 0).map((row) => `${row.exitReason}: ${row.trades} (${row.wins}W/${row.losses}L, ${number.format(row.sumR)} R)`).join(" · ")}</p>
+            )}
+          </>
+        ) : <p className="empty-state">{loading ? "Loading pure TP/SL totals…" : "No closed trades yet."}</p>}
       </section>
 
       <section className="panel" aria-labelledby="paper-strategy-performance-title">
@@ -1349,13 +1388,14 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
         {data?.configs.length ? (
           <div className="status-table-wrap">
             <table className="status-table">
-              <thead><tr><th>Symbol / strategy</th><th>Market</th><th>State</th><th>Capital</th><th>Realized equity</th><th>Risk / trade</th><th>Telegram</th><th>Report</th>{canTrade && <th>Actions</th>}</tr></thead>
+              <thead><tr><th>Symbol / strategy</th><th>Market</th><th>State</th><th>Exit mode</th><th>Capital</th><th>Realized equity</th><th>Risk / trade</th><th>Telegram</th><th>Report</th>{canTrade && <th>Actions</th>}</tr></thead>
               <tbody>
                 {data.configs.map((c) => (
                   <tr key={c.id}>
                     <td><strong>{c.symbol}</strong><small>{c.strategy_name} · {c.timeframe}</small></td>
                     <td>{c.market}</td>
                     <td><span className={"status-pill " + (c.is_active ? "status-positive" : "status-neutral")}>{c.archived_at ? "Archived" : c.is_active ? "Active" : "Paused"}</span></td>
+                    <td>{paperExitModeLabel(c.strategy_params)}</td>
                     <td>{money.format(c.allocated_capital)}</td>
                     <td>{c.realized_equity == null ? "—" : money.format(c.realized_equity)}</td>
                     <td>{number.format(c.risk_per_trade_pct)}%</td>
@@ -1439,6 +1479,21 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
             />
           )}
           {modelError && <p className="control-feedback control-error" role="alert">{modelError}</p>}
+          <div className="screener-control-field" style={{ marginBottom: "12px" }}>
+            <span id="paper-edit-exit-mode-label">Exit mode (new trades only)</span>
+            <div role="group" aria-labelledby="paper-edit-exit-mode-label" style={{ display: "flex", gap: "6px", marginTop: "4px" }}>
+              {(["dynamic", "pure"] as const).map((mode) => {
+                const current = (parameterDraft ?? editingConfig.strategy_params ?? {}).PURE_TP_SL === true ? "pure" : "dynamic";
+                return (
+                  <button key={mode} type="button" className={"button " + (current === mode ? "button-primary" : "button-secondary")} aria-pressed={current === mode} disabled={togglingConfigId !== null}
+                    onClick={() => setParameterDraft({ ...(parameterDraft ?? editingConfig.strategy_params ?? {}), PURE_TP_SL: mode === "pure" })}>
+                    {mode === "pure" ? "Pure TP/SL" : "Dynamic"}
+                  </button>
+                );
+              })}
+            </div>
+            <small>Open positions keep the mode they were opened with; only new trades use the changed mode.</small>
+          </div>
           <DeploymentParameters key={editingConfig.id} strategy={editingConfig.strategy_name}
             value={parameterDraft ?? editingConfig.strategy_params ?? {}}
             onChange={setParameterDraft} disabled={togglingConfigId !== null} />
@@ -1748,6 +1803,18 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
                   onChange={(e) => setDeployRisk(Number(e.target.value))}
                 />
               </div>
+            </div>
+
+            <div className="screener-control-field" style={{ marginBottom: "12px" }}>
+              <span id="paper-deploy-exit-mode-label">Exit mode</span>
+              <div role="group" aria-labelledby="paper-deploy-exit-mode-label" style={{ display: "flex", gap: "6px", marginTop: "4px" }}>
+                {(["dynamic", "pure"] as const).map((mode) => (
+                  <button key={mode} type="button" className={"button " + (deployExitMode === mode ? "button-primary" : "button-secondary")} aria-pressed={deployExitMode === mode} disabled={deployBusy} onClick={() => setDeployExitMode(mode)}>
+                    {mode === "pure" ? "Pure TP/SL" : "Dynamic"}
+                  </button>
+                ))}
+              </div>
+              <small>{deployExitMode === "pure" ? "New trades exit only on TP/SL — no trailing stop, no timeout." : "New trades use trailing stop and timeout, as before."}</small>
             </div>
 
             <div style={{ marginBottom: "16px" }}>
