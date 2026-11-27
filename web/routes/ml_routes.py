@@ -655,7 +655,6 @@ class MLWalkForwardRequest(MLStrategyRequest):
 
 class RegisterRetrainRequest(MLStrategyRequest):
     model_type: str = Field("hist_gradient_boosting", min_length=1, max_length=30)
-    auto_promote: bool = Field(True)
 
     @field_validator("model_type")
     @classmethod
@@ -725,7 +724,7 @@ def register_retrain_model(req: RegisterRetrainRequest):
         timeframe=req.timeframe,
         strategy_name=req.strategy_name,
         model_type=req.model_type,
-        auto_promote=req.auto_promote,
+        auto_promote=False,
     )
 
 
@@ -768,6 +767,29 @@ def trigger_continuous_retraining(background_tasks: BackgroundTasks, force: bool
     return {
         "status": "queued",
         "message": "Continuous online retraining cycle started in background.",
+    }
+
+
+@router.post("/retraining/models/{key}/trigger")
+def trigger_single_model_retraining(
+    background_tasks: BackgroundTasks,
+    key: str = ApiPath(..., min_length=1, max_length=200),
+    force: bool = True,
+):
+    """Trigger online retraining for a single active registered model."""
+    from ml.online_retrainer import execute_retraining_cycle, get_registered_model
+    subsystem_enabled, model = get_registered_model(key)
+    if model is None:
+        raise HTTPException(status_code=404, detail="Registered model not found")
+    if not subsystem_enabled:
+        raise HTTPException(status_code=409, detail="Continuous retraining subsystem is disabled")
+    if model.get("enabled") is False:
+        raise HTTPException(status_code=409, detail="Retraining is paused for this model")
+    background_tasks.add_task(execute_retraining_cycle, force=force, model_key=key)
+    return {
+        "status": "queued",
+        "key": key,
+        "message": f"Retraining queued for {key}.",
     }
 
 

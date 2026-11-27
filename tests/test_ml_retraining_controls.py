@@ -96,6 +96,39 @@ class TestRetrainingControlRoutes(unittest.TestCase):
         v, vh = self._client("viewer")
         self.assertEqual(v.delete("/api/ml/retraining/models/k", headers=vh).status_code, 403)
         self.assertEqual(v.put("/api/ml/retraining/enabled", json={"enabled": True}, headers=vh).status_code, 403)
+        self.assertEqual(v.post("/api/ml/retraining/models/k/trigger", headers=vh).status_code, 403)
+
+    def test_register_api_removes_auto_promote_and_per_model_trigger_enforces_pause(self):
+        from web.routes.ml_routes import RegisterRetrainRequest
+        self.assertNotIn("auto_promote", RegisterRetrainRequest.model_fields)
+
+        c, h = self._client("trader")
+        with patch("ml.online_retrainer.register_model_for_retraining", return_value={"key": "k"}) as reg_mock:
+            res = c.post(
+                "/api/ml/retraining/register",
+                json={"symbol": "BTCUSDT", "market": "spot", "timeframe": "1h", "strategy_name": "trend_ema_v1"},
+                headers=h,
+            )
+            self.assertEqual(res.status_code, 200)
+            self.assertIs(reg_mock.call_args.kwargs["auto_promote"], False)
+
+        with patch("ml.online_retrainer.get_registered_model", return_value=(True, None)):
+            self.assertEqual(c.post("/api/ml/retraining/models/missing/trigger", headers=h).status_code, 404)
+
+        with patch("ml.online_retrainer.get_registered_model", return_value=(False, {"key": "k", "enabled": True})):
+            self.assertEqual(c.post("/api/ml/retraining/models/k/trigger", headers=h).status_code, 409)
+
+        with patch("ml.online_retrainer.get_registered_model", return_value=(True, {"key": "k", "enabled": False})):
+            res_paused = c.post("/api/ml/retraining/models/k/trigger", headers=h)
+            self.assertEqual(res_paused.status_code, 409)
+            self.assertIn("paused", res_paused.json()["detail"].lower())
+
+        with patch("ml.online_retrainer.get_registered_model", return_value=(True, {"key": "k", "enabled": True})), \
+             patch("ml.online_retrainer.execute_retraining_cycle") as exec_mock:
+            res_ok = c.post("/api/ml/retraining/models/k/trigger", headers=h)
+            self.assertEqual(res_ok.status_code, 200)
+            self.assertEqual(res_ok.json()["status"], "queued")
+            exec_mock.assert_called_once_with(force=True, model_key="k")
 
 
 if __name__ == "__main__":

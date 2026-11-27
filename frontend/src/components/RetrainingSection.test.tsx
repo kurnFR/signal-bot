@@ -5,6 +5,7 @@ import { RetrainingSection } from "./RetrainingSection";
 const m = {
   fetchRetrainingStatus: vi.fn(), setRetrainingEnabled: vi.fn(), setRetrainingModelEnabled: vi.fn(),
   removeRetrainingModel: vi.fn(), registerRetrainingModel: vi.fn(), triggerRetraining: vi.fn(),
+  triggerModelRetraining: vi.fn(),
 };
 vi.mock("../lib/mlRetraining", () => ({
   fetchRetrainingStatus: (...a: unknown[]) => m.fetchRetrainingStatus(...a),
@@ -13,6 +14,7 @@ vi.mock("../lib/mlRetraining", () => ({
   removeRetrainingModel: (...a: unknown[]) => m.removeRetrainingModel(...a),
   registerRetrainingModel: (...a: unknown[]) => m.registerRetrainingModel(...a),
   triggerRetraining: (...a: unknown[]) => m.triggerRetraining(...a),
+  triggerModelRetraining: (...a: unknown[]) => m.triggerModelRetraining(...a),
 }));
 
 const status = (over = {}) => ({
@@ -72,5 +74,50 @@ describe("RetrainingSection", () => {
     m.fetchRetrainingStatus.mockRejectedValue(new Error("down"));
     render(<RetrainingSection />);
     expect(await screen.findByRole("alert")).toHaveTextContent("down");
+  });
+
+  it("supports per-model Run now when active, disables it when paused, and displays recent_audit history", async () => {
+    m.fetchRetrainingStatus.mockResolvedValue(status({
+      models: [
+        {
+          key: "BTCUSDT_spot_1h_trend_ema_v1", symbol: "BTCUSDT", market: "spot", timeframe: "1h",
+          strategy_name: "trend_ema_v1", model_type: "hist_gradient_boosting", enabled: true, drift_psi: 0.12,
+        },
+        {
+          key: "ETHUSDT_spot_1h_trend_ema_v1", symbol: "ETHUSDT", market: "spot", timeframe: "1h",
+          strategy_name: "trend_ema_v1", model_type: "logistic_regression", enabled: false, drift_psi: 0.05,
+        },
+      ],
+      recent_audit: [
+        {
+          key: "BTCUSDT_spot_1h_trend_ema_v1",
+          timestamp: "2026-11-27T03:00:00Z",
+          status: "retrained",
+          winner_model: "hist_gradient_boosting",
+          new_candles_processed: 46528,
+          drift_psi: 0.112,
+          baseline_test_r: 1.2,
+          ml_test_r: 2.1,
+          promotion_status: "disabled",
+        },
+      ],
+    }));
+    m.triggerModelRetraining.mockResolvedValue({ status: "queued" });
+
+    render(<RetrainingSection />);
+
+    const runActive = await screen.findByRole("button", { name: "Run BTCUSDT trend_ema_v1 now" });
+    const runPaused = screen.getByRole("button", { name: "Run ETHUSDT trend_ema_v1 now" });
+    expect(runActive).toBeEnabled();
+    expect(runPaused).toBeDisabled();
+
+    expect(screen.getByText("Retraining history (recent audit)")).toBeInTheDocument();
+    expect(screen.getByText("BTCUSDT_spot_1h_trend_ema_v1")).toBeInTheDocument();
+    expect(screen.getByText("retrained")).toBeInTheDocument();
+    expect(screen.getByText("46528")).toBeInTheDocument();
+    expect(screen.getByText("1.20 → 2.10")).toBeInTheDocument();
+
+    fireEvent.click(runActive);
+    await waitFor(() => expect(m.triggerModelRetraining).toHaveBeenCalledWith("BTCUSDT_spot_1h_trend_ema_v1", true));
   });
 });

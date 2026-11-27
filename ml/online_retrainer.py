@@ -258,7 +258,7 @@ def register_model_for_retraining(
     timeframe: str = "1h",
     strategy_name: str = "trend_ema_v1",
     model_type: str = "hist_gradient_boosting",
-    auto_promote: bool = True,
+    auto_promote: bool = False,
 ) -> dict[str, Any]:
     """Register a strategy model pipeline to be tracked and periodically retrained."""
     key = f"{symbol}_{market}_{timeframe}_{strategy_name}"
@@ -273,7 +273,7 @@ def register_model_for_retraining(
             "timeframe": timeframe,
             "strategy_name": strategy_name,
             "model_type": model_type,
-            "auto_promote": auto_promote,
+            "auto_promote": bool(auto_promote),
             "registered_at": now_iso,
             "last_retrained_at": None,
             "last_candle_count": 0,
@@ -318,13 +318,20 @@ def unregister_model_for_retraining(key: str) -> bool:
         return True
 
 
+def get_registered_model(key: str) -> tuple[bool, dict[str, Any] | None]:
+    """Return (subsystem_enabled, model_entry) for preflight checks."""
+    with _registry_lock():
+        reg = _load_registry()
+        return reg.get("enabled", True) is True, reg.get("registered_models", {}).get(key)
+
+
 def _persist_retraining_updates(updates: Mapping[str, Mapping[str, Any]]) -> bool:
     """Merge cycle results into the latest registry; return False if state is disabled/invalid."""
     if not updates:
         return True
 
     identity_fields = ("symbol", "market", "timeframe", "strategy_name", "registered_at")
-    runtime_fields = ("last_retrained_at", "last_candle_count", "last_result")
+    runtime_fields = ("last_retrained_at", "last_candle_count", "drift_psi", "last_result")
     with _registry_lock():
         latest = _load_registry()
         # A malformed/disabled registry is a hard stop; never replace it with
@@ -528,6 +535,7 @@ def _public_audit_entry(entry: Any) -> dict[str, Any]:
         "key",
         "timestamp",
         "new_candles_processed",
+        "drift_psi",
         "winner_model",
         "threshold",
         "baseline_test_r",
@@ -567,14 +575,40 @@ def get_retraining_status() -> dict[str, Any]:
     }
 
 
+def _compute_recent_feature_drift(df: Any, min_new_candles: int = 48) -> float:
+    """Compare recent feature distribution against prior baseline via PSI.
+
+    Returns 0.0 safely for lightweight test doubles or datasets without enough
+    populated feature rows.
+    """
+    if not hasattr(df, "columns"):
+        return 0.0
+    candidate_cols = [c for c in ("rsi", "atr_pct", "volume_ratio", "macd_hist") if c in df.columns]
+    if not candidate_cols or len(df) < 100:
+        return 0.0
+    try:
+        clean = df[candidate_cols].dropna()
+        if len(clean) < 100:
+            return 0.0
+        recent_n = min(max(int(min_new_candles or 48), 20), len(clean) // 3)
+        if len(clean) - recent_n < 40:
+            return 0.0
+        baseline_arr = clean.iloc[:-recent_n].to_numpy(dtype=float)
+        recent_arr = clean.iloc[-recent_n:].to_numpy(dtype=float)
+        return float(compute_drift_psi(baseline_arr, recent_arr))
+    except Exception:
+        return 0.0
+
+
 def _is_retraining_due(
     cfg: Mapping[str, Any],
     registry: Mapping[str, Any],
     current_candles: int,
     now: datetime,
     force: bool = False,
+    drift_psi: float = 0.0,
 ) -> bool:
-    """Apply the configured candle and minimum-interval gates to a model."""
+    """Apply the configured candle, interval, and drift PSI gates to a model."""
     if force:
         return True
 
@@ -595,21 +629,25 @@ def _is_retraining_due(
 
     interval_hours = max(0.0, float(registry.get("retrain_interval_hours", 24)))
     min_new_candles = max(0, int(registry.get("min_new_candles", 48)))
+    max_drift_psi = max(0.0, float(registry.get("max_drift_psi", 0.25)))
     new_candles = current_candles - int(cfg.get("last_candle_count", 0))
-    return elapsed >= timedelta(hours=interval_hours) and new_candles >= min_new_candles
+    if new_candles < min_new_candles:
+        return False
+    drift_triggered = max_drift_psi > 0 and float(drift_psi) >= max_drift_psi
+    return elapsed >= timedelta(hours=interval_hours) or drift_triggered
 
 
-def execute_retraining_cycle(force: bool = False) -> list[dict[str, Any]]:
-    """Run at most one retraining cycle across all workers/processes."""
+def execute_retraining_cycle(force: bool = False, model_key: str | None = None) -> list[dict[str, Any]]:
+    """Run at most one retraining cycle across all workers/processes (or one targeted model)."""
     with _retraining_cycle_lock() as acquired:
         if not acquired:
             return []
-        return _execute_retraining_cycle_unlocked(force=force)
+        return _execute_retraining_cycle_unlocked(force=force, model_key=model_key)
 
 
-def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, Any]]:
+def _execute_retraining_cycle_unlocked(force: bool = False, model_key: str | None = None) -> list[dict[str, Any]]:
     """
-    Check all registered models; if stale or forced, run retraining pipeline.
+    Check registered models (or one targeted model); if due or forced, run retraining pipeline.
     FreqAI/Qlib continuous inference cycle. Caller must hold the cycle lock.
     """
     _recover_completed_retraining()
@@ -622,7 +660,15 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
         logger.info("Online retraining is disabled; skipping cycle")
         return results
 
-    for key, cfg in models.items():
+    if model_key is not None:
+        if model_key not in models:
+            logger.info("Targeted retraining model %s not found; skipping", model_key)
+            return results
+        target_items = [(model_key, models[model_key])]
+    else:
+        target_items = list(models.items())
+
+    for key, cfg in target_items:
         if cfg.get("enabled") is False:
             continue  # paused by operator
         journaled = False
@@ -637,14 +683,20 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
             current_candles = len(df)
             last_candles = cfg.get("last_candle_count", 0)
             new_candles = current_candles - last_candles
+            drift_psi = _compute_recent_feature_drift(df, int(reg.get("min_new_candles", 48)))
 
             needs_retrain = _is_retraining_due(
-                cfg, reg, current_candles, datetime.now(timezone.utc), force=force
+                cfg, reg, current_candles, datetime.now(timezone.utc), force=force, drift_psi=drift_psi
             )
             if not needs_retrain:
                 continue
 
-            logger.info("Executing continuous retraining for %s (new candles: %d)", key, new_candles)
+            logger.info(
+                "Executing continuous retraining for %s (new candles: %d, drift PSI: %.4f)",
+                key,
+                new_candles,
+                drift_psi,
+            )
             exp_result_path = run_real_experiment(
                 symbol=symbol,
                 market=market,
@@ -665,6 +717,7 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
                 "key": key,
                 "timestamp": now_iso,
                 "new_candles_processed": new_candles,
+                "drift_psi": drift_psi,
                 "winner_model": exp_res["winner"]["model_type"],
                 "threshold": exp_res["experiment"]["threshold"],
                 "baseline_test_r": exp_res["experiment"]["baseline_test_metrics"].get("total_outcome_r"),
@@ -682,6 +735,7 @@ def _execute_retraining_cycle_unlocked(force: bool = False) -> list[dict[str, An
                 "runtime": {
                     "last_retrained_at": now_iso,
                     "last_candle_count": current_candles,
+                    "drift_psi": drift_psi,
                     "last_result": {
                         "winner": exp_res["winner"]["model_type"],
                         "ml_test_r": exp_res["experiment"]["ml_test_metrics"].get("total_outcome_r"),

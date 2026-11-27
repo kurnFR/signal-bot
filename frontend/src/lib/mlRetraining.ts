@@ -13,6 +13,19 @@ export interface RetrainingModel {
   drift_psi?: number;
 }
 
+export interface RetrainingAuditEntry {
+  key?: string;
+  timestamp?: string;
+  status?: string;
+  winner_model?: string;
+  new_candles_processed?: number;
+  drift_psi?: number;
+  baseline_test_r?: number | null;
+  ml_test_r?: number | null;
+  promotion_status?: string;
+  message?: string;
+}
+
 export interface RetrainingStatus {
   enabled: boolean;
   retrain_interval_hours: number;
@@ -20,7 +33,7 @@ export interface RetrainingStatus {
   max_drift_psi: number;
   registered_models_count: number;
   models: RetrainingModel[];
-  recent_audit: Array<Record<string, unknown>>;
+  recent_audit: RetrainingAuditEntry[];
 }
 
 export interface RegisterRetrainingRequest {
@@ -52,9 +65,11 @@ export const removeRetrainingModel = (key: string) =>
 export const registerRetrainingModel = (req: RegisterRetrainingRequest) =>
   apiRequest("/api/ml/retraining/register", {
     method: "POST",
-    // auto_promote is not implemented server-side, so the UI never requests it.
-    json: { ...req, symbol: req.symbol.trim().toUpperCase(), strategy_name: req.strategy_name.trim(), auto_promote: false },
+    json: { ...req, symbol: req.symbol.trim().toUpperCase(), strategy_name: req.strategy_name.trim() },
   });
 
 export const triggerRetraining = (force: boolean) =>
   apiRequest(`/api/ml/retraining/trigger?force=${force ? "true" : "false"}`, { method: "POST" });
+
+export const triggerModelRetraining = (key: string, force = true) =>
+  apiRequest(`/api/ml/retraining/models/${encodeURIComponent(key)}/trigger?force=${force ? "true" : "false"}`, { method: "POST" });
