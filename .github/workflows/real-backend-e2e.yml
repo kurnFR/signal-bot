@@ -120,10 +120,9 @@ jobs:
           unset TELEGRAM_DELIVERY_ENABLED RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED RETAILBOT2_ALLOW_TELEGRAM_DELIVERY
           SIGNAL_BOT_USE_MODERN_UI=0 PYTHONPATH=. python -m uvicorn frontend.e2e.fixture_app:app --host 127.0.0.1 --port 8050 > "$RUNNER_TEMP/real-e2e/api.log" 2>&1 &
           echo "$!" > "$RUNNER_TEMP/real-e2e/api.pid"
-          for attempt in {1..60}; do
-            if curl --fail --silent "$SIGNAL_BOT_REAL_E2E_URL/readyz" >/dev/null; then exit 0; fi
-            sleep 1
-          done
+          if timeout 60s bash -c 'until curl --fail --silent --max-time 2 "$SIGNAL_BOT_REAL_E2E_URL/readyz" >/dev/null; do sleep 1; done'; then
+            exit 0
+          fi
           python frontend/e2e/redact_logs.py "$RUNNER_TEMP/real-e2e/api.log"
           tail -n 50 "$RUNNER_TEMP/real-e2e/api.log"
           exit 1
