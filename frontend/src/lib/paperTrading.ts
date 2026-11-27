@@ -11,6 +11,7 @@ export interface PaperCircuitBreaker { status: string; emergency_stop_active: bo
 export interface PaperTradingSnapshot { positions: PaperPosition[]; configs: PaperConfig[]; orders: PaperOrder[]; trades: PaperTrade[]; metrics: PaperMetrics; breaker: PaperCircuitBreaker }
 
 export interface UpdatePaperConfigRequest {
+  create_only?: boolean;
   symbol: string;
   market: string;
   timeframe: string;
@@ -334,6 +335,7 @@ export async function updatePaperConfig(
       telegram_enabled: Boolean(req.telegram_enabled),
       report_enabled: Boolean(req.report_enabled),
       params: req.params ?? undefined,
+      create_only: req.create_only,
     }),
     signal,
   });
@@ -382,7 +384,7 @@ export async function purgePaperConfig(id: number, allowUnarchived = false): Pro
 }
 
 export type PaperDeploymentSettings = Partial<Pick<PaperConfig,
-  "is_active" | "allocated_capital" | "risk_per_trade_pct" | "telegram_enabled" | "report_enabled"
+  "is_active" | "allocated_capital" | "risk_per_trade_pct" | "telegram_enabled" | "report_enabled" | "ml_model_id" | "ml_generator_model_id"
 >> & { params?: PaperConfig["strategy_params"] };
 
 export async function patchPaperDeployment(id: number, settings: PaperDeploymentSettings): Promise<void> {

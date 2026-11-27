@@ -743,6 +743,43 @@ class TestPaperPositionLifecycle(unittest.TestCase):
             pe.purge_paper_config(traded)
         self.assertIn(traded, [c["id"] for c in pe.get_paper_configs()])  # still archived, not deleted
 
+    def test_model_updates_preserve_identity_and_reject_unfinished_work(self):
+        cfg_id = self._create_config()
+        changes = {}
+        self.assertTrue(pe.update_paper_deployment(cfg_id, ml_model_id="filter-v1", model_changes=changes))
+        self.assertEqual(changes, {"ml_model_id": {"old": None, "new": "filter-v1"}})
+        with self.assertRaisesRegex(ValueError, "only valid"):
+            pe.update_paper_deployment(cfg_id, ml_model_id=None, ml_generator_model_id="generator-v1")
+        with self.assertRaisesRegex(ValueError, "both"):
+            pe.update_paper_deployment(cfg_id, ml_generator_model_id="generator-v1")
+        with self.assertRaisesRegex(ValueError, "safe model identifier"):
+            pe.update_paper_deployment(cfg_id, ml_model_id="../unsafe")
+        self.assertTrue(pe.update_paper_deployment(cfg_id, ml_model_id=None))
+
+        gen_id = self._create_config(symbol="ETHUSDT", strategy_name="ml_signal_generator_v1", is_active=0)
+        self.assertTrue(pe.update_paper_deployment(gen_id, ml_generator_model_id="generator-v1"))
+        self.assertTrue(pe.update_paper_deployment(gen_id, ml_generator_model_id=None))
+        self._create_position(config_id=cfg_id)
+        with self.assertRaisesRegex(pe.PaperDeploymentConflict, "Close open positions"):
+            pe.update_paper_deployment(cfg_id, ml_model_id="filter-v2")
+
+        config = next(row for row in pe.get_paper_configs() if row["id"] == cfg_id)
+        self.assertIsNone(config["ml_model_id"])
+        self.assertEqual((config["symbol"], config["strategy_name"]), ("BTCUSDT", "trend_ema_v1"))
+
+    def test_create_only_deployment_cannot_overwrite_existing_identity(self):
+        original_id = self._create_config()
+        with self.assertRaises(pe.PaperDeploymentConflict):
+            pe.set_paper_config("BTCUSDT", "spot", "1h", "trend_ema_v1", False, 2500, create_only=True)
+        clone = pe.set_paper_config(
+            "BTCUSDT", "spot", "4h", "trend_ema_v1", False, 2500, create_only=True,
+        )
+        configs = {row["id"]: row for row in pe.get_paper_configs()}
+        self.assertTrue(configs[original_id]["is_active"])
+        self.assertEqual(float(configs[original_id]["allocated_capital"]), 5000)
+        self.assertFalse(configs[clone["id"]]["is_active"])
+        self.assertEqual(float(configs[clone["id"]]["allocated_capital"]), 2500)
+
     def test_15_duplicate_trade_prevention(self):
         """15. Direct call to close_position_in_db is strictly idempotent via CAS update."""
         cfg_id = self._create_config()

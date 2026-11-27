@@ -196,6 +196,35 @@ class TestPaperOrderRoutes(unittest.TestCase):
         save.assert_not_called()
         sync.assert_not_called()
 
+    def test_patch_explicit_model_clear_audits_old_and_new(self):
+        def update(config_id, *, ml_model_id, model_changes):
+            self.assertEqual(config_id, 15)
+            self.assertIsNone(ml_model_id)
+            model_changes["ml_model_id"] = {"old": "filter-v1", "new": None}
+            return True
+
+        with (
+            patch("web.app.authenticate_request", return_value=_user()),
+            patch("web.routes.paper_routes.update_paper_deployment", side_effect=update),
+            patch("web.routes.paper_routes.get_paper_configs", return_value=[]),
+            patch("web.routes.paper_routes.log_audit") as audit,
+        ):
+            self.assertEqual(self.client.patch("/api/paper/configs/15", json={"ml_model_id": None}).status_code, 200)
+            self.assertEqual(self.client.patch("/api/paper/configs/15", json={"symbol": "ETHUSDT"}).status_code, 422)
+            self.assertEqual(audit.call_args.args[3], {
+                "config_id": 15, "models": {"ml_model_id": {"old": "filter-v1", "new": None}},
+            })
+
+    def test_patch_surfaces_model_conflict(self):
+        from paper.engine import PaperDeploymentConflict
+
+        with (
+            patch("web.app.authenticate_request", return_value=_user()),
+            patch("web.routes.paper_routes.update_paper_deployment", side_effect=PaperDeploymentConflict("Close open positions first.")),
+        ):
+            response = self.client.patch("/api/paper/configs/15", json={"ml_model_id": "filter-v1"})
+        self.assertEqual(response.status_code, 409)
+
     def test_delete_paper_config_success(self):
         with patch("web.app.authenticate_request", return_value=_user("admin")), \
              patch("web.routes.paper_routes.delete_paper_config", return_value=True) as delete_mock:

@@ -6,6 +6,7 @@ import { PortfolioRiskDesk } from "./components/PortfolioRiskDesk";
 import { ExecutionBlotter } from "./components/ExecutionBlotter";
 import { useAuth } from "./AuthGate";
 import { fetchBacktestStrategies } from "./lib/backtestStudio";
+import { fetchMLModels, type MLModelManifest } from "./lib/mlStudio";
 import { fetchBackfilledSymbols } from "./lib/masterData";
 import { ApiError } from "./lib/api";
 import { trapFocus } from "./lib/dialog";
@@ -35,6 +36,22 @@ import {
   type PaperPosition,
   type PaperTradingSnapshot,
 } from "./lib/paperTrading";
+
+function DeploymentModelSelect({ label, value, models, onChange, disabled }: {
+  label: string;
+  value: string | null | undefined;
+  models: readonly { model_id: string }[];
+  onChange: (value: string | null) => void;
+  disabled: boolean;
+}) {
+  return <label className="screener-control-field">{label}
+    <select disabled={disabled} value={value ?? ""} onChange={(event) => onChange(event.target.value || null)}>
+      <option value="">No model</option>
+      {value && !models.some((model) => model.model_id === value) && <option value={value}>{value} (current)</option>}
+      {models.map((model) => <option key={model.model_id} value={model.model_id}>{model.model_id}</option>)}
+    </select>
+  </label>;
+}
 
 const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 });
@@ -141,6 +158,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
   const deployTriggerRef = useRef<HTMLElement | null>(null);
   const [parameterDraft, setParameterDraft] = useState<DeploymentOverrides | null>(null);
   const [editingConfig, setEditingConfig] = useState<PaperConfig | null>(null);
+  const [modelDraft, setModelDraft] = useState<PaperDeploymentSettings>({});
   const [pendingArchive, setPendingArchive] = useState<PaperConfig | null>(null);
   const [pendingPurge, setPendingPurge] = useState<PaperConfig | null>(null);
   const [reportDays, setReportDays] = useState(0);
@@ -169,6 +187,12 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
   const [deployCapital, setDeployCapital] = useState(5000);
   const [deployRisk, setDeployRisk] = useState(1.0);
   const [deployTelegram, setDeployTelegram] = useState(false);
+  const [cloneSource, setCloneSource] = useState<PaperConfig | null>(null);
+  const [cloneParams, setCloneParams] = useState<DeploymentOverrides>({});
+  const [cloneReport, setCloneReport] = useState(false);
+  const [cloneFilter, setCloneFilter] = useState("");
+  const [filterModels, setFilterModels] = useState<MLModelManifest[]>([]);
+  const [modelError, setModelError] = useState<string | null>(null);
   const [generatorModels, setGeneratorModels] = useState<GeneratorModelSummary[]>([]);
   const [selectedGeneratorModelId, setSelectedGeneratorModelId] = useState("");
 
@@ -181,12 +205,12 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
   );
 
   useEffect(() => {
-    if (deployStrategy === "ml_signal_generator_v1" && matchingGeneratorModels.length > 0) {
+    if (!cloneSource && deployStrategy === "ml_signal_generator_v1" && matchingGeneratorModels.length > 0) {
       if (!selectedGeneratorModelId || !matchingGeneratorModels.some((m) => m.model_id === selectedGeneratorModelId)) {
         setSelectedGeneratorModelId(matchingGeneratorModels[0].model_id);
       }
     }
-  }, [deployStrategy, deploySymbol, deployMarket, deployTimeframe, matchingGeneratorModels, selectedGeneratorModelId]);
+  }, [deployStrategy, deploySymbol, deployMarket, deployTimeframe, matchingGeneratorModels, selectedGeneratorModelId, cloneSource]);
 
   // PT-10: Trip / reset circuit breaker
   const [breakerAction, setBreakerAction] = useState<"trip" | "reset" | null>(null);
@@ -244,12 +268,29 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
       if (controller.signal.aborted) return;
       setAvailableSymbols(symbols);
     }).catch(() => {});
-    fetchGeneratorModels(controller.signal).then((models) => {
-      if (controller.signal.aborted) return;
-      setGeneratorModels(models);
-    }).catch(() => {});
     return () => controller.abort();
   }, [showDeployModal]);
+
+  const showModelSelectors = showDeployModal || editingConfig !== null;
+  const showFilterModels = cloneSource !== null || editingConfig !== null;
+  useEffect(() => {
+    if (!showModelSelectors) return;
+    const controller = new AbortController();
+    setModelError(null);
+    void fetchGeneratorModels(controller.signal).then((models) => {
+      if (!controller.signal.aborted) setGeneratorModels(models);
+    }).catch(() => {
+      if (!controller.signal.aborted) setModelError("Generator model catalog unavailable.");
+    });
+    if (showFilterModels) {
+      void fetchMLModels(controller.signal).then(({ models }) => {
+        if (!controller.signal.aborted) setFilterModels(models);
+      }).catch(() => {
+        if (!controller.signal.aborted) setModelError("Filter model catalog unavailable.");
+      });
+    }
+    return () => controller.abort();
+  }, [showModelSelectors, showFilterModels]);
 
   // Modal lifecycles
   useEffect(() => {
@@ -329,6 +370,27 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
     closePositionTriggerRef.current?.focus();
   };
 
+  const openClone = (config: PaperConfig, trigger: HTMLElement) => {
+    if (!["spot", "futures"].includes(config.market) || !["15m", "1h", "4h", "1d"].includes(config.timeframe)) {
+      setActionError("This deployment has an unsupported market or timeframe.");
+      return;
+    }
+    deployTriggerRef.current = trigger;
+    setCloneSource(config);
+    setDeploySymbol(config.symbol);
+    setDeployMarket(config.market as typeof deployMarket);
+    setDeployTimeframe(config.timeframe as typeof deployTimeframe);
+    setDeployStrategy(config.strategy_name);
+    setDeployCapital(config.allocated_capital);
+    setDeployRisk(config.risk_per_trade_pct);
+    setDeployTelegram(config.telegram_enabled);
+    setCloneReport(config.report_enabled);
+    setCloneParams(config.strategy_params ?? {});
+    setCloneFilter(config.ml_model_id ?? "");
+    setSelectedGeneratorModelId(config.ml_generator_model_id ?? "");
+    setShowDeployModal(true);
+  };
+
   const closeDeployModal = () => {
     if (deployDialogRef.current?.open) {
       if (typeof deployDialogRef.current.close === "function") {
@@ -338,6 +400,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
       }
     }
     setShowDeployModal(false);
+    setCloneSource(null);
     setDeployError(null);
     deployTriggerRef.current?.focus();
   };
@@ -414,6 +477,35 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
     }
     if (deployRisk < 0.1 || deployRisk > 10.0) {
       setDeployError("Risk per trade must be between 0.1% and 10.0%.");
+      return;
+    }
+
+    if (cloneSource) {
+      if (sym === cloneSource.symbol && deployMarket === cloneSource.market &&
+          deployTimeframe === cloneSource.timeframe && deployStrategy === cloneSource.strategy_name) {
+        setDeployError("Change the symbol, market, timeframe or strategy to create a new deployment.");
+        return;
+      }
+      setDeployBusy(true);
+      try {
+        const generator = deployStrategy === "ml_signal_generator_v1";
+        await updatePaperConfig({
+          create_only: true,
+          is_active: false,
+          symbol: sym, market: deployMarket, timeframe: deployTimeframe, strategy_name: deployStrategy,
+          allocated_capital: deployCapital, risk_per_trade_pct: deployRisk,
+          telegram_enabled: deployTelegram, report_enabled: cloneReport, params: cloneParams,
+          ml_model_id: generator ? null : cloneFilter || null,
+          ml_generator_model_id: generator ? selectedGeneratorModelId || null : null,
+        });
+        setActionSuccess("Created an inactive paper deployment.");
+        closeDeployModal();
+        setAttempt((value) => value + 1);
+      } catch (cause) {
+        setDeployError(cause instanceof PaperTradingActionError ? cause.message : "Could not clone the deployment.");
+      } finally {
+        setDeployBusy(false);
+      }
       return;
     }
 
@@ -603,7 +695,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
     event.preventDefault();
     if (!editingConfig || togglingConfigId !== null) return;
     const { allocated_capital, risk_per_trade_pct } = editingConfig;
-    if (await saveDeploymentSettings(editingConfig, { allocated_capital, risk_per_trade_pct, ...(parameterDraft !== null ? { params: parameterDraft } : {}) }, "Deployment settings saved.")) {
+    if (await saveDeploymentSettings(editingConfig, { allocated_capital, risk_per_trade_pct, ...modelDraft, ...(parameterDraft !== null ? { params: parameterDraft } : {}) }, "Deployment settings saved.")) {
       setEditingConfig(null);
     }
   };
@@ -1300,9 +1392,10 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
                             Report {c.report_enabled ? "On" : "Off"}
                           </button>
                           {!c.archived_at && <>
-                            <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={() => { setParameterDraft(null); setEditingConfig(c); }}>Edit</button>
+                            <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={() => { setParameterDraft(null); setModelDraft({}); setEditingConfig(c); }}>Edit</button>
                             <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={() => setPendingArchive(c)}>Archive</button>
                           </>}
+                          <button className="button button-secondary button-sm" type="button" disabled={loading || savingPreference || togglingConfigId !== null} onClick={(event) => openClone(c, event.currentTarget)}>Clone as new</button>
                           <button className="button button-secondary button-sm" type="button" disabled={c.is_active || loading || savingPreference || togglingConfigId !== null} title={c.is_active ? "Pause this deployment first" : undefined} onClick={() => setPendingPurge(c)}>Delete permanently</button>
                         </div>
                       </td>
@@ -1326,6 +1419,26 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
               <input type="number" min={0.1} max={10} step="0.01" required value={editingConfig.risk_per_trade_pct} onChange={(event) => setEditingConfig({ ...editingConfig, risk_per_trade_pct: event.target.valueAsNumber })} />
             </label>
           </div>
+          {editingConfig.strategy_name === "ml_signal_generator_v1" ? (
+            <DeploymentModelSelect
+              label="Generator model"
+              disabled={togglingConfigId !== null}
+              value={"ml_generator_model_id" in modelDraft ? modelDraft.ml_generator_model_id : editingConfig.ml_generator_model_id}
+              models={generatorModels.filter((model) => model.eligible_for_paper &&
+                (!model.symbol || model.symbol === editingConfig.symbol) && (!model.market || model.market === editingConfig.market) &&
+                (!model.timeframe || model.timeframe === editingConfig.timeframe))}
+              onChange={(value) => setModelDraft({ ml_generator_model_id: value })}
+            />
+          ) : (
+            <DeploymentModelSelect
+              label="Filter model"
+              disabled={togglingConfigId !== null}
+              value={"ml_model_id" in modelDraft ? modelDraft.ml_model_id : editingConfig.ml_model_id}
+              models={filterModels.filter((model) => !model.base_strategy || model.base_strategy === editingConfig.strategy_name)}
+              onChange={(value) => setModelDraft({ ml_model_id: value })}
+            />
+          )}
+          {modelError && <p className="control-feedback control-error" role="alert">{modelError}</p>}
           <DeploymentParameters key={editingConfig.id} strategy={editingConfig.strategy_name}
             value={parameterDraft ?? editingConfig.strategy_params ?? {}}
             onChange={setParameterDraft} disabled={togglingConfigId !== null} />
@@ -1499,8 +1612,8 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
         >
           <div className="panel-heading">
             <div>
-              <h3 id="deploy-strategy-dialog-title">Deploy Strategy to Paper Trading</h3>
-              <p id="deploy-strategy-dialog-desc">Configure and activate a simulated execution bot with dedicated virtual capital.</p>
+              <h3 id="deploy-strategy-dialog-title">{cloneSource ? "Clone paper deployment" : "Deploy Strategy to Paper Trading"}</h3>
+              <p id="deploy-strategy-dialog-desc">{cloneSource ? "Choose a new deployment identity. The copy starts inactive." : "Configure and activate a simulated execution bot with dedicated virtual capital."}</p>
             </div>
             <button type="button" aria-label="Close dialog" onClick={closeDeployModal} className="icon-button"><X size={16} /></button>
           </div>
@@ -1564,7 +1677,13 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
                   id="paper-deploy-strategy"
                   value={deployStrategy}
                   disabled={deployBusy}
-                  onChange={(e) => setDeployStrategy(e.target.value)}
+                  onChange={(e) => {
+                    setDeployStrategy(e.target.value);
+                    if (cloneSource) {
+                      setCloneFilter("");
+                      setSelectedGeneratorModelId("");
+                    }
+                  }}
                 >
                   {!catalog.length && <option value="">Select a registered strategy</option>}
                   {catalog.map((s) => (
@@ -1585,6 +1704,8 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
                   onChange={(e) => setSelectedGeneratorModelId(e.target.value)}
                 >
                   <option value="">Select an eligible generator model</option>
+                  {cloneSource && selectedGeneratorModelId && !matchingGeneratorModels.some((model) => model.model_id === selectedGeneratorModelId) &&
+                    <option value={selectedGeneratorModelId}>{selectedGeneratorModelId} (current)</option>}
                   {matchingGeneratorModels.map((m) => (
                     <option key={m.model_id} value={m.model_id}>
                       {m.model_id} ({m.model_type})
@@ -1606,7 +1727,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
                   id="paper-deploy-capital"
                   type="number"
                   min={100}
-                  step={100}
+                  step={cloneSource ? "0.01" : 100}
                   required
                   value={deployCapital}
                   disabled={deployBusy}
@@ -1620,7 +1741,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
                   type="number"
                   min={0.1}
                   max={10.0}
-                  step={0.1}
+                  step={cloneSource ? "0.01" : 0.1}
                   required
                   value={deployRisk}
                   disabled={deployBusy}
@@ -1641,6 +1762,18 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
               </label>
             </div>
 
+            {cloneSource && <>
+              {deployStrategy !== "ml_signal_generator_v1" && <DeploymentModelSelect
+                label="Filter model"
+                disabled={deployBusy}
+                value={cloneFilter}
+                models={filterModels.filter((model) => !model.base_strategy || model.base_strategy === deployStrategy)}
+                onChange={(value) => setCloneFilter(value ?? "")}
+              />}
+              <DeploymentParameters strategy={deployStrategy} value={cloneParams} onChange={setCloneParams} disabled={deployBusy} />
+              <label><input type="checkbox" checked={cloneReport} disabled={deployBusy} onChange={(event) => setCloneReport(event.target.checked)} /> Include in performance reports</label>
+            </>}
+            {modelError && <p className="control-feedback control-error">{modelError}</p>}
             {deployError && (
               <div className="api-error" role="alert" style={{ marginBottom: "14px" }}>
                 <div><p>{deployError}</p></div>
@@ -1658,7 +1791,7 @@ export function PaperTradingPanel({ initialStrategyId, onInitialStrategyApplied,
                   (deployStrategy === "ml_signal_generator_v1" && !selectedGeneratorModelId)
                 }
               >
-                {deployBusy ? "Deploying…" : "Deploy to Paper Trading"}
+                {deployBusy ? "Saving…" : cloneSource ? "Create inactive deployment" : "Deploy to Paper Trading"}
               </button>
             </div>
           </form>

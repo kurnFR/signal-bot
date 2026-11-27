@@ -14,6 +14,7 @@ as live execution.
 import time
 import json
 import logging
+from mysql.connector import IntegrityError
 import re
 import pandas as pd
 import os
@@ -352,6 +353,32 @@ def get_paper_configs(*, include_equity: bool = False) -> List[Dict[str, Any]]:
 _UNSET = object()
 
 
+class PaperDeploymentConflict(ValueError):
+    """Raised when a deployment already exists or has unfinished work."""
+
+
+def _validate_paper_models(strategy_name, ml_model_id, ml_generator_model_id, *, require_generator=True):
+    for field_name, value in (
+        ("ml_model_id", ml_model_id),
+        ("ml_generator_model_id", ml_generator_model_id),
+    ):
+        if value is not None and (
+            not isinstance(value, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", value)
+            or ".." in value
+        ):
+            raise ValueError(f"{field_name} must be a safe model identifier")
+    if ml_model_id and ml_generator_model_id:
+        raise ValueError("a paper config cannot use both an ML filter and a generator model")
+    if strategy_name == "ml_signal_generator_v1" and ml_model_id:
+        raise ValueError("the independent generator strategy cannot use an ML filter model")
+    if strategy_name == "ml_signal_generator_v1" and not ml_generator_model_id and require_generator:
+        raise ValueError("ml_signal_generator_v1 requires ml_generator_model_id")
+    if strategy_name != "ml_signal_generator_v1" and ml_generator_model_id:
+        raise ValueError("ml_generator_model_id is only valid for ml_signal_generator_v1")
+
+
+
 def set_paper_config(
     symbol: str,
     market: str,
@@ -365,6 +392,7 @@ def set_paper_config(
     report_enabled: Optional[bool] = None,
     ml_generator_model_id: Optional[str] = None,
     strategy_params: Any = _UNSET,
+    *, create_only: bool = False,
 ) -> Dict[str, Any]:
     if allocated_capital <= 0:
         raise ValueError("allocated_capital must be positive")
@@ -382,22 +410,7 @@ def set_paper_config(
     ):
         if not isinstance(value, str) or len(value) > max_length:
             raise ValueError(f"{field_name} must be a string of at most {max_length} characters")
-    for field_name, value in (
-        ("ml_model_id", ml_model_id),
-        ("ml_generator_model_id", ml_generator_model_id),
-    ):
-        if value is not None and (
-            not isinstance(value, str)
-            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", value)
-            or ".." in value
-        ):
-            raise ValueError(f"{field_name} must be a safe model identifier")
-    if ml_model_id and ml_generator_model_id:
-        raise ValueError("a paper config cannot use both an ML filter and a generator model")
-    if strategy_name == "ml_signal_generator_v1" and not ml_generator_model_id:
-        raise ValueError("ml_signal_generator_v1 requires ml_generator_model_id")
-    if strategy_name != "ml_signal_generator_v1" and ml_generator_model_id:
-        raise ValueError("ml_generator_model_id is only valid for ml_signal_generator_v1")
+    _validate_paper_models(strategy_name, ml_model_id, ml_generator_model_id)
 
     if strategy_params is _UNSET:
         params_json = None
@@ -414,7 +427,22 @@ def set_paper_config(
     cur = None
     try:
         cur = conn.cursor(dictionary=True)
-        if telegram_enabled is None and report_enabled is None:
+        if create_only:
+            try:
+                cur.execute(
+                    """INSERT INTO paper_configs
+                        (symbol, market, timeframe, strategy_name, is_active,
+                         allocated_capital, risk_per_trade_pct, ml_model_id, ml_generator_model_id,
+                         telegram_enabled, report_enabled, strategy_params)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,COALESCE(%s,0),COALESCE(%s,1),%s)""",
+                    (symbol, market, timeframe, strategy_name, is_active, allocated_capital, risk_per_trade_pct,
+                     ml_model_id, ml_generator_model_id, telegram_enabled, report_enabled, params_json),
+                )
+            except IntegrityError as exc:
+                if exc.errno == 1062:
+                    raise PaperDeploymentConflict("A deployment already uses this symbol, market, timeframe and strategy.") from exc
+                raise
+        elif telegram_enabled is None and report_enabled is None:
             # Legacy callers may update activation/capital without changing the
             # separately configured alert or report visibility preferences.
             cur.execute(
@@ -540,9 +568,11 @@ def set_paper_config(
             conn.close()
 
 
-def update_paper_deployment(config_id: int, **settings: Any) -> bool:
+def update_paper_deployment(config_id: int, *, model_changes: Optional[dict] = None, **settings: Any) -> bool:
     """Patch one deployment by ID without overwriting unrelated preferences."""
-    columns = {"is_active", "allocated_capital", "risk_per_trade_pct", "telegram_enabled", "report_enabled", "strategy_params"}
+    model_columns = ("ml_model_id", "ml_generator_model_id")
+    columns = {"is_active", "allocated_capital", "risk_per_trade_pct", "telegram_enabled",
+               "report_enabled", "strategy_params", *model_columns}
     if not settings or not settings.keys() <= columns:
         raise ValueError("No valid deployment settings provided")
     normalized_settings = dict(settings)
@@ -564,11 +594,50 @@ def update_paper_deployment(config_id: int, **settings: Any) -> bool:
     try:
         conn = get_pool().get_connection()
         try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id FROM paper_configs WHERE id = %s FOR UPDATE", (config_id,))
-                if cur.fetchone() is None:
+            with conn.cursor(dictionary=True) as cur:
+                cur.execute(
+                    """SELECT id, symbol, market, timeframe, strategy_name, is_active,
+                              ml_model_id, ml_generator_model_id
+                       FROM paper_configs WHERE id = %s FOR UPDATE""",
+                    (config_id,),
+                )
+                config = cur.fetchone()
+                if config is None:
                     conn.rollback()
                     return False
+                changes = {
+                    column: {"old": config[column], "new": normalized_settings[column]}
+                    for column in model_columns
+                    if column in normalized_settings and config[column] != normalized_settings[column]
+                }
+                if changes:
+                    filter_id, generator_id = (
+                        normalized_settings.get(column, config[column]) for column in model_columns
+                    )
+                    active = normalized_settings.get("is_active", config["is_active"])
+                    _validate_paper_models(config["strategy_name"], filter_id, generator_id, require_generator=active)
+                    cur.execute(
+                        """SELECT 1 AS unfinished FROM paper_positions
+                           WHERE status='OPEN' AND
+                             (config_id=%s OR (config_id IS NULL AND symbol=%s AND market=%s
+                                                AND timeframe=%s AND strategy_name=%s))
+                           UNION ALL
+                           SELECT 1 FROM paper_orders WHERE config_id=%s AND status='PENDING'
+                           LIMIT 1""",
+                        (config_id, config["symbol"], config["market"], config["timeframe"],
+                         config["strategy_name"], config_id),
+                    )
+                    if cur.fetchone() is not None:
+                        raise PaperDeploymentConflict("Close open positions or cancel pending orders before changing models.")
+                    if active and generator_id:
+                        try:
+                            from ml.generator_artifacts import load_generator_artifact
+                            load_generator_artifact(generator_id, require_eligible=True)
+                        except Exception as exc:
+                            logger.warning("Generator model validation failed (%s)", type(exc).__name__)
+                            raise PaperDeploymentConflict(
+                                "Generator model must pass the current paper-eligibility gate before activation."
+                            ) from exc
                 updates = [f"{column} = %s" for column in normalized_settings]
                 if normalized_settings.get("is_active") is True:
                     updates.append("archived_at = NULL")
@@ -579,6 +648,8 @@ def update_paper_deployment(config_id: int, **settings: Any) -> bool:
                 if settings.get("is_active") is False:
                     _cancel_deployment_orders(cur, config_id, "Deployment paused")
                 conn.commit()
+                if model_changes is not None:
+                    model_changes.update(changes)
                 return True
         except Exception:
             conn.rollback()

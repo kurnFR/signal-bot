@@ -275,6 +275,49 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
     expect(await screen.findByText(/Paper position #7 \(BTCUSDT\) was closed at market price/i)).toBeInTheDocument();
   });
 
+  it("edits a filter model and clones into a new inactive deployment", async () => {
+    const original = { ...baseFixture["/api/paper/configs"].configs[0],
+      strategy_name: "custom_rsi_v1", ml_model_id: "filter-v1", strategy_params: { rsi_thresh: 44 } };
+    const calls: Record<string, unknown> = {};
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      const path = url.pathname + url.search;
+      if (path === "/api/paper/configs/2" && init?.method === "PATCH") {
+        calls.patch = JSON.parse(String(init.body));
+        return json({ status: "success" });
+      }
+      if (path === "/api/paper/configs" && init?.method === "POST") {
+        calls.clone = JSON.parse(String(init.body));
+        return json({ status: "success" });
+      }
+      if (path === "/api/paper/configs") return json({ configs: [original] });
+      if (path === "/api/ml/models") return json({ models: [
+        { model_id: "filter-v1", base_strategy: "custom_rsi_v1", has_weights: true, eligibility: { eligible: true, reasons: [] } },
+        { model_id: "filter-v2", base_strategy: "custom_rsi_v1", has_weights: true, eligibility: { eligible: true, reasons: [] } },
+      ] });
+      return json(baseFixture[path as keyof typeof baseFixture] ?? {}, path in baseFixture ? 200 : 404);
+    }));
+    render(<PaperTradingPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /^Edit$/ }));
+    await screen.findByRole("option", { name: "filter-v2" });
+    fireEvent.change(screen.getByLabelText("Filter model"), { target: { value: "filter-v2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save deployment" }));
+    await waitFor(() => expect(calls.patch).toMatchObject({ ml_model_id: "filter-v2" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Clone as new" }));
+    const modal = screen.getByRole("dialog", { name: "Clone paper deployment" });
+    expect(within(modal).getByLabelText("Allocated Virtual Capital ($)")).toHaveValue(5000);
+    expect(within(modal).getByLabelText("Include in performance reports")).toBeChecked();
+    await within(modal).findByRole("option", { name: "custom_rsi_v1" });
+    fireEvent.change(within(modal).getByLabelText("Timeframe"), { target: { value: "4h" } });
+    fireEvent.click(within(modal).getByRole("button", { name: "Create inactive deployment" }));
+    await waitFor(() => expect(calls.clone).toMatchObject({
+      is_active: false, create_only: true, timeframe: "4h", strategy_name: "custom_rsi_v1",
+      allocated_capital: 5000, risk_per_trade_pct: 1, report_enabled: true, telegram_enabled: false,
+      ml_model_id: "filter-v1", params: { rsi_thresh: 44 },
+    }));
+  });
+
   it("PT-09: deploys paper strategy through modal and displays success feedback", async () => {
     let deployPayload: unknown = null;
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
