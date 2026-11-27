@@ -16,6 +16,15 @@ Both modules are guarded by `tests/test_retailbot2_decoupling.py`, which fails i
 they start importing `paper.retailbot2` again. `paper.retailbot2` re-exports
 `Indicators` and `TelegramAlert` delegates, so nothing else changed.
 
+## Comparing strategy signals
+
+Run `python -m tools.retailbot2_parity 1,2,3,4,5 1 engine` from the repository
+root. The harness compares closed-candle direction and stop/target levels at
+the signal close, including inverse signals. The legacy engine uses the signal
+close as its entry. Paper Trading and Backtest Studio use the following
+candle's open and apply their execution and accounting rules, so filled
+entry prices and realized returns can differ.
+
 ## Intentionally NOT removed yet
 - `paper/retailbot2.py` still hosts the **Telegram outbox store** (`DatabaseManager`
   outbox methods, `OUTBOX_LOCK_NAME`, `format_entry_message/exit`) and its

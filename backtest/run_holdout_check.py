@@ -24,7 +24,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import HOLDOUT_FRACTION, PAIRS_BASE_SYMBOL
 from db.db import fetch_ohlcv_with_features_df, insert_backtest_run, insert_backtest_trades
 from backtest.strategies import STRATEGIES, FUNDING_STRATEGIES
-from backtest.params import BASE_PARAMS, parse_overrides
+from backtest.params import BASE_PARAMS, parse_overrides, retailbot2_param_overrides
+from backtest.strategies.retailbot2_strategies import RETAILBOT2_STRATEGY_NAMES
 from backtest.strategies import TREND_ALIGNMENT_STRATEGIES, PAIRS_STRATEGIES
 from backtest.strategies.trend_alignment import HTF_TIMEFRAME
 from backtest.metrics import compute_metrics
@@ -64,6 +65,8 @@ def main():
         return
 
     overrides = parse_overrides(args.override)
+    if args.strategy in RETAILBOT2_STRATEGY_NAMES:
+        overrides = retailbot2_param_overrides(overrides)
     effective_params = dict(BASE_PARAMS, **overrides)
     if overrides:
         print(f"Using parameter overrides: {overrides}\n")

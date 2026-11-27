@@ -19,6 +19,10 @@ def test_backtest_strategies_do_not_import_retailbot2_worker():
     assert not _imports_retailbot2("import backtest.strategies")
 
 
+def test_retailbot2_strategy_library_does_not_import_retailbot2_worker():
+    assert not _imports_retailbot2("import backtest.strategies.retailbot2_strategies")
+
+
 def test_paper_report_module_is_standalone():
     assert not _imports_retailbot2("import paper.paper_report")
 
