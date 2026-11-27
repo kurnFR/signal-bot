@@ -18,9 +18,9 @@ import os
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger("retailbot2.observability")
+from paper.outbox_store import OUTBOX_LOCK_NAME
 
-OUTBOX_LOCK_NAME = "rdt_outbox_worker_lock"
+logger = logging.getLogger("retailbot2.observability")
 
 # Default monitoring threshold proposals (not production mandate; configurable)
 DEFAULT_PENDING_WARN_COUNT = 50

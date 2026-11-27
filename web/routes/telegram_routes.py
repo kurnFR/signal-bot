@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import Optional
 import logging
-from db.db import get_retailbot2_outbox_counts
+from paper.outbox_store import get_outbox_counts
 from web.auth import require_admin
 from notifications.telegram_notifier import (
     get_telegram_config,
@@ -61,9 +61,9 @@ def get_status(request: Request):
     }
     if role == "admin":
         try:
-            result["outbox"] = get_retailbot2_outbox_counts()
+            result["outbox"] = get_outbox_counts()
         except Exception:
-            logging.getLogger(__name__).exception("RetailBot2 outbox health unavailable")
+            logging.getLogger(__name__).exception("Telegram outbox health unavailable")
             result["outbox"] = None
     return result
 

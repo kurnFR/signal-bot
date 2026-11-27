@@ -28,6 +28,7 @@ PACKAGE_FILES = [
     "deploy/systemd/retailbot2-outbox-worker.service",
     "deploy/env/outbox-worker.env.example",
     "deploy/requirements-worker.txt",
+    "paper/outbox_store.py",
     "paper/outbox_worker.py",
     "paper/outbox_transport.py",
     "paper/outbox_health.py",
@@ -38,6 +39,7 @@ PACKAGE_FILES = [
 
 # Required Python modules
 REQUIRED_MODULES = [
+    "paper.outbox_store",
     "paper.outbox_worker",
     "paper.outbox_transport",
     "paper.outbox_health",
@@ -85,7 +87,9 @@ def check_env_security_defaults() -> Tuple[bool, List[str]]:
             k, v = line.split("=", 1)
             config[k.strip()] = v.strip()
 
-    # Delivery authorization must default to 0
+    # Delivery authorization must default to 0 (master switch + deprecated alias)
+    if config.get("TELEGRAM_DELIVERY_ENABLED") != "0":
+        errors.append(f"TELEGRAM_DELIVERY_ENABLED must be '0', got {config.get('TELEGRAM_DELIVERY_ENABLED')}")
     if config.get("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY") != "0":
         errors.append(f"RETAILBOT2_ALLOW_TELEGRAM_DELIVERY must be '0', got {config.get('RETAILBOT2_ALLOW_TELEGRAM_DELIVERY')}")
 

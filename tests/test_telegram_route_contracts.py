@@ -38,7 +38,7 @@ class TestTelegramRouteContracts(unittest.TestCase):
 
     def test_status_exposes_chat_id_only_to_admin(self):
         config = {"is_configured": True, "chat_id": "-100123456789", "token": "test-token"}
-        with patch("web.routes.telegram_routes.get_retailbot2_outbox_counts", return_value={"PENDING": 2}) as counts, patch("web.routes.telegram_routes.get_telegram_config", return_value=config):
+        with patch("web.routes.telegram_routes.get_outbox_counts", return_value={"PENDING": 2}) as counts, patch("web.routes.telegram_routes.get_telegram_config", return_value=config):
             admin = self._get("/api/telegram/status", "admin")
             trader = self._get("/api/telegram/status", "trader")
             viewer = self._get("/api/telegram/status", "viewer")

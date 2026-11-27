@@ -252,7 +252,7 @@ DROP USER 'retailbot2_obs'@'127.0.0.1';
 
 4. **Mock delivery on test database (`mock_transport_response`)**:
    An isolated integration test mechanism on `signal_bot_test` where the worker claims events and transitions row states based on synthetic in-memory responses without invoking Telegram or external network endpoints.
-5. **Actual Telegram delivery authorization (`RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`)**:
+5. **Actual Telegram delivery authorization (`TELEGRAM_DELIVERY_ENABLED=1` / deprecated `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`)**:
    Authorizes the worker or supervisor to execute the external transport subprocess and transmit HTTP requests to the Telegram Bot API. Standalone worker startup against production fails closed without this flag unless running in `--observation` mode.
 
 ### 4.4 Shadow enqueue decoupling, payload builders, and testing architecture (WO71778)
@@ -558,7 +558,7 @@ Stage G1.1 resolves the operational and safety ambiguities identified during rev
 1. **Unambiguous Observation-Only Service Default:**
    - `deploy/systemd/retailbot2-outbox-worker.service` explicitly specifies `--observation` in `ExecStart`.
    - The packaged service default guarantees that launching the unit cannot claim, acknowledge, retry, dead-letter, or transmit outbox events. In observation mode, the worker performs read-only queue inspection (`inspect_queue()`) on S_lock and never invokes `claim_event()`.
-   - Any transition from observation mode to active delivery mode requires deliberate written authorization, an operator configuration change (e.g. removing `--observation` via a systemd drop-in override), and explicit `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`.
+   - Any transition from observation mode to active delivery mode requires deliberate written authorization, an operator configuration change (e.g. removing `--observation` via a systemd drop-in override), and explicit `TELEGRAM_DELIVERY_ENABLED=1` (or legacy `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`).
    - Verified by `deploy/verify_deployment_package.py` and automated unit tests.
 
 2. **Manual Recovery Claim-Token Fencing & Row Count Verification:**

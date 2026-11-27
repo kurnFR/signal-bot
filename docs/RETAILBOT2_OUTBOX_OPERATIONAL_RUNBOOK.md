@@ -15,7 +15,7 @@ The RetailBot2 system enforces strict separation of privileges across four disti
 | :--- | :--- | :--- | :--- |
 | **Observation Mode** | `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1` | Acquire advisory lock `rdt_outbox_worker_lock`; verify schema; inspect queue totals via `SELECT` | Outbox claiming; updating row status; spawning transport subprocess; sending Telegram messages; inserting trades |
 | **Test / Mock Delivery** | `mock_transport_response` configured on `signal_bot_test` | Claim events; execute mock in-memory response; transition to `sent` or `pending` | Any network/HTTP socket calls; connecting to `crypto_signals`; modifying live trades |
-| **Production Telegram Delivery** | `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1` | Standalone worker daemon claims production events; transmits HTTP requests to Telegram API via isolated subprocess | Automated status resets without confirmation; modifying `rdt_trades` |
+| **Production Telegram Delivery** | `TELEGRAM_DELIVERY_ENABLED=1` (legacy alias `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`) | Standalone worker daemon claims production events; transmits HTTP requests to Telegram API via isolated subprocess | Automated status resets without confirmation; modifying `rdt_trades` |
 | **Live Trading Authorization** | `RETAILBOT2_ALLOW_TRADING=1` | Execute orders on Binance Futures; persist trade rows to `rdt_trades` and update `rdt_strategy_stats` | Live execution without operator approval; production worker does not need or inherit this flag |
 
 > [!CRITICAL]
@@ -48,7 +48,7 @@ Before starting the outbox worker daemon in any environment, verify:
 | `MYSQL_HOST` | All | MariaDB host address (loopback required for observation) | `127.0.0.1` |
 | `MYSQL_PORT` | All | MariaDB port | `3306` |
 | `MYSQL_DATABASE` | All | Target database (`signal_bot_test` or `crypto_signals`) | None (fails closed) |
-| `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY` | Production | Explicit gate to authorize outbound Telegram HTTP requests | Unset / `0` (delivery blocked) |
+| `TELEGRAM_DELIVERY_ENABLED` (alias `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY`) | Production | Explicit master gate to authorize outbound Telegram HTTP requests | Unset / `0` (delivery blocked) |
 | `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED` | Production | Explicit gate to authorize read-only queue observation | Unset / `0` (observation blocked) |
 | `RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER` | Production | Dedicated read-only observation database user | None (no generic fallback) |
 | `RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD` | Production | Dedicated read-only observation database password | None (no generic fallback) |
@@ -265,7 +265,7 @@ python3 deploy/verify_deployment_package.py --json
 
 ### Verification Checks Performed:
 1. **File Presence & Integrity:** Validates SHA-256 checksums of all 9 core deployment artifacts against `deploy/package_manifest.json`.
-2. **Fail-Closed Security Defaults:** Confirms `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0` and `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=0` in environment templates; guarantees zero hardcoded secrets.
+2. **Fail-Closed Security Defaults:** Confirms `TELEGRAM_DELIVERY_ENABLED=0`, `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0`, and `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=0` in environment templates; guarantees zero hardcoded secrets.
 3. **Systemd Unit Directives:** Confirms `KillMode=mixed`, `TimeoutStopSec=15s`, non-root execution (`User=retailbot`), restart limits, and sandboxing directives.
 4. **Python Module Imports:** Tests clean import of `paper.outbox_worker`, `paper.outbox_transport`, `paper.outbox_health`, and `paper.outbox_retention`.
 5. **CLI Entrypoints:** Validates return codes and help flag parsing.
@@ -316,8 +316,8 @@ When authorized for production deployment, operators must execute the rollout in
      - `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1`
      - `RETAILBOT2_PRODUCTION_OBSERVATION_DB_USER=retailbot2_obs`
      - `RETAILBOT2_PRODUCTION_OBSERVATION_DB_PASSWORD=<dedicated_observation_password>`
-     - `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0` (must remain 0; observation never authorizes delivery)
-   - **Delivery Authorization Separation:** Never set `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1` merely to make health checks or observation work. Telegram delivery is an independent stage requiring separate owner authorization, delivery credentials (`retailbot2_dispatcher`), and removal of `--observation` from the systemd unit.
+     - `TELEGRAM_DELIVERY_ENABLED=0` and `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0` (must remain 0; observation never authorizes delivery)
+   - **Delivery Authorization Separation:** Never set `TELEGRAM_DELIVERY_ENABLED=1` (or legacy `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`) merely to make health checks or observation work. Telegram delivery is an independent stage requiring separate owner authorization, delivery credentials (`retailbot2_dispatcher`), and removal of `--observation` from the systemd unit.
 4. **Step 4: Systemd Service Installation & Timeout Verification**
    - Copy `deploy/systemd/retailbot2-outbox-worker.service` to `/etc/systemd/system/`.
    - Run `sudo systemctl daemon-reload`.
@@ -330,7 +330,7 @@ When authorized for production deployment, operators must execute the rollout in
    - Run health snapshot: `python3 -m paper.outbox_worker --database crypto_signals --health --observation`. (Note: health-only inspection on `crypto_signals` requires `--observation` with dedicated observation credentials and never consults delivery credentials or delivery authorization flags).
    - Verify zero outbox row updates and zero outbound HTTP requests for 60 seconds.
 6. **Step 6: Delivery Authorization Cutover (Upon Explicit Owner Approval)**
-   - Update `/etc/retailbot2/outbox-worker.env`: `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`.
+   - Update `/etc/retailbot2/outbox-worker.env`: `TELEGRAM_DELIVERY_ENABLED=1`.
    - Update ExecStart in service unit to remove `--observation`.
    - Reload and restart: `sudo systemctl daemon-reload && sudo systemctl restart retailbot2-outbox-worker.service`.
    - Tail logs: `sudo journalctl -u retailbot2-outbox-worker.service -f`.
@@ -367,6 +367,7 @@ If anomalous behavior, unexpected delivery loops, or operational failures occur,
 4. **Disable Delivery Authorization Switch:**
    In `/etc/retailbot2/outbox-worker.env`, set:
    ```bash
+   TELEGRAM_DELIVERY_ENABLED=0
    RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=0
    ```
 5. **Inspect Affected Processing Events Individually:**

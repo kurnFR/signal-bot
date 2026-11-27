@@ -70,15 +70,24 @@ def _stored_lifecycle_bool(value: Any) -> bool:
     return False
 
 
+_BASE_STRATEGY_IDS = (
+    "RSI_CTR",
+    "MA_WHIP",
+    "SR_TRAP",
+    "MACD_DIV",
+    "BB_REV",
+    "DBL_PAT",
+    "SPIKE_FADE",
+)
+
+
 def _strategy_lifecycle_registry():
     """Build editable rows from executable strategy identities, not a
     hardcoded list of strategies selected for Telegram promotion."""
-    from paper.retailbot2 import StrategyID
-
     rows = []
-    for item in StrategyID:
-        rows.append({"strategy_id": item.value, "mode": "shadow"})
-        rows.append({"strategy_id": f"{item.value}_INV", "mode": "inverse"})
+    for strategy_id in _BASE_STRATEGY_IDS:
+        rows.append({"strategy_id": strategy_id, "mode": "shadow"})
+        rows.append({"strategy_id": f"{strategy_id}_INV", "mode": "inverse"})
     # Composite rows are retained only to let users hide historical aggregate
     # records; new trades are attributed independently.
     rows.extend([

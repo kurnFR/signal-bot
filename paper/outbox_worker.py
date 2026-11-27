@@ -32,9 +32,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import mysql.connector
 
-from paper.retailbot2 import (
+from paper.outbox_store import (
     OUTBOX_LOCK_NAME,
-    DatabaseManager,
+    OutboxStore,
     format_entry_message,
     format_exit_message,
 )
@@ -614,7 +614,7 @@ class OutboxSessionManager:
         self.db_config = db_config
         self.allowed_databases = allowed_databases
         self.s_lock = None
-        self.db_manager = object.__new__(DatabaseManager)
+        self.db_manager = object.__new__(OutboxStore)
         self.db_manager.logger = logger
         self.connected_database = ""
 
@@ -1232,7 +1232,7 @@ def main():
     allowed = ALLOWED_PROD_DATABASES if args.database == "crypto_signals" else ALLOWED_TEST_DATABASES
     if args.database == "crypto_signals" and not args.observation:
         if not is_telegram_delivery_authorized():
-            logger.error("Production outbox requires RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1")
+            logger.error("Production outbox requires TELEGRAM_DELIVERY_ENABLED=1 (or legacy RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1)")
             sys.exit(1)
 
     try:

@@ -5,13 +5,13 @@ import os
 import time
 
 from notifications.telegram_notifier import is_telegram_delivery_authorized
+from paper.outbox_store import OutboxConfig, OutboxStore
 from paper.paper_report import format_paper_report
-from paper.retailbot2 import BotConfig, DatabaseManager
 
 logger = logging.getLogger(__name__)
 
 
-def queue_current_hour(database: DatabaseManager, now: float) -> bool:
+def queue_current_hour(database: OutboxStore, now: float) -> bool:
     """Use a durable hourly key so supervisor restarts cannot duplicate reports."""
     if not is_telegram_delivery_authorized():
         return False
@@ -34,7 +34,7 @@ def main():
         if hour != last_hour:
             try:
                 if database is None or database.pool is None:
-                    database = DatabaseManager(BotConfig(), logger)
+                    database = OutboxStore(OutboxConfig(), logger)
                 if queue_current_hour(database, now):
                     last_hour = hour
                     logger.info("Paper performance report queued for hour %s", hour)

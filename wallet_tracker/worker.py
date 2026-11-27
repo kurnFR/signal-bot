@@ -106,7 +106,7 @@ def dispatch_telegram_alerts(notifier=None):
     if not notifier.delivery_authorized:
         logger.info(
             "Wallet Telegram alerts paused: global delivery authorization missing "
-            "(set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1); alerts remain queued"
+            "(set TELEGRAM_DELIVERY_ENABLED=1); alerts remain queued"
         )
         return 0
     sent = 0

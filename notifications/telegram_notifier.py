@@ -97,15 +97,20 @@ def _safe_http_status(status: Any) -> str:
 def is_telegram_delivery_authorized() -> bool:
     """Returns True only when Telegram delivery is authorized on BOTH layers.
 
-    The environment flag RETAILBOT2_ALLOW_TELEGRAM_DELIVERY is a hard
-    ceiling: when it is not "1", delivery is suppressed no matter what the
-    database setting says. When the ceiling is open, the database setting
-    (Settings UI, app_telegram_settings.delivery_authorized) decides if a
-    row exists; with no DB row the env flag alone decides. Every delivery
-    consumer (notifier, wallet tracker, report scheduler, outbox worker,
-    Screener) must gate on this helper so the layers can never diverge.
+    The environment flag ``TELEGRAM_DELIVERY_ENABLED`` (with deprecated legacy
+    alias ``RETAILBOT2_ALLOW_TELEGRAM_DELIVERY``; either set to ``"1"`` opens the
+    ceiling) is a hard ceiling: when neither is ``"1"``, delivery is suppressed
+    no matter what the database setting says. When the ceiling is open, the
+    database setting (Settings UI, ``app_telegram_settings.delivery_authorized``)
+    decides if a row exists; with no DB row the env flag alone decides. Every
+    delivery consumer (notifier, wallet tracker, report scheduler, outbox
+    worker, Screener) must gate on this helper so the layers can never diverge.
     """
-    if os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() != "1":
+    env_authorized = (
+        os.getenv("TELEGRAM_DELIVERY_ENABLED", "").strip() == "1"
+        or os.getenv("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", "").strip() == "1"
+    )
+    if not env_authorized:
         return False
     db_settings = _get_db_telegram_settings()
     if db_settings and db_settings.get("delivery_authorized") is not None:
@@ -156,12 +161,12 @@ def send_telegram_message(text: str, parse_mode: str = "HTML", max_retries: int 
         clean_preview = text.replace("\n", " | ")
         logger.info(
             "ℹ️ Telegram message suppressed (delivery unauthorized; "
-            "set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1): %s",
+            "set TELEGRAM_DELIVERY_ENABLED=1): %s",
             clean_preview[:300],
         )
         return {
             "success": False,
-            "error": "Telegram delivery is disabled: global authorization missing (set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1)",
+            "error": "Telegram delivery is disabled: global authorization missing (set TELEGRAM_DELIVERY_ENABLED=1)",
             "suppressed": True,
         }
 
@@ -235,11 +240,11 @@ def test_telegram_connection(custom_message: Optional[str] = None) -> Dict[str, 
     if not is_telegram_delivery_authorized():
         logger.info(
             "Telegram connectivity test suppressed: global delivery authorization missing "
-            "(set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1)"
+            "(set TELEGRAM_DELIVERY_ENABLED=1)"
         )
         return {
             "success": False,
-            "error": "Telegram delivery is disabled (authorization missing; set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 to enable)",
+            "error": "Telegram delivery is disabled (authorization missing; set TELEGRAM_DELIVERY_ENABLED=1 to enable)",
             "delivery_authorized": False,
         }
 

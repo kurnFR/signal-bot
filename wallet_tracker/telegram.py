@@ -35,7 +35,7 @@ class WalletTelegramNotifier:
         if not self.delivery_authorized:
             logger.info(
                 "ℹ️ Wallet Telegram delivery is disabled (authorization missing; "
-                "set RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1 to enable delivery)."
+                "set TELEGRAM_DELIVERY_ENABLED=1 to enable delivery)."
             )
 
     @property

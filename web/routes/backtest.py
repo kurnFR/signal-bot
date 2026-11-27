@@ -171,7 +171,7 @@ STRATEGY_METADATA = {
     },
     "BB_REV": {
         "displayName": "Bollinger Band Reversion (Retail)",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Fades price reaching outer Bollinger Bands expecting mean reversion. Classic retail behavior vulnerable to strong trends.",
         "params": [
@@ -183,7 +183,7 @@ STRATEGY_METADATA = {
     },
     "BB_REV_INV": {
         "displayName": "Inverse Bollinger Band Reversion",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Inverts BB_REV. Takes opposite side of retail crowd when price reaches Bollinger Bands to ride momentum breakouts.",
         "params": [
@@ -195,7 +195,7 @@ STRATEGY_METADATA = {
     },
     "DBL_PAT": {
         "displayName": "Double Top / Double Bottom (Retail)",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Enters classic retail double top (short) or double bottom (long) formations.",
         "params": [
@@ -206,7 +206,7 @@ STRATEGY_METADATA = {
     },
     "DBL_PAT_INV": {
         "displayName": "Inverse Double Pattern",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Inverts DBL_PAT. Anticipates retail stop hunts and false breakout traps at double top and bottom levels.",
         "params": [
@@ -217,7 +217,7 @@ STRATEGY_METADATA = {
     },
     "RSI_CTR": {
         "displayName": "RSI Counter-Trend (Retail)",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Fades overbought/oversold RSI extremes without overall trend filter.",
         "params": [
@@ -229,7 +229,7 @@ STRATEGY_METADATA = {
     },
     "RSI_CTR_INV": {
         "displayName": "Inverse RSI Counter-Trend",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Inverts RSI_CTR. Follows strong trend momentum when RSI pushes into extreme territory.",
         "params": [
@@ -241,7 +241,7 @@ STRATEGY_METADATA = {
     },
     "MA_WHIP": {
         "displayName": "MA Crossover Whipsaw (Retail)",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Enters on fast/slow EMA crossovers. Prone to severe whipsaws during ranging markets.",
         "params": [
@@ -252,7 +252,7 @@ STRATEGY_METADATA = {
     },
     "MA_WHIP_INV": {
         "displayName": "Inverse MA Crossover Whipsaw",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Inverts MA_WHIP. Capitalizes on retail whipsaws by fading late MA crosses.",
         "params": [
@@ -263,7 +263,7 @@ STRATEGY_METADATA = {
     },
     "SR_TRAP": {
         "displayName": "S/R Bounce Trap (Retail)",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Buys support and sells resistance blindly without higher-timeframe trend context.",
         "params": [
@@ -274,7 +274,7 @@ STRATEGY_METADATA = {
     },
     "SR_TRAP_INV": {
         "displayName": "Inverse S/R Bounce Trap",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Inverts SR_TRAP. Trades breakdown continuations when support fails and breakout continuations when resistance breaks.",
         "params": [
@@ -285,7 +285,7 @@ STRATEGY_METADATA = {
     },
     "MACD_DIV": {
         "displayName": "MACD Divergence (Retail)",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Fades trends based on MACD histogram divergences.",
         "params": [
@@ -297,7 +297,7 @@ STRATEGY_METADATA = {
     },
     "MACD_DIV_INV": {
         "displayName": "Inverse MACD Divergence",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Inverts MACD_DIV. Exploits false divergence signals in strong trending markets.",
         "params": [
@@ -309,7 +309,7 @@ STRATEGY_METADATA = {
     },
     "SPIKE_FADE": {
         "displayName": "Spike Fade (Retail)",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Fades large volatility expansion candles anticipating immediate mean reversion.",
         "params": [
@@ -319,7 +319,7 @@ STRATEGY_METADATA = {
     },
     "SPIKE_FADE_INV": {
         "displayName": "Inverse Spike Fade",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Inverts SPIKE_FADE. Rides high-momentum breakout candles rather than fading them.",
         "params": [
@@ -329,7 +329,7 @@ STRATEGY_METADATA = {
     },
     "COMPOSITE": {
         "displayName": "Composite Retail Trap Bot",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Combines signals from all retail strategies; trades when majority consensus triggers.",
         "params": [
@@ -338,7 +338,7 @@ STRATEGY_METADATA = {
     },
     "COMPOSITE_INV": {
         "displayName": "Inverse Composite Retail Trap Bot",
-        "category": "RetailBot2 (Research)",
+        "category": "Crowd Contrarian",
         "validated": False,
         "description": "Inverts composite retail consensus. Takes opposite side of combined retail signals.",
         "params": [
