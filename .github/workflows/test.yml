@@ -4,10 +4,10 @@ on:
   push:
     branches: ['**']
   pull_request:
-    branches: [master, feature/market-screener-v2]
+    branches: [master, feature/market-screener-v2, feat/modern-ui-parity-followups]
 
 jobs:
-  pytest:
+  mariadb-integration:
     # The full suite exceeded the previous 15-minute job limit without
     # producing a failure report. Allow enough time to finish and emit
     # per-test timing so slow or blocked tests can be identified.
@@ -17,7 +17,8 @@ jobs:
       mariadb:
         image: mariadb:10.11
         env:
-          MARIADB_ROOT_PASSWORD: signal_bot_test_root
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "1"
+          MARIADB_ROOT_HOST: localhost
           MARIADB_DATABASE: signal_bot_test
         ports:
           - 3306:3306
@@ -29,12 +30,13 @@ jobs:
     env:
       MYSQL_HOST: 127.0.0.1
       MYSQL_PORT: 3306
-      MYSQL_USER: root
-      MYSQL_PASSWORD: signal_bot_test_root
+      MYSQL_USER: signal_bot_ci
       MYSQL_DATABASE: signal_bot_test
       SIGNAL_BOT_RUN_RETAILBOT2_DB_INTEGRATION: "1"
-      SIGNAL_BOT_TEST_DB_USER: signal_bot_test
-      SIGNAL_BOT_TEST_DB_PASSWORD: disposable_recovery_tests
+      SIGNAL_BOT_TEST_DB_HOST: 127.0.0.1
+      SIGNAL_BOT_TEST_DB_PORT: 3306
+      WALLET_TRACKER_MARIADB_TESTS: "1"
+      PAPER_ORDERS_MARIADB_TESTS: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,7 +48,34 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt pytest pytest-timeout==2.3.1
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Provision isolated database credentials
+        env:
+          MARIADB_CONTAINER: ${{ job.services.mariadb.id }}
+          SIGNAL_BOT_TEST_DB_USER: ${{ secrets.SIGNAL_BOT_TEST_DB_USER }}
+          SIGNAL_BOT_TEST_DB_PASSWORD: ${{ secrets.SIGNAL_BOT_TEST_DB_PASSWORD }}
+        run: |
+          set -eu
+          migration_password=$(openssl rand -hex 32)
+          # Forks and repositories without CI secrets still get a fresh test identity.
+          test_user=${SIGNAL_BOT_TEST_DB_USER:-signal_bot_test}
+          test_password=${SIGNAL_BOT_TEST_DB_PASSWORD:-$(openssl rand -hex 32)}
+          if [[ ! "$test_user" =~ ^[a-zA-Z0-9_]{1,32}$ || "$test_user" == root || "$test_user" == cms || "$test_user" == signal_bot_ci || "$test_password" == *$'\n'* || "$test_password" == *$'\r'* ]]; then
+            echo "Invalid isolated database credentials" >&2
+            exit 1
+          fi
+          echo "::add-mask::$migration_password"
+          echo "::add-mask::$test_password"
+          docker exec -i "$MARIADB_CONTAINER" mariadb --protocol=socket -uroot <<SQL
+          CREATE USER 'signal_bot_ci'@'%' IDENTIFIED BY '$migration_password';
+          GRANT ALL PRIVILEGES ON *.* TO 'signal_bot_ci'@'%' WITH GRANT OPTION;
+          SQL
+          {
+            printf 'MYSQL_PASSWORD=%s\n' "$migration_password"
+            printf 'SIGNAL_BOT_TEST_DB_USER=%s\n' "$test_user"
+            printf 'SIGNAL_BOT_TEST_DB_PASSWORD=%s\n' "$test_password"
+          } >> "$GITHUB_ENV"
 
       - name: Apply migrations to isolated test database
         run: python -m db.migrate
@@ -55,14 +84,19 @@ jobs:
         run: |
           python - <<'PY'
           import os
+          import re
           import secrets
           from db.db import get_pool
           from web.auth import hash_password
 
+          test_user = os.environ["SIGNAL_BOT_TEST_DB_USER"]
+          if not re.fullmatch(r"[A-Za-z0-9_]{1,32}", test_user):
+              raise ValueError("Invalid isolated database username")
+          account = f"'{test_user}'@'%'"
           conn = get_pool().get_connection()
           try:
               cur = conn.cursor()
-              cur.execute("CREATE USER 'signal_bot_test'@'%' IDENTIFIED BY %s",
+              cur.execute(f"CREATE USER {account} IDENTIFIED BY %s",
                           (os.environ["SIGNAL_BOT_TEST_DB_PASSWORD"],))
               for table, privileges in (("ohlcv", "SELECT, INSERT, UPDATE, DELETE"),
                                         ("funding_rate", "SELECT, INSERT, UPDATE"),
@@ -74,9 +108,9 @@ jobs:
                                         ("rdt_strategy_stats", "SELECT, INSERT, UPDATE, DELETE"),
                                         ("users", "SELECT, INSERT, UPDATE, DELETE"),
                                         ("audit_logs", "SELECT, INSERT, DELETE")):
-                  cur.execute(f"GRANT {privileges} ON signal_bot_test.{table} TO 'signal_bot_test'@'%'")
+                  cur.execute(f"GRANT {privileges} ON signal_bot_test.{table} TO {account}")
               # The concurrency regression observes the waiting transaction in this disposable service.
-              cur.execute("GRANT PROCESS ON *.* TO 'signal_bot_test'@'%'")
+              cur.execute(f"GRANT PROCESS ON *.* TO {account}")
               cur.execute(
                   """
                   INSERT INTO users
@@ -100,4 +134,4 @@ jobs:
       - name: Run test suite
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-        run: python -m pytest -vv --durations=25 --timeout=120
+        run: python -m pytest -q tests --durations=25 --timeout=120
