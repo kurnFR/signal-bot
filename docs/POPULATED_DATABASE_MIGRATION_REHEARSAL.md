@@ -114,3 +114,33 @@ Record in a restricted change ticket:
 - Operator, reviewer, date, and explicit pass/fail decision.
 
 **Pass** only when expected schema and data invariants hold, deviations are resolved or formally accepted, and the database owner/reviewer signs off. Otherwise mark **fail / blocked**, preserve evidence, and do not proceed to production.
+
+## Inventory evidence for the isolated copy
+
+Use `python -m tools.rehearsal_inventory snapshot --out "$REHEARSAL_OUT/before.json"`
+before migration and write a separate `after.json` afterward. Evidence files
+must stay outside Git worktrees. The tool requires a database whose name
+starts with `signal_bot_rehearsal_`. Loopback is allowed by default. Use
+`--allow-host` only for an explicitly approved rehearsal host. Use an account
+with read-only grants.
+
+An expected-changes file names exact per-table differences and migration
+additions. For an already tracked database starting at migration 037, review
+the following plan before use:
+
+```json
+{
+  "tables": {
+    "custom_strategies": ["added"],
+    "news_ai_settings": ["schema"],
+    "schema_migrations": ["rows", "content_hash"]
+  },
+  "migrations_added": ["038_custom_strategies", "039_news_ai_runtime_controls"]
+}
+```
+
+The migration journal is separately checked for unchanged existing checksums.
+The News AI content fingerprint uses the original settings columns so the
+added nullable columns do not mask changes to existing settings. All other
+tables use all columns. Collect counts from this inventory and retain the
+results in the restricted change ticket.
