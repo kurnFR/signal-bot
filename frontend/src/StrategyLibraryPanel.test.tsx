@@ -19,6 +19,8 @@ describe("read-only strategy library", () => {
     expect(screen.getByText("rsi < 30")).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Indicator catalog" })).toBeInTheDocument();
     expect(screen.getByText("RSI (14)")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Indicator$/ }));
+    expect(screen.getByRole("columnheader", { name: "Indicator" })).toHaveAttribute("aria-sort", "ascending");
     expect(await screen.findByRole("heading", { name: "Strategy catalog" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);

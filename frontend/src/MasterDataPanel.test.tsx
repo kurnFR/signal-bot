@@ -44,7 +44,9 @@ describe("MasterDataPanel", () => {
   it("filters datasets by symbol, market, or timeframe", async () => {
     render(<MasterDataPanel />);
     await screen.findByText("BTCUSDT");
-    fireEvent.change(screen.getByRole("textbox", { name: "Filter datasets" }), { target: { value: "ETH" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Candles$/ }));
+    expect(screen.getByRole("columnheader", { name: "Candles" })).toHaveAttribute("aria-sort", "ascending");
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter datasets" }), { target: { value: "ETH" } });
     expect(screen.getByText("No datasets match this filter.")).toBeInTheDocument();
   });
 

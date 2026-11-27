@@ -42,7 +42,9 @@ describe("NewsAIPanel", () => {
   it("filters signals by headline and symbol", async () => {
     render(<NewsAIPanel />);
     await screen.findByText("Bitcoin market update");
-    const input = screen.getByRole("textbox", { name: "Filter News AI signals" });
+    fireEvent.click(screen.getByRole("button", { name: /^Confidence$/ }));
+    expect(screen.getByRole("columnheader", { name: "Confidence" })).toHaveAttribute("aria-sort", "ascending");
+    const input = screen.getByRole("searchbox", { name: "Filter News AI signals" });
     fireEvent.change(input, { target: { value: "ETH" } });
     expect(screen.queryByText("Bitcoin market update")).not.toBeInTheDocument();
     expect(screen.getByText("No signals match this filter.")).toBeInTheDocument();
