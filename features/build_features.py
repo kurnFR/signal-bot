@@ -13,6 +13,7 @@ Usage:
     python3 -m features.build_features --symbol BTCUSDT --timeframe 1h
 """
 import argparse
+from concurrent.futures import CancelledError
 import logging
 import sys
 import os
@@ -56,15 +57,19 @@ def call_with_retry(fn, description, attempts=3):
     for attempt in range(1, attempts + 1):
         try:
             return fn()
+        except CancelledError:
+            raise
         except Exception as e:
             last_err = e
-            logger.warning(f"{description}: attempt {attempt}/{attempts} failed ({e}), retrying...")
+            logger.warning("%s: attempt %d/%d failed (%s)", description, attempt, attempts, type(e).__name__)
             time.sleep(1.5 * attempt)
     raise last_err
 
 
-def build_one(symbol, market, timeframe):
+def build_one(symbol, market, timeframe, *, checkpoint=None):
     desc = f"{symbol} {market} {timeframe}"
+    if checkpoint is not None:
+        checkpoint()
     df = call_with_retry(lambda: fetch_ohlcv_df(symbol, market, timeframe, closed_only=True), f"{desc} fetch")
     min_required = max(RSI_WINDOW, MACD_SLOW, ATR_PERIOD, VOLUME_SMA_PERIOD, HTF_S_R_LOOKBACK_BARS) + 1
     if len(df) < min_required:
@@ -74,6 +79,8 @@ def build_one(symbol, market, timeframe):
         )
         return 0
 
+    if checkpoint is not None:
+        checkpoint()
     feats = compute_all_features(df, PARAMS)
     feats["open_time"] = df["open_time"].values
 
@@ -84,7 +91,10 @@ def build_one(symbol, market, timeframe):
             *[r[c] for c in FEATURE_COLUMNS],
         ))
 
-    call_with_retry(lambda: upsert_features(rows), f"{desc} upsert")
+    if checkpoint is None:
+        call_with_retry(lambda: upsert_features(rows), f"{desc} upsert")
+    else:
+        call_with_retry(lambda: upsert_features(rows, checkpoint=checkpoint), f"{desc} upsert")
     return len(rows)
 
 

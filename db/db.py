@@ -477,7 +477,7 @@ def fetch_ohlcv_df(symbol, market, timeframe, closed_only=True):
     return df
 
 
-def upsert_features(rows, batch_size=2000):
+def upsert_features(rows, batch_size=2000, *, checkpoint=None):
     """
     rows: list of tuples matching the features table column order
     (symbol, market, timeframe, open_time, rsi, macd, macd_signal, macd_hist,
@@ -515,15 +515,13 @@ def upsert_features(rows, batch_size=2000):
     ]
 
     conn = get_pool().get_connection()
-    try:
-        cur = conn.cursor()
+    with _owned_cursor(conn) as cur:
         for i in range(0, len(clean_rows), batch_size):
+            if checkpoint is not None:
+                checkpoint()
             chunk = clean_rows[i:i + batch_size]
             cur.executemany(sql, chunk)
             conn.commit()
-        cur.close()
-    finally:
-        conn.close()
 
 
 def fetch_ohlcv_with_features_df(symbol, market, timeframe, closed_only=True, include_funding=False, limit=None):

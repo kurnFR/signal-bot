@@ -71,6 +71,7 @@ export interface MasterDataJob {
   timeframe: string; status: string; progress: number; message?: string;
   error?: string | null; created_at?: number | string; updated_at?: number | string;
   candles_fetched?: number;
+  can_cancel?: boolean;
 }
 export interface MasterDataSnapshot {
   summary: CoverageSummary; coverage: CoverageRow[]; jobs: MasterDataJob[];
@@ -110,6 +111,7 @@ function validMasterDataJob(value: unknown): value is MasterDataJob {
   for (const key of ["id", "job_id"] as const) {
     if (value[key] !== undefined && typeof value[key] !== "string") return false;
   }
+  if (value.can_cancel !== undefined && typeof value.can_cancel !== "boolean") return false;
   if (value.message !== undefined && typeof value.message !== "string") return false;
   if (value.error !== undefined && value.error !== null && typeof value.error !== "string") return false;
   if (value.created_at !== undefined && !validJobTimestamp(value.created_at)) return false;
@@ -127,15 +129,23 @@ export async function fetchDatasetCoverage(signal?: AbortSignal): Promise<Omit<M
   return { summary: coverage.summary, coverage: coverage.coverage };
 }
 
-export async function fetchMasterDataSnapshot(signal?: AbortSignal): Promise<MasterDataSnapshot> {
-  const [coverage, jobs] = await Promise.all([
-    fetchDatasetCoverage(signal),
-    getJson<unknown>("/api/master-data/jobs", signal),
-  ]);
+export async function fetchMasterDataJobs(signal?: AbortSignal): Promise<MasterDataJob[]> {
+  const jobs = await getJson<unknown>("/api/master-data/jobs", signal);
   if (!isRecord(jobs) || !Array.isArray(jobs.jobs) || !jobs.jobs.every(validMasterDataJob)) {
     throw new Error("Master Data jobs returned an invalid response");
   }
-  return { ...coverage, jobs: jobs.jobs };
+  return jobs.jobs;
+}
+
+export async function fetchMasterDataSnapshot(signal?: AbortSignal): Promise<MasterDataSnapshot> {
+  const [coverage, jobs] = await Promise.all([fetchDatasetCoverage(signal), fetchMasterDataJobs(signal)]);
+  return { ...coverage, jobs };
+}
+
+export async function cancelMasterDataJob(jobId: string): Promise<MasterDataJob> {
+  const job = await apiRequest<unknown>(`/api/master-data/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+  if (!validMasterDataJob(job)) throw new Error("Master Data returned an invalid job response");
+  return job;
 }
 
 export interface BackfillInput {

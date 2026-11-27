@@ -316,6 +316,8 @@ def _role_allowed(method: str, path: str, role: str) -> bool:
         return role == "admin"
     if _is_prefix(path, ADMIN_ONLY_PREFIXES):
         return role == "admin"
+    if method.upper() == "POST" and _matches_route_template(path, ("/api/master-data/jobs/{job_id}/cancel",)):
+        return role in ("admin", "trader")
     if _is_prefix(path, ADMIN_OR_TRADER_PREFIXES):
         return role in ("admin", "trader")
     if _is_prefix(path, TRADER_OR_ADMIN_PREFIXES) and method.upper() != "GET":

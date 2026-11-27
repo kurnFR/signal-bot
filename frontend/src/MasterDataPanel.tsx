@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "./AuthGate";
 import { ArrowRight, Database, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { ApiError } from "./lib/api";
-import { fetchMasterDataSnapshot, fetchPopularCrypto, searchCryptoSymbols, MasterDataActionError, triggerMasterDataBackfill, triggerMasterDataFeatureBuild, deleteMasterDataset, type DeleteDatasetInput, type CryptoMarketTicker, type MasterDataSnapshot } from "./lib/masterData";
+import { cancelMasterDataJob, fetchMasterDataJobs, fetchMasterDataSnapshot, fetchPopularCrypto, searchCryptoSymbols, MasterDataActionError, triggerMasterDataBackfill, triggerMasterDataFeatureBuild, deleteMasterDataset, type DeleteDatasetInput, type CryptoMarketTicker, type MasterDataSnapshot } from "./lib/masterData";
 
 const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 function num(value: number | null | undefined) {
@@ -41,6 +41,8 @@ export function MasterDataPanel() {
   const [popularAttempt, setPopularAttempt] = useState(0);
   const auth = useAuth();
   const isAdmin = (auth?.user.role ?? "").toLowerCase() === "admin";
+  const [pendingCancel, setPendingCancel] = useState<string | null>(null);
+  const [jobRefreshError, setJobRefreshError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<DeleteDatasetInput | null>(null);
   const canManageJobs = ["admin", "trader"].includes((auth?.user.role ?? "").toLowerCase());
   const [backfillSymbol, setBackfillSymbol] = useState("BTCUSDT");
@@ -81,6 +83,28 @@ export function MasterDataPanel() {
     return () => controller.abort();
   }, [popularAttempt]);
 
+  const hasLiveJobs = data?.jobs.some((job) => ["queued", "running", "cancelling"].includes(job.status)) ?? false;
+  useEffect(() => {
+    if (!hasLiveJobs || loading || actionBusy) return;
+    const controller = new AbortController();
+    let timer: number;
+    const poll = async () => {
+      try {
+        const jobs = await fetchMasterDataJobs(controller.signal);
+        if (!controller.signal.aborted) {
+          setData((previous) => previous && { ...previous, jobs });
+          setJobRefreshError(null);
+        }
+      } catch (cause) {
+        if (!controller.signal.aborted) setJobRefreshError(errorMessage(cause));
+      } finally {
+        if (!controller.signal.aborted) timer = window.setTimeout(poll, 3000);
+      }
+    };
+    timer = window.setTimeout(poll, 3000);
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [hasLiveJobs, loading, actionBusy]);
+
   const coverage = useMemo(() => (data?.coverage ?? []).filter((row) => {
     const needle = filter.trim().toLowerCase();
     return !needle || [row.symbol, row.market, row.timeframe].some((part) => part.toLowerCase().includes(needle));
@@ -110,6 +134,25 @@ export function MasterDataPanel() {
     if (!Number.isFinite(years) || years < 0.05 || years > 10) { setActionError("Backfill years must be between 0.05 and 10."); return; }
     setActionError(null); setActionMessage(null);
     setPendingAction({ kind: "backfill", symbol, market: backfillMarket, timeframe: backfillTimeframe, years, auto_compute_features: autoComputeFeatures });
+  };
+
+  const confirmCancel = async () => {
+    if (pendingCancel === null) return;
+    setActionBusy(true);
+    setActionError(null);
+    setActionMessage(null);
+    try {
+      const job = await cancelMasterDataJob(pendingCancel);
+      setData((previous) => previous && {
+        ...previous,
+        jobs: previous.jobs.map((row) => row.id === pendingCancel ? job : row),
+      });
+      setPendingCancel(null);
+    } catch (cause) {
+      setActionError(cause instanceof ApiError ? cause.detail || cause.message : "Could not cancel the job.");
+    } finally {
+      setActionBusy(false);
+    }
   };
 
   const confirmDelete = async () => {
@@ -191,9 +234,38 @@ export function MasterDataPanel() {
       <label className="filter-field">Filter datasets <input aria-label="Filter datasets" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Symbol, market, timeframe…" /></label>
       {coverage.length ? <div className="table-scroll"><table><thead><tr><th>Symbol</th><th>Market</th><th>Timeframe</th><th>Candles</th><th>Features</th><th>First date</th><th>Last date</th>{canManageJobs && <th>Actions</th>}</tr></thead><tbody>{coverage.map((row) => <tr key={row.symbol + row.market + row.timeframe}><td>{row.symbol}</td><td>{row.market}</td><td>{row.timeframe}</td><td>{num(row.candleCount)}</td><td>{row.hasFeatures ? "Available" : "Missing"} ({num(row.featureCount)})</td><td>{dateLabel(row.startDate)}</td><td>{dateLabel(row.endDate)}</td>{canManageJobs && <td>{(row.market === "spot" || row.market === "futures") && <button className="button button-secondary" type="button" disabled={actionBusy || loading} onClick={() => { setActionError(null); setActionMessage(null); setPendingAction({ kind: "features", symbol: row.symbol, market: row.market as "spot" | "futures", timeframe: row.timeframe }); }}>Build features</button>}{isAdmin && (row.market === "spot" || row.market === "futures") && <>{" "}<button className="button button-secondary" type="button" disabled={actionBusy || loading} onClick={() => setPendingDelete({ symbol: row.symbol, market: row.market as "spot" | "futures", timeframe: row.timeframe, scope: "features" })}>Delete features {row.symbol} {row.market} {row.timeframe}</button>{" "}<button className="button button-danger" type="button" disabled={actionBusy || loading} onClick={() => setPendingDelete({ symbol: row.symbol, market: row.market as "spot" | "futures", timeframe: row.timeframe, scope: "all" })}>Delete dataset {row.symbol} {row.market} {row.timeframe}</button></>}</td>}</tr>)}</tbody></table></div> : <p className="empty-state">{loading ? "Loading datasets…" : "No datasets match this filter."}</p>}
     </section>
-    <section className="panel" aria-labelledby="master-jobs-title"><div className="panel-heading"><div><h2 id="master-jobs-title">Recent background jobs</h2><p>Read-only job history; no job is started or resumed here.</p></div><span className="panel-counter">{data?.jobs.length ?? 0} ROWS</span></div>
-      {data?.jobs.length ? <div className="table-scroll"><table><thead><tr><th>Job</th><th>Dataset</th><th>Status</th><th>Progress</th><th>Created</th><th>Message</th></tr></thead><tbody>{data.jobs.map((row, index) => <tr key={row.id ?? row.job_id ?? index}><td>{row.type}</td><td>{[row.symbol, row.market, row.timeframe].filter(Boolean).join(" · ") || "—"}</td><td>{row.status}</td><td>{typeof row.progress === "number" ? num(row.progress) + "%" : "—"}</td><td>{jobDate(row.created_at)}</td><td>{row.message ?? row.error ?? "—"}</td></tr>)}</tbody></table></div> : <p className="empty-state">{loading ? "Loading jobs…" : "No recent background jobs returned."}</p>}
+    <section className="panel" aria-labelledby="master-jobs-title">
+      <div className="panel-heading"><h2 id="master-jobs-title">Recent background jobs</h2></div>
+      {jobRefreshError && <p className="api-error" role="alert">{jobRefreshError}</p>}
+      {data?.jobs.length ? (
+        <div className="table-scroll"><table>
+          <thead><tr><th>Job</th><th>Dataset</th><th>Status</th><th>Progress</th><th>Created</th><th>Message</th>{canManageJobs && <th>Action</th>}</tr></thead>
+          <tbody>{data.jobs.map((row, index) => (
+            <tr key={row.id ?? row.job_id ?? index}>
+              <td>{row.type}</td>
+              <td>{[row.symbol, row.market, row.timeframe].filter(Boolean).join(" · ") || "—"}</td>
+              <td><span className={row.status === "cancelling" ? "badge badge-warn" : "badge"}>{row.status}</span></td>
+              <td>{typeof row.progress === "number" ? num(row.progress) + "%" : "—"}</td>
+              <td>{jobDate(row.created_at)}</td>
+              <td>{row.message ?? row.error ?? "—"}</td>
+              {canManageJobs && <td>{row.id && row.can_cancel && (
+                <button className="button button-secondary" type="button" disabled={actionBusy} onClick={() => setPendingCancel(row.id ?? null)}>
+                  Cancel job {row.id}
+                </button>
+              )}</td>}
+            </tr>
+          ))}</tbody>
+        </table></div>
+      ) : <p className="empty-state">{loading ? "Loading jobs…" : "No recent background jobs returned."}</p>}
     </section>
+    {pendingCancel && (
+      <section className="panel" aria-labelledby="master-cancel-confirm-title">
+        <h2 id="master-cancel-confirm-title">Cancel job {pendingCancel}?</h2>
+        <p>The job stops between batches. Completed batches are kept.</p>
+        <button className="button button-secondary" type="button" disabled={actionBusy} onClick={() => setPendingCancel(null)}>Keep running</button>{" "}
+        <button className="button button-danger" type="button" disabled={actionBusy} onClick={() => void confirmCancel()}>Confirm cancellation</button>
+      </section>
+    )}
     {pendingAction && <section className="panel" aria-labelledby="master-action-confirm-title">
       <div className="panel-heading"><div><h2 id="master-action-confirm-title">Confirm {pendingAction.kind === "backfill" ? "backfill" : "feature build"}</h2><p>This starts a background job and may write to the database. Review the details before continuing.</p></div></div>
       <p><strong>Dataset:</strong> {[pendingAction.symbol, pendingAction.market, pendingAction.timeframe].join(" · ")}</p>

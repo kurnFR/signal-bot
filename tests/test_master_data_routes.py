@@ -3,6 +3,7 @@
 All database/job state is mocked; these tests must never start backfills,
 feature builders, or call Binance.
 """
+import threading
 import unittest
 from datetime import datetime
 from unittest.mock import patch
@@ -10,6 +11,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from web.app import app
+from web.routes import master_data
 
 
 def user(role):
@@ -122,6 +124,71 @@ class TestMasterDataReadContracts(unittest.TestCase):
         self.assertEqual([job["id"] for job in response.json()["jobs"]], ["live-1", "stored-1"])
         self.assertEqual(response.json()["jobs"][0]["progress"], 45.0)
         self.assertEqual(response.json()["jobs"][1]["status"], "interrupted")
+
+
+class TestMasterDataCancellation(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(app, raise_server_exceptions=False)
+
+    def post_cancel(self, job_id, role="trader"):
+        with patch("web.app.authenticate_request", return_value=user(role)):
+            return self.client.post(f"/api/master-data/jobs/{job_id}/cancel")
+
+    def test_cancel_finishes_current_batch_and_idempotent_rerun(self):
+        jobs = {"job-1": {"id": "job-1", "status": "queued", "cancel_event": threading.Event()}}
+        stored = {}
+        batch_fetches = []
+        cancel_response = []
+
+        def fetch_batch(url, symbol, timeframe, cursor, end_ms):
+            if not batch_fetches:
+                batch_fetches.append(cursor + 60_000)
+            return [[batch_fetches[0]]] if cursor <= batch_fetches[0] else [[batch_fetches[0] + 1]]
+
+        def write_batch(rows):
+            stored.update((row[0], row) for row in rows)
+            if not cancel_response:
+                cancel_response.append(self.post_cancel("job-1"))
+
+        with (
+            patch.object(master_data, "JOBS", jobs),
+            patch.object(master_data, "KLINE_FETCH_LIMIT", 1),
+            patch.object(master_data, "fetch_klines", side_effect=fetch_batch) as fetch,
+            patch.object(master_data, "klines_to_rows", side_effect=lambda *args: args[-1]),
+            patch.object(master_data, "upsert_ohlcv", side_effect=write_batch),
+            patch.object(master_data.time, "sleep"),
+            patch.object(master_data, "_persist"),
+            patch.object(master_data, "log_audit") as audit,
+        ):
+            master_data._run_backfill_job("job-1", "BTCUSDT", "spot", "1h", 0.1, False)
+            self.assertEqual(fetch.call_count, 1)
+            self.assertEqual(cancel_response[0].status_code, 202)
+            self.assertEqual(cancel_response[0].json()["status"], "cancelling")
+            self.assertNotIn("cancel_event", cancel_response[0].json())
+            self.assertEqual(jobs["job-1"]["status"], "cancelled")
+            self.assertEqual(len(stored), 1)
+            audit.assert_called_once()
+
+            jobs["job-2"] = {"id": "job-2", "status": "queued", "cancel_event": threading.Event()}
+            fetch.side_effect = [[[batch_fetches[0]]], [[batch_fetches[0] + 1]], []]
+            master_data._run_backfill_job("job-2", "BTCUSDT", "spot", "1h", 0.1, False)
+            self.assertEqual(jobs["job-2"]["status"], "completed")
+            self.assertEqual(len(stored), 2)
+
+    def test_cancel_denies_viewer_and_distinguishes_finished_remote_and_missing_jobs(self):
+        stored = {"id": "remote", "status": "interrupted"}
+        live = {"done": {"id": "done", "status": "completed"}}
+        with (
+            patch.object(master_data, "JOBS", live),
+            patch.object(master_data.job_store, "load_job", side_effect=({"remote": stored}).get),
+            patch.object(master_data, "log_audit") as audit,
+        ):
+            self.assertEqual(self.post_cancel("done", "viewer").status_code, 403)
+            self.assertEqual(self.post_cancel("done").status_code, 409)
+            self.assertEqual(self.post_cancel("remote").status_code, 409)
+            self.assertEqual(self.post_cancel("missing").status_code, 404)
+            self.assertEqual(stored["status"], "interrupted")
+            audit.assert_not_called()
 
 
 if __name__ == "__main__":
