@@ -144,3 +144,18 @@ The News AI content fingerprint uses the original settings columns so the
 added nullable columns do not mask changes to existing settings. All other
 tables use all columns. Collect counts from this inventory and retain the
 results in the restricted change ticket.
+
+### Outbox status on the isolated copy
+
+Run `python -m tools.outbox_status` with the same read-only rehearsal
+connection. The output provides queue counts, due count, lock state, pause
+switches, and heartbeat ages. It excludes bot credentials, chat IDs, event
+payloads, and free-form worker details.
+
+The authorization reason previews the production policy using the CLI's
+environment and the rehearsal database's saved setting. The deployed worker
+CLI accepts only its existing test and production database names. A
+`signal_bot_rehearsal_` name is outside that allowlist. Use the approved
+isolated `signal_bot_test` harness and its simulated transport for the worker
+portion. Treat this status output as a snapshot of the copied database,
+separate from evidence of claim behavior in the worker harness.
