@@ -1400,7 +1400,7 @@ class TestDashboardTableColumnHeaderScopes(unittest.TestCase):
     def test_every_static_table_header_declares_column_scope(self):
         html = INDEX_HTML.read_text(encoding="utf-8")
         headers = re.findall(r'<th\b([^>]*)>', html, flags=re.IGNORECASE)
-        self.assertEqual(len(headers), 160)
+        self.assertEqual(len(headers), 171)
         for index, attrs in enumerate(headers):
             with self.subTest(header_index=index):
                 self.assertRegex(attrs, r'\bscope="col"')
@@ -1572,3 +1572,21 @@ class TestSidebarCollapseAndPaperTradesPricing(unittest.TestCase):
         self.assertIn("t.entry_price", app_js)
         self.assertIn("t.exit_price", app_js)
         self.assertIn('colspan="10"', app_js)
+
+    def test_per_strategy_paper_performance_has_pair_drilldown_and_sortable_headers(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        self.assertIn('id="paper-strategy-performance-table"', html)
+        self.assertIn('id="paper-strategy-pair-detail"', html)
+        self.assertIn('id="paper-strategy-pair-table"', html)
+        self.assertIn('id="paper-strategy-pair-body"', html)
+        self.assertIn('class="w-full text-left custom-table"', html)
+
+        app_js = APP_JS.read_text(encoding="utf-8")
+        self.assertIn("_groupPaperStrategyMetrics(", app_js)
+        self.assertIn("_renderPaperStrategyPairDetail(", app_js)
+        self.assertIn("selectedPaperStrategyKey", app_js)
+        self.assertIn("DashboardTableSort.reapply", app_js)
+        self.assertIn("data-sort-value=", app_js)
+
+        enhancements_js = DASHBOARD_ENHANCEMENTS_JS.read_text(encoding="utf-8")
+        self.assertIn("window.DashboardTableSort = { reapply: reapplyTableSort }", enhancements_js)

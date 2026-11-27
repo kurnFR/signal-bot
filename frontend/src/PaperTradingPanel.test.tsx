@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { PaperTradingPanel } from "./PaperTradingPanel";
+import type { PaperMetrics } from "./lib/paperTrading";
 
 const mockUseAuth = vi.fn();
 vi.mock("./AuthGate", () => ({
@@ -855,5 +856,166 @@ describe("Paper Trading Actions (PT-07 – PT-10) with RBAC", () => {
     fireEvent.click(syncBtn);
     await waitFor(() => expect(syncCalled).toBe(true));
     expect(await screen.findByText(/Paper trading market tick synced and evaluated\./i)).toBeInTheDocument();
+  });
+
+  it("aggregates strategy performance, supports sorting all headers, and shows clickable per-pair detail", async () => {
+    const fixtures = structuredClone(baseFixture) as typeof baseFixture & {
+      "/api/paper/metrics": { metrics: PaperMetrics };
+    };
+    fixtures["/api/paper/metrics"].metrics.byStrategy = [
+      {
+        strategy: "BB_REV_INV",
+        symbol: "BTCUSDT",
+        market: "spot",
+        timeframe: "1h",
+        configId: 15,
+        totalTrades: 4,
+        wins: 2,
+        losses: 2,
+        winRatePct: 50,
+        cumulativeR: 0.4645,
+        expectancyR: 0.1161,
+        netPnl: 23.22,
+      },
+      {
+        strategy: "BB_REV_INV",
+        symbol: "ETHUSDT",
+        market: "spot",
+        timeframe: "1h",
+        configId: 16,
+        totalTrades: 2,
+        wins: 2,
+        losses: 0,
+        winRatePct: 100,
+        cumulativeR: 2.0,
+        expectancyR: 1.0,
+        netPnl: 120.0,
+      },
+      {
+        strategy: "trend_ema_v1",
+        symbol: "SOLUSDT",
+        market: "spot",
+        timeframe: "1d",
+        configId: 17,
+        totalTrades: 3,
+        wins: 1,
+        losses: 2,
+        winRatePct: 33.33,
+        cumulativeR: -0.5,
+        expectancyR: -0.1667,
+        netPnl: -25.0,
+      },
+    ];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const path = new URL(String(input), "http://localhost").pathname + new URL(String(input), "http://localhost").search;
+      const payload = fixtures[path as keyof typeof fixtures];
+      return Promise.resolve(payload ? json(payload) : json({ detail: "Unexpected route" }, 404));
+    }));
+
+    render(<PaperTradingPanel />);
+    const report = within(await screen.findByRole("region", { name: "Strategy performance" }));
+    const summaryTable = await report.findByRole("table", { name: "Strategy performance summary" });
+    expect(within(summaryTable).getByText("BB_REV_INV")).toBeInTheDocument();
+    expect(within(summaryTable).getByText("$143.22")).toBeInTheDocument();
+
+    // Sort summary table by Strategy ascending, then Net PnL ascending
+    fireEvent.click(within(summaryTable).getByRole("button", { name: "Sort by Strategy" }));
+    expect(within(summaryTable).getByRole("columnheader", { name: "Strategy" })).toHaveAttribute("aria-sort", "ascending");
+    fireEvent.click(within(summaryTable).getByRole("button", { name: "Sort by Net PnL" }));
+    fireEvent.click(within(summaryTable).getByRole("button", { name: "Sort by Net PnL" }));
+    expect(within(summaryTable).getByRole("columnheader", { name: "Net PnL" })).toHaveAttribute("aria-sort", "ascending");
+
+    // Click BB_REV_INV to open per-pair detail and sort pair table headers
+    fireEvent.click(within(summaryTable).getByRole("button", { name: /BB_REV_INV/i }));
+    const pairTable = await report.findByRole("table", { name: "Strategy performance by pair" });
+    expect(within(pairTable).getByText("BTCUSDT")).toBeInTheDocument();
+    expect(within(pairTable).getByText("ETHUSDT")).toBeInTheDocument();
+    expect(within(pairTable).getByText("$23.22")).toBeInTheDocument();
+    expect(within(pairTable).getByText("$120.00")).toBeInTheDocument();
+
+    fireEvent.click(within(pairTable).getByRole("button", { name: "Sort by Pair" }));
+    expect(within(pairTable).getByRole("columnheader", { name: "Pair" })).toHaveAttribute("aria-sort", "ascending");
+    fireEvent.click(within(pairTable).getByRole("button", { name: "Sort by Closed trades" }));
+    expect(within(pairTable).getByRole("columnheader", { name: "Closed trades" })).toHaveAttribute("aria-sort", "descending");
+  });
+
+  it("supports deploy, pause, Telegram off, and Report off for normal and _INV RetailBot2 strategies", async () => {
+    const fixtures = structuredClone(baseFixture);
+    fixtures["/api/backtest/strategies"] = {
+      strategies: [
+        { id: "BB_REV" },
+        { id: "BB_REV_INV" },
+      ],
+    };
+    const patchCalls: Array<{ id: number; body: Record<string, unknown> }> = [];
+    let nextId = 20;
+
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      const path = url.pathname + url.search;
+      const method = (init?.method || "GET").toUpperCase();
+      if (path === "/api/paper/deploy" && method === "POST") {
+        const body = JSON.parse(String(init?.body || "{}"));
+        const created = {
+          id: nextId++,
+          symbol: String(body.symbol),
+          market: String(body.market),
+          timeframe: String(body.timeframe),
+          strategy_name: String(body.strategy_name),
+          is_active: true,
+          allocated_capital: Number(body.allocated_capital),
+          risk_per_trade_pct: Number(body.risk_per_trade_pct),
+          telegram_enabled: Boolean(body.send_telegram),
+          report_enabled: true,
+          created_at: "2026-11-27T00:00:00Z",
+        };
+        fixtures["/api/paper/configs"].configs.push(created);
+        return Promise.resolve(json({ status: "success", message: `Deployed ${body.strategy_name}`, config: created, telegramAlert: { success: true } }));
+      }
+      const patchMatch = url.pathname.match(/^\/api\/paper\/configs\/(\d+)$/);
+      if (patchMatch && method === "PATCH") {
+        const id = Number(patchMatch[1]);
+        const body = JSON.parse(String(init?.body || "{}"));
+        patchCalls.push({ id, body });
+        const target = fixtures["/api/paper/configs"].configs.find((c) => c.id === id);
+        if (target) Object.assign(target, body);
+        return Promise.resolve(json({ status: "success", id }));
+      }
+      const payload = fixtures[path as keyof typeof fixtures];
+      return Promise.resolve(payload ? json(payload) : json({ detail: "Unexpected route" }, 404));
+    }));
+
+    render(<PaperTradingPanel />);
+    await screen.findByRole("heading", { name: "Strategy configurations" });
+
+    for (const strat of ["BB_REV", "BB_REV_INV"]) {
+      fireEvent.click(screen.getByRole("button", { name: /Deploy Strategy/i }));
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.change(within(dialog).getByLabelText("Symbol"), { target: { value: "ETHUSDT" } });
+      fireEvent.change(within(dialog).getByLabelText("Timeframe"), { target: { value: "1h" } });
+      fireEvent.change(within(dialog).getByLabelText("Strategy"), { target: { value: strat } });
+      const tgCheckbox = within(dialog).getByRole("checkbox", { name: /Broadcast signal alerts/i });
+      if (!(tgCheckbox as HTMLInputElement).checked) fireEvent.click(tgCheckbox);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Deploy to Paper Trading" }));
+      await screen.findByText(new RegExp(`Deployed ${strat}`));
+
+      const rowCell = await screen.findByText(new RegExp(`^${strat} · 1h$`));
+      const row = rowCell.closest("tr")!;
+      fireEvent.click(within(row).getByRole("button", { name: "Pause" }));
+      await screen.findByText("Deployment paused.");
+      fireEvent.click(within(row).getByRole("button", { name: "Telegram On" }));
+      await screen.findByText("Telegram alerts disabled.");
+      fireEvent.click(within(row).getByRole("button", { name: "Report On" }));
+      await screen.findByText("Performance report hidden.");
+    }
+
+    expect(patchCalls).toEqual([
+      { id: 20, body: { is_active: false } },
+      { id: 20, body: { telegram_enabled: false } },
+      { id: 20, body: { report_enabled: false } },
+      { id: 21, body: { is_active: false } },
+      { id: 21, body: { telegram_enabled: false } },
+      { id: 21, body: { report_enabled: false } },
+    ]);
   });
 });
