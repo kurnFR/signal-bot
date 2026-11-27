@@ -103,6 +103,12 @@ export function ScreenerControlsPanel() {
 
   if (!canEdit) return <section className="panel screener-controls-readonly"><div className="panel-heading"><div><h2>Screener configuration</h2><p>Configuration editing is restricted to admin and trader roles.</p></div><ShieldCheck size={18} /></div><p className="empty-state">You can view screener status and signals. Use an authorized role to change the alert gate or detection thresholds.</p></section>;
 
+  useEffect(() => {
+    if (window.location.hash === "#screener-controls-title") {
+      document.getElementById("screener-controls-title")?.scrollIntoView?.();
+    }
+  }, []);
+
   return <section className="panel" aria-labelledby="screener-controls-title" aria-busy={loading || saving}>
     <div className="panel-heading"><div><h2 id="screener-controls-title">Screener configuration</h2><p>Changes are persisted and picked up by the running worker on its next control-loop tick. Saving does not restart the worker.</p></div><button className="button button-secondary" onClick={() => setReload((value) => value + 1)} disabled={loading || saving}><RefreshCw size={15} /> Reload</button></div>
     {error && <p className="control-feedback control-error" role="alert">{error}</p>}

@@ -75,14 +75,19 @@ function validScreenerStats(value: unknown): value is ScreenerStats {
     Object.values(value.by_type_last_24h).every(isCount);
 }
 
+export async function fetchScreenerStatus(signal?: AbortSignal): Promise<ScreenerStatus> {
+  const status = await getJson<unknown>("/api/research/screener/status", signal);
+  if (!validScreenerStatus(status)) throw new Error("Screener status returned an invalid response");
+  return status;
+}
+
 /** Read-only snapshot. Reject malformed backend rows instead of rendering partial or misleading metrics. */
 export async function fetchScreenerSnapshot(signal?: AbortSignal): Promise<ScreenerSnapshot> {
   const [status, signalPayload, stats] = await Promise.all([
-    getJson<unknown>("/api/research/screener/status", signal),
+    fetchScreenerStatus(signal),
     getJson<unknown>("/api/research/screener/signals?limit=50", signal),
     getJson<unknown>("/api/research/screener/stats", signal),
   ]);
-  if (!validScreenerStatus(status)) throw new Error("Screener status returned an invalid response");
   if (!isRecord(signalPayload) || !Array.isArray(signalPayload.signals) ||
       !signalPayload.signals.every(validScreenerSignal)) {
     throw new Error("Screener signals returned an invalid response");
