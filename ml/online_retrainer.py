@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-import fcntl
 import hashlib
 import json
 import logging
@@ -20,6 +19,7 @@ import uuid
 from typing import Any, Iterator, Mapping
 
 from db.db import fetch_ohlcv_with_features_df
+from ml.file_lock import exclusive_lock, lock_exclusive_nonblocking, unlock
 from ml.run_real_experiment import run_real_experiment
 from ml.walk_forward_engine import compute_drift_psi
 
@@ -40,11 +40,8 @@ def _registry_lock() -> Iterator[None]:
     """Serialize short registry read/modify/write sections across processes."""
     REGISTRY_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     with REGISTRY_LOCK_PATH.open("a", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        try:
+        with exclusive_lock(lock_file):
             yield
-        finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 @contextmanager
@@ -52,16 +49,14 @@ def _retraining_cycle_lock() -> Iterator[bool]:
     """Acquire a non-blocking process-wide lock; the OS releases it after a crash."""
     CYCLE_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     with CYCLE_LOCK_PATH.open("a", encoding="utf-8") as lock_file:
-        try:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+        if not lock_exclusive_nonblocking(lock_file):
             logger.info("Online retraining cycle already running; skipping duplicate trigger")
             yield False
             return
         try:
             yield True
         finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            unlock(lock_file)
 
 
 def _atomic_write_json(path: Path, data: Any) -> None:
@@ -222,11 +217,8 @@ def _audit_log_lock() -> Iterator[None]:
     """Serialize audit-log read/modify/write operations across processes."""
     AUDIT_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     with AUDIT_LOCK_PATH.open("a", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        try:
+        with exclusive_lock(lock_file):
             yield
-        finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def _append_audit_log(entry: dict[str, Any]) -> bool:
@@ -365,11 +357,8 @@ def _journal_lock() -> Iterator[None]:
     """Serialize recovery-journal updates across processes."""
     JOURNAL_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     with JOURNAL_LOCK_PATH.open("a", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        try:
+        with exclusive_lock(lock_file):
             yield
-        finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def _load_retraining_journal() -> dict[str, dict[str, Any]]:

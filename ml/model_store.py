@@ -12,10 +12,7 @@ import sys
 import tempfile
 from typing import Any
 
-if sys.platform != "win32":
-    import fcntl
-else:
-    import msvcrt
+from ml.file_lock import lock_exclusive, unlock
 
 try:
     import joblib
@@ -49,20 +46,11 @@ class ModelStore:
         lock_path = root / f".model-{model_id}.lock"
         descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            if sys.platform != "win32":
-                fcntl.flock(descriptor, fcntl.LOCK_EX)
-            else:
-                msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+            lock_exclusive(descriptor)
             yield
         finally:
             try:
-                if sys.platform != "win32":
-                    fcntl.flock(descriptor, fcntl.LOCK_UN)
-                else:
-                    try:
-                        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
-                    except OSError:
-                        pass
+                unlock(descriptor)
             finally:
                 os.close(descriptor)
 
