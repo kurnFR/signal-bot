@@ -139,12 +139,9 @@ MUTATION_EXCEPTIONS = {
     ("POST", "/api/ml/walk-forward"): (
         "Research endpoint awaiting a UI or retirement decision.", "ML Studio", date(2026, 12, 27),
     ),
-    ("POST", "/api/research/retailbot2/control"): (
-        "RetailBot2 research navigation retired.", "RetailBot2 Archive", date(2027, 2, 25),
-    ),
-    ("POST", "/api/research/retailbot2/strategies"): (
-        "RetailBot2 research navigation retired.", "RetailBot2 Archive", date(2027, 2, 25),
-    ),
+    # Step 3: POST /api/research/retailbot2/control and /strategies were
+    # retired with the worker, so they are no longer registered routes at
+    # all -- they leave the mutation matrix instead of needing exceptions.
 }
 
 

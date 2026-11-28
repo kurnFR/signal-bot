@@ -1,8 +1,9 @@
 """Technical indicators shared by Backtest Studio and the paper engine.
 
-Extracted verbatim from ``paper/retailbot2.py`` so that importing indicators no
-longer pulls in the retired RetailBot2 worker (ccxt, MySQL pools, Telegram).
-``paper.retailbot2`` re-exports ``Indicators`` for backward compatibility.
+Extracted from the retired RetailBot2 worker (``paper/retailbot2.py``,
+deleted in the retailbot2 migration) so that importing indicators no
+longer pulls in the worker's heavy dependencies (ccxt, MySQL pools,
+Telegram).
 """
 from typing import List, Tuple
 

@@ -6,7 +6,7 @@ How the system is put together and the rules that keep it correct. For setup see
 
 In production, all core services run as isolated containers via `docker-compose.yml` (with optional automatic HTTPS via `docker-compose.prod.yml` + `deploy/Caddyfile`). For bare-metal runs, `run_all.py` starts and supervises the Phase 2A default set (restarting after 5 s on crash). Each process can also be run standalone.
 
-The RetailBot2 Telegram outbox consumer is separate from the trading process. It is added to `run_all.py` only when both `RETAILBOT2_OUTBOX_WORKER_ENABLED=1` and `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1` are explicitly set. Without both flags, trade alerts remain persisted in `rdt_telegram_outbox` and are not sent. The supervisor sends `SIGTERM` during shutdown but refuses to `SIGKILL` this worker so it can cleanly release its MariaDB advisory lock (`rdt_outbox_worker_lock`) after child transport cleanup.
+The Telegram outbox consumer is separate from the paper engine. It is added to `run_all.py` only when both `RETAILBOT2_OUTBOX_WORKER_ENABLED=1` and `TELEGRAM_DELIVERY_ENABLED=1` (deprecated alias `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`) are explicitly set. Without both flags, trade alerts remain persisted in `rdt_telegram_outbox` and are not sent. The supervisor sends `SIGTERM` during shutdown but refuses to `SIGKILL` this worker so it can cleanly release its MariaDB advisory lock (`rdt_outbox_worker_lock`) after child transport cleanup. (The RetailBot2 worker itself is retired and deleted -- see [RETAILBOT2_RETIREMENT.md](RETAILBOT2_RETIREMENT.md). Its strategies live in the strategy library and run through Paper Trading.)
 
 | Process / Service | Entry point | Role |
 |---|---|---|
@@ -15,7 +15,7 @@ The RetailBot2 Telegram outbox consumer is separate from the trading process. It
 | `funding-collector` | `collectors/funding_poller.py` | Advisory-locked Binance Futures 8-hour funding rate REST poller with HTTP 418/429 cooldown defense |
 | `paper_engine` | `run_paper_engine.py` | Evaluates deployed strategies on new closed candles, manages paper positions/orders, and accrues funding |
 | `news_ai` | `run_news_ai.py` | News + macro-calendar pollers, LLM reasoning, guarded paper execution |
-| `retailbot2` | `paper/retailbot2.py` | Experimental research bot (own tables; trading disabled by default) |
+| `retailbot2` *(retired)* | -- | Worker deleted; strategies live in `backtest/strategies/retail_death_trap.py` and run through Paper Trading; `rdt_*` tables are a read-only archive (see [RETAILBOT2_RETIREMENT.md](RETAILBOT2_RETIREMENT.md)) |
 | `outbox-worker` | `python -m paper.outbox_worker` | Advisory-locked Telegram outbox consumer (explicit opt-in) |
 | `screener` | `Screen/screening.py` | Smart-money volume detector with independent `telegram_enabled` control |
 | `wallet_tracker` | `run_wallet_tracker.py` | On-chain swap scanner, wallet candidates, per-wallet Telegram alerts |
@@ -89,7 +89,7 @@ FastAPI app in `web/app.py` with centralized fail-closed RBAC, security headers 
 | `/api/custom-strategy` | `custom_strategy.py` | Custom JSON strategies, AI generation, quick test, safe delete (pauses active paper configs) |
 | `/api/ml` | `ml_routes.py` | Experiments, saved models (`/api/ml/models/{model_id}`), generator models, deploy-to-paper |
 | `/api/news` | `news_routes.py` | News AI stats, signals, events |
-| `/api/research` | `research_routes.py` | RetailBot2 and Screener data/controls (including independent `telegram_enabled`) |
+| `/api/research` | `research_routes.py` | RetailBot2 historical archive (read-only GETs) and Screener data/controls (including independent `telegram_enabled`) |
 | `/api/wallets` | `wallet_routes.py` | Wallet tracking, manual poll (`POST /api/wallets/poll`), per-wallet Telegram toggle |
 | `/api/system/status`, `/api/settings`, `/api/telegram` | `system_status.py`, `settings.py`, `telegram_routes.py` | Public status + branding + license status, admin diagnostics, DB-backed encrypted Telegram config & test |
 
@@ -117,7 +117,7 @@ The primary UI is the React 19 + TypeScript Modern UI in `frontend/` (served at 
 | `collectors/` | Backfill scripts, live WebSocket/REST collectors, `funding_poller.py`, news & calendar pollers |
 | `features/` | Shared technical indicators and `features` table builder |
 | `backtest/` | Execution simulator, shared accounting, metrics, holdout, walk-forward, optimizer, `strategies/` |
-| `paper/` | Paper engine, circuit breakers, order ledger, `retailbot2`, transactional Telegram outbox worker |
+| `paper/` | Paper engine, circuit breakers, order ledger, transactional Telegram outbox worker (`paper/outbox_store.py`) |
 | `ml/` | ML signal-filter pipeline, purged splits, generator artifacts (see [ML.md](ML.md)) |
 | `ai/` | Quantitative insight engine, News AI reasoning and execution |
 | `wallet_tracker/` | On-chain swap scanner, rankings, and Telegram alert dispatcher |
@@ -133,6 +133,6 @@ The primary UI is the React 19 + TypeScript Modern UI in `frontend/` (served at 
 GitHub Actions (`.github/workflows/`) runs five workflows:
 - `test.yml` (`Test`): Full `pytest` suite against MariaDB 10.11 on Python 3.11.
 - `tests.yml` (`tests`): Fast unit tests + Wallet Tracker MariaDB integration.
-- `retailbot-accounting.yml` (`RetailBot accounting regression`): Paper & RetailBot2 accounting parity tests.
+- `retailbot-accounting.yml` (`RetailBot accounting regression`): Paper accounting regression tests (the RetailBot2 worker accounting tests were deleted with the worker).
 - `frontend.yml` (`Frontend foundation`): `tsc --noEmit`, Vitest unit suite, Vite production build, and Playwright browser smoke tests.
 - `release.yml` (`Release & Container Publish`): Triggered on `v*.*.*` tags — runs the MariaDB-backed release verification gate, builds and pushes the multi-stage Docker image to GHCR, and publishes the GitHub Release with deployment assets.

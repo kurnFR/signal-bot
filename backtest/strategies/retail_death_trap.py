@@ -455,18 +455,11 @@ RETAILBOT2_STRATEGIES: Dict[str, Any] = {
     "MACD_DIV_INV": run_macd_div_inverse,
     "SPIKE_FADE_INV": run_spike_fade_inverse,
     "COMPOSITE_INV": run_composite_inverse,
-
-    # Backward-compatible & user-specified aliases
-    "DBL_PAT_INV_inverse": run_dbl_pat_inverse,
-    "BB_REV_INV_inverse": run_bb_rev_inverse,
-    "inverse_BB_REV": run_bb_rev_inverse,
-    "inverse_DBL_PAT": run_dbl_pat_inverse,
-    "inverse_RSI_CTR": run_rsi_ctr_inverse,
-    "inverse_MA_WHIP": run_ma_whip_inverse,
-    "inverse_SR_TRAP": run_sr_trap_inverse,
-    "inverse_MACD_DIV": run_macd_div_inverse,
-    "inverse_SPIKE_FADE": run_spike_fade_inverse,
-    "inverse_COMPOSITE": run_composite_inverse,
+    # Canonical keys only (16). The 10 legacy alias keys (e.g.
+    # "BB_REV_INV_inverse", "inverse_BB_REV") were removed in migration
+    # step 1; persisted alias lifecycle rows are renamed to the canonical
+    # ids by db/migrate_retailbot2_alias_lifecycle_rename.sql (040).
+    # Do not re-add alias keys here.
 }
 
 RETAILBOT2_STRATEGY_NAMES = set(RETAILBOT2_STRATEGIES.keys())

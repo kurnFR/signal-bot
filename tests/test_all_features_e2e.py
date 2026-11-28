@@ -237,17 +237,14 @@ def run_tests():
     ctrl_data = rdt_ctrl_res.json()
     print(f"  ✅ RDT Bot Controls: is_running={ctrl_data.get('is_running')}")
 
-    # Test updating bot control and verify in database
+    # Test that the retired control write is rejected (step 3: the worker
+    # is gone, so POST /retailbot2/control must fail closed, not write).
     update_ctrl_res = requests.post(f"{BASE_URL}/api/research/retailbot2/control", headers=headers, json={
         "enabled": True,
         "overrides": {"risk_per_trade": 0.02}
     })
-    assert update_ctrl_res.status_code == 200
-    conn, cur = get_db()
-    cur.execute("SELECT enabled, overrides_json FROM bot_control WHERE id = 1")
-    bc_row = cur.fetchone()
-    assert bc_row is not None, "bot_control record missing in MySQL!"
-    print(f"  ✅ DB Verification: bot_control record (enabled={bc_row['enabled']}) verified in MySQL")
+    assert update_ctrl_res.status_code == 403, f"retired retailbot2 control write must fail closed, got {update_ctrl_res.status_code}"
+    print("  ✅ Retired RDT Bot control write rejected (403, worker gone)")
     cur.close()
     conn.close()
 

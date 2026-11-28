@@ -73,12 +73,15 @@ async def lifespan(app: FastAPI):
         ensure_wallet_tables()
     except Exception as e:
         logger.warning(f"Could not initialize wallet tracking tables on startup: {e}")
-    if os.getenv("RETAILBOT2_ENABLED", "").strip() == "1":
-        try:
-            from db.db import verify_retailbot2_schema
-            verify_retailbot2_schema()
-        except Exception as e:
-            logger.warning("RetailBot2 schema verification failed; run 'python -m db.migrate': %s", e)
+    # The RetailBot2 worker is retired, but its rdt_* tables remain as a
+    # read-only archive. Verify the archive schema (warn-only) on every
+    # startup so a missing migration still surfaces instead of failing
+    # silently the first time the archive UI is opened.
+    try:
+        from db.db import verify_retailbot2_schema
+        verify_retailbot2_schema()
+    except Exception as e:
+        logger.warning("RetailBot2 schema verification failed; run 'python -m db.migrate': %s", e)
     try:
         from db.db import verify_strategy_auto_promotion_schema
         verify_strategy_auto_promotion_schema()
@@ -199,9 +202,11 @@ ADMIN_OR_TRADER_PREFIXES = (
     "/api/master-data/build-features",
     "/api/custom-strategy",
 )
+# Trader/admin-only write prefixes. The RetailBot2 POST routes were retired
+# with the worker, so only the live screener control prefix remains here;
+# the read-only GET /api/research/retailbot2/* routes are listed in
+# AUTHENTICATED_READ_PATHS below.
 RESEARCH_CONTROL_PREFIXES = (
-    "/api/research/retailbot2/control",
-    "/api/research/retailbot2/strategies",
     "/api/research/screener/control",
 )
 

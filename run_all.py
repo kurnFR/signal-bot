@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Single entry point for supervising the configured Signal Bot processes.
-The safe default set is the Phase 2A stack; paper/news engines and RetailBot2
-require separate opt-ins.
+The safe default set is the Phase 2A stack; paper/news engines require
+separate opt-ins.
 
     python3 run_all.py
     python3 run_all.py --only web_server --only collectors --only screener --only wallet_tracker
@@ -12,21 +12,15 @@ Enable the paper engine or News AI explicitly when intended:
     PAPER_ENGINE_ENABLED=1 python3 run_all.py --only paper_engine
     NEWS_AI_ENABLED=1 python3 run_all.py --only news_ai
 
-RetailBot2 is excluded from the default process set because it can create or
-update paper trades. To include it, explicitly set RETAILBOT2_ENABLED=1 before
-invoking the supervisor; only then is it available to --only/--skip:
-
-    RETAILBOT2_ENABLED=1 python3 run_all.py --only retailbot2
-
-Enabling RetailBot2 starts the worker with trade execution disabled by default.
-Trade execution requires separate, explicit authorization:
-
-    RETAILBOT2_ALLOW_TRADING=1
+RetailBot2 was retired in the retailbot2-migration work: the worker
+(paper/retailbot2.py) is deleted and there is no RETAILBOT2_ENABLED opt-in
+anymore. Its strategies live in the strategy library
+(backtest/strategies/retail_death_trap.py) and run through Paper Trading;
+its Telegram outbox lives in paper/outbox_store.py.
 
 The outbox worker is a separate opt-in and additionally requires
 RETAILBOT2_OUTBOX_WORKER_ENABLED=1 and
 TELEGRAM_DELIVERY_ENABLED=1 (or deprecated alias RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1).
-Enabling RetailBot2 does not enable trading, Telegram delivery, or the outbox worker.
 
 Automatic migrations are disabled by default. Run python3 -m db.migrate
 as a separately authorized deployment step, or explicitly opt in to automatic
@@ -61,7 +55,7 @@ logger = logging.getLogger("run_all")
 RESTART_BACKOFF_SECONDS = 5
 
 def build_processes(environ=None):
-    """Build supervised commands; RetailBot2 and Telegram delivery are explicit opt-ins."""
+    """Build supervised commands; the Telegram outbox worker is an explicit opt-in."""
     env = os.environ if environ is None else environ
     raw_port = (env.get("WEB_PORT") or "").strip()
     try:
@@ -91,10 +85,10 @@ def build_processes(environ=None):
     if (env.get("NEWS_AI_ENABLED") or "").strip() == "1":
         processes["news_ai"] = [sys.executable, "run_news_ai.py"]
 
-    # RetailBot2 can create/update paper trades, so never include it in the
-    # default supervisor set. It requires an explicit, independent opt-in.
-    if (env.get("RETAILBOT2_ENABLED") or "").strip() == "1":
-        processes["retailbot2"] = [sys.executable, "paper/retailbot2.py"]
+    # The RetailBot2 worker is retired (paper/retailbot2.py deleted); there is
+    # no "retailbot2" supervisor entry anymore. RETAILBOT2_ENABLED is ignored.
+    # The Telegram outbox worker below is the only retailbot2-named process
+    # left, and it is backed by paper/outbox_store.py, not the worker.
 
     # Keep delivery disabled by default. Both flags are required so enabling
     # the process supervisor alone cannot accidentally enable production sends.
@@ -114,15 +108,13 @@ def build_processes(environ=None):
                 "(or legacy RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1) is missing; worker will remain disabled"
             )
     report_enabled = (env.get("PAPER_REPORT_ENABLED") or "").strip()
-    if not report_enabled:
-        report_enabled = (env.get("RETAILBOT2_ENABLED") or "").strip()
     if report_enabled == "1" and "retailbot2_outbox" in processes:
         processes["paper_report"] = [sys.executable, "-m", "paper.report_scheduler"]
     return processes
 
 
 # name -> command. Phase 2A services are enabled by default; paper_engine,
-# news_ai, RetailBot2, and the outbox worker each require explicit opt-in.
+# news_ai, and the outbox worker each require explicit opt-in.
 PROCESSES = build_processes()
 
 _shutdown = threading.Event()

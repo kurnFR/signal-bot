@@ -408,19 +408,24 @@ def deploy_strategy(req: DeployStrategyRequest):
     if timeframe not in {"15m", "1h", "4h", "1d"}:
         raise HTTPException(status_code=400, detail="timeframe must be one of: 15m, 1h, 4h, 1d")
     # 1. Update/Add paper config
-    res = set_paper_config(
-        req.symbol.strip().upper(),
-        market,
-        timeframe,
-        strategy_name,
-        is_active=True,
-        allocated_capital=req.allocated_capital,
-        risk_per_trade_pct=req.risk_per_trade_pct,
-        ml_model_id=req.ml_model_id.strip() if req.ml_model_id else None,
-        telegram_enabled=req.send_telegram,
-        report_enabled=True,
-        strategy_params=req.params,
-    )
+    try:
+        res = set_paper_config(
+            req.symbol.strip().upper(),
+            market,
+            timeframe,
+            strategy_name,
+            is_active=True,
+            allocated_capital=req.allocated_capital,
+            risk_per_trade_pct=req.risk_per_trade_pct,
+            ml_model_id=req.ml_model_id.strip() if req.ml_model_id else None,
+            telegram_enabled=req.send_telegram,
+            report_enabled=True,
+            strategy_params=req.params,
+        )
+    except ValueError as exc:
+        # Same contract as POST /api/paper/configs: a rejected deployment
+        # (e.g. COMPOSITE, which is research-only) is a 400, not a 500.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # 2. Telegram deployment alert
     telegram_res = None

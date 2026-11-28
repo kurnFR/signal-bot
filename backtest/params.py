@@ -59,6 +59,17 @@ RETAILBOT2_DEFAULT_PARAMS = {
 BASE_PARAMS = {
     **RETAILBOT2_DEFAULT_PARAMS,
     "ATR_PERIOD": ATR_PERIOD,
+    # Generic-strategy RSI keys (30/70, from config.py). These belong to
+    # confluence_reversal_v1 (backtest/strategies/mean_reversion.py) and
+    # confluence_ensemble_v1, which read params["RSI_OVERSOLD"] /
+    # They are NOT the RetailBot2 keys: the retail mirror reads
+    # RB2_RSI_OVERSOLD / RB2_RSI_OVERBOUGHT (35/65) only, and every
+    # retail param path translates shared RSI_OVERSOLD / RSI_OVERBOUGHT
+    # overrides via retailbot2_param_overrides() (paper/engine.py,
+    # web/routes/backtest.py, backtest/optimize.py, walk_forward.py,
+    # run_holdout_check.py). Do NOT delete these keys or repoint the
+    # mirror at them -- see tests/test_retailbot2_mirror_fidelity.py
+    # test_rsi_shadow_keys_are_generic_not_retail.
     "RSI_OVERSOLD": RSI_OVERSOLD,
     "RSI_OVERBOUGHT": RSI_OVERBOUGHT,
     "SR_PROXIMITY_PCT": SR_PROXIMITY_PCT,

@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from paper.outbox_store import OUTBOX_LOCK_NAME
 
-logger = logging.getLogger("retailbot2.observability")
+logger = logging.getLogger("telegram.outbox.observability")
 
 # Default monitoring threshold proposals (not production mandate; configurable)
 DEFAULT_PENDING_WARN_COUNT = 50

@@ -67,3 +67,22 @@ These are small samples measured on the holdout window at the time. Treat them a
 3. Put new tunables in `backtest/params.py` (`BASE_PARAMS`) and `config.py`.
 4. If it needs funding, a higher timeframe, or a second symbol, add its name to `FUNDING_STRATEGIES`, `TREND_ALIGNMENT_STRATEGIES` or `PAIRS_STRATEGIES` in the same `__init__.py`. That data join is applied separately in `run_backtest.py`, `walk_forward.py`, `optimize.py`, `run_holdout_check.py`, `web/routes/backtest.py` and `paper/engine.py`, so check each place handles the new name. Missing it makes the extra-data component silently contribute nothing.
 5. Test it for lookahead (mutate future bars, recompute, assert earlier trades are identical) and with a hand-built fixture before trusting any real-data result.
+
+## 6. RetailBot2 mirror: fidelity, execution drift, and COMPOSITE
+
+The 16 RetailBot2 keys (`BB_REV`, `DBL_PAT`, `RSI_CTR`, `MA_WHIP`, `SR_TRAP`, `MACD_DIV`, `SPIKE_FADE`, `COMPOSITE`, each plus `_INV`) live in `backtest/strategies/retail_death_trap.py`. That file was originally a mirror of the live implementations in the now-deleted `paper/retailbot2.py` (`RetailStrategyEngine.strat_*`); the mirror is now the implementation of record. Signal fidelity was verified bar-for-bar against live in step 2 (`tests/test_retailbot2_mirror_fidelity.py`, since retired with the worker); the live-free properties are pinned in `tests/test_retailbot2_mirror_guards.py`: same signal bars, same direction, same signal-close risk math (entry = signal-bar close, risk = ATR x 1.5, target = risk x 2.0). Warmup: the mirror guards on `row.name` (RSI/MA 48, SR 58, MACD 68, BB 28, DBL 68, SPIKE 28).
+
+What the mirror does **not** reproduce is live execution. Backtest/paper results for these strategies are therefore not live results:
+
+| | Retired live worker (`paper/retailbot2.py`, deleted) | Mirror / paper engine (`backtest/simulate.py`, `paper/engine.py`) |
+|---|---|---|
+| Entry | Signal-bar close | Next-bar open |
+| Costs | Gross PnL by default (no fees/slippage) | 0.1% fee + 0.05% slippage per side |
+| Exit | No trailing stop, no timeout | 200-bar timeout (and trailing stop unless Pure TP/SL mode, which removes trailing/timeout only -- not the entry/cost drift) |
+| Re-entry | 1 trade per symbol/mode + 2h cooldown | Re-entry on the next bar after a signal |
+
+`double_pattern_v1` (neckline-break confirmation) and `DBL_PAT` (level-triggered double top/bottom, `pattern_tolerance` 0.002) are deliberate variants, not duplicates -- keep both.
+
+**COMPOSITE decision.** The mirror vote rule matched the retired live worker exactly, including ties going LONG (the mirror's `_composite_long` is `votes_long >= votes_short`). But COMPOSITE is research-only: the retired worker forced it disabled (`historical_only` in `web/routes/research_routes.py`) and never executed it, so paper trading must not either. `paper/engine.py` (`COMPOSITE_PAPER_FORBIDDEN`) rejects COMPOSITE / COMPOSITE_INV deployments in `set_paper_config` and skips any such row in the entry-evaluation loop, while leaving COMPOSITE in the backtest catalog for research. An already-open COMPOSITE position, if one ever existed, still gets Phase 1 exit management.
+
+**RSI thresholds.** Retail uses 35/65 (`RB2_RSI_OVERSOLD` / `RB2_RSI_OVERBOUGHT` in `backtest/params.py`); the `RSI_OVERSOLD=30` / `RSI_OVERBOUGHT=70` keys in `BASE_PARAMS` are generic-strategy keys used by `confluence_reversal_v1` (`backtest/strategies/mean_reversion.py`) and `confluence_ensemble_v1`. The mirror never reads them. Shared-key overrides (`RSI_OVERSOLD`, `RSI_OVERBOUGHT`, `ATR_PERIOD`, `RISK_REWARD_RATIO`) are translated to `RB2_*` by `retailbot2_param_overrides()` on every retail param path (paper engine, backtest run endpoint, optimize, walk-forward, holdout check).

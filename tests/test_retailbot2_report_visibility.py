@@ -1,7 +1,6 @@
 from decimal import Decimal
 from types import SimpleNamespace
 
-from paper.retailbot2 import DatabaseManager
 
 
 class _Cursor:
@@ -33,8 +32,15 @@ class _Connection:
         self.closed = True
 
 
-def test_telegram_performance_stats_respect_strategy_report_visibility():
-    connection = _Connection([
+def test_telegram_performance_stats_respect_strategy_report_visibility(monkeypatch):
+    """Step 3: DatabaseManager.get_stats() is deleted with the worker. The
+    same visibility rule now lives in db.get_retailbot2_stats(), which the
+    archive stats endpoint and the paper report read. Port the test to it:
+    the per-strategy query must still join rdt_strategy_lifecycle and hide
+    report_enabled=False rows, and the visible row must still aggregate."""
+    from db import db as db_module
+
+    rows = [
         {
             "strategy": "BB_REV_INV",
             "mode": "inverse",
@@ -42,24 +48,55 @@ def test_telegram_performance_stats_respect_strategy_report_visibility():
             "wins": 6,
             "losses": 4,
             "total_pnl": Decimal("125.50"),
+            "last_updated": None,
         }
-    ])
-    db = object.__new__(DatabaseManager)
-    db.logger = SimpleNamespace(error=lambda *args, **kwargs: None)
-    db.get_conn = lambda: connection
+    ]
 
-    stats = db.get_stats()
+    class _Cursor:
+        def __init__(self):
+            self.queries = []
+            self.fetchall_index = 0
 
-    assert stats["BB_REV_INV_inverse"]["total"] == 10
-    assert stats["BB_REV_INV_inverse"]["net_pnl"] == 125.5
-    assert "LEFT JOIN rdt_strategy_lifecycle" in connection.cur.query
+        def execute(self, query, params=None):
+            self.queries.append(query)
+
+        def fetchall(self):
+            # get_retailbot2_stats runs 3 queries: per-strategy rows, open
+            # counts, per-mode aggregates. Only the first returns rows here.
+            result = [rows, [], []][self.fetchall_index]
+            self.fetchall_index += 1
+            return result
+
+        def close(self):
+            self.closed = True
+
+    cursor = _Cursor()
+
+    class _Connection:
+        def cursor(self, dictionary=False):
+            assert dictionary is True
+            return cursor
+
+        def close(self):
+            self.closed = True
+
+    class _Pool:
+        def get_connection(self):
+            return _Connection()
+
+    monkeypatch.setattr(db_module, "get_retailbot2_pool", lambda: _Pool())
+
+    stats = db_module.get_retailbot2_stats()
+
+    row = next(r for r in stats["by_strategy"] if r["strategy"] == "BB_REV_INV")
+    assert row["total_trades"] == 10
+    assert row["total_pnl"] == 125.5
+    strategy_query = cursor.queries[0]
+    assert "LEFT JOIN rdt_strategy_lifecycle" in strategy_query
     # Visibility is scoped to the exact strategy/mode pair: hiding inverse
     # results must not hide the same strategy in shadow mode (or vice versa).
-    assert "ON l.strategy_id = t.strategy AND l.mode = t.mode" in connection.cur.query
-    assert "COALESCE(l.report_enabled, TRUE) = TRUE" in connection.cur.query
-    assert connection.cur.closed is True
-    assert connection.closed is True
-
+    assert "ON l.strategy_id = t.strategy AND l.mode = t.mode" in strategy_query
+    assert "COALESCE(l.report_enabled, TRUE) = TRUE" in strategy_query
 
 
 def test_lifecycle_database_readback_parses_string_flags_without_truthiness(monkeypatch):

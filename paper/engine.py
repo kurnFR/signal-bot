@@ -31,7 +31,7 @@ from backtest.strategies.trend_alignment import HTF_TIMEFRAME
 from backtest.custom_strategy import paper_strategy_registry
 from backtest.simulate import trailing_bar
 from backtest.params import BASE_PARAMS, retailbot2_param_overrides, validate_param_overrides
-from backtest.strategies.retailbot2_strategies import RETAILBOT2_STRATEGY_NAMES
+from backtest.strategies.retail_death_trap import RETAILBOT2_STRATEGY_NAMES
 from backtest.accounting import calculate_position_size, calculate_trade_accounting, resolve_stop_target_exit
 from config import BACKTEST_FEE_PCT, BACKTEST_SLIPPAGE_PCT, PAIRS_BASE_SYMBOL
 from paper.orders import create_pending_order, fill_pending_order, list_orders, transition_order
@@ -216,6 +216,19 @@ def _load_verified_ml_model(ml_model_id: str, models_dir: str = "ml_models"):
 
 OVERLAY_STRATEGIES = {"news_ai_overlay"}
 
+# COMPOSITE / COMPOSITE_INV are research-only vote rules, not executable
+# paper strategies. The retired RetailBot2 worker forced them disabled in
+# its lifecycle table (and they are marked historical_only in
+# web/routes/research_routes.py), and the mirror's run_composite is only a
+# backtest/research runner. A COMPOSITE paper deployment would therefore
+# trade a consensus the retired bot never traded.
+# set_paper_config() rejects new COMPOSITE deployments, and the entry
+# evaluation loop below skips any COMPOSITE row that somehow already
+# exists (legacy row, direct-SQL insert, or reactivation via batch update).
+# Phase 1 exit management is unaffected: an already-open COMPOSITE
+# position (if one ever existed) still gets SL/TP/trailing management.
+COMPOSITE_PAPER_FORBIDDEN = {"COMPOSITE", "COMPOSITE_INV"}
+
 PAPER_ENTRY_MAX_DELAY_MS = max(1, int(os.getenv("PAPER_ENTRY_MAX_DELAY_SECONDS", "120"))) * 1000
 
 _TIMEFRAME_MS = {
@@ -398,6 +411,14 @@ def set_paper_config(
         raise ValueError("allocated_capital must be positive")
     if risk_per_trade_pct <= 0:
         raise ValueError("risk_per_trade_pct must be positive")
+    # COMPOSITE is research-only (see COMPOSITE_PAPER_FORBIDDEN): the live
+    # bot never executes it, so no paper deployment may be created for it.
+    if strategy_name in COMPOSITE_PAPER_FORBIDDEN:
+        raise ValueError(
+            f"{strategy_name} is research-only and cannot be deployed to paper trading: "
+            "COMPOSITE mirrors the live all-7 vote rule for backtest research, "
+            "but live RetailBot2 forces it disabled and never executes it."
+        )
     if strategy_params is not _UNSET and strategy_params is not None and not isinstance(strategy_params, dict):
         raise ValueError("strategy_params must be an object")
 
@@ -1930,6 +1951,15 @@ def _sync_and_evaluate_paper_trading_impl() -> Dict[str, Any]:
         symbol, market, timeframe, strategy_name = cfg["symbol"], cfg["market"], cfg["timeframe"], cfg["strategy_name"]
         cfg_id = int(cfg["id"]) if cfg.get("id") is not None else None
         key = cfg_id if cfg_id is not None else (symbol, market, timeframe, strategy_name)
+
+        # COMPOSITE is research-only: never evaluate it for paper entries,
+        # even if a row somehow exists (see COMPOSITE_PAPER_FORBIDDEN).
+        if strategy_name in COMPOSITE_PAPER_FORBIDDEN:
+            logger.warning(
+                "Skipping COMPOSITE paper config %s: COMPOSITE is research-only "
+                "and must not open paper positions", cfg_id,
+            )
+            continue
 
         if cfg_id is not None and cfg_id in open_config_ids:
             continue

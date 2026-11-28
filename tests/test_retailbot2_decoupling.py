@@ -21,7 +21,7 @@ def _imports_retailbot2(code: str) -> bool:
     [
         "paper.indicators",
         "backtest.strategies",
-        "backtest.strategies.retailbot2_strategies",
+        "backtest.strategies.retail_death_trap",
         "paper.paper_report",
         "paper.outbox_store",
         "paper.outbox_worker",
@@ -39,14 +39,15 @@ def test_runtime_modules_do_not_import_retailbot2_worker(module_name):
     assert not _imports_retailbot2(f"import {module_name}")
 
 
-def test_retailbot2_reexports_shared_helpers_for_compatibility():
-    with patch.dict(os.environ, os.environ.copy(), clear=False):
-        from paper import outbox_store
-        from paper.indicators import Indicators as shared_indicators
-        from paper import retailbot2 as legacy
+def test_retailbot2_worker_module_is_gone():
+    """Step 3: paper/retailbot2.py is deleted; the shared helpers live in
+    paper/outbox_store.py (and paper/paper_report.py) with no worker left
+    to re-export them."""
+    import paper.outbox_store as outbox_store
 
-    assert shared_indicators is legacy.Indicators
-    assert issubclass(legacy.DatabaseManager, outbox_store.OutboxStore)
+    with pytest.raises(ModuleNotFoundError):
+        import paper.retailbot2  # noqa: F401
+
     for name in (
         "OUTBOX_LOCK_NAME",
         "ALLOWED_OUTBOX_ENQUEUE_DATABASES",
@@ -61,14 +62,14 @@ def test_retailbot2_reexports_shared_helpers_for_compatibility():
         "build_entry_alert_payload",
         "build_exit_alert_payload",
     ):
-        assert getattr(legacy, name) is getattr(outbox_store, name)
+        assert hasattr(outbox_store, name), name
+    assert outbox_store.OUTBOX_LOCK_NAME == "rdt_outbox_worker_lock"
 
 
-def test_telegram_alert_delegates_to_shared_report(monkeypatch):
+def test_paper_report_is_the_shared_report(monkeypatch):
     import paper.paper_report as report
-    from paper.retailbot2 import TelegramAlert
+
     monkeypatch.setattr(report, "paper_performance_lines", lambda: ["LINE"])
-    assert "LINE" in TelegramAlert.format_paper_report()
     assert "LINE" in report.format_paper_report()
 
 
@@ -121,7 +122,9 @@ def test_telegram_master_switch_and_deprecated_alias(env_vars, expected):
         assert ("retailbot2_outbox" in procs) is expected
 
 
-def test_web_lifespan_gates_retailbot2_schema_verification_on_flag():
+def test_web_lifespan_always_verifies_retailbot2_archive_schema():
+    """Step 3: the worker is gone, so the archive schema check is no longer
+    gated on RETAILBOT2_ENABLED -- it runs on every startup (warn-only)."""
     import db.db as db_module
     import Screen.screening as screening_module
     from web.app import app, lifespan
@@ -130,16 +133,10 @@ def test_web_lifespan_gates_retailbot2_schema_verification_on_flag():
         async with lifespan(app):
             pass
 
-    with patch.dict(os.environ, {"RETAILBOT2_ENABLED": "0"}, clear=False), \
-         patch.object(screening_module, "verify_signal_schema") as sig_verify, \
-         patch.object(db_module, "verify_retailbot2_schema") as rb2_verify:
-        asyncio.run(_run_lifespan())
-        sig_verify.assert_called_once_with()
-        rb2_verify.assert_not_called()
-
-    with patch.dict(os.environ, {"RETAILBOT2_ENABLED": "1"}, clear=False), \
-         patch.object(screening_module, "verify_signal_schema") as sig_verify, \
-         patch.object(db_module, "verify_retailbot2_schema") as rb2_verify:
-        asyncio.run(_run_lifespan())
-        sig_verify.assert_called_once_with()
-        rb2_verify.assert_called_once_with()
+    for flag in ("0", "1"):
+        with patch.dict(os.environ, {"RETAILBOT2_ENABLED": flag}, clear=False), \
+             patch.object(screening_module, "verify_signal_schema") as sig_verify, \
+             patch.object(db_module, "verify_retailbot2_schema") as rb2_verify:
+            asyncio.run(_run_lifespan())
+            sig_verify.assert_called_once_with()
+            rb2_verify.assert_called_once_with()

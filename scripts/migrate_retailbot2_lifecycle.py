@@ -11,7 +11,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backtest.strategies.retailbot2_strategies import RETAILBOT2_STRATEGY_NAMES
+from backtest.strategies.retail_death_trap import RETAILBOT2_STRATEGY_NAMES
 from db.db import get_pool
 
 VALID_MARKETS = {"spot", "futures"}

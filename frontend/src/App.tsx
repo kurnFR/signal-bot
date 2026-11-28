@@ -434,7 +434,7 @@ export function App() {
             selectedEvidenceModelId={paperEvidence?.kind === "model" ? paperEvidence.id : undefined}
             onSelectPaperEvidence={(id) => selectPaperEvidence({ kind: "model", id, label: `ML filter · ${id}` })} />
         ) : activeView === "Research" ? (
-          <ResearchPanel historyOnly />
+          <ResearchPanel />
         ) : activeView === "News AI" ? (
           <NewsAIPanel />
         ) : activeView === "Master Data" ? (

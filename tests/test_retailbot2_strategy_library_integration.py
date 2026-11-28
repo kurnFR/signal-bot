@@ -9,13 +9,14 @@ Verifies:
 5. Background shadow/inverse execution continues recording paper trades.
 """
 import pytest
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
 from web.app import app
 from web.routes.backtest import list_strategies, STRATEGY_METADATA
 from backtest.strategies import STRATEGIES
-from backtest.strategies.retailbot2_strategies import RETAILBOT2_STRATEGY_NAMES, RETAILBOT2_STRATEGIES
+from backtest.strategies.retail_death_trap import RETAILBOT2_STRATEGY_NAMES, RETAILBOT2_STRATEGIES
 from paper.engine import close_position_in_db
 
 
@@ -35,7 +36,54 @@ def test_retailbot2_strategies_registered_in_strategies():
     assert "MACD_DIV_INV" in STRATEGIES
     assert "SPIKE_FADE_INV" in STRATEGIES
     assert "COMPOSITE_INV" in STRATEGIES
-    assert "DBL_PAT_INV_inverse" in STRATEGIES
+    # Canonical base keys (the 10 legacy alias keys, e.g.
+    # "DBL_PAT_INV_inverse", were removed in migration step 1).
+    assert "RSI_CTR" in STRATEGIES
+    assert "MA_WHIP" in STRATEGIES
+    assert "SR_TRAP" in STRATEGIES
+    assert "MACD_DIV" in STRATEGIES
+    assert "SPIKE_FADE" in STRATEGIES
+    assert "COMPOSITE" in STRATEGIES
+
+
+# Retail (RetailBot2 mirror) registry after migration step 1: exactly the
+# 16 canonical keys -- 7 base + 7 _INV + COMPOSITE + COMPOSITE_INV.
+RETAIL_CANONICAL_KEYS = {
+    "BB_REV", "DBL_PAT", "RSI_CTR", "MA_WHIP", "SR_TRAP", "MACD_DIV", "SPIKE_FADE",
+    "BB_REV_INV", "DBL_PAT_INV", "RSI_CTR_INV", "MA_WHIP_INV", "SR_TRAP_INV",
+    "MACD_DIV_INV", "SPIKE_FADE_INV",
+    "COMPOSITE", "COMPOSITE_INV",
+}
+
+# All 10 legacy alias keys removed in migration step 1 (registry + DB
+# migration 040 renames the two persisted ones to their canonical ids).
+RETAIL_ALIAS_KEYS = {
+    "DBL_PAT_INV_inverse", "BB_REV_INV_inverse",
+    "inverse_BB_REV", "inverse_DBL_PAT", "inverse_RSI_CTR", "inverse_MA_WHIP",
+    "inverse_SR_TRAP", "inverse_MACD_DIV", "inverse_SPIKE_FADE", "inverse_COMPOSITE",
+}
+
+
+def test_retail_registry_contains_only_canonical_keys():
+    assert set(RETAILBOT2_STRATEGIES) == RETAIL_CANONICAL_KEYS
+    assert len(RETAILBOT2_STRATEGIES) == 16
+    assert RETAILBOT2_STRATEGY_NAMES == RETAIL_CANONICAL_KEYS
+    assert not (set(RETAILBOT2_STRATEGIES) & RETAIL_ALIAS_KEYS)
+    for alias in RETAIL_ALIAS_KEYS:
+        assert alias not in STRATEGIES
+    # 51 keys at ac6e648e minus the 10 removed aliases.
+    assert len(STRATEGIES) == 41
+
+
+def test_dead_retail_files_removed_with_no_importers():
+    import importlib.util
+
+    root = Path(__file__).resolve().parent.parent
+    assert not (root / "backtest" / "strategy.py").exists()
+    assert not (root / "web" / "routes" / "retailbot2_promotion_mapping.py").exists()
+    assert not (root / "tests" / "test_retailbot2_promotion_mapping.py").exists()
+    assert importlib.util.find_spec("backtest.strategy") is None
+    assert importlib.util.find_spec("web.routes.retailbot2_promotion_mapping") is None
 
 
 def test_strategy_library_catalog_exposes_bb_rev_inv_and_dbl_pat_inv():
@@ -62,8 +110,9 @@ def test_strategy_library_catalog_exposes_bb_rev_inv_and_dbl_pat_inv():
 
 
 def test_paper_config_accepts_bb_rev_inv_without_changing_research_lifecycle():
-    with patch("web.routes.paper_routes.set_paper_config") as mock_set_cfg, \
-         patch("db.db.set_retailbot2_strategy_lifecycle_setting") as mock_sync:
+    # Step 3: the research-lifecycle sync (set_retailbot2_strategy_lifecycle_setting)
+    # is deleted with the worker; a paper config must not touch the archive.
+    with patch("web.routes.paper_routes.set_paper_config") as mock_set_cfg:
         mock_set_cfg.return_value = {"status": "success", "strategy": "BB_REV_INV"}
 
         from web.routes.paper_routes import update_config, PaperConfigRequest
@@ -83,7 +132,6 @@ def test_paper_config_accepts_bb_rev_inv_without_changing_research_lifecycle():
         assert res["status"] == "success"
 
         mock_set_cfg.assert_called_once()
-        mock_sync.assert_not_called()
 
 
 def test_trade_close_alert_suppressed_when_telegram_disabled():

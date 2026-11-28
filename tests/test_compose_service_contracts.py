@@ -175,7 +175,7 @@ class TestAuditCleanupContracts:
     def test_no_legacy_cms_user_defaults(self):
         assert 'DB_USER", "cms"' not in _read("config.py")
         assert 'MYSQL_USER", "cms"' not in _read("paper/outbox_worker.py")
-        assert "DB_USER', 'cms'" not in _read("paper/retailbot2.py")
+        assert "DB_USER', 'cms'" not in _read("paper/outbox_store.py")
         assert '"signal_bot"' in _read("config.py")
 
     def test_systemd_units_are_templates_without_personal_account(self):

@@ -25,7 +25,7 @@ from config import HOLDOUT_FRACTION, PAIRS_BASE_SYMBOL
 from db.db import fetch_ohlcv_with_features_df, insert_backtest_run, insert_backtest_trades
 from backtest.strategies import STRATEGIES, FUNDING_STRATEGIES
 from backtest.params import BASE_PARAMS, parse_overrides, retailbot2_param_overrides
-from backtest.strategies.retailbot2_strategies import RETAILBOT2_STRATEGY_NAMES
+from backtest.strategies.retail_death_trap import RETAILBOT2_STRATEGY_NAMES
 from backtest.strategies import TREND_ALIGNMENT_STRATEGIES, PAIRS_STRATEGIES
 from backtest.strategies.trend_alignment import HTF_TIMEFRAME
 from backtest.metrics import compute_metrics

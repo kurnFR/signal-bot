@@ -2,6 +2,12 @@
 
 Pinned to 127.0.0.1:3306/signal_bot_test. All Telegram transport is mocked;
 this test never creates TelegramAlert or contacts Telegram.
+
+Step 3: the worker (paper/retailbot2.py) is deleted. Outbox rows are now
+seeded directly through paper/outbox_store.OutboxStore (the same INSERT the
+old DatabaseManager.save_trade/close_trade performed for the alert itself);
+no rdt_trades rows are created anymore, and trade_id is only a correlation
+key on the outbox row.
 Requires migrations 018, 026, and 027 in the isolated test schema.
 
 Run:
@@ -23,7 +29,7 @@ import mysql.connector
 import pytest
 
 from paper.outbox_worker import ALLOWED_TEST_DATABASES, OutboxWorker
-from paper.retailbot2 import DatabaseManager
+from paper.outbox_store import OutboxStore
 
 
 TEST_DB_HOST = "127.0.0.1"
@@ -62,15 +68,22 @@ def _connection():
 
 
 def _db():
-    db = object.__new__(DatabaseManager)
+    db = object.__new__(OutboxStore)
     db.logger = logging.getLogger("test.retailbot2.outbox.delivery.mysql")
     db.get_conn = _connection
     db.config = SimpleNamespace(
         db_name=TEST_DB_NAME,
-        allow_trading=True,
         observation_only=False,
     )
     return db
+
+
+def _new_trade_id():
+    """Correlation key for a seeded outbox row (no rdt_trades row exists
+    anymore, so any unique positive int works)."""
+    import random
+
+    return random.randint(1_000_000, 2_000_000_000)
 
 
 def _assert_outbox_idle():
@@ -129,8 +142,13 @@ def _seed_entry(db, suffix):
         "risk_pct": 1.0,
         "mode": "shadow",
     }
-    trade_id = db.save_trade(signal, 2.0, "shadow", entry_alert=alert)
-    assert trade_id is not None, "could not seed isolated paper trade/outbox event"
+    # Old save_trade() stored this exact row: event_key retailbot2:entry:{tid},
+    # event_type 'entry', payload_json = the entry alert. Seed it directly.
+    trade_id = _new_trade_id()
+    ok = db.enqueue_telegram_outbox_event(
+        f"retailbot2:entry:{trade_id}", "entry", alert, trade_id=trade_id
+    )
+    assert ok, "could not seed isolated outbox event"
     return trade_id, symbol
 
 
@@ -335,7 +353,12 @@ def test_dispatcher_recovers_expired_claim_after_worker_interruption():
             _cleanup(db, trade_id)
 
 
-def test_closed_trade_persists_exit_event_and_dispatches_confirmed_delivery():
+def test_exit_event_persists_and_dispatches_confirmed_delivery():
+    """Step 3: the old version seeded a real rdt_trades row via save_trade
+    and closed it via close_trade_and_update_stats, asserting the CLOSED
+    row. Trade CRUD died with the worker, so this now seeds the exit outbox
+    event directly (same event_key/payload the old close path stored) and
+    asserts the worker delivers it."""
     if os.getenv("SIGNAL_BOT_RUN_RETAILBOT2_DB_INTEGRATION") != "1":
         pytest.skip("opt-in isolated signal_bot_test integration test")
 
@@ -346,23 +369,7 @@ def test_closed_trade_persists_exit_event_and_dispatches_confirmed_delivery():
     try:
         _assert_outbox_idle()
         symbol = f"OTX{uuid.uuid4().hex[:10].upper()}USDT"
-        trade = {
-            "symbol": symbol,
-            "side": "LONG",
-            "entry": 100.0,
-            "stop": 95.0,
-            "target": 110.0,
-            "atr": 2.0,
-            "rr": 2.0,
-            "strategy": strategy,
-            "strategies_triggered": [strategy],
-            "telegram_enabled": False,
-            "confluence_score": 1,
-            "reason": "isolated exit outbox acceptance",
-        }
-        trade_id = db.save_trade(trade, 2.0, "shadow")
-        assert trade_id is not None
-
+        trade_id = _new_trade_id()
         exit_alert = {
             "trade": {
                 "id": trade_id,
@@ -379,26 +386,9 @@ def test_closed_trade_persists_exit_event_and_dispatches_confirmed_delivery():
             "pnl_pct": 6.0,
             "telegram_enabled": True,
         }
-        assert db.close_trade_and_update_stats(
-            trade_id, 106.0, "TAKE_PROFIT", 12.0, 6.0,
-            strategy, "shadow", exit_alert=exit_alert,
+        assert db.enqueue_telegram_outbox_event(
+            f"retailbot2:exit:{trade_id}", "exit", exit_alert, trade_id=trade_id
         )
-
-        conn = _connection()
-        try:
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute(
-                "SELECT status, exit_price, net_pnl FROM rdt_trades WHERE id=%s",
-                (trade_id,),
-            )
-            closed_trade = cursor.fetchone()
-            assert closed_trade is not None
-            assert closed_trade["status"] == "CLOSED"
-            assert float(closed_trade["exit_price"]) == pytest.approx(106.0)
-            assert float(closed_trade["net_pnl"]) == pytest.approx(12.0)
-            cursor.close()
-        finally:
-            conn.close()
 
         queued = _read_event(trade_id)
         assert queued["event_type"] == "exit"
@@ -471,7 +461,7 @@ def test_active_lease_prevents_second_worker_from_claiming_same_event():
         assert first_claim["id"] == event["id"]
         assert first_claim["attempts"] == 1
 
-        # A separate DatabaseManager/connection represents another worker.
+        # A separate OutboxStore/connection represents another worker.
         second_claim = second_worker_db.claim_telegram_outbox_event(
             lease_seconds=90
         )

@@ -562,10 +562,9 @@ const App = {
         } finally {
             if (window.lucide) window.lucide.createIcons();
         }
-        // Separate try/catch: a bot that's never been started yet (control
-        // table doesn't exist) shouldn't take down the rest of the panel
-        // above, which can still show positions/stats/signals fine.
-        this._fetchBotControl("retailbot2");
+        // NOTE: the retailbot2 control fetch is retired with the worker --
+        // its control endpoints are gone and the saved control row is
+        // archive history only (see the retired notice in index.html).
     },
 
     async fetchScreenerData() {
@@ -1106,7 +1105,9 @@ const App = {
                 throw new Error(detail);
             }
             const control = await res.json();
-            const prefix = botName === "retailbot2" ? "rb2-ctl-" : "screener-ctl-";
+            // Screener-only now: the retailbot2 control fetch was retired
+            // with the worker, so this is only ever called with "screener".
+            const prefix = "screener-ctl-";
             const enabledEl = document.getElementById(`${prefix}enabled`);
             if (enabledEl) enabledEl.checked = !!control.enabled;
 
@@ -1147,13 +1148,14 @@ const App = {
     },
 
     async saveBotControl(botName) {
-        const prefix = botName === "retailbot2" ? "rb2-ctl-" : "screener-ctl-";
-        const fields = botName === "retailbot2"
-            ? ["atr_sl_multiplier", "rr_ratio", "risk_per_trade", "max_open_trades_per_mode",
-               "max_trades_per_symbol", "min_trade_interval_hours", "rsi_oversold", "rsi_overbought",
-               "rsi_zone_width", "sr_touch_threshold", "sr_min_touches", "bb_std", "bb_proximity_pct",
-               "pattern_tolerance", "pattern_min_bars_apart", "spike_atr_multiplier"]
-            : ["rvol_multiplier", "divergence_max_price_change", "velocity_threshold",
+        if (botName === "retailbot2") {
+            // RetailBot2 is retired: the worker is deleted and the control
+            // endpoints are retired. The saved row is a read-only archive.
+            this.showToast("RetailBot2 is retired — bot control is a read-only archive and cannot be changed.", "error");
+            return;
+        }
+        const prefix = "screener-ctl-";
+        const fields = ["rvol_multiplier", "divergence_max_price_change", "velocity_threshold",
                "max_alerts_per_hour", "max_alerts_per_symbol_per_hour", "alert_cooldown_sec",
                "enable_divergence_detection", "enable_velocity_detection",
                "require_confluence", "min_signal_rvol", "min_signal_velocity",
@@ -1190,7 +1192,7 @@ const App = {
                 throw new Error(detail);
             }
             const data = await res.json();
-            this.showToast(`${botName === "retailbot2" ? "Retail Bot" : "Screener"} settings saved. ${data.note || ""}`, "success");
+            this.showToast(`Screener settings saved. ${data.note || ""}`, "success");
         } catch (e) {
             this.showToast(`Failed to save ${botName} settings: ${e.message || e}`, "error");
         }
@@ -1218,7 +1220,7 @@ const App = {
         const tbody = document.getElementById("rb2-positions-table-body");
         if (!tbody) return;
         if (!positions || positions.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-500 text-xs">No open positions. Confirm paper/retailbot2.py is running.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-500 text-xs">No historical open positions in the archive.</td></tr>`;
             return;
         }
         tbody.innerHTML = positions.map(p => {
@@ -1239,11 +1241,14 @@ const App = {
         }).join("");
     },
 
+    // Read-only render of the saved lifecycle rows (retired archive).
+    // The worker is deleted and POST /api/research/retailbot2/strategies
+    // is retired, so there are no checkboxes, Save, or Stop & Hide controls.
     _renderRb2LifecycleTable(rows) {
         const tbody = document.getElementById("rb2-lifecycle-table-body");
         if (!tbody) return;
         if (!Array.isArray(rows) || rows.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-500 text-xs">No executable strategies were returned.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-slate-500 text-xs">No saved strategy rows were returned.</td></tr>`;
             return;
         }
         tbody.innerHTML = rows.map(row => {
@@ -1251,98 +1256,30 @@ const App = {
             const mode = String(row.mode || "");
             const safeId = this._escapeHtml(strategy);
             const safeMode = this._escapeHtml(mode);
-            const key = `rlc-${strategy.replace(/[^a-zA-Z0-9_-]/g, "_")}-${mode}`;
-            const checkbox = (field, label) => {
-                const disabled = row.historical_only && field !== "report_enabled" ? "disabled" : "";
-                return `
-                <label class="inline-flex items-center gap-1.5 text-[10px] text-slate-300">
-                    <input type="checkbox" id="${key}-${field}" ${row[field] ? "checked" : ""} ${disabled}
-                        aria-label="${label} for ${safeId} (${safeMode})"
-                        class="rounded border-slate-600 bg-slate-800 text-sky-500 focus:ring-sky-500">
-                    <span class="sr-only">${label}</span>
-                </label>`;
-            };
+            const flag = (on, onLabel, offLabel) => on ? onLabel : offLabel;
             return `
                 <tr>
                     <td class="font-semibold text-slate-100 whitespace-nowrap">
                         ${safeId}<div class="text-[10px] text-slate-500 font-normal">${safeMode}${row.historical_only ? " · historical only" : ""}</div>
                     </td>
-                    <td>${checkbox("evaluation_enabled", "Evaluate strategy")}</td>
-                    <td>${checkbox("paper_enabled", "Paper track strategy")}</td>
-                    <td>${checkbox("telegram_enabled", "Telegram alerts")}</td>
-                    <td>${checkbox("report_enabled", "Include in performance report")}</td>
-                    <td class="whitespace-nowrap">
-                        <button type="button" data-strategy-lifecycle-save data-strategy-id="${safeId}" data-strategy-mode="${safeMode}"
-                            class="px-3 py-1.5 text-[10px] font-semibold bg-sky-600 hover:bg-sky-500 text-white rounded-md">Save</button>
-                        ${row.historical_only ? "" : `<button type="button" data-strategy-lifecycle-stop-hide data-strategy-id="${safeId}" data-strategy-mode="${safeMode}"
-                            aria-label="Stop and hide ${safeId} (${safeMode})"
-                            class="ml-1 px-3 py-1.5 text-[10px] font-semibold bg-rose-700 hover:bg-rose-600 text-white rounded-md">Stop &amp; Hide</button>`}
-                    </td>
+                    <td class="text-slate-300">${flag(row.evaluation_enabled, "On", "Off")}</td>
+                    <td class="text-slate-300">${flag(row.paper_enabled, "On", "Off")}</td>
+                    <td class="text-slate-300">${flag(row.telegram_enabled, "On", "Off")}</td>
+                    <td class="text-slate-300">${flag(row.report_enabled, "Visible", "Hidden")}</td>
                 </tr>`;
         }).join("");
-        tbody.querySelectorAll("[data-strategy-lifecycle-save]").forEach(button => {
-            button.addEventListener("click", () => {
-                this.saveStrategyLifecycle(button.dataset.strategyId, button.dataset.strategyMode);
-            });
-        });
-        tbody.querySelectorAll("[data-strategy-lifecycle-stop-hide]").forEach(button => {
-            button.addEventListener("click", () => {
-                this.stopAndHideStrategy(button.dataset.strategyId, button.dataset.strategyMode);
-            });
-        });
     },
 
     async stopAndHideStrategy(strategyId, mode) {
-        const confirmed = window.confirm(
-            `Stop evaluation and paper entries, disable Telegram alerts, and hide ${strategyId} (${mode}) from future performance reports? Historical trades will be retained.`
-        );
-        if (!confirmed) return;
-        const safePart = String(strategyId).replace(/[^a-zA-Z0-9_-]/g, "_");
-        const prefix = `rlc-${safePart}-${mode}`;
-        for (const field of ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled"]) {
-            const el = document.getElementById(`${prefix}-${field}`);
-            if (!el) {
-                this.showToast("Strategy control is missing from the page. Refresh and try again.", "error");
-                return;
-            }
-            el.checked = false;
-        }
-        await this.saveStrategyLifecycle(strategyId, mode);
+        // Retired with the worker: lifecycle writes are gone (POST
+        // /api/research/retailbot2/strategies returns 403). Kept as a stub
+        // so any stale caller reports the retirement instead of failing.
+        this.showToast("RetailBot2 is retired — strategy lifecycle is a read-only archive.", "error");
     },
 
     async saveStrategyLifecycle(strategyId, mode) {
-        const safePart = String(strategyId).replace(/[^a-zA-Z0-9_-]/g, "_");
-        const prefix = `rlc-${safePart}-${mode}`;
-        const fields = ["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled"];
-        const settings = {};
-        for (const field of fields) {
-            const el = document.getElementById(`${prefix}-${field}`);
-            if (!el) {
-                this.showToast("Strategy control is missing from the page. Refresh and try again.", "error");
-                return;
-            }
-            settings[field] = el.checked;
-        }
-        try {
-            const res = await fetch(`${API_BASE}/api/research/retailbot2/strategies`, {
-                method: "POST",
-                headers: this.getAuthHeaders(),
-                body: JSON.stringify({ strategy_id: strategyId, mode, ...settings, auto_promote_enabled: false }),
-            });
-            if (!res.ok) {
-                let detail = `HTTP ${res.status}`;
-                try { detail = (await res.json()).detail || detail; } catch (_) {}
-                throw new Error(detail);
-            }
-            const data = await res.json();
-            this.showToast(`Saved ${strategyId} (${mode}). ${data.note || ""}`, "success");
-            await this.fetchResearchData();
-        } catch (e) {
-            this.showToast(`Failed to save strategy settings: ${e.message || e}`, "error");
-            // Restore the controls from persisted state when possible so a
-            // failed write does not leave an unsaved stop/hide looking active.
-            try { await this.fetchResearchData(); } catch (_) {}
-        }
+        // Retired with the worker: see stopAndHideStrategy above.
+        this.showToast("RetailBot2 is retired — strategy lifecycle is a read-only archive.", "error");
     },
 
     _renderRb2StrategyTable(rows) {

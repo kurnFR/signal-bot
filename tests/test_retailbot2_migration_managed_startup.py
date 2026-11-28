@@ -1,4 +1,9 @@
-"""RetailBot2 schema is migration-managed, never mutated by runtime startup."""
+"""RetailBot2 archive schema is migration-managed, never mutated by runtime startup.
+
+Step 3: the worker (paper/retailbot2.py) is deleted. The store checks below
+now target paper/outbox_store.OutboxStore, the only remaining runtime
+owner of the rdt_telegram_outbox table; the lifecycle-write test is gone
+with set_retailbot2_strategy_lifecycle_setting."""
 import inspect
 import unittest
 from pathlib import Path
@@ -7,7 +12,7 @@ from unittest.mock import Mock, patch
 from db import db as db_helpers
 
 from db.migrate import MIGRATIONS
-from paper.retailbot2 import DatabaseManager
+from paper.outbox_store import OutboxStore
 from web.app import lifespan
 
 
@@ -24,35 +29,32 @@ class TestRetailBot2MigrationManagedStartup(unittest.TestCase):
         self.assertNotIn("DatabaseManager(", source)
         self.assertNotIn("ensure_retailbot2_lifecycle_table", source)
 
-    def test_database_manager_startup_does_not_call_runtime_table_creator(self):
-        source = inspect.getsource(DatabaseManager._init_pool)
+    def test_outbox_store_startup_does_not_call_runtime_table_creator(self):
+        source = inspect.getsource(OutboxStore._init_pool)
         self.assertNotIn("_create_tables(", source)
         self.assertIn("_verify_schema(", source)
 
-    def test_database_manager_verification_uses_only_read_queries(self):
-        manager = DatabaseManager.__new__(DatabaseManager)
+    def test_outbox_store_verification_uses_only_read_queries(self):
+        # The store verifies only its own table (rdt_telegram_outbox +
+        # claim_token column); the other rdt_* tables are archive-only and
+        # are verified by db.db.verify_retailbot2_schema().
+        store = OutboxStore.__new__(OutboxStore)
         cursor = Mock()
-        cursor.fetchall.return_value = [
-            {"table_name": "rdt_trades"},
-            {"table_name": "rdt_strategy_stats"},
-            {"table_name": "bot_control"},
-            {"table_name": "rdt_strategy_lifecycle"},
-            {"table_name": "rdt_telegram_outbox"},
-        ]
-        cursor.fetchone.return_value = {"column_name": "telegram_enabled"}
+        cursor.fetchone.return_value = {"table_name": "rdt_telegram_outbox"}
         conn = Mock()
         conn.cursor.return_value = cursor
-        manager.get_conn = Mock(return_value=conn)
+        store.get_conn = Mock(return_value=conn)
 
-        manager._verify_schema()
+        store._verify_schema()
 
         statements = [call.args[0].lstrip().upper() for call in cursor.execute.call_args_list]
-        self.assertEqual(len(statements), 3)
+        self.assertEqual(len(statements), 2)
         self.assertTrue(all(statement.startswith("SELECT") for statement in statements))
         self.assertFalse(any(statement.startswith(("CREATE", "ALTER", "INSERT", "UPDATE", "DELETE")) for statement in statements))
-        self.assertIn("INFORMATION_SCHEMA.COLUMNS", statements[2])
+        self.assertIn("INFORMATION_SCHEMA.TABLES", statements[0])
+        self.assertIn("INFORMATION_SCHEMA.COLUMNS", statements[1])
         self.assertEqual(
-            cursor.execute.call_args_list[2].args[1],
+            cursor.execute.call_args_list[1].args[1],
             ("rdt_telegram_outbox", "claim_token"),
         )
         conn.close.assert_called_once()
@@ -62,44 +64,6 @@ class TestRetailBot2MigrationManagedStartup(unittest.TestCase):
         with patch.object(db_helpers, "verify_retailbot2_schema") as verify:
             db_helpers.ensure_retailbot2_lifecycle_table()
         verify.assert_called_once_with()
-
-    def test_strategy_lifecycle_save_uses_migration_managed_table_and_commits(self):
-        pool = Mock()
-        cursor = Mock()
-        conn = Mock()
-        conn.cursor.return_value = cursor
-        pool.get_connection.return_value = conn
-        settings = {
-            "evaluation_enabled": True,
-            "paper_enabled": True,
-            "telegram_enabled": True,
-            "report_enabled": True,
-            "auto_promote_enabled": False,
-        }
-
-        with patch.object(db_helpers, "get_retailbot2_pool", return_value=pool):
-            db_helpers.set_retailbot2_strategy_lifecycle_setting(
-                "BB_REV_INV", "inverse", settings
-            )
-
-        self.assertEqual(cursor.execute.call_count, 1)
-        sql, params = cursor.execute.call_args.args
-        normalized_sql = " ".join(sql.split()).upper()
-        self.assertIn("INSERT INTO RDT_STRATEGY_LIFECYCLE", normalized_sql)
-        self.assertIn("TELEGRAM_ENABLED", normalized_sql)
-        self.assertNotIn("CREATE TABLE", normalized_sql)
-        self.assertEqual(
-            params,
-            ("BB_REV_INV", "inverse", True, True, True, True, False),
-        )
-        conn.commit.assert_called_once()
-        conn.rollback.assert_not_called()
-        cursor.close.assert_called_once()
-        conn.close.assert_called_once()
-
-        # Catch regressions that reintroduce a missing runtime DDL helper.
-        source = inspect.getsource(db_helpers.set_retailbot2_strategy_lifecycle_setting)
-        self.assertNotIn("_ensure_retailbot2_strategy_lifecycle_table", source)
 
     def test_migration_defines_all_runtime_tables_and_legacy_column(self):
         migration = Path("db/migrate_retailbot2_runtime_schema.sql").read_text(encoding="utf-8")

@@ -14,7 +14,6 @@ from backtest.accounting import calculate_trade_accounting
 from collectors import funding_poller
 from db import db
 from paper import engine as paper_engine
-from paper.retailbot2 import DatabaseManager, RetailDeathTrapBot
 
 
 # ==============================================================================
@@ -248,75 +247,6 @@ def test_paper_engine_duplicate_trade_preserves_exit_exec_price(monkeypatch):
     assert pos["status"] == "CLOSED"
 
 
-def test_retailbot2_close_trade_gross_and_net_accounting():
-    """RetailBot2 _close_trade supports net accounting via deduct_fees_slippage=True
-    and explicitly labels default metrics as Gross P&L."""
-    trade = {
-        "id": 1,
-        "symbol": "BTCUSDT",
-        "side": "LONG",
-        "mode": "shadow",
-        "entry": 50000.0,
-        "stop": 48000.0,
-        "units": 0.1,
-        "strategy": "s1",
-    }
-
-    # 1. Default (gross PnL) mode
-    bot_gross = object.__new__(RetailDeathTrapBot)
-    bot_gross.observation_only = False
-    bot_gross.db = Mock()
-    bot_gross.db.close_trade_and_update_stats.return_value = True
-    bot_gross.logger = Mock()
-    bot_gross.tg = Mock()
-    bot_gross.active_shadow = {1: dict(trade)}
-    bot_gross.active_inverse = {}
-    bot_gross.equity_shadow = 1000.0
-    bot_gross.equity_inverse = 1000.0
-    bot_gross.config = Mock()
-    bot_gross.config.observation_only = False
-    bot_gross.config.deduct_fees_slippage = False
-
-    bot_gross._close_trade(1, 52000.0, "TP", mode="shadow")
-    # Gross PnL: (52000 - 50000) * 0.1 = +200.0
-    assert bot_gross.equity_shadow == 1200.0
-    bot_gross.db.close_trade_and_update_stats.assert_called_once()
-    saved_pnl_gross = bot_gross.db.close_trade_and_update_stats.call_args[0][3]
-    assert saved_pnl_gross == 200.0
-    # Check that logger recorded Gross P&L
-    log_messages = [call[0][0] for call in bot_gross.logger.info.call_args_list]
-    assert any("Gross P&L: $+200.00" in msg for msg in log_messages)
-
-    # 2. Net accounting mode (deduct_fees_slippage=True)
-    bot_net = object.__new__(RetailDeathTrapBot)
-    bot_net.observation_only = False
-    bot_net.db = Mock()
-    bot_net.db.close_trade_and_update_stats.return_value = True
-    bot_net.logger = Mock()
-    bot_net.tg = Mock()
-    bot_net.active_shadow = {2: dict(trade)}
-    bot_net.active_inverse = {}
-    bot_net.equity_shadow = 1000.0
-    bot_net.equity_inverse = 1000.0
-    bot_net.config = Mock()
-    bot_net.config.observation_only = False
-    bot_net.config.deduct_fees_slippage = True
-
-    bot_net._close_trade(2, 52000.0, "TP", mode="shadow")
-    bot_net.db.close_trade_and_update_stats.assert_called_once()
-    saved_pnl_net = bot_net.db.close_trade_and_update_stats.call_args[0][3]
-    # Net PnL must be strictly less than gross PnL due to fee and slippage deductions
-    assert saved_pnl_net < 200.0
-    assert bot_net.equity_shadow < 1200.0
-    # Check that logger recorded Net P&L
-    log_messages_net = [call[0][0] for call in bot_net.logger.info.call_args_list]
-    assert any("Net P&L:" in msg for msg in log_messages_net)
-
-
-# ==============================================================================
-# 3. Database & Paper Cursor Lifecycle Cleanup on Exceptions
-# ==============================================================================
-
 
 def test_paper_engine_cursor_cleanup_on_exception(monkeypatch):
     """Ensure cur.close() and conn.close() are always called on exceptions
@@ -403,50 +333,6 @@ def test_paper_engine_close_position_in_db_cur_cfg_cleanup(monkeypatch):
     cfg_conn.close.assert_called_once()
 
 
-def test_retailbot2_database_manager_cursor_cleanup_on_exception():
-    """Ensure DatabaseManager closes cursors and connections even when SQL queries raise exceptions."""
-    db_mgr = object.__new__(DatabaseManager)
-    db_mgr.logger = Mock()
-
-    # 1. count_open
-    mock_cursor = Mock()
-    mock_cursor.execute.side_effect = RuntimeError("count_open failed")
-    mock_conn = Mock()
-    mock_conn.cursor.return_value = mock_cursor
-    db_mgr.get_conn = Mock(return_value=mock_conn)
-
-    count = db_mgr.count_open()
-    assert count == 0
-    mock_cursor.close.assert_called_once()
-    mock_conn.close.assert_called_once()
-
-    # 2. get_stats
-    mock_cursor.reset_mock()
-    mock_conn.reset_mock()
-    mock_cursor.execute.side_effect = RuntimeError("get_stats failed")
-    stats = db_mgr.get_stats()
-    assert stats == {}
-    mock_cursor.close.assert_called_once()
-    mock_conn.close.assert_called_once()
-
-    # 3. get_realized_pnl_by_mode
-    mock_cursor.reset_mock()
-    mock_conn.reset_mock()
-    mock_cursor.execute.side_effect = RuntimeError("get_realized_pnl_by_mode failed")
-    pnl_by_mode = db_mgr.get_realized_pnl_by_mode()
-    assert pnl_by_mode == {}
-    mock_cursor.close.assert_called_once()
-    mock_conn.close.assert_called_once()
-
-    # 4. get_last_trade_times
-    mock_cursor.reset_mock()
-    mock_conn.reset_mock()
-    mock_cursor.execute.side_effect = RuntimeError("get_last_trade_times failed")
-    trade_times = db_mgr.get_last_trade_times()
-    assert trade_times == {}
-    mock_cursor.close.assert_called_once()
-    mock_conn.close.assert_called_once()
-
 
 def test_db_owned_cursor_cleanup_on_exception(monkeypatch):
     """Ensure _owned_cursor in db/db.py closes cursor, rolls back, and closes connection on exception."""
@@ -471,22 +357,6 @@ def test_db_owned_cursor_cleanup_on_exception(monkeypatch):
     mock_conn.reset_mock()
     with pytest.raises(RuntimeError, match="SQL error"):
         db.get_retailbot2_recent_trades()
-    mock_cursor.close.assert_called_once()
-    mock_conn.rollback.assert_called_once()
-    mock_conn.close.assert_called_once()
-
-    # 3. set_retailbot2_strategy_lifecycle_setting
-    mock_cursor.reset_mock()
-    mock_conn.reset_mock()
-    settings = {
-        "evaluation_enabled": True,
-        "paper_enabled": True,
-        "telegram_enabled": False,
-        "report_enabled": True,
-        "auto_promote_enabled": False,
-    }
-    with pytest.raises(RuntimeError, match="SQL error"):
-        db.set_retailbot2_strategy_lifecycle_setting("s1", "shadow", settings)
     mock_cursor.close.assert_called_once()
     mock_conn.rollback.assert_called_once()
     mock_conn.close.assert_called_once()

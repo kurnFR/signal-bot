@@ -1291,13 +1291,6 @@ def get_retailbot2_recent_trades(limit=50):
         return rows
 
 
-def get_retailbot2_outbox_counts():
-    conn = get_retailbot2_pool().get_connection()
-    with _owned_cursor(conn) as cur:
-        cur.execute("SELECT status, COUNT(*) FROM rdt_telegram_outbox GROUP BY status")
-        return {status: int(count) for status, count in cur.fetchall()}
-
-
 def get_retailbot2_stats():
     """Per-strategy/mode win-rate stats plus overall equity summary
     (initial_capital isn't stored in this DB -- the dashboard adds it from
@@ -1488,10 +1481,10 @@ def get_smart_money_stats():
 # assume migrations have already been applied and never create schema.
 # ----------------------------------------------------------------------------
 
-# Explicit safe-list mirrored from paper/retailbot2.py's own
-# _tunable_fields -- kept here too so a malformed/forged request can be
-# rejected at the API layer before it ever reaches the bot process, not
-# just relying on the bot's own filter as the only line of defense.
+# Explicit safe-list for the retired worker's saved control row, kept
+# here so the read-only GET /retailbot2/control endpoint can still report
+# which fields were tunable. The worker is gone; nothing writes this row
+# anymore, so this is archive metadata, not a live filter.
 RETAILBOT2_TUNABLE_FIELDS = {
     "rsi_oversold", "rsi_overbought", "rsi_zone_width",
     "sr_touch_threshold", "sr_min_touches",
@@ -1617,31 +1610,6 @@ def get_retailbot2_strategy_lifecycle_settings():
         conn.close()
 
 
-def set_retailbot2_strategy_lifecycle_setting(strategy_id, mode, settings):
-    """Atomically replace one strategy/mode lifecycle setting row."""
-    conn = get_retailbot2_pool().get_connection()
-    with _owned_cursor(conn) as cur:
-        # The lifecycle table is provisioned and verified by the migration/startup
-        # path. Runtime writes must not call a table-creation helper here.
-        cur.execute("""
-            INSERT INTO rdt_strategy_lifecycle
-                (strategy_id, mode, evaluation_enabled, paper_enabled,
-                 telegram_enabled, report_enabled, auto_promote_enabled)
-            VALUES (%s,%s,%s,%s,%s,%s,%s)
-            ON DUPLICATE KEY UPDATE
-                evaluation_enabled=VALUES(evaluation_enabled),
-                paper_enabled=VALUES(paper_enabled),
-                telegram_enabled=VALUES(telegram_enabled),
-                report_enabled=VALUES(report_enabled),
-                auto_promote_enabled=VALUES(auto_promote_enabled)
-        """, (
-            strategy_id, mode, settings["evaluation_enabled"],
-            settings["paper_enabled"], settings["telegram_enabled"],
-            settings["report_enabled"], settings["auto_promote_enabled"]
-        ))
-        conn.commit()
-
-
 def get_retailbot2_control():
     conn = get_retailbot2_pool().get_connection()
     with _owned_cursor(conn, dictionary=True) as cur:
@@ -1670,25 +1638,6 @@ def get_retailbot2_control():
             "overrides": overrides,
             "updated_at": str(row["updated_at"]) if row.get("updated_at") else None,
         }
-
-
-def set_retailbot2_control(enabled, overrides):
-    """Persist the full dashboard control state, creating its singleton row if absent."""
-    conn = get_retailbot2_pool().get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """INSERT INTO bot_control (id, enabled, overrides_json)
-               VALUES (1, %s, %s)
-               ON DUPLICATE KEY UPDATE
-                   enabled=VALUES(enabled),
-                   overrides_json=VALUES(overrides_json)""",
-            (enabled, json.dumps(overrides)),
-        )
-        conn.commit()
-        cur.close()
-    finally:
-        conn.close()
 
 
 def update_screener_heartbeat(*, pid=None, timeframe=None, symbols_monitored=None, last_signal_at=None, last_universe_refresh_at=None):

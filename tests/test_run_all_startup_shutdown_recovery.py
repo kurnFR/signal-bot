@@ -85,13 +85,11 @@ class TestSupervisorProcessSet(unittest.TestCase):
         self.assertEqual(p["news_ai"], [sys.executable, "run_news_ai.py"])
 
     def test_retailbot2_opt_in_strictness(self):
-        for val in ("", "0", "false", "no", "true", "yes", "2", "enabled", None):
+        # Step 3: the worker is deleted -- RETAILBOT2_ENABLED no longer opts
+        # anything in, whatever its value (including "1").
+        for val in ("", "0", "false", "no", "true", "yes", "2", "enabled", None, "1"):
             p = run_all.build_processes({"RETAILBOT2_ENABLED": val})
             self.assertNotIn("retailbot2", p)
-
-        p = run_all.build_processes({"RETAILBOT2_ENABLED": "1"})
-        self.assertIn("retailbot2", p)
-        self.assertEqual(p["retailbot2"], [sys.executable, "paper/retailbot2.py"])
 
     def test_outbox_worker_dual_opt_in_permutations(self):
         # Missing or single flags keep outbox disabled

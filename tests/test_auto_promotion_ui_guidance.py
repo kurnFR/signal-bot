@@ -19,17 +19,20 @@ def test_retailbot2_lifecycle_ui_does_not_claim_auto_promotion_is_available():
     assert "Automatic promotion is opt-in and configured in Backtest Studio." not in html
 
 
-def test_retailbot2_lifecycle_has_one_click_stop_and_hide_without_deleting_history():
+def test_retailbot2_lifecycle_is_retired_read_only_without_stop_and_hide():
+    """Step 3: the worker is retired, so the legacy static UI must no longer
+    offer lifecycle writes. The lifecycle table renders saved rows read-only
+    (no Save / Stop & Hide buttons, no POST to /retailbot2/strategies) and
+    the retired control card says so."""
     js = Path("web/static/js/app.js").read_text(encoding="utf-8")
     html = Path("web/static/index.html").read_text(encoding="utf-8")
 
-    assert "data-strategy-lifecycle-stop-hide" in js
-    assert "stopAndHideStrategy(button.dataset.strategyId, button.dataset.strategyMode)" in js
-    assert '["evaluation_enabled", "paper_enabled", "telegram_enabled", "report_enabled"]' in js
-    assert "await this.saveStrategyLifecycle(strategyId, mode);" in js
-    assert "const confirmed = window.confirm(" in js
-    assert "try { await this.fetchResearchData(); } catch (_) {}" in js
-    assert "Stop &amp; Hide" in js
+    assert "data-strategy-lifecycle-stop-hide" not in js
+    assert "stopAndHideStrategy(button.dataset.strategyId, button.dataset.strategyMode)" not in js
+    assert "await this.saveStrategyLifecycle(strategyId, mode);" not in js
+    assert "Stop &amp; Hide" not in html
+    assert "RetailBot2 is retired" in html
+    assert "read-only archive" in html.lower()
     assert re.search(r'app\.js\?v=\d{8}-\d+', html)
 
 

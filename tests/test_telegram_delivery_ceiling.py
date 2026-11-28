@@ -111,18 +111,16 @@ def test_report_scheduler_follows_ceiling(monkeypatch, env_value, db_row, expect
     "env_value,db_row,expected",
     [("0", DB_ON, False), ("1", DB_OFF, False), ("1", DB_ON, True), ("1", None, True)],
 )
-def test_retailbot2_alert_global_authorization_follows_ceiling(
+def test_notifier_delivery_authorization_follows_ceiling(
     monkeypatch, env_value, db_row, expected
 ):
-    import logging
-
-    from paper.retailbot2 import TelegramAlert
+    """Step 3: TelegramAlert is deleted with the worker; the ceiling is now
+    asserted through the replacement, notifications.telegram_notifier."""
+    from notifications.telegram_notifier import is_telegram_delivery_authorized
 
     with _gate(monkeypatch, env_value, db_row):
-        alert = TelegramAlert(
-            token="<redacted>", chat_id="123456", logger=logging.getLogger("test-ceiling")
-        )
-    assert alert.global_authorized is expected
+        assert is_telegram_delivery_authorized() is expected
+
 
 
 def test_missing_outbox_authorization_warning_is_rate_limited(monkeypatch, caplog):

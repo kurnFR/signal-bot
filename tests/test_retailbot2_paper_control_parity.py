@@ -23,6 +23,16 @@ ALL_RETAILBOT2_CANONICAL_NAMES = (
     "COMPOSITE", "COMPOSITE_INV",
 )
 
+# The 14 executable retail strategies. COMPOSITE / COMPOSITE_INV are
+# research-only and must never open paper positions (paper/engine.py
+# COMPOSITE_PAPER_FORBIDDEN), so tests that drive the paper evaluation
+# loop to an actual entry must not use them as fixtures -- see
+# tests/test_retailbot2_mirror_fidelity.py for the guard tests.
+NON_COMPOSITE_RETAILBOT2_NAMES = tuple(
+    name for name in ALL_RETAILBOT2_CANONICAL_NAMES
+    if name not in {"COMPOSITE", "COMPOSITE_INV"}
+)
+
 _CLIENT = TestClient(app, raise_server_exceptions=False)
 
 
@@ -99,8 +109,13 @@ def _make_fake_pool(captured_queries):
     return _Pool()
 
 
-@pytest.mark.parametrize("strategy_name", ALL_RETAILBOT2_CANONICAL_NAMES)
+@pytest.mark.parametrize("strategy_name", NON_COMPOSITE_RETAILBOT2_NAMES)
 def test_all_16_strategies_deploy_edit_pause_archive_permanent_delete(strategy_name):
+    # NOTE: parametrized over the 14 executable strategies only. COMPOSITE /
+    # COMPOSITE_INV cannot be deployed: engine.set_paper_config rejects them
+    # (ValueError -> 400 on /api/paper/configs), covered by the guard tests
+    # in tests/test_retailbot2_mirror_fidelity.py. This test mocks
+    # set_paper_config at the route level, so it cannot see that rejection.
     configs = [
         {
             "id": 101,
@@ -185,7 +200,7 @@ def test_inactive_strategy_never_opens_entry(strategy_name):
     mock_insert.assert_not_called()
 
 
-@pytest.mark.parametrize("strategy_name", ALL_RETAILBOT2_CANONICAL_NAMES)
+@pytest.mark.parametrize("strategy_name", NON_COMPOSITE_RETAILBOT2_NAMES)
 def test_telegram_disabled_sends_no_alert_or_outbox_event(strategy_name):
     df = _sample_candles(60)
     candle_open_time = int(df.iloc[-1]["open_time"])

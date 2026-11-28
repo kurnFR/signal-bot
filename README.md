@@ -2,7 +2,7 @@
 
 A production-ready quantitative research, backtesting, and paper-trading platform for crypto strategies on Binance data. It collects spot/futures market data and 8-hour funding rates, computes shared indicators, backtests 24+ strategy variants with strict train/holdout discipline, runs deployed strategies as paper trades with fail-closed circuit breakers and Telegram alerts, and integrates ML signal filters, a News/Macro AI overlay, and on-chain wallet tracking — all operated from a real-time React/TypeScript Modern UI workstation.
 
-> **Not a live-trading system.** Execution is simulated (paper). Nothing here places real exchange orders (`RETAILBOT2_ALLOW_TRADING=0` by default).
+> **Not a live-trading system.** Execution is simulated (paper). Nothing here places real exchange orders.
 
 ## What is in the dashboard
 
@@ -142,7 +142,6 @@ Optional execution workers require explicit opt-in flags:
 ```bash
 PAPER_ENGINE_ENABLED=1 python3 run_all.py --only paper_engine
 NEWS_AI_ENABLED=1 python3 run_all.py --only news_ai
-RETAILBOT2_ENABLED=1 python3 run_all.py --only retailbot2  # requires RETAILBOT2_ALLOW_TRADING=1 to trade
 ```
 
 Standalone funding collector: `python collectors/funding_poller.py`.  

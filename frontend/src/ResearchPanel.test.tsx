@@ -1,11 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { ResearchPanel } from "./ResearchPanel";
-
-const mockUseAuth = vi.fn();
-vi.mock("./AuthGate", () => ({
-  useAuth: () => mockUseAuth(),
-}));
 
 const snapshot = {
   "/api/research/retailbot2/positions?limit=100": {
@@ -98,7 +93,6 @@ const snapshot = {
 describe("ResearchPanel (Read-only baseline)", () => {
   beforeEach(() => {
     cleanup();
-    mockUseAuth.mockReturnValue(null);
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (init?.method && init.method !== "GET") throw new Error("Research preview must be GET-only");
@@ -117,184 +111,28 @@ describe("ResearchPanel (Read-only baseline)", () => {
     expect(screen.getByRole("heading", { name: "Performance by mode" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Performance by strategy" })).toBeInTheDocument();
     expect(screen.getByText("58.3%")).toBeInTheDocument();
-    expect(screen.getByText("-25")).toBeInTheDocument();
-    expect(screen.getAllByText("125.5")).toHaveLength(2);
+    expect(screen.getAllByText("-25")).toHaveLength(2);
+    expect(screen.getAllByText("125.5")).toHaveLength(3);
     expect(screen.getAllByText("Unavailable").length).toBeGreaterThan(0);
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
     expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
     expect(vi.mocked(fetch).mock.calls.map(([path]) => String(path))).toEqual(expect.arrayContaining(Object.keys(snapshot)));
   });
 
-  it("hides RetailBot2 lifecycle controls and skips strategies fetch in historyOnly mode", async () => {
-    render(<ResearchPanel historyOnly />);
+  it("renders the read-only archive: lifecycle snapshot shown, no mutation controls, strategies fetched", async () => {
+    render(<ResearchPanel />);
     expect(await screen.findByText("BTCUSDT")).toBeInTheDocument();
     expect(screen.getByText("RetailBot2 Historical Archive (Read-Only)")).toBeInTheDocument();
     expect(screen.getByText("Shadow realized PnL")).toBeInTheDocument();
     expect(screen.getByText("Inverse realized PnL")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Strategy lifecycle snapshot" })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Filter strategies")).not.toBeInTheDocument();
-    expect(vi.mocked(fetch).mock.calls.map(([path]) => String(path))).not.toContain("/api/research/retailbot2/strategies");
-  });
-});
-
-describe("Research Strategy Lifecycle Workflows (RB-03 & RB-04) with RBAC", () => {
-  beforeEach(() => {
-    cleanup();
-    mockUseAuth.mockReturnValue({
-      user: { id: 1, username: "trader_alice", role: "trader", is_active: true },
-      logout: vi.fn(),
-      logoutError: null,
-    });
-  });
-  afterEach(() => vi.unstubAllGlobals());
-
-  it("RB-03: saves updated lifecycle settings for a strategy row", async () => {
-    let lifecyclePayload: unknown = null;
-    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      const method = init?.method ?? "GET";
-
-      if (path === "/api/research/retailbot2/strategies" && method === "POST") {
-        lifecyclePayload = JSON.parse(String(init?.body));
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              status: "ok",
-              strategy_id: "BB_REV_INV",
-              mode: "inverse",
-              settings: lifecyclePayload,
-            }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          ),
-        );
-      }
-      const body = snapshot[path as keyof typeof snapshot];
-      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(<ResearchPanel />);
-    expect((await screen.findAllByText("BB_REV_INV")).length).toBeGreaterThan(0);
-
-    // Toggle telegram checkbox for BB_REV_INV (inverse)
-    const telegramCheckbox = screen.getByLabelText("Telegram alerts for BB_REV_INV (inverse)");
-    expect(telegramCheckbox).not.toBeChecked();
-    fireEvent.click(telegramCheckbox);
-    expect(telegramCheckbox).toBeChecked();
-
-    // Save row
-    const saveButtons = screen.getAllByRole("button", { name: "Save" });
-    fireEvent.click(saveButtons[0]);
-
-    await waitFor(() => expect(lifecyclePayload).not.toBeNull());
-    expect(lifecyclePayload).toMatchObject({
-      strategy_id: "BB_REV_INV",
-      mode: "inverse",
-      evaluation_enabled: true,
-      paper_enabled: true,
-      telegram_enabled: true,
-      report_enabled: true,
-      auto_promote_enabled: false,
-    });
-    expect(await screen.findByText(/Lifecycle settings saved for 'BB_REV_INV' \(inverse\)\./i)).toBeInTheDocument();
-  });
-
-  it("RB-03: disables evaluation, paper, and telegram for historical_only strategies", async () => {
-    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
-      const path = String(input);
-      const body = snapshot[path as keyof typeof snapshot];
-      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(<ResearchPanel />);
-    expect(await screen.findByText("HIST_ONLY_STRAT")).toBeInTheDocument();
-
-    const evalCheck = screen.getByLabelText("Evaluation for HIST_ONLY_STRAT (shadow)");
-    const paperCheck = screen.getByLabelText("Paper tracking for HIST_ONLY_STRAT (shadow)");
-    const teleCheck = screen.getByLabelText("Telegram alerts for HIST_ONLY_STRAT (shadow)");
-    const reportCheck = screen.getByLabelText("Report visibility for HIST_ONLY_STRAT (shadow)");
-
-    expect(evalCheck).toBeDisabled();
-    expect(paperCheck).toBeDisabled();
-    expect(teleCheck).toBeDisabled();
-    expect(reportCheck).not.toBeDisabled();
-  });
-
-  it("RB-04: stops and hides strategy via confirmation dialog", async () => {
-    let stopPayload: unknown = null;
-    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      const method = init?.method ?? "GET";
-
-      if (path === "/api/research/retailbot2/strategies" && method === "POST") {
-        stopPayload = JSON.parse(String(init?.body));
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              status: "ok",
-              strategy_id: "BB_REV_INV",
-              mode: "inverse",
-              settings: stopPayload,
-            }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          ),
-        );
-      }
-      const body = snapshot[path as keyof typeof snapshot];
-      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(<ResearchPanel />);
-    expect((await screen.findAllByText("BB_REV_INV")).length).toBeGreaterThan(0);
-
-    // Click Stop & Hide
-    const stopBtn = screen.getByRole("button", { name: "Stop & Hide" });
-    fireEvent.click(stopBtn);
-
-    const dialog = screen.getByRole("dialog", { name: "Stop & Hide Strategy" });
-    expect(dialog).toBeInTheDocument();
-    expect(within(dialog).getByText(/This will disable live evaluation, paper tracking, and Telegram alerts/i)).toBeInTheDocument();
-
-    const confirmBtn = within(dialog).getByRole("button", { name: "Stop & Hide Strategy" });
-    fireEvent.click(confirmBtn);
-
-    await waitFor(() => expect(stopPayload).not.toBeNull());
-    expect(stopPayload).toMatchObject({
-      strategy_id: "BB_REV_INV",
-      mode: "inverse",
-      evaluation_enabled: false,
-      paper_enabled: false,
-      telegram_enabled: false,
-      report_enabled: false,
-      auto_promote_enabled: false,
-    });
-    expect(await screen.findByText(/Strategy 'BB_REV_INV' \(inverse\) stopped and hidden\./i)).toBeInTheDocument();
-  });
-
-  it("RBAC: viewer role renders view-only badges and suppresses action buttons", async () => {
-    mockUseAuth.mockReturnValue({
-      user: { id: 3, username: "viewer_charlie", role: "viewer", is_active: true },
-      logout: vi.fn(),
-      logoutError: null,
-    });
-
-    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
-      const path = String(input);
-      const body = snapshot[path as keyof typeof snapshot];
-      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(<ResearchPanel />);
-    expect((await screen.findAllByText("BB_REV_INV")).length).toBeGreaterThan(0);
-
-    // No Save or Stop & Hide buttons
+    // The saved lifecycle rows are displayed read-only, never edited.
+    expect(screen.getByRole("heading", { name: "Strategy lifecycle snapshot" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Filter strategies")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop & Hide" })).not.toBeInTheDocument();
-
-    // View only label present
-    expect(screen.getAllByText("View only").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
+    expect(vi.mocked(fetch).mock.calls.map(([path]) => String(path))).toContain("/api/research/retailbot2/strategies");
   });
 });

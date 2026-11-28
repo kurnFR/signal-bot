@@ -3,8 +3,9 @@
 Validates:
 A. Pure payload builders (build_entry_alert_payload, build_exit_alert_payload).
 B. Test-only shadow enqueue authorization (is_shadow_outbox_enqueue_authorized).
-C. Outbox persistence atomicity without trade mutation (DatabaseManager.enqueue_trade_signal_event).
-D. Full integration with RetailDeathTrapBot and OutboxWorker on signal_bot_test.
+C. Outbox persistence atomicity without trade mutation (OutboxStore.enqueue_trade_signal_event).
+D. (retired with the worker) Full integration with RetailDeathTrapBot and
+   OutboxWorker on signal_bot_test -- deleted in migration step 3.
 """
 
 import json
@@ -17,11 +18,11 @@ from unittest.mock import MagicMock, patch
 import mysql.connector
 
 from paper.outbox_worker import OutboxWorker
-from paper.retailbot2 import (
-    BotConfig,
-    DatabaseManager,
-    RetailDeathTrapBot,
-    SignalMode,
+# Step 3: the worker (paper/retailbot2.py) is deleted. Payload builders,
+# formatters, and the shadow-enqueue gate live in paper/outbox_store.py;
+# this suite now tests that module directly (DatabaseManager -> OutboxStore).
+from paper.outbox_store import (
+    OutboxStore,
     build_entry_alert_payload,
     build_exit_alert_payload,
     format_entry_message,
@@ -348,8 +349,8 @@ class TestShadowEnqueuePersistence(unittest.TestCase):
         initial_stats_count = cur.fetchone()[0]
         cur.close()
 
-        # 2. Setup DatabaseManager pointing to signal_bot_test
-        db = object.__new__(DatabaseManager)
+        # 2. Setup OutboxStore pointing to signal_bot_test
+        db = object.__new__(OutboxStore)
         db.logger = logger
         db.get_conn = lambda: _get_test_db_connection()
         db.config = SimpleNamespace(db_name="signal_bot_test", observation_only=False, allow_trading=False)
@@ -397,7 +398,7 @@ class TestShadowEnqueuePersistence(unittest.TestCase):
         cur.close()
 
     def test_shadow_enqueue_idempotency_duplicate_key(self):
-        db = object.__new__(DatabaseManager)
+        db = object.__new__(OutboxStore)
         db.logger = logger
         db.get_conn = lambda: _get_test_db_connection()
         db.config = SimpleNamespace(db_name="signal_bot_test", observation_only=False, allow_trading=False)
@@ -420,7 +421,7 @@ class TestShadowEnqueuePersistence(unittest.TestCase):
 
     def test_mock_worker_claims_and_delivers_shadow_outbox_event(self):
         # 1. Enqueue an event using shadow enqueue
-        db = object.__new__(DatabaseManager)
+        db = object.__new__(OutboxStore)
         db.logger = logger
         db.get_conn = lambda: _get_test_db_connection()
         db.config = SimpleNamespace(db_name="signal_bot_test", observation_only=False, allow_trading=False)
@@ -479,86 +480,6 @@ class TestShadowEnqueuePersistence(unittest.TestCase):
         self.assertEqual(row["status"], "sent", "Shadow event should be marked 'sent' on delivery")
         self.assertEqual(row["attempts"], 1)
         self.assertIsNotNone(row["sent_at"])
-
-
-class TestRetailDeathTrapBotShadowIntegration(unittest.TestCase):
-    def setUp(self):
-        self.conn = _get_test_db_connection()
-        if not self.conn:
-            self.skipTest("Isolated test database 'signal_bot_test' unavailable")
-        self.created_keys = []
-
-    def tearDown(self):
-        if self.conn and self.created_keys:
-            try:
-                cur = self.conn.cursor()
-                for key in self.created_keys:
-                    cur.execute("DELETE FROM rdt_telegram_outbox WHERE event_key = %s;", (key,))
-                self.conn.commit()
-                cur.close()
-            except Exception:
-                pass
-        if self.conn:
-            try:
-                self.conn.close()
-            except Exception:
-                pass
-
-    def test_enqueue_shadow_entry_signal_lifecycle_gating(self):
-        bot_cfg = BotConfig(
-            db_name="signal_bot_test",
-            allow_trading=False,
-            observation_only=False,
-        )
-        bot = object.__new__(RetailDeathTrapBot)
-        bot.logger = logger
-        bot.config = bot_cfg
-        bot.mode = SignalMode.SHADOW
-        bot.equity_shadow = 10000.0
-        bot.equity_inverse = 10000.0
-        bot.observation_only = False
-        bot.db = object.__new__(DatabaseManager)
-        bot.db.logger = logger
-        bot.db.config = bot_cfg
-        bot.db.get_conn = lambda: _get_test_db_connection()
-
-        signal = {
-            "symbol": "BTC/USDT",
-            "side": "LONG",
-            "entry": 65000.0,
-            "stop": 64000.0,
-            "target": 67000.0,
-            "strategy": "BB_REV",
-            "candle_close_time": "2026-11-13 14:00:00",
-        }
-        expected_key = "retailbot2:shadow:entry:BTC/USDT_BB_REV_shadow_LONG_2026-11-13_14-00-00"
-        self.created_keys.append(expected_key)
-
-        with patch.dict(os.environ, {"RETAILBOT2_SHADOW_ENQUEUE_ENABLED": "1"}):
-            # 1. When telegram_enabled is False in lifecycle -> False, no row
-            with patch.object(bot, "_get_strategy_lifecycle", return_value={"telegram_enabled": False, "paper_enabled": True}):
-                ok = bot.enqueue_shadow_entry_signal(signal, mode="shadow")
-                self.assertFalse(ok)
-
-            # 2. When paper_enabled and evaluation_enabled are False -> False, no row
-            with patch.object(bot, "_get_strategy_lifecycle", return_value={"telegram_enabled": True, "paper_enabled": False, "evaluation_enabled": False}):
-                ok = bot.enqueue_shadow_entry_signal(signal, mode="shadow")
-                self.assertFalse(ok)
-
-            # 3. When eligible -> True, outbox row created
-            with patch.object(bot, "_get_strategy_lifecycle", return_value={"telegram_enabled": True, "paper_enabled": True}):
-                ok = bot.enqueue_shadow_entry_signal(signal, mode="shadow")
-                self.assertTrue(ok)
-
-        # Confirm outbox row exists in signal_bot_test
-        self.conn.commit()
-        cur = self.conn.cursor()
-        cur.execute("SELECT status, trade_id FROM rdt_telegram_outbox WHERE event_key = %s;", (expected_key,))
-        row = cur.fetchone()
-        cur.close()
-        self.assertIsNotNone(row)
-        self.assertEqual(row[0], "pending")
-        self.assertEqual(row[1], 0)
 
 
 class TestShadowEnqueueDocumentation(unittest.TestCase):

@@ -53,7 +53,7 @@ PAIRS_STRATEGIES = {pairs_ratio.NAME, f"inverse_{pairs_ratio.NAME}"}
 # RetailBot2 / Retail Death Trap strategies (including BB_REV, BB_REV_INV,
 # DBL_PAT, DBL_PAT_INV, etc.) exposed for backtest, Strategy Library,
 # and paper trading integration.
-from backtest.strategies.retailbot2_strategies import (
+from backtest.strategies.retail_death_trap import (
     RETAILBOT2_STRATEGIES, RETAILBOT2_STRATEGY_NAMES
 )
 STRATEGIES.update(RETAILBOT2_STRATEGIES)
