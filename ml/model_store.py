@@ -12,7 +12,7 @@ import sys
 import tempfile
 from typing import Any
 
-from ml.file_lock import lock_exclusive, unlock
+from ml.file_lock import fsync_directory, lock_exclusive, unlock
 
 try:
     import joblib
@@ -56,13 +56,9 @@ class ModelStore:
 
     @staticmethod
     def _fsync_directory(directory: Path) -> None:
-        if sys.platform == "win32":
-            return  # Windows does not support fsync on directories
-        descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        # Single shared implementation lives in ml.file_lock; this wrapper
+        # keeps existing call sites (and any external callers) working.
+        fsync_directory(directory)
 
     def save(self, artifact: ModelArtifact, model: Any) -> tuple[Path, Path]:
         """Persist a model; the manifest is the commit marker for its weights.
@@ -102,7 +98,13 @@ class ModelStore:
                 # replace cannot leave required sidecar arrays behind.
                 joblib.dump(model, temp_path, compress=3)
                 digest = hashlib.sha256()
-                with open(temp_path, "rb") as handle:
+                # Open read/write, not read-only: os.fsync needs a
+                # write-capable handle on Windows (FlushFileBuffers
+                # requires GENERIC_WRITE), so fsync on a "rb" handle raises
+                # OSError [Errno 9] Bad file descriptor there. Nothing is
+                # written through this handle; it only reads the digest and
+                # flushes what joblib.dump already wrote.
+                with open(temp_path, "r+b") as handle:
                     for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                         digest.update(chunk)
                     os.fsync(handle.fileno())

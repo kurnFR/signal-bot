@@ -33,6 +33,7 @@ from backtest.strategies import STRATEGIES
 from db.db import fetch_ohlcv_with_features_df
 from ml.dataset import SHARED_FEATURE_COLUMNS, TARGET_TYPES, build_signal_dataset
 from ml.execution_tournament import run_execution_aware_tournament
+from ml.file_lock import fsync_directory
 from ml.tournament import build_candidates
 
 logger = logging.getLogger("ml_real_experiment")
@@ -79,11 +80,9 @@ def _atomic_write_text(path: Path, content: str) -> None:
         os.replace(temp_path, path)
         temp_path = None
 
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        # Persist the directory entry as well as the file contents.
+        # No-op on Windows, which cannot open (or fsync) a directory.
+        fsync_directory(path.parent)
     finally:
         if temp_path is not None:
             try:

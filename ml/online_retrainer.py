@@ -19,7 +19,7 @@ import uuid
 from typing import Any, Iterator, Mapping
 
 from db.db import fetch_ohlcv_with_features_df
-from ml.file_lock import exclusive_lock, lock_exclusive_nonblocking, unlock
+from ml.file_lock import exclusive_lock, fsync_directory, lock_exclusive_nonblocking, unlock
 from ml.run_real_experiment import run_real_experiment
 from ml.walk_forward_engine import compute_drift_psi
 
@@ -81,12 +81,10 @@ def _atomic_write_json(path: Path, data: Any) -> None:
         os.replace(temp_path, path)
         temp_path = None
 
-        # Persist the directory entry as well as the file contents on POSIX.
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        # Persist the directory entry as well as the file contents.
+        # No-op on Windows, which cannot open (or fsync) a directory —
+        # os.open(path.parent, os.O_RDONLY) raises PermissionError [Errno 13] there.
+        fsync_directory(path.parent)
     finally:
         if temp_path is not None:
             try:
