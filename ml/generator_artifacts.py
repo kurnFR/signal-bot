@@ -14,6 +14,7 @@ import tempfile
 from typing import Any, Mapping
 
 from ml.artifacts import read_model_manifest_file, resolve_model_artifact_paths, resolve_model_manifest_path
+from ml.file_lock import fsync_directory
 from ml.models import supported_models
 
 GENERATOR_TASK_TYPE = "signal_generator_v1"
@@ -170,11 +171,8 @@ class GeneratorArtifact:
                 os.fsync(handle.fileno())
             os.replace(temporary, destination)
             temporary = None
-            descriptor = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
+            # No-op on Windows, which cannot open (or fsync) a directory.
+            fsync_directory(root)
             return destination
         except (OSError, TypeError, ValueError) as exc:
             raise ValueError("generator manifest could not be written safely") from exc

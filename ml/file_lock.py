@@ -32,6 +32,7 @@ import errno
 import os
 import sys
 from contextlib import contextmanager
+from pathlib import Path
 from typing import IO, Iterator
 
 if sys.platform != "win32":
@@ -121,3 +122,23 @@ def exclusive_lock(fd_or_file: int | IO) -> Iterator[None]:
         yield
     finally:
         unlock(fd_or_file)
+
+
+def fsync_directory(directory: Path | str) -> None:
+    """Persist a directory entry after an atomic ``os.replace``.
+
+    On POSIX, opening the directory read-only and fsyncing it flushes the
+    rename to disk. On Windows this is a no-op: Windows cannot open a
+    directory with ``os.open`` (``PermissionError: [Errno 13]``) and does
+    not support fsync on directories, so there is nothing to flush — the
+    rename itself is already visible. Callers must use this helper
+    instead of ``os.open(dir, os.O_RDONLY)`` + ``os.fsync`` so the same
+    code runs on both platforms.
+    """
+    if sys.platform == "win32":
+        return
+    descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)

@@ -179,6 +179,36 @@ class TestMLArtifacts(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 resolve_model_artifact_paths("model-v1", root)
 
+    def test_manifest_read_works_without_o_nofollow(self):
+        # Regression test for the Windows gate of PR #824: Windows Python
+        # has no os.O_NOFOLLOW, and read_model_manifest_file used to raise
+        # RuntimeError there instead of reading the manifest.
+        import os
+
+        from ml.artifacts import read_model_manifest_file
+
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "model-v1.json"
+            path.write_text('{"model_id": "model-v1"}', encoding="utf-8")
+            had = hasattr(os, "O_NOFOLLOW")
+            saved = getattr(os, "O_NOFOLLOW", None)
+            try:
+                if had:
+                    del os.O_NOFOLLOW
+                self.assertEqual(
+                    read_model_manifest_file(path), {"model_id": "model-v1"}
+                )
+                # The post-open regular-file check must still hold without
+                # O_NOFOLLOW: a FIFO is openable but not a regular file, so
+                # it must be rejected rather than parsed as a manifest.
+                fifo = Path(d) / "not-a-file.json"
+                os.mkfifo(fifo)
+                with self.assertRaisesRegex(ValueError, "regular file"):
+                    read_model_manifest_file(fifo)
+            finally:
+                if had:
+                    os.O_NOFOLLOW = saved
+
 
 if __name__ == "__main__":
     unittest.main()

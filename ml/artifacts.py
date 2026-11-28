@@ -91,10 +91,17 @@ def read_model_manifest_file(path: str | Path) -> dict[str, Any]:
 
     Callers must resolve and contain the path first. O_NOFOLLOW and fstat then
     prevent a symlink or non-regular file from being substituted before open.
+
+    On platforms without os.O_NOFOLLOW (notably Windows), the flag is simply
+    unavailable, so the open falls back to 0 instead of raising: the caller
+    already resolved the path and contained it inside the artifact root, and
+    the post-open fstat check below still rejects anything that is not a
+    regular file. The only defence lost on those platforms is the
+    open-time no-follow itself, i.e. a symlink swapped in between the
+    caller's resolve() and this open(); that TOCTOU window does not exist
+    on POSIX, where O_NOFOLLOW is honoured.
     """
-    nofollow = getattr(os, "O_NOFOLLOW", None)
-    if nofollow is None:
-        raise RuntimeError("safe model manifest reads require O_NOFOLLOW support")
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
     flags = os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0)
     try:
         descriptor = os.open(Path(path), flags)
