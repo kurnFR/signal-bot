@@ -69,7 +69,7 @@ class TestOutboxObservability(unittest.TestCase):
                 try:
                     cur = self.conn.cursor()
                     for k in self.tracked_keys:
-                        cur.execute("DELETE FROM rdt_telegram_outbox WHERE event_key = %s", (k,))
+                        cur.execute("DELETE FROM telegram_outbox WHERE event_key = %s", (k,))
                     self.conn.commit()
                     cur.close()
                 except Exception:
@@ -106,14 +106,14 @@ class TestOutboxObservability(unittest.TestCase):
 
         # Due item (next_attempt_at in past)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, next_attempt_at)
                VALUES (%s, 0, 'entry', '{}', 'pending', 0, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 MINUTE))""",
             (key_due,),
         )
         # Future item (next_attempt_at 1 hour in future)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, next_attempt_at)
                VALUES (%s, 0, 'entry', '{}', 'pending', 1, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 HOUR))""",
             (key_future,),
@@ -135,7 +135,7 @@ class TestOutboxObservability(unittest.TestCase):
 
         # Processing item with locked_until expired 2 minutes ago
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, locked_until, claim_token)
                VALUES (%s, 0, 'entry', '{}', 'processing', 1, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 MINUTE), 'stale_token')""",
             (key_stale,),
@@ -156,7 +156,7 @@ class TestOutboxObservability(unittest.TestCase):
         self.tracked_keys.append(key_dead)
 
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, last_error)
                VALUES (%s, 0, 'entry', '{}', 'dead', 8, 'Permanent Telegram 400 Bad Request')""",
             (key_dead,),
@@ -179,7 +179,7 @@ class TestOutboxObservability(unittest.TestCase):
         """Lock status accurately reports whether lock is held, without acquiring it."""
         inspector = OutboxHealthInspector(self.conn, expected_database="signal_bot_test")
         lock_info = inspector.get_lock_status()
-        self.assertEqual(lock_info["lock_name"], "rdt_outbox_worker_lock")
+        self.assertEqual(lock_info["lock_name"], "telegram_outbox_worker_lock")
         self.assertIn("is_locked", lock_info)
         self.assertIn("lock_holder_connection_id", lock_info)
         self.assertIn("is_held_by_current_session", lock_info)
@@ -187,9 +187,9 @@ class TestOutboxObservability(unittest.TestCase):
     def test_read_only_behavior_causes_zero_mutations(self):
         """Health inspection must never insert, update, or delete rows in any table."""
         cur = self.conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox")
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox")
         outbox_before = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM rdt_trades")
+        cur.execute("SELECT COUNT(*) FROM paper_trades")
         trades_before = cur.fetchone()[0]
         cur.close()
 
@@ -198,9 +198,9 @@ class TestOutboxObservability(unittest.TestCase):
         _ = inspect_dead_letters(self.conn, expected_database="signal_bot_test", limit=10)
 
         cur = self.conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox")
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox")
         outbox_after = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM rdt_trades")
+        cur.execute("SELECT COUNT(*) FROM paper_trades")
         trades_after = cur.fetchone()[0]
         cur.close()
 

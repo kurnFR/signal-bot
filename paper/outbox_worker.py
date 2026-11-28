@@ -2,7 +2,7 @@
 
 Operates independently of the RetailBot2 trading loop:
 - Does NOT initialize Binance, load markets, scan strategies, or manage trades.
-- Dedicated, unpooled MariaDB connection S_lock holds MariaDB advisory lock 'rdt_outbox_worker_lock'.
+- Dedicated, unpooled MariaDB connection S_lock holds MariaDB advisory lock 'telegram_outbox_worker_lock'.
 - Uses isolated child process group for Telegram transport with PR_SET_PDEATHSIG(SIGKILL).
 - Inspects entire process group on cleanup and filters out inert zombies.
 - Enters STATE_FATAL_LOCKOUT if process group cleanup cannot be confirmed, retaining
@@ -153,7 +153,7 @@ class SchemaVerificationError(RuntimeError):
 def verify_outbox_schema(conn) -> None:
     """Preflight validation of required outbox table and columns before lock acquisition.
 
-    Queries information_schema to verify rdt_telegram_outbox and all required columns exist.
+    Queries information_schema to verify telegram_outbox and all required columns exist.
     Fails closed without modifying any database state.
     """
     cursor = conn.cursor()
@@ -162,14 +162,14 @@ def verify_outbox_schema(conn) -> None:
             """SELECT TABLE_NAME
                FROM information_schema.tables
                WHERE TABLE_SCHEMA = DATABASE()
-                 AND TABLE_NAME = 'rdt_telegram_outbox'"""
+                 AND TABLE_NAME = 'telegram_outbox'"""
         )
         row = cursor.fetchone()
         if not row:
             raise SchemaVerificationError(
-                "Required outbox table 'rdt_telegram_outbox' does not exist in database. "
+                "Required outbox table 'telegram_outbox' does not exist in database. "
                 "Worker startup halted fail-closed. Operator investigation required against "
-                "approved migration history (migrations 025-027 must not be blindly re-run); "
+                "approved migration history (migrations 026-027 and 041 must not be blindly re-run); "
                 "do not automatically modify production schema."
             )
 
@@ -177,15 +177,15 @@ def verify_outbox_schema(conn) -> None:
             """SELECT COLUMN_NAME
                FROM information_schema.columns
                WHERE TABLE_SCHEMA = DATABASE()
-                 AND TABLE_NAME = 'rdt_telegram_outbox'"""
+                 AND TABLE_NAME = 'telegram_outbox'"""
         )
         existing = {r[0] for r in cursor.fetchall()}
         missing = sorted(set(REQUIRED_OUTBOX_COLUMNS) - existing)
         if missing:
             raise SchemaVerificationError(
-                f"Required outbox column(s) missing from 'rdt_telegram_outbox': {', '.join(missing)}. "
+                f"Required outbox column(s) missing from 'telegram_outbox': {', '.join(missing)}. "
                 "Worker startup halted fail-closed. Operator investigation required against "
-                "approved migration history (migrations 025-027 must not be blindly re-run); "
+                "approved migration history (migrations 026-027 and 041 must not be blindly re-run); "
                 "do not automatically modify production schema."
             )
     finally:
@@ -646,7 +646,7 @@ class OutboxSessionManager:
 
             # Preflight: Validate required outbox schema BEFORE attempting lock acquisition
             verify_outbox_schema(self.s_lock)
-            logger.info("Schema preflight verified for 'rdt_telegram_outbox'")
+            logger.info("Schema preflight verified for 'telegram_outbox'")
 
             # Acquire MariaDB advisory lock
             acquired = self.db_manager.acquire_outbox_lock(self.s_lock, timeout_seconds=0)
@@ -776,13 +776,13 @@ class OutboxSessionManager:
                        status,
                        COUNT(*) AS count,
                        MIN(created_at) AS oldest_created_at
-                   FROM rdt_telegram_outbox
+                   FROM telegram_outbox
                    GROUP BY status"""
             )
             rows = cursor.fetchall()
             cursor.execute(
                 """SELECT COUNT(*) AS due_count
-                   FROM rdt_telegram_outbox
+                   FROM telegram_outbox
                    WHERE attempts < 8 AND (
                        (status='pending' AND next_attempt_at <= UTC_TIMESTAMP())
                        OR (status='processing' AND locked_until <= UTC_TIMESTAMP())

@@ -40,17 +40,22 @@ class TestPhase2ApiContractsAndPurity(unittest.TestCase):
     # ------------------------------------------------------------------------
     # 1. GET Endpoints Must Not Mutate Schema or Commit Transactions
     # ------------------------------------------------------------------------
-    def test_get_research_strategies_does_not_execute_ddl_or_commit(self):
+    def test_get_research_stats_does_not_execute_ddl_or_commit(self):
+        # GET /retailbot2/strategies is deleted with migration 041 (its
+        # rdt_strategy_lifecycle source table is dropped); the purity
+        # contract now targets GET /retailbot2/stats, which reads
+        # paper_trades through the shared pool.
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_cur.fetchall.return_value = []
+        mock_cur.fetchone.return_value = {"open_count": 0}
         mock_conn.cursor.return_value = mock_cur
 
-        with patch("db.db.get_retailbot2_pool") as mock_pool:
+        with patch("db.db.get_pool") as mock_pool:
             mock_pool.return_value.get_connection.return_value = mock_conn
 
             res = self.client.get(
-                "/api/research/retailbot2/strategies",
+                "/api/research/retailbot2/stats",
                 headers={"Authorization": f"Bearer {self.admin_token}"},
             )
             self.assertEqual(res.status_code, 200)

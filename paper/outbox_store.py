@@ -19,7 +19,7 @@ import uuid
 
 from mysql.connector import pooling
 
-OUTBOX_LOCK_NAME = "rdt_outbox_worker_lock"
+OUTBOX_LOCK_NAME = "telegram_outbox_worker_lock"
 ALLOWED_OUTBOX_ENQUEUE_DATABASES: Tuple[str, ...] = ("signal_bot_test", "crypto_signals")
 
 
@@ -463,21 +463,21 @@ class OutboxStore:
                    FROM information_schema.tables
                    WHERE TABLE_SCHEMA = DATABASE()
                      AND TABLE_NAME = %s""",
-                ("rdt_telegram_outbox",),
+                ("telegram_outbox",),
             )
             if not cur.fetchone():
                 raise RuntimeError(
-                    "Outbox schema is missing table 'rdt_telegram_outbox'; "
+                    "Outbox schema is missing table 'telegram_outbox'; "
                     "run 'python -m db.migrate' before starting the worker."
                 )
             cur.execute(
                 "SELECT COLUMN_NAME FROM information_schema.columns "
                 "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
-                ("rdt_telegram_outbox", "claim_token"),
+                ("telegram_outbox", "claim_token"),
             )
             if not cur.fetchone():
                 raise RuntimeError(
-                    "Outbox schema is missing rdt_telegram_outbox.claim_token; "
+                    "Outbox schema is missing telegram_outbox.claim_token; "
                     "run python -m db.migrate before starting the worker."
                 )
             cur.close()
@@ -557,7 +557,7 @@ class OutboxStore:
             cursor = active_conn.cursor(dictionary=True)
             cursor.execute("START TRANSACTION")
             cursor.execute(
-                """UPDATE rdt_telegram_outbox
+                """UPDATE telegram_outbox
                    SET status='dead', locked_until=NULL, claim_token=NULL,
                        last_error=COALESCE(last_error, 'DELIVERY_UNKNOWN: delivery lease expired at max attempts')
                    WHERE status='processing' AND locked_until <= UTC_TIMESTAMP()
@@ -565,7 +565,7 @@ class OutboxStore:
             )
             cursor.execute(
                 """SELECT id, trade_id, event_type, payload_json, attempts
-                   FROM rdt_telegram_outbox
+                   FROM telegram_outbox
                    WHERE attempts < 8 AND (
                        (status='pending' AND next_attempt_at <= UTC_TIMESTAMP())
                        OR (status='processing' AND locked_until <= UTC_TIMESTAMP())
@@ -580,7 +580,7 @@ class OutboxStore:
                 payload = json.loads(event.get("payload_json") or "{}")
             except (TypeError, ValueError) as exc:
                 cursor.execute(
-                    """UPDATE rdt_telegram_outbox
+                    """UPDATE telegram_outbox
                        SET status='dead', locked_until=NULL, claim_token=NULL, last_error=%s
                        WHERE id=%s""",
                     (f"invalid payload JSON: {exc}"[:1000], event["id"]),
@@ -589,7 +589,7 @@ class OutboxStore:
                 return None
             claim_token = uuid.uuid4().hex
             cursor.execute(
-                """UPDATE rdt_telegram_outbox
+                """UPDATE telegram_outbox
                    SET status='processing', attempts=attempts+1,
                        locked_until=DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s SECOND),
                        claim_token=%s, last_error=NULL WHERE id=%s""",
@@ -619,7 +619,7 @@ class OutboxStore:
     def mark_telegram_outbox_sent(self, event_id: int, claim_token: str, conn=None) -> bool:
         """Acknowledge only the still-current, unexpired claim owner."""
         return self._update_telegram_outbox(
-            """UPDATE rdt_telegram_outbox
+            """UPDATE telegram_outbox
                SET status='sent', sent_at=UTC_TIMESTAMP(), locked_until=NULL,
                    claim_token=NULL, last_error=NULL
                WHERE id=%s AND status='processing' AND claim_token=%s
@@ -646,7 +646,7 @@ class OutboxStore:
         else:
             delay = max(1, int(delay))
         return self._update_telegram_outbox(
-            """UPDATE rdt_telegram_outbox
+            """UPDATE telegram_outbox
                SET status=%s, next_attempt_at=DATE_ADD(UTC_TIMESTAMP(), INTERVAL %s SECOND),
                    locked_until=NULL, claim_token=NULL, last_error=%s
                WHERE id=%s AND status='processing' AND claim_token=%s
@@ -664,7 +664,7 @@ class OutboxStore:
     ) -> bool:
         """Permanently transition to dead state if this worker owns unexpired claim."""
         return self._update_telegram_outbox(
-            """UPDATE rdt_telegram_outbox
+            """UPDATE telegram_outbox
                SET status='dead', locked_until=NULL,
                    claim_token=NULL, last_error=%s
                WHERE id=%s AND status='processing' AND claim_token=%s
@@ -710,7 +710,7 @@ class OutboxStore:
         *,
         deduplicate: bool = False,
     ) -> bool:
-        """Enqueue an event into rdt_telegram_outbox for asynchronous delivery."""
+        """Enqueue an event into telegram_outbox for asynchronous delivery."""
         enqueue_cfg = getattr(self, "config", None)
         if enqueue_cfg is None or is_observation_only(enqueue_cfg):
             return False
@@ -725,7 +725,7 @@ class OutboxStore:
         cursor = None
         try:
             cursor = active_conn.cursor()
-            statement = """INSERT INTO rdt_telegram_outbox
+            statement = """INSERT INTO telegram_outbox
                    (trade_id, event_key, event_type, payload_json, status, next_attempt_at)
                    VALUES (%s, %s, %s, %s, 'pending', UTC_TIMESTAMP())"""
             if deduplicate:
@@ -759,7 +759,7 @@ class OutboxStore:
         conn=None,
         trade_id: int = 0,
     ) -> bool:
-        """Enqueue a notification-only trade signal event into rdt_telegram_outbox."""
+        """Enqueue a notification-only trade signal event into telegram_outbox."""
         if not event_key or not isinstance(event_key, str):
             self.logger.warning("enqueue_trade_signal_event rejected: invalid or empty event_key")
             return False
@@ -789,7 +789,7 @@ class OutboxStore:
             cursor = active_conn.cursor()
             normalized_event_type = "entry" if "entry" in event_type else "exit"
             cursor.execute(
-                """INSERT INTO rdt_telegram_outbox
+                """INSERT INTO telegram_outbox
                    (trade_id, event_key, event_type, payload_json, status, attempts, next_attempt_at)
                    VALUES (%s, %s, %s, %s, 'pending', 0, UTC_TIMESTAMP())
                    ON DUPLICATE KEY UPDATE event_key=VALUES(event_key)""",
@@ -819,10 +819,10 @@ class OutboxStore:
 
 
 def get_outbox_counts() -> Dict[str, int]:
-    """Return status -> count mapping from rdt_telegram_outbox via shared DB pool."""
+    """Return status -> count mapping from telegram_outbox via shared DB pool."""
     from db.db import get_pool, _owned_cursor
 
     conn = get_pool().get_connection()
     with _owned_cursor(conn) as cur:
-        cur.execute("SELECT status, COUNT(*) FROM rdt_telegram_outbox GROUP BY status")
+        cur.execute("SELECT status, COUNT(*) FROM telegram_outbox GROUP BY status")
         return {status: int(count) for status, count in cur.fetchall()}

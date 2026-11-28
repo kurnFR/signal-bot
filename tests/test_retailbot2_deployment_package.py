@@ -186,7 +186,7 @@ def test_runbook_conservative_recovery_assertions():
     runbook_text = runbook_path.read_text(encoding="utf-8")
 
     # Blanket UPDATE on all processing rows must NOT be present
-    blanket_sql = "UPDATE rdt_telegram_outbox SET status = 'pending', claim_token = NULL, locked_until = NULL WHERE status = 'processing';"
+    blanket_sql = "UPDATE telegram_outbox SET status = 'pending', claim_token = NULL, locked_until = NULL WHERE status = 'processing';"
     assert blanket_sql not in runbook_text
 
     # Un-fenced per-event recovery queries without claim_token must NOT be present

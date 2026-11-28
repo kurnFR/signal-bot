@@ -81,7 +81,7 @@ def test_user_management_concurrency_skip_when_database_unavailable():
 
 def test_user_management_concurrency_fails_on_database_identity_mismatch():
     """Verify AssertionError is raised immediately on database identity mismatch."""
-    with patch("db.db.get_pool") as mock_get_pool, patch("db.db.get_retailbot2_pool") as mock_get_rb_pool:
+    with patch("db.db.get_pool") as mock_get_pool:
         mock_pool = MagicMock()
         mock_conn = MagicMock()
         mock_cur = MagicMock()
@@ -89,7 +89,6 @@ def test_user_management_concurrency_fails_on_database_identity_mismatch():
         mock_conn.cursor.return_value = mock_cur
         mock_pool.get_connection.return_value = mock_conn
         mock_get_pool.return_value = mock_pool
-        mock_get_rb_pool.return_value = mock_pool
 
         with pytest.raises(AssertionError, match="strictly expected 'signal_bot_test'"):
             user_management.TestMariaDBUserManagementConcurrency.setUpClass()
@@ -97,7 +96,7 @@ def test_user_management_concurrency_fails_on_database_identity_mismatch():
 
 def test_user_management_concurrency_fails_on_missing_schema_tables():
     """Verify RuntimeError is raised immediately on missing schema tables."""
-    with patch("db.db.get_pool") as mock_get_pool, patch("db.db.get_retailbot2_pool") as mock_get_rb_pool:
+    with patch("db.db.get_pool") as mock_get_pool:
         mock_pool = MagicMock()
         mock_conn = MagicMock()
         mock_cur = MagicMock()
@@ -107,7 +106,6 @@ def test_user_management_concurrency_fails_on_missing_schema_tables():
         mock_conn.cursor.return_value = mock_cur
         mock_pool.get_connection.return_value = mock_conn
         mock_get_pool.return_value = mock_pool
-        mock_get_rb_pool.return_value = mock_pool
 
         with pytest.raises(RuntimeError, match="Required schema tables missing"):
             user_management.TestMariaDBUserManagementConcurrency.setUpClass()

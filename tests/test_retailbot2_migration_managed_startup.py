@@ -1,9 +1,13 @@
-"""RetailBot2 archive schema is migration-managed, never mutated by runtime startup.
+"""Paper Trading archive schema is migration-managed, never mutated by runtime startup.
 
-Step 3: the worker (paper/retailbot2.py) is deleted. The store checks below
-now target paper/outbox_store.OutboxStore, the only remaining runtime
-owner of the rdt_telegram_outbox table; the lifecycle-write test is gone
-with set_retailbot2_strategy_lifecycle_setting."""
+Migration 041 drops the retired RetailBot2 `rdt_*` tables: the store
+checks below now target paper/outbox_store.OutboxStore, the only
+remaining runtime owner of the Telegram outbox table (now
+`telegram_outbox`), and the archive-schema check is
+`db.db.verify_paper_archive_schema()` over `paper_trades`,
+`paper_positions`, `paper_configs` and `telegram_outbox`. The
+`rdt_strategy_lifecycle` / `bot_control` reads and the legacy ensure
+helper are gone with the tables."""
 import inspect
 import unittest
 from pathlib import Path
@@ -23,11 +27,14 @@ class TestRetailBot2MigrationManagedStartup(unittest.TestCase):
         self.assertIn("026_retailbot2_telegram_outbox", versions)
         self.assertIn("027_retailbot2_outbox_claim_token", versions)
         self.assertIn("028_retailbot2_safe_control_defaults", versions)
+        self.assertIn("041_remove_rdt_tables", versions)
 
-    def test_web_lifespan_does_not_construct_schema_manager_or_run_ddl_helper(self):
+    def test_web_lifespan_verifies_paper_archive_schema_and_never_runs_ddl_helper(self):
         source = inspect.getsource(lifespan)
         self.assertNotIn("DatabaseManager(", source)
         self.assertNotIn("ensure_retailbot2_lifecycle_table", source)
+        self.assertNotIn("verify_retailbot2_schema", source)
+        self.assertIn("verify_paper_archive_schema", source)
 
     def test_outbox_store_startup_does_not_call_runtime_table_creator(self):
         source = inspect.getsource(OutboxStore._init_pool)
@@ -35,12 +42,12 @@ class TestRetailBot2MigrationManagedStartup(unittest.TestCase):
         self.assertIn("_verify_schema(", source)
 
     def test_outbox_store_verification_uses_only_read_queries(self):
-        # The store verifies only its own table (rdt_telegram_outbox +
-        # claim_token column); the other rdt_* tables are archive-only and
-        # are verified by db.db.verify_retailbot2_schema().
+        # The store verifies only its own table (telegram_outbox +
+        # claim_token column); the other paper tables are archive-only and
+        # are verified by db.db.verify_paper_archive_schema().
         store = OutboxStore.__new__(OutboxStore)
         cursor = Mock()
-        cursor.fetchone.return_value = {"table_name": "rdt_telegram_outbox"}
+        cursor.fetchone.return_value = {"table_name": "telegram_outbox"}
         conn = Mock()
         conn.cursor.return_value = cursor
         store.get_conn = Mock(return_value=conn)
@@ -55,15 +62,10 @@ class TestRetailBot2MigrationManagedStartup(unittest.TestCase):
         self.assertIn("INFORMATION_SCHEMA.COLUMNS", statements[1])
         self.assertEqual(
             cursor.execute.call_args_list[1].args[1],
-            ("rdt_telegram_outbox", "claim_token"),
+            ("telegram_outbox", "claim_token"),
         )
         conn.close.assert_called_once()
         cursor.close.assert_called_once()
-
-    def test_legacy_ensure_helper_is_read_only_compatibility_alias(self):
-        with patch.object(db_helpers, "verify_retailbot2_schema") as verify:
-            db_helpers.ensure_retailbot2_lifecycle_table()
-        verify.assert_called_once_with()
 
     def test_migration_defines_all_runtime_tables_and_legacy_column(self):
         migration = Path("db/migrate_retailbot2_runtime_schema.sql").read_text(encoding="utf-8")
@@ -80,41 +82,46 @@ class TestRetailBot2MigrationManagedStartup(unittest.TestCase):
         self.assertIn("ALTER TABLE BOT_CONTROL MODIFY COLUMN ENABLED BOOLEAN NOT NULL DEFAULT FALSE", normalized)
         self.assertIn("UPDATE BOT_CONTROL SET ENABLED = FALSE WHERE ID = 1", normalized)
 
-    def test_get_retailbot2_control_defaults_to_disabled_when_empty_or_legacy_unconfigured(self):
+    def test_migration_041_renames_outbox_and_drops_rdt_tables(self):
+        migration = Path("db/migrate_remove_rdt_tables.sql").read_text(encoding="utf-8")
+        self.assertIn("RENAME TABLE rdt_telegram_outbox TO telegram_outbox", migration)
+        for table in ("rdt_trades", "rdt_strategy_stats", "rdt_strategy_lifecycle", "bot_control"):
+            self.assertIn(table, migration)
+        self.assertIn("DROP TABLE IF EXISTS rdt_trades, rdt_strategy_stats, rdt_strategy_lifecycle, bot_control", migration)
+        # Fail-closed guard: a pre-existing rename target must abort the run.
+        self.assertIn("telegram_outbox", migration)
+        self.assertIn("CHECK (ok = 1)", migration)
+        # Pre-migration backup prerequisite must be stated in the file.
+        self.assertIn("mysqldump", migration)
+        self.assertIn("rdt_archive_pre_removal.sql", migration)
+
+    def test_verify_paper_archive_schema_requires_all_tables(self):
         pool = Mock()
         conn = Mock()
         cursor = Mock()
         conn.cursor.return_value = cursor
         pool.get_connection.return_value = conn
 
-        with patch.object(db_helpers, "get_retailbot2_pool", return_value=pool):
-            # 1. Missing row defaults to disabled
-            cursor.fetchone.return_value = None
-            ctrl = db_helpers.get_retailbot2_control()
-            self.assertFalse(ctrl["enabled"])
+        with patch.object(db_helpers, "get_pool", return_value=pool):
+            # 1. All four tables present: no error.
+            cursor.fetchall.return_value = [
+                {"table_name": "paper_trades"},
+                {"table_name": "paper_positions"},
+                {"table_name": "paper_configs"},
+                {"table_name": "telegram_outbox"},
+            ]
+            db_helpers.verify_paper_archive_schema()
 
-            # 2. Legacy unconfigured row (overrides_json IS NULL) defaults to disabled
-            cursor.fetchone.return_value = {"enabled": 1, "overrides_json": None, "updated_at": None}
-            ctrl_legacy = db_helpers.get_retailbot2_control()
-            self.assertFalse(ctrl_legacy["enabled"])
-
-            # 3. Explicitly configured row preserves enabled=True
-            cursor.fetchone.return_value = {"enabled": 1, "overrides_json": '{"risk_per_trade": 0.02}', "updated_at": None}
-            ctrl_saved = db_helpers.get_retailbot2_control()
-            self.assertTrue(ctrl_saved["enabled"])
-            self.assertEqual(ctrl_saved["overrides"], {"risk_per_trade": 0.02})
-
-            # 4. Corrupted/malformed JSON fails closed
-            cursor.fetchone.return_value = {"enabled": 1, "overrides_json": '{"risk_per_trade": corrupted', "updated_at": None}
-            ctrl_corrupt = db_helpers.get_retailbot2_control()
-            self.assertFalse(ctrl_corrupt["enabled"])
-            self.assertEqual(ctrl_corrupt["overrides"], {})
-
-            # 5. Non-dict JSON fails closed
-            cursor.fetchone.return_value = {"enabled": 1, "overrides_json": '"scalar_string"', "updated_at": None}
-            ctrl_nondict = db_helpers.get_retailbot2_control()
-            self.assertFalse(ctrl_nondict["enabled"])
-            self.assertEqual(ctrl_nondict["overrides"], {})
+            # 2. Missing telegram_outbox fails closed.
+            cursor.fetchall.return_value = [
+                {"table_name": "paper_trades"},
+                {"table_name": "paper_positions"},
+                {"table_name": "paper_configs"},
+            ]
+            with self.assertRaises(RuntimeError) as ctx:
+                db_helpers.verify_paper_archive_schema()
+            self.assertIn("telegram_outbox", str(ctx.exception))
+            self.assertIn("python -m db.migrate", str(ctx.exception))
 
 
 if __name__ == "__main__":

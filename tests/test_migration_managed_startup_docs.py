@@ -28,15 +28,15 @@ class TestMigrationManagedStartupDocs(unittest.TestCase):
 
     def test_retailbot2_outbox_runbook_documents_authoritative_advisory_lock(self):
         from paper.outbox_store import OUTBOX_LOCK_NAME
-        self.assertEqual(OUTBOX_LOCK_NAME, "rdt_outbox_worker_lock")
+        self.assertEqual(OUTBOX_LOCK_NAME, "telegram_outbox_worker_lock")
 
         release_gates = _doc("docs/RETAILBOT2_AND_MODERN_UI_RELEASE_GATES.md").read_text(encoding="utf-8")
-        self.assertIn("OUTBOX_LOCK_NAME = \"rdt_outbox_worker_lock\"", release_gates)
-        self.assertIn("SELECT IS_USED_LOCK('rdt_outbox_worker_lock');", release_gates)
-        self.assertIn("WHERE ID = IS_USED_LOCK('rdt_outbox_worker_lock');", release_gates)
+        self.assertIn("OUTBOX_LOCK_NAME = \"telegram_outbox_worker_lock\"", release_gates)
+        self.assertIn("SELECT IS_USED_LOCK('telegram_outbox_worker_lock');", release_gates)
+        self.assertIn("WHERE ID = IS_USED_LOCK('telegram_outbox_worker_lock');", release_gates)
 
         arch_doc = _doc("docs/ARCHITECTURE.md").read_text(encoding="utf-8")
-        self.assertIn("`rdt_outbox_worker_lock`", arch_doc)
+        self.assertIn("`telegram_outbox_worker_lock`", arch_doc)
 
         # Confirm no lock query in docs mistakenly refers to retailbot2_telegram_outbox
         for doc_path in (REPO_ROOT / "docs").glob("*.md"):
@@ -58,8 +58,8 @@ class TestMigrationManagedStartupDocs(unittest.TestCase):
         self.assertIn("RETAILBOT2_ALLOW_TELEGRAM_DELIVERY", release_gates)
 
         # 3. Does not state that production currently lacks the outbox table
-        self.assertNotIn("Production currently lacks `rdt_telegram_outbox`", release_gates)
-        self.assertNotIn("Production table `rdt_telegram_outbox` is currently reported missing", release_gates)
+        self.assertNotIn("Production currently lacks `telegram_outbox`", release_gates)
+        self.assertNotIn("Production table `telegram_outbox` is currently reported missing", release_gates)
         self.assertNotIn("migration 026 has only been applied to `signal_bot_test`", release_gates)
 
         # 4. Production access boundary: requires separate authorization for all access, including read-only
@@ -139,7 +139,7 @@ class TestMigrationManagedStartupDocs(unittest.TestCase):
         self.assertIn("Read-only event inspection", release_gates)
 
         # 6. No unconditional recovery UPDATE query is present in documentation
-        self.assertNotIn("UPDATE rdt_telegram_outbox", release_gates)
+        self.assertNotIn("UPDATE telegram_outbox", release_gates)
         self.assertNotIn("SET status = 'pending'", release_gates)
 
     def test_retailbot2_outbox_provisioning_runbook_and_failure_states(self):

@@ -29,19 +29,15 @@ class TestResearchRoutes(unittest.TestCase):
         # Stub route-level database helpers as well as authentication. These
         # tests assert HTTP contracts; database behavior is covered separately.
         self.route_patches = [
-            patch("web.routes.research_routes.get_retailbot2_open_trades", return_value=[]),
-            patch("web.routes.research_routes.get_retailbot2_recent_trades", return_value=[]),
-            patch("web.routes.research_routes.get_retailbot2_stats", return_value={
-                "by_strategy": [], "by_mode": {"inverse": [], "shadow": []}
+            patch("web.routes.research_routes.get_paper_open_positions", return_value=[]),
+            patch("web.routes.research_routes.get_paper_recent_trades", return_value=[]),
+            patch("web.routes.research_routes.get_paper_trade_stats", return_value={
+                "by_strategy": [], "by_mode": {"paper": {"realized_pnl": 0.0, "closed_count": 0, "wins": 0, "win_rate": None, "open_count": 0}}
             }),
             patch("web.routes.research_routes.get_recent_smart_money_signals", return_value=[]),
             patch("web.routes.research_routes.get_smart_money_stats", return_value={
                 "total_signals": 0, "signals_last_24h": 0, "by_type_last_24h": []
             }),
-            patch("web.routes.research_routes.get_retailbot2_control", return_value={
-                "enabled": True, "overrides": {}, "updated_at": None
-            }),
-            patch("web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings", return_value=[]),
             patch("web.routes.research_routes.get_screener_control", return_value={
                 "enabled": True, "overrides": {}, "updated_at": None
             }),
@@ -74,102 +70,11 @@ class TestResearchRoutes(unittest.TestCase):
             "/api/research/screener/status",
             "/api/research/screener/signals",
             "/api/research/screener/stats",
-            "/api/research/retailbot2/control",
-            "/api/research/retailbot2/strategies",
             "/api/research/screener/control",
         ]
         for ep in endpoints:
             res = self.client.get(ep)
             self.assertEqual(res.status_code, 401, f"Endpoint {ep} should require auth")
-
-    def test_strategy_lifecycle_endpoint_defaults_fail_closed_for_telegram(self):
-        res = self.client.get("/api/research/retailbot2/strategies", headers=self.headers)
-        self.assertEqual(res.status_code, 200)
-        strategies = res.json()["strategies"]
-        bb_inverse = next(
-            row for row in strategies
-            if row["strategy_id"] == "BB_REV_INV" and row["mode"] == "inverse"
-        )
-        self.assertTrue(bb_inverse["paper_enabled"])
-        self.assertTrue(bb_inverse["report_enabled"])
-        self.assertFalse(bb_inverse["telegram_enabled"])
-        self.assertFalse(bb_inverse["auto_promote_enabled"])
-
-    def test_requested_inverse_strategies_are_registered_and_default_telegram_off(self):
-        res = self.client.get("/api/research/retailbot2/strategies", headers=self.headers)
-        self.assertEqual(res.status_code, 200)
-        rows = res.json()["strategies"]
-        for strategy_id in ("BB_REV_INV", "DBL_PAT_INV"):
-            row = next(
-                item for item in rows
-                if item["strategy_id"] == strategy_id and item["mode"] == "inverse"
-            )
-            self.assertTrue(row["evaluation_enabled"])
-            self.assertTrue(row["paper_enabled"])
-            self.assertTrue(row["report_enabled"])
-            self.assertFalse(row["telegram_enabled"])
-            self.assertFalse(row["auto_promote_enabled"])
-
-    def test_lifecycle_readback_parses_legacy_flags_and_never_exposes_auto_promotion(self):
-        legacy_rows = [{
-            "strategy_id": "BB_REV_INV",
-            "mode": "inverse",
-            "evaluation_enabled": "0",
-            "paper_enabled": "0",
-            "telegram_enabled": "0",
-            "report_enabled": "false",
-            "auto_promote_enabled": "1",
-        }]
-        with patch(
-            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
-            return_value=legacy_rows,
-        ):
-            res = self.client.get(
-                "/api/research/retailbot2/strategies",
-                headers=self.headers,
-            )
-
-        self.assertEqual(res.status_code, 200)
-        row = next(
-            item for item in res.json()["strategies"]
-            if item["strategy_id"] == "BB_REV_INV" and item["mode"] == "inverse"
-        )
-        self.assertFalse(row["evaluation_enabled"])
-        self.assertFalse(row["paper_enabled"])
-        self.assertFalse(row["telegram_enabled"])
-        self.assertFalse(row["report_enabled"])
-        # Legacy DB values must not make an unavailable feature appear enabled.
-        self.assertFalse(row["auto_promote_enabled"])
-
-    def test_historical_composite_rows_fail_closed_even_if_legacy_settings_enable_them(self):
-        legacy_rows = [{
-            "strategy_id": "COMPOSITE",
-            "mode": "shadow",
-            "evaluation_enabled": 1,
-            "paper_enabled": 1,
-            "telegram_enabled": 1,
-            "report_enabled": 1,
-            "auto_promote_enabled": 1,
-        }]
-        with patch(
-            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
-            return_value=legacy_rows,
-        ):
-            res = self.client.get(
-                "/api/research/retailbot2/strategies",
-                headers=self.headers,
-            )
-
-        self.assertEqual(res.status_code, 200)
-        row = next(
-            item for item in res.json()["strategies"]
-            if item["strategy_id"] == "COMPOSITE" and item["mode"] == "shadow"
-        )
-        self.assertFalse(row["evaluation_enabled"])
-        self.assertFalse(row["paper_enabled"])
-        self.assertFalse(row["telegram_enabled"])
-        self.assertTrue(row["report_enabled"])
-        self.assertFalse(row["auto_promote_enabled"])
 
     def test_retailbot2_strategy_lifecycle_writes_are_retired(self):
         """Step 3: POST /retailbot2/strategies is retired with the worker.
@@ -206,15 +111,13 @@ class TestResearchRoutes(unittest.TestCase):
         )
         self.assertEqual(res.status_code, 403)
 
-    def test_strategy_lifecycle_get_surfaces_persistence_read_failure(self):
-        with patch(
-            "web.routes.research_routes.get_retailbot2_strategy_lifecycle_settings",
-            side_effect=RuntimeError("database read unavailable"),
-        ):
-            res = self.client.get("/api/research/retailbot2/strategies", headers=self.headers)
-
-        self.assertEqual(res.status_code, 500)
-        self.assertIn("failed to load", res.json()["detail"].lower())
+    def test_retailbot2_strategies_and_control_gets_are_deleted_with_migration_041(self):
+        """Migration 041 drops rdt_strategy_lifecycle and bot_control, so
+        the GET routes that served them are deleted too (their data now
+        lives in paper_configs / nowhere). The UI no longer calls them."""
+        for ep in ("/api/research/retailbot2/strategies", "/api/research/retailbot2/control"):
+            res = self.client.get(ep, headers=self.headers)
+            self.assertEqual(res.status_code, 404, ep)
 
     def test_retailbot2_positions_endpoint(self):
         res = self.client.get("/api/research/retailbot2/positions", headers=self.headers)
@@ -237,8 +140,7 @@ class TestResearchRoutes(unittest.TestCase):
         self.assertIn("by_strategy", data)
         self.assertIn("by_mode", data)
         self.assertIsInstance(data["by_strategy"], list)
-        self.assertIn("inverse", data["by_mode"])
-        self.assertIn("shadow", data["by_mode"])
+        self.assertIn("paper", data["by_mode"])
 
     def test_screener_signals_endpoint(self):
         res = self.client.get("/api/research/screener/signals", headers=self.headers)
@@ -254,25 +156,6 @@ class TestResearchRoutes(unittest.TestCase):
         self.assertIn("total_signals", data)
         self.assertIn("signals_last_24h", data)
         self.assertIn("by_type_last_24h", data)
-
-    def test_retailbot2_control_get_is_read_only(self):
-        # GET still serves the saved control row for archive display.
-        res = self.client.get("/api/research/retailbot2/control", headers=self.headers)
-        self.assertEqual(res.status_code, 200)
-        data = res.json()
-        self.assertIn("enabled", data)
-        self.assertIn("tunable_fields", data)
-
-        # POST is retired with the worker (see
-        # test_retailbot2_control_write_is_retired); even an unknown override
-        # key is a 403 now, not a 400 -- there is no write path left to
-        # validate against.
-        bad_res = self.client.post(
-            "/api/research/retailbot2/control",
-            headers=self.headers,
-            json={"enabled": True, "overrides": {"db_password": 123.0}}
-        )
-        self.assertEqual(bad_res.status_code, 403)
 
     def test_screener_control_get_and_set(self):
         # GET
@@ -346,70 +229,74 @@ class TestResearchRoutes(unittest.TestCase):
         )
         self.assertEqual(res.status_code, 200)
 
-    @patch("web.routes.research_routes.get_retailbot2_stats")
+    @patch("web.routes.research_routes.get_paper_trade_stats")
     def test_retailbot2_stats_error_handling(self, mock_stats):
         mock_stats.side_effect = Exception("DB query timeout")
         res = self.client.get("/api/research/retailbot2/stats", headers=self.headers)
         self.assertEqual(res.status_code, 500)
-        self.assertIn("Failed to load retailbot2 stats", res.json().get("detail", ""))
+        self.assertIn("Failed to load paper trade stats", res.json().get("detail", ""))
 
-    @patch("web.routes.research_routes.get_retailbot2_archive_summary", return_value={"trades_count": 9042, "stats_count": 14})
+    @patch("web.routes.research_routes.get_paper_archive_summary", return_value={"trades_count": 9042, "stats_count": 14})
     def test_retailbot2_archive_summary_returns_exact_counts(self, mock_summary):
         res = self.client.get("/api/research/retailbot2/archive/summary", headers=self.headers)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json(), {"tradesCount": 9042, "statsCount": 14})
         mock_summary.assert_called_once_with()
 
-    @patch("web.routes.research_routes.iter_retailbot2_table_batches")
+    @patch("web.routes.research_routes.iter_paper_archive_batches")
     def test_retailbot2_archive_trades_csv_streams_paginated_rows(self, mock_iter):
         import csv
         import io
-        from db.db import RETAILBOT2_ARCHIVE_COLUMNS
+        from db.db import PAPER_ARCHIVE_COLUMNS
 
-        cols = RETAILBOT2_ARCHIVE_COLUMNS["rdt_trades"]
+        cols = PAPER_ARCHIVE_COLUMNS["paper_trades"]
         row1 = tuple(f"v1_{i}" for i in range(len(cols)))
-        row2 = (2, "BTCUSDT", "SHORT", "inverse", "50000.0", "50500.0", "49000.0", "250.0", "2.0", "0.1",
-                "BB_REV", '["BB_REV", "RSI_CTR"]', 0, 2, "fade, bounce\nline2", "CLOSED", "49000.0",
-                "TAKE_PROFIT", "100.0", "2.0", "2026-10-01 00:00:00", "2026-10-01 04:00:00", "2026-10-01 00:00:00")
-        row3 = (3, "ETHUSDT", "LONG", "shadow", "3000.0", "2950.0", "3100.0", "25.0", "2.0", "1.0",
-                "MA_WHIP", None, 1, 1, None, "OPEN", None, None, None, None, "2026-10-02 01:00:00", None, "2026-10-02 01:00:00")
+        row2 = (2, 501, "BTCUSDT", "spot", "1h", "BB_REV", "SHORT",
+                "2026-10-01 07:00:00", "50000.0", "2026-10-01 11:00:00", "49000.0",
+                "TP", "50500.0", "49000.0", "0.1", "5000.0", "100.0", "100.0",
+                "2.0", "2.0", 4, 101, "2026-10-01 11:00:00")
+        row3 = (3, 502, "ETHUSDT", "spot", "1h", "MA_WHIP", "LONG",
+                "2026-10-02 08:00:00", "3000.0", None, None,
+                None, "2950.0", "3100.0", "1.0", "3000.0", None, None,
+                None, None, 0, 102, "2026-10-02 08:00:00")
         mock_iter.return_value = iter([[row1, row2], [row3]])
 
         res = self.client.get("/api/research/retailbot2/archive/trades.csv", headers=self.headers)
         self.assertEqual(res.status_code, 200)
         self.assertIn("text/csv", res.headers.get("content-type", ""))
-        self.assertIn('filename="rdt_trades_archive.csv"', res.headers.get("content-disposition", ""))
+        self.assertIn('filename="paper_trades_archive.csv"', res.headers.get("content-disposition", ""))
 
         parsed = list(csv.reader(io.StringIO(res.text)))
         self.assertEqual(tuple(parsed[0]), cols)
         self.assertEqual(len(parsed) - 1, 3)
-        self.assertEqual(parsed[2][14], "fade, bounce\nline2")
+        # NULLs (open trade: no exit yet) stream as empty fields.
+        self.assertEqual(parsed[3][9], "")
         self.assertEqual(parsed[3][11], "")
-        mock_iter.assert_called_once_with("rdt_trades", batch_size=500)
+        mock_iter.assert_called_once_with("paper_trades", batch_size=500)
 
-    @patch("web.routes.research_routes.iter_retailbot2_table_batches")
+    @patch("web.routes.research_routes.iter_paper_archive_batches")
     def test_retailbot2_archive_stats_csv_streams_rows(self, mock_iter):
         import csv
         import io
-        from db.db import RETAILBOT2_ARCHIVE_COLUMNS
+        from db.db import PAPER_ARCHIVE_COLUMNS
 
-        cols = RETAILBOT2_ARCHIVE_COLUMNS["rdt_strategy_stats"]
+        cols = PAPER_ARCHIVE_COLUMNS["paper_strategy_stats"]
         rows = [
-            (1, "BB_REV", "shadow", 120, 40, 80, "-250.5", "2026-11-01 00:00:00"),
-            (2, "BB_REV", "inverse", 120, 80, 40, "310.25", "2026-11-01 00:00:00"),
+            (1, "BB_REV", "paper", 120, 80, 40, "310.25", "2026-11-01 00:00:00"),
+            (2, "MA_WHIP", "paper", 60, 20, 40, "-250.5", "2026-11-01 00:00:00"),
         ]
         mock_iter.return_value = iter([rows])
 
         res = self.client.get("/api/research/retailbot2/archive/stats.csv", headers=self.headers)
         self.assertEqual(res.status_code, 200)
-        self.assertIn('filename="rdt_strategy_stats_archive.csv"', res.headers.get("content-disposition", ""))
+        self.assertIn('filename="paper_strategy_stats_archive.csv"', res.headers.get("content-disposition", ""))
 
         parsed = list(csv.reader(io.StringIO(res.text)))
         self.assertEqual(tuple(parsed[0]), cols)
         self.assertEqual(len(parsed) - 1, len(rows))
-        mock_iter.assert_called_once_with("rdt_strategy_stats", batch_size=500)
+        mock_iter.assert_called_once_with("paper_strategy_stats", batch_size=500)
 
-    def test_iter_retailbot2_table_batches_uses_keyset_pagination(self):
+    def test_iter_paper_archive_batches_uses_keyset_pagination(self):
         from unittest.mock import MagicMock
         import db.db as db_module
 
@@ -423,8 +310,8 @@ class TestResearchRoutes(unittest.TestCase):
         pool = MagicMock()
         pool.get_connection.return_value = conn
 
-        with patch.object(db_module, "get_retailbot2_pool", return_value=pool):
-            batches = list(db_module.iter_retailbot2_table_batches("rdt_strategy_stats", batch_size=2))
+        with patch.object(db_module, "get_pool", return_value=pool):
+            batches = list(db_module.iter_paper_archive_batches("paper_trades", batch_size=2))
 
         self.assertEqual(batches, [[(1, "a"), (2, "b")], [(5, "c")]])
         self.assertEqual(cursor.execute.call_count, 2)
@@ -434,6 +321,12 @@ class TestResearchRoutes(unittest.TestCase):
         cursor.close.assert_called_once()
         conn.rollback.assert_called_once()
         conn.close.assert_called_once()
+
+    def test_iter_paper_archive_batches_rejects_unknown_dataset(self):
+        import db.db as db_module
+
+        with self.assertRaises(ValueError):
+            list(db_module.iter_paper_archive_batches("rdt_trades", batch_size=2))
 
     def test_ui_show_retailbot2_history_flag_exposed_in_status(self):
         import os

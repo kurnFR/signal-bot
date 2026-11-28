@@ -106,7 +106,7 @@ def table_data(cursor, table, columns):
         count += 1
         total += int(digest, 16)
     result = {"rows": count, "content_hash": f"{total % (1 << 256):064x}"}
-    if table in KEY_TABLES or table.startswith(("paper_", "rdt_", "wallet_")):
+    if table in KEY_TABLES or table.startswith(("paper_", "wallet_")):
         expressions, keys = [], []
         for name, _, data_type, *_ in columns:
             if name in names and (data_type in TIMESTAMP_TYPES or name.endswith(("_at", "_time"))):

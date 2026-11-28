@@ -23,7 +23,7 @@ Funding rate collection runs through the separate `signal-funding-collector.serv
 ### Held-Back Processes (Strict Independent Opt-Ins)
 - **Paper Engine** (`run_paper_engine.py`): Excluded by default. Requires explicit `PAPER_ENGINE_ENABLED=1`.
 - **News AI** (`run_news_ai.py`): Excluded by default. Requires explicit `NEWS_AI_ENABLED=1`.
-- **RetailBot2** (retired, worker deleted -- see `docs/RETAILBOT2_RETIREMENT.md`): No supervisor entry anymore. Its strategies run through Paper Trading; its `rdt_*` tables are a read-only archive.
+- **RetailBot2** (retired, worker deleted -- see `docs/RETAILBOT2_RETIREMENT.md`): No supervisor entry anymore. Its strategies run through Paper Trading; its `rdt_*` tables were dropped by migration 041 (the Telegram outbox lives on as `telegram_outbox`, the archive reads `paper_trades`).
 - **RetailBot2 Outbox Worker** (`paper.outbox_worker`): Excluded by default. Requires **both** `RETAILBOT2_OUTBOX_WORKER_ENABLED=1` AND `TELEGRAM_DELIVERY_ENABLED=1` (or deprecated alias `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`).
 - **Telegram Delivery**: Disabled globally by default. Enabling the supervisor or any individual service never enables live Telegram notifications.
 

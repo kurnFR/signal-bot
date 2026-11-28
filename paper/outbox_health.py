@@ -91,7 +91,7 @@ class OutboxHealthInspector:
                        COUNT(*) AS count,
                        MIN(created_at) AS oldest_created_at,
                        MAX(created_at) AS newest_created_at
-                   FROM rdt_telegram_outbox
+                   FROM telegram_outbox
                    GROUP BY status"""
             )
             status_rows = cur.fetchall()
@@ -120,10 +120,10 @@ class OutboxHealthInspector:
                 oldest_processing_age_sec = max(0.0, delta.total_seconds())
 
             # 2. Due items ready for dispatch or retry
-            # Uses idx_rdt_telegram_outbox_due (status, next_attempt_at, locked_until, id)
+            # Uses idx_telegram_outbox_due (status, next_attempt_at, locked_until, id)
             cur.execute(
                 """SELECT COUNT(*) AS due_count
-                   FROM rdt_telegram_outbox
+                   FROM telegram_outbox
                    WHERE status = 'pending'
                      AND next_attempt_at <= UTC_TIMESTAMP()
                      AND attempts < 8"""
@@ -133,7 +133,7 @@ class OutboxHealthInspector:
             # 3. Expired / stale processing leases
             cur.execute(
                 """SELECT COUNT(*) AS expired_count, MIN(locked_until) AS oldest_expired_until
-                   FROM rdt_telegram_outbox
+                   FROM telegram_outbox
                    WHERE status = 'processing'
                      AND locked_until <= UTC_TIMESTAMP()"""
             )
@@ -144,7 +144,7 @@ class OutboxHealthInspector:
             # 4. Attempt distribution
             cur.execute(
                 """SELECT attempts, COUNT(*) AS count
-                   FROM rdt_telegram_outbox
+                   FROM telegram_outbox
                    GROUP BY attempts
                    ORDER BY attempts"""
             )
@@ -178,7 +178,7 @@ class OutboxHealthInspector:
                        last_error,
                        created_at,
                        sent_at
-                   FROM rdt_telegram_outbox
+                   FROM telegram_outbox
                    WHERE status = 'dead'
                    ORDER BY id DESC
                    LIMIT %s""",

@@ -144,7 +144,7 @@ class OutboxRetentionPlanner:
                        COUNT(*) AS count,
                        MIN(COALESCE(sent_at, created_at)) AS oldest_timestamp,
                        MAX(COALESCE(sent_at, created_at)) AS newest_timestamp
-                   FROM rdt_telegram_outbox
+                   FROM telegram_outbox
                    WHERE status = 'sent'
                      AND COALESCE(sent_at, created_at) < %s
                      AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
@@ -161,7 +161,7 @@ class OutboxRetentionPlanner:
                        COUNT(*) AS count,
                        MIN(created_at) AS oldest_timestamp,
                        MAX(created_at) AS newest_timestamp
-                   FROM rdt_telegram_outbox
+                   FROM telegram_outbox
                    WHERE status = 'dead'
                      AND created_at < %s
                      AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
@@ -173,15 +173,15 @@ class OutboxRetentionPlanner:
             newest_dead_cand = dead_cand_row.get("newest_timestamp")
 
             # 3. Protected Categories: Active items (pending, processing)
-            cur.execute("SELECT COUNT(*) AS count FROM rdt_telegram_outbox WHERE status = 'pending'")
+            cur.execute("SELECT COUNT(*) AS count FROM telegram_outbox WHERE status = 'pending'")
             pending_count = int(cur.fetchone()["count"])
 
-            cur.execute("SELECT COUNT(*) AS count FROM rdt_telegram_outbox WHERE status = 'processing'")
+            cur.execute("SELECT COUNT(*) AS count FROM telegram_outbox WHERE status = 'processing'")
             processing_count = int(cur.fetchone()["count"])
 
             # 4. Protected Categories: Retained within retention window (and not uncertain)
             cur.execute(
-                f"""SELECT COUNT(*) AS count FROM rdt_telegram_outbox
+                f"""SELECT COUNT(*) AS count FROM telegram_outbox
                    WHERE status = 'sent' AND COALESCE(sent_at, created_at) >= %s
                      AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
                 (sent_cutoff,)
@@ -189,7 +189,7 @@ class OutboxRetentionPlanner:
             sent_retained = int(cur.fetchone()["count"])
 
             cur.execute(
-                f"""SELECT COUNT(*) AS count FROM rdt_telegram_outbox
+                f"""SELECT COUNT(*) AS count FROM telegram_outbox
                    WHERE status = 'dead' AND created_at >= %s
                      AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
                 (dead_cutoff,)
@@ -202,7 +202,7 @@ class OutboxRetentionPlanner:
                        COUNT(*) AS count,
                        MIN(created_at) AS oldest_timestamp,
                        MAX(created_at) AS newest_timestamp
-                   FROM rdt_telegram_outbox
+                   FROM telegram_outbox
                    WHERE {UNCERTAIN_DELIVERY_SQL_PREDICATE}"""
             )
             uncertain_row = cur.fetchone()
@@ -216,7 +216,7 @@ class OutboxRetentionPlanner:
                        SUM(CASE WHEN status = 'dead' THEN 1 ELSE 0 END) AS dead_count,
                        SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) AS sent_count,
                        SUM(CASE WHEN status IN ('pending', 'processing') THEN 1 ELSE 0 END) AS active_count
-                   FROM rdt_telegram_outbox
+                   FROM telegram_outbox
                    WHERE {UNCERTAIN_DELIVERY_SQL_PREDICATE}"""
             )
             breakdown_row = cur.fetchone()
@@ -311,7 +311,7 @@ class OutboxRetentionPlanner:
 
             # 1. Delete sent candidates older than sent_cutoff (strictly excluding uncertain)
             cur.execute(
-                f"""DELETE FROM rdt_telegram_outbox
+                f"""DELETE FROM telegram_outbox
                    WHERE status = 'sent'
                      AND COALESCE(sent_at, created_at) < %s
                      AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
@@ -321,7 +321,7 @@ class OutboxRetentionPlanner:
 
             # 2. Delete dead candidates older than dead_cutoff (strictly excluding uncertain)
             cur.execute(
-                f"""DELETE FROM rdt_telegram_outbox
+                f"""DELETE FROM telegram_outbox
                    WHERE status = 'dead'
                      AND created_at < %s
                      AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",

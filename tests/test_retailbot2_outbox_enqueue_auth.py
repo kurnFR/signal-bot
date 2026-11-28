@@ -158,7 +158,7 @@ def test_actual_signal_bot_test_connection_permits_enqueue_with_delivery_unset(m
     # Verify SELECT DATABASE() occurred on the active connection before INSERT
     sql_calls = [c[0] for c in cursor.calls]
     assert any("SELECT DATABASE()" in sql for sql in sql_calls)
-    assert any("INSERT INTO rdt_telegram_outbox" in sql for sql in sql_calls)
+    assert any("INSERT INTO telegram_outbox" in sql for sql in sql_calls)
     assert conn.commits == 1
 
 
@@ -186,7 +186,7 @@ def test_config_signal_bot_test_actual_connection_reports_another_db_rejected(mo
         payload={"text": "mismatch"},
     )
     assert result is False
-    assert not any("INSERT INTO rdt_telegram_outbox" in c[0] for c in cursor.calls)
+    assert not any("INSERT INTO telegram_outbox" in c[0] for c in cursor.calls)
     assert conn.commits == 0
 
 
@@ -214,7 +214,7 @@ def test_config_crypto_signals_actual_connection_signal_bot_test_rejected(monkey
         payload={"text": "cross mismatch"},
     )
     assert result is False
-    assert not any("INSERT INTO rdt_telegram_outbox" in c[0] for c in cursor.calls)
+    assert not any("INSERT INTO telegram_outbox" in c[0] for c in cursor.calls)
     assert conn.commits == 0
 
 
@@ -270,7 +270,7 @@ def test_missing_configuration_fails_closed(monkeypatch):
         payload={"text": "none"},
     )
     assert result is False
-    assert not any("INSERT INTO rdt_telegram_outbox" in c[0] for c in cursor.calls)
+    assert not any("INSERT INTO telegram_outbox" in c[0] for c in cursor.calls)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -317,7 +317,7 @@ def test_select_database_returns_null_rejected(monkeypatch):
         payload={"text": "null"},
     )
     assert result is False
-    assert not any("INSERT INTO rdt_telegram_outbox" in c[0] for c in cursor.calls)
+    assert not any("INSERT INTO telegram_outbox" in c[0] for c in cursor.calls)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -343,7 +343,7 @@ def test_database_identity_query_raises_exception_rejected(monkeypatch):
         payload={"text": "err"},
     )
     assert result is False
-    assert not any("INSERT INTO rdt_telegram_outbox" in c[0] for c in cursor.calls)
+    assert not any("INSERT INTO telegram_outbox" in c[0] for c in cursor.calls)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -400,7 +400,7 @@ def test_enqueue_flag_unset_rejected(monkeypatch, flag_value):
         payload={"text": "hello"},
     )
     assert result is False
-    assert not any("INSERT INTO rdt_telegram_outbox" in c[0] for c in cursor.calls)
+    assert not any("INSERT INTO telegram_outbox" in c[0] for c in cursor.calls)
     assert conn.commits == 0
 
 
@@ -432,7 +432,7 @@ def test_observation_only_mode_rejected(monkeypatch):
         payload={"text": "blocked"},
     )
     assert result is False
-    assert not any("INSERT INTO rdt_telegram_outbox" in c[0] for c in cursor.calls)
+    assert not any("INSERT INTO telegram_outbox" in c[0] for c in cursor.calls)
 
 
 # ═══════════════════════════════════════════════════════════════════

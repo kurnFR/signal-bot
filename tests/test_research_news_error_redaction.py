@@ -10,13 +10,13 @@ from web.routes import news_routes, research_routes
 class TestResearchNewsErrorRedaction(unittest.TestCase):
     def test_retailbot_positions_error_is_generic(self):
         secret = "database-password=secret-token"
-        with patch.object(research_routes, "get_retailbot2_open_trades", side_effect=RuntimeError(secret)), \
+        with patch.object(research_routes, "get_paper_open_positions", side_effect=RuntimeError(secret)), \
              self.assertLogs("web.research_routes", level="ERROR") as captured:
             with self.assertRaises(HTTPException) as raised:
                 research_routes.retailbot2_positions()
 
         self.assertEqual(raised.exception.status_code, 500)
-        self.assertEqual(raised.exception.detail, "Failed to load retailbot2 positions")
+        self.assertEqual(raised.exception.detail, "Failed to load paper positions")
         self.assertNotIn("secret-token", "\n".join(captured.output))
 
     def test_news_stats_error_is_generic(self):

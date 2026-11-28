@@ -132,7 +132,7 @@ def _clean_test_outbox_events(conn):
     cursor = conn.cursor()
     cursor.execute(
         """
-        DELETE FROM rdt_telegram_outbox
+        DELETE FROM telegram_outbox
         WHERE event_key LIKE %s
            OR (
                event_key LIKE 'test:%'
@@ -151,7 +151,7 @@ def _assert_no_unrelated_outbox_rows(conn):
     cursor.execute(
         """
         SELECT COUNT(*)
-        FROM rdt_telegram_outbox
+        FROM telegram_outbox
         WHERE NOT (
             event_key LIKE %s
             OR (
@@ -193,7 +193,7 @@ def _insert_test_event(conn, event_type="entry", trade_id=None):
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO rdt_telegram_outbox
+        INSERT INTO telegram_outbox
         (event_key, trade_id, event_type, payload_json, status, attempts, next_attempt_at)
         VALUES (%s, %s, %s, %s, 'pending', 0, UTC_TIMESTAMP())
         """,
@@ -237,8 +237,8 @@ class TestDatabaseAuthorization:
 
 
 class TestAdvisoryLockOwnership:
-    def test_outbox_lock_name_constant_is_authoritative_rdt_outbox_worker_lock(self):
-        assert OUTBOX_LOCK_NAME == "rdt_outbox_worker_lock"
+    def test_outbox_lock_name_constant_is_authoritative_telegram_outbox_worker_lock(self):
+        assert OUTBOX_LOCK_NAME == "telegram_outbox_worker_lock"
 
     @pytest.mark.db_integration
     def test_single_session_lock_and_rejection_on_contention(self):
@@ -596,7 +596,7 @@ sys.exit(exit_code)
     @pytest.fixture(autouse=True)
     def isolate_test_outbox_rows(self, request):
         if request.node.name in (
-            "test_outbox_lock_name_constant_is_authoritative_rdt_outbox_worker_lock",
+            "test_outbox_lock_name_constant_is_authoritative_telegram_outbox_worker_lock",
             "test_legacy_dispatcher_is_disabled_without_lock_api",
             "test_legacy_dispatcher_never_attempts_lock_acquisition",
         ):
@@ -627,7 +627,7 @@ sys.exit(exit_code)
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO rdt_telegram_outbox
+                INSERT INTO telegram_outbox
                 (event_key, trade_id, event_type, payload_json, status, attempts, next_attempt_at)
                 VALUES (%s, %s, 'entry', %s, 'pending', 0, UTC_TIMESTAMP())
                 """,
@@ -648,7 +648,7 @@ sys.exit(exit_code)
 
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id FROM rdt_telegram_outbox WHERE id IN (%s, %s)",
+                "SELECT id FROM telegram_outbox WHERE id IN (%s, %s)",
                 (owned_id, unrelated_id),
             )
             remaining = {row[0] for row in cursor.fetchall()}
@@ -658,7 +658,7 @@ sys.exit(exit_code)
         finally:
             if unrelated_id is not None:
                 cursor = conn.cursor()
-                cursor.execute("DELETE FROM rdt_telegram_outbox WHERE id=%s", (unrelated_id,))
+                cursor.execute("DELETE FROM telegram_outbox WHERE id=%s", (unrelated_id,))
                 conn.commit()
                 cursor.close()
             conn.close()
@@ -684,7 +684,7 @@ sys.exit(exit_code)
 
             chk_conn = _test_connection()
             cur = chk_conn.cursor(dictionary=True)
-            cur.execute("SELECT status, sent_at, claim_token FROM rdt_telegram_outbox WHERE id=%s", (event_id,))
+            cur.execute("SELECT status, sent_at, claim_token FROM telegram_outbox WHERE id=%s", (event_id,))
             row = cur.fetchone()
             cur.close()
             chk_conn.close()
@@ -737,7 +737,7 @@ sys.exit(exit_code)
             mod_conn = _test_connection()
             cur = mod_conn.cursor()
             cur.execute(
-                "UPDATE rdt_telegram_outbox SET locked_until=DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 SECOND) WHERE id=%s",
+                "UPDATE telegram_outbox SET locked_until=DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 SECOND) WHERE id=%s",
                 (event_id,)
             )
             mod_conn.commit()
@@ -767,7 +767,7 @@ sys.exit(exit_code)
             mod_conn = _test_connection()
             cur = mod_conn.cursor()
             cur.execute(
-                "UPDATE rdt_telegram_outbox SET locked_until=DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 SECOND) WHERE id=%s",
+                "UPDATE telegram_outbox SET locked_until=DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 SECOND) WHERE id=%s",
                 (event_id,)
             )
             mod_conn.commit()

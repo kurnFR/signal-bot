@@ -221,21 +221,29 @@ def run_tests():
     assert sync_res.status_code == 200
     print(f"  ✅ Paper Sync Engine: Executed cleanly -> {sync_res.json()}")
 
-    # 8. Research (RetailDeathTrapBot)
-    print("\n[8/11] 🔬 Testing RetailDeathTrapBot (RDT Bot) Research & Controls...")
-    rdt_stats_res = requests.get(f"{BASE_URL}/api/research/retailbot2/stats", headers=headers)
-    assert rdt_stats_res.status_code == 200
-    rdt_stats = rdt_stats_res.json()
-    print(f"  ✅ RDT Bot Stats: Overall PnL=${rdt_stats.get('overall_pnl', 0):,.2f}, Total Trades={rdt_stats.get('total_trades', 0)}")
+    # 8. Research (Paper Trading archive -- migration 041 repointed the
+    # /retailbot2/* GET routes from the dropped rdt_* tables to the
+    # paper_trades / paper_positions ledger; the strategies/control GETs
+    # are deleted with them)
+    print("\n[8/11] 🔬 Testing Paper Trading Research archive...")
+    paper_stats_res = requests.get(f"{BASE_URL}/api/research/retailbot2/stats", headers=headers)
+    assert paper_stats_res.status_code == 200
+    paper_stats = paper_stats_res.json()
+    assert "by_strategy" in paper_stats and "by_mode" in paper_stats
+    assert "paper" in paper_stats["by_mode"]
+    print(f"  ✅ Paper Stats: PnL=${paper_stats['by_mode']['paper'].get('realized_pnl', 0):,.2f}, Closed={paper_stats['by_mode']['paper'].get('closed_count', 0)}")
 
-    rdt_pos_res = requests.get(f"{BASE_URL}/api/research/retailbot2/positions", headers=headers)
-    assert rdt_pos_res.status_code == 200
-    print(f"  ✅ RDT Bot Positions: {len(rdt_pos_res.json())} open positions")
+    paper_pos_res = requests.get(f"{BASE_URL}/api/research/retailbot2/positions", headers=headers)
+    assert paper_pos_res.status_code == 200
+    assert "positions" in paper_pos_res.json()
+    print(f"  ✅ Paper Positions: {len(paper_pos_res.json()['positions'])} open positions")
 
-    rdt_ctrl_res = requests.get(f"{BASE_URL}/api/research/retailbot2/control", headers=headers)
-    assert rdt_ctrl_res.status_code == 200
-    ctrl_data = rdt_ctrl_res.json()
-    print(f"  ✅ RDT Bot Controls: is_running={ctrl_data.get('is_running')}")
+    # The retired lifecycle/control GETs are deleted with migration 041.
+    paper_ctrl_res = requests.get(f"{BASE_URL}/api/research/retailbot2/control", headers=headers)
+    assert paper_ctrl_res.status_code == 404, f"deleted retailbot2 control GET must 404, got {paper_ctrl_res.status_code}"
+    paper_strat_res = requests.get(f"{BASE_URL}/api/research/retailbot2/strategies", headers=headers)
+    assert paper_strat_res.status_code == 404, f"deleted retailbot2 strategies GET must 404, got {paper_strat_res.status_code}"
+    print("  ✅ Retired RDT Bot control/strategies GETs return 404 (tables dropped)")
 
     # Test that the retired control write is rejected (step 3: the worker
     # is gone, so POST /retailbot2/control must fail closed, not write).

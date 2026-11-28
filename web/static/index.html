@@ -1581,43 +1581,43 @@
                 <!-- ===== Retail Death Trap Bot v2 ===== -->
                 <div class="flex items-center gap-2">
                     <i data-lucide="skull" class="w-4 h-4 text-purple-400"></i>
-                    <h2 class="text-sm font-bold text-slate-100">RetailBot2 Historical Archive (Read-Only)</h2>
-                    <span class="text-[10px] text-slate-500">Retired worker &middot; saved positions, trades, and lifecycle rows only</span>
+                    <h2 class="text-sm font-bold text-slate-100">Paper Trading Research Archive (Read-Only)</h2>
+                    <span class="text-[10px] text-slate-500">Paper Trading ledger &middot; open positions and closed trades</span>
                     <button type="button" aria-label="Refresh research data" onclick="App.fetchResearchData()" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
                         <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
                     </button>
                 </div>
 
                 <!-- Bot Control: retailbot2 -- RETIRED. The worker is deleted and
-                     POST /api/research/retailbot2/control is retired; the saved
-                     control row is shown for reference only and cannot be edited. -->
+                     its control write endpoint is retired; the saved control row
+                     is shown for reference only and cannot be edited. -->
                 <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
                     <div class="flex items-center justify-between">
                         <h3 class="text-sm font-bold text-slate-100">RetailBot2 is retired</h3>
                         <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700 uppercase">Read-Only Archive</span>
                     </div>
-                    <p class="text-xs text-slate-400">The RetailBot2 worker is deleted. Its saved bot-control row and strategy lifecycle flags are a read-only archive — no worker applies them anymore. Active simulations run in Paper Trading; Telegram delivery is governed by the Telegram outbox settings.</p>
+                    <p class="text-xs text-slate-400">The RetailBot2 worker is deleted and its <code>rdt_*</code> tables were dropped by migration 041. Strategy lifecycle flags now live in Paper Trading configs; Telegram delivery is governed by the Telegram outbox settings. RetailBot2 automatic promotion is not available yet; keep this control manual until the validated promotion workflow is implemented.</p>
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                     <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-                        <span class="text-xs text-slate-400 uppercase font-semibold">Shadow (real signal)</span>
-                        <div id="rb2-kpi-shadow-pnl" class="text-2xl font-black font-mono mt-2">$0.00</div>
-                        <span class="text-[11px] text-slate-500"><span id="rb2-kpi-shadow-open">0</span> open &middot; <span id="rb2-kpi-shadow-wr">--</span> win rate</span>
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Paper Trading — Realized P&amp;L</span>
+                        <div id="rb2-kpi-paper-pnl" class="text-2xl font-black font-mono mt-2">$0.00</div>
+                        <span class="text-[11px] text-slate-500"><span id="rb2-kpi-paper-open">0</span> open &middot; <span id="rb2-kpi-paper-wr">--</span> win rate</span>
                     </div>
                     <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-                        <span class="text-xs text-slate-400 uppercase font-semibold">Inverse (faded signal)</span>
-                        <div id="rb2-kpi-inverse-pnl" class="text-2xl font-black font-mono mt-2">$0.00</div>
-                        <span class="text-[11px] text-slate-500"><span id="rb2-kpi-inverse-open">0</span> open &middot; <span id="rb2-kpi-inverse-wr">--</span> win rate</span>
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Paper Trading — Open Positions</span>
+                        <div id="rb2-kpi-paper-open" class="text-2xl font-black font-mono mt-2">0</div>
+                        <span class="text-[11px] text-slate-500">Currently open in <code>paper_positions</code></span>
                     </div>
                     <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-                        <span class="text-xs text-slate-400 uppercase font-semibold">Shadow Closed Trades</span>
-                        <div id="rb2-kpi-shadow-closed" class="text-2xl font-black font-mono text-slate-100 mt-2">0</div>
-                        <span class="text-[11px] text-slate-500">All-time</span>
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Paper Trading — Win Rate</span>
+                        <div id="rb2-kpi-paper-wr" class="text-2xl font-black font-mono text-slate-100 mt-2">--</div>
+                        <span class="text-[11px] text-slate-500">Closed trades in <code>paper_trades</code></span>
                     </div>
                     <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-                        <span class="text-xs text-slate-400 uppercase font-semibold">Inverse Closed Trades</span>
-                        <div id="rb2-kpi-inverse-closed" class="text-2xl font-black font-mono text-slate-100 mt-2">0</div>
+                        <span class="text-xs text-slate-400 uppercase font-semibold">Paper Trading — Closed Trades</span>
+                        <div id="rb2-kpi-paper-closed" class="text-2xl font-black font-mono text-slate-100 mt-2">0</div>
                         <span class="text-[11px] text-slate-500">All-time</span>
                     </div>
                 </div>
@@ -1640,7 +1640,7 @@
                 </div>
 
                 <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
-                    <h3 class="text-sm font-bold text-slate-100">Strategy Performance (7 strategies &times; shadow/inverse)</h3>
+                    <h3 class="text-sm font-bold text-slate-100">Strategy Performance (Paper Trading)</h3>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left custom-table">
                             <thead>
@@ -1653,30 +1653,6 @@
                             </tbody>
                         </table>
                     </div>
-                </div>
-
-                <div class="p-6 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
-                    <div>
-                        <h3 class="text-sm font-bold text-slate-100">Saved Strategy Lifecycle (Read-Only)</h3>
-                        <p class="text-[11px] text-slate-500 mt-1">Saved per-strategy flags from the retired worker. These rows are a read-only archive — they are no longer applied by any worker. Manage new simulations in Paper Trading.</p>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left custom-table">
-                            <thead>
-                                <tr>
-                                    <th scope="col">Strategy / Mode</th>
-                                    <th scope="col">Evaluate</th>
-                                    <th scope="col">Paper Track</th>
-                                    <th scope="col">Telegram Alerts</th>
-                                    <th scope="col">Performance Report</th>
-                                </tr>
-                            </thead>
-                            <tbody id="rb2-lifecycle-table-body">
-                                <tr><td colspan="6" class="text-center py-6 text-slate-500 text-xs">Loading strategy controls...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <p class="text-[10px] text-amber-300">RetailBot2 automatic promotion is not available yet; keep this control manual until the validated promotion workflow is implemented. This table controls per-strategy runtime evaluation, paper tracking, Telegram alerts, and report visibility. Backtest Studio results are research evidence, not automatic activation.</p>
                 </div>
 
             </section>
@@ -1773,7 +1749,7 @@
                         <label class="text-[11px] text-slate-400 flex items-center gap-2 mt-3"><input type="checkbox" id="screener-ctl-require_confluence" class="w-3.5 h-3.5"> Require Confluence</label>
                     </div>
                     <div class="flex items-center gap-3">
-                        <button type="button" onclick="App.saveBotControl('screener')" class="px-4 py-2 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-all">Save Changes</button>
+                        <button type="button" onclick="App.saveBotControl()" class="px-4 py-2 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-all">Save Changes</button>
                         <span class="text-[10px] text-slate-500">No process restart required.</span>
                     </div>
                 </div>
@@ -2196,19 +2172,19 @@
                         <div>
                             <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
                                 <i data-lucide="archive" class="w-4 h-4 text-purple-400"></i>
-                                RetailBot2 Historical Archive (Read-Only)
+                                Paper Trading Archive (Read-Only)
                             </h3>
-                            <p class="text-xs text-slate-400 mt-0.5">Stream CSV archives of <code>rdt_trades</code> and <code>rdt_strategy_stats</code> without altering or deleting legacy tables.</p>
+                            <p class="text-xs text-slate-400 mt-0.5">Stream CSV archives of <code>paper_trades</code> and per-strategy aggregates without altering or deleting live data.</p>
                         </div>
                         <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700 uppercase">Read-Only</span>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                         <div class="p-3 rounded-lg bg-slate-850 border border-slate-800 flex justify-between">
-                            <span class="text-slate-400">Archived rdt_trades:</span>
+                            <span class="text-slate-400">Archived paper_trades:</span>
                             <span id="archive-trades-count" class="font-mono font-bold text-slate-100">—</span>
                         </div>
                         <div class="p-3 rounded-lg bg-slate-850 border border-slate-800 flex justify-between">
-                            <span class="text-slate-400">Archived rdt_strategy_stats:</span>
+                            <span class="text-slate-400">Archived paper_strategy_stats:</span>
                             <span id="archive-stats-count" class="font-mono font-bold text-slate-100">—</span>
                         </div>
                     </div>
@@ -2217,10 +2193,10 @@
                             Load Archive Counts
                         </button>
                         <button type="button" onclick="App.downloadRetailbot2ArchiveCsv('trades')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 text-xs font-semibold">
-                            Export rdt_trades (CSV)
+                            Export paper_trades (CSV)
                         </button>
                         <button type="button" onclick="App.downloadRetailbot2ArchiveCsv('stats')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 text-xs font-semibold">
-                            Export rdt_strategy_stats (CSV)
+                            Export paper_strategy_stats (CSV)
                         </button>
                     </div>
                 </div>
