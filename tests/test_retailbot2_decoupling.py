@@ -63,7 +63,7 @@ def test_retailbot2_worker_module_is_gone():
         "build_exit_alert_payload",
     ):
         assert hasattr(outbox_store, name), name
-    assert outbox_store.OUTBOX_LOCK_NAME == "rdt_outbox_worker_lock"
+    assert outbox_store.OUTBOX_LOCK_NAME == "telegram_outbox_worker_lock"
 
 
 def test_paper_report_is_the_shared_report(monkeypatch):
@@ -123,8 +123,10 @@ def test_telegram_master_switch_and_deprecated_alias(env_vars, expected):
 
 
 def test_web_lifespan_always_verifies_retailbot2_archive_schema():
-    """Step 3: the worker is gone, so the archive schema check is no longer
-    gated on RETAILBOT2_ENABLED -- it runs on every startup (warn-only)."""
+    """The worker is gone and the rdt_* tables are dropped by migration
+    041, so the startup schema check now verifies the Paper Trading
+    archive schema. It is still not gated on RETAILBOT2_ENABLED -- it
+    runs on every startup (warn-only)."""
     import db.db as db_module
     import Screen.screening as screening_module
     from web.app import app, lifespan
@@ -133,10 +135,19 @@ def test_web_lifespan_always_verifies_retailbot2_archive_schema():
         async with lifespan(app):
             pass
 
+    # The lifespan's early steps (seed_default_admin, durable rate
+    # limiting, legacy strategy drift) open real DB connections; stub
+    # them so this test stays hermetic without MySQL -- at pristine
+    # 1dc5d5ec it failed in a no-DB sandbox at seed_default_admin
+    # before ever reaching the archive check it claims to verify.
     for flag in ("0", "1"):
         with patch.dict(os.environ, {"RETAILBOT2_ENABLED": flag}, clear=False), \
+             patch("web.app.seed_default_admin"), \
+             patch("web.app.enable_durable_rate_limit"), \
+             patch("web.routes.custom_strategy.load_custom_strategies"), \
+             patch("db.custom_strategy_store.legacy_strategy_drift", return_value=None), \
              patch.object(screening_module, "verify_signal_schema") as sig_verify, \
-             patch.object(db_module, "verify_retailbot2_schema") as rb2_verify:
+             patch.object(db_module, "verify_paper_archive_schema") as rb2_verify:
             asyncio.run(_run_lifespan())
             sig_verify.assert_called_once_with()
             rb2_verify.assert_called_once_with()

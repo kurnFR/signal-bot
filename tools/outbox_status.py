@@ -27,9 +27,9 @@ def collect(connection):
             reason = "delivery_disabled_in_settings"
         else:
             reason = None
-        cursor.execute("SELECT status, COUNT(*) FROM rdt_telegram_outbox GROUP BY status ORDER BY status")
+        cursor.execute("SELECT status, COUNT(*) FROM telegram_outbox GROUP BY status ORDER BY status")
         counts = dict(cursor.fetchall())
-        cursor.execute("""SELECT COUNT(*) FROM rdt_telegram_outbox WHERE attempts < 8 AND (
+        cursor.execute("""SELECT COUNT(*) FROM telegram_outbox WHERE attempts < 8 AND (
             (status='pending' AND next_attempt_at <= UTC_TIMESTAMP()) OR
             (status='processing' AND locked_until <= UTC_TIMESTAMP()))""")
         due, = cursor.fetchone()

@@ -509,12 +509,13 @@ const App = {
     // ----------------------------------------------------
     async fetchResearchData() {
         try {
-            const [posRes, statsRes, lifecycleRes] = await Promise.all([
+            // The strategies GET was deleted with migration 041 (its rows lived in
+            // rdt_strategy_lifecycle); lifecycle flags now live in paper_configs.
+            const [posRes, statsRes] = await Promise.all([
                 fetch(`${API_BASE}/api/research/retailbot2/positions?limit=100`, { headers: this.getAuthHeaders() }),
                 fetch(`${API_BASE}/api/research/retailbot2/stats`, { headers: this.getAuthHeaders() }),
-                fetch(`${API_BASE}/api/research/retailbot2/strategies`, { headers: this.getAuthHeaders() }),
             ]);
-            const results = [posRes, statsRes, lifecycleRes];
+            const results = [posRes, statsRes];
             const failed = results.find(r => !r.ok);
             if (failed) {
                 let detail = `HTTP ${failed.status}`;
@@ -523,14 +524,11 @@ const App = {
             }
             const positionsData = await posRes.json();
             const rb2Stats = await statsRes.json();
-            const lifecycleData = await lifecycleRes.json();
             const validObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
             if (
                 !validObject(positionsData) || !Array.isArray(positionsData.positions) ||
                 positionsData.positions.some(item => !item || typeof item !== "object" || Array.isArray(item)) ||
                 !validObject(rb2Stats) ||
-                !validObject(lifecycleData) || !Array.isArray(lifecycleData.strategies) ||
-                lifecycleData.strategies.some(item => !item || typeof item !== "object" || Array.isArray(item)) ||
                 (rb2Stats.by_strategy !== undefined && !Array.isArray(rb2Stats.by_strategy)) ||
                 (Array.isArray(rb2Stats.by_strategy) && rb2Stats.by_strategy.some(item => !item || typeof item !== "object" || Array.isArray(item)))
             ) {
@@ -541,7 +539,6 @@ const App = {
             this._renderRb2Kpis(rb2Stats);
             this._renderRb2Positions(positionsData.positions);
             this._renderRb2StrategyTable(rb2Stats.by_strategy || []);
-            this._renderRb2LifecycleTable(lifecycleData.strategies);
         } catch (e) {
             const message = e && e.message ? e.message : String(e || "Unknown error");
             const safeMessage = this._escapeHtml(message);
@@ -550,9 +547,8 @@ const App = {
                 if (el) el.innerText = "Unavailable";
             };
             for (const id of [
-                "rb2-kpi-shadow-pnl", "rb2-kpi-shadow-open", "rb2-kpi-shadow-wr",
-                "rb2-kpi-inverse-pnl", "rb2-kpi-inverse-open", "rb2-kpi-inverse-wr",
-                "rb2-kpi-shadow-closed", "rb2-kpi-inverse-closed",
+                "rb2-kpi-paper-pnl", "rb2-kpi-paper-open", "rb2-kpi-paper-wr",
+                "rb2-kpi-paper-closed",
             ]) setUnavailable(id);
             const positionsBody = document.getElementById("rb2-positions-table-body");
             if (positionsBody) positionsBody.innerHTML = `<tr><td colspan="9" class="text-center py-6 text-rose-300 text-xs">Unable to refresh Research Bots positions. Check your connection or sign-in, then retry. ${safeMessage}</td></tr>`;
@@ -594,7 +590,7 @@ const App = {
             this._renderScreenerStatus(status);
             this._renderScreenerKpis(stats);
             this._renderScreenerSignals(signals);
-            this._fetchBotControl("screener");
+            this._fetchBotControl();
         } catch (e) {
             const message = e && e.message ? e.message : String(e || "Unknown error");
             const statusEl = document.getElementById("screener-v2-status");
@@ -1096,17 +1092,17 @@ const App = {
         } catch (e) { this.showToast(`Could not remove wallet: ${e.message || e}`, "error"); }
     },
 
-    async _fetchBotControl(botName) {
+    // Screener-only: the retailbot2 control route was deleted with
+    // migration 041, so there is no botName parameter anymore.
+    async _fetchBotControl() {
         try {
-            const res = await fetch(`${API_BASE}/api/research/${botName}/control`, { headers: this.getAuthHeaders() });
+            const res = await fetch(`${API_BASE}/api/research/screener/control`, { headers: this.getAuthHeaders() });
             if (!res.ok) {
                 let detail = `HTTP ${res.status}`;
                 try { detail = (await res.json()).detail || detail; } catch (_) {}
                 throw new Error(detail);
             }
             const control = await res.json();
-            // Screener-only now: the retailbot2 control fetch was retired
-            // with the worker, so this is only ever called with "screener".
             const prefix = "screener-ctl-";
             const enabledEl = document.getElementById(`${prefix}enabled`);
             if (enabledEl) enabledEl.checked = !!control.enabled;
@@ -1114,17 +1110,15 @@ const App = {
             // Boolean screener settings have real process defaults. Reflect those
             // defaults in the UI when there is no persisted override; otherwise a
             // normal "Save Changes" could accidentally turn them off.
-            if (botName === "screener") {
-                const screenerBooleanDefaults = {
-                    enable_divergence_detection: true,
-                    enable_velocity_detection: true,
-                    require_confluence: true,
-                };
-                for (const [key, defaultValue] of Object.entries(screenerBooleanDefaults)) {
-                    const el = document.getElementById(`screener-ctl-${key}`);
-                    if (el && !Object.prototype.hasOwnProperty.call(control.overrides || {}, key)) {
-                        el.checked = defaultValue;
-                    }
+            const screenerBooleanDefaults = {
+                enable_divergence_detection: true,
+                enable_velocity_detection: true,
+                require_confluence: true,
+            };
+            for (const [key, defaultValue] of Object.entries(screenerBooleanDefaults)) {
+                const el = document.getElementById(`screener-ctl-${key}`);
+                if (el && !Object.prototype.hasOwnProperty.call(control.overrides || {}, key)) {
+                    el.checked = defaultValue;
                 }
             }
 
@@ -1143,17 +1137,11 @@ const App = {
             // load, and "bot never started yet" is an expected state, not
             // an error worth interrupting the user with a toast for. The
             // control card's inputs just stay at their placeholder defaults.
-            console.warn(`${botName} control not available yet:`, e.message || e);
+            console.warn("Screener control not available yet:", e.message || e);
         }
     },
 
-    async saveBotControl(botName) {
-        if (botName === "retailbot2") {
-            // RetailBot2 is retired: the worker is deleted and the control
-            // endpoints are retired. The saved row is a read-only archive.
-            this.showToast("RetailBot2 is retired — bot control is a read-only archive and cannot be changed.", "error");
-            return;
-        }
+    async saveBotControl() {
         const prefix = "screener-ctl-";
         const fields = ["rvol_multiplier", "divergence_max_price_change", "velocity_threshold",
                "max_alerts_per_hour", "max_alerts_per_symbol_per_hour", "alert_cooldown_sec",
@@ -1181,7 +1169,7 @@ const App = {
         }
 
         try {
-            const res = await fetch(`${API_BASE}/api/research/${botName}/control`, {
+            const res = await fetch(`${API_BASE}/api/research/screener/control`, {
                 method: "POST",
                 headers: this.getAuthHeaders(),
                 body: JSON.stringify({ enabled: enabledEl ? enabledEl.checked : true, overrides }),
@@ -1194,26 +1182,23 @@ const App = {
             const data = await res.json();
             this.showToast(`Screener settings saved. ${data.note || ""}`, "success");
         } catch (e) {
-            this.showToast(`Failed to save ${botName} settings: ${e.message || e}`, "error");
+            this.showToast(`Failed to save screener settings: ${e.message || e}`, "error");
         }
     },
 
+    // by_mode is a single "paper" key since migration 041 (stats come from
+    // paper_trades; the shadow/inverse split died with rdt_strategy_stats).
     _renderRb2Kpis(stats) {
         const byMode = stats.by_mode || {};
-        const shadow = byMode.shadow || {};
-        const inverse = byMode.inverse || {};
+        const paper = byMode.paper || {};
         const set = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
         const pnlClass = (v) => v > 0 ? "text-emerald-400" : v < 0 ? "text-rose-400" : "text-slate-100";
         const pnlEl = (id, v) => { const el = document.getElementById(id); if (el) { el.innerText = `${v >= 0 ? "+" : ""}$${v.toFixed(2)}`; el.className = el.className.replace(/text-(emerald|rose|slate)-\d+/, "") + " " + pnlClass(v); } };
 
-        pnlEl("rb2-kpi-shadow-pnl", shadow.realized_pnl || 0);
-        pnlEl("rb2-kpi-inverse-pnl", inverse.realized_pnl || 0);
-        set("rb2-kpi-shadow-open", shadow.open_count ?? 0);
-        set("rb2-kpi-inverse-open", inverse.open_count ?? 0);
-        set("rb2-kpi-shadow-wr", shadow.win_rate != null ? `${shadow.win_rate}%` : "--");
-        set("rb2-kpi-inverse-wr", inverse.win_rate != null ? `${inverse.win_rate}%` : "--");
-        set("rb2-kpi-shadow-closed", shadow.closed_count ?? 0);
-        set("rb2-kpi-inverse-closed", inverse.closed_count ?? 0);
+        pnlEl("rb2-kpi-paper-pnl", paper.realized_pnl || 0);
+        set("rb2-kpi-paper-open", paper.open_count ?? 0);
+        set("rb2-kpi-paper-wr", paper.win_rate != null ? `${paper.win_rate}%` : "--");
+        set("rb2-kpi-paper-closed", paper.closed_count ?? 0);
     },
 
     _renderRb2Positions(positions) {
@@ -1235,51 +1220,10 @@ const App = {
                     <td class="font-mono text-rose-400">$${Number(p.stop_price).toFixed(4)}</td>
                     <td class="font-mono text-emerald-400">$${Number(p.target_price).toFixed(4)}</td>
                     <td class="text-slate-400">${this._escapeHtml(p.strategy)}</td>
-                    <td class="text-slate-400">${this._safeNumber(p.confluence_score, 1)}/7</td>
+                    <td class="text-slate-400">${p.confluence_score == null ? "--" : `${this._safeNumber(p.confluence_score, 1)}/7`}</td>
                     <td class="whitespace-nowrap text-slate-500">${this._formatDateTime(p.entry_time)}</td>
                 </tr>`;
         }).join("");
-    },
-
-    // Read-only render of the saved lifecycle rows (retired archive).
-    // The worker is deleted and POST /api/research/retailbot2/strategies
-    // is retired, so there are no checkboxes, Save, or Stop & Hide controls.
-    _renderRb2LifecycleTable(rows) {
-        const tbody = document.getElementById("rb2-lifecycle-table-body");
-        if (!tbody) return;
-        if (!Array.isArray(rows) || rows.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-slate-500 text-xs">No saved strategy rows were returned.</td></tr>`;
-            return;
-        }
-        tbody.innerHTML = rows.map(row => {
-            const strategy = String(row.strategy_id || "");
-            const mode = String(row.mode || "");
-            const safeId = this._escapeHtml(strategy);
-            const safeMode = this._escapeHtml(mode);
-            const flag = (on, onLabel, offLabel) => on ? onLabel : offLabel;
-            return `
-                <tr>
-                    <td class="font-semibold text-slate-100 whitespace-nowrap">
-                        ${safeId}<div class="text-[10px] text-slate-500 font-normal">${safeMode}${row.historical_only ? " · historical only" : ""}</div>
-                    </td>
-                    <td class="text-slate-300">${flag(row.evaluation_enabled, "On", "Off")}</td>
-                    <td class="text-slate-300">${flag(row.paper_enabled, "On", "Off")}</td>
-                    <td class="text-slate-300">${flag(row.telegram_enabled, "On", "Off")}</td>
-                    <td class="text-slate-300">${flag(row.report_enabled, "Visible", "Hidden")}</td>
-                </tr>`;
-        }).join("");
-    },
-
-    async stopAndHideStrategy(strategyId, mode) {
-        // Retired with the worker: lifecycle writes are gone (POST
-        // /api/research/retailbot2/strategies returns 403). Kept as a stub
-        // so any stale caller reports the retirement instead of failing.
-        this.showToast("RetailBot2 is retired — strategy lifecycle is a read-only archive.", "error");
-    },
-
-    async saveStrategyLifecycle(strategyId, mode) {
-        // Retired with the worker: see stopAndHideStrategy above.
-        this.showToast("RetailBot2 is retired — strategy lifecycle is a read-only archive.", "error");
     },
 
     _renderRb2StrategyTable(rows) {
@@ -4504,7 +4448,7 @@ const App = {
 
     async downloadRetailbot2ArchiveCsv(kind) {
         const endpoint = kind === "stats" ? "/api/research/retailbot2/archive/stats.csv" : "/api/research/retailbot2/archive/trades.csv";
-        const filename = kind === "stats" ? "rdt_strategy_stats_archive.csv" : "rdt_trades_archive.csv";
+        const filename = kind === "stats" ? "paper_strategy_stats_archive.csv" : "paper_trades_archive.csv";
         try {
             const res = await fetch(`${API_BASE}${endpoint}`, { headers: this.getAuthHeaders() });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);

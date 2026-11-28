@@ -79,7 +79,7 @@ Use the staging dashboard and its real authenticated API/backend, not mocked bro
 4. Save both, reload the dashboard, and confirm the settings read back exactly.
 5. Allow the isolated staging worker to refresh its lifecycle cache; the implementation refreshes persisted lifecycle settings periodically without requiring a process restart.
 6. Exercise controlled paper-entry signals for both strategies using the staging-only test procedure. Do not use live exchange credentials or live trading endpoints.
-7. Verify both paper trades persist, but only the selected strategy has `telegram_enabled=1` and an entry event in `rdt_telegram_outbox`. The unselected strategy must have no entry outbox event.
+7. Verify both paper trades persist, but only the selected strategy has `telegram_enabled=1` and an entry event in `telegram_outbox`. The unselected strategy must have no entry outbox event.
 8. Verify the same selected/unselected distinction for exit events if the staging test procedure safely closes the disposable paper trades.
 9. Record exact test trade IDs and event keys, then remove only those test records using the approved exact-ID cleanup procedure.
 
@@ -127,26 +127,26 @@ Therefore:
 - Do not interpret the WO71688 report or documentation updates as standing authorization for future production database access.
 - Do not start or restart the standalone outbox worker without explicit administrative authorization.
 - Do not enable `RETAILBOT2_OUTBOX_WORKER_ENABLED` or `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY` in production without an approved change window.
-- Do not manually create or alter `rdt_telegram_outbox`.
+- Do not manually create or alter `telegram_outbox`.
 
 Before any authorized activation, the database owner and operations team must confirm current database integrity, verify backup readiness, and coordinate an approved change window. Following activation, operators must verify advisory lock ownership, queue processing, and error monitoring before enabling external delivery.
 
 ### 4.2 Standalone worker advisory lock verification runbook
 
-The standalone outbox worker synchronizes global delivery across multiple instances using the MariaDB advisory lock constant `OUTBOX_LOCK_NAME = "rdt_outbox_worker_lock"`.
+The standalone outbox worker synchronizes global delivery across multiple instances using the MariaDB advisory lock constant `OUTBOX_LOCK_NAME = "telegram_outbox_worker_lock"`.
 
 To verify advisory-lock ownership after an authorized worker activation, execute these read-only inspection queries against the target database:
 
 ```sql
-SELECT IS_USED_LOCK('rdt_outbox_worker_lock');
+SELECT IS_USED_LOCK('telegram_outbox_worker_lock');
 
 SELECT
     ID, USER, HOST, DB, COMMAND, TIME, STATE
 FROM information_schema.PROCESSLIST
-WHERE ID = IS_USED_LOCK('rdt_outbox_worker_lock');
+WHERE ID = IS_USED_LOCK('telegram_outbox_worker_lock');
 ```
 
-- If `IS_USED_LOCK('rdt_outbox_worker_lock')` returns `NULL`, no worker session currently holds the advisory lock.
+- If `IS_USED_LOCK('telegram_outbox_worker_lock')` returns `NULL`, no worker session currently holds the advisory lock.
 - If it returns a connection ID, verify in `information_schema.PROCESSLIST` that the connection corresponds to the authorized worker process connected to the target database.
 
 ### 4.3 Five distinct outbox operational modes and authorization boundaries
@@ -156,7 +156,7 @@ To prevent operational confusion during staging, deployment, and auditing, opera
 1. **Trade persistence authorization (`RETAILBOT2_ALLOW_TRADING=1`)**:
    Authorizes RetailBot2 to execute trades and persist trade records (`rdt_trades`, `rdt_trade_events`). When absent or set to any value other than `"1"`, or when `RETAILBOT2_OBSERVATION_ONLY=1`, trading and trade persistence are disabled.
 2. **Outbox enqueue authorization (`RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1` + dedicated database gates)**:
-   Authorizes inserting notification events into `rdt_telegram_outbox`.
+   Authorizes inserting notification events into `telegram_outbox`.
    - For `signal_bot_test`: requires `RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1`.
    - For `crypto_signals`: requires **both** `RETAILBOT2_OUTBOX_ENQUEUE_ENABLED=1` AND `RETAILBOT2_PRODUCTION_ENQUEUE_ENABLED=1`. Missing, empty, or malformed values fail closed.
    - Always validates active connection identity via `SELECT DATABASE()` against the configured database.
@@ -171,8 +171,8 @@ To prevent operational confusion during staging, deployment, and auditing, opera
      - Missing, empty, or non-`"1"` authorization flag, or missing credentials, must fail closed and abort before any database connection attempt.
      - Never falls back to generic `MYSQL_USER`, `MYSQL_PASSWORD`, or default `"cms"`.
      - This flag authorizes read-only observation ONLY; it never authorizes outbox enqueue, live trading, worker delivery, or Telegram transmission.
-     - **Provisioning Constraint:** The production observation account must be provisioned separately by database administrators with SELECT-only privileges for the required outbox and schema inspection (`SELECT` on `rdt_telegram_outbox`, `information_schema.tables`, `information_schema.columns`) and advisory-lock operations (`GET_LOCK`, `RELEASE_LOCK`, `IS_USED_LOCK`). Do not provision accounts or modify grants automatically.
-   - Acquires and heartbeats the MariaDB advisory lock (`rdt_outbox_worker_lock`).
+     - **Provisioning Constraint:** The production observation account must be provisioned separately by database administrators with SELECT-only privileges for the required outbox and schema inspection (`SELECT` on `telegram_outbox`, `information_schema.tables`, `information_schema.columns`) and advisory-lock operations (`GET_LOCK`, `RELEASE_LOCK`, `IS_USED_LOCK`). Do not provision accounts or modify grants automatically.
+   - Acquires and heartbeats the MariaDB advisory lock (`telegram_outbox_worker_lock`).
    - Verifies database identity via `SELECT DATABASE()` and verifies schema presence.
    - Queries queue status totals and due item counts using read-only `SELECT` queries (`inspect_queue`).
    - Logs periodic queue status summaries.
@@ -198,7 +198,7 @@ To safely prepare and operate the read-only worker observation mode against `cry
 5. **Handle `CREATE USER` failure**: If `CREATE USER` fails (e.g. syntax error, permission error, or conflict), **STOP**. Do not execute `GRANT`. State remains `ACCOUNT_NOT_CREATED` (or `PROVISIONING_STATE_UNKNOWN` if the connection dropped or state is unverified).
 6. **Execute exact table-level grant**: If `CREATE USER` succeeds, state transitions to `ACCOUNT_CREATED_GRANT_PENDING`. Execute the exact table-level `SELECT` grant:
    ```sql
-   GRANT SELECT ON `crypto_signals`.`rdt_telegram_outbox` TO 'retailbot2_obs'@'127.0.0.1';
+   GRANT SELECT ON `crypto_signals`.`telegram_outbox` TO 'retailbot2_obs'@'127.0.0.1';
    ```
 7. **Handle `GRANT` failure**: If `GRANT` fails (e.g. `Error 1142: GRANT command denied`), **STOP IMMEDIATELY**. State remains `ACCOUNT_CREATED_GRANT_PENDING` (or `PROVISIONING_STATE_UNKNOWN` if connection was interrupted).
 8. **Prohibit worker startup**: Do **NOT** configure worker credentials or start the observation worker while in any unverified or partial state.
@@ -210,8 +210,8 @@ To safely prepare and operate the read-only worker observation mode against `cry
 Every provisioning attempt must be tracked and classified into exactly one of four explicit states:
 
 - **`ACCOUNT_NOT_CREATED`**: Preflight check confirmed 0 matching rows, and `CREATE USER` was either not attempted or failed closed before user creation. No user object exists in MariaDB.
-- **`ACCOUNT_CREATED_GRANT_PENDING`**: `CREATE USER` completed successfully, but `GRANT SELECT` has either not yet executed, failed, or not yet been verified. The account has only implicit `USAGE` and cannot read `rdt_telegram_outbox`.
-- **`ACCOUNT_CREATED_GRANT_VERIFIED`**: Both `CREATE USER` and `GRANT SELECT` completed successfully, and read-only verification (`SHOW GRANTS FOR 'retailbot2_obs'@'127.0.0.1'`) confirmed exact least-privilege grants (`USAGE` on `*.*` and `SELECT` on `crypto_signals.rdt_telegram_outbox`).
+- **`ACCOUNT_CREATED_GRANT_PENDING`**: `CREATE USER` completed successfully, but `GRANT SELECT` has either not yet executed, failed, or not yet been verified. The account has only implicit `USAGE` and cannot read `telegram_outbox`.
+- **`ACCOUNT_CREATED_GRANT_VERIFIED`**: Both `CREATE USER` and `GRANT SELECT` completed successfully, and read-only verification (`SHOW GRANTS FOR 'retailbot2_obs'@'127.0.0.1'`) confirmed exact least-privilege grants (`USAGE` on `*.*` and `SELECT` on `crypto_signals.telegram_outbox`).
 - **`PROVISIONING_STATE_UNKNOWN`**: A network timeout, disconnection, or unhandled server error occurred during `CREATE USER` or `GRANT`, leaving the server-side state unconfirmed.
 
 > [!CRITICAL]
@@ -313,20 +313,20 @@ To prevent duplicate outbox entries while supporting independent signals across 
   retailbot2:shadow:exit:{symbol}_{strategy}_{mode}_{side}_{candle_close}
   ```
 - **Idempotency Guarantee:**
-  Rows are enqueued using MariaDB's `INSERT ... ON DUPLICATE KEY UPDATE event_key=VALUES(event_key)`. Since `event_key` has a `UNIQUE` index on `rdt_telegram_outbox`, repeated evaluations of the same candle signal produce a harmless no-op, preventing duplicate notifications.
+  Rows are enqueued using MariaDB's `INSERT ... ON DUPLICATE KEY UPDATE event_key=VALUES(event_key)`. Since `event_key` has a `UNIQUE` index on `telegram_outbox`, repeated evaluations of the same candle signal produce a harmless no-op, preventing duplicate notifications.
 
 #### 5. Trade ID = 0 Semantics and Schema Compatibility
 
-In migration 026, `rdt_telegram_outbox.trade_id` is defined as `int(11) NOT NULL` without a foreign key constraint to `rdt_trades`.
+In migration 026, `telegram_outbox.trade_id` is defined as `int(11) NOT NULL` without a foreign key constraint to any trade table.
 - `trade_id = 0` is fully compliant with schema constraints.
-- `OutboxWorker.format_event_text()` and the message formatters (`format_entry_message`, `format_exit_message`) parse payloads with `trade_id = 0` seamlessly without querying `rdt_trades`.
+- `OutboxWorker.format_event_text()` and the message formatters (`format_entry_message`, `format_exit_message`) parse payloads with `trade_id = 0` seamlessly without querying `paper_trades`.
 - Delivery status updates (`acknowledge_outbox_event`, `retry_outbox_event`, `dead_letter_outbox_event`) operate on outbox `id` and `claim_token`, remaining completely agnostic to `trade_id`.
 
 #### 6. Exit Correlation Limitations and Future Architecture
 
 While entry signals are purely decoupled from trade records, shadow exit correlation has specific operational boundaries:
 - **Decoupled Entry Signals:** Fully supported. The scan loop detects candidate entries and immediately enqueues them when `RETAILBOT2_SHADOW_ENQUEUE_ENABLED=1` without opening trades.
-- **Exit Correlation Limitation:** Because unauthorized trading skips `_open_trade()`, no active trade record exists in `rdt_trades` or in-memory trade collections. Consequently, standard stop-loss, take-profit, or trend-reversal triggers cannot look up an existing shadow position to calculate realized exit P&L or determine exit timestamps.
+- **Exit Correlation Limitation:** Because unauthorized trading skips `_open_trade()`, no active trade record exists in `paper_trades` or in-memory trade collections. Consequently, standard stop-loss, take-profit, or trend-reversal triggers cannot look up an existing shadow position to calculate realized exit P&L or determine exit timestamps.
 - **Future Resolution Path:** To achieve fully automated shadow exit notifications without trade persistence, a future work order will introduce a dedicated in-memory shadow position ledger or virtual paper state engine that tracks simulated trade lifetimes separately from live execution tables.
 
 > [!WARNING]
@@ -336,9 +336,9 @@ While entry signals are purely decoupled from trade records, shadow exit correla
 ### 4.5 Verified schema lineage and production monitoring / recovery runbook
 
 #### Schema Lineage
-- **Migration 026 (`db/migrate_retailbot2_telegram_outbox.sql`):** Creates table `rdt_telegram_outbox` with 12 columns: `id`, `event_key`, `trade_id`, `event_type`, `payload_json`, `status`, `attempts`, `next_attempt_at`, `locked_until`, `last_error`, `created_at`, `sent_at`.
+- **Migration 026 (`db/migrate_retailbot2_telegram_outbox.sql`):** Creates table `telegram_outbox` with 12 columns: `id`, `event_key`, `trade_id`, `event_type`, `payload_json`, `status`, `attempts`, `next_attempt_at`, `locked_until`, `last_error`, `created_at`, `sent_at`.
 - **Migration 027 (`db/migrate_retailbot2_outbox_claim_token.sql`):** Fences stale worker leases by adding column 13: `claim_token CHAR(32) NULL AFTER locked_until`.
-- **No `updated_at` column:** Table `rdt_telegram_outbox` does **not** contain an `updated_at` column. Monitoring queries, administrative inspection scripts, and incident recovery scripts must NEVER reference `updated_at`. Referencing `updated_at` will fail with MariaDB error `Unknown column 'updated_at' in 'field list'`.
+- **No `updated_at` column:** Table `telegram_outbox` does **not** contain an `updated_at` column. Monitoring queries, administrative inspection scripts, and incident recovery scripts must NEVER reference `updated_at`. Referencing `updated_at` will fail with MariaDB error `Unknown column 'updated_at' in 'field list'`.
 
 #### Approved Read-Only Monitoring Queries
 Use only verified schema columns:
@@ -349,7 +349,7 @@ SELECT
     status,
     COUNT(*) AS count,
     MIN(created_at) AS oldest_created_at
-FROM rdt_telegram_outbox
+FROM telegram_outbox
 GROUP BY status;
 
 -- 2. Due items ready for processing or retry
@@ -364,7 +364,7 @@ SELECT
     locked_until,
     claim_token,
     created_at
-FROM rdt_telegram_outbox
+FROM telegram_outbox
 WHERE attempts < 8
   AND (
       (status = 'pending' AND next_attempt_at <= UTC_TIMESTAMP())
@@ -383,7 +383,7 @@ SELECT
     attempts,
     last_error,
     created_at
-FROM rdt_telegram_outbox
+FROM telegram_outbox
 WHERE status = 'dead' OR attempts >= 8
 ORDER BY id DESC
 LIMIT 10;
@@ -398,7 +398,7 @@ Automated recovery jobs and ad-hoc UPDATE queries are strictly prohibited. Befor
 
 1. **Stop the worker gracefully**: Terminate the running worker process using `SIGINT` or `SIGTERM` and ensure it shuts down cleanly.
 2. **Verify process elimination**: Verify via `ps aux | grep -E "outbox_worker|outbox_transport"` and `/proc` inspection that no worker process and no transport subprocess group remains alive.
-3. **Verify advisory lock release**: Execute read-only lock inspection to confirm `IS_USED_LOCK('rdt_outbox_worker_lock')` returns `NULL`.
+3. **Verify advisory lock release**: Execute read-only lock inspection to confirm `IS_USED_LOCK('telegram_outbox_worker_lock')` returns `NULL`.
 4. **Read-only event inspection**: Inspect affected event IDs, their exact claim token, attempts, and lease expiry timestamps using read-only inspection SQL (see query 4 below).
 5. **Obtain explicit authorization**: Obtain explicit operator and database owner sign-off for the specific event IDs to be recovered after evaluating the external delivery classification below.
 6. **Preserve audit record**: Record an immutable audit log detailing the affected IDs, original states, claim tokens, delivery classification, and the authorized operator before making any state adjustments.
@@ -453,7 +453,7 @@ SELECT
         WHEN locked_until <= UTC_TIMESTAMP() THEN 'EXPIRED'
         ELSE 'ACTIVE_LEASE'
     END AS lease_state
-FROM rdt_telegram_outbox
+FROM telegram_outbox
 WHERE status = 'processing'
 ORDER BY locked_until ASC, id ASC;
 ```

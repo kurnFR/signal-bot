@@ -4,7 +4,8 @@ Test Strategy Library, Paper Trading, and Telegram Alert Gating for RetailBot2 s
 Verifies:
 1. All RetailBot2 strategies (BB_REV, BB_REV_INV, DBL_PAT, DBL_PAT_INV, etc.) appear in Strategy Library.
 2. Strategies can be added to Paper Trading configurations.
-3. Adding/updating RetailBot2 paper configs is independent of rdt_strategy_lifecycle.
+3. Adding/updating RetailBot2 paper configs is independent of any lifecycle table
+   (rdt_strategy_lifecycle was dropped by migration 041; flags live in paper_configs).
 4. Only chosen strategies with telegram_enabled=True send trade open/close signals to Telegram.
 5. Background shadow/inverse execution continues recording paper trades.
 """

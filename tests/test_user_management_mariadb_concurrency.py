@@ -45,16 +45,13 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         overrides = dict(host="127.0.0.1", port=int(os.getenv("MYSQL_PORT", "3306")), database="signal_bot_test",
                          user=test_db_user, password=test_db_password)
         for patcher in (patch.dict(db_module.MYSQL_CONFIG, overrides),
-                        patch.dict(db_module.RETAILBOT2_DB_CONFIG, overrides),
-                        patch.object(db_module, "_pool", None),
-                        patch.object(db_module, "_retailbot2_pool", None)):
+                        patch.object(db_module, "_pool", None)):
             patcher.start()
             cls.addClassCleanup(patcher.stop)
 
         # 2. Attempt connections safely
         try:
             cls.pool = db_module.get_pool()
-            cls.retailbot2_pool = db_module.get_retailbot2_pool()
         except DatabaseError as e:
             if e.errno not in {2002, 2003}:
                 raise
@@ -65,7 +62,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
 
         # 3. Independently verify every configured database pool strictly uses signal_bot_test - FAIL immediately on mismatch
         cls.verified_pools = {}
-        for pool_name, pool in [("primary_pool", cls.pool), ("retailbot2_pool", cls.retailbot2_pool)]:
+        for pool_name, pool in [("primary_pool", cls.pool)]:
             conn = pool.get_connection()
             try:
                 cur = conn.cursor()
@@ -126,7 +123,7 @@ class TestMariaDBUserManagementConcurrency(unittest.TestCase):
         # Gather all unique pool objects
         pools_to_clean = []
         seen = set()
-        for candidate in [getattr(cls, "pool", None), getattr(cls, "retailbot2_pool", None), db_module._pool, db_module._retailbot2_pool]:
+        for candidate in [getattr(cls, "pool", None), db_module._pool]:
             if candidate is not None and id(candidate) not in seen:
                 seen.add(id(candidate))
                 pools_to_clean.append(candidate)

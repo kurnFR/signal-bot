@@ -247,10 +247,10 @@ class TestOutboxWorkerSchemaPreflight:
             verify_outbox_schema(conn)
 
         msg = str(exc_info.value)
-        assert "Required outbox table 'rdt_telegram_outbox' does not exist in database" in msg
+        assert "Required outbox table 'telegram_outbox' does not exist in database" in msg
         assert "Worker startup halted fail-closed" in msg
         assert "Operator investigation required against approved migration history" in msg
-        assert "(migrations 025-027 must not be blindly re-run)" in msg
+        assert "(migrations 026-027 and 041 must not be blindly re-run)" in msg
         assert "do not automatically modify production schema" in msg
         # Must NOT casually recommend running db.migrate
         assert "run 'python -m db.migrate'" not in msg
@@ -259,7 +259,7 @@ class TestOutboxWorkerSchemaPreflight:
     def test_preflight_fails_when_claim_token_column_missing_with_strict_diagnostic(self):
         """Missing claim_token column raises SchemaVerificationError with strict diagnostic."""
         cursor = Mock()
-        cursor.fetchone.return_value = ("rdt_telegram_outbox",)
+        cursor.fetchone.return_value = ("telegram_outbox",)
         columns_without_claim_token = [
             (c,) for c in REQUIRED_OUTBOX_COLUMNS if c != "claim_token"
         ]
@@ -271,17 +271,17 @@ class TestOutboxWorkerSchemaPreflight:
             verify_outbox_schema(conn)
 
         msg = str(exc_info.value)
-        assert "Required outbox column(s) missing from 'rdt_telegram_outbox': claim_token" in msg
+        assert "Required outbox column(s) missing from 'telegram_outbox': claim_token" in msg
         assert "Worker startup halted fail-closed" in msg
         assert "Operator investigation required against approved migration history" in msg
-        assert "(migrations 025-027 must not be blindly re-run)" in msg
+        assert "(migrations 026-027 and 041 must not be blindly re-run)" in msg
         assert "run 'python -m db.migrate'" not in msg
         cursor.close.assert_called_once()
 
     def test_preflight_fails_when_multiple_columns_missing(self):
         """Missing other required columns raises SchemaVerificationError listing them."""
         cursor = Mock()
-        cursor.fetchone.return_value = ("rdt_telegram_outbox",)
+        cursor.fetchone.return_value = ("telegram_outbox",)
         partial_columns = [(c,) for c in REQUIRED_OUTBOX_COLUMNS if c not in ("status", "locked_until")]
         cursor.fetchall.return_value = partial_columns
         conn = Mock()
@@ -299,7 +299,7 @@ class TestOutboxWorkerSchemaPreflight:
     def test_preflight_queries_only_information_schema_without_mutations(self):
         """Preflight issues only read-only SELECT queries against information_schema."""
         cursor = Mock()
-        cursor.fetchone.return_value = ("rdt_telegram_outbox",)
+        cursor.fetchone.return_value = ("telegram_outbox",)
         cursor.fetchall.return_value = [(c,) for c in REQUIRED_OUTBOX_COLUMNS]
         conn = Mock()
         conn.cursor.return_value = cursor

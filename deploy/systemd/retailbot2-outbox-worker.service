@@ -59,7 +59,7 @@ ExecStart=/opt/signal-bot/venv/bin/python3 -m paper.outbox_worker --database cry
 # Process lifecycle and graceful shutdown:
 # KillMode=mixed sends SIGTERM to the main worker process, allowing its signal
 # handler to stop claiming, wait for in-flight transport subprocesses to terminate,
-# and cleanly release MariaDB advisory lock 'rdt_outbox_worker_lock'.
+# and cleanly release MariaDB advisory lock 'telegram_outbox_worker_lock'.
 # If descendants or parent linger beyond TimeoutStopSec, systemd sends SIGKILL to all.
 KillMode=mixed
 KillSignal=SIGTERM

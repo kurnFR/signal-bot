@@ -81,7 +81,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
                 try:
                     cur = self.conn.cursor()
                     for k in self.tracked_keys:
-                        cur.execute("DELETE FROM rdt_telegram_outbox WHERE event_key = %s", (k,))
+                        cur.execute("DELETE FROM telegram_outbox WHERE event_key = %s", (k,))
                     self.conn.commit()
                     cur.close()
                 except Exception:
@@ -101,7 +101,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
     def test_dry_run_zero_mutation_guarantee(self):
         """plan() must be purely read-only and never delete or modify any row."""
         cur = self.conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox")
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox")
         count_before = cur.fetchone()[0]
         cur.close()
 
@@ -110,7 +110,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         self.assertEqual(plan["action"], "DRY_RUN_ONLY_NO_RECORDS_MODIFIED")
 
         cur = self.conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox")
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox")
         count_after = cur.fetchone()[0]
         cur.close()
 
@@ -135,49 +135,49 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
 
         # 1. Old sent (sent_at 20 days ago)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, sent_at)
                VALUES (%s, 0, 'entry', '{}', 'sent', 1, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 20 DAY), DATE_SUB(UTC_TIMESTAMP(), INTERVAL 20 DAY))""",
             (key_old_sent,)
         )
         # 2. Young sent (sent_at 2 days ago)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, sent_at)
                VALUES (%s, 0, 'entry', '{}', 'sent', 1, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 DAY), DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 DAY))""",
             (key_young_sent,)
         )
         # 3. Old dead (created_at 100 days ago)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY), 'Old error')""",
             (key_old_dead,)
         )
         # 4. Young dead (created_at 5 days ago)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 DAY), 'Recent error')""",
             (key_young_dead,)
         )
         # 5. Pending (must be protected)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at)
                VALUES (%s, 0, 'entry', '{}', 'pending', 0, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 30 DAY))""",
             (key_pending,)
         )
         # 6. Processing (must be protected)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, locked_until)
                VALUES (%s, 0, 'entry', '{}', 'processing', 1, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 30 DAY), DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 HOUR))""",
             (key_processing,)
         )
         # 7. Uncertain delivery (must be protected from automatic deletion)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 0, 'entry', '{}', 'pending', 2, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 25 DAY), 'Delivery state unknown: timeout')""",
             (key_uncertain,)
@@ -211,13 +211,13 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         self.tracked_keys.extend([key_old_sent, key_young_sent])
 
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, sent_at)
                VALUES (%s, 0, 'entry', '{}', 'sent', 1, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 20 DAY), DATE_SUB(UTC_TIMESTAMP(), INTERVAL 20 DAY))""",
             (key_old_sent,)
         )
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, sent_at)
                VALUES (%s, 0, 'entry', '{}', 'sent', 1, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 DAY), DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 DAY))""",
             (key_young_sent,)
@@ -238,10 +238,10 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
 
         # Verify young row remains
         cur = self.conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_young_sent,))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (key_young_sent,))
         self.assertEqual(cur.fetchone()[0], 1)
         # Verify old row deleted
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_old_sent,))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (key_old_sent,))
         self.assertEqual(cur.fetchone()[0], 0)
         cur.close()
 
@@ -282,7 +282,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         self.tracked_keys.append(key_dead_timeout)
 
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY),
                        'ReadTimeout: socket read timed out after request transmission')""",
@@ -297,7 +297,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         # The 100-day-old dead ReadTimeout must be excluded from dead_candidates
         cur = self.conn.cursor()
         cur.execute(
-            f"""SELECT COUNT(*) FROM rdt_telegram_outbox
+            f"""SELECT COUNT(*) FROM telegram_outbox
                WHERE event_key = %s AND status = 'dead'
                  AND created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 90 DAY)
                  AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
@@ -313,7 +313,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         # Cleanup must NOT delete this record
         planner.execute_test_cleanup(TEST_CLEANUP_CONFIRMATION_TOKEN)
         cur = self.conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_dead_timeout,))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (key_dead_timeout,))
         self.assertEqual(cur.fetchone()[0], 1)
         cur.close()
 
@@ -324,7 +324,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         self.tracked_keys.append(key_dead_502)
 
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY),
                        'Server error HTTP 502')""",
@@ -337,7 +337,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         planner.execute_test_cleanup(TEST_CLEANUP_CONFIRMATION_TOKEN)
 
         cur = self.conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_dead_502,))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (key_dead_502,))
         self.assertEqual(cur.fetchone()[0], 1)
         cur.close()
 
@@ -348,7 +348,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         self.tracked_keys.append(key_new_marker)
 
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY),
                        'DELIVERY_UNKNOWN: UnexpectedTransportError: ConnectionResetError')""",
@@ -363,7 +363,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         # Must not be an eligible candidate
         cur = self.conn.cursor()
         cur.execute(
-            f"""SELECT COUNT(*) FROM rdt_telegram_outbox
+            f"""SELECT COUNT(*) FROM telegram_outbox
                WHERE event_key = %s AND status = 'dead'
                  AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
             (key_new_marker,)
@@ -374,7 +374,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         # Must remain in DB after test cleanup
         planner.execute_test_cleanup(TEST_CLEANUP_CONFIRMATION_TOKEN)
         cur = self.conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_new_marker,))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (key_new_marker,))
         self.assertEqual(cur.fetchone()[0], 1)
         cur.close()
 
@@ -389,7 +389,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
 
         # 1. Historical dead row with Transport child exception (100 days old)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY),
                        'Transport child exception: unexpected child failure')""",
@@ -397,7 +397,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         )
         # 2. Historical dead row with lowercase transport child exception (100 days old)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY),
                        'transport child exception: process terminated unexpectedly')""",
@@ -405,7 +405,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         )
         # 3. Known confirmed permanent rejection without ambiguity marker (100 days old)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY),
                        'Bad Request: chat not found')""",
@@ -413,7 +413,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         )
         # 4. New ambiguous outcome with DELIVERY_UNKNOWN marker (100 days old)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY),
                        'DELIVERY_UNKNOWN: Transport child exception: subprocess broken pipe')""",
@@ -428,7 +428,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         # Evidence: key_child_exc and key_child_exc_lower must be excluded from dead_candidates
         cur = self.conn.cursor()
         cur.execute(
-            f"""SELECT COUNT(*) FROM rdt_telegram_outbox
+            f"""SELECT COUNT(*) FROM telegram_outbox
                WHERE event_key IN (%s, %s, %s) AND status = 'dead'
                  AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
             (key_child_exc, key_child_exc_lower, key_new_ambig)
@@ -437,7 +437,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
 
         # Evidence: confirmed permanent rejection IS an eligible candidate
         cur.execute(
-            f"""SELECT COUNT(*) FROM rdt_telegram_outbox
+            f"""SELECT COUNT(*) FROM telegram_outbox
                WHERE event_key = %s AND status = 'dead'
                  AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
             (key_perm_rejection,)
@@ -454,17 +454,17 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
 
         cur = self.conn.cursor()
         # The confirmed rejection was deleted
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_perm_rejection,))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (key_perm_rejection,))
         self.assertEqual(cur.fetchone()[0], 0, "Confirmed rejection must be purged")
 
         # The historical Transport child exception rows remain untouched
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_child_exc,))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (key_child_exc,))
         self.assertEqual(cur.fetchone()[0], 1, "Legacy Transport child exception row must NOT be deleted")
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_child_exc_lower,))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (key_child_exc_lower,))
         self.assertEqual(cur.fetchone()[0], 1, "Legacy lowercase transport child exception row must NOT be deleted")
 
         # The new DELIVERY_UNKNOWN row remains untouched
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_new_ambig,))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (key_new_ambig,))
         self.assertEqual(cur.fetchone()[0], 1, "New DELIVERY_UNKNOWN row must NOT be deleted")
         cur.close()
 
@@ -496,7 +496,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
             test_keys.append(k)
             self.tracked_keys.append(k)
             cur.execute(
-                """INSERT INTO rdt_telegram_outbox
+                """INSERT INTO telegram_outbox
                    (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                    VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY), %s)""",
                 (k, err)
@@ -509,7 +509,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
 
         cur = self.conn.cursor()
         for k in test_keys:
-            cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (k,))
+            cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (k,))
             self.assertEqual(cur.fetchone()[0], 1, f"Legacy ambiguous record {k} was improperly deleted")
         cur.close()
 
@@ -528,7 +528,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
             perm_keys.append(k)
             self.tracked_keys.append(k)
             cur.execute(
-                """INSERT INTO rdt_telegram_outbox
+                """INSERT INTO telegram_outbox
                    (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                    VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY), %s)""",
                 (k, err)
@@ -546,7 +546,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
 
         cur = self.conn.cursor()
         for k in perm_keys:
-            cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (k,))
+            cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (k,))
             self.assertEqual(cur.fetchone()[0], 0, f"Confirmed rejection {k} should have been deleted")
         cur.close()
 
@@ -559,7 +559,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
 
         # 1. Confirmed dead (older than 90 days) -> eligible for deletion
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 120 DAY),
                        'Bad Request: chat not found')""",
@@ -567,7 +567,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         )
         # 2. Ambiguous dead (older than 90 days) -> protected from deletion
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 120 DAY),
                        'DELIVERY_UNKNOWN: ReadTimeout: read timed out')""",
@@ -580,10 +580,10 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         planner.execute_test_cleanup(TEST_CLEANUP_CONFIRMATION_TOKEN)
 
         cur = self.conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_confirmed,))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (key_confirmed,))
         self.assertEqual(cur.fetchone()[0], 0, "Confirmed dead event should have been purged")
 
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_ambiguous,))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (key_ambiguous,))
         self.assertEqual(cur.fetchone()[0], 1, "Ambiguous dead event must NOT be purged")
         cur.close()
 
@@ -595,13 +595,13 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         self.tracked_keys.extend([key_old_pending, key_old_proc])
 
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at)
                VALUES (%s, 0, 'entry', '{}', 'pending', 0, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 150 DAY))""",
             (key_old_pending,)
         )
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, locked_until)
                VALUES (%s, 0, 'entry', '{}', 'processing', 1, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 150 DAY),
                        DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 HOUR))""",
@@ -618,9 +618,9 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         planner.execute_test_cleanup(TEST_CLEANUP_CONFIRMATION_TOKEN)
 
         cur = self.conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_old_pending,))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (key_old_pending,))
         self.assertEqual(cur.fetchone()[0], 1)
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (key_old_proc,))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (key_old_proc,))
         self.assertEqual(cur.fetchone()[0], 1)
         cur.close()
 
@@ -639,28 +639,28 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
 
         # Eligible sent candidate (sent 20 days ago, no error)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, sent_at)
                VALUES (%s, 0, 'entry', '{}', 'sent', 1, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 20 DAY), DATE_SUB(UTC_TIMESTAMP(), INTERVAL 20 DAY))""",
             (k_sent_cand,)
         )
         # Eligible dead candidate (dead 100 days ago, confirmed error)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY), 'Bad Request: chat not found')""",
             (k_dead_cand,)
         )
         # Ineligible dead ambiguous (dead 100 days ago, DELIVERY_UNKNOWN)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 0, 'entry', '{}', 'dead', 8, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY), 'DELIVERY_UNKNOWN: ReadTimeout')""",
             (k_dead_uncert,)
         )
         # Ineligible sent ambiguous (sent 20 days ago, DELIVERY_UNKNOWN)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, sent_at, last_error)
                VALUES (%s, 0, 'entry', '{}', 'sent', 2, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 20 DAY), DATE_SUB(UTC_TIMESTAMP(), INTERVAL 20 DAY),
                        'DELIVERY_UNKNOWN: previous ambiguous attempt')""",
@@ -675,7 +675,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         # Both k_dead_uncert and k_sent_uncert must be excluded from candidates
         cur = self.conn.cursor()
         cur.execute(
-            f"""SELECT COUNT(*) FROM rdt_telegram_outbox
+            f"""SELECT COUNT(*) FROM telegram_outbox
                WHERE event_key IN (%s, %s) AND {NOT_UNCERTAIN_DELIVERY_SQL_PREDICATE}""",
             (k_dead_uncert, k_sent_uncert)
         )
@@ -687,15 +687,15 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
 
         cur = self.conn.cursor()
         # Eligible candidates deleted
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key IN (%s, %s)", (k_sent_cand, k_dead_cand))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key IN (%s, %s)", (k_sent_cand, k_dead_cand))
         self.assertEqual(cur.fetchone()[0], 0)
         # Ineligible uncertain records NOT deleted
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key IN (%s, %s)", (k_dead_uncert, k_sent_uncert))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key IN (%s, %s)", (k_dead_uncert, k_sent_uncert))
         self.assertEqual(cur.fetchone()[0], 2)
         cur.close()
 
     def test_cleanup_does_not_alter_unrelated_rows(self):
-        """Cleanup does not delete, alter, or mutate any unrelated rows in rdt_telegram_outbox."""
+        """Cleanup does not delete, alter, or mutate any unrelated rows in telegram_outbox."""
         cur = self.conn.cursor()
         k_unrelated_sent = f"retailbot2:test:unrel_sent_{uuid.uuid4().hex[:8]}"
         k_unrelated_dead = f"retailbot2:test:unrel_dead_{uuid.uuid4().hex[:8]}"
@@ -711,7 +711,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
 
         # Young sent (2 days ago)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, sent_at)
                VALUES (%s, 101, 'entry', '{\"symbol\":\"BTC\"}', 'sent', 1,
                        DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 DAY), DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 DAY))""",
@@ -719,7 +719,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         )
         # Young dead (5 days ago)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 102, 'exit', '{\"symbol\":\"ETH\"}', 'dead', 8,
                        DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 DAY), 'Bad Request: invalid chat')""",
@@ -727,7 +727,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         )
         # Active pending
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at)
                VALUES (%s, 103, 'entry', '{\"symbol\":\"SOL\"}', 'pending', 0,
                        DATE_SUB(UTC_TIMESTAMP(), INTERVAL 50 DAY))""",
@@ -735,7 +735,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         )
         # Active processing
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, locked_until)
                VALUES (%s, 104, 'entry', '{\"symbol\":\"BNB\"}', 'processing', 1,
                        DATE_SUB(UTC_TIMESTAMP(), INTERVAL 50 DAY), DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 HOUR))""",
@@ -743,7 +743,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         )
         # Ambiguous dead (100 days ago, protected)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 105, 'entry', '{\"symbol\":\"XRP\"}', 'dead', 8,
                        DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY), 'DELIVERY_UNKNOWN: 504 Gateway Timeout')""",
@@ -751,7 +751,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         )
         # Target candidate (100 days ago, confirmed dead -> should be deleted)
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, last_error)
                VALUES (%s, 106, 'entry', '{\"symbol\":\"ADA\"}', 'dead', 8,
                        DATE_SUB(UTC_TIMESTAMP(), INTERVAL 100 DAY), 'Unauthorized: revoked')""",
@@ -763,7 +763,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         unrelated_keys = [k_unrelated_sent, k_unrelated_dead, k_unrelated_pend, k_unrelated_proc, k_unrelated_ambig]
         cur.execute(
             f"""SELECT event_key, trade_id, event_type, payload_json, status, attempts, last_error
-               FROM rdt_telegram_outbox WHERE event_key IN ({','.join(['%s']*len(unrelated_keys))})
+               FROM telegram_outbox WHERE event_key IN ({','.join(['%s']*len(unrelated_keys))})
                ORDER BY event_key""",
             tuple(unrelated_keys)
         )
@@ -775,13 +775,13 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
 
         cur = self.conn.cursor()
         # Verify target candidate was deleted
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s", (k_target_purge,))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s", (k_target_purge,))
         self.assertEqual(cur.fetchone()[0], 0)
 
         # Snapshot unrelated rows after cleanup
         cur.execute(
             f"""SELECT event_key, trade_id, event_type, payload_json, status, attempts, last_error
-               FROM rdt_telegram_outbox WHERE event_key IN ({','.join(['%s']*len(unrelated_keys))})
+               FROM telegram_outbox WHERE event_key IN ({','.join(['%s']*len(unrelated_keys))})
                ORDER BY event_key""",
             tuple(unrelated_keys)
         )
@@ -800,7 +800,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
         self.tracked_keys.append(k_worker_test)
 
         cur.execute(
-            """INSERT INTO rdt_telegram_outbox
+            """INSERT INTO telegram_outbox
                (event_key, trade_id, event_type, payload_json, status, attempts, created_at, next_attempt_at)
                VALUES (%s, 9999, 'operational', '{\"text\":\"test worker ambiguous\"}', 'pending', 0,
                        UTC_TIMESTAMP(), UTC_TIMESTAMP())""",
@@ -831,7 +831,7 @@ class TestOutboxRetentionPlanner(unittest.TestCase):
 
             # Check database row
             cur = self.conn.cursor(dictionary=True)
-            cur.execute("SELECT status, attempts, last_error FROM rdt_telegram_outbox WHERE event_key = %s", (k_worker_test,))
+            cur.execute("SELECT status, attempts, last_error FROM telegram_outbox WHERE event_key = %s", (k_worker_test,))
             row = cur.fetchone()
             cur.close()
 

@@ -103,6 +103,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("038_custom_strategies", "migrate_custom_strategies.sql", "Shared custom strategy definitions"),
     Migration("039_news_ai_runtime_controls", "migrate_news_ai_runtime_controls.sql", "News AI sizing and polling overrides"),
     Migration("040_retailbot2_alias_lifecycle_rename", "migrate_retailbot2_alias_lifecycle_rename.sql", "Rename persisted BB_REV_INV_inverse / DBL_PAT_INV_inverse lifecycle rows to canonical *_INV"),
+    Migration("041_remove_rdt_tables", "migrate_remove_rdt_tables.sql", "Rename rdt_telegram_outbox to telegram_outbox and drop rdt_trades, rdt_strategy_stats, rdt_strategy_lifecycle, bot_control"),
 )
 
 

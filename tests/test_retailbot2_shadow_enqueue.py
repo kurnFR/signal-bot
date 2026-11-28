@@ -329,7 +329,7 @@ class TestShadowEnqueuePersistence(unittest.TestCase):
             try:
                 cur = self.conn.cursor()
                 for key in self.created_keys:
-                    cur.execute("DELETE FROM rdt_telegram_outbox WHERE event_key = %s;", (key,))
+                    cur.execute("DELETE FROM telegram_outbox WHERE event_key = %s;", (key,))
                 self.conn.commit()
                 cur.close()
             except Exception:
@@ -341,12 +341,13 @@ class TestShadowEnqueuePersistence(unittest.TestCase):
                 pass
 
     def test_shadow_enqueue_inserts_outbox_row_without_trade_mutation(self):
-        # 1. Check initial counts of rdt_trades and rdt_strategy_stats
+        # 1. Check initial counts of paper_trades and paper_positions:
+        # shadow enqueue must not create trade rows or open positions.
         cur = self.conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM rdt_trades;")
+        cur.execute("SELECT COUNT(*) FROM paper_trades;")
         initial_trades_count = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM rdt_strategy_stats;")
-        initial_stats_count = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM paper_positions;")
+        initial_positions_count = cur.fetchone()[0]
         cur.close()
 
         # 2. Setup OutboxStore pointing to signal_bot_test
@@ -377,7 +378,7 @@ class TestShadowEnqueuePersistence(unittest.TestCase):
 
         # 3. Verify outbox row exists with trade_id=0 and status='pending'
         cur = self.conn.cursor(dictionary=True)
-        cur.execute("SELECT * FROM rdt_telegram_outbox WHERE event_key = %s;", (test_key,))
+        cur.execute("SELECT * FROM telegram_outbox WHERE event_key = %s;", (test_key,))
         row = cur.fetchone()
         self.assertIsNotNone(row)
         self.assertEqual(row["event_key"], test_key)
@@ -387,14 +388,15 @@ class TestShadowEnqueuePersistence(unittest.TestCase):
         parsed_payload = json.loads(row["payload_json"])
         self.assertEqual(parsed_payload["signal"]["symbol"], "SOL/USDT")
 
-        # 4. Verify ZERO trade rows were inserted or modified
-        cur.execute("SELECT COUNT(*) FROM rdt_trades;")
+        # 4. Verify ZERO trade rows were inserted or modified, and no
+        # paper position was opened either.
+        cur.execute("SELECT COUNT(*) FROM paper_trades;")
         final_trades_count = cur.fetchone()["COUNT(*)"]
         self.assertEqual(final_trades_count, initial_trades_count, "Zero trade rows must be created by shadow enqueue")
 
-        cur.execute("SELECT COUNT(*) FROM rdt_strategy_stats;")
-        final_stats_count = cur.fetchone()["COUNT(*)"]
-        self.assertEqual(final_stats_count, initial_stats_count, "Zero strategy stats rows must be mutated")
+        cur.execute("SELECT COUNT(*) FROM paper_positions;")
+        final_positions_count = cur.fetchone()["COUNT(*)"]
+        self.assertEqual(final_positions_count, initial_positions_count, "Zero positions must be opened by shadow enqueue")
         cur.close()
 
     def test_shadow_enqueue_idempotency_duplicate_key(self):
@@ -414,7 +416,7 @@ class TestShadowEnqueuePersistence(unittest.TestCase):
         self.assertTrue(ok2)
 
         cur = self.conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM rdt_telegram_outbox WHERE event_key = %s;", (test_key,))
+        cur.execute("SELECT COUNT(*) FROM telegram_outbox WHERE event_key = %s;", (test_key,))
         count = cur.fetchone()[0]
         cur.close()
         self.assertEqual(count, 1, "Duplicate event_key must not create multiple pending rows")
@@ -473,7 +475,7 @@ class TestShadowEnqueuePersistence(unittest.TestCase):
 
         # 4. Verify event in DB is now 'sent'
         cur = self.conn.cursor(dictionary=True)
-        cur.execute("SELECT status, attempts, sent_at FROM rdt_telegram_outbox WHERE event_key = %s;", (test_key,))
+        cur.execute("SELECT status, attempts, sent_at FROM telegram_outbox WHERE event_key = %s;", (test_key,))
         row = cur.fetchone()
         cur.close()
         self.assertIsNotNone(row)

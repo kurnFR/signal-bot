@@ -9,7 +9,7 @@ const snapshot = {
         id: 1,
         symbol: "BTCUSDT",
         side: "LONG",
-        mode: "inverse",
+        mode: "paper",
         entry_price: 100,
         stop_price: 95,
         target_price: 110,
@@ -18,9 +18,11 @@ const snapshot = {
         units: 0.1,
         strategy: "BB_REV_INV",
         strategies_json: null,
-        confluence_score: 4,
-        reason: "test",
+        confluence_score: null,
+        reason: null,
         entry_time: "2026-10-26T10:00:00Z",
+        market: "spot",
+        timeframe: "1h",
       },
     ],
   },
@@ -30,20 +32,22 @@ const snapshot = {
         id: 2,
         symbol: "ETHUSDT",
         side: "LONG",
-        mode: "shadow",
+        mode: "paper",
         entry_price: 50,
         stop_price: 48,
         target_price: 55,
         units: 1,
         strategy: "BB_REV",
-        confluence_score: 3,
+        confluence_score: null,
         status: "CLOSED",
         exit_price: 55,
-        exit_reason: "target",
+        exit_reason: "TP",
         net_pnl: 5,
         pnl_percent: 10,
         entry_time: "2026-10-26T10:00:00Z",
         exit_time: "2026-10-26T11:00:00Z",
+        market: "spot",
+        timeframe: "1h",
       },
     ],
   },
@@ -51,7 +55,7 @@ const snapshot = {
     by_strategy: [
       {
         strategy: "BB_REV_INV",
-        mode: "inverse",
+        mode: "paper",
         total_trades: 12,
         wins: 7,
         losses: 5,
@@ -60,33 +64,8 @@ const snapshot = {
       },
     ],
     by_mode: {
-      inverse: { realized_pnl: 125.5, closed_count: 12, wins: 7, win_rate: 58.3, open_count: 1 },
-      shadow: { realized_pnl: -25, closed_count: 4, wins: 1, win_rate: 25, open_count: 0 },
+      paper: { realized_pnl: 125.5, closed_count: 12, wins: 7, win_rate: 58.3, open_count: 1 },
     },
-  },
-  "/api/research/retailbot2/strategies": {
-    strategies: [
-      {
-        strategy_id: "BB_REV_INV",
-        mode: "inverse",
-        evaluation_enabled: true,
-        paper_enabled: true,
-        telegram_enabled: false,
-        report_enabled: true,
-        auto_promote_enabled: false,
-        historical_only: false,
-      },
-      {
-        strategy_id: "HIST_ONLY_STRAT",
-        mode: "shadow",
-        evaluation_enabled: false,
-        paper_enabled: false,
-        telegram_enabled: false,
-        report_enabled: true,
-        auto_promote_enabled: false,
-        historical_only: true,
-      },
-    ],
   },
 };
 
@@ -103,7 +82,7 @@ describe("ResearchPanel (Read-only baseline)", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("renders positions, trades, and persisted lifecycle flags using GET requests only", async () => {
+  it("renders paper positions, trades, and stats using GET requests only", async () => {
     render(<ResearchPanel />);
     expect(await screen.findByText("BTCUSDT")).toBeInTheDocument();
     expect(screen.getByText("ETHUSDT")).toBeInTheDocument();
@@ -111,28 +90,27 @@ describe("ResearchPanel (Read-only baseline)", () => {
     expect(screen.getByRole("heading", { name: "Performance by mode" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Performance by strategy" })).toBeInTheDocument();
     expect(screen.getByText("58.3%")).toBeInTheDocument();
-    expect(screen.getAllByText("-25")).toHaveLength(2);
     expect(screen.getAllByText("125.5")).toHaveLength(3);
-    expect(screen.getAllByText("Unavailable").length).toBeGreaterThan(0);
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
+    expect(screen.getByText("Paper realized PnL")).toBeInTheDocument();
+    // No lifecycle snapshot anymore: the rdt_strategy_lifecycle rows are
+    // gone with migration 041 and the flags live in paper_configs.
+    expect(screen.queryByRole("heading", { name: "Strategy lifecycle snapshot" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Filter strategies")).not.toBeInTheDocument();
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
     expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
     expect(vi.mocked(fetch).mock.calls.map(([path]) => String(path))).toEqual(expect.arrayContaining(Object.keys(snapshot)));
   });
 
-  it("renders the read-only archive: lifecycle snapshot shown, no mutation controls, strategies fetched", async () => {
+  it("renders the read-only archive: no mutation controls, no lifecycle endpoint", async () => {
     render(<ResearchPanel />);
     expect(await screen.findByText("BTCUSDT")).toBeInTheDocument();
-    expect(screen.getByText("RetailBot2 Historical Archive (Read-Only)")).toBeInTheDocument();
-    expect(screen.getByText("Shadow realized PnL")).toBeInTheDocument();
-    expect(screen.getByText("Inverse realized PnL")).toBeInTheDocument();
-    // The saved lifecycle rows are displayed read-only, never edited.
-    expect(screen.getByRole("heading", { name: "Strategy lifecycle snapshot" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Filter strategies")).toBeInTheDocument();
+    expect(screen.getByText("Paper Trading Research Archive (Read-Only)")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop & Hide" })).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
-    expect(vi.mocked(fetch).mock.calls.map(([path]) => String(path))).toContain("/api/research/retailbot2/strategies");
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(fetch).mock.calls.map(([path]) => String(path))).not.toContain("/api/research/retailbot2/strategies");
+    expect(vi.mocked(fetch).mock.calls.map(([path]) => String(path))).not.toContain("/api/research/retailbot2/control");
   });
 });

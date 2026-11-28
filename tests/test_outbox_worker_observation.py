@@ -266,7 +266,7 @@ class ObservationMockCursor:
         if "SELECT DATABASE()" in sql_u:
             self._current_result = [{"db": self.db_name}] if self.dictionary else [(self.db_name,)]
         elif "INFORMATION_SCHEMA.TABLES" in sql_u:
-            self._current_result = [{"TABLE_NAME": "rdt_telegram_outbox"}] if self.dictionary else [("rdt_telegram_outbox",)]
+            self._current_result = [{"TABLE_NAME": "telegram_outbox"}] if self.dictionary else [("telegram_outbox",)]
         elif "INFORMATION_SCHEMA.COLUMNS" in sql_u:
             cols = [
                 "id", "event_key", "trade_id", "event_type", "payload_json", "status",
@@ -511,7 +511,7 @@ def test_worker_observation_fails_closed_on_database_identity_mismatch():
 
 
 def test_worker_observation_fails_closed_on_schema_verification_failure():
-    """Worker observation mode fails closed if rdt_telegram_outbox is missing required columns."""
+    """Worker observation mode fails closed if telegram_outbox is missing required columns."""
     mock_conn = ObservationMockConnection(db_name="signal_bot_test")
     # Simulate missing claim_token column
     old_cursor = mock_conn.cursor
@@ -537,7 +537,7 @@ def test_worker_observation_fails_closed_on_schema_verification_failure():
         with pytest.raises(SchemaVerificationError) as exc_info:
             worker.session_mgr.connect_and_acquire()
 
-        assert "Required outbox column(s) missing from 'rdt_telegram_outbox': claim_token" in str(exc_info.value)
+        assert "Required outbox column(s) missing from 'telegram_outbox': claim_token" in str(exc_info.value)
 
 
 # ═══════════════════════════════════════════════════════════════════

@@ -703,7 +703,7 @@ describe("SettingsPanel", () => {
     });
   });
 
-  it("loads read-only RetailBot2 archive summary and exports CSV files under Settings", async () => {
+  it("loads read-only Paper Trading archive summary and exports CSV files under Settings", async () => {
     window.localStorage.setItem("token", "viewer-session");
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const path = new URL(String(input), "http://localhost").pathname;
@@ -716,10 +716,10 @@ describe("SettingsPanel", () => {
       if (path === "/api/research/retailbot2/stats") {
         return Promise.resolve(new Response(JSON.stringify({
           by_strategy: [
-            { strategy: "BB_REV", mode: "inverse", total_trades: 40, wins: 25, losses: 15, total_pnl: 120.5, last_updated: "2026-11-26 12:00:00" },
+            { strategy: "BB_REV", mode: "paper", total_trades: 40, wins: 25, losses: 15, total_pnl: 120.5, last_updated: "2026-11-26 12:00:00" },
           ],
           by_mode: {
-            inverse: { realized_pnl: 120.5, closed_count: 40, wins: 25, win_rate: 62.5, open_count: 0 },
+            paper: { realized_pnl: 120.5, closed_count: 40, wins: 25, win_rate: 62.5, open_count: 0 },
           },
         }), { status: 200, headers: { "content-type": "application/json" } }));
       }
@@ -745,18 +745,18 @@ describe("SettingsPanel", () => {
 
     try {
       render(<SettingsPanel theme="dark" onToggleTheme={() => undefined} username="viewer01" role="viewer" />);
-      expect(screen.getByText(/RetailBot2 Historical Archive \(Read-Only\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/Paper Trading Archive \(Read-Only\)/i)).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Load archive summary" }));
       expect(await screen.findByText(/9,012 rows/)).toBeInTheDocument();
       expect(screen.getByText(/14 rows/)).toBeInTheDocument();
       expect(screen.getByText("BB_REV")).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole("button", { name: "Export rdt_trades (CSV)" }));
-      expect(await screen.findByText(/Downloaded rdt_trades_archive\.csv\./)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Export paper_trades (CSV)" }));
+      expect(await screen.findByText(/Downloaded paper_trades_archive\.csv\./)).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole("button", { name: "Export rdt_strategy_stats (CSV)" }));
-      expect(await screen.findByText(/Downloaded rdt_strategy_stats_archive\.csv\./)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Export paper strategy stats (CSV)" }));
+      expect(await screen.findByText(/Downloaded paper_strategy_stats_archive\.csv\./)).toBeInTheDocument();
     } finally {
       URL.createObjectURL = originalCreateObjectURL;
       URL.revokeObjectURL = originalRevokeObjectURL;

@@ -343,20 +343,20 @@ def test_db_owned_cursor_cleanup_on_exception(monkeypatch):
 
     mock_pool = Mock()
     mock_pool.get_connection.return_value = mock_conn
-    monkeypatch.setattr(db, "get_retailbot2_pool", lambda: mock_pool)
+    monkeypatch.setattr(db, "get_pool", lambda: mock_pool)
 
-    # 1. get_retailbot2_open_trades
+    # 1. get_paper_open_positions
     with pytest.raises(RuntimeError, match="SQL error"):
-        db.get_retailbot2_open_trades()
+        db.get_paper_open_positions()
     mock_cursor.close.assert_called_once()
     mock_conn.rollback.assert_called_once()
     mock_conn.close.assert_called_once()
 
-    # 2. get_retailbot2_recent_trades
+    # 2. get_paper_recent_trades
     mock_cursor.reset_mock()
     mock_conn.reset_mock()
     with pytest.raises(RuntimeError, match="SQL error"):
-        db.get_retailbot2_recent_trades()
+        db.get_paper_recent_trades()
     mock_cursor.close.assert_called_once()
     mock_conn.rollback.assert_called_once()
     mock_conn.close.assert_called_once()

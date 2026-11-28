@@ -13,10 +13,10 @@ The RetailBot2 system enforces strict separation of privileges across four disti
 
 | Mode / Capability | Required Flag | Permitted Actions | Prohibited Actions |
 | :--- | :--- | :--- | :--- |
-| **Observation Mode** | `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1` | Acquire advisory lock `rdt_outbox_worker_lock`; verify schema; inspect queue totals via `SELECT` | Outbox claiming; updating row status; spawning transport subprocess; sending Telegram messages; inserting trades |
+| **Observation Mode** | `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED=1` | Acquire advisory lock `telegram_outbox_worker_lock`; verify schema; inspect queue totals via `SELECT` | Outbox claiming; updating row status; spawning transport subprocess; sending Telegram messages; inserting trades |
 | **Test / Mock Delivery** | `mock_transport_response` configured on `signal_bot_test` | Claim events; execute mock in-memory response; transition to `sent` or `pending` | Any network/HTTP socket calls; connecting to `crypto_signals`; modifying live trades |
-| **Production Telegram Delivery** | `TELEGRAM_DELIVERY_ENABLED=1` (legacy alias `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`) | Standalone worker daemon claims production events; transmits HTTP requests to Telegram API via isolated subprocess | Automated status resets without confirmation; modifying `rdt_trades` |
-| **Live Trading Authorization** | `RETAILBOT2_ALLOW_TRADING=1` | Execute orders on Binance Futures; persist trade rows to `rdt_trades` and update `rdt_strategy_stats` | Live execution without operator approval; production worker does not need or inherit this flag |
+| **Production Telegram Delivery** | `TELEGRAM_DELIVERY_ENABLED=1` (legacy alias `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`) | Standalone worker daemon claims production events; transmits HTTP requests to Telegram API via isolated subprocess | Automated status resets without confirmation; modifying `paper_trades` |
+| **Live Trading Authorization** | `RETAILBOT2_ALLOW_TRADING=1` | Execute orders on Binance Futures; persist trade rows to `paper_trades` | Live execution without operator approval; production worker does not need or inherit this flag |
 
 > [!CRITICAL]
 > **Installing, enabling, or starting the systemd service does NOT authorize outbox event enqueueing, Telegram delivery, or live trading.**
@@ -29,13 +29,13 @@ The RetailBot2 system enforces strict separation of privileges across four disti
 Before starting the outbox worker daemon in any environment, verify:
 
 1. **Schema Lineage:**
-   - Migration 026 (`db/migrate_retailbot2_telegram_outbox.sql`): Table `rdt_telegram_outbox` with base columns and indexes.
+   - Migration 026 (`db/migrate_retailbot2_telegram_outbox.sql`): Table `telegram_outbox` with base columns and indexes.
    - Migration 027 (`db/migrate_retailbot2_outbox_claim_token.sql`): Adds `claim_token CHAR(32) NULL AFTER locked_until`.
    - Verified 13-column schema present without references to non-existent `updated_at`.
 2. **Dedicated Least-Privilege Account:**
-   - Production observation: `'retailbot2_obs'@'127.0.0.1'` (SELECT only on `rdt_telegram_outbox` + advisory locks).
+   - Production observation: `'retailbot2_obs'@'127.0.0.1'` (SELECT only on `telegram_outbox` + advisory locks).
    - Staging: `'signal_bot_test'@'127.0.0.1'` (DML only on `signal_bot_test`).
-   - Production delivery: Dedicated daemon account with SELECT/UPDATE on `rdt_telegram_outbox` only.
+   - Production delivery: Dedicated daemon account with SELECT/UPDATE on `telegram_outbox` only.
 3. **Dedicated Configuration File:**
    - Configuration stored in `/etc/retailbot2/outbox-worker.env` with filesystem permissions `0600` owned by `retailbot:retailbot`.
 
@@ -117,7 +117,7 @@ python3 -m paper.outbox_health --database crypto_signals --observation --dead-le
 ```
 
 ### Health Metrics Evaluated
-- `is_locked`: Advisory lock state (`rdt_outbox_worker_lock`).
+- `is_locked`: Advisory lock state (`telegram_outbox_worker_lock`).
 - `status_counts`: Event counts grouped by status (`pending`, `processing`, `sent`, `dead`).
 - `due_pending_count`: Pending events ready for immediate claim.
 - `expired_processing_count`: In-flight events whose lease expired before worker acknowledgement.
@@ -137,7 +137,7 @@ When `due_pending_count` or `oldest_pending_age_sec` exceeds warning thresholds:
 2. **Verify Advisory Lock:**
    Execute read-only lock check:
    ```sql
-   SELECT IS_USED_LOCK('rdt_outbox_worker_lock'), CONNECTION_ID();
+   SELECT IS_USED_LOCK('telegram_outbox_worker_lock'), CONNECTION_ID();
    ```
    If `NULL`, worker is not holding the dispatch lock.
 3. **Inspect Network / Telegram Status:**
@@ -154,7 +154,7 @@ When `dead` events accumulate (`status = 'dead'`):
 
 ```sql
 SELECT id, event_key, trade_id, event_type, attempts, last_error, created_at
-FROM rdt_telegram_outbox
+FROM telegram_outbox
 WHERE status = 'dead'
 ORDER BY id DESC LIMIT 10;
 ```
@@ -165,14 +165,14 @@ ORDER BY id DESC LIMIT 10;
 3. **Exhausted Retries (`attempts >= 8`):** Persistent upstream network partition or prolonged Telegram outage exceeding exponential backoff window (~1 hour).
 
 > [!CAUTION]
-> **Never blindly execute `UPDATE rdt_telegram_outbox SET status='pending' WHERE status='dead'`!**
+> **Never blindly execute `UPDATE telegram_outbox SET status='pending' WHERE status='dead'`!**
 > Replaying dead letters without fixing the root cause will flood Telegram rate limits or produce duplicate notifications.
 
 ---
 
 ## 9. Advisory Lock Contention & Worker Conflict
 
-Only one active dispatcher worker may hold `rdt_outbox_worker_lock` per database:
+Only one active dispatcher worker may hold `telegram_outbox_worker_lock` per database:
 
 - **Symptom:** Worker startup exits with error code `1` and log message:
   `Could not acquire advisory lock; exiting worker`.
@@ -187,7 +187,7 @@ Only one active dispatcher worker may hold `rdt_outbox_worker_lock` per database
       pl.STATE,
       pl.INFO
   FROM information_schema.processlist pl
-  WHERE pl.ID = IS_USED_LOCK('rdt_outbox_worker_lock');
+  WHERE pl.ID = IS_USED_LOCK('telegram_outbox_worker_lock');
   ```
 - **Remediation:** Verify if a duplicate worker instance is running (`ps aux | grep outbox_worker`). Stop duplicate processes before restarting the service.
 
@@ -196,7 +196,7 @@ Only one active dispatcher worker may hold `rdt_outbox_worker_lock` per database
 ## 10. Worker Crash Recovery & Stale Lease Fencing
 
 If the worker crashes or terminates abruptly:
-1. **MariaDB Advisory Lock Release:** MariaDB automatically releases `rdt_outbox_worker_lock` when the connection socket drops.
+1. **MariaDB Advisory Lock Release:** MariaDB automatically releases `telegram_outbox_worker_lock` when the connection socket drops.
 2. **Lease Expiry:** Any events in `status = 'processing'` remain locked until `locked_until <= UTC_TIMESTAMP()`.
 3. **Claim Token Fencing:** When the new worker starts and claims an expired event, it issues a new `claim_token`. If a zombie transport subprocess from the crashed worker attempts to acknowledge the event, MariaDB rejects the update (`WHERE claim_token = :token`), preventing stale acknowledgements.
 
@@ -209,7 +209,7 @@ An event enters uncertain delivery state when a network timeout occurs while tra
 - **Preconditions for Recovery:**
   1. Gracefully stop the worker daemon (`sudo systemctl stop retailbot2-outbox-worker.service`).
   2. Confirm zero live transport processes remain in `/proc`.
-  3. Verify `IS_USED_LOCK('rdt_outbox_worker_lock')` returns `NULL`.
+  3. Verify `IS_USED_LOCK('telegram_outbox_worker_lock')` returns `NULL`.
   4. Inspect affected event IDs and query the target Telegram chat to confirm whether the message was received.
   5. If the message **was received**: Mark `status = 'sent', sent_at = UTC_TIMESTAMP()`.
   6. If the message **was not received**: Mark `status = 'pending', attempts = attempts + 1`.
@@ -241,11 +241,11 @@ The retention planner runs in **dry-run mode by default**, computing cutoffs, co
 
 Operators and administrators must **NEVER**:
 
-- [ ] Execute `UPDATE rdt_telegram_outbox SET status = 'pending'` without completing the 6 uncertain-delivery preconditions.
-- [ ] Execute `DELETE FROM rdt_telegram_outbox` directly on production without an authorized change ticket.
+- [ ] Execute `UPDATE telegram_outbox SET status = 'pending'` without completing the 6 uncertain-delivery preconditions.
+- [ ] Execute `DELETE FROM telegram_outbox` directly on production without an authorized change ticket.
 - [ ] Delete `pending` or `processing` events.
 - [ ] Run outbox workers using `root`, `cms`, or shared application database credentials.
-- [ ] Reference `updated_at` on `rdt_telegram_outbox` (column does not exist; schema is 13 columns).
+- [ ] Reference `updated_at` on `telegram_outbox` (column does not exist; schema is 13 columns).
 - [ ] Bypass advisory lock acquisition (`GET_LOCK`) or force kill workers with `SIGKILL` without first attempting graceful `SIGTERM`.
 - [ ] Replay dead-lettered events without addressing the underlying error.
 
@@ -282,7 +282,7 @@ The following 10 alerts constitute the production monitoring specification for t
 | **`OutboxDeliveryStalled`** | `oldest_pending_age_sec > 900` while `due_pending_count > 0` | Critical | 15 min | Worker stopped, hung, or lost database connectivity. Check `systemctl status retailbot2-outbox-worker`. |
 | **`OutboxDeadLetterSpike`** | `dead_count` delta >= 5 | Warning | 15 min | Intermittent Telegram API errors or schema/payload format incompatibility. Query `paper.outbox_health --dead-letters`. |
 | **`OutboxDeadLetterCritical`** | `dead_count > 20` | Critical | Immediate | Systemic failure (invalid Telegram token, blocked chat, unrecoverable bug). Halt queue claiming if necessary. |
-| **`OutboxLockContention`** | `IS_USED_LOCK('rdt_outbox_worker_lock')` holds foreign connection ID | Critical | Immediate | Duplicate worker or orphaned zombie connection. Terminate conflicting process before restarting worker. |
+| **`OutboxLockContention`** | `IS_USED_LOCK('telegram_outbox_worker_lock')` holds foreign connection ID | Critical | Immediate | Duplicate worker or orphaned zombie connection. Terminate conflicting process before restarting worker. |
 | **`OutboxWorkerCrashLoop`** | Service restarts >= 5 times within 60s | Critical | Immediate | Configuration error, invalid credentials, or missing database connection. Check `journalctl -u retailbot2-outbox-worker.service`. |
 | **`OutboxExpiredLeaseAccumulation`** | `expired_processing_count > 5` | Warning | 10 min | Transport subprocess crashes, worker termination, or network timeouts exceeding the 90-second lease duration (with 10.0s transport HTTP deadline + 2.0s ack budget). An expired lease (`status='processing' AND locked_until <= UTC_TIMESTAMP()`) means claim ownership has lapsed; it is NOT proof that delivery failed. Do not blindly reset rows; inspect individual event forensic evidence. |
 | **`OutboxSlowTransport`** | Delivery loop duration > 15s per batch | Warning | 15 min | Telegram API rate limits (HTTP 429), proxy latency, or DB lock contention. Inspect Telegram response latency. |
@@ -326,7 +326,7 @@ When authorized for production deployment, operators must execute the rollout in
 5. **Step 5: Controlled Observation Trial (Stage C Verification)**
    - Verify fail-closed behavior: If `RETAILBOT2_PRODUCTION_OUTBOX_OBSERVATION_ENABLED` is left at `0`, starting the service immediately fails closed with `Database credential resolution failed: Production outbox observation authorization rejected`.
    - Once observation is explicitly enabled and credentials provisioned in `/etc/retailbot2/outbox-worker.env`, start worker: `sudo systemctl start retailbot2-outbox-worker.service`.
-   - Confirm advisory lock acquired: `SELECT IS_USED_LOCK('rdt_outbox_worker_lock');`.
+   - Confirm advisory lock acquired: `SELECT IS_USED_LOCK('telegram_outbox_worker_lock');`.
    - Run health snapshot: `python3 -m paper.outbox_worker --database crypto_signals --health --observation`. (Note: health-only inspection on `crypto_signals` requires `--observation` with dedicated observation credentials and never consults delivery credentials or delivery authorization flags).
    - Verify zero outbox row updates and zero outbound HTTP requests for 60 seconds.
 6. **Step 6: Delivery Authorization Cutover (Upon Explicit Owner Approval)**
@@ -361,7 +361,7 @@ If anomalous behavior, unexpected delivery loops, or operational failures occur,
 3. **Verify Advisory Lock & Session Release:**
    Query MariaDB to verify lock is released and socket dropped:
    ```sql
-   SELECT IS_USED_LOCK('rdt_outbox_worker_lock');
+   SELECT IS_USED_LOCK('telegram_outbox_worker_lock');
    ```
    Must return `NULL`.
 4. **Disable Delivery Authorization Switch:**
@@ -375,7 +375,7 @@ If anomalous behavior, unexpected delivery loops, or operational failures occur,
    ```sql
    SELECT id, claim_token, event_key, trade_id, event_type, attempts, locked_until, created_at,
           TIMESTAMPDIFF(SECOND, locked_until, UTC_TIMESTAMP()) AS expired_seconds_ago
-   FROM rdt_telegram_outbox
+   FROM telegram_outbox
    WHERE status = 'processing'
    ORDER BY id ASC;
    ```
@@ -387,7 +387,7 @@ If anomalous behavior, unexpected delivery loops, or operational failures occur,
      - *Negative Rule:* **Absence of a Telegram message in a chat is NOT sufficient proof that delivery did not occur.** (Chat UI latency, wrong chat inspection, message deletion, Telegram internal pipeline delays, or client sync lag can make a delivered message appear missing).
      - *Recovery Action:* Only when positive evidence confirms zero transmission and written operator approval is obtained, execute optimistic conditional update fencing the exact ID, status, and observed claim token:
        ```sql
-       UPDATE rdt_telegram_outbox
+       UPDATE telegram_outbox
        SET status = 'pending', claim_token = NULL, locked_until = NULL, attempts = attempts + 1
        WHERE id = <event_id>
          AND status = 'processing'
@@ -404,7 +404,7 @@ If anomalous behavior, unexpected delivery loops, or operational failures occur,
        4. Transport logs recording HTTP 200 with Telegram `message_id`.
      - *Recovery Action:* With written approval, reconcile database state via optimistic conditional update:
        ```sql
-       UPDATE rdt_telegram_outbox
+       UPDATE telegram_outbox
        SET status = 'sent', sent_at = UTC_TIMESTAMP(), claim_token = NULL, locked_until = NULL
        WHERE id = <event_id>
          AND status = 'processing'
@@ -427,7 +427,7 @@ If anomalous behavior, unexpected delivery loops, or operational failures occur,
    Document every recovered event ID, evidence examined, operator name, timestamp, and approved action.
 8. **Explicit Prohibitions for Operators:**
    > [!CAUTION]
-   > 1. **Never execute blanket resets such as `UPDATE rdt_telegram_outbox SET status='pending' WHERE status='processing';`!**
+   > 1. **Never execute blanket resets such as `UPDATE telegram_outbox SET status='pending' WHERE status='processing';`!**
    > 2. **Never create or run automated blanket reset scripts.**
    > 3. **Never treat chat message absence as proof of non-delivery.**
    > 4. **Never omit optimistic claim-token fencing (`AND claim_token = '<observed_claim_token>'`) or status checks from recovery queries.**

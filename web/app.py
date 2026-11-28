@@ -73,15 +73,17 @@ async def lifespan(app: FastAPI):
         ensure_wallet_tables()
     except Exception as e:
         logger.warning(f"Could not initialize wallet tracking tables on startup: {e}")
-    # The RetailBot2 worker is retired, but its rdt_* tables remain as a
-    # read-only archive. Verify the archive schema (warn-only) on every
+    # The RetailBot2 worker is retired and its rdt_* tables are dropped by
+    # migration 041. The Research archive now reads the Paper Trading
+    # ledger (paper_trades / paper_positions / paper_configs) plus the
+    # live telegram_outbox table. Verify that schema (warn-only) on every
     # startup so a missing migration still surfaces instead of failing
-    # silently the first time the archive UI is opened.
+    # silently the first time the Research UI is opened.
     try:
-        from db.db import verify_retailbot2_schema
-        verify_retailbot2_schema()
+        from db.db import verify_paper_archive_schema
+        verify_paper_archive_schema()
     except Exception as e:
-        logger.warning("RetailBot2 schema verification failed; run 'python -m db.migrate': %s", e)
+        logger.warning("Paper Trading schema verification failed; run 'python -m db.migrate': %s", e)
     try:
         from db.db import verify_strategy_auto_promotion_schema
         verify_strategy_auto_promotion_schema()

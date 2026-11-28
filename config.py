@@ -369,9 +369,10 @@ MYSQL_CONFIG = {
     "database": os.getenv("MYSQL_DATABASE", "crypto_signals"),
 }
 
-# Dashboard reads the same database and endpoint as the rest of signal-bot.
-# Keep this alias for existing callers; do not allow a separate Binance DB.
-RETAILBOT2_DB_CONFIG = dict(MYSQL_CONFIG)
+# Dashboard reads the same database and endpoint as the rest of signal-bot
+# (MYSQL_CONFIG above); there is no separate RetailBot2 database alias
+# anymore -- migration 041 drops the `rdt_*` tables and the Research
+# archive reads `paper_trades` / `paper_positions` / `paper_configs`.
 
 # ---------------------------------------------------------------------------
 # Dedicated Binance Futures Funding Rate REST Collector Database Configuration

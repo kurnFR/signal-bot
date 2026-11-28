@@ -31,13 +31,13 @@ interface StatsResponse {
 const ARCHIVE_EXPORT_META = {
   trades: {
     url: "/api/research/retailbot2/archive/trades.csv",
-    filename: "rdt_trades_archive.csv",
-    label: "Export rdt_trades (CSV)",
+    filename: "paper_trades_archive.csv",
+    label: "Export paper_trades (CSV)",
   },
   stats: {
     url: "/api/research/retailbot2/archive/stats.csv",
-    filename: "rdt_strategy_stats_archive.csv",
-    label: "Export rdt_strategy_stats (CSV)",
+    filename: "paper_strategy_stats_archive.csv",
+    label: "Export paper strategy stats (CSV)",
   },
 } as const;
 
@@ -59,7 +59,7 @@ function isArchiveSummary(val: unknown): val is ArchiveSummary {
   );
 }
 
-/** Read-only archive under Settings providing row counts, stats preview, and CSV downloads for retired rdt_* tables. */
+/** Read-only archive under Settings providing row counts, stats preview, and CSV downloads for the Paper Trading ledger (paper_trades). The retired rdt_* tables are dropped by migration 041. */
 export function RetailBot2ArchiveSection() {
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<ArchiveSummary | null>(null);
@@ -85,7 +85,7 @@ export function RetailBot2ArchiveSection() {
       if (cause instanceof ApiError && cause.status === 401) {
         setError("Session expired. Sign in again to load the archive summary.");
       } else {
-        setError("Failed to load RetailBot2 historical archive.");
+        setError("Failed to load Paper Trading archive.");
       }
     } finally {
       setLoading(false);
@@ -128,8 +128,8 @@ export function RetailBot2ArchiveSection() {
     <section className="panel" aria-labelledby="settings-retailbot2-archive-title" aria-busy={loading || exporting !== null}>
       <div className="panel-heading">
         <div>
-          <h2 id="settings-retailbot2-archive-title"><Archive size={17} className="inline-icon" /> RetailBot2 Historical Archive (Read-Only)</h2>
-          <p>Export historical <code>rdt_trades</code> and <code>rdt_strategy_stats</code> records via streamed CSV without modifying or dropping legacy tables. Active simulation controls now live in Paper Trading.</p>
+          <h2 id="settings-retailbot2-archive-title"><Archive size={17} className="inline-icon" /> Paper Trading Archive (Read-Only)</h2>
+          <p>Export closed trades from <code>paper_trades</code> and per-strategy aggregates computed from the same ledger via streamed CSV. Active simulation controls live in Paper Trading.</p>
         </div>
         <span className="panel-counter">READ-ONLY ARCHIVE</span>
       </div>
@@ -139,8 +139,8 @@ export function RetailBot2ArchiveSection() {
 
       {summary && (
         <div className="settings-telegram-status" style={{ marginBottom: 12 }}>
-          <div><span>Archived rdt_trades</span><strong>{summary.tradesCount.toLocaleString()} rows</strong></div>
-          <div><span>Archived rdt_strategy_stats</span><strong>{summary.statsCount.toLocaleString()} rows</strong></div>
+          <div><span>Paper trades</span><strong>{summary.tradesCount.toLocaleString()} rows</strong></div>
+          <div><span>Paper strategies</span><strong>{summary.statsCount.toLocaleString()} rows</strong></div>
           {stats?.by_mode && Object.entries(stats.by_mode).map(([mode, m]) => (
             <div key={mode}>
               <span>{mode.toUpperCase()} PnL ({m.closed_count} closed)</span>
@@ -194,7 +194,7 @@ export function RetailBot2ArchiveSection() {
           onClick={() => void downloadCsv("trades")}
         >
           <Download size={15} />
-          {exporting === "trades" ? "Exporting rdt_trades…" : ARCHIVE_EXPORT_META.trades.label}
+          {exporting === "trades" ? "Exporting paper_trades…" : ARCHIVE_EXPORT_META.trades.label}
         </button>
         <button
           type="button"
@@ -203,7 +203,7 @@ export function RetailBot2ArchiveSection() {
           onClick={() => void downloadCsv("stats")}
         >
           <Download size={15} />
-          {exporting === "stats" ? "Exporting rdt_strategy_stats…" : ARCHIVE_EXPORT_META.stats.label}
+          {exporting === "stats" ? "Exporting paper strategy stats…" : ARCHIVE_EXPORT_META.stats.label}
         </button>
       </div>
     </section>

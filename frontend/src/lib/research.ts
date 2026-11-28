@@ -16,6 +16,8 @@ export interface ResearchPosition {
   confluence_score: number | null;
   reason: string | null;
   entry_time: string | null;
+  market?: string;
+  timeframe?: string;
 }
 export interface ResearchTrade {
   id: number;
@@ -35,6 +37,8 @@ export interface ResearchTrade {
   pnl_percent: number | null;
   entry_time: string | null;
   exit_time: string | null;
+  market?: string;
+  timeframe?: string;
 }
 export interface ResearchStrategyStats {
   strategy: string;
@@ -56,22 +60,10 @@ export interface ResearchStats {
   by_strategy: ResearchStrategyStats[];
   by_mode: Record<string, ResearchModeStats>;
 }
-export interface ResearchStrategy {
-  strategy_id: string;
-  mode: string;
-  evaluation_enabled: boolean;
-  paper_enabled: boolean;
-  telegram_enabled: boolean;
-  report_enabled: boolean;
-  auto_promote_enabled: boolean;
-  historical_only?: boolean;
-  updated_at?: string | null;
-}
 export interface ResearchSnapshot {
   positions: ResearchPosition[];
   trades: ResearchTrade[];
   stats: ResearchStats;
-  strategies: ResearchStrategy[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -95,6 +87,9 @@ function nullableString(value: unknown): boolean {
 function nullableNumber(value: unknown): boolean {
   return value === null || isFiniteNumber(value);
 }
+function optionalString(value: unknown): boolean {
+  return value === undefined || isString(value);
+}
 function validPosition(value: unknown): value is ResearchPosition {
   return isRecord(value) && isCount(value.id) && isNonEmptyString(value.symbol) &&
     isNonEmptyString(value.side) && isNonEmptyString(value.mode) &&
@@ -103,6 +98,7 @@ function validPosition(value: unknown): value is ResearchPosition {
     nullableNumber(value.rr) && isFiniteNumber(value.units) &&
     isNonEmptyString(value.strategy) && nullableNumber(value.confluence_score) &&
     nullableString(value.reason) && nullableString(value.entry_time) &&
+    optionalString(value.market) && optionalString(value.timeframe) &&
     (value.strategies_json === undefined || value.strategies_json === null || isString(value.strategies_json) || isRecord(value.strategies_json));
 }
 function validTrade(value: unknown): value is ResearchTrade {
@@ -114,7 +110,8 @@ function validTrade(value: unknown): value is ResearchTrade {
     isNonEmptyString(value.status) && nullableNumber(value.exit_price) &&
     nullableString(value.exit_reason) && isFiniteNumber(value.net_pnl) &&
     nullableNumber(value.pnl_percent) && nullableString(value.entry_time) &&
-    nullableString(value.exit_time);
+    nullableString(value.exit_time) &&
+    optionalString(value.market) && optionalString(value.timeframe);
 }
 function validStrategyStats(value: unknown): value is ResearchStrategyStats {
   return isRecord(value) && isNonEmptyString(value.strategy) && isNonEmptyString(value.mode) &&
@@ -130,27 +127,17 @@ function validStats(value: unknown): value is ResearchStats {
   return isRecord(value) && Array.isArray(value.by_strategy) &&
     value.by_strategy.every(validStrategyStats) && isRecord(value.by_mode) &&
     Object.values(value.by_mode).every(validModeStats) &&
-    isRecord(value.by_mode.shadow) && isRecord(value.by_mode.inverse);
-}
-function validStrategy(value: unknown): value is ResearchStrategy {
-  if (!isRecord(value) || !isNonEmptyString(value.strategy_id) || !isNonEmptyString(value.mode) ||
-      typeof value.evaluation_enabled !== "boolean" || typeof value.paper_enabled !== "boolean" ||
-      typeof value.telegram_enabled !== "boolean" || typeof value.report_enabled !== "boolean" ||
-      typeof value.auto_promote_enabled !== "boolean") return false;
-  return (value.historical_only === undefined || typeof value.historical_only === "boolean") &&
-    (value.updated_at === undefined || nullableString(value.updated_at));
+    isRecord(value.by_mode.paper);
 }
 
-/** Read-only Research snapshot. Validate the real FastAPI/DB serializer contracts before rendering. */
-export async function fetchResearchSnapshot(signal?: AbortSignal, includeStrategies = true): Promise<ResearchSnapshot> {
-  // Batch requests in 2 concurrent pairs to stay well within retailbot2_pool size (pool_size=3)
-  const [positions, stats] = await Promise.all([
+/** Read-only Research snapshot from the Paper Trading ledger
+ * (`paper_positions` / `paper_trades`). Validate the real
+ * FastAPI/DB serializer contracts before rendering. */
+export async function fetchResearchSnapshot(signal?: AbortSignal): Promise<ResearchSnapshot> {
+  const [positions, trades, stats] = await Promise.all([
     getJson<unknown>("/api/research/retailbot2/positions?limit=100", signal),
-    getJson<unknown>("/api/research/retailbot2/stats", signal),
-  ]);
-  const [trades, strategies] = await Promise.all([
     getJson<unknown>("/api/research/retailbot2/trades?limit=50", signal),
-    includeStrategies ? getJson<unknown>("/api/research/retailbot2/strategies", signal) : Promise.resolve({ strategies: [] }),
+    getJson<unknown>("/api/research/retailbot2/stats", signal),
   ]);
   if (!isRecord(positions) || !Array.isArray(positions.positions) || !positions.positions.every(validPosition)) {
     throw new Error("Research positions returned an invalid response");
@@ -159,13 +146,9 @@ export async function fetchResearchSnapshot(signal?: AbortSignal, includeStrateg
     throw new Error("Research trades returned an invalid response");
   }
   if (!validStats(stats)) throw new Error("Research stats returned an invalid response");
-  if (!isRecord(strategies) || !Array.isArray(strategies.strategies) || !strategies.strategies.every(validStrategy)) {
-    throw new Error("Research strategies returned an invalid response");
-  }
   return {
     positions: positions.positions,
     trades: trades.trades,
     stats,
-    strategies: strategies.strategies,
   };
 }

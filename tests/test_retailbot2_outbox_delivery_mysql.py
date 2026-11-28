@@ -6,7 +6,7 @@ this test never creates TelegramAlert or contacts Telegram.
 Step 3: the worker (paper/retailbot2.py) is deleted. Outbox rows are now
 seeded directly through paper/outbox_store.OutboxStore (the same INSERT the
 old DatabaseManager.save_trade/close_trade performed for the alert itself);
-no rdt_trades rows are created anymore, and trade_id is only a correlation
+no paper_trades rows are created by the outbox path, and trade_id is only a correlation
 key on the outbox row.
 Requires migrations 018, 026, and 027 in the isolated test schema.
 
@@ -79,8 +79,8 @@ def _db():
 
 
 def _new_trade_id():
-    """Correlation key for a seeded outbox row (no rdt_trades row exists
-    anymore, so any unique positive int works)."""
+    """Correlation key for a seeded outbox row (no trade row exists
+    for it, so any unique positive int works)."""
     import random
 
     return random.randint(1_000_000, 2_000_000_000)
@@ -93,7 +93,7 @@ def _assert_outbox_idle():
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT COUNT(*) FROM rdt_telegram_outbox
+            SELECT COUNT(*) FROM telegram_outbox
             WHERE status IN ('pending', 'processing')
             """
         )
@@ -177,7 +177,7 @@ def _read_event(trade_id):
             """
             SELECT id, event_key, trade_id, event_type, status, attempts,
                    next_attempt_at, locked_until, claim_token, last_error, sent_at
-            FROM rdt_telegram_outbox WHERE trade_id=%s
+            FROM telegram_outbox WHERE trade_id=%s
             """,
             (trade_id,),
         )
@@ -194,7 +194,7 @@ def _set_event_due(event_id):
         cursor = conn.cursor()
         cursor.execute(
             """
-            UPDATE rdt_telegram_outbox
+            UPDATE telegram_outbox
             SET next_attempt_at=UTC_TIMESTAMP()
             WHERE id=%s
             """,
@@ -213,7 +213,7 @@ def _expire_lease(event_id):
         cursor = conn.cursor()
         cursor.execute(
             """
-            UPDATE rdt_telegram_outbox
+            UPDATE telegram_outbox
             SET locked_until=DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 SECOND)
             WHERE id=%s AND status='processing'
             """,
@@ -232,7 +232,7 @@ def _force_final_attempt_expired(event_id):
         cursor = conn.cursor()
         cursor.execute(
             """
-            UPDATE rdt_telegram_outbox
+            UPDATE telegram_outbox
             SET status='processing', attempts=8,
                 locked_until=DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 SECOND),
                 last_error='simulated final-attempt worker interruption'
@@ -252,15 +252,9 @@ def _cleanup(db, trade_id, strategy=None):
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "DELETE FROM rdt_telegram_outbox WHERE trade_id=%s",
+            "DELETE FROM telegram_outbox WHERE trade_id=%s",
             (trade_id,),
         )
-        cursor.execute("DELETE FROM rdt_trades WHERE id=%s", (trade_id,))
-        if strategy:
-            cursor.execute(
-                "DELETE FROM rdt_strategy_stats WHERE strategy=%s AND mode='shadow'",
-                (strategy,),
-            )
         conn.commit()
         cursor.close()
     finally:
@@ -354,10 +348,10 @@ def test_dispatcher_recovers_expired_claim_after_worker_interruption():
 
 
 def test_exit_event_persists_and_dispatches_confirmed_delivery():
-    """Step 3: the old version seeded a real rdt_trades row via save_trade
-    and closed it via close_trade_and_update_stats, asserting the CLOSED
-    row. Trade CRUD died with the worker, so this now seeds the exit outbox
-    event directly (same event_key/payload the old close path stored) and
+    """The old version seeded a real trade row via save_trade and closed
+    it via close_trade_and_update_stats, asserting the CLOSED row. Trade
+    CRUD died with the worker, so this now seeds the exit outbox event
+    directly (same event_key/payload the old close path stored) and
     asserts the worker delivers it."""
     if os.getenv("SIGNAL_BOT_RUN_RETAILBOT2_DB_INTEGRATION") != "1":
         pytest.skip("opt-in isolated signal_bot_test integration test")
@@ -555,7 +549,7 @@ def test_manual_recovery_claim_token_fencing():
             stale_token = "stale_token_" + uuid.uuid4().hex[:16]
             cursor.execute(
                 """
-                UPDATE rdt_telegram_outbox
+                UPDATE telegram_outbox
                 SET status = 'pending', claim_token = NULL, locked_until = NULL, attempts = attempts + 1
                 WHERE id = %s
                   AND status = 'processing'
@@ -575,7 +569,7 @@ def test_manual_recovery_claim_token_fencing():
             # Suppose another session or worker completed the event
             cursor.execute(
                 """
-                UPDATE rdt_telegram_outbox
+                UPDATE telegram_outbox
                 SET status = 'sent', sent_at = UTC_TIMESTAMP(), claim_token = NULL, locked_until = NULL
                 WHERE id = %s
                   AND status = 'processing'
@@ -589,7 +583,7 @@ def test_manual_recovery_claim_token_fencing():
             # Now status is 'sent'; an attempted recovery update expecting 'processing' must affect 0 rows
             cursor.execute(
                 """
-                UPDATE rdt_telegram_outbox
+                UPDATE telegram_outbox
                 SET status = 'pending', claim_token = NULL, locked_until = NULL, attempts = attempts + 1
                 WHERE id = %s
                   AND status = 'processing'
@@ -604,7 +598,7 @@ def test_manual_recovery_claim_token_fencing():
             new_token = "token_recov_" + uuid.uuid4().hex[:16]
             cursor.execute(
                 """
-                UPDATE rdt_telegram_outbox
+                UPDATE telegram_outbox
                 SET status = 'processing', claim_token = %s, locked_until = DATE_ADD(UTC_TIMESTAMP(), INTERVAL 90 SECOND)
                 WHERE id = %s
                 """,
@@ -615,7 +609,7 @@ def test_manual_recovery_claim_token_fencing():
             # 3. Valid conditional recovery with matching ID, status 'processing', and exact token -> 1 row affected
             cursor.execute(
                 """
-                UPDATE rdt_telegram_outbox
+                UPDATE telegram_outbox
                 SET status = 'pending', claim_token = NULL, locked_until = NULL, attempts = attempts + 1
                 WHERE id = %s
                   AND status = 'processing'

@@ -16,12 +16,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import MYSQL_CONFIG, RETAILBOT2_DB_CONFIG
+from config import MYSQL_CONFIG
 
 logger = logging.getLogger("db")
 
 _pool = None
-_retailbot2_pool = None
 _funding_pool = None
 _pool_lock = Lock()
 
@@ -47,23 +46,6 @@ def get_funding_pool(config=None, reset=False):
                 **cfg.to_dict(),
             )
         return _funding_pool
-
-
-def get_retailbot2_pool():
-    """Compatibility pool for RetailBot dashboard helpers.
-    It uses the same centralized MYSQL_CONFIG as every other component;
-    this separate pool preserves existing callers only."""
-    global _retailbot2_pool
-    with _pool_lock:
-        if _retailbot2_pool is None:
-            import config
-            _retailbot2_pool = pooling.MySQLConnectionPool(
-                pool_name="retailbot2_pool",
-                pool_size=3,
-                init_command="SET time_zone = '+00:00'",
-                **config.RETAILBOT2_DB_CONFIG,
-            )
-        return _retailbot2_pool
 
 
 def get_pool():
@@ -1243,157 +1225,244 @@ def get_news_overlay_stats():
 
 
 # ----------------------------------------------------------------------------
-# RetailBot -- read helpers for the web dashboard visibility panel.
+# Paper Trading -- read helpers for the web dashboard Research panel.
 # Uses the shared MYSQL_CONFIG database, same as the bot and all other components.
+#
+# History: these helpers used to read the retired RetailBot2 `rdt_*`
+# archive tables (`rdt_trades`, `rdt_strategy_stats`,
+# `rdt_strategy_lifecycle`, `bot_control`). Migration 041
+# (`db/migrate_remove_rdt_tables.sql`) drops those tables; the same data
+# now comes from the live Paper Trading ledger -- `paper_trades` (closed
+# trades, written by `paper/engine.py` on every close) and
+# `paper_positions` (open positions) -- with the per-deployment
+# `paper_configs.report_enabled` flag replacing the old
+# `rdt_strategy_lifecycle.report_enabled` visibility filter. Response
+# shapes are unchanged apart from `mode`, which is now always "paper":
+# paper trading has no shadow/inverse modes. `market` / `timeframe` are
+# included so the UI can tell deployments apart.
 # ----------------------------------------------------------------------------
 
-def get_retailbot2_open_trades(limit=100):
-    conn = get_retailbot2_pool().get_connection()
+_PAPER_MODE = "paper"
+
+
+def _paper_epoch_ms_to_iso(value):
+    """Convert a millisecond-epoch timestamp from `paper_trades` /
+    `paper_positions` to an ISO-8601 UTC string (or None)."""
+    if value is None:
+        return None
+    try:
+        return datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc).isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return str(value)
+
+
+def get_paper_open_positions(limit=100):
+    conn = get_pool().get_connection()
     with _owned_cursor(conn, dictionary=True) as cur:
         cur.execute("""
-            SELECT id, symbol, side, mode, entry_price, stop_price, target_price,
-                   atr, rr, units, strategy, strategies_json, confluence_score,
-                   reason, entry_time
-            FROM rdt_trades WHERE status='OPEN'
-            ORDER BY entry_time DESC LIMIT %s
+            SELECT p.id, p.symbol, p.market, p.timeframe, p.direction,
+                   p.entry_time, p.entry_price, p.stop_loss, p.take_profit,
+                   p.atr_at_signal, p.quantity, p.strategy_name
+            FROM paper_positions p
+            LEFT JOIN paper_configs c ON c.id = p.config_id
+            WHERE p.status='OPEN'
+              AND COALESCE(c.report_enabled, TRUE) = TRUE
+            ORDER BY p.entry_time DESC LIMIT %s
         """, (limit,))
         rows = cur.fetchall()
+        out = []
         for r in rows:
             for k, v in r.items():
                 if isinstance(v, Decimal):
                     r[k] = float(v)
-            r["entry_time"] = str(r["entry_time"]) if r.get("entry_time") else None
-        return rows
+            entry = r["entry_price"]
+            stop = r["stop_loss"]
+            target = r["take_profit"]
+            risk = abs(entry - stop) if entry is not None and stop is not None else None
+            if r["direction"] == "LONG":
+                reward = (target - entry) if target is not None and entry is not None else None
+            else:
+                reward = (entry - target) if target is not None and entry is not None else None
+            rr = (reward / risk) if risk and reward is not None else None
+            out.append({
+                "id": r["id"],
+                "symbol": r["symbol"],
+                "side": r["direction"],
+                "mode": _PAPER_MODE,
+                "entry_price": entry,
+                "stop_price": stop,
+                "target_price": target,
+                "atr": r["atr_at_signal"],
+                "rr": float(rr) if rr is not None else None,
+                "units": r["quantity"] if r["quantity"] is not None else 0.0,
+                "strategy": r["strategy_name"],
+                "strategies_json": None,
+                "confluence_score": None,
+                "reason": None,
+                "entry_time": _paper_epoch_ms_to_iso(r["entry_time"]),
+                "market": r["market"],
+                "timeframe": r["timeframe"],
+            })
+        return out
 
 
-def get_retailbot2_recent_trades(limit=50):
-    conn = get_retailbot2_pool().get_connection()
+def get_paper_recent_trades(limit=50):
+    conn = get_pool().get_connection()
     with _owned_cursor(conn, dictionary=True) as cur:
         cur.execute("""
-            SELECT t.id, t.symbol, t.side, t.mode, t.entry_price, t.stop_price, t.target_price,
-                   t.units, t.strategy, t.confluence_score, t.status, t.exit_price,
-                   t.exit_reason, t.net_pnl, t.pnl_percent, t.entry_time, t.exit_time
-            FROM rdt_trades t
-            LEFT JOIN rdt_strategy_lifecycle l
-              ON l.strategy_id = t.strategy AND l.mode = t.mode
-            WHERE t.status='CLOSED'
-              AND COALESCE(l.report_enabled, TRUE) = TRUE
+            SELECT t.id, t.symbol, t.market, t.timeframe, t.direction,
+                   t.entry_time, t.entry_price, t.stop_loss, t.take_profit,
+                   t.quantity, t.strategy_name, t.exit_time, t.exit_price,
+                   t.exit_reason, t.net_pnl, t.net_return_pct
+            FROM paper_trades t
+            LEFT JOIN paper_configs c ON c.id = t.config_id
+            WHERE COALESCE(c.report_enabled, TRUE) = TRUE
             ORDER BY t.exit_time DESC LIMIT %s
         """, (limit,))
         rows = cur.fetchall()
+        out = []
         for r in rows:
             for k, v in r.items():
                 if isinstance(v, Decimal):
                     r[k] = float(v)
-            for dt_key in ("entry_time", "exit_time"):
-                if r.get(dt_key) is not None:
-                    r[dt_key] = str(r[dt_key])
-        return rows
+            out.append({
+                "id": r["id"],
+                "symbol": r["symbol"],
+                "side": r["direction"],
+                "mode": _PAPER_MODE,
+                "entry_price": r["entry_price"],
+                "stop_price": r["stop_loss"],
+                "target_price": r["take_profit"],
+                "units": r["quantity"] if r["quantity"] is not None else 0.0,
+                "strategy": r["strategy_name"],
+                "confluence_score": None,
+                "status": "CLOSED",
+                "exit_price": r["exit_price"],
+                "exit_reason": r["exit_reason"],
+                "net_pnl": r["net_pnl"] if r["net_pnl"] is not None else 0.0,
+                "pnl_percent": r["net_return_pct"],
+                "entry_time": _paper_epoch_ms_to_iso(r["entry_time"]),
+                "exit_time": _paper_epoch_ms_to_iso(r["exit_time"]),
+                "market": r["market"],
+                "timeframe": r["timeframe"],
+            })
+        return out
 
 
-def get_retailbot2_stats():
-    """Per-strategy/mode win-rate stats plus overall equity summary
-    (initial_capital isn't stored in this DB -- the dashboard adds it from
-    its own config if needed; realized_pnl sums are enough on their own to
-    show relative performance)."""
-    conn = get_retailbot2_pool().get_connection()
+def get_paper_trade_stats():
+    """Per-strategy win-rate stats plus overall equity summary from the
+    paper_trades ledger. Wins/losses follow the paper engine's rule
+    (`r_multiple` sign, same as `paper/engine.py:get_paper_metrics`);
+    totals use `net_pnl`. Deployments with `report_enabled=FALSE` are
+    hidden, exactly like the old `rdt_strategy_lifecycle` filter."""
+    conn = get_pool().get_connection()
     with _owned_cursor(conn, dictionary=True) as cur:
         cur.execute("""
-            SELECT t.strategy, t.mode,
+            SELECT t.strategy_name AS strategy, 'paper' AS mode,
                    COUNT(*) AS total_trades,
-                   SUM(CASE WHEN t.net_pnl > 0 THEN 1 ELSE 0 END) AS wins,
-                   SUM(CASE WHEN t.net_pnl < 0 THEN 1 ELSE 0 END) AS losses,
+                   SUM(CASE WHEN t.r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
+                   SUM(CASE WHEN t.r_multiple < 0 THEN 1 ELSE 0 END) AS losses,
                    COALESCE(SUM(t.net_pnl), 0) AS total_pnl,
-                   MAX(t.exit_time) AS last_updated
-            FROM rdt_trades t
-            LEFT JOIN rdt_strategy_lifecycle l
-              ON l.strategy_id = t.strategy AND l.mode = t.mode
-            WHERE t.status='CLOSED'
-              AND COALESCE(l.report_enabled, TRUE) = TRUE
-            GROUP BY t.strategy, t.mode
-            ORDER BY t.mode, t.strategy
+                   MAX(t.exit_time) AS last_updated_ms
+            FROM paper_trades t
+            LEFT JOIN paper_configs c ON c.id = t.config_id
+            WHERE COALESCE(c.report_enabled, TRUE) = TRUE
+            GROUP BY t.strategy_name
+            ORDER BY t.strategy_name
         """)
         stats_rows = cur.fetchall()
         for r in stats_rows:
             if isinstance(r.get("total_pnl"), Decimal):
                 r["total_pnl"] = float(r["total_pnl"])
-            r["last_updated"] = str(r["last_updated"]) if r.get("last_updated") else None
+            r["last_updated"] = _paper_epoch_ms_to_iso(r.pop("last_updated_ms", None))
 
         cur.execute("""
-            SELECT t.mode, COUNT(*) AS open_count FROM rdt_trades t
-            LEFT JOIN rdt_strategy_lifecycle l ON l.strategy_id = t.strategy AND l.mode = t.mode
-            WHERE t.status='OPEN' AND COALESCE(l.report_enabled, TRUE) = TRUE GROUP BY t.mode
+            SELECT COUNT(*) AS open_count FROM paper_positions p
+            LEFT JOIN paper_configs c ON c.id = p.config_id
+            WHERE p.status='OPEN' AND COALESCE(c.report_enabled, TRUE) = TRUE
         """)
-        open_counts = {r["mode"]: r["open_count"] for r in cur.fetchall()}
+        open_count = int((cur.fetchone() or {}).get("open_count") or 0)
 
         cur.execute("""
-            SELECT t.mode, COALESCE(SUM(t.net_pnl), 0) AS realized_pnl,
+            SELECT COALESCE(SUM(t.net_pnl), 0) AS realized_pnl,
                    COUNT(*) AS closed_count,
-                   SUM(CASE WHEN t.net_pnl > 0 THEN 1 ELSE 0 END) AS wins
-            FROM rdt_trades t
-            LEFT JOIN rdt_strategy_lifecycle l
-              ON l.strategy_id = t.strategy AND l.mode = t.mode
-            WHERE t.status='CLOSED'
-              AND COALESCE(l.report_enabled, TRUE) = TRUE
-            GROUP BY t.mode
+                   SUM(CASE WHEN t.r_multiple > 0 THEN 1 ELSE 0 END) AS wins
+            FROM paper_trades t
+            LEFT JOIN paper_configs c ON c.id = t.config_id
+            WHERE COALESCE(c.report_enabled, TRUE) = TRUE
         """)
-        pnl_rows = cur.fetchall()
-        by_mode = {}
-        for r in pnl_rows:
-            closed = r["closed_count"] or 0
-            wins = r["wins"] or 0
-            by_mode[r["mode"]] = {
-                "realized_pnl": float(r["realized_pnl"]),
-                "closed_count": closed,
-                "wins": wins,
-                "win_rate": round(wins / closed * 100, 1) if closed > 0 else None,
-                "open_count": open_counts.get(r["mode"], 0),
-            }
-        for mode in ("shadow", "inverse"):
-            by_mode.setdefault(mode, {
-                "realized_pnl": 0.0, "closed_count": 0, "wins": 0,
-                "win_rate": None, "open_count": open_counts.get(mode, 0),
-            })
+        totals = cur.fetchone() or {}
+        closed = int(totals.get("closed_count") or 0)
+        wins = int(totals.get("wins") or 0)
+        by_mode = {_PAPER_MODE: {
+            "realized_pnl": float(totals.get("realized_pnl") or 0),
+            "closed_count": closed,
+            "wins": wins,
+            "win_rate": round(wins / closed * 100, 1) if closed > 0 else None,
+            "open_count": open_count,
+        }}
         return {"by_strategy": stats_rows, "by_mode": by_mode}
 
 
-RETAILBOT2_ARCHIVE_COLUMNS = {
-    "rdt_trades": (
-        "id", "symbol", "side", "mode", "entry_price", "stop_price", "target_price",
-        "atr", "rr", "units", "strategy", "strategies_json", "telegram_enabled",
-        "confluence_score", "reason", "status", "exit_price", "exit_reason",
-        "net_pnl", "pnl_percent", "entry_time", "exit_time", "created_at",
+PAPER_ARCHIVE_COLUMNS = {
+    "paper_trades": (
+        "id", "position_id", "symbol", "market", "timeframe", "strategy_name",
+        "direction", "entry_time_wib", "entry_price", "exit_time_wib",
+        "exit_price", "exit_reason", "stop_loss", "take_profit", "quantity",
+        "notional_value", "gross_pnl", "net_pnl", "net_return_pct",
+        "r_multiple", "holding_bars", "config_id", "created_at",
     ),
-    "rdt_strategy_stats": (
-        "id", "strategy", "mode", "total_trades", "wins", "losses", "total_pnl", "last_updated",
+    "paper_strategy_stats": (
+        "id", "strategy", "mode", "total_trades", "wins", "losses",
+        "total_pnl", "last_updated",
     ),
 }
 
 
-def get_retailbot2_archive_summary():
-    """Return read-only row counts for the archived rdt_trades and rdt_strategy_stats tables."""
-    conn = get_retailbot2_pool().get_connection()
+def get_paper_archive_summary():
+    """Return read-only counts for the paper-trades archive: closed trades
+    in `paper_trades`, and the distinct strategies behind them (the stats
+    CSV carries one aggregate row per strategy)."""
+    conn = get_pool().get_connection()
     with _owned_cursor(conn) as cur:
-        cur.execute("SELECT COUNT(*) FROM rdt_trades")
+        cur.execute("SELECT COUNT(*) FROM paper_trades")
         trades_count = int((cur.fetchone() or (0,))[0] or 0)
-        cur.execute("SELECT COUNT(*) FROM rdt_strategy_stats")
+        cur.execute("SELECT COUNT(DISTINCT strategy_name) FROM paper_trades")
         stats_count = int((cur.fetchone() or (0,))[0] or 0)
     return {"trades_count": trades_count, "stats_count": stats_count}
 
 
-def iter_retailbot2_table_batches(table_name: str, batch_size: int = 500):
-    """Yield keyset-paginated read-only batches from an allowlisted rdt_* table.
+def iter_paper_archive_batches(dataset: str, batch_size: int = 500):
+    """Yield keyset-paginated read-only batches from a paper-trades archive
+    dataset (`paper_trades` rows, or one per-strategy aggregate row for
+    `paper_strategy_stats`).
 
-    Never loads the entire table into Python memory; uses WHERE id > %s ORDER BY id ASC LIMIT %s
-    over a single read snapshot so exported row counts remain consistent with COUNT(*).
+    Never loads the entire table into Python memory; uses WHERE id > %s
+    ORDER BY id ASC LIMIT %s over a single read snapshot so exported row
+    counts remain consistent with COUNT(*).
     """
-    columns = RETAILBOT2_ARCHIVE_COLUMNS.get(table_name)
+    columns = PAPER_ARCHIVE_COLUMNS.get(dataset)
     if columns is None:
-        raise ValueError(f"Unsupported archive table: {table_name!r}")
+        raise ValueError(f"Unsupported archive dataset: {dataset!r}")
     limit = max(1, min(int(batch_size), 1000))
     cols_sql = ", ".join(columns)
-    query = f"SELECT {cols_sql} FROM {table_name} WHERE id > %s ORDER BY id ASC LIMIT %s"
-    conn = get_retailbot2_pool().get_connection()
+    if dataset == "paper_strategy_stats":
+        query = f"""SELECT {cols_sql} FROM (
+                   SELECT ROW_NUMBER() OVER (ORDER BY t.strategy_name) AS id,
+                          t.strategy_name AS strategy, 'paper' AS mode,
+                          COUNT(*) AS total_trades,
+                          SUM(CASE WHEN t.r_multiple > 0 THEN 1 ELSE 0 END) AS wins,
+                          SUM(CASE WHEN t.r_multiple < 0 THEN 1 ELSE 0 END) AS losses,
+                          COALESCE(SUM(t.net_pnl), 0) AS total_pnl,
+                          FROM_UNIXTIME(MAX(t.exit_time) / 1000) AS last_updated
+                     FROM paper_trades t
+                     LEFT JOIN paper_configs c ON c.id = t.config_id
+                    WHERE COALESCE(c.report_enabled, TRUE) = TRUE
+                    GROUP BY t.strategy_name
+               ) AS s WHERE id > %s ORDER BY id ASC LIMIT %s"""
+    else:
+        query = f"SELECT {cols_sql} FROM {dataset} WHERE id > %s ORDER BY id ASC LIMIT %s"
+    conn = get_pool().get_connection()
     cur = None
     try:
         cur = conn.cursor()
@@ -1419,6 +1488,37 @@ def iter_retailbot2_table_batches(table_name: str, batch_size: int = 500):
             pass
         conn.close()
 
+
+def verify_paper_archive_schema():
+    """Verify the migration-managed Paper Trading schema the Research
+    archive reads (`paper_trades`, `paper_positions`, `paper_configs`)
+    plus the live Telegram outbox table, without issuing DDL/DML."""
+    conn = get_pool().get_connection()
+    cur = None
+    try:
+        cur = conn.cursor(dictionary=True)
+        required_tables = ("paper_trades", "paper_positions", "paper_configs", "telegram_outbox")
+        placeholders = ", ".join(["%s"] * len(required_tables))
+        cur.execute(
+            f"""SELECT TABLE_NAME AS table_name
+                FROM information_schema.tables
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME IN ({placeholders})""",
+            required_tables,
+        )
+        existing = {str(row["table_name"]) for row in cur.fetchall()}
+        missing = sorted(set(required_tables) - existing)
+        if missing:
+            raise RuntimeError(
+                "Paper Trading schema is missing tables "
+                f"({', '.join(missing)}); run 'python -m db.migrate' before startup."
+            )
+    finally:
+        try:
+            if cur is not None:
+                cur.close()
+        finally:
+            conn.close()
 
 # ----------------------------------------------------------------------------
 # Screen/screening.py (smart-money volume screener) -- read helpers.
@@ -1475,26 +1575,19 @@ def get_smart_money_stats():
 
 # ----------------------------------------------------------------------------
 # Bot control -- read/write for the "enable + tunable params" toggle panels.
-# RetailBot2's bot_control/lifecycle tables and the Screener's
-# screener_control/heartbeat/signal tables are migration-managed. The web API
-# and their workers verify schema presence at startup; these route helpers
-# assume migrations have already been applied and never create schema.
+# The Screener's screener_control/heartbeat/signal tables are
+# migration-managed. The web API and their workers verify schema presence
+# at startup; these route helpers assume migrations have already been
+# applied and never create schema.
+#
+# History: this section also held the retired RetailBot2 `bot_control`
+# row and `rdt_strategy_lifecycle` reads (`get_retailbot2_control`,
+# `get_retailbot2_strategy_lifecycle_settings`, `verify_retailbot2_schema`).
+# Migration 041 drops those tables: the worker that polled `bot_control`
+# is deleted, and the lifecycle flags now live in `paper_configs`
+# (per symbol / market / timeframe / strategy), managed by the Paper
+# Trading UI. There is no read-only GET replacement for them.
 # ----------------------------------------------------------------------------
-
-# Explicit safe-list for the retired worker's saved control row, kept
-# here so the read-only GET /retailbot2/control endpoint can still report
-# which fields were tunable. The worker is gone; nothing writes this row
-# anymore, so this is archive metadata, not a live filter.
-RETAILBOT2_TUNABLE_FIELDS = {
-    "rsi_oversold", "rsi_overbought", "rsi_zone_width",
-    "sr_touch_threshold", "sr_min_touches",
-    "bb_std", "bb_proximity_pct",
-    "pattern_tolerance", "pattern_min_bars_apart",
-    "spike_atr_multiplier",
-    "atr_sl_multiplier", "rr_ratio", "risk_per_trade",
-    "max_open_trades_per_mode", "max_trades_per_symbol",
-    "min_trade_interval_hours",
-}
 
 SCREENER_TUNABLE_FIELDS = {
     "rvol_multiplier", "divergence_max_price_change", "velocity_threshold",
@@ -1506,139 +1599,6 @@ SCREENER_TUNABLE_FIELDS = {
     "expired_signal_retention_days", "expired_signal_cleanup_interval_days",
     "telegram_enabled",
 }
-
-
-def verify_retailbot2_schema():
-    """Verify migration-managed RetailBot2 schema without issuing DDL/DML."""
-    conn = get_retailbot2_pool().get_connection()
-    cur = None
-    try:
-        cur = conn.cursor(dictionary=True)
-        required_tables = ("rdt_trades", "rdt_strategy_stats", "bot_control", "rdt_strategy_lifecycle")
-        placeholders = ", ".join(["%s"] * len(required_tables))
-        cur.execute(
-            f"""SELECT TABLE_NAME AS table_name
-                FROM information_schema.tables
-                WHERE TABLE_SCHEMA = DATABASE()
-                  AND TABLE_NAME IN ({placeholders})""",
-            required_tables,
-        )
-        existing = {str(row["table_name"]) for row in cur.fetchall()}
-        missing = sorted(set(required_tables) - existing)
-        if missing:
-            raise RuntimeError(
-                "RetailBot2 schema is missing tables "
-                f"({', '.join(missing)}); run 'python -m db.migrate' before startup."
-            )
-        cur.execute(
-            """SELECT COLUMN_NAME AS column_name
-               FROM information_schema.columns
-               WHERE TABLE_SCHEMA = DATABASE()
-                 AND TABLE_NAME = %s AND COLUMN_NAME = %s""",
-            ("rdt_trades", "telegram_enabled"),
-        )
-        if not cur.fetchone():
-            raise RuntimeError(
-                "RetailBot2 schema is missing rdt_trades.telegram_enabled; "
-                "run 'python -m db.migrate' before startup."
-            )
-    finally:
-        try:
-            if cur is not None:
-                cur.close()
-        finally:
-            conn.close()
-
-
-def _retailbot2_lifecycle_flag(value):
-    """Parse persisted lifecycle flags without treating non-empty strings as true.
-
-    MariaDB BOOLEAN columns normally return 0/1, but fail closed if a legacy
-    adapter or imported row supplies textual or malformed values.
-    """
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return value == 1
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"1", "true"}:
-            return True
-        if normalized in {"0", "false"}:
-            return False
-    return False
-
-
-def ensure_retailbot2_lifecycle_table():
-    """Backward-compatible alias for read-only RetailBot2 schema verification.
-
-    The schema is managed by db.migrate; this legacy entry point must never
-    issue DDL or DML during runtime startup.
-    """
-    return verify_retailbot2_schema()
-
-
-def get_retailbot2_strategy_lifecycle_settings():
-    """Read UI-managed strategy settings.
-
-    An empty table is valid and means worker defaults apply; no promotion is
-    implicitly enabled. Query/connection errors propagate so callers cannot
-    mistake an unavailable persistence layer for an empty configuration.
-    """
-    conn = get_retailbot2_pool().get_connection()
-    try:
-        cur = conn.cursor(dictionary=True)
-        try:
-            cur.execute("""
-                SELECT strategy_id, mode, evaluation_enabled, paper_enabled,
-                       telegram_enabled, report_enabled, auto_promote_enabled,
-                       updated_at
-                FROM rdt_strategy_lifecycle
-                ORDER BY strategy_id, mode
-            """)
-            rows = cur.fetchall()
-        finally:
-            cur.close()
-        for row in rows:
-            for key in ("evaluation_enabled", "paper_enabled", "telegram_enabled",
-                        "report_enabled", "auto_promote_enabled"):
-                row[key] = _retailbot2_lifecycle_flag(row[key])
-            if row.get("updated_at") is not None:
-                row["updated_at"] = str(row["updated_at"])
-        return rows
-    finally:
-        conn.close()
-
-
-def get_retailbot2_control():
-    conn = get_retailbot2_pool().get_connection()
-    with _owned_cursor(conn, dictionary=True) as cur:
-        cur.execute("SELECT enabled, overrides_json, updated_at FROM bot_control WHERE id=1")
-        row = cur.fetchone()
-        if not row:
-            return {"enabled": False, "overrides": {}, "updated_at": None}
-        raw_overrides = row.get("overrides_json")
-        raw_enabled = bool(row["enabled"])
-        if raw_enabled and raw_overrides is None:
-            raw_enabled = False
-        overrides = {}
-        if raw_overrides:
-            try:
-                parsed = json.loads(raw_overrides)
-                if isinstance(parsed, dict):
-                    overrides = parsed
-                else:
-                    raw_enabled = False
-                    overrides = {}
-            except (json.JSONDecodeError, TypeError):
-                raw_enabled = False
-                overrides = {}
-        return {
-            "enabled": raw_enabled,
-            "overrides": overrides,
-            "updated_at": str(row["updated_at"]) if row.get("updated_at") else None,
-        }
-
 
 def update_screener_heartbeat(*, pid=None, timeframe=None, symbols_monitored=None, last_signal_at=None, last_universe_refresh_at=None):
     """Persist lightweight process telemetry so the dashboard can distinguish

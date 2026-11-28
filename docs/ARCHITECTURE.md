@@ -6,7 +6,7 @@ How the system is put together and the rules that keep it correct. For setup see
 
 In production, all core services run as isolated containers via `docker-compose.yml` (with optional automatic HTTPS via `docker-compose.prod.yml` + `deploy/Caddyfile`). For bare-metal runs, `run_all.py` starts and supervises the Phase 2A default set (restarting after 5 s on crash). Each process can also be run standalone.
 
-The Telegram outbox consumer is separate from the paper engine. It is added to `run_all.py` only when both `RETAILBOT2_OUTBOX_WORKER_ENABLED=1` and `TELEGRAM_DELIVERY_ENABLED=1` (deprecated alias `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`) are explicitly set. Without both flags, trade alerts remain persisted in `rdt_telegram_outbox` and are not sent. The supervisor sends `SIGTERM` during shutdown but refuses to `SIGKILL` this worker so it can cleanly release its MariaDB advisory lock (`rdt_outbox_worker_lock`) after child transport cleanup. (The RetailBot2 worker itself is retired and deleted -- see [RETAILBOT2_RETIREMENT.md](RETAILBOT2_RETIREMENT.md). Its strategies live in the strategy library and run through Paper Trading.)
+The Telegram outbox consumer is separate from the paper engine. It is added to `run_all.py` only when both `RETAILBOT2_OUTBOX_WORKER_ENABLED=1` and `TELEGRAM_DELIVERY_ENABLED=1` (deprecated alias `RETAILBOT2_ALLOW_TELEGRAM_DELIVERY=1`) are explicitly set. Without both flags, trade alerts remain persisted in `telegram_outbox` and are not sent. The supervisor sends `SIGTERM` during shutdown but refuses to `SIGKILL` this worker so it can cleanly release its MariaDB advisory lock (`telegram_outbox_worker_lock`) after child transport cleanup. (The RetailBot2 worker itself is retired and deleted -- see [RETAILBOT2_RETIREMENT.md](RETAILBOT2_RETIREMENT.md). Its strategies live in the strategy library and run through Paper Trading.)
 
 | Process / Service | Entry point | Role |
 |---|---|---|
@@ -15,7 +15,7 @@ The Telegram outbox consumer is separate from the paper engine. It is added to `
 | `funding-collector` | `collectors/funding_poller.py` | Advisory-locked Binance Futures 8-hour funding rate REST poller with HTTP 418/429 cooldown defense |
 | `paper_engine` | `run_paper_engine.py` | Evaluates deployed strategies on new closed candles, manages paper positions/orders, and accrues funding |
 | `news_ai` | `run_news_ai.py` | News + macro-calendar pollers, LLM reasoning, guarded paper execution |
-| `retailbot2` *(retired)* | -- | Worker deleted; strategies live in `backtest/strategies/retail_death_trap.py` and run through Paper Trading; `rdt_*` tables are a read-only archive (see [RETAILBOT2_RETIREMENT.md](RETAILBOT2_RETIREMENT.md)) |
+| `retailbot2` *(retired)* | -- | Worker deleted; strategies live in `backtest/strategies/retail_death_trap.py` and run through Paper Trading; the `rdt_*` tables were dropped by migration 041 (see [RETAILBOT2_RETIREMENT.md](RETAILBOT2_RETIREMENT.md)) |
 | `outbox-worker` | `python -m paper.outbox_worker` | Advisory-locked Telegram outbox consumer (explicit opt-in) |
 | `screener` | `Screen/screening.py` | Smart-money volume detector with independent `telegram_enabled` control |
 | `wallet_tracker` | `run_wallet_tracker.py` | On-chain swap scanner, wallet candidates, per-wallet Telegram alerts |
@@ -58,7 +58,7 @@ Managed via `python -m db.migrate` (versioned, checksummed, advisory-locked in `
 | Paper trading | `paper_configs` (`strategy_params`, archive status), `paper_positions`, `paper_trades`, `paper_orders`, promotion policy/audit | `001`–`003`, `016`–`018`, `024`, `029`, `032`–`033` |
 | News AI | `news_events`, `news_ai_signals` | `006`–`007` |
 | Screener | `smart_money_signals`, `screener_control`, `screener_heartbeat` | `008`, `023`, `031` |
-| Research bot & outbox | `rdt_trades`, `rdt_strategy_stats`, `bot_control`, `rdt_strategy_lifecycle`, `rdt_telegram_outbox` | `022`, `026`–`028` |
+| Research bot & outbox | `paper_trades`, `paper_positions`, `paper_configs`, `telegram_outbox` | `001`, `002`, `024`, `026`–`027`, `041` |
 | Wallet tracking | `wallet_swaps`, `wallet_positions`, `tracked_wallets`, `wallet_tracker_settings`, `wallet_tracker_status`, `wallet_telegram_alerts`, `wallet_tracker_alert_cursor` | `009`, `021`, `030` |
 
 ## 5. Backtest and validation engine
